@@ -162,7 +162,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::EnqueueMovementInput(_) => self.handle_movement_command(cmd).await,
+            ClientCommand::DriveMovement(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -745,9 +745,9 @@ impl Client {
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::EnqueueMovementInput(input) => {
-                log::info!(">>> Queueing movement input: {:?}", input);
-                self.movement.enqueue_input(input, Instant::now());
+            ClientCommand::DriveMovement(command) => {
+                log::info!(">>> Queueing resolved movement command: {:?}", command);
+                self.movement.enqueue_command(command, Instant::now());
                 Ok(())
             }
             _ => unreachable!(),

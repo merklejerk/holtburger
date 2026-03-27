@@ -47,11 +47,11 @@ This section validates the plan against the code as it exists today.
 ### Gaps And Awkwardness The Plan Needs To Account For
 
 #### Gap 1: The Current `ClientCommand` Surface Bakes In Fragment Semantics
-Today `ClientCommand` exposes `EnqueueMovementInput(MovementInput)` in `crates/holtburger-core/src/client/types.rs`, and `commands.rs` dispatches specifically on that variant.
+At plan start, `ClientCommand` exposed `EnqueueMovementInput(MovementInput)` in `crates/holtburger-core/src/client/types.rs`, and `commands.rs` dispatched specifically on that variant.
 
 Consequence:
-- Phase 1 must explicitly introduce a new top-level movement command variant rather than assuming the new API can slot into the existing enum unchanged.
-- We should expect a temporary compatibility period where both `EnqueueMovementInput` and the resolved movement command coexist.
+- Phase 1 needed to explicitly introduce a new top-level movement command variant rather than assuming the new API could slot into the existing enum unchanged.
+- A temporary compatibility period was expected while both `EnqueueMovementInput` and the resolved movement command coexisted.
 
 #### Gap 2: The Shared Command Bus Allows Multiple Movement Commands Per UI Update
 `UpdateResult` in the CLI stores `Vec<ClientCommand>`, and multiple systems can push movement-related commands into that list during the same UI update.
@@ -69,7 +69,7 @@ Consequence:
 - That is acceptable for the first pass, but the phase plan should not imply that the controller itself already speaks in resolved gait terms.
 
 #### Gap 4: The CLI Test Suite Asserts Fragment-Shaped Commands Directly
-The CLI state tests currently match exact `EnqueueMovementInput(MovementInput::Hold/Pulse/Stop/SnapFacing)` variants in `apps/holtburger-cli/src/pages/game/state.rs`.
+At plan start, the CLI state tests matched exact `EnqueueMovementInput(MovementInput::Hold/Pulse/Stop/SnapFacing)` variants in `apps/holtburger-cli/src/pages/game/state.rs`.
 
 Consequence:
 - The migration cost is a little broader than just core movement and navigation code.
@@ -255,6 +255,13 @@ MovementCommand::Stop
 - Unit tests cover the builder or constructor invariants for `MotionState`.
 - There is one clear public command path for resolved movement state.
 
+#### Phase 1 Status
+- Completed.
+- Landed `Gait`, `Locomotion`, `Turn`, `MotionState`, `MotionStateBuilder`, and `MovementCommand` in `crates/holtburger-core/src/client/movement_types.rs`.
+- Added `ClientCommand::DriveMovement` in `crates/holtburger-core/src/client/types.rs` and routed it through `crates/holtburger-core/src/client/commands.rs`.
+- Added a temporary compatibility adapter in `crates/holtburger-core/src/client/movement.rs` that translates resolved movement commands into legacy `MovementInput` fragments.
+- Added focused unit tests for the new types and compatibility mapping.
+
 ### Phase 2: Refactor MovementSystem To Execute Resolved Commands
 
 #### Deliverables
@@ -268,6 +275,13 @@ MovementCommand::Stop
 - Local prediction uses the same resolved state the encoder uses.
 - Movement tests still cover turn-only, snap-facing, stop, and pulse expiry behavior.
 
+#### Phase 2 Status
+- Completed.
+- Reworked `crates/holtburger-core/src/client/movement.rs` so `MovementSystem` now queues resolved `MovementCommand`s directly and executes them through one native `MotionState` path instead of translating them back into legacy fragments first.
+- Moved protocol encoding behind `MotionState` with a dedicated raw-motion encoder that preserves resolved gait semantics, including walk-default turn-only motion and explicit `turn_speed` overrides.
+- Updated local prediction, local vector sync, and server-motion intent tracking to operate on resolved motion state.
+- Preserved the legacy public-input compatibility path by reconciling old fragment callers into one active resolved motion record with per-axis expiry, so existing navigation pulse patterns still behave correctly until Phase 3.
+
 ### Phase 3: Refactor Navigation To Plan Against The Resolved Actuator Model
 
 #### Deliverables
@@ -280,6 +294,13 @@ MovementCommand::Stop
 - Navigation no longer hardcodes `MovementControl::Run` as the only forward locomotion control.
 - The planner can predict against explicit walk or run motion without hidden movement-layer reconciliation.
 
+#### Phase 3 Status
+- Completed.
+- Updated `crates/holtburger-core/src/client/navigation.rs` so the planner emits `ClientCommand::DriveMovement(MovementCommand::...)` directly instead of legacy `EnqueueMovementInput` fragments.
+- Reworked planner issuance so turn-only steering is expressed as native turn-only `MotionState`s and forward drive is emitted as resolved `SetMotion` or `PulseMotion` commands.
+- Added explicit gait choice inside navigation by selecting walk when the controller throttles to walk-speed authority and otherwise retaining run semantics.
+- Updated the TUI snap-facing and navigation-facing assertions in `apps/holtburger-cli/src/pages/game/input.rs` and `apps/holtburger-cli/src/pages/game/state.rs` to the new resolved movement command shape.
+
 ### Phase 4: Remove The Legacy Fragment API
 
 #### Deliverables
@@ -291,6 +312,13 @@ MovementCommand::Stop
 - No production code paths depend on the legacy fragment API.
 - `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli` pass.
 - The movement API surface reads as one coherent model instead of layered compatibility scaffolding.
+
+#### Phase 4 Status
+- Completed.
+- Removed the public legacy movement fragment API from `crates/holtburger-core/src/client/movement_types.rs`, `crates/holtburger-core/src/client/types.rs`, and `crates/holtburger-core/src/client/commands.rs`.
+- Simplified `crates/holtburger-core/src/client/movement.rs` to one native resolved-command execution path by deleting fragment reconciliation, compatibility queue state, and legacy request helpers.
+- Updated `crates/holtburger-core/src/client/navigation.rs` to plan against `MotionState`-based estimation helpers instead of the removed control-based estimator surface.
+- Updated current architecture documentation in `crates/holtburger-core/ARCHITECTURE.md` to describe `MovementCommand` and `MotionState` as the live primitive movement boundary.
 
 ## Risks And Mitigations
 
@@ -320,17 +348,17 @@ Mitigation:
 - The public movement API expresses resolved motion state rather than queued fragments.
 - The movement executor and local prediction share one actuator model.
 - Navigation emits resolved movement commands and can choose walk versus run explicitly.
-- Legacy fragment-only movement inputs are removed or clearly demoted to a compatibility adapter.
+- Legacy fragment-only movement inputs are removed from the active public and production code paths.
 - Core and CLI test suites pass.
 - API examples exist in repo documentation and match the implemented surface.
 
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Add resolved motion-state types and command surface.
-- [ ] Phase 2: Switch `MovementSystem` execution and prediction to resolved motion commands.
-- [ ] Phase 3: Switch navigation output to resolved motion commands and explicit gait choice.
-- [ ] Phase 4: Remove legacy fragment API and update docs/tests.
+- [x] Phase 1: Add resolved motion-state types and command surface.
+- [x] Phase 2: Switch `MovementSystem` execution and prediction to resolved motion commands.
+- [x] Phase 3: Switch navigation output to resolved motion commands and explicit gait choice.
+- [x] Phase 4: Remove legacy fragment API and update docs/tests.
 
 ### Decisions Log
 - Decision: Use one resolved gait for the whole motion state instead of per-axis gait hints.
@@ -345,9 +373,28 @@ Mitigation:
     Rationale: most metadata can be derived by the movement system from current state and protocol context; explicit metadata override should be an exceptional path, not the default public API.
 - Decision: Start with no public metadata override path on the resolved movement API.
     Rationale: the current metadata surface is only `contact` and `motion_style`, and both already have sensible movement-system-owned defaults in the common case.
+- Decision: Keep Phase 1 as a compatibility bridge rather than replacing movement execution semantics immediately.
+    Rationale: this lands the new public API and command surface without accidentally expanding the scope into the full executor rewrite reserved for Phase 2.
+- Decision: Defer fidelity for explicit `turn_speed` overrides to Phase 2.
+    Rationale: the Phase 1 adapter translates resolved commands into legacy fragment inputs, and that legacy path has no way to faithfully encode an explicit resolved turn-speed override yet.
+- Decision: Preserve legacy fragment compatibility in Phase 2 by storing one active resolved motion record with per-axis expiry instead of a single whole-state timeout.
+    Rationale: current navigation can still combine held turning with pulsed locomotion on different lifetimes, and collapsing that into one whole-state expiry would change behavior before Phase 3 migrates navigation to native resolved commands.
+- Decision: Let legacy turn-only compatibility continue to prefer run-held protocol semantics, while native resolved turn-only commands default to walk unless explicitly requested otherwise.
+    Rationale: this keeps old callers behaviorally stable during the bridge period without diluting the semantics of the new public `MotionState` API.
+- Decision: Navigation chooses `Walk` only when controller output is throttled to walk-speed authority and otherwise keeps issuing `Run` with hold-or-pulse shaping.
+    Rationale: this removes the hardcoded run-only planner shortcut without changing the existing near-arrival run-pulse behavior for controller outputs that are still above walk speed.
+- Decision: Remove the fragment compatibility lane entirely once navigation and CLI command paths are fully migrated to `MovementCommand`.
+    Rationale: keeping both the resolved and fragment models alive after Phase 3 would preserve redundant executor complexity and stale public surface area without any remaining production caller benefit.
 
 ### Verification Log
-- Pending implementation.
+- `cargo test -p holtburger-core movement_types --lib`
+- `cargo test -p holtburger-core movement --lib`
+- `cargo test -p holtburger-core navigation --lib`
+- `cargo test -p holtburger-cli`
+- `cargo test -p holtburger-core movement --lib && cargo test -p holtburger-core navigation --lib && cargo test -p holtburger-cli`
+- `cargo test -p holtburger-cli`
+- `cargo test -p holtburger-core navigation --lib && cargo test -p holtburger-cli`
+- `cargo test -p holtburger-core --lib && cargo test -p holtburger-cli`
 
 ### Open Questions
 - None currently.

@@ -1,7 +1,8 @@
 use crate::client::WireEvent;
 use crate::client::movement_types::{
-    MotionStyle, MovementControl, MovementInput, MovementPacketMetadata, MovementPrimitive,
-    MovementRequest, RUN_ANIM_SPEED, planar_velocity_for_heading,
+    Gait, Locomotion, MotionState, MotionStyle, MovementCommand, MovementPacketMetadata,
+    RUN_ANIM_SPEED,
+    Turn, planar_velocity_for_heading,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -50,55 +51,6 @@ fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
         delta -= TAU;
     }
     delta
-}
-
-fn turn_motion_command(control: Option<MovementControl>) -> Option<u32> {
-    match control {
-        Some(MovementControl::TurnRight) => Some(TURN_RIGHT_MOTION_COMMAND),
-        Some(MovementControl::TurnLeft) => Some(TURN_LEFT_MOTION_COMMAND),
-        _ => None,
-    }
-}
-
-fn locomotion_motion_command(control: MovementControl) -> (u32, f32) {
-    match control {
-        MovementControl::Run => (WALK_FORWARD_MOTION_COMMAND, SERVER_RUN_SPEED),
-        MovementControl::Walk => (WALK_FORWARD_MOTION_COMMAND, 1.0),
-        MovementControl::Backstep => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
-        MovementControl::StrafeRight => (SIDESTEP_RIGHT_MOTION_COMMAND, 1.0),
-        MovementControl::StrafeLeft => (SIDESTEP_LEFT_MOTION_COMMAND, 1.0),
-        MovementControl::TurnLeft | MovementControl::TurnRight => {
-            unreachable!("turn controls are not locomotion commands")
-        }
-    }
-}
-
-fn current_hold_key_for_controls(
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
-) -> HoldKey {
-    match locomotion {
-        Some(MovementControl::Run) => HoldKey::Run,
-        Some(
-            MovementControl::Walk
-            | MovementControl::Backstep
-            | MovementControl::StrafeLeft
-            | MovementControl::StrafeRight,
-        ) => HoldKey::None,
-        Some(MovementControl::TurnLeft | MovementControl::TurnRight) => HoldKey::None,
-        None if turning.is_some() => HoldKey::Run,
-        None => HoldKey::None,
-    }
-}
-
-fn turn_speed_for_controls(
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
-) -> Option<f32> {
-    turning.map(|_| match current_hold_key_for_controls(locomotion, turning) {
-        HoldKey::Run => RUN_HELD_TURN_SPEED_RAD_PER_SEC,
-        HoldKey::Invalid | HoldKey::None => NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC,
-    })
 }
 
 fn normalize_heading(heading: f32) -> f32 {
@@ -175,45 +127,64 @@ fn build_autonomous_position_sync(
     })
 }
 
-fn build_controls_raw_motion_state(
+
+fn hold_key_for_motion_state(state: MotionState) -> HoldKey {
+    match state.gait {
+        Gait::Run => HoldKey::Run,
+        Gait::Walk => HoldKey::None,
+    }
+}
+
+fn locomotion_command_for_state(locomotion: Locomotion, gait: Gait) -> (u32, f32) {
+    match (gait, locomotion) {
+        (Gait::Run, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, SERVER_RUN_SPEED),
+        (Gait::Walk, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, 1.0),
+        (_, Locomotion::Backstep) => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
+        (_, Locomotion::StrafeLeft) => (SIDESTEP_LEFT_MOTION_COMMAND, 1.0),
+        (_, Locomotion::StrafeRight) => (SIDESTEP_RIGHT_MOTION_COMMAND, 1.0),
+    }
+}
+
+fn turn_motion_command_for_state(turn: Turn) -> u32 {
+    match turn {
+        Turn::Left => TURN_LEFT_MOTION_COMMAND,
+        Turn::Right => TURN_RIGHT_MOTION_COMMAND,
+    }
+}
+
+fn build_motion_state_raw_motion_state(
     world: &WorldState,
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
+    state: MotionState,
     motion_style: MotionStyle,
 ) -> RawMotionState {
     let mut raw_motion_state = RawMotionState {
         flags: RawMotionFlags::CURRENT_HOLD_KEY,
-        current_hold_key: Some(current_hold_key_for_controls(locomotion, turning) as u32),
+        current_hold_key: Some(hold_key_for_motion_state(state) as u32),
         ..Default::default()
     };
 
-    if let Some(control) = locomotion {
-        let (command, speed) = locomotion_motion_command(control);
-        match control {
-            MovementControl::Run | MovementControl::Walk | MovementControl::Backstep => {
+    if let Some(locomotion) = state.locomotion {
+        let (command, speed) = locomotion_command_for_state(locomotion, state.gait);
+        match locomotion {
+            Locomotion::Forward | Locomotion::Backstep => {
                 raw_motion_state.flags |=
                     RawMotionFlags::FORWARD_COMMAND | RawMotionFlags::FORWARD_SPEED;
                 raw_motion_state.forward_command = Some(command);
                 raw_motion_state.forward_speed = Some(speed);
             }
-            MovementControl::StrafeLeft | MovementControl::StrafeRight => {
+            Locomotion::StrafeLeft | Locomotion::StrafeRight => {
                 raw_motion_state.flags |=
                     RawMotionFlags::SIDE_STEP_COMMAND | RawMotionFlags::SIDE_STEP_SPEED;
                 raw_motion_state.sidestep_command = Some(command);
                 raw_motion_state.sidestep_speed = Some(speed);
             }
-            MovementControl::TurnLeft | MovementControl::TurnRight => unreachable!(),
         }
     }
 
-    if let Some(turn_command) = turn_motion_command(turning) {
-        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND;
-        raw_motion_state.turn_command = Some(turn_command);
-
-        if let Some(turn_speed) = turn_speed_for_controls(locomotion, turning) {
-            raw_motion_state.flags |= RawMotionFlags::TURN_SPEED;
-            raw_motion_state.turn_speed = Some(turn_speed);
-        }
+    if let Some(turn) = state.turning {
+        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND | RawMotionFlags::TURN_SPEED;
+        raw_motion_state.turn_command = Some(turn_motion_command_for_state(turn));
+        raw_motion_state.turn_speed = Some(turn_speed_for_state(state));
     }
 
     raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
@@ -319,108 +290,87 @@ impl MovementSequenceDiagnostics {
 
 pub(super) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
-    queued_inputs: Vec<QueuedMovementCommand>,
-    pending_snap_facing: Option<PendingSnapFacing>,
-    active_public_locomotion: Option<ActiveBufferedControl>,
-    active_public_turn: Option<ActiveBufferedControl>,
-    local_motion: Option<LocalMotionIntent>,
+    queued_commands: Vec<MovementCommand>,
+    pending_snap_facing: Option<f32>,
+    active_public_motion: Option<ActivePublicMotion>,
+    local_motion: Option<MotionState>,
     server_motion_active: bool,
     last_server_motion_intent: Option<ServerMotionIntent>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct ActiveBufferedControl {
-    control: MovementControl,
+struct ActivePublicMotion {
+    state: MotionState,
     until: Option<Instant>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct PendingSnapFacing {
-    heading: f32,
-    metadata: MovementPacketMetadata,
-}
+impl ActivePublicMotion {
+    fn from_command(state: MotionState, until: Option<Instant>) -> Self {
+        Self { state, until }
+    }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum QueuedMovementCommand {
-    Public {
-        input: MovementInput,
-        metadata: MovementPacketMetadata,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct LocalMotionIntent {
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
+    fn resolved_state(self) -> MotionState {
+        self.state
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ServerMotionIntent {
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
+    state: MotionState,
     motion_style: MotionStyle,
 }
 
 fn server_motion_intent(
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
+    state: MotionState,
     motion_style: MotionStyle,
 ) -> ServerMotionIntent {
     ServerMotionIntent {
-        locomotion,
-        turning,
+        state,
         motion_style,
     }
 }
 
-fn local_motion_from_controls(
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
-) -> Option<LocalMotionIntent> {
-    if locomotion.is_none() && turning.is_none() {
-        return None;
+fn locomotion_speed_for_state(state: MotionState) -> f32 {
+    match (state.gait, state.locomotion) {
+        (_, None) => 0.0,
+        (Gait::Run, Some(Locomotion::Forward)) => SERVER_RUN_SPEED,
+        (Gait::Walk, Some(Locomotion::Forward)) => 1.0,
+        (_, Some(Locomotion::Backstep | Locomotion::StrafeLeft | Locomotion::StrafeRight)) => 1.0,
     }
+}
 
-    Some(LocalMotionIntent {
-        locomotion,
-        turning,
+fn local_velocity_for_state(current_heading: f32, state: MotionState) -> Vector3 {
+    match state.locomotion {
+        Some(Locomotion::Forward) => {
+            planar_velocity_for_heading(current_heading, locomotion_speed_for_state(state))
+        }
+        Some(Locomotion::Backstep) => {
+            planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
+        }
+        Some(Locomotion::StrafeLeft) => {
+            planar_velocity_for_heading(normalize_heading(current_heading - (PI / 2.0)), 1.0)
+        }
+        Some(Locomotion::StrafeRight) => {
+            planar_velocity_for_heading(normalize_heading(current_heading + (PI / 2.0)), 1.0)
+        }
+        None => Vector3::zero(),
+    }
+}
+
+fn turn_speed_for_state(state: MotionState) -> f32 {
+    state.turn_speed.unwrap_or(match state.gait {
+        Gait::Run => RUN_HELD_TURN_SPEED_RAD_PER_SEC,
+        Gait::Walk => NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     })
 }
 
-fn local_velocity_for_control(current_heading: f32, locomotion: Option<MovementControl>) -> Vector3 {
-    match locomotion {
-        Some(MovementControl::Run) => planar_velocity_for_heading(current_heading, SERVER_RUN_SPEED),
-        Some(MovementControl::Walk) => planar_velocity_for_heading(current_heading, 1.0),
-        Some(MovementControl::Backstep) => {
-            planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
-        }
-        Some(MovementControl::StrafeLeft) => {
-            planar_velocity_for_heading(normalize_heading(current_heading - (PI / 2.0)), 1.0)
-        }
-        Some(MovementControl::StrafeRight) => {
-            planar_velocity_for_heading(normalize_heading(current_heading + (PI / 2.0)), 1.0)
-        }
-        Some(MovementControl::TurnLeft | MovementControl::TurnRight) | None => Vector3::zero(),
-    }
-}
+fn local_omega_for_state(state: MotionState) -> Vector3 {
+    let turn_speed = turn_speed_for_state(state);
 
-fn local_omega_for_control(
-    locomotion: Option<MovementControl>,
-    turning: Option<MovementControl>,
-) -> Vector3 {
-    let turn_speed = turn_speed_for_controls(locomotion, turning).unwrap_or(0.0);
-
-    match turning {
-        Some(MovementControl::TurnRight) => Vector3::new(0.0, 0.0, turn_speed),
-        Some(MovementControl::TurnLeft) => Vector3::new(0.0, 0.0, -turn_speed),
-        Some(
-            MovementControl::Run
-            | MovementControl::Walk
-            | MovementControl::Backstep
-            | MovementControl::StrafeLeft
-            | MovementControl::StrafeRight,
-        )
-        | None => Vector3::zero(),
+    match state.turning {
+        Some(Turn::Right) => Vector3::new(0.0, 0.0, turn_speed),
+        Some(Turn::Left) => Vector3::new(0.0, 0.0, -turn_speed),
+        None => Vector3::zero(),
     }
 }
 
@@ -428,24 +378,23 @@ impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
-            queued_inputs: Vec::new(),
+            queued_commands: Vec::new(),
             pending_snap_facing: None,
-            active_public_locomotion: None,
-            active_public_turn: None,
+            active_public_motion: None,
             local_motion: None,
             server_motion_active: false,
             last_server_motion_intent: None,
         }
     }
 
-    /// Estimates the pulse duration needed to cover a planar distance for the given control.
+    /// Estimates the pulse duration needed to cover a planar distance for the given motion state.
     /// This is planning math based on the current client actuator model, not a server guarantee.
     pub fn estimate_duration_for_distance(
         &self,
-        control: MovementControl,
+        state: MotionState,
         distance_m: f32,
     ) -> Duration {
-        let speed = self.control_speed_mps(control);
+        let speed = self.motion_state_speed_mps(state);
         if speed <= 1e-6 {
             Duration::ZERO
         } else {
@@ -453,111 +402,56 @@ impl MovementSystem {
         }
     }
 
-    /// Estimates planar displacement for a control held for the given duration.
+    /// Estimates planar displacement for a motion state held for the given duration.
     /// This is planning math based on the current client actuator model, not a server guarantee.
-    pub fn estimate_displacement(&self, control: MovementControl, duration: Duration) -> f32 {
-        self.control_speed_mps(control) * duration.as_secs_f32().max(0.0)
+    pub fn estimate_displacement(&self, state: MotionState, duration: Duration) -> f32 {
+        self.motion_state_speed_mps(state) * duration.as_secs_f32().max(0.0)
     }
 
-    pub(super) fn enqueue_input(&mut self, input: MovementInput, _now: Instant) {
-        self.queued_inputs.push(QueuedMovementCommand::Public {
-            input,
-            metadata: MovementPacketMetadata::default(),
-        });
+    pub(super) fn enqueue_command(&mut self, command: MovementCommand, _now: Instant) {
+        self.queued_commands.push(command);
     }
 
-    fn control_speed_mps(&self, control: MovementControl) -> f32 {
-        match control {
-            MovementControl::Run => RUN_ANIM_SPEED * SERVER_RUN_SPEED,
-            MovementControl::Walk => RUN_ANIM_SPEED,
-            MovementControl::Backstep => RUN_ANIM_SPEED,
-            MovementControl::StrafeLeft | MovementControl::StrafeRight => {
-                RUN_ANIM_SPEED
-            }
-            MovementControl::TurnLeft | MovementControl::TurnRight => 0.0,
-        }
+    fn motion_state_speed_mps(&self, state: MotionState) -> f32 {
+        RUN_ANIM_SPEED * locomotion_speed_for_state(state)
     }
 
-    fn ingest_public_input(
-        &mut self,
-        input: MovementInput,
-        metadata: MovementPacketMetadata,
-        now: Instant,
-    ) {
-        match input {
-            MovementInput::Hold { control } => self.set_active_control(control, None),
-            MovementInput::Pulse { control, duration } => {
-                self.set_active_control(control, Some(now + duration))
+    fn ingest_public_command(&mut self, command: MovementCommand, now: Instant) {
+        match command {
+            MovementCommand::SetMotion { state } => {
+                self.active_public_motion = Some(ActivePublicMotion::from_command(state, None));
             }
-            MovementInput::SnapFacing { heading } => {
-                self.pending_snap_facing = Some(PendingSnapFacing { heading, metadata });
+            MovementCommand::PulseMotion { state, duration } => {
+                self.active_public_motion =
+                    Some(ActivePublicMotion::from_command(state, Some(now + duration)));
             }
-            MovementInput::Stop => {
+            MovementCommand::SnapFacing { heading } => {
+                self.pending_snap_facing = Some(heading);
+            }
+            MovementCommand::Stop => {
                 self.pending_snap_facing = None;
-                self.active_public_locomotion = None;
-                self.active_public_turn = None;
-            }
-            MovementInput::ReleaseLocomotion => {
-                self.active_public_locomotion = None;
-            }
-            MovementInput::ReleaseTurning => {
-                self.active_public_turn = None;
+                self.active_public_motion = None;
             }
         }
     }
 
-    fn set_active_control(&mut self, control: MovementControl, until: Option<Instant>) {
-        let next = Some(ActiveBufferedControl { control, until });
-        match control {
-            MovementControl::Run
-            | MovementControl::Walk
-            | MovementControl::Backstep
-            | MovementControl::StrafeLeft
-            | MovementControl::StrafeRight => self.active_public_locomotion = next,
-            MovementControl::TurnLeft | MovementControl::TurnRight => {
-                self.active_public_turn = next
-            }
-        }
-    }
+    fn expire_public_motion(&mut self, now: Instant) {
+        let Some(active) = self.active_public_motion else {
+            return;
+        };
 
-    fn expire_buffered_controls(&mut self, now: Instant) {
-        if self
-            .active_public_locomotion
-            .is_some_and(|active| active.until.is_some_and(|until| now >= until))
-        {
+        if active.until.is_some_and(|until| now >= until) {
             log::info!(
-                "movement: expiring locomotion control {:?} at tick {:?}",
-                self.active_public_locomotion,
+                "movement: expiring public motion {:?} at tick {:?}",
+                active.state,
                 now,
             );
-            self.active_public_locomotion = None;
-        }
-
-        if self
-            .active_public_turn
-            .is_some_and(|active| active.until.is_some_and(|until| now >= until))
-        {
-            log::info!(
-                "movement: expiring turn control {:?} at tick {:?}",
-                self.active_public_turn,
-                now,
-            );
-            self.active_public_turn = None;
+            self.active_public_motion = None;
         }
     }
 
-    fn public_request_for_tick(&self) -> Option<MovementRequest> {
-        let locomotion = self.active_public_locomotion.map(|active| active.control);
-        let turning = self.active_public_turn.map(|active| active.control);
-
-        if locomotion.is_none() && turning.is_none() {
-            None
-        } else {
-            Some(MovementRequest::new(MovementPrimitive::Controls {
-                locomotion,
-                turning,
-            }))
-        }
+    fn public_motion_state_for_tick(&self) -> Option<MotionState> {
+        self.active_public_motion.map(|active| active.resolved_state())
     }
 
     pub(super) async fn tick(
@@ -566,73 +460,56 @@ impl MovementSystem {
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
-        let queued = std::mem::take(&mut self.queued_inputs);
+        let queued = std::mem::take(&mut self.queued_commands);
         if !queued.is_empty() {
             log::info!(
-                "movement: ingesting {} queued inputs at tick {:?}: {:?}",
+                "movement: ingesting {} queued movement commands at tick {:?}: {:?}",
                 queued.len(),
                 now,
                 queued,
             );
         }
         for command in queued {
-            match command {
-                QueuedMovementCommand::Public { input, metadata } => {
-                    self.ingest_public_input(input, metadata, now)
-                }
-            }
+            self.ingest_public_command(command, now);
         }
 
-        self.expire_buffered_controls(now);
+        self.expire_public_motion(now);
 
         let mut events = Vec::new();
-        if let Some(snap) = self.pending_snap_facing.take() {
+        if let Some(heading) = self.pending_snap_facing.take() {
             events.extend(
-                self.execute_movement_request_at(
-                    MovementRequest::new(MovementPrimitive::SnapFacing {
-                        heading: snap.heading,
-                    })
-                    .with_metadata(snap.metadata),
+                self.execute_snap_facing(
+                    heading,
                     world,
                     session,
-                    now,
+                    MovementPacketMetadata::default(),
                 )
                 .await?,
             );
         }
 
-        let request = self.public_request_for_tick();
+        let public_motion = self.public_motion_state_for_tick();
         if self.pending_snap_facing.is_some()
-            || request.is_some()
+            || public_motion.is_some()
             || self.local_motion.is_some()
             || self.server_motion_active
         {
             log::info!(
-                "movement: tick state locomotion={:?} turn={:?} snap={:?} request={:?} local_motion={:?} server_motion_active={}",
-                self.active_public_locomotion,
-                self.active_public_turn,
+                "movement: tick state active_public_motion={:?} snap={:?} public_motion={:?} local_motion={:?} server_motion_active={}",
+                self.active_public_motion,
                 self.pending_snap_facing,
-                request,
+                public_motion,
                 self.local_motion,
                 self.server_motion_active,
             );
         }
 
-        match request {
-            Some(request) => events.extend(
-                self.execute_movement_request_at(request, world, session, now)
-                    .await?,
-            ),
+        match public_motion {
+            Some(state) => {
+                events.extend(self.execute_motion_state_at(state, world, session, now).await?)
+            }
             None if self.local_motion.is_some() || self.server_motion_active => {
-                events.extend(
-                    self.execute_movement_request_at(
-                        MovementRequest::new(MovementPrimitive::Stop),
-                        world,
-                        session,
-                        now,
-                    )
-                    .await?,
-                );
+                events.extend(self.execute_stop_at(world, session, MovementPacketMetadata::default()).await?);
             }
             None => {}
         }
@@ -664,19 +541,6 @@ impl MovementSystem {
             .record_server_control_sequence(server_control_sequence);
     }
 
-    fn should_send_motion_pulse(
-        &self,
-        locomotion: Option<MovementControl>,
-        turning: Option<MovementControl>,
-        motion_style: MotionStyle,
-    ) -> bool {
-        if !self.server_motion_active {
-            return true;
-        }
-
-        self.last_server_motion_intent != Some(server_motion_intent(locomotion, turning, motion_style))
-    }
-
     fn should_send_stop_pulse(&self) -> bool {
         self.server_motion_active
     }
@@ -691,81 +555,75 @@ impl MovementSystem {
         self.last_server_motion_intent = None;
     }
 
-    #[cfg(test)]
-    pub(super) async fn execute_movement_request(
+    async fn execute_motion_state_at(
         &mut self,
-        request: MovementRequest,
-        world: &mut WorldState,
-        session: &mut Session,
-    ) -> Result<Vec<WorldEvent>> {
-        self.execute_movement_request_at(request, world, session, Instant::now())
-            .await
-    }
-
-    async fn execute_movement_request_at(
-        &mut self,
-        request: MovementRequest,
+        state: MotionState,
         world: &mut WorldState,
         session: &mut Session,
         now: Instant,
     ) -> Result<Vec<WorldEvent>> {
-        let primitive = request.primitive;
-        if let MovementPrimitive::SnapFacing { heading } = primitive {
-            return self
-                .execute_snap_facing(heading, world, session, request.metadata)
-                .await;
-        }
+        self.execute_motion_state_with_metadata_at(
+            state,
+            MovementPacketMetadata::default(),
+            world,
+            session,
+            now,
+        )
+        .await
+    }
 
-        let controls = match primitive {
-            MovementPrimitive::Controls {
-                locomotion,
-                turning,
-            } => Some((locomotion, turning)),
-            _ => None,
-        };
-        if let Some((locomotion, turning)) = controls {
-            log::info!(
-                "movement: control request locomotion={:?} turning={:?} at tick {:?} (last_server_motion_intent={:?})",
-                locomotion,
-                turning,
-                now,
-                self.last_server_motion_intent,
-            );
-        }
+    async fn execute_stop_at(
+        &mut self,
+        world: &mut WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<Vec<WorldEvent>> {
         let had_active_local_motion = self.local_motion.is_some();
-        let state_events = self.apply_movement_primitive(primitive, world);
+        let state_events = self.apply_motion_state_stop(world);
 
-        match primitive {
-            MovementPrimitive::Stop if self.should_send_stop_pulse() => {
-                log::info!(
-                    "movement: sending stop pulse (had_active_local_motion={}, server_motion_active={})",
-                    had_active_local_motion,
-                    self.server_motion_active,
-                );
-                Self::send_stop_pulse(world, session, request.metadata).await?;
-                if had_active_local_motion {
-                    Self::send_autonomous_position_sync(world, session, request.metadata).await?;
-                }
-                self.note_server_motion_cleared();
+        if self.should_send_stop_pulse() {
+            log::info!(
+                "movement: sending stop pulse (had_active_local_motion={}, server_motion_active={})",
+                had_active_local_motion,
+                self.server_motion_active,
+            );
+            Self::send_stop_pulse(world, session, metadata).await?;
+            if had_active_local_motion {
+                Self::send_autonomous_position_sync(world, session, metadata).await?;
             }
-            MovementPrimitive::Controls {
-                locomotion,
-                turning,
-            } if self.should_send_motion_pulse(locomotion, turning, request.metadata.motion_style) => {
-                log::info!(
-                    "movement: sending motion pulse locomotion={:?} turning={:?}",
-                    locomotion,
-                    turning,
-                );
-                Self::send_motion_pulse(world, session, locomotion, turning, request.metadata)
-                    .await?;
-                self.note_server_motion_sent(server_motion_intent(
-                    locomotion,
-                    turning,
-                    request.metadata.motion_style,
-                ));
-            }
-            _ => {}
+            self.note_server_motion_cleared();
+        }
+
+        Ok(state_events)
+    }
+
+    async fn execute_motion_state_with_metadata_at(
+        &mut self,
+        state: MotionState,
+        metadata: MovementPacketMetadata,
+        world: &mut WorldState,
+        session: &mut Session,
+        now: Instant,
+    ) -> Result<Vec<WorldEvent>> {
+        log::info!(
+            "movement: resolved motion request state={:?} at tick {:?} (last_server_motion_intent={:?})",
+            state,
+            now,
+            self.last_server_motion_intent,
+        );
+
+        let had_active_local_motion = self.local_motion.is_some();
+        let state_events = self.apply_motion_state(state, world);
+
+        if self.should_send_motion_state_pulse(state, metadata.motion_style) {
+            log::info!("movement: sending resolved motion pulse state={:?}", state);
+            Self::send_motion_state_pulse(world, session, state, metadata).await?;
+            self.note_server_motion_sent(server_motion_intent(state, metadata.motion_style));
+        }
+
+        if had_active_local_motion && self.local_motion.is_none() && self.should_send_stop_pulse() {
+            Self::send_stop_pulse(world, session, metadata).await?;
+            self.note_server_motion_cleared();
         }
 
         Ok(state_events)
@@ -804,45 +662,24 @@ impl MovementSystem {
         Ok(world_events)
     }
 
-    fn apply_movement_primitive(
-        &mut self,
-        primitive: MovementPrimitive,
-        world: &mut WorldState,
-    ) -> Vec<WorldEvent> {
-        match primitive {
-            MovementPrimitive::Controls {
-                locomotion,
-                turning,
-            } => {
-                self.local_motion = local_motion_from_controls(locomotion, turning);
-                self.sync_local_motion_vectors(world)
-            }
-            MovementPrimitive::SnapFacing { heading } => {
-                let mut next_pos = world.player.position;
-                next_pos.rotation = Quaternion::from_heading(normalize_heading(heading));
-                let mut events = world.set_player_position(next_pos);
+    fn apply_motion_state(&mut self, state: MotionState, world: &mut WorldState) -> Vec<WorldEvent> {
+        self.local_motion = Some(state);
+        self.sync_local_motion_vectors(world)
+    }
 
-                if self.local_motion.is_some() {
-                    events.extend(self.sync_local_motion_vectors(world));
-                }
-
-                events
-            }
-            MovementPrimitive::Stop => {
-                self.local_motion = None;
-                world.set_player_vector(Vector3::zero(), Vector3::zero())
-            }
-        }
+    fn apply_motion_state_stop(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
+        self.local_motion = None;
+        world.set_player_vector(Vector3::zero(), Vector3::zero())
     }
 
     fn sync_local_motion_vectors(&self, world: &mut WorldState) -> Vec<WorldEvent> {
-        let Some(intent) = self.local_motion else {
+        let Some(state) = self.local_motion else {
             return world.set_player_vector(Vector3::zero(), Vector3::zero());
         };
 
         let current_heading = world.player.position.rotation.to_heading();
-        let velocity = local_velocity_for_control(current_heading, intent.locomotion);
-        let omega = local_omega_for_control(intent.locomotion, intent.turning);
+        let velocity = local_velocity_for_state(current_heading, state);
+        let omega = local_omega_for_state(state);
 
         world.set_player_vector(velocity, omega)
     }
@@ -852,7 +689,7 @@ impl MovementSystem {
         dt: f32,
         world: &mut WorldState,
     ) -> Vec<WorldEvent> {
-        let Some(intent) = self.local_motion else {
+        let Some(state) = self.local_motion else {
             return Vec::new();
         };
 
@@ -866,15 +703,23 @@ impl MovementSystem {
         }
 
         let current_heading = world.player.position.rotation.to_heading();
-        let turn_speed = turn_speed_for_controls(intent.locomotion, intent.turning).unwrap_or(0.0);
-        let turn_step = match intent.turning {
-            Some(MovementControl::TurnRight) => turn_speed * dt,
-            Some(MovementControl::TurnLeft) => -turn_speed * dt,
+        let turn_speed = turn_speed_for_state(state);
+        let turn_step = match state.turning {
+            Some(Turn::Right) => turn_speed * dt,
+            Some(Turn::Left) => -turn_speed * dt,
             _ => 0.0,
         };
         let next_heading = normalize_heading(current_heading + turn_step);
-        let velocity = local_velocity_for_control(next_heading, intent.locomotion);
-        let omega = local_omega_for_control(intent.locomotion, intent.turning);
+        let velocity = local_velocity_for_state(
+            next_heading,
+            MotionState {
+                gait: state.gait,
+                locomotion: state.locomotion,
+                turning: state.turning,
+                turn_speed: state.turn_speed,
+            },
+        );
+        let omega = local_omega_for_state(state);
 
         let mut next_pos = world.player.position;
         next_pos.rotation = Quaternion::from_heading(next_heading);
@@ -930,20 +775,26 @@ impl MovementSystem {
         Ok(true)
     }
 
-    async fn send_motion_pulse(
+    fn should_send_motion_state_pulse(
+        &self,
+        state: MotionState,
+        motion_style: MotionStyle,
+    ) -> bool {
+        if !self.server_motion_active {
+            return true;
+        }
+
+        self.last_server_motion_intent != Some(server_motion_intent(state, motion_style))
+    }
+
+    async fn send_motion_state_pulse(
         world: &WorldState,
         session: &mut Session,
-        locomotion: Option<MovementControl>,
-        turning: Option<MovementControl>,
+        state: MotionState,
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: build_controls_raw_motion_state(
-                world,
-                locomotion,
-                turning,
-                metadata.motion_style,
-            ),
+            raw_motion_state: build_motion_state_raw_motion_state(world, state, metadata.motion_style),
             position: world.player.position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
@@ -1222,13 +1073,12 @@ mod tests {
     }
 
     #[test]
-    fn controls_raw_motion_state_adds_right_turn_when_requested() {
+    fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
         let world = WorldState::synthetic();
 
-        let raw_motion_state = build_controls_raw_motion_state(
+        let raw_motion_state = build_motion_state_raw_motion_state(
             &world,
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnRight),
+            MotionState::builder().run().forward().turn_right().build(),
             MotionStyle::PreserveServer,
         );
 
@@ -1258,13 +1108,12 @@ mod tests {
     }
 
     #[test]
-    fn controls_raw_motion_state_adds_left_turn_when_requested() {
+    fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
         let world = WorldState::synthetic();
 
-        let raw_motion_state = build_controls_raw_motion_state(
+        let raw_motion_state = build_motion_state_raw_motion_state(
             &world,
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnLeft),
+            MotionState::builder().run().forward().turn_left().build(),
             MotionStyle::PreserveServer,
         );
 
@@ -1284,13 +1133,12 @@ mod tests {
     }
 
     #[test]
-    fn controls_raw_motion_state_omits_turn_when_not_requested() {
+    fn motion_state_raw_motion_state_omits_turn_when_not_requested() {
         let world = WorldState::synthetic();
 
-        let raw_motion_state = build_controls_raw_motion_state(
+        let raw_motion_state = build_motion_state_raw_motion_state(
             &world,
-            Some(MovementControl::Run),
-            None,
+            MotionState::builder().run().forward().build(),
             MotionStyle::PreserveServer,
         );
 
@@ -1326,13 +1174,7 @@ mod tests {
         let mut movement = MovementSystem::new();
         world.player.position.rotation = Quaternion::from_heading(180.0_f32.to_radians());
         let _ = world.set_player_position(world.player.position);
-        movement.apply_movement_primitive(
-            MovementPrimitive::Controls {
-                locomotion: Some(MovementControl::Run),
-                turning: None,
-            },
-            &mut world,
-        );
+        movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
 
         let events = movement.advance_local_motion_prediction(0.5, &mut world);
 
@@ -1380,13 +1222,8 @@ mod tests {
             .insert(Entity::new(player_guid, "Player".to_string(), position));
 
         let mut movement = MovementSystem::new();
-        let events = movement.apply_movement_primitive(
-            MovementPrimitive::Controls {
-                locomotion: None,
-                turning: Some(MovementControl::TurnRight),
-            },
-            &mut world,
-        );
+        let events =
+            movement.apply_motion_state(MotionState::builder().walk().turn_right().build(), &mut world);
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1420,13 +1257,7 @@ mod tests {
             world.player.position,
         ));
         let mut movement = MovementSystem::new();
-        movement.apply_movement_primitive(
-            MovementPrimitive::Controls {
-                locomotion: Some(MovementControl::Run),
-                turning: None,
-            },
-            &mut world,
-        );
+        movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
 
         world.player.position.rotation = Quaternion::from_heading(90.0_f32.to_radians());
         let _ = world.set_player_position(world.player.position);
@@ -1466,13 +1297,7 @@ mod tests {
         let _ = world.set_player_position(world.player.position);
 
         let mut movement = MovementSystem::new();
-        let events = movement.apply_movement_primitive(
-            MovementPrimitive::Controls {
-                locomotion: Some(MovementControl::Run),
-                turning: None,
-            },
-            &mut world,
-        );
+        let events = movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1487,27 +1312,27 @@ mod tests {
     #[test]
     fn duration_and_displacement_helpers_share_one_run_vocabulary() {
         let movement = MovementSystem::new();
-        let control = MovementControl::Run;
+        let state = MotionState::builder().run().forward().build();
         let distance = 9.0;
 
-        let duration = movement.estimate_duration_for_distance(control, distance);
-        let displacement = movement.estimate_displacement(control, duration);
+        let duration = movement.estimate_duration_for_distance(state, distance);
+        let displacement = movement.estimate_displacement(state, duration);
 
         assert!((duration.as_secs_f32() - 0.5).abs() < 1e-5);
         assert!((displacement - distance).abs() < 1e-4);
     }
 
     #[test]
-    fn turn_controls_have_zero_displacement_and_duration_helpers() {
+    fn turn_only_motion_has_zero_displacement_and_duration_helpers() {
         let movement = MovementSystem::new();
-        let control = MovementControl::TurnLeft;
+        let state = MotionState::builder().walk().turn_left().build();
 
         assert_eq!(
-            movement.estimate_duration_for_distance(control, 5.0),
+            movement.estimate_duration_for_distance(state, 5.0),
             Duration::ZERO
         );
         assert_eq!(
-            movement.estimate_displacement(control, Duration::from_secs(1)),
+            movement.estimate_displacement(state, Duration::from_secs(1)),
             0.0
         );
     }
@@ -1529,14 +1354,11 @@ mod tests {
         ));
 
         let mut movement = MovementSystem::new();
-        movement.apply_movement_primitive(
-            MovementPrimitive::Controls {
-                locomotion: Some(MovementControl::Run),
-                turning: Some(MovementControl::TurnRight),
-            },
+        movement.apply_motion_state(
+            MotionState::builder().run().forward().turn_right().build(),
             &mut world,
         );
-        let events = movement.apply_movement_primitive(MovementPrimitive::Stop, &mut world);
+        let events = movement.apply_motion_state_stop(&mut world);
 
         let player = world
             .entities
@@ -1567,13 +1389,8 @@ mod tests {
         ));
 
         let mut movement = MovementSystem::new();
-        let events = movement.apply_movement_primitive(
-            MovementPrimitive::Controls {
-                locomotion: None,
-                turning: Some(MovementControl::TurnLeft),
-            },
-            &mut world,
-        );
+        let events =
+            movement.apply_motion_state(MotionState::builder().walk().turn_left().build(), &mut world);
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1588,8 +1405,7 @@ mod tests {
     fn stop_pulse_is_still_required_when_server_motion_is_active() {
         let mut movement = MovementSystem::new();
         movement.note_server_motion_sent(server_motion_intent(
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnRight),
+            MotionState::builder().run().forward().turn_right().build(),
             MotionStyle::PreserveServer,
         ));
 
@@ -1600,8 +1416,7 @@ mod tests {
     fn note_server_motion_cleared_resets_drive_tracking() {
         let mut movement = MovementSystem::new();
         movement.note_server_motion_sent(server_motion_intent(
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnRight),
+            MotionState::builder().run().forward().turn_right().build(),
             MotionStyle::PreserveServer,
         ));
 
@@ -1615,14 +1430,12 @@ mod tests {
     fn unchanged_motion_intent_does_not_require_server_refresh() {
         let mut movement = MovementSystem::new();
         movement.note_server_motion_sent(server_motion_intent(
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnRight),
+            MotionState::builder().run().forward().turn_right().build(),
             MotionStyle::PreserveServer,
         ));
 
-        assert!(!movement.should_send_motion_pulse(
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnRight),
+        assert!(!movement.should_send_motion_state_pulse(
+            MotionState::builder().run().forward().turn_right().build(),
             MotionStyle::PreserveServer,
         ));
     }
@@ -1755,13 +1568,11 @@ mod tests {
         let mut session = Session::new_test();
 
         movement
-            .execute_movement_request(
-                MovementRequest::new(MovementPrimitive::Controls {
-                    locomotion: Some(MovementControl::Run),
-                    turning: None,
-                }),
+            .execute_motion_state_at(
+                MotionState::builder().run().forward().build(),
                 &mut world,
                 &mut session,
+                Instant::now(),
             )
             .await
             .expect("drive request should succeed");
@@ -1770,11 +1581,7 @@ mod tests {
         world.entities.insert(entity);
 
         movement
-            .execute_movement_request(
-                MovementRequest::new(MovementPrimitive::Stop),
-                &mut world,
-                &mut session,
-            )
+            .execute_stop_at(&mut world, &mut session, MovementPacketMetadata::default())
             .await
             .expect("stop request should succeed");
 
@@ -1800,17 +1607,12 @@ mod tests {
         let mut movement = MovementSystem::new();
         let mut session = Session::new_test();
         movement.note_server_motion_sent(server_motion_intent(
-            Some(MovementControl::Run),
-            Some(MovementControl::TurnRight),
+            MotionState::builder().run().forward().turn_right().build(),
             MotionStyle::PreserveServer,
         ));
 
         movement
-            .execute_movement_request(
-                MovementRequest::new(MovementPrimitive::Stop),
-                &mut world,
-                &mut session,
-            )
+            .execute_stop_at(&mut world, &mut session, MovementPacketMetadata::default())
             .await
             .expect("stop request should succeed");
 
@@ -1818,7 +1620,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unchanged_control_requests_do_not_resend_motion_pulses() {
+    async fn unchanged_motion_state_requests_do_not_resend_motion_pulses() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
@@ -1836,20 +1638,24 @@ mod tests {
         let mut movement = MovementSystem::new();
         let mut session = Session::new_test();
         let start = Instant::now();
-        let request = MovementRequest::new(MovementPrimitive::Controls {
-            locomotion: Some(MovementControl::Run),
-            turning: Some(MovementControl::TurnRight),
-        });
+        let state = MotionState::builder().run().forward().turn_right().build();
 
         movement
-            .execute_movement_request_at(request, &mut world, &mut session, start)
+            .execute_motion_state_with_metadata_at(
+                state,
+                MovementPacketMetadata::default(),
+                &mut world,
+                &mut session,
+                start,
+            )
             .await
             .expect("initial motion request should send a motion pulse");
         assert_eq!(session.packet_sequence, 2);
 
         movement
-            .execute_movement_request_at(
-                request,
+            .execute_motion_state_with_metadata_at(
+                state,
+                MovementPacketMetadata::default(),
                 &mut world,
                 &mut session,
                 start + Duration::from_millis(100),
@@ -1879,9 +1685,9 @@ mod tests {
         let mut session = Session::new_test();
         let start = Instant::now();
 
-        movement.enqueue_input(
-            MovementInput::Hold {
-                control: MovementControl::Run,
+        movement.enqueue_command(
+            MovementCommand::SetMotion {
+                state: MotionState::builder().run().forward().build(),
             },
             start,
         );
@@ -1933,9 +1739,9 @@ mod tests {
         let mut session = Session::new_test();
         let start = Instant::now();
 
-        movement.enqueue_input(
-            MovementInput::Pulse {
-                control: MovementControl::Run,
+        movement.enqueue_command(
+            MovementCommand::PulseMotion {
+                state: MotionState::builder().run().forward().build(),
                 duration: Duration::from_millis(50),
             },
             start,
@@ -1981,9 +1787,9 @@ mod tests {
         let mut session = Session::new_test();
         let start = Instant::now();
 
-        movement.enqueue_input(
-            MovementInput::Hold {
-                control: MovementControl::Run,
+        movement.enqueue_command(
+            MovementCommand::SetMotion {
+                state: MotionState::builder().run().forward().build(),
             },
             start,
         );
@@ -1992,7 +1798,7 @@ mod tests {
             .await
             .expect("held run should start");
 
-        movement.enqueue_input(MovementInput::Stop, start + Duration::from_millis(30));
+        movement.enqueue_command(MovementCommand::Stop, start + Duration::from_millis(30));
         movement
             .tick(start + Duration::from_millis(30), &mut world, &mut session)
             .await

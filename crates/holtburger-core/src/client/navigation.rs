@@ -20,7 +20,9 @@ use crate::client::controllers::{
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
 use crate::client::movement::{MovementSystem, SERVER_PULSE_PERIOD, SERVER_RUN_SPEED};
-use crate::client::movement_types::{MovementControl, MovementInput};
+use crate::client::movement_types::{
+    Gait, Locomotion, MotionState, MovementCommand, Turn,
+};
 use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
@@ -34,11 +36,12 @@ const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 const FOLLOW_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
-const MIN_RUN_PULSE_DUTY_CYCLE: f32 = 0.15;
+const MIN_PULSE_DUTY_CYCLE: f32 = 0.15;
 const MIN_ACTIONABLE_RUN_PULSE_DURATION: Duration = Duration::from_millis(30);
 const TURN_ONLY_ENTER_THRESHOLD_RAD: f32 = 20.0_f32.to_radians();
 const TURN_ONLY_EXIT_THRESHOLD_RAD: f32 = 10.0_f32.to_radians();
 const HEADING_EPSILON_RAD: f32 = 1e-4;
+const WALK_SPEED_CONTROL_RATE: f32 = 1.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ApproachSyncInput {
@@ -213,7 +216,7 @@ enum IssuedLocomotion {
 #[derive(Debug, Clone, Copy, Default)]
 struct NavigationPulsePlanner {
     issued: Option<IssuedLocomotion>,
-    issued_turn: Option<MovementControl>,
+    issued_turn: Option<Turn>,
 }
 
 impl NavigationPulsePlanner {
@@ -232,38 +235,39 @@ impl NavigationPulsePlanner {
         };
 
         if should_turn_only {
-            if self.issued.take().is_some() {
-                update.push_command(ClientCommand::EnqueueMovementInput(
-                    MovementInput::ReleaseLocomotion,
-                ));
-            }
-
             let desired_turn = if heading_delta > HEADING_EPSILON_RAD {
-                Some(MovementControl::TurnRight)
+                Some(Turn::Right)
             } else if heading_delta < -HEADING_EPSILON_RAD {
-                Some(MovementControl::TurnLeft)
+                Some(Turn::Left)
             } else {
                 None
             };
 
-            if self.issued_turn != desired_turn {
+            if self.issued_turn != desired_turn || self.issued.take().is_some() {
                 match desired_turn {
-                    Some(control) => {
+                    Some(turning) => {
                         log::info!(
                             "navigation pulse: turning in place at target heading {:.3} rad (current {:.3} rad, delta {:.3} rad) with {:?}",
                             plan.heading,
                             current_heading,
                             heading_delta,
-                            control,
+                            turning,
                         );
-                        update.push_command(ClientCommand::EnqueueMovementInput(
-                            MovementInput::Hold { control },
+                        update.push_command(ClientCommand::DriveMovement(
+                            MovementCommand::SetMotion {
+                                state: MotionState {
+                                    gait: Gait::Walk,
+                                    locomotion: None,
+                                    turning: Some(turning),
+                                    turn_speed: None,
+                                },
+                            },
                         ));
                     }
                     None => {
-                        update.push_command(ClientCommand::EnqueueMovementInput(
-                            MovementInput::ReleaseTurning,
-                        ));
+                        if let Some(command) = self.stop_command() {
+                            update.push_command(command);
+                        }
                     }
                 }
                 self.issued_turn = desired_turn;
@@ -272,29 +276,32 @@ impl NavigationPulsePlanner {
             return update;
         }
 
-        if self.issued_turn.take().is_some() {
-            update.push_command(ClientCommand::EnqueueMovementInput(
-                MovementInput::ReleaseTurning,
-            ));
-        }
+        self.issued_turn = None;
 
-        let control = MovementControl::Run;
+        let gait = gait_for_max_run_rate(plan.max_run_rate);
+        let locomotion_state = MotionState {
+            gait,
+            locomotion: Some(Locomotion::Forward),
+            turning: None,
+            turn_speed: None,
+        };
         let estimator = MovementSystem::new();
-        let full_pulse_distance = estimator.estimate_displacement(control, SERVER_PULSE_PERIOD);
-        let run_rate_ratio = if SERVER_RUN_SPEED <= 1e-6 {
+        let full_pulse_distance =
+            estimator.estimate_displacement(locomotion_state, SERVER_PULSE_PERIOD);
+        let gait_rate_ratio = if gait_speed(gait) <= 1e-6 {
             0.0
         } else {
-            (plan.max_run_rate.max(0.0) / SERVER_RUN_SPEED).clamp(0.0, 1.0)
+            (plan.max_run_rate.max(0.0) / gait_speed(gait)).clamp(0.0, 1.0)
         };
         let capped_pulse_distance =
-            full_pulse_distance * run_rate_ratio.max(MIN_RUN_PULSE_DUTY_CYCLE);
+            full_pulse_distance * gait_rate_ratio.max(MIN_PULSE_DUTY_CYCLE);
         let desired_distance = plan.remaining_distance.min(capped_pulse_distance);
 
-        if desired_distance <= 1e-6 || run_rate_ratio <= 1e-6 {
+        if desired_distance <= 1e-6 || gait_rate_ratio <= 1e-6 {
             log::info!(
-                "navigation pulse: stopping locomotion because remaining {:.2}m and run-rate ratio {:.2} cannot sustain a run pulse",
+                "navigation pulse: stopping locomotion because remaining {:.2}m and gait-rate ratio {:.2} cannot sustain a locomotion pulse",
                 plan.remaining_distance,
-                run_rate_ratio,
+                gait_rate_ratio,
             );
             if let Some(command) = self.stop_command() {
                 update.push_command(command);
@@ -302,13 +309,13 @@ impl NavigationPulsePlanner {
             return update;
         }
 
-        let planned = if run_rate_ratio >= 1.0 - 1e-6
+        let planned = if gait_rate_ratio >= 1.0 - 1e-6
             && plan.remaining_distance >= full_pulse_distance
         {
             PlannedLocomotion::Hold
         } else {
             PlannedLocomotion::Pulse {
-                duration: estimator.estimate_duration_for_distance(control, desired_distance),
+                duration: estimator.estimate_duration_for_distance(locomotion_state, desired_distance),
             }
         };
 
@@ -325,16 +332,24 @@ impl NavigationPulsePlanner {
                 }
                 _ => {
                     log::info!(
-                        "navigation pulse: issuing hold toward heading {:.3} rad (remaining {:.2}m, max run rate {:.2}, run-rate ratio {:.2}, previous {:?})",
+                        "navigation pulse: issuing {:?} hold toward heading {:.3} rad (remaining {:.2}m, max run rate {:.2}, gait-rate ratio {:.2}, previous {:?})",
+                        gait,
                         plan.heading,
                         plan.remaining_distance,
                         plan.max_run_rate,
-                        run_rate_ratio,
+                        gait_rate_ratio,
                         self.issued,
                     );
                     self.issued = Some(IssuedLocomotion::Hold);
-                    update.push_command(ClientCommand::EnqueueMovementInput(
-                        MovementInput::Hold { control },
+                    update.push_command(ClientCommand::DriveMovement(
+                        MovementCommand::SetMotion {
+                            state: MotionState {
+                                gait,
+                                locomotion: Some(Locomotion::Forward),
+                                turning: None,
+                                turn_speed: None,
+                            },
+                        },
                     ));
                     update
                 }
@@ -352,18 +367,27 @@ impl NavigationPulsePlanner {
                 }
                 _ => {
                     log::info!(
-                        "navigation pulse: issuing {} ms pulse toward heading {:.3} rad (remaining {:.2}m, desired {:.2}m, max run rate {:.2}, run-rate ratio {:.2}, previous {:?})",
+                        "navigation pulse: issuing {:?} {} ms pulse toward heading {:.3} rad (remaining {:.2}m, desired {:.2}m, max run rate {:.2}, gait-rate ratio {:.2}, previous {:?})",
+                        gait,
                         duration.as_millis(),
                         plan.heading,
                         plan.remaining_distance,
                         desired_distance,
                         plan.max_run_rate,
-                        run_rate_ratio,
+                        gait_rate_ratio,
                         self.issued,
                     );
                     self.issued = Some(IssuedLocomotion::Pulse { until: now + duration });
-                    update.push_command(ClientCommand::EnqueueMovementInput(
-                        MovementInput::Pulse { control, duration },
+                    update.push_command(ClientCommand::DriveMovement(
+                        MovementCommand::PulseMotion {
+                            state: MotionState {
+                                gait,
+                                locomotion: Some(Locomotion::Forward),
+                                turning: None,
+                                turn_speed: None,
+                            },
+                            duration,
+                        },
                     ));
                     update
                 }
@@ -380,16 +404,36 @@ impl NavigationPulsePlanner {
                 previous_locomotion,
                 previous_turn,
             );
-            Some(ClientCommand::EnqueueMovementInput(MovementInput::Stop))
+            Some(ClientCommand::DriveMovement(MovementCommand::Stop))
         } else {
             None
         }
     }
 }
 
+fn gait_speed(gait: Gait) -> f32 {
+    match gait {
+        Gait::Run => SERVER_RUN_SPEED,
+        Gait::Walk => WALK_SPEED_CONTROL_RATE,
+    }
+}
+
+fn gait_for_max_run_rate(max_run_rate: f32) -> Gait {
+    if max_run_rate <= WALK_SPEED_CONTROL_RATE + 1e-6 {
+        Gait::Walk
+    } else {
+        Gait::Run
+    }
+}
+
 fn minimum_actionable_run_distance() -> f32 {
     MovementSystem::new().estimate_displacement(
-        MovementControl::Run,
+        MotionState {
+            gait: Gait::Run,
+            locomotion: Some(Locomotion::Forward),
+            turning: None,
+            turn_speed: None,
+        },
         MIN_ACTIONABLE_RUN_PULSE_DURATION,
     )
 }
@@ -1521,10 +1565,16 @@ mod tests {
     fn is_drive_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
-                control: MovementControl::Run,
-            }) | ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
-                control: MovementControl::Run,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
+                    ..
+                },
+            }) | ClientCommand::DriveMovement(MovementCommand::PulseMotion {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
+                    ..
+                },
                 ..
             })
         )
@@ -1533,8 +1583,12 @@ mod tests {
     fn is_turn_left_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
-                control: MovementControl::TurnLeft,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: None,
+                    turning: Some(Turn::Left),
+                    ..
+                },
             })
         )
     }
@@ -1542,8 +1596,12 @@ mod tests {
     fn is_turn_right_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
-                control: MovementControl::TurnRight,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: None,
+                    turning: Some(Turn::Right),
+                    ..
+                },
             })
         )
     }
@@ -1553,17 +1611,11 @@ mod tests {
     }
 
     fn is_stop_command(command: &ClientCommand) -> bool {
-        matches!(
-            command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Stop)
-        )
+        matches!(command, ClientCommand::DriveMovement(MovementCommand::Stop))
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
-        matches!(
-            command,
-            ClientCommand::EnqueueMovementInput(MovementInput::SnapFacing { .. })
-        )
+        matches!(command, ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. }))
     }
 
     fn has_active_approach(automation: &NavigationAutomation) -> bool {
@@ -1904,8 +1956,13 @@ mod tests {
 
         assert!(result.commands.iter().any(|command| matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
-                control: MovementControl::Run,
+            ClientCommand::DriveMovement(MovementCommand::PulseMotion {
+                state: MotionState {
+                    gait: Gait::Run,
+                    locomotion: Some(Locomotion::Forward),
+                    turning: None,
+                    turn_speed: None,
+                },
                 ..
             })
         )));
@@ -1929,7 +1986,7 @@ mod tests {
             .commands
             .iter()
             .find_map(|command| match command {
-                ClientCommand::EnqueueMovementInput(MovementInput::Pulse { duration, .. }) => {
+                ClientCommand::DriveMovement(MovementCommand::PulseMotion { duration, .. }) => {
                     Some(*duration)
                 }
                 _ => None,
@@ -1962,8 +2019,13 @@ mod tests {
         );
         assert!(refreshed.commands.iter().any(|command| matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
-                control: MovementControl::Run,
+            ClientCommand::DriveMovement(MovementCommand::PulseMotion {
+                state: MotionState {
+                    gait: Gait::Run,
+                    locomotion: Some(Locomotion::Forward),
+                    turning: None,
+                    turn_speed: None,
+                },
                 ..
             })
         )));

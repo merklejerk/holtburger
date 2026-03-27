@@ -123,9 +123,7 @@ impl Controller for ApproachTargetController {
                     .arrival_distance
                     .max(target_use_radius.unwrap_or(0.0).max(0.0));
 
-                if distance_to_target
-                    <= effective_arrival_distance + APPROACH_ARRIVAL_DEADBAND_M
-                {
+                if distance_to_target <= effective_arrival_distance + APPROACH_ARRIVAL_DEADBAND_M {
                     return ControllerUpdate::new(ControllerStatus::Completed)
                         .with_effect(ApproachTargetEffect::Stop)
                         .with_effect(ApproachTargetEffect::Finished(
@@ -146,9 +144,8 @@ impl Controller for ApproachTargetController {
                     remaining_distance: (distance_to_target - effective_arrival_distance).max(0.0),
                 };
 
-                ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                    ApproachTargetEffect::Pursue(plan),
-                )
+                ControllerUpdate::new(ControllerStatus::Active)
+                    .with_effect(ApproachTargetEffect::Pursue(plan))
             }
         }
     }

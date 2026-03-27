@@ -474,12 +474,8 @@ mod tests {
         assert!(result.needs_redraw);
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::ExecuteMovement(
-                holtburger_core::client::movement_types::MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::SnapFacing { .. },
-                    ..
-                }
+            Some(ClientCommand::EnqueueMovementInput(
+                holtburger_core::client::movement_types::MovementInput::SnapFacing { .. }
             ))
         ));
     }

@@ -39,11 +39,11 @@ Applications are free to use these controllers, ignore them, or layer their own 
 
 The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines low-level buffered inputs such as held and pulsed locomotion, snap-facing, and stop. [src/client/movement.rs](src/client/movement.rs) remains the sole executor that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
 
-The long-term public boundary is `MovementInput`, not `MovementRequest`:
+The public boundary is `MovementInput`:
 
 - `MovementInput` expresses low-level client intent such as hold-run, pulse-run, snap-facing, stop, and release.
 - `MovementSystem` ingests those inputs, merges them with active buffered state, and decides on tick whether a `MoveToState`, stop pulse, or `AutonomousPosition` sync is actually required.
-- `MovementRequest` remains only as a temporary compatibility shim during migration of older callers.
+- Any primitive-shaped request vocabulary remains movement-internal implementation detail rather than a public command contract.
 
 Movement packet metadata and motion-style fallback remain movement-internal concerns on the normal public path. Frontends submit intent; core derives packet-shaping details from world state unless a specialized override path is explicitly justified later.
 
@@ -52,7 +52,7 @@ Frontend adoption pattern today:
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
 3. Interpret its emitted effect vocabulary, such as `ApproachLocomotionPlan`, stop/finish effects, or combat-facing intents, in the frontend's own orchestration layer.
-4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementInput` values through `ClientCommand::EnqueueMovementInput`, while older compatibility callers may still use `MovementRequest` temporarily when they are expressing direct locomotion rather than navigation policy.
+4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementInput` values through `ClientCommand::EnqueueMovementInput`.
 
 The important ownership rule is that frontends submit intent, not packet cadence. Core decides when a drive or stop intent actually requires a server-visible `MoveToState` edge and when a stop pulse is still owed.
 

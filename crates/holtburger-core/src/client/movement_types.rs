@@ -45,13 +45,13 @@ impl MovementPacketMetadata {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MovementRequest {
-    pub primitive: MovementPrimitive,
-    pub metadata: MovementPacketMetadata,
+pub(crate) struct MovementRequest {
+    pub(crate) primitive: MovementPrimitive,
+    pub(crate) metadata: MovementPacketMetadata,
 }
 
 impl MovementRequest {
-    pub const fn new(primitive: MovementPrimitive) -> Self {
+    pub(crate) const fn new(primitive: MovementPrimitive) -> Self {
         Self {
             primitive,
             metadata: MovementPacketMetadata {
@@ -61,7 +61,7 @@ impl MovementRequest {
         }
     }
 
-    pub const fn with_metadata(self, metadata: MovementPacketMetadata) -> Self {
+    pub(crate) const fn with_metadata(self, metadata: MovementPacketMetadata) -> Self {
         Self { metadata, ..self }
     }
 }
@@ -101,19 +101,15 @@ pub enum MovementInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MovementPrimitive {
-    Drive {
-        heading: f32,
-        speed: f32,
-    },
-    SnapFacing {
-        heading: f32,
-    },
+pub(crate) enum MovementPrimitive {
+    Drive { heading: f32, speed: f32 },
+    SnapFacing { heading: f32 },
     Stop,
 }
 
 impl MovementPrimitive {
-    pub fn desired_velocity(&self) -> Option<Vector3> {
+    #[cfg(test)]
+    pub(crate) fn desired_velocity(&self) -> Option<Vector3> {
         match *self {
             Self::Drive { heading, speed } => Some(planar_velocity_for_heading(heading, speed)),
             Self::SnapFacing { .. } => Some(Vector3::zero()),

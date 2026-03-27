@@ -162,9 +162,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::EnqueueMovementInput(_) | ClientCommand::ExecuteMovement(_) => {
-                self.handle_movement_command(cmd).await
-            }
+            ClientCommand::EnqueueMovementInput(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -750,11 +748,6 @@ impl Client {
             ClientCommand::EnqueueMovementInput(input) => {
                 log::info!(">>> Queueing movement input: {:?}", input);
                 self.movement.enqueue_input(input, Instant::now());
-                Ok(())
-            }
-            ClientCommand::ExecuteMovement(request) => {
-                log::info!(">>> Queueing legacy movement primitive: {:?}", request.primitive);
-                self.movement.enqueue_legacy_request(request);
                 Ok(())
             }
             _ => unreachable!(),

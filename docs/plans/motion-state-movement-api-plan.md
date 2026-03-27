@@ -61,12 +61,12 @@ Consequence:
 - The likely rule is last-wins replacement for pending continuous motion commands, while preserving one-shot actions like `SnapFacing` and `Stop`.
 - This means the movement system should probably store one pending public movement command rather than preserving the old fragment queue semantics.
 
-#### Gap 3: `ApproachTargetController` Still Emits A Scalar Run-Rate Plan
-`ApproachLocomotionPlan` currently carries `heading`, `max_run_rate`, and `remaining_distance` in `crates/holtburger-core/src/client/controllers/approach_target.rs`.
+#### Gap 3: `ApproachTargetController` Originally Emitted A Scalar Run-Rate Plan
+At plan start, `ApproachLocomotionPlan` carried `heading`, `max_run_rate`, and `remaining_distance` in `crates/holtburger-core/src/client/controllers/approach_target.rs`.
 
 Consequence:
 - Even after the public API becomes `MotionState`-based, navigation will still be the layer that resolves controller output into `Walk` versus `Run` unless we also evolve the controller contract.
-- That is acceptable for the first pass, but the phase plan should not imply that the controller itself already speaks in resolved gait terms.
+- The follow-up cleanup should move controller outputs toward spatial pursuit intent and keep gait/pulse policy in navigation.
 
 #### Gap 4: The CLI Test Suite Asserts Fragment-Shaped Commands Directly
 At plan start, the CLI state tests matched exact `EnqueueMovementInput(MovementInput::Hold/Pulse/Stop/SnapFacing)` variants in `apps/holtburger-cli/src/pages/game/state.rs`.

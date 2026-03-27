@@ -4,7 +4,7 @@ use holtburger_core::client::controllers::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetInput, Controller,
     ControllerStatus,
 };
-use holtburger_core::client::movement_types::{DriveIntent, MovementPrimitive};
+use holtburger_core::client::movement_types::MovementPrimitive;
 
 fn position(x: f32) -> WorldPosition {
     WorldPosition {
@@ -30,10 +30,9 @@ fn external_consumers_can_drive_approach_target_controller() {
     assert_eq!(controller.arrival_distance(), 1.0);
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-            intent: DriveIntent { speed, .. },
-            ..
-        })] if (*speed - 4.0).abs() < f32::EPSILON
+        [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+            velocity,
+        })] if (velocity.length() - 16.0).abs() < f32::EPSILON
     ));
 
     let update = controller.handle(&ApproachTargetInput::Tick {
@@ -46,9 +45,8 @@ fn external_consumers_can_drive_approach_target_controller() {
 
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-            intent: DriveIntent { speed, .. },
-            ..
-        })] if (*speed - 3.55).abs() < 1e-6
+        [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+            velocity,
+        })] if (velocity.length() - 14.2).abs() < 1e-6
     ));
 }

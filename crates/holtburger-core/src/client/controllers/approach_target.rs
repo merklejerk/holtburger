@@ -5,13 +5,12 @@
 //! orchestration model.
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::movement_types::{
-    DriveIntent, MovementPrediction, MovementPrimitive, RUN_ANIM_SPEED,
-};
+use crate::client::movement_types::{MovementPrimitive, RUN_ANIM_SPEED};
 use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
 
+const APPROACH_ARRIVAL_DEADBAND_M: f32 = 0.01;
 const APPROACH_SLOWDOWN_HORIZON_SECS: f32 = 0.25;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -129,7 +128,9 @@ impl Controller for ApproachTargetController {
                     .arrival_distance
                     .max(target_use_radius.unwrap_or(0.0).max(0.0));
 
-                if distance_to_target <= effective_arrival_distance {
+                if distance_to_target
+                    <= effective_arrival_distance + APPROACH_ARRIVAL_DEADBAND_M
+                {
                     return ControllerUpdate::new(ControllerStatus::Completed)
                         .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
                         .with_effect(ApproachTargetEffect::Finished(
@@ -142,20 +143,21 @@ impl Controller for ApproachTargetController {
                     effective_arrival_distance,
                     move_speed,
                 );
+                let heading = player_position.heading_to(&target_position);
 
-                let prediction =
-                    Self::predicted_velocity_toward(player_position, target_position, capped_move_speed)
-                        .map(MovementPrediction::WorldVelocity)
-                        .unwrap_or(MovementPrediction::FromHeading);
+                let primitive = Self::predicted_velocity_toward(
+                    player_position,
+                    target_position,
+                    capped_move_speed,
+                )
+                .map(|velocity| MovementPrimitive::DriveVelocity { velocity })
+                .unwrap_or(MovementPrimitive::Drive {
+                    heading,
+                    speed: capped_move_speed,
+                });
 
                 ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                    ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                        intent: DriveIntent {
-                            heading: player_position.heading_to(&target_position),
-                            speed: capped_move_speed,
-                        },
-                        prediction,
-                    }),
+                    ApproachTargetEffect::Movement(primitive),
                 )
             }
         }
@@ -222,12 +224,8 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+                velocity: Vector3::new(18.0, 0.0, 0.0),
             })]
         );
     }
@@ -258,12 +256,8 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+                velocity: Vector3::new(18.0, 0.0, 0.0),
             })]
         );
     }
@@ -335,12 +329,8 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+                velocity: Vector3::new(18.0, 0.0, 0.0),
             })]
         );
     }
@@ -369,12 +359,8 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+                velocity: Vector3::new(18.0, 0.0, 0.0),
             })]
         );
     }
@@ -404,8 +390,8 @@ mod tests {
 
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                prediction: MovementPrediction::WorldVelocity(predicted_velocity),
+            [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+                velocity: predicted_velocity,
                 ..
             })] if predicted_velocity.z > 0.0
         ));
@@ -473,13 +459,36 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent { speed, .. },
-                prediction: MovementPrediction::WorldVelocity(predicted_velocity),
-            })] if (speed - 1.1).abs() <= 1e-6
+            [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
+                velocity: predicted_velocity,
+                ..
+            })] if (predicted_velocity.length() - 4.4).abs() <= 1e-6
                 && (predicted_velocity.x - 4.4).abs() <= 1e-6
                 && predicted_velocity.y.abs() <= 1e-6
                 && predicted_velocity.z.abs() <= 1e-6
         ));
+    }
+
+    #[test]
+    fn completes_within_arrival_deadband_to_avoid_micro_pulses() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(1.0);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
+            target_position: Some(position(1.005)),
+            target_use_radius: None,
+            move_speed: 4.5,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Completed);
+        assert_eq!(
+            update.effects,
+            vec![
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
+            ]
+        );
     }
 }

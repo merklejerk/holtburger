@@ -1296,11 +1296,28 @@ mod tests {
     fn drive_heading(update: &NavigationUpdate) -> Option<f32> {
         update.commands.iter().find_map(|command| match command {
             ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::Drive { intent, .. },
+                primitive: MovementPrimitive::Drive { heading, .. },
                 ..
-            }) => Some(intent.heading),
+            }) => Some(*heading),
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::DriveVelocity { velocity },
+                ..
+            }) if velocity.x * velocity.x + velocity.y * velocity.y > 1e-6 => {
+                Some(velocity.y.atan2(-velocity.x).rem_euclid(std::f32::consts::TAU))
+            }
             _ => None,
         })
+    }
+
+    fn is_drive_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::Drive { .. }
+                    | MovementPrimitive::DriveVelocity { .. },
+                ..
+            })
+        )
     }
 
     fn has_active_approach(automation: &NavigationAutomation) -> bool {
@@ -1338,18 +1355,12 @@ mod tests {
         assert!(matches!(
             first.commands.first(),
             Some(ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::SnapFacing { .. },
+                primitive: MovementPrimitive::DriveVelocity { .. },
                 ..
             }))
         ));
         assert!(first.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         }));
 
         let second = automation.start_approach_target(
@@ -1385,13 +1396,7 @@ mod tests {
         assert!(has_active_follow(&automation));
         assert!(!has_active_approach(&automation));
         assert!(first.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         }));
 
         let arrived = automation.reconcile_navigation(
@@ -1432,15 +1437,7 @@ mod tests {
 
         assert!(has_active_follow(&automation));
         assert!(!has_active_approach(&automation));
-        assert!(resumed.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(resumed.commands.iter().any(is_drive_command));
     }
 
     #[test]
@@ -1492,13 +1489,7 @@ mod tests {
             )
         });
         let drive_index = switched.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         });
 
         assert!(stop_index.is_some());
@@ -1548,13 +1539,7 @@ mod tests {
             )
         });
         let drive_index = switched.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         });
 
         assert!(matches!(
@@ -1614,13 +1599,7 @@ mod tests {
             )
         });
         let drive_index = switched.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         });
 
         assert!(matches!(
@@ -1729,13 +1708,7 @@ mod tests {
         );
 
         assert!(next.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         }));
         assert!(!next.commands.iter().any(|command| matches!(
             command,
@@ -1821,13 +1794,7 @@ mod tests {
         );
 
         assert!(resumed.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         }));
         assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
         assert!(automation.sticky_is_pursuing());
@@ -1879,13 +1846,7 @@ mod tests {
         );
 
         assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
+            is_drive_command(command)
         }));
         assert_eq!(automation.sticky_latched_target_guid(), Some(Guid(0x1234)));
         assert!(automation.sticky_is_pursuing());

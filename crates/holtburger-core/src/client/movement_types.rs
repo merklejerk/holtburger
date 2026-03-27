@@ -74,11 +74,11 @@ impl From<MovementPrimitive> for MovementRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MovementControl {
-    Run { heading: f32 },
-    Walk { heading: f32 },
-    Backstep { heading: f32 },
-    StrafeLeft { heading: f32 },
-    StrafeRight { heading: f32 },
+    Run,
+    Walk,
+    Backstep,
+    StrafeLeft,
+    StrafeRight,
     TurnLeft,
     TurnRight,
 }
@@ -102,20 +102,12 @@ pub enum MovementInput {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum MovementPrimitive {
-    Drive { heading: f32, speed: f32 },
+    Controls {
+        locomotion: Option<MovementControl>,
+        turning: Option<MovementControl>,
+    },
     SnapFacing { heading: f32 },
     Stop,
-}
-
-impl MovementPrimitive {
-    #[cfg(test)]
-    pub(crate) fn desired_velocity(&self) -> Option<Vector3> {
-        match *self {
-            Self::Drive { heading, speed } => Some(planar_velocity_for_heading(heading, speed)),
-            Self::SnapFacing { .. } => Some(Vector3::zero()),
-            Self::Stop => Some(Vector3::zero()),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -123,35 +115,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn drive_velocity_matches_ac_heading_convention() {
-        let west = MovementPrimitive::Drive {
-            heading: 0.0,
-            speed: 2.0,
-        };
-        let north = MovementPrimitive::Drive {
-            heading: 90.0f32.to_radians(),
-            speed: 2.0,
-        };
+    fn planar_velocity_matches_ac_heading_convention() {
+        let west_velocity = planar_velocity_for_heading(0.0, 2.0);
+        let north_velocity = planar_velocity_for_heading(90.0f32.to_radians(), 2.0);
 
-        assert_eq!(west.desired_velocity(), Some(Vector3::new(-8.0, 0.0, 0.0)));
-
-        let north_velocity = north.desired_velocity().unwrap();
+        assert_eq!(west_velocity, Vector3::new(-8.0, 0.0, 0.0));
         assert!(north_velocity.x.abs() < 1e-5);
         assert!((north_velocity.y - 8.0).abs() < 1e-5);
     }
 
     #[test]
-    fn stop_maps_to_zero_velocity() {
-        let primitive = MovementPrimitive::Stop;
+    fn movement_primitive_controls_can_hold_independent_turn_and_locomotion() {
+        let primitive = MovementPrimitive::Controls {
+            locomotion: Some(MovementControl::Run),
+            turning: Some(MovementControl::TurnLeft),
+        };
 
-        assert_eq!(primitive.desired_velocity(), Some(Vector3::zero()));
+        assert_eq!(
+            primitive,
+            MovementPrimitive::Controls {
+                locomotion: Some(MovementControl::Run),
+                turning: Some(MovementControl::TurnLeft),
+            }
+        );
     }
 
     #[test]
-    fn snap_facing_maps_to_zero_velocity() {
-        let primitive = MovementPrimitive::SnapFacing { heading: 1.0 };
-
-        assert_eq!(primitive.desired_velocity(), Some(Vector3::zero()));
+    fn stop_is_distinct_from_controls_primitive() {
+        assert_ne!(
+            MovementPrimitive::Stop,
+            MovementPrimitive::Controls {
+                locomotion: None,
+                turning: None,
+            }
+        );
     }
 
     #[test]

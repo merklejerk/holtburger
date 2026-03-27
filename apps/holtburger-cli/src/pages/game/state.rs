@@ -1264,7 +1264,7 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let max_run_speed = self
+        let max_run_rate = self
             .data
             .player_run_rate()
             .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
@@ -1278,7 +1278,7 @@ impl GameState {
                     sample,
                     use_radius: target_use_radius,
                 }),
-            max_run_speed,
+            max_run_rate,
         }
     }
 
@@ -1289,10 +1289,43 @@ impl GameState {
         now: Instant,
         result: &mut UpdateResult,
     ) {
-        let update = self
-            .runtime
-            .navigation
-            .reconcile_navigation(intent, self.navigation_sync_input(now, target_guid));
+        let input = self.navigation_sync_input(now, target_guid);
+        let authoritative_distance = input
+            .player_position
+            .zip(input.target.map(|target| target.sample.authoritative_pose))
+            .map(|(player, target)| player.distance_to(&target));
+        let projected_distance = input
+            .player_position
+            .zip(input.target.map(|target| target.sample.projected_pose))
+            .map(|(player, target)| player.distance_to(&target));
+
+        if !matches!(
+            intent,
+            NavigationIntent::StickyMelee {
+                target_guid: None,
+                combat_mode: CombatMode::NonCombat,
+                attack_sequence_active: false,
+            }
+        ) {
+            log::info!(
+                "tui navigation: syncing {:?} target={:?} player_present={} auth_distance={:?} projected_distance={:?} max_run_rate={:.2}",
+                intent,
+                target_guid.map(|guid| format!("0x{:08X}", guid.0)),
+                input.player_position.is_some(),
+                authoritative_distance,
+                projected_distance,
+                input.max_run_rate,
+            );
+        }
+
+        let update = self.runtime.navigation.reconcile_navigation(intent, input);
+        if !update.commands.is_empty() {
+            log::info!(
+                "tui navigation: emitted {} command(s): {:?}",
+                update.commands.len(),
+                update.commands,
+            );
+        }
         result.commands.extend(update.commands);
     }
 
@@ -1836,12 +1869,25 @@ mod tests {
         matches!(
             command,
             ClientCommand::EnqueueMovementInput(MovementInput::Hold {
-                control: MovementControl::Run { .. },
+                control: MovementControl::Run,
             }) | ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
-                control: MovementControl::Run { .. },
+                control: MovementControl::Run,
                 ..
             })
         )
+    }
+
+    fn is_turn_movement_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
+                control: MovementControl::TurnLeft | MovementControl::TurnRight,
+            })
+        )
+    }
+
+    fn is_navigation_movement_command(command: &ClientCommand) -> bool {
+        is_run_movement_command(command) || is_turn_movement_command(command)
     }
 
     fn is_stop_movement_command(command: &ClientCommand) -> bool {
@@ -1887,7 +1933,7 @@ mod tests {
                         },
                         use_radius: input.target_use_radius,
                     }),
-                max_run_speed: input.max_run_speed,
+                max_run_rate: input.max_run_rate,
             },
         );
     }
@@ -1909,7 +1955,7 @@ mod tests {
                         use_radius: input.target_use_radius,
                     }
                 }),
-                max_run_speed: input.max_run_speed,
+                max_run_rate: input.max_run_rate,
             },
         );
     }
@@ -2428,7 +2474,7 @@ mod tests {
                 player_position: Some(start_pos),
                 target_position: Some(target_pos),
                 target_use_radius: None,
-                max_run_speed: DEFAULT_APPROACH_RUN_RATE,
+                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3159,7 +3205,7 @@ mod tests {
                 player_position,
                 target: Some(target_sample),
                 target_use_radius: None,
-                max_run_speed: DEFAULT_APPROACH_RUN_RATE,
+                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3245,7 +3291,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(is_run_movement_command));
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
@@ -3360,7 +3406,7 @@ mod tests {
                 .x,
             6.0
         );
-        assert!(result.commands.iter().any(is_run_movement_command));
+        assert!(result.commands.iter().any(is_navigation_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3391,7 +3437,7 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        assert!(started.commands.iter().any(is_run_movement_command));
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3421,7 +3467,7 @@ mod tests {
             },
         });
 
-        assert!(slipped.commands.iter().any(is_run_movement_command));
+        assert!(slipped.commands.iter().any(is_navigation_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3498,7 +3544,7 @@ mod tests {
         let drive_index = result
             .commands
             .iter()
-            .position(|command| is_run_movement_command(command));
+            .position(|command| is_navigation_movement_command(command));
 
         assert!(matches!((stop_index, drive_index), (Some(stop), Some(drive)) if stop < drive));
         assert!(has_active_approach(&state));
@@ -3535,7 +3581,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(is_run_movement_command));
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
@@ -3649,7 +3695,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(is_run_movement_command));
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::EntityMoved {
@@ -3749,7 +3795,7 @@ mod tests {
                     projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
                 }),
                 target_use_radius: None,
-                max_run_speed: DEFAULT_APPROACH_RUN_RATE,
+                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3764,7 +3810,7 @@ mod tests {
 
         let slipped_again = state.handle_tick(0.016);
 
-        assert!(slipped_again.commands.iter().any(is_run_movement_command));
+        assert!(slipped_again.commands.iter().any(is_navigation_movement_command));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(sticky_is_pursuing(&state));
     }
@@ -3934,7 +3980,7 @@ mod tests {
         let mut first = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut first);
 
-        assert!(first.commands.iter().any(is_run_movement_command));
+        assert!(first.commands.iter().any(is_navigation_movement_command));
 
         let mut second = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut second);

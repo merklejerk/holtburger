@@ -51,8 +51,8 @@ Frontend adoption pattern today:
 
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
-3. Interpret its emitted primitive effects, such as `MovementPrimitive`, in the frontend's own orchestration layer.
-4. Execute those primitives through the frontend's preferred runtime path. Command-channel frontends submit `MovementInput` values through `ClientCommand::EnqueueMovementInput`, while older compatibility callers may still use `MovementRequest` temporarily.
+3. Interpret its emitted effect vocabulary, such as `ApproachLocomotionPlan`, stop/finish effects, or combat-facing intents, in the frontend's own orchestration layer.
+4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementInput` values through `ClientCommand::EnqueueMovementInput`, while older compatibility callers may still use `MovementRequest` temporarily when they are expressing direct locomotion rather than navigation policy.
 
 The important ownership rule is that frontends submit intent, not packet cadence. Core decides when a drive or stop intent actually requires a server-visible `MoveToState` edge and when a stop pulse is still owed.
 
@@ -116,7 +116,7 @@ The current ownership model is explicit:
 
 1. A frontend owns reusable controllers such as `ApproachTargetController` or `MaintainRangeController`.
 2. The frontend feeds those controllers with world-derived inputs on ticks and relevant events, including forced reposition.
-3. Navigation or frontend orchestration translates resulting movement decisions into raw `MovementInput` values.
+3. Navigation or frontend orchestration translates resulting pursuit plans and stop/facing decisions into raw `MovementInput` values.
 4. `MovementSystem` executes those inputs and continues to own local prediction plus server-authoritative movement handling.
 
 This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
@@ -168,7 +168,7 @@ sequenceDiagram
 We do not need a flag day refactor. The current movement behavior can evolve incrementally:
 
 1. **Document current controllers explicitly**
-    - Document how frontends own reusable controllers and submit emitted primitives for execution.
+    - Document how frontends own reusable controllers and submit emitted plans or direct intents for execution.
 2. **Separate primitive helpers from controller logic**
     - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
 3. **Isolate controller state**

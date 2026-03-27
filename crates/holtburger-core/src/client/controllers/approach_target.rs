@@ -1,11 +1,12 @@
 //! Reusable controller for approaching a target until an arrival distance is met.
 //!
 //! Frontends can own this controller directly, feed it world-derived inputs, and
-//! apply the resulting [`MovementPrimitive`] values using their preferred
+//! apply the resulting low-level pursuit plans using their preferred
 //! orchestration model.
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::movement_types::{MovementPrimitive, RUN_ANIM_SPEED};
+use crate::client::movement::SERVER_RUN_SPEED;
+use crate::client::movement_types::RUN_ANIM_SPEED;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
 
@@ -36,8 +37,16 @@ pub enum ApproachTargetFinishReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ApproachLocomotionPlan {
+    pub heading: f32,
+    pub max_speed: f32,
+    pub remaining_distance: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetEffect {
-    Movement(MovementPrimitive),
+    Pursue(ApproachLocomotionPlan),
+    Stop,
     Finished(ApproachTargetFinishReason),
 }
 
@@ -76,20 +85,20 @@ impl Controller for ApproachTargetController {
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
         match *input {
             ApproachTargetInput::Cancel => ControllerUpdate::new(ControllerStatus::Completed)
-                .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                .with_effect(ApproachTargetEffect::Stop)
                 .with_effect(ApproachTargetEffect::Finished(
                     ApproachTargetFinishReason::Cancelled,
                 )),
             ApproachTargetInput::ForcedReposition => {
                 ControllerUpdate::new(ControllerStatus::Completed)
-                    .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                    .with_effect(ApproachTargetEffect::Stop)
                     .with_effect(ApproachTargetEffect::Finished(
                         ApproachTargetFinishReason::ForcedReposition,
                     ))
             }
             ApproachTargetInput::TeleportStarted => {
                 ControllerUpdate::new(ControllerStatus::Completed)
-                    .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                    .with_effect(ApproachTargetEffect::Stop)
                     .with_effect(ApproachTargetEffect::Finished(
                         ApproachTargetFinishReason::TeleportStarted,
                     ))
@@ -103,7 +112,7 @@ impl Controller for ApproachTargetController {
             } => {
                 let Some(target_position) = target_position else {
                     return ControllerUpdate::new(ControllerStatus::Completed)
-                        .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                        .with_effect(ApproachTargetEffect::Stop)
                         .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::TargetUnavailable,
                         ));
@@ -118,7 +127,7 @@ impl Controller for ApproachTargetController {
                     <= effective_arrival_distance + APPROACH_ARRIVAL_DEADBAND_M
                 {
                     return ControllerUpdate::new(ControllerStatus::Completed)
-                        .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                        .with_effect(ApproachTargetEffect::Stop)
                         .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::Arrived,
                         ));
@@ -131,13 +140,14 @@ impl Controller for ApproachTargetController {
                 );
                 let heading = player_position.heading_to(&target_position);
 
-                let primitive = MovementPrimitive::Drive {
+                let plan = ApproachLocomotionPlan {
                     heading,
-                    speed: capped_move_speed,
+                    max_speed: capped_move_speed.min(SERVER_RUN_SPEED),
+                    remaining_distance: (distance_to_target - effective_arrival_distance).max(0.0),
                 };
 
                 ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                    ApproachTargetEffect::Movement(primitive),
+                    ApproachTargetEffect::Pursue(plan),
                 )
             }
         }
@@ -174,7 +184,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );
@@ -204,9 +214,10 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
                 heading: std::f32::consts::PI,
-                speed: 4.5,
+                max_speed: 4.5,
+                remaining_distance: 9.0,
             })]
         );
     }
@@ -237,9 +248,10 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
                 heading: std::f32::consts::PI,
-                speed: 4.5,
+                max_speed: 4.5,
+                remaining_distance: 191.0,
             })]
         );
     }
@@ -255,7 +267,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::ForcedReposition),
             ]
         );
@@ -272,7 +284,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::TeleportStarted),
             ]
         );
@@ -289,14 +301,14 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Cancelled),
             ]
         );
     }
 
     #[test]
-    fn first_tick_emits_drive_intent() {
+    fn first_tick_emits_pursuit_plan() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(1.0);
 
@@ -311,15 +323,16 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
                 heading: std::f32::consts::PI,
-                speed: 4.5,
+                max_speed: 4.5,
+                remaining_distance: 9.0,
             })]
         );
     }
 
     #[test]
-    fn steady_state_ticks_keep_emitting_drive_intent() {
+    fn steady_state_ticks_keep_emitting_pursuit_plan() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(1.0);
 
@@ -342,15 +355,16 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
                 heading: std::f32::consts::PI,
-                speed: 4.5,
+                max_speed: 4.5,
+                remaining_distance: 8.55,
             })]
         );
     }
 
     #[test]
-    fn drive_intent_includes_vertical_prediction_when_target_height_differs() {
+    fn pursuit_plan_includes_vertical_prediction_when_target_height_differs() {
         let now = Instant::now();
         let player_position = WorldPosition {
             landblock_id: Guid(0x01000000),
@@ -374,10 +388,11 @@ mod tests {
 
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            [ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
                 heading,
-                speed,
-            })] if (*heading - 90.0_f32.to_radians()).abs() <= 1e-6 && (*speed - 4.5).abs() <= 1e-6
+                max_speed,
+                ..
+            })] if (*heading - 90.0_f32.to_radians()).abs() <= 1e-6 && (*max_speed - 4.5).abs() <= 1e-6
         ));
     }
 
@@ -398,7 +413,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::TargetUnavailable),
             ]
         );
@@ -421,7 +436,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );
@@ -443,10 +458,14 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            [ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
                 heading,
-                speed,
-            })] if (*heading - std::f32::consts::PI).abs() <= 1e-6 && (*speed - 1.1).abs() <= 1e-6
+                max_speed,
+                remaining_distance,
+            })]
+                if (*heading - std::f32::consts::PI).abs() <= 1e-6
+                    && (*max_speed - 1.1).abs() <= 1e-6
+                    && (*remaining_distance - 1.1).abs() <= 1e-6
         ));
     }
 
@@ -467,7 +486,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );

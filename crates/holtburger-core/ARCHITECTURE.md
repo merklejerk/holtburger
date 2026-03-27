@@ -23,7 +23,7 @@ We use a 3-layer event model to separate protocol fidelity from UI ergonomics, s
    - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
 
 #### Interaction
-- **ClientCommand**: Commands sent from the UI to the engine (e.g., `EnqueueMovementInput`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
+- **ClientCommand**: Commands sent from the UI to the engine (e.g., `DriveMovement`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
 - **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from Wire -> State -> View.
 
 ### Command and Controller Boundary
@@ -31,19 +31,20 @@ We use a 3-layer event model to separate protocol fidelity from UI ergonomics, s
 The core crate exposes two layers of client-facing behavior:
 
 1. **Primitives**: low-level commands and systems that directly map to protocol or authoritative local-state responsibilities.
-    - Examples: `EnqueueMovementInput`, snap-facing, buffered locomotion state, movement prediction, position sync, and handling server-controlled movement.
+    - Examples: `DriveMovement(MovementCommand::...)`, snap-facing, resolved motion-state execution, movement prediction, position sync, and handling server-controlled movement.
 2. **Controllers**: optional, reusable higher-level behaviors built on top of those primitives.
     - Examples: approach a target until an arrival distance, maintain combat range, desired-attack maintenance, combat-facing assistance, or sticky-melee steering.
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
-The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines low-level buffered inputs such as held and pulsed locomotion, snap-facing, and stop. [src/client/movement.rs](src/client/movement.rs) remains the sole executor that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
+The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines resolved movement commands built around `MotionState`, plus one-shot `SnapFacing` and `Stop`. [src/client/movement.rs](src/client/movement.rs) remains the sole executor that owns local prediction, packet-edge synthesis, and direct server-facing movement behavior.
 
-The public boundary is `MovementInput`:
+The public boundary is `MovementCommand`:
 
-- `MovementInput` expresses low-level client intent such as hold-run, pulse-run, snap-facing, stop, and release.
-- `MovementSystem` ingests those inputs, merges them with active buffered state, and decides on tick whether a `MoveToState`, stop pulse, or `AutonomousPosition` sync is actually required.
-- Any primitive-shaped request vocabulary remains movement-internal implementation detail rather than a public command contract.
+- `MovementCommand::SetMotion` expresses one continuous resolved locomotion and turning state.
+- `MovementCommand::PulseMotion` expresses a resolved state with an explicit expiry.
+- `MovementCommand::SnapFacing` and `MovementCommand::Stop` remain one-shot primitives.
+- `MovementSystem` ingests those commands, coalesces them at the physics boundary, and decides on tick whether a `MoveToState`, stop pulse, or `AutonomousPosition` sync is actually required.
 
 Movement packet metadata and motion-style fallback remain movement-internal concerns on the normal public path. Frontends submit intent; core derives packet-shaping details from world state unless a specialized override path is explicitly justified later.
 
@@ -52,7 +53,7 @@ Frontend adoption pattern today:
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
 3. Interpret its emitted effect vocabulary, such as `ApproachLocomotionPlan`, stop/finish effects, or combat-facing intents, in the frontend's own orchestration layer.
-4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementInput` values through `ClientCommand::EnqueueMovementInput`.
+4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementCommand` values through `ClientCommand::DriveMovement`.
 
 The important ownership rule is that frontends submit intent, not packet cadence. Core decides when a drive or stop intent actually requires a server-visible `MoveToState` edge and when a stop pulse is still owed.
 
@@ -82,9 +83,9 @@ It intentionally does not standardize a scheduler, claim system, universal reaso
 Manages the multi-stage handshake with GLS (Global Login Service) and the World server. Handles ticket exchange and character selection.
 
 #### Movement ([src/client/movement.rs](src/client/movement.rs))
-The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests buffered movement inputs, calculates client-side prediction, and pushes reliable synchronization with the server's authoritative position.
+The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, calculates client-side prediction, and pushes reliable synchronization with the server's authoritative position.
 
-Today, this module owns buffered input expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-controlled movement reconciliation. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into raw `MovementInput` commands before crossing into the movement executor.
+Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-controlled movement reconciliation. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
 
 Combat automation now follows the same pattern from [src/client/controllers/combat.rs](src/client/controllers/combat.rs): frontends own a controller, feed it world-derived snapshots, and translate emitted facing or targeted-attack intents into their preferred execution path. Sticky melee range maintenance now does the same through [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), which owns the repeat latch and pursuit reissue cadence while leaving activation policy in the frontend.
 
@@ -99,9 +100,9 @@ Movement in `holtburger-core` should converge on three distinct layers:
     - Cache server-authored motion-style state needed to build correct outbound movement packets.
     - Decide when locomotion intent actually implies a new server-visible movement edge or clear.
 2. **Primitive client actions**
-    - Set heading through a one-shot snap-facing input when a frontend wants an immediate observer-visible reorientation.
-    - Start, pulse, release, or stop locomotion through buffered `MovementInput` state.
-    - Keep turning control separate from locomotion state where that is useful for a frontend.
+    - Set heading through a one-shot snap-facing command when a frontend wants an immediate observer-visible reorientation.
+    - Start, pulse, or stop locomotion through resolved `MovementCommand` values backed by one `MotionState`.
+    - Express turning and locomotion together in one coherent actuator state while still allowing turn-only motion.
 3. **Optional reusable controllers**
     - Approach target until arrival distance.
     - Follow or maintain range.
@@ -116,8 +117,8 @@ The current ownership model is explicit:
 
 1. A frontend owns reusable controllers such as `ApproachTargetController` or `MaintainRangeController`.
 2. The frontend feeds those controllers with world-derived inputs on ticks and relevant events, including forced reposition.
-3. Navigation or frontend orchestration translates resulting pursuit plans and stop/facing decisions into raw `MovementInput` values.
-4. `MovementSystem` executes those inputs and continues to own local prediction plus server-authoritative movement handling.
+3. Navigation or frontend orchestration translates resulting pursuit plans and stop/facing decisions into resolved `MovementCommand` values.
+4. `MovementSystem` executes those commands and continues to own local prediction plus server-authoritative movement handling.
 
 This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
 

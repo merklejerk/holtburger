@@ -3,8 +3,11 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
+use holtburger_core::client::movement_types::MovementCommand;
 #[cfg(test)]
-use holtburger_core::client::movement_types::{MovementControl, MovementInput};
+use holtburger_core::client::movement_types::{
+    Locomotion, MotionState, Turn,
+};
 use holtburger_core::client::navigation::{
     NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
     ResolvedNavigationTarget,
@@ -1198,9 +1201,11 @@ impl GameState {
             CombatAutomationEffect::TurnTo { heading } => {
                 self.data.combat_runtime.queue_attack();
                 result.needs_redraw = true;
-                result.commands.push(ClientCommand::EnqueueMovementInput(
-                    holtburger_core::client::movement_types::MovementInput::SnapFacing { heading },
-                ));
+                result
+                    .commands
+                    .push(ClientCommand::DriveMovement(MovementCommand::SnapFacing {
+                        heading,
+                    }));
             }
             CombatAutomationEffect::Attack(request) => {
                 self.data.combat_runtime.queue_attack();
@@ -1868,10 +1873,16 @@ mod tests {
     fn is_run_movement_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
-                control: MovementControl::Run,
-            }) | ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
-                control: MovementControl::Run,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
+                    ..
+                },
+            }) | ClientCommand::DriveMovement(MovementCommand::PulseMotion {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
+                    ..
+                },
                 ..
             })
         )
@@ -1880,8 +1891,12 @@ mod tests {
     fn is_turn_movement_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
-                control: MovementControl::TurnLeft | MovementControl::TurnRight,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: None,
+                    turning: Some(Turn::Left | Turn::Right),
+                    ..
+                },
             })
         )
     }
@@ -1891,17 +1906,11 @@ mod tests {
     }
 
     fn is_stop_movement_command(command: &ClientCommand) -> bool {
-        matches!(
-            command,
-            ClientCommand::EnqueueMovementInput(MovementInput::Stop)
-        )
+        matches!(command, ClientCommand::DriveMovement(MovementCommand::Stop))
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
-        matches!(
-            command,
-            ClientCommand::EnqueueMovementInput(MovementInput::SnapFacing { .. })
-        )
+        matches!(command, ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. }))
     }
 
     fn seed_active_approach(

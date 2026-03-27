@@ -2,6 +2,7 @@ mod commands;
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
+use holtburger_core::client::movement_types::MovementCommand;
 use holtburger_core::ClientCommand;
 use holtburger_protocol::messages::combat::CombatMode;
 
@@ -215,8 +216,8 @@ impl GameState {
                     let mut new_heading = current_heading + delta;
                     let two_pi = 2.0 * std::f32::consts::PI;
                     new_heading = (new_heading % two_pi + two_pi) % two_pi;
-                    result.commands.push(ClientCommand::EnqueueMovementInput(
-                        holtburger_core::client::movement_types::MovementInput::SnapFacing {
+                    result.commands.push(ClientCommand::DriveMovement(
+                        MovementCommand::SnapFacing {
                             heading: new_heading,
                         },
                     ));
@@ -474,9 +475,7 @@ mod tests {
         assert!(result.needs_redraw);
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::EnqueueMovementInput(
-                holtburger_core::client::movement_types::MovementInput::SnapFacing { .. }
-            ))
+            Some(ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. }))
         ));
     }
 

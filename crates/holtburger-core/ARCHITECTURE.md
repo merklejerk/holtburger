@@ -52,7 +52,7 @@ Frontend adoption pattern today:
 
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
-3. Interpret its emitted effect vocabulary, such as `ApproachLocomotionPlan`, stop/finish effects, or combat-facing intents, in the frontend's own orchestration layer.
+3. Interpret its emitted effect vocabulary, such as approach pursuit intent, stop/finish effects, or combat-facing intents, in the frontend's own orchestration layer.
 4. Execute those effects through the frontend's preferred runtime path. Command-channel frontends submit `MovementCommand` values through `ClientCommand::DriveMovement`.
 
 The important ownership rule is that frontends submit intent, not packet cadence. Core decides when a drive or stop intent actually requires a server-visible `MoveToState` edge and when a stop pulse is still owed.

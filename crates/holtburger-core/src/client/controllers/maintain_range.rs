@@ -47,7 +47,7 @@ pub enum MaintainRangeFinishReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MaintainRangeEffect {
-    StartApproach { arrival_distance: f32 },
+    PursueTarget { arrival_distance: f32 },
     Stop,
     Finished(MaintainRangeFinishReason),
 }
@@ -172,7 +172,7 @@ impl Controller for MaintainRangeController {
                     self.pursuing = true;
                     self.last_reissue_at = Some(now);
                     return ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                        MaintainRangeEffect::StartApproach {
+                        MaintainRangeEffect::PursueTarget {
                             arrival_distance: effective_arrival_distance,
                         },
                     );
@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::StartApproach {
+            vec![MaintainRangeEffect::PursueTarget {
                 arrival_distance: 0.6
             }]
         );
@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::StartApproach {
+            vec![MaintainRangeEffect::PursueTarget {
                 arrival_distance: 0.6
             }]
         );
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::StartApproach {
+            vec![MaintainRangeEffect::PursueTarget {
                 arrival_distance: 0.6
             }]
         );
@@ -456,7 +456,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::StartApproach {
+            vec![MaintainRangeEffect::PursueTarget {
                 arrival_distance: 0.6
             }]
         );
@@ -505,7 +505,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::StartApproach {
+            vec![MaintainRangeEffect::PursueTarget {
                 arrival_distance: 0.6
             }]
         );

@@ -1,7 +1,7 @@
 use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::client::controllers::{
-    ApproachLocomotionPlan, ApproachTargetController, ApproachTargetEffect, ApproachTargetInput,
+    ApproachTargetController, ApproachTargetEffect, ApproachTargetInput, ApproachTargetIntent,
     Controller, ControllerStatus,
 };
 
@@ -22,19 +22,16 @@ fn external_consumers_can_drive_approach_target_controller() {
         player_position: position(0.0),
         target_position: Some(position(5.0)),
         target_use_radius: None,
-        max_run_rate: 4.5,
     });
 
     assert_eq!(update.status, ControllerStatus::Active);
     assert_eq!(controller.arrival_distance(), 1.0);
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+        [ApproachTargetEffect::Pursue(ApproachTargetIntent {
             heading,
-            max_run_rate,
             remaining_distance,
         })] if (*heading - std::f32::consts::PI).abs() < f32::EPSILON
-            && (*max_run_rate - 4.0).abs() < f32::EPSILON
             && (*remaining_distance - 4.0).abs() < f32::EPSILON
     ));
 
@@ -43,18 +40,15 @@ fn external_consumers_can_drive_approach_target_controller() {
         player_position: position(0.45),
         target_position: Some(position(5.0)),
         target_use_radius: None,
-        max_run_rate: 4.5,
     });
 
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+        [ApproachTargetEffect::Pursue(ApproachTargetIntent {
             heading,
-            max_run_rate,
             remaining_distance,
         })]
             if (*heading - std::f32::consts::PI).abs() < 1e-6
-                && (*max_run_rate - 3.55).abs() < 1e-6
                 && (*remaining_distance - 3.55).abs() < 1e-6
     ));
 }

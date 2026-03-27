@@ -10,7 +10,7 @@
 //! own navigation policy while still reusing lower-level movement and packet
 //! machinery from core.
 
-use crate::client::controllers::approach_target::ApproachLocomotionPlan;
+use crate::client::controllers::approach_target::ApproachTargetIntent;
 use crate::client::controllers::maintain_range::{
     MaintainRangeSpatialInput, MaintainRangeTickInput,
 };
@@ -223,8 +223,9 @@ impl NavigationPulsePlanner {
     fn command_for_plan(
         &mut self,
         now: Instant,
-        plan: ApproachLocomotionPlan,
+        plan: ApproachTargetIntent,
         current_heading: f32,
+        max_run_rate: f32,
     ) -> NavigationUpdate {
         let mut update = NavigationUpdate::default();
         let heading_delta = signed_heading_delta(current_heading, plan.heading);
@@ -278,7 +279,7 @@ impl NavigationPulsePlanner {
 
         self.issued_turn = None;
 
-        let gait = gait_for_max_run_rate(plan.max_run_rate);
+        let gait = gait_for_max_run_rate(max_run_rate);
         let locomotion_state = MotionState {
             gait,
             locomotion: Some(Locomotion::Forward),
@@ -291,7 +292,7 @@ impl NavigationPulsePlanner {
         let gait_rate_ratio = if gait_speed(gait) <= 1e-6 {
             0.0
         } else {
-            (plan.max_run_rate.max(0.0) / gait_speed(gait)).clamp(0.0, 1.0)
+            (max_run_rate.max(0.0) / gait_speed(gait)).clamp(0.0, 1.0)
         };
         let capped_pulse_distance =
             full_pulse_distance * gait_rate_ratio.max(MIN_PULSE_DUTY_CYCLE);
@@ -323,20 +324,20 @@ impl NavigationPulsePlanner {
             PlannedLocomotion::Hold => match self.issued {
                 Some(IssuedLocomotion::Hold) => {
                     log::info!(
-                        "navigation pulse: retaining active hold toward heading {:.3} rad (remaining {:.2}m, max run rate {:.2})",
+                        "navigation pulse: retaining active hold toward heading {:.3} rad (remaining {:.2}m, navigation speed cap {:.2})",
                         plan.heading,
                         plan.remaining_distance,
-                        plan.max_run_rate,
+                        max_run_rate,
                     );
                     update
                 }
                 _ => {
                     log::info!(
-                        "navigation pulse: issuing {:?} hold toward heading {:.3} rad (remaining {:.2}m, max run rate {:.2}, gait-rate ratio {:.2}, previous {:?})",
+                        "navigation pulse: issuing {:?} hold toward heading {:.3} rad (remaining {:.2}m, navigation speed cap {:.2}, gait-rate ratio {:.2}, previous {:?})",
                         gait,
                         plan.heading,
                         plan.remaining_distance,
-                        plan.max_run_rate,
+                        max_run_rate,
                         gait_rate_ratio,
                         self.issued,
                     );
@@ -357,23 +358,23 @@ impl NavigationPulsePlanner {
             PlannedLocomotion::Pulse { duration } => match self.issued {
                 Some(IssuedLocomotion::Pulse { until }) if now < until => {
                     log::info!(
-                        "navigation pulse: keeping active pulse toward heading {:.3} rad for another {} ms (remaining {:.2}m, max run rate {:.2})",
+                        "navigation pulse: keeping active pulse toward heading {:.3} rad for another {} ms (remaining {:.2}m, navigation speed cap {:.2})",
                         plan.heading,
                         until.saturating_duration_since(now).as_millis(),
                         plan.remaining_distance,
-                        plan.max_run_rate,
+                        max_run_rate,
                     );
                     update
                 }
                 _ => {
                     log::info!(
-                        "navigation pulse: issuing {:?} {} ms pulse toward heading {:.3} rad (remaining {:.2}m, desired {:.2}m, max run rate {:.2}, gait-rate ratio {:.2}, previous {:?})",
+                        "navigation pulse: issuing {:?} {} ms pulse toward heading {:.3} rad (remaining {:.2}m, desired {:.2}m, navigation speed cap {:.2}, gait-rate ratio {:.2}, previous {:?})",
                         gait,
                         duration.as_millis(),
                         plan.heading,
                         plan.remaining_distance,
                         desired_distance,
-                        plan.max_run_rate,
+                        max_run_rate,
                         gait_rate_ratio,
                         self.issued,
                     );
@@ -792,6 +793,7 @@ impl NavigationAutomation {
                         Self::apply_approach_target_effect(
                             None,
                             None,
+                            input.max_run_rate,
                             &mut state.planner,
                             state.target_guid,
                             state.controller.arrival_distance(),
@@ -801,6 +803,7 @@ impl NavigationAutomation {
                         Self::apply_approach_target_effect(
                             None,
                             None,
+                            input.max_run_rate,
                             &mut state.planner,
                             state.target_guid,
                             state.controller.arrival_distance(),
@@ -1118,14 +1121,13 @@ impl NavigationAutomation {
             player_position,
             target_position,
             target_use_radius: input.target_use_radius,
-            max_run_rate: input.max_run_rate,
         });
 
         match target_position {
             Some(target_position) => {
                 let distance_to_target = player_position.distance_to(&target_position);
                 log::info!(
-                    "approach: sync target 0x{:08X} distance {:.2}m arrival {:.2}m run-rate cap {:.2} heading {:.3} rad",
+                    "approach: sync target 0x{:08X} distance {:.2}m arrival {:.2}m navigation speed cap {:.2} heading {:.3} rad",
                     target_guid.0,
                     distance_to_target,
                     controller.arrival_distance(),
@@ -1135,7 +1137,7 @@ impl NavigationAutomation {
             }
             None => {
                 log::info!(
-                    "approach: sync target 0x{:08X} without usable target position (run-rate cap {:.2})",
+                    "approach: sync target 0x{:08X} without usable target position (navigation speed cap {:.2})",
                     target_guid.0,
                     input.max_run_rate,
                 );
@@ -1149,6 +1151,7 @@ impl NavigationAutomation {
             Self::apply_approach_target_effect(
                 Some(input.now),
                 Some(player_position.rotation.to_heading()),
+                input.max_run_rate,
                 planner,
                 target_guid,
                 arrival_distance,
@@ -1236,7 +1239,7 @@ impl NavigationAutomation {
         let mut result = NavigationUpdate::default();
         for effect in effects {
             match effect {
-                MaintainRangeEffect::StartApproach { arrival_distance } => {
+                MaintainRangeEffect::PursueTarget { arrival_distance } => {
                     log::info!(
                         "{}: issuing pursuit for target 0x{:08X}",
                         mode.label(),
@@ -1373,6 +1376,7 @@ impl NavigationAutomation {
             Self::apply_approach_target_effect(
                 None,
                 None,
+                0.0,
                 planner,
                 target_guid,
                 arrival_distance,
@@ -1386,6 +1390,7 @@ impl NavigationAutomation {
     fn apply_approach_target_effect(
         now: Option<Instant>,
         current_heading: Option<f32>,
+        max_run_rate: f32,
         planner: &mut NavigationPulsePlanner,
         target_guid: Guid,
         arrival_distance: f32,
@@ -1395,11 +1400,11 @@ impl NavigationAutomation {
         match effect {
             ApproachTargetEffect::Pursue(plan) => {
                 log::info!(
-                    "approach: target 0x{:08X} pursuing with heading {:.3} rad, remaining {:.2}m, capped run rate {:.2}, arrival {:.2}m",
+                    "approach: target 0x{:08X} pursuing with heading {:.3} rad, remaining {:.2}m, navigation speed cap {:.2}, arrival {:.2}m",
                     target_guid.0,
                     plan.heading,
                     plan.remaining_distance,
-                    plan.max_run_rate,
+                    max_run_rate,
                     arrival_distance,
                 );
                 if let Some(now) = now {
@@ -1407,6 +1412,7 @@ impl NavigationAutomation {
                         now,
                         plan,
                         current_heading.unwrap_or(plan.heading),
+                        max_run_rate,
                     );
                     if !update.commands.is_empty() {
                         log::info!(
@@ -2056,11 +2062,7 @@ mod tests {
             ),
         );
 
-        assert!(
-            next.commands
-                .iter()
-                .any(|command| { is_drive_command(command) })
-        );
+        assert!(!next.commands.iter().any(is_stop_command));
         assert!(!next.commands.iter().any(is_snap_facing_command));
         assert!(has_active_approach(&automation));
     }

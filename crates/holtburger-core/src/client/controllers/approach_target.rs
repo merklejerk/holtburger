@@ -5,13 +5,10 @@
 //! orchestration model.
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::movement::SERVER_RUN_SPEED;
-use crate::client::movement_types::RUN_ANIM_SPEED;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
 
 const APPROACH_ARRIVAL_DEADBAND_M: f32 = 0.2;
-const APPROACH_SLOWDOWN_HORIZON_SECS: f32 = 0.25;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetInput {
@@ -20,7 +17,6 @@ pub enum ApproachTargetInput {
         player_position: WorldPosition,
         target_position: Option<WorldPosition>,
         target_use_radius: Option<f32>,
-        max_run_rate: f32,
     },
     Cancel,
     ForcedReposition,
@@ -37,15 +33,14 @@ pub enum ApproachTargetFinishReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ApproachLocomotionPlan {
+pub struct ApproachTargetIntent {
     pub heading: f32,
-    pub max_run_rate: f32,
     pub remaining_distance: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetEffect {
-    Pursue(ApproachLocomotionPlan),
+    Pursue(ApproachTargetIntent),
     Stop,
     Finished(ApproachTargetFinishReason),
 }
@@ -62,19 +57,6 @@ impl ApproachTargetController {
 
     pub fn arrival_distance(&self) -> f32 {
         self.arrival_distance
-    }
-
-    fn capped_move_speed(
-        distance_to_target: f32,
-        effective_arrival_distance: f32,
-        max_run_rate: f32,
-    ) -> f32 {
-        let requested_run_rate = max_run_rate.max(0.0);
-        let remaining_distance = (distance_to_target - effective_arrival_distance).max(0.0);
-        let max_run_rate_for_remaining_distance =
-            remaining_distance / (RUN_ANIM_SPEED * APPROACH_SLOWDOWN_HORIZON_SECS);
-
-        requested_run_rate.min(max_run_rate_for_remaining_distance.max(0.0))
     }
 }
 
@@ -108,7 +90,6 @@ impl Controller for ApproachTargetController {
                 player_position,
                 target_position,
                 target_use_radius,
-                max_run_rate,
             } => {
                 let Some(target_position) = target_position else {
                     return ControllerUpdate::new(ControllerStatus::Completed)
@@ -131,16 +112,10 @@ impl Controller for ApproachTargetController {
                         ));
                 }
 
-                let capped_move_speed = Self::capped_move_speed(
-                    distance_to_target,
-                    effective_arrival_distance,
-                    max_run_rate,
-                );
                 let heading = player_position.heading_to(&target_position);
 
-                let plan = ApproachLocomotionPlan {
+                let plan = ApproachTargetIntent {
                     heading,
-                    max_run_rate: capped_move_speed.min(SERVER_RUN_SPEED),
                     remaining_distance: (distance_to_target - effective_arrival_distance).max(0.0),
                 };
 
@@ -174,7 +149,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(0.5)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -197,7 +171,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
@@ -205,15 +178,13 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
                 heading: std::f32::consts::PI,
-                max_run_rate: 4.5,
                 remaining_distance: 9.0,
             })]
         );
@@ -239,15 +210,13 @@ mod tests {
             player_position,
             target_position: Some(target_position),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
                 heading: std::f32::consts::PI,
-                max_run_rate: 4.5,
                 remaining_distance: 191.0,
             })]
         );
@@ -314,15 +283,13 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
                 heading: std::f32::consts::PI,
-                max_run_rate: 4.5,
                 remaining_distance: 9.0,
             })]
         );
@@ -338,7 +305,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
@@ -346,15 +312,13 @@ mod tests {
             player_position: position(0.45),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
                 heading: std::f32::consts::PI,
-                max_run_rate: 4.5,
                 remaining_distance: 8.55,
             })]
         );
@@ -380,16 +344,14 @@ mod tests {
             player_position,
             target_position: Some(target_position),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+            [ApproachTargetEffect::Pursue(ApproachTargetIntent {
                 heading,
-                max_run_rate,
                 ..
-            })] if (*heading - 90.0_f32.to_radians()).abs() <= 1e-6 && (*max_run_rate - 4.5).abs() <= 1e-6
+            })] if (*heading - 90.0_f32.to_radians()).abs() <= 1e-6
         ));
     }
 
@@ -403,7 +365,6 @@ mod tests {
             player_position: position(0.0),
             target_position: None,
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -426,7 +387,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(2.5)),
             target_use_radius: Some(3.0),
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -449,19 +409,16 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(1.6)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Pursue(ApproachLocomotionPlan {
+            [ApproachTargetEffect::Pursue(ApproachTargetIntent {
                 heading,
-                max_run_rate,
                 remaining_distance,
             })]
                 if (*heading - std::f32::consts::PI).abs() <= 1e-6
-                    && (*max_run_rate - 1.1).abs() <= 1e-6
                     && (*remaining_distance - 1.1).abs() <= 1e-6
         ));
     }
@@ -476,7 +433,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(1.18)),
             target_use_radius: None,
-            max_run_rate: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);

@@ -25,7 +25,7 @@ const TURN_LEFT_MOTION_COMMAND: u32 = 0x6500_000e;
 const SIDESTEP_RIGHT_MOTION_COMMAND: u32 = 0x6500_000f;
 const SIDESTEP_LEFT_MOTION_COMMAND: u32 = 0x6500_0010;
 const RUN_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.5;
-const WALK_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.0;
+const NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.0;
 
 fn calculate_arrival_position(
     source: &WorldPosition,
@@ -97,7 +97,7 @@ fn turn_speed_for_controls(
 ) -> Option<f32> {
     turning.map(|_| match current_hold_key_for_controls(locomotion, turning) {
         HoldKey::Run => RUN_HELD_TURN_SPEED_RAD_PER_SEC,
-        HoldKey::Invalid | HoldKey::None => WALK_HELD_TURN_SPEED_RAD_PER_SEC,
+        HoldKey::Invalid | HoldKey::None => NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     })
 }
 

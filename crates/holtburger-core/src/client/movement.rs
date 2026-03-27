@@ -1,7 +1,7 @@
 use crate::client::WireEvent;
 use crate::client::movement_types::{
-    MotionStyle, MovementPacketMetadata, MovementPrimitive, MovementRequest,
-    RUN_ANIM_SPEED, planar_velocity_for_heading,
+    MotionStyle, MovementControl, MovementInput, MovementPacketMetadata,
+    MovementPrimitive, MovementRequest, RUN_ANIM_SPEED, planar_velocity_for_heading,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -16,8 +16,8 @@ use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
-const SERVER_RUN_SPEED: f32 = 4.5;
-const SERVER_PULSE_PERIOD: Duration = Duration::from_millis(200);
+pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
+pub(crate) const SERVER_PULSE_PERIOD: Duration = Duration::from_millis(200);
 const MIN_SERVER_RUN_DUTY_CYCLE: f32 = 0.15;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
@@ -258,10 +258,43 @@ impl MovementSequenceDiagnostics {
 
 pub(super) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
+    queued_inputs: Vec<QueuedMovementCommand>,
+    pending_snap_facing: Option<PendingSnapFacing>,
+    active_public_locomotion: Option<ActiveBufferedControl>,
+    active_public_turn: Option<ActiveBufferedControl>,
+    active_legacy_request: Option<MovementRequest>,
     local_motion: Option<LocalMotionIntent>,
     server_motion_active: bool,
     last_server_drive_intent: Option<ServerDriveIntent>,
     server_pulse_cycle_started_at: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ActiveBufferedControl {
+    control: MovementControl,
+    until: Option<Instant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PendingSnapFacing {
+    heading: f32,
+    metadata: MovementPacketMetadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum QueuedMovementCommand {
+    Public {
+        input: MovementInput,
+        metadata: MovementPacketMetadata,
+    },
+    Legacy(MovementRequest),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MovementKinematics {
+    pub run_speed_mps: f32,
+    pub walk_speed_mps: f32,
+    pub turn_rate_rad_per_sec: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -292,18 +325,6 @@ fn server_drive_intent(
     }
 }
 
-fn drive_intent_from_velocity(velocity: Vector3) -> Option<(f32, f32)> {
-    let planar_speed = velocity.x.hypot(velocity.y);
-    if planar_speed <= 1e-6 {
-        return None;
-    }
-
-    Some((
-        normalize_heading(velocity.y.atan2(-velocity.x)),
-        planar_speed / RUN_ANIM_SPEED,
-    ))
-}
-
 fn local_ground_motion_from_server_drive(
     server_drive: Option<(f32, f32)>,
     should_run_server_drive: bool,
@@ -326,11 +347,207 @@ impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
+            queued_inputs: Vec::new(),
+            pending_snap_facing: None,
+            active_public_locomotion: None,
+            active_public_turn: None,
+            active_legacy_request: None,
             local_motion: None,
             server_motion_active: false,
             last_server_drive_intent: None,
             server_pulse_cycle_started_at: None,
         }
+    }
+
+    pub fn kinematics(&self) -> MovementKinematics {
+        MovementKinematics {
+            run_speed_mps: RUN_ANIM_SPEED * SERVER_RUN_SPEED,
+            walk_speed_mps: RUN_ANIM_SPEED,
+            turn_rate_rad_per_sec: LOCAL_TURN_RATE_RAD_PER_SEC,
+        }
+    }
+
+    pub fn estimate_duration_for_distance(
+        &self,
+        control: MovementControl,
+        distance_m: f32,
+    ) -> Duration {
+        let speed = self.control_speed_mps(control);
+        if speed <= 1e-6 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs_f32((distance_m.max(0.0) / speed).max(0.0))
+        }
+    }
+
+    pub fn estimate_displacement(&self, control: MovementControl, duration: Duration) -> f32 {
+        self.control_speed_mps(control) * duration.as_secs_f32().max(0.0)
+    }
+
+    pub(super) fn enqueue_input(&mut self, input: MovementInput, _now: Instant) {
+        self.queued_inputs.push(QueuedMovementCommand::Public {
+            input,
+            metadata: MovementPacketMetadata::default(),
+        });
+    }
+
+    pub(super) fn enqueue_legacy_request(&mut self, request: MovementRequest) {
+        self.queued_inputs.push(QueuedMovementCommand::Legacy(request));
+    }
+
+    fn control_speed_mps(&self, control: MovementControl) -> f32 {
+        match control {
+            MovementControl::Run { .. } => RUN_ANIM_SPEED * SERVER_RUN_SPEED,
+            MovementControl::Walk { .. } => RUN_ANIM_SPEED,
+            MovementControl::Backstep { .. } => RUN_ANIM_SPEED,
+            MovementControl::StrafeLeft { .. } | MovementControl::StrafeRight { .. } => {
+                RUN_ANIM_SPEED
+            }
+            MovementControl::TurnLeft | MovementControl::TurnRight => 0.0,
+        }
+    }
+
+    fn ingest_public_input(
+        &mut self,
+        input: MovementInput,
+        metadata: MovementPacketMetadata,
+        now: Instant,
+    ) {
+        self.active_legacy_request = None;
+
+        match input {
+            MovementInput::Hold { control } => self.set_active_control(control, None),
+            MovementInput::Pulse { control, duration } => {
+                self.set_active_control(control, Some(now + duration))
+            }
+            MovementInput::SnapFacing { heading } => {
+                self.pending_snap_facing = Some(PendingSnapFacing { heading, metadata });
+            }
+            MovementInput::Stop => {
+                self.pending_snap_facing = None;
+                self.active_public_locomotion = None;
+                self.active_public_turn = None;
+            }
+            MovementInput::ReleaseLocomotion => {
+                self.active_public_locomotion = None;
+            }
+            MovementInput::ReleaseTurning => {
+                self.active_public_turn = None;
+            }
+        }
+    }
+
+    fn set_active_control(&mut self, control: MovementControl, until: Option<Instant>) {
+        let next = Some(ActiveBufferedControl { control, until });
+        match control {
+            MovementControl::Run { .. }
+            | MovementControl::Walk { .. }
+            | MovementControl::Backstep { .. }
+            | MovementControl::StrafeLeft { .. }
+            | MovementControl::StrafeRight { .. } => self.active_public_locomotion = next,
+            MovementControl::TurnLeft | MovementControl::TurnRight => self.active_public_turn = next,
+        }
+    }
+
+    fn expire_buffered_controls(&mut self, now: Instant) {
+        if self
+            .active_public_locomotion
+            .is_some_and(|active| active.until.is_some_and(|until| now >= until))
+        {
+            self.active_public_locomotion = None;
+        }
+
+        if self
+            .active_public_turn
+            .is_some_and(|active| active.until.is_some_and(|until| now >= until))
+        {
+            self.active_public_turn = None;
+        }
+    }
+
+    fn public_request_for_tick(&self) -> Option<MovementRequest> {
+        match self.active_public_locomotion.map(|active| active.control) {
+            Some(MovementControl::Run { heading }) => Some(MovementRequest::new(
+                MovementPrimitive::Drive {
+                    heading,
+                    speed: SERVER_RUN_SPEED,
+                },
+            )),
+            Some(MovementControl::Walk { heading })
+            | Some(MovementControl::Backstep { heading })
+            | Some(MovementControl::StrafeLeft { heading })
+            | Some(MovementControl::StrafeRight { heading }) => Some(MovementRequest::new(
+                MovementPrimitive::Drive {
+                    heading,
+                    speed: 1.0,
+                },
+            )),
+            Some(MovementControl::TurnLeft) | Some(MovementControl::TurnRight) => None,
+            None => None,
+        }
+    }
+
+    pub(super) async fn tick(
+        &mut self,
+        now: Instant,
+        world: &mut WorldState,
+        session: &mut Session,
+    ) -> Result<Vec<WorldEvent>> {
+        let queued = std::mem::take(&mut self.queued_inputs);
+        for command in queued {
+            match command {
+                QueuedMovementCommand::Public { input, metadata } => {
+                    self.ingest_public_input(input, metadata, now)
+                }
+                QueuedMovementCommand::Legacy(request) => {
+                    self.pending_snap_facing = None;
+                    self.active_public_locomotion = None;
+                    self.active_public_turn = None;
+                    self.active_legacy_request = Some(request);
+                }
+            }
+        }
+
+        self.expire_buffered_controls(now);
+
+        let mut events = Vec::new();
+        if let Some(snap) = self.pending_snap_facing.take() {
+            events.extend(
+                self.execute_movement_request_at(
+                    MovementRequest::new(MovementPrimitive::SnapFacing {
+                        heading: snap.heading,
+                    })
+                    .with_metadata(snap.metadata),
+                    world,
+                    session,
+                    now,
+                )
+                .await?,
+            );
+        }
+
+        let request = self.active_legacy_request.or_else(|| self.public_request_for_tick());
+
+        match request {
+            Some(request) => events.extend(
+                self.execute_movement_request_at(request, world, session, now)
+                    .await?,
+            ),
+            None if self.local_motion.is_some() || self.server_motion_active => {
+                events.extend(
+                    self.execute_movement_request_at(
+                        MovementRequest::new(MovementPrimitive::Stop),
+                        world,
+                        session,
+                        now,
+                    )
+                    .await?,
+                );
+            }
+            None => {}
+        }
+
+        Ok(events)
     }
 
     pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
@@ -420,6 +637,7 @@ impl MovementSystem {
             < SERVER_PULSE_PERIOD.mul_f32(duty_cycle)
     }
 
+    #[cfg(test)]
     pub(super) async fn execute_movement_request(
         &mut self,
         request: MovementRequest,
@@ -447,7 +665,6 @@ impl MovementSystem {
         let current_heading = world.player.position.rotation.to_heading();
         let server_drive = match primitive {
             MovementPrimitive::Drive { heading, speed } => Some((heading, speed)),
-            MovementPrimitive::DriveVelocity { velocity } => drive_intent_from_velocity(velocity),
             _ => None,
         };
         let should_run_server_drive = match server_drive {
@@ -547,7 +764,7 @@ impl MovementSystem {
         world: &mut WorldState,
     ) -> Vec<WorldEvent> {
         match primitive {
-            MovementPrimitive::Drive { .. } | MovementPrimitive::DriveVelocity { .. } => {
+            MovementPrimitive::Drive { .. } => {
                 self.local_motion =
                     local_ground_motion_from_server_drive(server_drive, should_run_server_drive);
                 self.sync_local_motion_vectors(world)
@@ -1184,8 +1401,9 @@ mod tests {
         ));
         let mut movement = MovementSystem::new();
         movement.apply_movement_primitive(
-            MovementPrimitive::DriveVelocity {
-                velocity: Vector3::new(0.0, 2.0, 3.0),
+            MovementPrimitive::Drive {
+                heading: 90.0_f32.to_radians(),
+                speed: 0.5,
             },
             Some((90.0_f32.to_radians(), 0.5)),
             true,
@@ -1208,7 +1426,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_drive_velocity_uses_discretized_planar_run_velocity() {
+    fn apply_drive_uses_discretized_planar_run_velocity() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
@@ -1225,8 +1443,9 @@ mod tests {
 
         let mut movement = MovementSystem::new();
         let events = movement.apply_movement_primitive(
-            MovementPrimitive::DriveVelocity {
-                velocity: Vector3::new(0.0, 2.0, 3.0),
+            MovementPrimitive::Drive {
+                heading: 90.0_f32.to_radians(),
+                speed: 0.5,
             },
             Some((90.0_f32.to_radians(), 0.5)),
             true,
@@ -1444,8 +1663,9 @@ mod tests {
 
         movement
             .execute_movement_request(
-                MovementRequest::new(MovementPrimitive::DriveVelocity {
-                    velocity: Vector3::new(0.0, 4.0, 0.0),
+                MovementRequest::new(MovementPrimitive::Drive {
+                    heading: 90.0_f32.to_radians(),
+                    speed: 1.0,
                 }),
                 &mut world,
                 &mut session,

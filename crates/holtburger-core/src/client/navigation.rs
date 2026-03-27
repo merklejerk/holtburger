@@ -18,7 +18,11 @@ use crate::client::controllers::{
     ApproachTargetInput, Controller, MaintainRangeConfig, MaintainRangeController,
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
-use crate::client::movement_types::{MovementPacketMetadata, MovementPrimitive, MovementRequest};
+use crate::client::movement::MovementSystem;
+use crate::client::movement::{SERVER_PULSE_PERIOD, SERVER_RUN_SPEED};
+use crate::client::movement_types::{
+    MovementControl, MovementInput, MovementPacketMetadata, MovementPrimitive,
+};
 use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
@@ -26,12 +30,16 @@ use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::combat::CombatMode;
 use std::time::{Duration, Instant};
 
+#[cfg(test)]
+use crate::client::movement_types::MovementRequest;
+
 const MELEE_ATTACK_DISTANCE: f32 = 0.6;
 const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
 const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 const FOLLOW_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
+const MIN_RUN_PULSE_DUTY_CYCLE: f32 = 0.15;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ApproachSyncInput {
@@ -493,32 +501,7 @@ impl NavigationAutomation {
             input.target_position,
         );
 
-        let mut result = self.sync_approach_target(input);
-
-        if let (Some(player_position), Some(target_position)) =
-            (input.player_position, input.target_position)
-            && result.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive: MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        {
-            result.commands.insert(
-                0,
-                Self::movement_command(
-                    MovementPrimitive::SnapFacing {
-                        heading: player_position.heading_to(&target_position),
-                    },
-                    input.metadata,
-                ),
-            );
-        }
-
-        result
+        self.sync_approach_target(input)
     }
 
     fn start_follow_target(
@@ -1078,33 +1061,7 @@ impl NavigationAutomation {
             input.target_position,
         );
 
-        let mut result =
-            Self::sync_pursuit_controller(pursuit, input, automation_target_distance_limit_m);
-
-        if let (Some(player_position), Some(target_position)) =
-            (input.player_position, input.target_position)
-            && result.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive: MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        {
-            result.commands.insert(
-                0,
-                Self::movement_command(
-                    MovementPrimitive::SnapFacing {
-                        heading: player_position.heading_to(&target_position),
-                    },
-                    input.metadata,
-                ),
-            );
-        }
-
-        result
+        Self::sync_pursuit_controller(pursuit, input, automation_target_distance_limit_m)
     }
 
     fn sync_pursuit_controller(
@@ -1186,9 +1143,40 @@ impl NavigationAutomation {
 
     fn movement_command(
         primitive: MovementPrimitive,
-        metadata: MovementPacketMetadata,
+        _metadata: MovementPacketMetadata,
     ) -> ClientCommand {
-        ClientCommand::ExecuteMovement(MovementRequest::new(primitive).with_metadata(metadata))
+        match primitive {
+            MovementPrimitive::Drive { heading, speed } => {
+                let duty_cycle = (speed.max(0.0) / SERVER_RUN_SPEED)
+                    .clamp(0.0, 1.0)
+                    .max(MIN_RUN_PULSE_DUTY_CYCLE);
+                if speed <= 1e-6 {
+                    ClientCommand::EnqueueMovementInput(MovementInput::Stop)
+                } else if duty_cycle >= 1.0 - 1e-6 {
+                    ClientCommand::EnqueueMovementInput(MovementInput::Hold {
+                        control: MovementControl::Run { heading },
+                    })
+                } else {
+                    let estimator = MovementSystem::new();
+                    let _kinematics = estimator.kinematics();
+                    let full_pulse_distance = estimator.estimate_displacement(
+                        MovementControl::Run { heading },
+                        SERVER_PULSE_PERIOD,
+                    );
+                    ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
+                        control: MovementControl::Run { heading },
+                        duration: estimator.estimate_duration_for_distance(
+                            MovementControl::Run { heading },
+                            full_pulse_distance * duty_cycle,
+                        ),
+                    })
+                }
+            }
+            MovementPrimitive::SnapFacing { heading } => {
+                ClientCommand::EnqueueMovementInput(MovementInput::SnapFacing { heading })
+            }
+            MovementPrimitive::Stop => ClientCommand::EnqueueMovementInput(MovementInput::Stop),
+        }
     }
 
     fn log_sticky_melee_finish(reason: MaintainRangeFinishReason) {
@@ -1295,16 +1283,17 @@ mod tests {
 
     fn drive_heading(update: &NavigationUpdate) -> Option<f32> {
         update.commands.iter().find_map(|command| match command {
+            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
+                control: MovementControl::Run { heading },
+            })
+            | ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
+                control: MovementControl::Run { heading },
+                ..
+            }) => Some(*heading),
             ClientCommand::ExecuteMovement(MovementRequest {
                 primitive: MovementPrimitive::Drive { heading, .. },
                 ..
             }) => Some(*heading),
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::DriveVelocity { velocity },
-                ..
-            }) if velocity.x * velocity.x + velocity.y * velocity.y > 1e-6 => {
-                Some(velocity.y.atan2(-velocity.x).rem_euclid(std::f32::consts::TAU))
-            }
             _ => None,
         })
     }
@@ -1312,11 +1301,39 @@ mod tests {
     fn is_drive_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::Drive { .. }
-                    | MovementPrimitive::DriveVelocity { .. },
-                ..
+            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
+                control: MovementControl::Run { .. },
             })
+                | ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
+                    control: MovementControl::Run { .. },
+                    ..
+                })
+                | ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Drive { .. },
+                    ..
+                })
+        )
+    }
+
+    fn is_stop_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::EnqueueMovementInput(MovementInput::Stop)
+                | ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Stop,
+                    ..
+                })
+        )
+    }
+
+    fn is_snap_facing_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::EnqueueMovementInput(MovementInput::SnapFacing { .. })
+                | ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::SnapFacing { .. },
+                    ..
+                })
         )
     }
 
@@ -1352,13 +1369,7 @@ mod tests {
             },
         );
 
-        assert!(matches!(
-            first.commands.first(),
-            Some(ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::DriveVelocity { .. },
-                ..
-            }))
-        ));
+        assert!(first.commands.first().is_some_and(is_drive_command));
         assert!(first.commands.iter().any(|command| {
             is_drive_command(command)
         }));
@@ -1412,15 +1423,7 @@ mod tests {
         );
 
         assert!(has_active_follow(&automation));
-        assert!(arrived.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(arrived.commands.iter().any(is_stop_command));
         assert!(!has_active_approach(&automation));
 
         let resumed = automation.reconcile_navigation(
@@ -1479,15 +1482,7 @@ mod tests {
             },
         );
 
-        let stop_index = switched.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        });
+        let stop_index = switched.commands.iter().position(is_stop_command);
         let drive_index = switched.commands.iter().position(|command| {
             is_drive_command(command)
         });
@@ -1529,15 +1524,7 @@ mod tests {
             },
         );
 
-        let stop_index = switched.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        });
+        let stop_index = switched.commands.iter().position(is_stop_command);
         let drive_index = switched.commands.iter().position(|command| {
             is_drive_command(command)
         });
@@ -1589,15 +1576,7 @@ mod tests {
             },
         );
 
-        let stop_index = switched.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        });
+        let stop_index = switched.commands.iter().position(is_stop_command);
         let drive_index = switched.commands.iter().position(|command| {
             is_drive_command(command)
         });
@@ -1710,13 +1689,7 @@ mod tests {
         assert!(next.commands.iter().any(|command| {
             is_drive_command(command)
         }));
-        assert!(!next.commands.iter().any(|command| matches!(
-            command,
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::SnapFacing { .. },
-                ..
-            })
-        )));
+        assert!(!next.commands.iter().any(is_snap_facing_command));
         assert!(has_active_approach(&automation));
     }
 
@@ -1735,15 +1708,7 @@ mod tests {
         let result = automation
             .cancel_active_approach_due_to_forced_reposition(MovementPacketMetadata::default());
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_command));
         assert!(!has_active_approach(&automation));
     }
 
@@ -1768,15 +1733,7 @@ mod tests {
 
         let paused = automation.handle_forced_reposition(MovementPacketMetadata::default());
 
-        assert!(paused.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(paused.commands.iter().any(is_stop_command));
         assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
         assert!(!automation.sticky_is_pursuing());
 
@@ -1817,15 +1774,7 @@ mod tests {
 
         let cleared = automation.handle_teleport_start(MovementPacketMetadata::default());
 
-        assert!(cleared.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(cleared.commands.iter().any(is_stop_command));
         assert_eq!(automation.sticky_latched_target_guid(), None);
         assert!(!automation.sticky_is_pursuing());
         assert!(!has_active_approach(&automation));

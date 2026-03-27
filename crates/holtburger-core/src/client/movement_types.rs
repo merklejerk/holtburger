@@ -1,5 +1,6 @@
 use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
+use std::time::Duration;
 
 pub(crate) const RUN_ANIM_SPEED: f32 = 4.0;
 
@@ -72,13 +73,38 @@ impl From<MovementPrimitive> for MovementRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MovementControl {
+    Run { heading: f32 },
+    Walk { heading: f32 },
+    Backstep { heading: f32 },
+    StrafeLeft { heading: f32 },
+    StrafeRight { heading: f32 },
+    TurnLeft,
+    TurnRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MovementInput {
+    Hold {
+        control: MovementControl,
+    },
+    Pulse {
+        control: MovementControl,
+        duration: Duration,
+    },
+    SnapFacing {
+        heading: f32,
+    },
+    Stop,
+    ReleaseLocomotion,
+    ReleaseTurning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MovementPrimitive {
     Drive {
         heading: f32,
         speed: f32,
-    },
-    DriveVelocity {
-        velocity: Vector3,
     },
     SnapFacing {
         heading: f32,
@@ -90,7 +116,6 @@ impl MovementPrimitive {
     pub fn desired_velocity(&self) -> Option<Vector3> {
         match *self {
             Self::Drive { heading, speed } => Some(planar_velocity_for_heading(heading, speed)),
-            Self::DriveVelocity { velocity, .. } => Some(velocity),
             Self::SnapFacing { .. } => Some(Vector3::zero()),
             Self::Stop => Some(Vector3::zero()),
         }
@@ -154,14 +179,9 @@ mod tests {
     }
 
     #[test]
-    fn drive_velocity_prefers_predicted_velocity_override() {
-        let primitive = MovementPrimitive::DriveVelocity {
-            velocity: Vector3::new(1.0, 2.0, 3.0),
-        };
+    fn movement_input_snap_facing_is_one_shot() {
+        let input = MovementInput::SnapFacing { heading: 1.0 };
 
-        assert_eq!(
-            primitive.desired_velocity(),
-            Some(Vector3::new(1.0, 2.0, 3.0))
-        );
+        assert_eq!(input, MovementInput::SnapFacing { heading: 1.0 });
     }
 }

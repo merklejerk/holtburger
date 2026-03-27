@@ -6,7 +6,6 @@
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
 use crate::client::movement_types::{MovementPrimitive, RUN_ANIM_SPEED};
-use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
 
@@ -67,19 +66,6 @@ impl ApproachTargetController {
             remaining_distance / (RUN_ANIM_SPEED * APPROACH_SLOWDOWN_HORIZON_SECS);
 
         requested_speed.min(max_speed_for_remaining_distance.max(0.0))
-    }
-
-    fn predicted_velocity_toward(
-        player_position: WorldPosition,
-        target_position: WorldPosition,
-        move_speed: f32,
-    ) -> Option<Vector3> {
-        let delta = target_position.global_coords() - player_position.global_coords();
-        if delta.length_squared() <= 1e-6 {
-            return None;
-        }
-
-        Some(delta.normalize() * (move_speed.max(0.0) * RUN_ANIM_SPEED))
     }
 }
 
@@ -145,16 +131,10 @@ impl Controller for ApproachTargetController {
                 );
                 let heading = player_position.heading_to(&target_position);
 
-                let primitive = Self::predicted_velocity_toward(
-                    player_position,
-                    target_position,
-                    capped_move_speed,
-                )
-                .map(|velocity| MovementPrimitive::DriveVelocity { velocity })
-                .unwrap_or(MovementPrimitive::Drive {
+                let primitive = MovementPrimitive::Drive {
                     heading,
                     speed: capped_move_speed,
-                });
+                };
 
                 ControllerUpdate::new(ControllerStatus::Active).with_effect(
                     ApproachTargetEffect::Movement(primitive),
@@ -224,8 +204,9 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-                velocity: Vector3::new(18.0, 0.0, 0.0),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                heading: std::f32::consts::PI,
+                speed: 4.5,
             })]
         );
     }
@@ -256,8 +237,9 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-                velocity: Vector3::new(18.0, 0.0, 0.0),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                heading: std::f32::consts::PI,
+                speed: 4.5,
             })]
         );
     }
@@ -329,8 +311,9 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-                velocity: Vector3::new(18.0, 0.0, 0.0),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                heading: std::f32::consts::PI,
+                speed: 4.5,
             })]
         );
     }
@@ -359,8 +342,9 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-                velocity: Vector3::new(18.0, 0.0, 0.0),
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                heading: std::f32::consts::PI,
+                speed: 4.5,
             })]
         );
     }
@@ -390,10 +374,10 @@ mod tests {
 
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-                velocity: predicted_velocity,
-                ..
-            })] if predicted_velocity.z > 0.0
+            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                heading,
+                speed,
+            })] if (*heading - 90.0_f32.to_radians()).abs() <= 1e-6 && (*speed - 4.5).abs() <= 1e-6
         ));
     }
 
@@ -459,13 +443,10 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-                velocity: predicted_velocity,
-                ..
-            })] if (predicted_velocity.length() - 4.4).abs() <= 1e-6
-                && (predicted_velocity.x - 4.4).abs() <= 1e-6
-                && predicted_velocity.y.abs() <= 1e-6
-                && predicted_velocity.z.abs() <= 1e-6
+            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                heading,
+                speed,
+            })] if (*heading - std::f32::consts::PI).abs() <= 1e-6 && (*speed - 1.1).abs() <= 1e-6
         ));
     }
 

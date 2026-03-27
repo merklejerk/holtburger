@@ -30,9 +30,11 @@ fn external_consumers_can_drive_approach_target_controller() {
     assert_eq!(controller.arrival_distance(), 1.0);
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-            velocity,
-        })] if (velocity.length() - 16.0).abs() < f32::EPSILON
+        [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            heading,
+            speed,
+        })] if (*heading - std::f32::consts::PI).abs() < f32::EPSILON
+            && (*speed - 4.0).abs() < f32::EPSILON
     ));
 
     let update = controller.handle(&ApproachTargetInput::Tick {
@@ -45,8 +47,9 @@ fn external_consumers_can_drive_approach_target_controller() {
 
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Movement(MovementPrimitive::DriveVelocity {
-            velocity,
-        })] if (velocity.length() - 14.2).abs() < 1e-6
+        [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            heading,
+            speed,
+        })] if (*heading - std::f32::consts::PI).abs() < 1e-6 && (*speed - 3.55).abs() < 1e-6
     ));
 }

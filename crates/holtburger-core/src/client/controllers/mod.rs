@@ -3,8 +3,8 @@ pub mod combat;
 pub mod maintain_range;
 
 pub use approach_target::{
-    ApproachTargetController, ApproachTargetEffect, ApproachTargetIntent,
-    ApproachTargetFinishReason, ApproachTargetInput,
+    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
+    ApproachTargetInput, ApproachTargetIntent,
 };
 pub use combat::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput,

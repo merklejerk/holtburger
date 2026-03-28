@@ -2,8 +2,8 @@ mod commands;
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
-use holtburger_core::client::movement_types::MovementCommand;
 use holtburger_core::ClientCommand;
+use holtburger_core::client::movement_types::MovementCommand;
 use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
@@ -475,7 +475,9 @@ mod tests {
         assert!(result.needs_redraw);
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. }))
+            Some(ClientCommand::DriveMovement(
+                MovementCommand::SnapFacing { .. }
+            ))
         ));
     }
 

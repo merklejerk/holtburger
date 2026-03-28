@@ -17,12 +17,14 @@ impl WorldState {
         outcome: EntityPositionSyncOutcome,
         events: &mut Vec<WorldEvent>,
     ) {
-        self.scene.update_entity(guid, old_lb, pos.landblock_id);
-
         match outcome {
             EntityPositionSyncOutcome::Rejected => {}
-            EntityPositionSyncOutcome::Moved => events.push(WorldEvent::EntityMoved { guid, pos }),
+            EntityPositionSyncOutcome::Moved => {
+                self.scene.update_entity(guid, old_lb, pos.landblock_id);
+                events.push(WorldEvent::EntityMoved { guid, pos })
+            }
             EntityPositionSyncOutcome::Reset { sequence } => {
+                self.scene.update_entity(guid, old_lb, pos.landblock_id);
                 events.push(WorldEvent::ForcedReposition {
                     guid,
                     pos,

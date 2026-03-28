@@ -12,6 +12,7 @@ mod commands;
 pub mod controllers;
 mod messages;
 mod movement;
+mod simulation;
 pub mod movement_types;
 pub mod navigation;
 pub mod projection;
@@ -19,6 +20,7 @@ pub mod types;
 use auth::AuthState;
 pub use builder::ClientBuilder;
 use movement::MovementSystem;
+use simulation::ClientSimulationSystem;
 use types::*;
 
 /// Physics tick interval in milliseconds.
@@ -45,6 +47,7 @@ pub struct Client {
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
     movement: MovementSystem,
+    simulation: ClientSimulationSystem,
     auth: AuthState,
     turbine_chat: TurbineChatState,
 }
@@ -362,6 +365,47 @@ impl Client {
     }
 
     pub fn handle_world_event(&self, event: &WorldEvent) {
+        self.emit_world_view_projection(event);
+    }
+
+    fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
+        const EPSILON: f32 = 1e-6;
+
+        match event {
+            WorldEvent::EntitySpawned(entity)
+            | WorldEvent::EntityReplaced(entity)
+            | WorldEvent::EntityIdentified(entity) => {
+                if entity.guid != self.world.player.guid
+                    && (entity.velocity.length_squared() > EPSILON
+                        || entity.omega.length_squared() > EPSILON)
+                {
+                    self.simulation.track_actor(entity.guid);
+                }
+            }
+            WorldEvent::EntityVectorUpdated {
+                guid,
+                velocity,
+                omega,
+            } => {
+                if *guid == self.world.player.guid {
+                    return;
+                }
+
+                if velocity.length_squared() > EPSILON || omega.length_squared() > EPSILON {
+                    self.simulation.track_actor(*guid);
+                } else {
+                    self.simulation.untrack_actor(*guid);
+                }
+            }
+            WorldEvent::EntityDespawned(guid) => {
+                self.simulation.untrack_actor(*guid);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
+        self.observe_runtime_world_event(event);
         self.emit_world_view_projection(event);
     }
 
@@ -738,6 +782,7 @@ impl Client {
                 _ = physics_tick.tick() => {
                     let now = Instant::now();
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
+                    let dt_duration = Duration::from_secs_f32(dt.max(0.0));
                     last_physics_time = now;
 
                     let movement_events = self
@@ -745,20 +790,24 @@ impl Client {
                         .tick(now, &mut self.world, &mut self.session)
                         .await?;
                     for event in movement_events {
-                        self.handle_world_event(&event);
+                        self.handle_runtime_world_event(&event);
                     }
 
                     let physics_events = self.world.tick();
                     for event in physics_events {
-                        self.handle_world_event(&event);
+                        self.handle_runtime_world_event(&event);
                     }
 
-                    let predicted_events = self
-                        .movement
-                        .advance_local_motion_prediction(dt, &mut self.world);
-                    for event in predicted_events {
-                        self.handle_world_event(&event);
+                    let simulation_events = self.simulation.tick(
+                        now,
+                        dt_duration,
+                        &mut self.world,
+                        &mut self.movement,
+                    );
+                    for event in simulation_events {
+                        self.handle_runtime_world_event(&event);
                     }
+
                 }
             }
         }
@@ -770,7 +819,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::{Guid, Vector3};
+    use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
 
@@ -928,5 +977,284 @@ mod tests {
         }
 
         assert!(saw_kinematics);
+    }
+
+    #[test]
+    fn simulation_build_request_returns_none_without_local_intent() {
+        let client = builder::build_test_client(ClientState::InWorld);
+
+        let request = client.simulation.build_solve_request(
+            Instant::now(),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &client.world,
+            &client.movement,
+        );
+
+        assert!(request.is_none());
+    }
+
+    #[tokio::test]
+    async fn simulation_build_request_reads_player_state_after_movement_tick() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let now = Instant::now();
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.player.position.rotation = Quaternion::identity();
+        client.world.entities.insert(Entity::new(
+            guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+
+        client.movement.enqueue_command(
+            movement_types::MovementCommand::SetMotion {
+                state: movement_types::MotionState::builder().run().forward().build(),
+            },
+            now,
+        );
+
+        let _ = client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .expect("movement tick should succeed");
+
+        let request = client
+            .simulation
+            .build_solve_request(now, Duration::from_millis(PHYSICS_TICK_MS), &client.world, &client.movement)
+            .expect("movement-backed local intent should produce a solve request");
+
+        let entity = client
+            .world
+            .entities
+            .get(guid)
+            .expect("player entity should exist after movement tick");
+
+        assert_eq!(request.actors.len(), 1);
+        let actor = request.actors[0];
+        assert_eq!(actor.actor_id, guid);
+        assert_eq!(actor.pose, client.world.player.position);
+        assert_eq!(actor.velocity, entity.velocity);
+        assert_eq!(actor.omega, entity.omega);
+    }
+
+    #[tokio::test]
+    async fn simulation_build_request_includes_tracked_nearby_actor() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_0304);
+        let remote_guid = Guid(0x0102_0305);
+        let now = Instant::now();
+
+        client.world.player.guid = player_guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.player.position.rotation = Quaternion::identity();
+        client.world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+        client.world.add_entity(Entity::new(
+            remote_guid,
+            "Remote".to_string(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: holtburger_common::Vector3::new(8.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        ));
+        let remote = client
+            .world
+            .entities
+            .get_mut(remote_guid)
+            .expect("tracked remote entity should exist");
+        remote.velocity = holtburger_common::Vector3::new(1.0, 0.0, 0.0);
+
+        client.simulation.track_actor(remote_guid);
+        client.movement.enqueue_command(
+            movement_types::MovementCommand::SetMotion {
+                state: movement_types::MotionState::builder().run().forward().build(),
+            },
+            now,
+        );
+
+        let _ = client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .expect("movement tick should succeed");
+
+        let request = client
+            .simulation
+            .build_solve_request(now, Duration::from_millis(PHYSICS_TICK_MS), &client.world, &client.movement)
+            .expect("tracked nearby actor should join the solve set");
+
+        assert_eq!(request.actors.len(), 2);
+        assert!(request.actors.iter().any(|actor| actor.actor_id == player_guid));
+        assert!(request.actors.iter().any(|actor| actor.actor_id == remote_guid));
+    }
+
+    #[tokio::test]
+    async fn simulation_tick_advances_local_player_motion_authoritatively() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let now = Instant::now();
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.player.position.rotation = Quaternion::identity();
+        client.world.entities.insert(Entity::new(
+            guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+
+        client.movement.enqueue_command(
+            movement_types::MovementCommand::SetMotion {
+                state: movement_types::MotionState::builder().run().forward().build(),
+            },
+            now,
+        );
+
+        let _ = client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .expect("movement tick should succeed");
+
+        let events = client.simulation.tick(
+            now,
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+        );
+
+        assert_eq!(client.world.player.position.landblock_id, Guid(0x1000_0001));
+        assert!(client.world.player.position.coords.y > 0.0);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == guid
+        )));
+    }
+
+    #[tokio::test]
+    async fn simulation_tick_advances_tracked_actor_alongside_local_player() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_0304);
+        let remote_guid = Guid(0x0102_0305);
+        let now = Instant::now();
+
+        client.world.player.guid = player_guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.player.position.rotation = Quaternion::identity();
+        client.world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+        client.world.add_entity(Entity::new(
+            remote_guid,
+            "Remote".to_string(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: holtburger_common::Vector3::new(8.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        ));
+        let remote_start = client
+            .world
+            .entities
+            .get(remote_guid)
+            .expect("tracked remote entity should exist before solve")
+            .position
+            .coords;
+        let remote = client
+            .world
+            .entities
+            .get_mut(remote_guid)
+            .expect("tracked remote entity should exist");
+        remote.velocity = holtburger_common::Vector3::new(2.0, 0.0, 0.0);
+
+        client.simulation.track_actor(remote_guid);
+        client.movement.enqueue_command(
+            movement_types::MovementCommand::SetMotion {
+                state: movement_types::MotionState::builder().run().forward().build(),
+            },
+            now,
+        );
+
+        let _ = client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .expect("movement tick should succeed");
+
+        let events = client.simulation.tick(
+            now,
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &mut client.world,
+            &mut client.movement,
+        );
+
+        let remote_after = client
+            .world
+            .entities
+            .get(remote_guid)
+            .expect("tracked remote entity should still exist after solve");
+        assert!(client.world.player.position.coords.y > 0.0);
+        assert!(remote_after.position.coords.x > remote_start.x);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == player_guid
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == remote_guid
+        )));
+    }
+
+    #[test]
+    fn runtime_world_event_tracking_registers_remote_movers() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_0304);
+        let remote_guid = Guid(0x0102_0305);
+
+        client.world.player.guid = player_guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+        client.world.add_entity(Entity::new(
+            remote_guid,
+            "Remote".to_string(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: holtburger_common::Vector3::new(12.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        ));
+
+        client.observe_runtime_world_event(&WorldEvent::EntityVectorUpdated {
+            guid: remote_guid,
+            velocity: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
+            omega: holtburger_common::Vector3::zero(),
+        });
+
+        let request = client.simulation.build_solve_request(
+            Instant::now(),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &client.world,
+            &client.movement,
+        );
+
+        assert!(request.is_some());
+        assert!(request
+            .expect("tracked remote mover should produce a solve request")
+            .actors
+            .iter()
+            .any(|actor| actor.actor_id == remote_guid));
     }
 }

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use crate::WorldEvent;
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
-use crate::spatial::SpatialScene;
+use crate::spatial::{BasicSpatialPhysics, SpatialPhysics, SpatialScene};
 use crate::spell::{SpellCatalog, SpellInfo};
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
@@ -179,6 +179,13 @@ impl WorldState {
     }
 
     pub fn new(resources: Arc<ScopedResourceResolver>) -> Result<Self> {
+        Self::new_with_spatial_physics(resources, Arc::new(BasicSpatialPhysics))
+    }
+
+    pub fn new_with_spatial_physics(
+        resources: Arc<ScopedResourceResolver>,
+        spatial_physics: Arc<dyn SpatialPhysics>,
+    ) -> Result<Self> {
         let skill_table_data = resources
             .get_file_for::<SkillTable>()
             .context("missing required skill table from mounted resources")?;
@@ -205,7 +212,7 @@ impl WorldState {
             xp_table,
             skill_table: Arc::new(skill_table),
             spell_catalog: Arc::new(spell_table.into()),
-            scene: SpatialScene::new(),
+            scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
             trade: None,
@@ -216,6 +223,11 @@ impl WorldState {
 
     #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic() -> Self {
+        Self::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics))
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn synthetic_with_spatial_physics(spatial_physics: Arc<dyn SpatialPhysics>) -> Self {
         Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
@@ -224,7 +236,7 @@ impl WorldState {
             xp_table: XpTable::default(),
             skill_table: Arc::new(SkillTable::default()),
             spell_catalog: Arc::new(SpellCatalog::default()),
-            scene: SpatialScene::new(),
+            scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
             trade: None,
@@ -260,10 +272,10 @@ impl WorldState {
 
     pub fn add_entity(&mut self, entity: Entity) {
         let guid = entity.guid;
-        let lb = entity.position.landblock_id;
+        let pos = entity.position;
 
         self.entities.insert(entity);
-        self.scene.update_entity(guid, lb, lb);
+        self.scene.update_entity(guid, pos.landblock_id, pos);
     }
 
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {

@@ -8,6 +8,7 @@ use crossterm::{
 use directories::ProjectDirs;
 use holtburger_cli::pages;
 use holtburger_cli::pages::selection::SelectionState;
+use holtburger_cli::spatial::TuiSpatialPhysics;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
@@ -17,6 +18,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -330,6 +332,7 @@ async fn bootstrap_once(
     let mut client = ClientBuilder::new(args.account.clone())
         .server(host.to_string(), port)
         .dats_path(dats_path.to_path_buf())
+        .spatial_physics(Arc::new(TuiSpatialPhysics::default()))
         .connect()
         .await?;
 

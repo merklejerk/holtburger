@@ -228,6 +228,7 @@
 - [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
 - [ ] Asset pipeline.
 - [ ] isn't it strange that `get_run_rate` lives in cli?
+- [ ] Rename `Client` -> `ClientRuntime`
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

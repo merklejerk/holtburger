@@ -1,9 +1,10 @@
-use crate::client::WireEvent;
+use super::simulation::LocalMotionIntent;
 use crate::client::movement_types::{
     Gait, Locomotion, MotionState, MotionStyle, MovementCommand, MovementPacketMetadata,
     RUN_ANIM_SPEED, Turn, planar_velocity_for_heading,
 };
 use anyhow::Result;
+#[cfg(test)]
 use holtburger_common::position::WorldPosition;
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Quaternion, Vector3};
@@ -11,11 +12,9 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::{WorldEvent, WorldState};
+use holtburger_world::{SolvedActorKinematics, WorldEvent, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
-/// Maximum distance (in meters) to allow an automated server-controlled teleport.
-const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
 pub(crate) const SERVER_PULSE_PERIOD: Duration = Duration::from_millis(200);
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
@@ -26,21 +25,6 @@ const SIDESTEP_RIGHT_MOTION_COMMAND: u32 = 0x6500_000f;
 const SIDESTEP_LEFT_MOTION_COMMAND: u32 = 0x6500_0010;
 const RUN_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.5;
 const NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC: f32 = 1.0;
-
-fn calculate_arrival_position(
-    source: &WorldPosition,
-    target_pos: &holtburger_common::Vector3,
-    distance: f32,
-) -> holtburger_common::Vector3 {
-    let to_player = source.coords - *target_pos;
-    if to_player.length_squared() > 1e-6 {
-        *target_pos + (to_player.normalize() * distance)
-    } else {
-        let mut fallback = *target_pos;
-        fallback.x += distance;
-        fallback
-    }
-}
 
 fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
     let mut delta = (desired_heading - current_heading) % TAU;
@@ -515,6 +499,27 @@ impl MovementSystem {
         Ok(events)
     }
 
+    pub(super) fn current_local_intent(&self, world: &WorldState) -> Option<LocalMotionIntent> {
+        if world.player.guid == Guid::NULL {
+            return None;
+        }
+
+        let locomotion = self.local_motion?;
+
+        Some(LocalMotionIntent {
+            actor_id: world.player.guid,
+            locomotion,
+        })
+    }
+
+    pub(super) fn handle_post_solve(
+        &mut self,
+        _world: &WorldState,
+        _solved: &SolvedActorKinematics,
+    ) -> Vec<WorldEvent> {
+        Vec::new()
+    }
+
     pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
         self.sequence_diagnostics
             .record_force_position_sequence(force_position_sequence);
@@ -686,52 +691,6 @@ impl MovementSystem {
         world.set_player_vector(velocity, omega)
     }
 
-    pub(super) fn advance_local_motion_prediction(
-        &mut self,
-        dt: f32,
-        world: &mut WorldState,
-    ) -> Vec<WorldEvent> {
-        let Some(state) = self.local_motion else {
-            return Vec::new();
-        };
-
-        let Some(_player_entity) = world.entities.get(world.player.guid) else {
-            return Vec::new();
-        };
-
-        let dt = dt.max(0.0);
-        if dt <= f32::EPSILON {
-            return Vec::new();
-        }
-
-        let current_heading = world.player.position.rotation.to_heading();
-        let turn_speed = turn_speed_for_state(state);
-        let turn_step = match state.turning {
-            Some(Turn::Right) => turn_speed * dt,
-            Some(Turn::Left) => -turn_speed * dt,
-            _ => 0.0,
-        };
-        let next_heading = normalize_heading(current_heading + turn_step);
-        let velocity = local_velocity_for_state(
-            next_heading,
-            MotionState {
-                gait: state.gait,
-                locomotion: state.locomotion,
-                turning: state.turning,
-                turn_speed: state.turn_speed,
-            },
-        );
-        let omega = local_omega_for_state(state);
-
-        let mut next_pos = world.player.position;
-        next_pos.rotation = Quaternion::from_heading(next_heading);
-        next_pos.coords = next_pos.coords + (velocity * dt);
-
-        let mut events = world.set_player_position(next_pos);
-        events.extend(world.set_player_vector(velocity, omega));
-        events
-    }
-
     pub(super) async fn send_autonomous_position_heartbeat(
         &mut self,
         world: &WorldState,
@@ -755,7 +714,7 @@ impl MovementSystem {
         Ok(true)
     }
 
-    async fn send_autonomous_position_sync(
+    pub(super) async fn send_autonomous_position_sync(
         world: &WorldState,
         session: &mut Session,
         metadata: MovementPacketMetadata,
@@ -837,116 +796,6 @@ impl MovementSystem {
             .send_action(GameAction::MoveToState(Box::new(data)))
             .await
     }
-
-    pub(super) async fn handle_server_controlled_movement(
-        &mut self,
-        data: MovementEventData,
-        world: &mut WorldState,
-        session: &mut Session,
-    ) -> Result<(Vec<WireEvent>, Vec<WorldEvent>)> {
-        let mut wire_events = Vec::new();
-        log::info!(
-            ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
-            data.movement_type,
-            data.server_control_sequence
-        );
-
-        let mut next_pos = world.player.position;
-
-        match &data.data {
-            MovementTypeData::MoveToObject(mto) => {
-                // We use the origin provided in the packet as the source of truth for the target's position.
-                // This is more reliable than our local entity tracking which might be uninitialized (e.g. landblock 0).
-                next_pos.landblock_id = mto.origin.cell_id;
-                next_pos.coords = mto.origin.position;
-
-                let arrival_dist = mto.params.distance_to_object;
-
-                // Calculate arrival on the line between the player and the target
-                if (world.player.position.landblock_id >> 16) == (next_pos.landblock_id >> 16) {
-                    next_pos.coords = calculate_arrival_position(
-                        &world.player.position,
-                        &next_pos.coords,
-                        arrival_dist,
-                    );
-
-                    // If desired_heading is 0.0, face the target
-                    if mto.params.desired_heading.abs() <= 1e-6 {
-                        next_pos.rotation = Quaternion::from_heading(
-                            next_pos.coords.heading_to(&mto.origin.position),
-                        );
-                    } else {
-                        next_pos.rotation = Quaternion::from_heading(mto.params.desired_heading);
-                    }
-                } else {
-                    // Different landblocks, fallback to simple offset
-                    next_pos.coords.x += arrival_dist;
-                }
-            }
-            MovementTypeData::MoveToPosition(mtp) => {
-                next_pos.landblock_id = mtp.origin.cell_id;
-                next_pos.coords = mtp.origin.position;
-
-                // If desired_heading is not zero, use it.
-                if mtp.params.desired_heading.abs() > 1e-6 {
-                    next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
-                } else {
-                    // Face the target position from our current position
-                    next_pos.rotation = Quaternion::from_heading(
-                        world.player.position.coords.heading_to(&next_pos.coords),
-                    );
-                }
-            }
-            MovementTypeData::TurnToHeading(tth) => {
-                next_pos.rotation = Quaternion::from_heading(tth.params.desired_heading);
-            }
-            MovementTypeData::TurnToObject(tto) => {
-                // If the turn has a heading, use it. Some TurnToObjects have 0.0 which means "compute it".
-                if tto.desired_heading.abs() > 1e-6 {
-                    next_pos.rotation = Quaternion::from_heading(tto.desired_heading);
-                } else if let Some(target) = world.get_visible_entity(tto.target) {
-                    // Try to compute heading to target (West = 0, North = 90, East = 180, South = 270)
-                    // We only do this if they are in the same landblock for now.
-                    if target.position.landblock_id == next_pos.landblock_id {
-                        next_pos.rotation = Quaternion::from_heading(
-                            next_pos.coords.heading_to(&target.position.coords),
-                        );
-                    }
-                }
-            }
-            _ => {
-                // For other movement types (like Stop), we just accept current position
-            }
-        }
-
-        // Update local world state (Teleport)
-        // Check distance safely - ignore check if we are uninitialized (landblock 0) or just logging in
-        let distance = if world.player.position.landblock_id == Guid::NULL {
-            0.0
-        } else {
-            world.player.position.distance_to(&next_pos)
-        };
-
-        if distance > AUTO_MOVE_DISTANCE_LIMIT {
-            log::warn!(
-                "Aborting auto-move: target is {:.2}m away (limit {}m)",
-                distance,
-                AUTO_MOVE_DISTANCE_LIMIT
-            );
-            wire_events.push(WireEvent::ClientError(format!(
-                "Item is too far away ({:.1}m). Move closer!",
-                distance
-            )));
-            return Ok((wire_events, Vec::new()));
-        }
-
-        let state_events = world.set_player_position(next_pos);
-
-        Self::send_autonomous_position_sync(world, session, MovementPacketMetadata::default())
-            .await?;
-
-        Ok((wire_events, state_events))
-    }
 }
 
 #[cfg(test)]
@@ -981,18 +830,44 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_arrival_position() {
-        let source = WorldPosition {
-            coords: Vector3::new(0.0, 0.0, 0.0),
-            ..Default::default()
-        };
-        let target_pos = Vector3::new(10.0, 0.0, 0.0);
-        let arrival_dist = 2.0;
+    fn current_local_intent_returns_none_without_guid_or_motion() {
+        let world = WorldState::synthetic();
+        let movement = MovementSystem::new();
 
-        // Should stop at (8, 0, 0)
-        let pos = calculate_arrival_position(&source, &target_pos, arrival_dist);
-        assert!((pos.x - 8.0).abs() < 1e-4);
-        assert!(pos.y.abs() < 1e-4);
+        assert_eq!(movement.current_local_intent(&world), None);
+    }
+
+    #[test]
+    fn current_local_intent_ignores_snap_only_state() {
+        let mut world = WorldState::synthetic();
+        world.player.guid = Guid(0x50000123);
+
+        let mut movement = MovementSystem::new();
+        movement.pending_snap_facing = Some(1.25);
+
+        assert_eq!(movement.current_local_intent(&world), None);
+    }
+
+    #[test]
+    fn handle_post_solve_is_currently_a_noop_for_local_player() {
+        let mut world = WorldState::synthetic();
+        let mut movement = MovementSystem::new();
+        let guid = Guid(0x5000_0001);
+
+        world.player.guid = guid;
+
+        let events = movement.handle_post_solve(
+            &world,
+            &SolvedActorKinematics {
+                actor_id: guid,
+                pose: world.player.position,
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(),
+                contact: holtburger_world::ContactState::Unknown,
+            },
+        );
+
+        assert!(events.is_empty());
     }
 
     #[test]
@@ -1152,129 +1027,6 @@ mod tests {
         assert!(!raw_motion_state.flags.contains(RawMotionFlags::TURN_SPEED));
         assert_eq!(raw_motion_state.turn_command, None);
         assert_eq!(raw_motion_state.turn_speed, None);
-    }
-
-    #[test]
-    fn local_motion_prediction_advances_player_position_from_velocity() {
-        let mut world = WorldState::synthetic();
-        let player_guid = Guid(0x50000123);
-        world.player.guid = player_guid;
-        world.player.position = WorldPosition {
-            landblock_id: Guid(0x12340000),
-            coords: Vector3::new(10.0, 20.0, 0.0),
-            rotation: Quaternion::identity(),
-        };
-        world.entities.insert(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            world.player.position,
-        ));
-        let mut movement = MovementSystem::new();
-        world.player.position.rotation = Quaternion::from_heading(180.0_f32.to_radians());
-        let _ = world.set_player_position(world.player.position);
-        movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
-
-        let events = movement.advance_local_motion_prediction(0.5, &mut world);
-
-        assert!(
-            events.iter().any(|event| matches!(event, WorldEvent::EntityMoved { guid, pos } if *guid == player_guid && (pos.coords.x - 19.0).abs() < 1e-5 && (pos.coords.y - 20.0).abs() < 1e-5))
-        );
-        assert!((world.player.position.coords.x - 19.0).abs() < 1e-5);
-        assert!((world.player.position.coords.y - 20.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn local_motion_prediction_ignores_missing_drive_intent() {
-        let mut world = WorldState::synthetic();
-        let player_guid = Guid(0x50000123);
-        let position = WorldPosition {
-            landblock_id: Guid(0x12340000),
-            coords: Vector3::new(10.0, 20.0, 0.0),
-            rotation: Quaternion::identity(),
-        };
-        world.player.guid = player_guid;
-        world.player.position = position;
-        world
-            .entities
-            .insert(Entity::new(player_guid, "Player".to_string(), position));
-
-        let events = MovementSystem::new().advance_local_motion_prediction(0.5, &mut world);
-
-        assert!(events.is_empty());
-        assert_eq!(world.player.position, position);
-    }
-
-    #[test]
-    fn local_motion_prediction_turns_under_turn_control_without_snapping() {
-        let mut world = WorldState::synthetic();
-        let player_guid = Guid(0x50000123);
-        let position = WorldPosition {
-            landblock_id: Guid(0x12340000),
-            coords: Vector3::new(10.0, 20.0, 0.0),
-            rotation: Quaternion::identity(),
-        };
-        world.player.guid = player_guid;
-        world.player.position = position;
-        world
-            .entities
-            .insert(Entity::new(player_guid, "Player".to_string(), position));
-
-        let mut movement = MovementSystem::new();
-        let events = movement.apply_motion_state(
-            MotionState::builder().walk().turn_right().build(),
-            &mut world,
-        );
-
-        assert!(events.iter().any(|event| matches!(
-            event,
-            WorldEvent::EntityVectorUpdated { guid, velocity, omega }
-                if *guid == player_guid
-                    && velocity.length_squared() <= 1e-6
-                    && omega.z > 0.0
-        )));
-        assert_eq!(world.player.position.rotation, position.rotation);
-
-        let _ = movement.advance_local_motion_prediction(0.25, &mut world);
-
-        let new_heading = world.player.position.rotation.to_heading();
-        assert!(new_heading > 0.0);
-        assert!(new_heading < 180.0_f32.to_radians());
-    }
-
-    #[test]
-    fn local_motion_prediction_uses_run_velocity_for_run_control() {
-        let mut world = WorldState::synthetic();
-        let player_guid = Guid(0x50000123);
-        world.player.guid = player_guid;
-        world.player.position = WorldPosition {
-            landblock_id: Guid(0x12340000),
-            coords: Vector3::new(10.0, 20.0, 0.0),
-            rotation: Quaternion::identity(),
-        };
-        world.entities.insert(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            world.player.position,
-        ));
-        let mut movement = MovementSystem::new();
-        movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
-
-        world.player.position.rotation = Quaternion::from_heading(90.0_f32.to_radians());
-        let _ = world.set_player_position(world.player.position);
-
-        let events = movement.advance_local_motion_prediction(0.5, &mut world);
-
-        assert!(events.iter().any(|event| matches!(
-            event,
-            WorldEvent::EntityMoved { guid, pos }
-                if *guid == player_guid
-                && (pos.coords.y - 29.0).abs() < 1e-5
-                && (pos.coords.z - 0.0).abs() < 1e-5
-        )));
-        assert!((world.player.position.rotation.w - 1.0).abs() < 1e-5);
-        assert!(world.player.position.rotation.x.abs() < 1e-5);
-        assert!(world.player.position.rotation.y.abs() < 1e-5);
-        assert!(world.player.position.rotation.z.abs() < 1e-5);
     }
 
     #[test]

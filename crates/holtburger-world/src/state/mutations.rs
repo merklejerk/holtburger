@@ -1,6 +1,7 @@
 use super::*;
 use crate::context::WorldContextExt;
 use crate::entity::EntityPositionSyncOutcome;
+use crate::spatial::{ContactState, SolvedActorKinematics, SpatialEvent};
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
@@ -9,6 +10,23 @@ use holtburger_protocol::messages::movement::{
 };
 
 impl WorldState {
+    fn apply_player_contact_state(
+        &mut self,
+        contact: ContactState,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        let Some(grounded) = contact.grounded() else {
+            return;
+        };
+
+        if self.player.server_grounded == Some(grounded) {
+            return;
+        }
+
+        self.player.server_grounded = Some(grounded);
+        events.push(WorldEvent::PlayerGroundedUpdated { grounded });
+    }
+
     fn emit_entity_position_sync(
         &mut self,
         guid: Guid,
@@ -20,11 +38,11 @@ impl WorldState {
         match outcome {
             EntityPositionSyncOutcome::Rejected => {}
             EntityPositionSyncOutcome::Moved => {
-                self.scene.update_entity(guid, old_lb, pos.landblock_id);
+                self.scene.update_entity(guid, old_lb, pos);
                 events.push(WorldEvent::EntityMoved { guid, pos })
             }
             EntityPositionSyncOutcome::Reset { sequence } => {
-                self.scene.update_entity(guid, old_lb, pos.landblock_id);
+                self.scene.update_entity(guid, old_lb, pos);
                 events.push(WorldEvent::ForcedReposition {
                     guid,
                     pos,
@@ -207,6 +225,188 @@ impl WorldState {
         }
 
         self.player.set_position_property(position_type, position);
+    }
+
+    /// Updates the player's position, ensuring the record in PlayerState,
+    /// the mirrored Entity, and the SpatialScene stay in sync.
+    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return events;
+        }
+
+        if !pos.rotation.w.is_finite()
+            || !pos.rotation.x.is_finite()
+            || !pos.rotation.y.is_finite()
+            || !pos.rotation.z.is_finite()
+        {
+            pos.rotation = self.player.position.rotation;
+        }
+
+        let old_lb = self.player.position.landblock_id;
+        self.player.position = pos;
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.position = pos;
+        }
+        self.scene.update_entity(guid, old_lb, pos);
+
+        events.push(WorldEvent::EntityMoved { guid, pos });
+        events
+    }
+
+    /// Synchronizes the player's mirrored position without emitting movement events.
+    ///
+    /// This is intended for hydration/bootstrap flows where the client is seeding authoritative
+    /// state rather than reacting to a live movement update packet.
+    pub fn sync_player_position(&mut self, mut pos: WorldPosition) {
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return;
+        }
+
+        if !pos.rotation.w.is_finite()
+            || !pos.rotation.x.is_finite()
+            || !pos.rotation.y.is_finite()
+            || !pos.rotation.z.is_finite()
+        {
+            pos.rotation = self.player.position.rotation;
+        }
+
+        let old_lb = self.player.position.landblock_id;
+        self.player.position = pos;
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.position = pos;
+        }
+        self.scene.update_entity(guid, old_lb, pos);
+    }
+
+    pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return events;
+        }
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.velocity = velocity;
+            entity.omega = omega;
+            events.push(WorldEvent::EntityVectorUpdated {
+                guid,
+                velocity,
+                omega,
+            });
+        }
+
+        events
+    }
+
+    pub fn apply_solved_actor_kinematics(
+        &mut self,
+        solved: &SolvedActorKinematics,
+    ) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+
+        if solved.actor_id == self.player.guid {
+            events.extend(self.set_player_position(solved.pose));
+            events.extend(self.set_player_vector(solved.velocity, solved.omega));
+            self.apply_player_contact_state(solved.contact, &mut events);
+            return events;
+        }
+
+        let Some(entity) = self.entities.get_mut(solved.actor_id) else {
+            return events;
+        };
+
+        let old_lb = entity.position.landblock_id;
+        entity.position = solved.pose;
+        entity.velocity = solved.velocity;
+        entity.omega = solved.omega;
+        self.scene
+            .update_entity(solved.actor_id, old_lb, solved.pose);
+
+        events.push(WorldEvent::EntityMoved {
+            guid: solved.actor_id,
+            pos: solved.pose,
+        });
+        events.push(WorldEvent::EntityVectorUpdated {
+            guid: solved.actor_id,
+            velocity: solved.velocity,
+            omega: solved.omega,
+        });
+
+        events
+    }
+
+    pub fn apply_spatial_event(&mut self, event: &SpatialEvent) -> Vec<WorldEvent> {
+        match *event {
+            SpatialEvent::ContactChanged { actor_id, contact } => {
+                if actor_id != self.player.guid {
+                    return Vec::new();
+                }
+
+                let mut events = Vec::new();
+                self.apply_player_contact_state(contact, &mut events);
+                events
+            }
+            SpatialEvent::ForcedReposition { actor_id, pose } => {
+                if actor_id == self.player.guid {
+                    let mut events = self.set_player_position(pose);
+                    events.push(WorldEvent::ForcedReposition {
+                        guid: actor_id,
+                        pos: pose,
+                        sequence: 0,
+                    });
+                    return events;
+                }
+
+                let Some(entity) = self.entities.get_mut(actor_id) else {
+                    return Vec::new();
+                };
+
+                let old_lb = entity.position.landblock_id;
+                entity.position = pose;
+                self.scene.update_entity(actor_id, old_lb, pose);
+
+                vec![WorldEvent::ForcedReposition {
+                    guid: actor_id,
+                    pos: pose,
+                    sequence: 0,
+                }]
+            }
+        }
+    }
+
+    /// Applies an authoritative server-side movement sync to the player.
+    pub fn apply_player_autonomous_position(
+        &mut self,
+        data: &ServerAutonomousPositionData,
+    ) -> Vec<WorldEvent> {
+        let accepted = self.player.should_accept_server_position_sequences(
+            data.teleport_sequence,
+            data.force_position_sequence,
+        );
+
+        if !accepted {
+            return Vec::new();
+        }
+
+        let mut events = vec![WorldEvent::SelfAutonomousPosition {
+            teleport_sequence: data.teleport_sequence,
+            force_position_sequence: data.force_position_sequence,
+            server_control_sequence: data.server_control_sequence,
+        }];
+
+        events.extend(self.set_player_position(data.position));
+
+        self.player.instance_sequence = data.instance_sequence;
+        self.player.server_control_sequence = data.server_control_sequence;
+        self.player.teleport_sequence = data.teleport_sequence;
+        self.player.force_position_sequence = data.force_position_sequence;
+
+        events
     }
 
     pub(crate) fn apply_public_position_update(

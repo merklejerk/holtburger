@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
+use crate::{ContactState, SolvedActorKinematics};
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
@@ -88,7 +90,7 @@ fn test_player_mirror_invariant_on_set_position() {
 }
 
 #[test]
-fn test_player_mirror_invariant_on_set_velocity() {
+fn test_player_mirror_invariant_on_set_vector() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
@@ -98,9 +100,16 @@ fn test_player_mirror_invariant_on_set_velocity() {
     state.entities.insert(player_entity);
 
     let new_vel = Vector3::new(1.0, 2.0, 3.0);
-    state.set_player_velocity(new_vel);
+    let new_omega = Vector3::new(0.0, 0.0, 4.0);
+    let events = state.set_player_vector(new_vel, new_omega);
 
     assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
+    assert_eq!(state.entities.get(player_guid).unwrap().omega, new_omega);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated { guid, velocity, omega }
+            if *guid == player_guid && *velocity == new_vel && *omega == new_omega
+    )));
 }
 
 #[test]
@@ -140,6 +149,98 @@ fn test_set_player_position_sanitizes_nan_rotation() {
         state.entities.get(player_guid).unwrap().position.rotation,
         holtburger_common::math::Quaternion::identity()
     );
+}
+
+#[test]
+fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000123);
+    let start_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = start_pos;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        start_pos,
+    ));
+
+    let solved = SolvedActorKinematics {
+        actor_id: player_guid,
+        pose: WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+        velocity: Vector3::new(1.0, 2.0, 3.0),
+        omega: Vector3::new(0.0, 0.0, 4.0),
+        contact: ContactState::Grounded,
+    };
+
+    let events = state.apply_solved_actor_kinematics(&solved);
+
+    assert_eq!(state.player.position, solved.pose);
+    let entity = state
+        .entities
+        .get(player_guid)
+        .expect("player entity should stay mirrored");
+    assert_eq!(entity.position, solved.pose);
+    assert_eq!(entity.velocity, solved.velocity);
+    assert_eq!(entity.omega, solved.omega);
+    assert_eq!(state.player.server_grounded, Some(true));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved { guid, pos }
+        if *guid == player_guid && *pos == solved.pose
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated { guid, velocity, omega }
+        if *guid == player_guid && *velocity == solved.velocity && *omega == solved.omega
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::PlayerGroundedUpdated { grounded: true }
+    )));
+}
+
+#[test]
+fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_unknown() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000123);
+    let start_pos = WorldPosition::default();
+
+    state.player.guid = player_guid;
+    state.player.position = start_pos;
+    state.player.server_grounded = Some(true);
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        start_pos,
+    ));
+
+    let solved = SolvedActorKinematics {
+        actor_id: player_guid,
+        pose: WorldPosition {
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            ..start_pos
+        },
+        velocity: Vector3::zero(),
+        omega: Vector3::zero(),
+        contact: ContactState::Unknown,
+    };
+
+    let events = state.apply_solved_actor_kinematics(&solved);
+
+    assert_eq!(state.player.server_grounded, Some(true));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::PlayerGroundedUpdated { .. }
+    )));
 }
 
 #[test]
@@ -567,7 +668,7 @@ fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() 
     assert_eq!(state.entities.get(guid).unwrap().position, initial_pos);
 
     let nearby: std::collections::HashSet<_> = state
-        .get_nearby_entities()
+        .get_nearby_world_entities()
         .into_iter()
         .map(|entity| entity.guid)
         .collect();
@@ -1946,7 +2047,7 @@ fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
     state.add_entity(null_entity);
 
     let nearby: std::collections::HashSet<_> = state
-        .get_nearby_entities()
+        .get_nearby_world_entities()
         .into_iter()
         .map(|entity| entity.guid)
         .collect();

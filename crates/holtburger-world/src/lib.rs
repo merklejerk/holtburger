@@ -27,3 +27,8 @@ pub mod vendor;
 
 pub use self::state::WorldState;
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
+pub use spatial::{
+	BasicSpatialPhysics, ContactState, NoopSpatialPhysics, SolvedActorKinematics,
+	SolveActorInput, SpatialEvent, SpatialPhysics, SpatialScene, SpatialSolveBatch,
+	SpatialSolveRequest, advance_actor_kinematics,
+};

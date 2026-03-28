@@ -1,4 +1,4 @@
-use crate::client::movement_types::MovementRequest;
+use crate::client::movement_types::MovementCommand;
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -505,7 +505,7 @@ pub enum ClientCommand {
         slot: Option<TargetSlot>,
         amount: u32,
     },
-    ExecuteMovement(MovementRequest),
+    DriveMovement(MovementCommand),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,

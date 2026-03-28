@@ -1,8 +1,11 @@
 use crate::entity::Entity;
 use crate::state::WorldState;
+use crate::stats::{AttributeType, SkillType};
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::{EquipMask, ItemType, Usable, WorldObjectExt};
+use holtburger_common::properties::{
+    EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt, WorldObjectPropertyAccessors,
+};
 use holtburger_protocol::messages::combat::CombatMode;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +43,25 @@ impl CombatTargetStatus {
     }
 }
 
+pub fn burden_load_modifier(burden: f32) -> f32 {
+    if burden < 1.0 {
+        1.0
+    } else if burden < 2.0 {
+        2.0 - burden
+    } else {
+        0.0
+    }
+}
+
+pub fn run_rate_from_skill_and_burden(run_skill: f32, burden: f32) -> f32 {
+    if run_skill >= 800.0 {
+        18.0 / 4.0
+    } else {
+        let load_mod = burden_load_modifier(burden);
+        (load_mod * (run_skill / (run_skill + 200.0) * 11.0) + 4.0) / 4.0
+    }
+}
+
 /// Provides access to the world state for common logic.
 pub trait WorldContext {
     fn get_player_guid(&self) -> Option<Guid>;
@@ -48,6 +70,18 @@ pub trait WorldContext {
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
     fn is_open_container(&self, guid: Guid) -> bool;
+
+    fn get_player_attribute_current(&self, _attr: AttributeType) -> Option<u32> {
+        None
+    }
+
+    fn get_player_skill_current(&self, _skill: SkillType) -> Option<u32> {
+        None
+    }
+
+    fn get_player_int_property(&self, _prop: PropertyInt) -> Option<i32> {
+        None
+    }
 }
 
 impl WorldContext for WorldState {
@@ -74,10 +108,65 @@ impl WorldContext for WorldState {
     fn is_open_container(&self, guid: Guid) -> bool {
         self.open_containers.contains(&guid)
     }
+
+    fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
+        self.player
+            .attributes
+            .get(&attr)
+            .map(|attribute| attribute.current)
+    }
+
+    fn get_player_skill_current(&self, skill: SkillType) -> Option<u32> {
+        self.player.skills.get(&skill).map(|skill| skill.current)
+    }
+
+    fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {
+        self.player.get_int_prop(prop)
+    }
 }
 
 /// Common game logic shared across all clients.
 pub trait WorldContextExt: WorldContext {
+    fn player_burden(&self) -> Option<f32> {
+        self.get_player_guid()?;
+
+        let mut encumbrance = 0.0;
+        for guid in self.iter_inventory() {
+            let item = self.get_entity(guid)?;
+
+            if let Some(container_id) = item.container_id()
+                && self.is_in_player_inventory(container_id)
+                && Some(container_id) != self.get_player_guid()
+            {
+                continue;
+            }
+
+            encumbrance += item.get_int_prop(PropertyInt::EncumbranceVal).unwrap_or(0) as f32;
+        }
+
+        let strength = self.get_player_attribute_current(AttributeType::StrengthAttr)? as f32;
+        if strength <= 0.0 {
+            return Some(3.0);
+        }
+
+        let num_augs = self
+            .get_player_int_property(PropertyInt::AugmentationIncreasedCarryingCapacity)
+            .unwrap_or(0)
+            .max(0) as f32;
+        let capacity = (150.0 * strength) + (num_augs * 30.0 * strength);
+
+        if capacity <= 0.0 {
+            return Some(3.0);
+        }
+        Some(encumbrance / capacity)
+    }
+
+    fn player_run_rate(&self) -> Option<f32> {
+        let run_skill = self.get_player_skill_current(SkillType::Run)? as f32;
+        let burden = self.player_burden().unwrap_or(3.0);
+        Some(run_rate_from_skill_and_burden(run_skill, burden))
+    }
+
     fn combat_target_status(&self, guid: Guid) -> CombatTargetStatus {
         if Some(guid) == self.get_player_guid() {
             return CombatTargetStatus::Unavailable;
@@ -524,8 +613,12 @@ impl<T: WorldContext + ?Sized> WorldContextExt for T {}
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use super::{CombatTargetStatus, WorldContext, WorldContextExt};
+    use super::{
+        CombatTargetStatus, WorldContext, WorldContextExt, burden_load_modifier,
+        run_rate_from_skill_and_burden,
+    };
     use crate::entity::{Entity, EntityMotionSnapshot};
+    use crate::stats::{AttributeType, SkillType};
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::EquipMask;
@@ -542,6 +635,9 @@ mod tests {
         inventory: HashSet<Guid>,
         equipment: HashSet<Guid>,
         open_containers: HashSet<Guid>,
+        player_attributes: HashMap<AttributeType, u32>,
+        player_skills: HashMap<SkillType, u32>,
+        player_int_properties: Vec<(PropertyInt, i32)>,
     }
 
     impl WorldContext for TestWorld {
@@ -568,6 +664,20 @@ mod tests {
         fn is_open_container(&self, guid: Guid) -> bool {
             self.open_containers.contains(&guid)
         }
+
+        fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
+            self.player_attributes.get(&attr).copied()
+        }
+
+        fn get_player_skill_current(&self, skill: SkillType) -> Option<u32> {
+            self.player_skills.get(&skill).copied()
+        }
+
+        fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {
+            self.player_int_properties
+                .iter()
+                .find_map(|(candidate, value)| (*candidate == prop).then_some(*value))
+        }
     }
 
     fn entity(guid: Guid, name: &str) -> Entity {
@@ -580,6 +690,59 @@ mod tests {
             .iids
             .insert(PropertyInstanceId::Container, container_id);
         item
+    }
+
+    #[test]
+    fn burden_load_modifier_matches_ace_thresholds() {
+        assert_eq!(burden_load_modifier(0.5), 1.0);
+        assert_eq!(burden_load_modifier(1.25), 0.75);
+        assert_eq!(burden_load_modifier(2.0), 0.0);
+    }
+
+    #[test]
+    fn player_run_rate_uses_nested_container_burden_and_ace_formula() {
+        let player_guid = Guid(0x5000_0001);
+        let side_pack_guid = Guid(0x8000_0001);
+        let nested_item_guid = Guid(0x8000_0002);
+        let equipped_item_guid = Guid(0x8000_0003);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            inventory: HashSet::from([side_pack_guid, nested_item_guid, equipped_item_guid]),
+            equipment: HashSet::from([equipped_item_guid]),
+            player_attributes: HashMap::from([(AttributeType::StrengthAttr, 100)]),
+            player_skills: HashMap::from([(SkillType::Run, 300)]),
+            player_int_properties: vec![(PropertyInt::AugmentationIncreasedCarryingCapacity, 1)],
+            ..Default::default()
+        };
+
+        let mut side_pack = item_in_container(side_pack_guid, player_guid, "Side Pack");
+        side_pack
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 120);
+        world.entities.insert(side_pack_guid, side_pack);
+
+        let mut nested_item = item_in_container(nested_item_guid, side_pack_guid, "Nested Item");
+        nested_item
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 9999);
+        world.entities.insert(nested_item_guid, nested_item);
+
+        let mut equipped_item = entity(equipped_item_guid, "Wand");
+        equipped_item
+            .properties
+            .ints
+            .insert(PropertyInt::EncumbranceVal, 180);
+        world.entities.insert(equipped_item_guid, equipped_item);
+
+        let expected_burden = 300.0 / 18000.0;
+        assert_eq!(world.player_burden(), Some(expected_burden));
+        assert_eq!(
+            world.player_run_rate(),
+            Some(run_rate_from_skill_and_burden(300.0, expected_burden))
+        );
     }
 
     #[test]

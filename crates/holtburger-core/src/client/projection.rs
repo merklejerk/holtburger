@@ -1169,6 +1169,20 @@ mod tests {
             start,
         );
         system.handle_view_event(
+            &ClientViewEvent::EntityMotionUpdated {
+                guid,
+                snapshot: Some(EntityMotionSnapshot {
+                    forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                    forward_speed: Some(
+                        holtburger_world::entity::OrderedMotionSpeed::from_f32(1.0)
+                            .expect("speed should encode"),
+                    ),
+                    ..Default::default()
+                }),
+            },
+            start,
+        );
+        system.handle_view_event(
             &ClientViewEvent::ForcedReposition {
                 guid,
                 pos: make_position(100.0, 50.0, 1.5),
@@ -1182,13 +1196,59 @@ mod tests {
         let projected = system.projected_entity(guid).expect("entity should exist");
         assert_eq!(projected.velocity, Vector3::zero());
         assert_eq!(projected.omega, Vector3::zero());
+        assert_eq!(projected.motion_state, None);
         assert_eq!(projected.projection_mode, ProjectionMode::AuthoritativeOnly);
         assert_eq!(projected.projected_pose, make_position(100.0, 50.0, 1.5));
     }
 
     #[test]
-    fn first_authoritative_move_bootstraps_without_interpolation() {
+    fn ordinary_authoritative_move_preserves_existing_motion_state() {
         let guid = Guid(0x5000_0008);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig {
+            max_position_interp: Duration::from_millis(200),
+            ..ProjectionConfig::default()
+        });
+        let entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
+
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
+        let snapshot = EntityMotionSnapshot {
+            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+            turn_speed: Some(
+                holtburger_world::entity::OrderedMotionSpeed::from_f32(1.0)
+                    .expect("speed should encode"),
+            ),
+            ..Default::default()
+        };
+        system.handle_view_event(
+            &ClientViewEvent::EntityMotionUpdated {
+                guid,
+                snapshot: Some(snapshot),
+            },
+            start,
+        );
+
+        system.handle_view_event(
+            &ClientViewEvent::EntityMoved {
+                guid,
+                pos: make_position(3.0, 4.0, 0.5),
+            },
+            start + Duration::from_millis(50),
+        );
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(projected.motion_state, Some(snapshot));
+        assert_eq!(projected.authoritative_pose, make_position(3.0, 4.0, 0.5));
+    }
+
+    #[test]
+    fn first_authoritative_move_bootstraps_without_interpolation() {
+        let guid = Guid(0x5000_0009);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig {
             max_position_interp: Duration::from_millis(200),
@@ -1211,7 +1271,7 @@ mod tests {
 
     #[test]
     fn teleport_suspension_requires_authoritative_resume() {
-        let guid = Guid(0x5000_0009);
+        let guid = Guid(0x5000_000A);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(1.0, 2.0, 0.25));
@@ -1260,7 +1320,7 @@ mod tests {
 
     #[test]
     fn authoritative_snapshot_resumes_suspended_projection() {
-        let guid = Guid(0x5000_000A);
+        let guid = Guid(0x5000_000B);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(1.0, 2.0, 0.25));

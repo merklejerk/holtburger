@@ -1,16 +1,14 @@
 //! Reusable controller for approaching a target until an arrival distance is met.
 //!
 //! Frontends can own this controller directly, feed it world-derived inputs, and
-//! apply the resulting [`MovementPrimitive`] values using their preferred
+//! apply the resulting low-level pursuit plans using their preferred
 //! orchestration model.
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::movement_types::{
-    DriveIntent, MovementPrediction, MovementPrimitive, RUN_ANIM_SPEED,
-};
-use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
+
+const APPROACH_ARRIVAL_DEADBAND_M: f32 = 0.2;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetInput {
@@ -19,7 +17,6 @@ pub enum ApproachTargetInput {
         player_position: WorldPosition,
         target_position: Option<WorldPosition>,
         target_use_radius: Option<f32>,
-        move_speed: f32,
     },
     Cancel,
     ForcedReposition,
@@ -36,8 +33,15 @@ pub enum ApproachTargetFinishReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ApproachTargetIntent {
+    pub heading: f32,
+    pub remaining_distance: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetEffect {
-    Movement(MovementPrimitive),
+    Pursue(ApproachTargetIntent),
+    Stop,
     Finished(ApproachTargetFinishReason),
 }
 
@@ -54,19 +58,6 @@ impl ApproachTargetController {
     pub fn arrival_distance(&self) -> f32 {
         self.arrival_distance
     }
-
-    fn predicted_velocity_toward(
-        player_position: WorldPosition,
-        target_position: WorldPosition,
-        move_speed: f32,
-    ) -> Option<Vector3> {
-        let delta = target_position.global_coords() - player_position.global_coords();
-        if delta.length_squared() <= 1e-6 {
-            return None;
-        }
-
-        Some(delta.normalize() * (move_speed.max(0.0) * RUN_ANIM_SPEED))
-    }
 }
 
 impl Controller for ApproachTargetController {
@@ -76,20 +67,20 @@ impl Controller for ApproachTargetController {
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
         match *input {
             ApproachTargetInput::Cancel => ControllerUpdate::new(ControllerStatus::Completed)
-                .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                .with_effect(ApproachTargetEffect::Stop)
                 .with_effect(ApproachTargetEffect::Finished(
                     ApproachTargetFinishReason::Cancelled,
                 )),
             ApproachTargetInput::ForcedReposition => {
                 ControllerUpdate::new(ControllerStatus::Completed)
-                    .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                    .with_effect(ApproachTargetEffect::Stop)
                     .with_effect(ApproachTargetEffect::Finished(
                         ApproachTargetFinishReason::ForcedReposition,
                     ))
             }
             ApproachTargetInput::TeleportStarted => {
                 ControllerUpdate::new(ControllerStatus::Completed)
-                    .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                    .with_effect(ApproachTargetEffect::Stop)
                     .with_effect(ApproachTargetEffect::Finished(
                         ApproachTargetFinishReason::TeleportStarted,
                     ))
@@ -99,11 +90,10 @@ impl Controller for ApproachTargetController {
                 player_position,
                 target_position,
                 target_use_radius,
-                move_speed,
             } => {
                 let Some(target_position) = target_position else {
                     return ControllerUpdate::new(ControllerStatus::Completed)
-                        .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                        .with_effect(ApproachTargetEffect::Stop)
                         .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::TargetUnavailable,
                         ));
@@ -114,28 +104,23 @@ impl Controller for ApproachTargetController {
                     .arrival_distance
                     .max(target_use_radius.unwrap_or(0.0).max(0.0));
 
-                if distance_to_target <= effective_arrival_distance {
+                if distance_to_target <= effective_arrival_distance + APPROACH_ARRIVAL_DEADBAND_M {
                     return ControllerUpdate::new(ControllerStatus::Completed)
-                        .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
+                        .with_effect(ApproachTargetEffect::Stop)
                         .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::Arrived,
                         ));
                 }
 
-                let prediction =
-                    Self::predicted_velocity_toward(player_position, target_position, move_speed)
-                        .map(MovementPrediction::WorldVelocity)
-                        .unwrap_or(MovementPrediction::FromHeading);
+                let heading = player_position.heading_to(&target_position);
 
-                ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                    ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                        intent: DriveIntent {
-                            heading: player_position.heading_to(&target_position),
-                            speed: move_speed.max(0.0),
-                        },
-                        prediction,
-                    }),
-                )
+                let plan = ApproachTargetIntent {
+                    heading,
+                    remaining_distance: (distance_to_target - effective_arrival_distance).max(0.0),
+                };
+
+                ControllerUpdate::new(ControllerStatus::Active)
+                    .with_effect(ApproachTargetEffect::Pursue(plan))
             }
         }
     }
@@ -164,14 +149,13 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(0.5)),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );
@@ -187,7 +171,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
@@ -195,18 +178,14 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
+                heading: std::f32::consts::PI,
+                remaining_distance: 9.0,
             })]
         );
     }
@@ -231,18 +210,14 @@ mod tests {
             player_position,
             target_position: Some(target_position),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
+                heading: std::f32::consts::PI,
+                remaining_distance: 191.0,
             })]
         );
     }
@@ -258,7 +233,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::ForcedReposition),
             ]
         );
@@ -275,7 +250,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::TeleportStarted),
             ]
         );
@@ -292,14 +267,14 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Cancelled),
             ]
         );
     }
 
     #[test]
-    fn first_tick_emits_drive_intent() {
+    fn first_tick_emits_pursuit_plan() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(1.0);
 
@@ -308,24 +283,20 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
+                heading: std::f32::consts::PI,
+                remaining_distance: 9.0,
             })]
         );
     }
 
     #[test]
-    fn steady_state_ticks_keep_emitting_drive_intent() {
+    fn steady_state_ticks_keep_emitting_pursuit_plan() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(1.0);
 
@@ -334,7 +305,6 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
@@ -342,24 +312,20 @@ mod tests {
             player_position: position(0.45),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: std::f32::consts::PI,
-                    speed: 4.5,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            vec![ApproachTargetEffect::Pursue(ApproachTargetIntent {
+                heading: std::f32::consts::PI,
+                remaining_distance: 8.55,
             })]
         );
     }
 
     #[test]
-    fn drive_intent_includes_vertical_prediction_when_target_height_differs() {
+    fn pursuit_plan_includes_vertical_prediction_when_target_height_differs() {
         let now = Instant::now();
         let player_position = WorldPosition {
             landblock_id: Guid(0x01000000),
@@ -378,15 +344,14 @@ mod tests {
             player_position,
             target_position: Some(target_position),
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert!(matches!(
             update.effects.as_slice(),
-            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
-                prediction: MovementPrediction::WorldVelocity(predicted_velocity),
+            [ApproachTargetEffect::Pursue(ApproachTargetIntent {
+                heading,
                 ..
-            })] if predicted_velocity.z > 0.0
+            })] if (*heading - 90.0_f32.to_radians()).abs() <= 1e-6
         ));
     }
 
@@ -400,14 +365,13 @@ mod tests {
             player_position: position(0.0),
             target_position: None,
             target_use_radius: None,
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::TargetUnavailable),
             ]
         );
@@ -423,14 +387,59 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(2.5)),
             target_use_radius: Some(3.0),
-            move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Stop,
+                ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
+            ]
+        );
+    }
+
+    #[test]
+    fn computes_remaining_distance_near_arrival_threshold() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(0.5);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
+            target_position: Some(position(1.6)),
+            target_use_radius: None,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Active);
+        assert!(matches!(
+            update.effects.as_slice(),
+            [ApproachTargetEffect::Pursue(ApproachTargetIntent {
+                heading,
+                remaining_distance,
+            })]
+                if (*heading - std::f32::consts::PI).abs() <= 1e-6
+                    && (*remaining_distance - 1.1).abs() <= 1e-6
+        ));
+    }
+
+    #[test]
+    fn completes_within_arrival_deadband_to_avoid_micro_pulses() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(1.0);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
+            target_position: Some(position(1.18)),
+            target_use_radius: None,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Completed);
+        assert_eq!(
+            update.effects,
+            vec![
+                ApproachTargetEffect::Stop,
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );

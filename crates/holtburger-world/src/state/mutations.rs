@@ -1,11 +1,39 @@
 use super::*;
 use crate::context::WorldContextExt;
+use crate::entity::EntityPositionSyncOutcome;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_protocol::messages::movement::PositionType;
+use holtburger_protocol::messages::movement::{
+    PositionPack, PositionType, ServerAutonomousPositionData,
+};
 
 impl WorldState {
+    fn emit_entity_position_sync(
+        &mut self,
+        guid: Guid,
+        old_lb: Guid,
+        pos: WorldPosition,
+        outcome: EntityPositionSyncOutcome,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        match outcome {
+            EntityPositionSyncOutcome::Rejected => {}
+            EntityPositionSyncOutcome::Moved => {
+                self.scene.update_entity(guid, old_lb, pos.landblock_id);
+                events.push(WorldEvent::EntityMoved { guid, pos })
+            }
+            EntityPositionSyncOutcome::Reset { sequence } => {
+                self.scene.update_entity(guid, old_lb, pos.landblock_id);
+                events.push(WorldEvent::ForcedReposition {
+                    guid,
+                    pos,
+                    sequence,
+                });
+            }
+        }
+    }
+
     pub(crate) fn mark_entity_immediately_eligible_for_pruning_if_unretained(
         &mut self,
         guid: Guid,
@@ -118,21 +146,53 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn move_entity_to_position(
+    pub(crate) fn apply_entity_position_pack(
         &mut self,
         guid: Guid,
-        pos: WorldPosition,
+        pos_pack: &PositionPack,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        if let Some(entity) = self.entities.get_mut(guid) {
-            let old_lb = entity.position.landblock_id;
-            entity.position = pos;
-            self.scene.update_entity(guid, old_lb, pos.landblock_id);
-            events.push(WorldEvent::EntityMoved { guid, pos });
-            true
-        } else {
-            false
-        }
+        let Some(entity) = self.entities.get_mut(guid) else {
+            return false;
+        };
+
+        let old_lb = entity.position.landblock_id;
+        let pos = pos_pack.pos;
+        let outcome = entity.apply_server_position_update(
+            pos,
+            pos_pack.instance_sequence,
+            Some(pos_pack.position_sequence),
+            pos_pack.teleport_sequence,
+            pos_pack.force_position_sequence,
+            None,
+        );
+        let accepted = !matches!(outcome, EntityPositionSyncOutcome::Rejected);
+        self.emit_entity_position_sync(guid, old_lb, pos, outcome, events);
+        accepted
+    }
+
+    pub(crate) fn apply_entity_autonomous_position(
+        &mut self,
+        data: &ServerAutonomousPositionData,
+        events: &mut Vec<WorldEvent>,
+    ) -> bool {
+        let Some(entity) = self.entities.get_mut(data.guid) else {
+            return false;
+        };
+
+        let old_lb = entity.position.landblock_id;
+        let pos = data.position;
+        let outcome = entity.apply_server_position_update(
+            pos,
+            data.instance_sequence,
+            None,
+            data.teleport_sequence,
+            data.force_position_sequence,
+            Some(data.server_control_sequence),
+        );
+        let accepted = !matches!(outcome, EntityPositionSyncOutcome::Rejected);
+        self.emit_entity_position_sync(data.guid, old_lb, pos, outcome, events);
+        accepted
     }
 
     pub(crate) fn apply_private_position_update(
@@ -162,7 +222,20 @@ impl WorldState {
                 return true;
             }
 
-            return self.move_entity_to_position(guid, position, events);
+            let Some(entity) = self.entities.get_mut(guid) else {
+                return false;
+            };
+
+            let old_lb = entity.position.landblock_id;
+            entity.position = position;
+            self.emit_entity_position_sync(
+                guid,
+                old_lb,
+                position,
+                EntityPositionSyncOutcome::Moved,
+                events,
+            );
+            return true;
         }
 
         if guid == self.player.guid {
@@ -239,16 +312,18 @@ impl WorldState {
         rotation: Quaternion,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        if let Some(entity) = self.entities.get_mut(guid) {
+        let (old_lb, pos) = {
+            let Some(entity) = self.entities.get_mut(guid) else {
+                return false;
+            };
+
+            let old_lb = entity.position.landblock_id;
             entity.position.rotation = rotation;
-            events.push(WorldEvent::EntityMoved {
-                guid,
-                pos: entity.position,
-            });
-            true
-        } else {
-            false
-        }
+            (old_lb, entity.position)
+        };
+
+        self.emit_entity_position_sync(guid, old_lb, pos, EntityPositionSyncOutcome::Moved, events);
+        true
     }
 
     pub(crate) fn clear_entity_world_presence(&mut self, guid: Guid) -> Option<WorldPosition> {

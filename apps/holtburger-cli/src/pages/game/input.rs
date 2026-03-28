@@ -3,6 +3,7 @@ mod commands;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
 use holtburger_core::ClientCommand;
+use holtburger_core::client::movement_types::MovementCommand;
 use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
@@ -200,27 +201,25 @@ impl GameState {
                         result.needs_redraw = true;
                     }
                 } else {
-                    let mut pos = self.data.player_pos.unwrap_or_default();
                     let delta = if key.code == KeyCode::Right {
                         0.1
                     } else {
                         -0.1
                     };
 
-                    let current_heading = pos.rotation.to_heading();
+                    let current_heading = self
+                        .data
+                        .player_pos
+                        .unwrap_or_default()
+                        .rotation
+                        .to_heading();
                     let mut new_heading = current_heading + delta;
                     let two_pi = 2.0 * std::f32::consts::PI;
                     new_heading = (new_heading % two_pi + two_pi) % two_pi;
-                    pos.rotation = holtburger_common::Quaternion::from_heading(new_heading);
-
-                    self.data.player_pos = Some(pos);
-                    result.commands.push(ClientCommand::ExecuteMovement(
-                        holtburger_core::client::movement_types::MovementRequest::new(
-                            holtburger_core::client::movement_types::MovementPrimitive::SnapFacing {
-                                heading: new_heading,
-                            },
-                        )
-                        .with_metadata(self.current_movement_metadata()),
+                    result.commands.push(ClientCommand::DriveMovement(
+                        MovementCommand::SnapFacing {
+                            heading: new_heading,
+                        },
                     ));
                     result.needs_redraw = true;
                 }
@@ -476,12 +475,8 @@ mod tests {
         assert!(result.needs_redraw);
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::ExecuteMovement(
-                holtburger_core::client::movement_types::MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::SnapFacing { .. },
-                    ..
-                }
+            Some(ClientCommand::DriveMovement(
+                MovementCommand::SnapFacing { .. }
             ))
         ));
     }

@@ -46,6 +46,11 @@ fn vital_color(current: u32, max: u32) -> Color {
     }
 }
 
+fn render_empty_party_state(tab: &mut PartyTab, f: &mut Frame, area: Rect) {
+    tab.list_state.select(None);
+    f.render_widget(Paragraph::new("Not currently in a party."), area);
+}
+
 pub fn render_party_tab(
     tab: &mut PartyTab,
     f: &mut Frame,
@@ -53,8 +58,12 @@ pub fn render_party_tab(
     _view: &ViewState,
     area: Rect,
 ) {
-    let Some(party) = data.party.as_ref() else {
-        f.render_widget(Paragraph::new("Not currently in a party."), area);
+    let Some(party) = data
+        .party
+        .as_ref()
+        .filter(|party| !party.members.is_empty())
+    else {
+        render_empty_party_state(tab, f, area);
         return;
     };
 
@@ -103,13 +112,13 @@ pub fn render_party_tab(
 
     let members = tab.visible_members(data);
     let content_len = members.len();
-    let selected_index = tab.clamped_selected_index_for_len(content_len).unwrap_or(0);
+    let selected_index = tab.clamped_selected_index_for_len(content_len);
 
     let items: Vec<ListItem<'static>> = members
         .iter()
         .enumerate()
         .map(|(index, entry)| {
-            let item_style = theme::list_item_style(index == selected_index);
+            let item_style = theme::list_item_style(selected_index == Some(index));
             let badge = format_badge(entry);
             let distance_suffix = format_distance_suffix(entry);
 
@@ -163,7 +172,7 @@ pub fn render_party_tab(
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
     let list_state = &mut tab.list_state;
-    list_state.select(Some(selected_index));
+    list_state.select(selected_index);
 
     f.render_stateful_widget(list, chunks[1], list_state);
     let offset = list_state.offset();
@@ -173,6 +182,10 @@ pub fn render_party_tab(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::Guid;
+    use holtburger_world::state::FellowshipState;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     #[test]
     fn vital_color_uses_expected_breakpoints() {
@@ -186,5 +199,55 @@ mod tests {
     #[test]
     fn vital_fraction_clamps_overfilled_values() {
         assert_eq!(vital_fraction(150, 100), 1.0);
+    }
+
+    #[test]
+    fn render_party_tab_without_party_shows_empty_state() {
+        let rendered = render_party_tab_text(GameData::new(
+            Guid(0x50000001),
+            "Player".to_string(),
+            "World".to_string(),
+        ));
+
+        assert!(rendered.contains("Not currently in a party."));
+    }
+
+    #[test]
+    fn render_party_tab_with_empty_party_members_shows_empty_state() {
+        let mut data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        data.party = Some(FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: true,
+            open: false,
+            is_locked: false,
+            members: Vec::new(),
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+
+        let rendered = render_party_tab_text(data);
+
+        assert!(rendered.contains("Not currently in a party."));
+    }
+
+    fn render_party_tab_text(data: GameData) -> String {
+        let area = Rect::new(0, 0, 100, 12);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut tab = PartyTab::default();
+
+        terminal
+            .draw(|frame| render_party_tab(&mut tab, frame, &data, &ViewState::default(), area))
+            .expect("party tab should render");
+
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>()
     }
 }

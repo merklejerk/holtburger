@@ -65,7 +65,7 @@ pub fn render_inventory_tab(
             ));
         }
 
-        if let Some(burden) = data.get_burden() {
+        if let Some(burden) = data.player_burden() {
             summary_spans.push(Span::raw(" | "));
             summary_spans.push(Span::styled(
                 format!("Burden {:.0}%", burden * 100.0),

@@ -1,5 +1,6 @@
 use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
+use std::time::Duration;
 
 pub(crate) const RUN_ANIM_SPEED: f32 = 4.0;
 
@@ -43,61 +44,116 @@ impl MovementPacketMetadata {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MovementRequest {
-    pub primitive: MovementPrimitive,
-    pub metadata: MovementPacketMetadata,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Gait {
+    #[default]
+    Walk,
+    Run,
 }
 
-impl MovementRequest {
-    pub const fn new(primitive: MovementPrimitive) -> Self {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Locomotion {
+    Forward,
+    Backstep,
+    StrafeLeft,
+    StrafeRight,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Turn {
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionState {
+    pub gait: Gait,
+    pub locomotion: Option<Locomotion>,
+    pub turning: Option<Turn>,
+    pub turn_speed: Option<f32>,
+}
+
+impl Default for MotionState {
+    fn default() -> Self {
         Self {
-            primitive,
-            metadata: MovementPacketMetadata {
-                contact: None,
-                motion_style: MotionStyle::PreserveServer,
-            },
+            gait: Gait::Walk,
+            locomotion: None,
+            turning: None,
+            turn_speed: None,
         }
     }
-
-    pub const fn with_metadata(self, metadata: MovementPacketMetadata) -> Self {
-        Self { metadata, ..self }
-    }
 }
 
-impl From<MovementPrimitive> for MovementRequest {
-    fn from(primitive: MovementPrimitive) -> Self {
-        Self::new(primitive)
+impl MotionState {
+    pub fn builder() -> MotionStateBuilder {
+        MotionStateBuilder::default()
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DriveIntent {
-    pub heading: f32,
-    pub speed: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum MovementPrediction {
-    #[default]
-    FromHeading,
-    WorldVelocity(Vector3),
+pub struct MotionStateBuilder {
+    state: MotionState,
 }
 
-impl MovementPrediction {
-    pub fn resolve_velocity(self, heading: f32, speed: f32) -> Vector3 {
-        match self {
-            Self::FromHeading => planar_velocity_for_heading(heading, speed),
-            Self::WorldVelocity(velocity) => velocity,
-        }
+impl MotionStateBuilder {
+    pub fn walk(mut self) -> Self {
+        self.state.gait = Gait::Walk;
+        self
+    }
+
+    pub fn run(mut self) -> Self {
+        self.state.gait = Gait::Run;
+        self
+    }
+
+    pub fn forward(mut self) -> Self {
+        self.state.locomotion = Some(Locomotion::Forward);
+        self
+    }
+
+    pub fn backstep(mut self) -> Self {
+        self.state.locomotion = Some(Locomotion::Backstep);
+        self
+    }
+
+    pub fn strafe_left(mut self) -> Self {
+        self.state.locomotion = Some(Locomotion::StrafeLeft);
+        self
+    }
+
+    pub fn strafe_right(mut self) -> Self {
+        self.state.locomotion = Some(Locomotion::StrafeRight);
+        self
+    }
+
+    pub fn turn_left(mut self) -> Self {
+        self.state.turning = Some(Turn::Left);
+        self
+    }
+
+    pub fn turn_right(mut self) -> Self {
+        self.state.turning = Some(Turn::Right);
+        self
+    }
+
+    pub fn with_turn_speed(mut self, turn_speed: f32) -> Self {
+        self.state.turn_speed = Some(turn_speed);
+        self
+    }
+
+    pub fn build(self) -> MotionState {
+        self.state
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MovementPrimitive {
-    Drive {
-        intent: DriveIntent,
-        prediction: MovementPrediction,
+pub enum MovementCommand {
+    SetMotion {
+        state: MotionState,
+    },
+    PulseMotion {
+        state: MotionState,
+        duration: Duration,
     },
     SnapFacing {
         heading: f32,
@@ -105,66 +161,18 @@ pub enum MovementPrimitive {
     Stop,
 }
 
-impl MovementPrimitive {
-    pub fn desired_velocity(&self) -> Option<Vector3> {
-        match *self {
-            Self::Drive { intent, prediction } => {
-                Some(prediction.resolve_velocity(intent.heading, intent.speed))
-            }
-            Self::SnapFacing { .. } => Some(Vector3::zero()),
-            Self::Stop => Some(Vector3::zero()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn drive_velocity_matches_ac_heading_convention() {
-        let west = MovementPrimitive::Drive {
-            intent: DriveIntent {
-                heading: 0.0,
-                speed: 2.0,
-            },
-            prediction: MovementPrediction::FromHeading,
-        };
-        let north = MovementPrimitive::Drive {
-            intent: DriveIntent {
-                heading: 90.0f32.to_radians(),
-                speed: 2.0,
-            },
-            prediction: MovementPrediction::FromHeading,
-        };
+    fn planar_velocity_matches_ac_heading_convention() {
+        let west_velocity = planar_velocity_for_heading(0.0, 2.0);
+        let north_velocity = planar_velocity_for_heading(90.0f32.to_radians(), 2.0);
 
-        assert_eq!(west.desired_velocity(), Some(Vector3::new(-8.0, 0.0, 0.0)));
-
-        let north_velocity = north.desired_velocity().unwrap();
+        assert_eq!(west_velocity, Vector3::new(-8.0, 0.0, 0.0));
         assert!(north_velocity.x.abs() < 1e-5);
         assert!((north_velocity.y - 8.0).abs() < 1e-5);
-    }
-
-    #[test]
-    fn stop_maps_to_zero_velocity() {
-        let primitive = MovementPrimitive::Stop;
-
-        assert_eq!(primitive.desired_velocity(), Some(Vector3::zero()));
-    }
-
-    #[test]
-    fn snap_facing_maps_to_zero_velocity() {
-        let primitive = MovementPrimitive::SnapFacing { heading: 1.0 };
-
-        assert_eq!(primitive.desired_velocity(), Some(Vector3::zero()));
-    }
-
-    #[test]
-    fn movement_request_defaults_to_fallback_metadata() {
-        let request = MovementRequest::new(MovementPrimitive::Stop);
-
-        assert_eq!(request.metadata.contact, None);
-        assert_eq!(request.metadata.motion_style, MotionStyle::PreserveServer);
     }
 
     #[test]
@@ -180,18 +188,99 @@ mod tests {
     }
 
     #[test]
-    fn drive_velocity_prefers_predicted_velocity_override() {
-        let primitive = MovementPrimitive::Drive {
-            intent: DriveIntent {
-                heading: 0.0,
-                speed: 2.0,
-            },
-            prediction: MovementPrediction::WorldVelocity(Vector3::new(1.0, 2.0, 3.0)),
+    fn movement_packet_metadata_defaults_to_preserve_server_style() {
+        let metadata = MovementPacketMetadata::default();
+
+        assert_eq!(metadata.contact, None);
+        assert_eq!(metadata.motion_style, MotionStyle::PreserveServer);
+    }
+
+    #[test]
+    fn motion_state_builder_builds_resolved_motion_state() {
+        let state = MotionState::builder()
+            .run()
+            .forward()
+            .turn_left()
+            .with_turn_speed(1.25)
+            .build();
+
+        assert_eq!(state.gait, Gait::Run);
+        assert_eq!(state.locomotion, Some(Locomotion::Forward));
+        assert_eq!(state.turning, Some(Turn::Left));
+        assert_eq!(state.turn_speed, Some(1.25));
+    }
+
+    #[test]
+    fn motion_state_defaults_to_walk_with_no_axes() {
+        let state = MotionState::default();
+
+        assert_eq!(state.gait, Gait::Walk);
+        assert_eq!(state.locomotion, None);
+        assert_eq!(state.turning, None);
+        assert_eq!(state.turn_speed, None);
+    }
+
+    #[test]
+    fn movement_command_preserves_resolved_state() {
+        let command = MovementCommand::SetMotion {
+            state: MotionState::builder().run().forward().turn_right().build(),
         };
 
         assert_eq!(
-            primitive.desired_velocity(),
-            Some(Vector3::new(1.0, 2.0, 3.0))
+            command,
+            MovementCommand::SetMotion {
+                state: MotionState {
+                    gait: Gait::Run,
+                    locomotion: Some(Locomotion::Forward),
+                    turning: Some(Turn::Right),
+                    turn_speed: None,
+                },
+            }
+        );
+    }
+
+    #[test]
+    fn pulse_motion_command_preserves_duration_and_state() {
+        let command = MovementCommand::PulseMotion {
+            state: MotionState::builder().walk().forward().build(),
+            duration: Duration::from_millis(120),
+        };
+
+        assert_eq!(
+            command,
+            MovementCommand::PulseMotion {
+                state: MotionState {
+                    gait: Gait::Walk,
+                    locomotion: Some(Locomotion::Forward),
+                    turning: None,
+                    turn_speed: None,
+                },
+                duration: Duration::from_millis(120),
+            }
+        );
+    }
+
+    #[test]
+    fn snap_facing_command_is_one_shot() {
+        let command = MovementCommand::SnapFacing { heading: 1.0 };
+
+        assert_eq!(command, MovementCommand::SnapFacing { heading: 1.0 });
+    }
+
+    #[test]
+    fn stop_command_is_distinct_from_motion_commands() {
+        assert_ne!(
+            MovementCommand::Stop,
+            MovementCommand::PulseMotion {
+                state: MotionState::builder().walk().forward().build(),
+                duration: Duration::from_millis(120),
+            }
+        );
+        assert_ne!(
+            MovementCommand::Stop,
+            MovementCommand::SetMotion {
+                state: MotionState::builder().walk().forward().build(),
+            }
         );
     }
 }

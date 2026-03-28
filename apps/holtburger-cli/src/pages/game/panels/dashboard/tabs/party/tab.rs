@@ -27,7 +27,11 @@ pub struct PartyTab {
 
 impl PartyTab {
     pub(crate) fn clamped_selected_index_for_len(&self, len: usize) -> Option<usize> {
-        (len > 0).then_some(self.selected_index.min(len - 1))
+        if len == 0 {
+            None
+        } else {
+            Some(self.selected_index.min(len - 1))
+        }
     }
 
     pub(crate) fn visible_members<'a>(&self, data: &'a GameData) -> Vec<PartyListEntry<'a>> {
@@ -317,6 +321,33 @@ mod tests {
             .collect();
 
         assert_eq!(visible_names, vec!["alpha".to_string(), "Zulu".to_string()]);
+    }
+
+    #[test]
+    fn clamped_selected_index_returns_none_for_empty_list() {
+        let tab = PartyTab::default();
+
+        assert_eq!(tab.clamped_selected_index_for_len(0), None);
+    }
+
+    #[test]
+    fn get_verbs_is_empty_when_party_has_no_members() {
+        let mut data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        data.party = Some(FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: true,
+            open: false,
+            is_locked: false,
+            members: Vec::new(),
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+
+        let verbs = PartyTab::default().get_verbs(&data, &ViewState::default(), &None);
+
+        assert!(verbs.is_empty());
     }
 
     #[test]

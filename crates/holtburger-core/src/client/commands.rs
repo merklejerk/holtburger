@@ -9,6 +9,7 @@ use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::spell::MagicSchool;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NormalizedSpellCast {
@@ -161,7 +162,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::ExecuteMovement(_) => self.handle_movement_command(cmd).await,
+            ClientCommand::DriveMovement(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -744,15 +745,9 @@ impl Client {
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::ExecuteMovement(request) => {
-                log::info!(">>> Executing movement primitive: {:?}", request.primitive);
-                let world_events = self
-                    .movement
-                    .execute_movement_request(request, &mut self.world, &mut self.session)
-                    .await?;
-                for event in world_events {
-                    self.handle_world_event(&event);
-                }
+            ClientCommand::DriveMovement(command) => {
+                log::info!(">>> Queueing resolved movement command: {:?}", command);
+                self.movement.enqueue_command(command, Instant::now());
                 Ok(())
             }
             _ => unreachable!(),

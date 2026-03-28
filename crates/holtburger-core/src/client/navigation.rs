@@ -20,9 +20,7 @@ use crate::client::controllers::{
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
 use crate::client::movement::{MovementSystem, SERVER_PULSE_PERIOD, SERVER_RUN_SPEED};
-use crate::client::movement_types::{
-    Gait, Locomotion, MotionState, MovementCommand, Turn,
-};
+use crate::client::movement_types::{Gait, Locomotion, MotionState, MovementCommand, Turn};
 use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
@@ -242,8 +240,7 @@ impl NavigationPulsePlanner {
         } else {
             (max_run_rate.max(0.0) / gait_speed(gait)).clamp(0.0, 1.0)
         };
-        let capped_pulse_distance =
-            full_pulse_distance * gait_rate_ratio.max(MIN_PULSE_DUTY_CYCLE);
+        let capped_pulse_distance = full_pulse_distance * gait_rate_ratio.max(MIN_PULSE_DUTY_CYCLE);
         let desired_distance = plan.remaining_distance.min(capped_pulse_distance);
 
         if desired_distance <= 1e-6 || gait_rate_ratio <= 1e-6 {
@@ -258,15 +255,15 @@ impl NavigationPulsePlanner {
             return update;
         }
 
-        let planned = if gait_rate_ratio >= 1.0 - 1e-6
-            && plan.remaining_distance >= full_pulse_distance
-        {
-            PlannedLocomotion::Hold
-        } else {
-            PlannedLocomotion::Pulse {
-                duration: estimator.estimate_duration_for_distance(locomotion_state, desired_distance),
-            }
-        };
+        let planned =
+            if gait_rate_ratio >= 1.0 - 1e-6 && plan.remaining_distance >= full_pulse_distance {
+                PlannedLocomotion::Hold
+            } else {
+                PlannedLocomotion::Pulse {
+                    duration: estimator
+                        .estimate_duration_for_distance(locomotion_state, desired_distance),
+                }
+            };
 
         match planned {
             PlannedLocomotion::Hold => match self.issued {
@@ -290,16 +287,14 @@ impl NavigationPulsePlanner {
                         self.issued,
                     );
                     self.issued = Some(IssuedLocomotion::Hold);
-                    update.push_command(ClientCommand::DriveMovement(
-                        MovementCommand::SetMotion {
-                            state: MotionState {
-                                gait,
-                                locomotion: Some(Locomotion::Forward),
-                                turning: None,
-                                turn_speed: None,
-                            },
+                    update.push_command(ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                        state: MotionState {
+                            gait,
+                            locomotion: Some(Locomotion::Forward),
+                            turning: None,
+                            turn_speed: None,
                         },
-                    ));
+                    }));
                     update
                 }
             },
@@ -326,7 +321,9 @@ impl NavigationPulsePlanner {
                         gait_rate_ratio,
                         self.issued,
                     );
-                    self.issued = Some(IssuedLocomotion::Pulse { until: now + duration });
+                    self.issued = Some(IssuedLocomotion::Pulse {
+                        until: now + duration,
+                    });
                     update.push_command(ClientCommand::DriveMovement(
                         MovementCommand::PulseMotion {
                             state: MotionState {
@@ -552,8 +549,10 @@ impl NavigationAutomation {
                 target: state.target_guid,
                 arrival_distance: state.controller.arrival_distance(),
             }),
-            ActiveNavigation::TrackedTarget(state) => state.maintain.has_latched_target().then_some(
-                match state.mode {
+            ActiveNavigation::TrackedTarget(state) => state
+                .maintain
+                .has_latched_target()
+                .then_some(match state.mode {
                     TrackedTargetMode::Follow => NavigationMode::Follow {
                         target: state.target_guid,
                         arrival_distance: state.maintain.arrival_distance(),
@@ -561,8 +560,7 @@ impl NavigationAutomation {
                     TrackedTargetMode::StickyMelee => NavigationMode::StickyMelee {
                         target: state.target_guid,
                     },
-                },
-            ),
+                }),
         }
     }
 
@@ -599,17 +597,23 @@ impl NavigationAutomation {
 
     pub fn sticky_latched_target_guid(&self) -> Option<Guid> {
         match &self.active {
-            ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee => state
-                .maintain
-                .has_latched_target()
-                .then_some(state.target_guid),
+            ActiveNavigation::TrackedTarget(state)
+                if state.mode == TrackedTargetMode::StickyMelee =>
+            {
+                state
+                    .maintain
+                    .has_latched_target()
+                    .then_some(state.target_guid)
+            }
             _ => None,
         }
     }
 
     pub fn sticky_is_pursuing(&self) -> bool {
         match &self.active {
-            ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee => {
+            ActiveNavigation::TrackedTarget(state)
+                if state.mode == TrackedTargetMode::StickyMelee =>
+            {
                 state.maintain.is_pursuing()
             }
             _ => false,
@@ -677,14 +681,16 @@ impl NavigationAutomation {
         arrival_distance: f32,
         input: NavigationSyncInput,
     ) -> NavigationUpdate {
-        self.active = ActiveNavigation::TrackedTarget(TrackedTargetState {
-            mode: TrackedTargetMode::Follow,
-            target_guid: target,
-            maintain: MaintainRangeController::new(
-                self.tracked_target_config_for_mode(TrackedTargetMode::Follow, Some(arrival_distance)),
-            ),
-            pursuit: None,
-        });
+        self.active =
+            ActiveNavigation::TrackedTarget(TrackedTargetState {
+                mode: TrackedTargetMode::Follow,
+                target_guid: target,
+                maintain: MaintainRangeController::new(self.tracked_target_config_for_mode(
+                    TrackedTargetMode::Follow,
+                    Some(arrival_distance),
+                )),
+                pursuit: None,
+            });
         self.sync_tracked_target(target, input)
     }
 
@@ -692,10 +698,8 @@ impl NavigationAutomation {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Approach(mut state) => {
-                if let (Some(player_position), Some(target_position)) = (
-                    input.player_position,
-                    input.authoritative_target_position(),
-                )
+                if let (Some(player_position), Some(target_position)) =
+                    (input.player_position, input.authoritative_target_position())
                 {
                     let effective_arrival_distance = state
                         .controller
@@ -803,7 +807,9 @@ impl NavigationAutomation {
     fn cancel_active_follow(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
-            ActiveNavigation::TrackedTarget(mut state) if state.mode == TrackedTargetMode::Follow => {
+            ActiveNavigation::TrackedTarget(mut state)
+                if state.mode == TrackedTargetMode::Follow =>
+            {
                 Self::suspend_tracked_target_state(&mut state, true)
             }
             other => {
@@ -832,7 +838,9 @@ impl NavigationAutomation {
     fn pause_follow_target_due_to_forced_reposition(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
-            ActiveNavigation::TrackedTarget(mut state) if state.mode == TrackedTargetMode::Follow => {
+            ActiveNavigation::TrackedTarget(mut state)
+                if state.mode == TrackedTargetMode::Follow =>
+            {
                 let result = Self::suspend_tracked_target_state(&mut state, false);
                 self.active = ActiveNavigation::TrackedTarget(state);
                 result
@@ -847,7 +855,9 @@ impl NavigationAutomation {
     fn reset_follow_target_due_to_teleport_start(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
-            ActiveNavigation::TrackedTarget(mut state) if state.mode == TrackedTargetMode::Follow => {
+            ActiveNavigation::TrackedTarget(mut state)
+                if state.mode == TrackedTargetMode::Follow =>
+            {
                 Self::suspend_tracked_target_state(&mut state, true)
             }
             other => {
@@ -865,7 +875,8 @@ impl NavigationAutomation {
         input: NavigationSyncInput,
     ) -> NavigationUpdate {
         let Some(target_guid) = target_guid else {
-            return if matches!(&self.active, ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee) {
+            return if matches!(&self.active, ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee)
+            {
                 self.suspend_sticky_melee(true)
             } else {
                 NavigationUpdate::default()
@@ -873,7 +884,8 @@ impl NavigationAutomation {
         };
 
         if input.player_position.is_none() {
-            return if matches!(&self.active, ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee) {
+            return if matches!(&self.active, ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee)
+            {
                 self.suspend_sticky_melee(true)
             } else {
                 NavigationUpdate::default()
@@ -881,7 +893,8 @@ impl NavigationAutomation {
         };
 
         if combat_mode != CombatMode::Melee || !attack_sequence_active {
-            return if matches!(&self.active, ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee) {
+            return if matches!(&self.active, ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee)
+            {
                 self.suspend_sticky_melee(true)
             } else {
                 NavigationUpdate::default()
@@ -899,7 +912,8 @@ impl NavigationAutomation {
                     pursuit: None,
                 });
             }
-            ActiveNavigation::TrackedTarget(state) if state.mode == TrackedTargetMode::StickyMelee => {}
+            ActiveNavigation::TrackedTarget(state)
+                if state.mode == TrackedTargetMode::StickyMelee => {}
             ActiveNavigation::Approach(_) | ActiveNavigation::TrackedTarget(_) => {
                 return NavigationUpdate::default();
             }
@@ -911,7 +925,9 @@ impl NavigationAutomation {
     fn suspend_sticky_melee(&mut self, clear_latch: bool) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
-            ActiveNavigation::TrackedTarget(mut state) if state.mode == TrackedTargetMode::StickyMelee => {
+            ActiveNavigation::TrackedTarget(mut state)
+                if state.mode == TrackedTargetMode::StickyMelee =>
+            {
                 let result = Self::suspend_tracked_target_state(&mut state, clear_latch);
                 if clear_latch {
                     self.active = ActiveNavigation::Idle;
@@ -981,7 +997,9 @@ impl NavigationAutomation {
         let target_position = Self::automation_target_position_with_limit(
             automation_target_distance_limit_m,
             input.player_position,
-            input.projected_target_sample().map(|target| target.projected_pose),
+            input
+                .projected_target_sample()
+                .map(|target| target.projected_pose),
         );
 
         let Some(player_position) = input.player_position else {
@@ -1054,12 +1072,14 @@ impl NavigationAutomation {
             .map(|_| target)
         });
 
-        let update = state.maintain.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
-            now: input.now,
-            player_position,
-            target: target.map(|target| MaintainRangeSpatialInput { target }),
-            target_use_radius: input.target_use_radius(),
-        }));
+        let update = state
+            .maintain
+            .handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+                now: input.now,
+                player_position,
+                target: target.map(|target| MaintainRangeSpatialInput { target }),
+                target_use_radius: input.target_use_radius(),
+            }));
 
         let completed = update.is_terminal();
         let result = Self::apply_tracked_target_effects(
@@ -1073,8 +1093,13 @@ impl NavigationAutomation {
         (result, completed)
     }
 
-    fn suspend_tracked_target_state(state: &mut TrackedTargetState, clear_latch: bool) -> NavigationUpdate {
-        let update = state.maintain.handle(&MaintainRangeInput::Suspend { clear_latch });
+    fn suspend_tracked_target_state(
+        state: &mut TrackedTargetState,
+        clear_latch: bool,
+    ) -> NavigationUpdate {
+        let update = state
+            .maintain
+            .handle(&MaintainRangeInput::Suspend { clear_latch });
         Self::apply_tracked_target_effects(
             state,
             state.target_guid,
@@ -1152,7 +1177,11 @@ impl NavigationAutomation {
                 target.0,
                 arrival_distance
             );
-            return Self::sync_pursuit_controller(pursuit, input, automation_target_distance_limit_m);
+            return Self::sync_pursuit_controller(
+                pursuit,
+                input,
+                automation_target_distance_limit_m,
+            );
         }
 
         let Some(_player_position) = input.player_position else {
@@ -1392,7 +1421,6 @@ mod tests {
             landblock_id: Guid(0x01000000),
             coords: Vector3::new(x, 0.0, 0.0),
             rotation: Quaternion::from_heading(std::f32::consts::PI),
-            ..Default::default()
         }
     }
 
@@ -1465,7 +1493,10 @@ mod tests {
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
-        matches!(command, ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. }))
+        matches!(
+            command,
+            ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. })
+        )
     }
 
     fn has_active_approach(automation: &NavigationAutomation) -> bool {
@@ -1604,10 +1635,7 @@ mod tests {
         );
 
         let stop_index = switched.commands.iter().position(is_stop_command);
-        let drive_index = switched
-            .commands
-            .iter()
-            .position(|command| is_drive_command(command));
+        let drive_index = switched.commands.iter().position(is_drive_command);
 
         assert!(stop_index.is_some());
         assert!(drive_index.is_some());
@@ -1646,10 +1674,7 @@ mod tests {
         );
 
         let stop_index = switched.commands.iter().position(is_stop_command);
-        let drive_index = switched
-            .commands
-            .iter()
-            .position(|command| is_drive_command(command));
+        let drive_index = switched.commands.iter().position(is_drive_command);
 
         assert!(matches!(
             automation.navigation_mode(),
@@ -1698,10 +1723,7 @@ mod tests {
         );
 
         let stop_index = switched.commands.iter().position(is_stop_command);
-        let drive_index = switched
-            .commands
-            .iter()
-            .position(|command| is_drive_command(command));
+        let drive_index = switched.commands.iter().position(is_drive_command);
 
         assert!(matches!(
             automation.navigation_mode(),

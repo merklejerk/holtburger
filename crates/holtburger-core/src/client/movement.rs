@@ -1,8 +1,7 @@
 use crate::client::WireEvent;
 use crate::client::movement_types::{
     Gait, Locomotion, MotionState, MotionStyle, MovementCommand, MovementPacketMetadata,
-    RUN_ANIM_SPEED,
-    Turn, planar_velocity_for_heading,
+    RUN_ANIM_SPEED, Turn, planar_velocity_for_heading,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -126,7 +125,6 @@ fn build_autonomous_position_sync(
         last_contact: encode_last_contact(world, metadata),
     })
 }
-
 
 fn hold_key_for_motion_state(state: MotionState) -> HoldKey {
     match state.gait {
@@ -320,10 +318,7 @@ struct ServerMotionIntent {
     motion_style: MotionStyle,
 }
 
-fn server_motion_intent(
-    state: MotionState,
-    motion_style: MotionStyle,
-) -> ServerMotionIntent {
+fn server_motion_intent(state: MotionState, motion_style: MotionStyle) -> ServerMotionIntent {
     ServerMotionIntent {
         state,
         motion_style,
@@ -389,11 +384,7 @@ impl MovementSystem {
 
     /// Estimates the pulse duration needed to cover a planar distance for the given motion state.
     /// This is planning math based on the current client actuator model, not a server guarantee.
-    pub fn estimate_duration_for_distance(
-        &self,
-        state: MotionState,
-        distance_m: f32,
-    ) -> Duration {
+    pub fn estimate_duration_for_distance(&self, state: MotionState, distance_m: f32) -> Duration {
         let speed = self.motion_state_speed_mps(state);
         if speed <= 1e-6 {
             Duration::ZERO
@@ -422,8 +413,10 @@ impl MovementSystem {
                 self.active_public_motion = Some(ActivePublicMotion::from_command(state, None));
             }
             MovementCommand::PulseMotion { state, duration } => {
-                self.active_public_motion =
-                    Some(ActivePublicMotion::from_command(state, Some(now + duration)));
+                self.active_public_motion = Some(ActivePublicMotion::from_command(
+                    state,
+                    Some(now + duration),
+                ));
             }
             MovementCommand::SnapFacing { heading } => {
                 self.pending_snap_facing = Some(heading);
@@ -451,7 +444,8 @@ impl MovementSystem {
     }
 
     fn public_motion_state_for_tick(&self) -> Option<MotionState> {
-        self.active_public_motion.map(|active| active.resolved_state())
+        self.active_public_motion
+            .map(|active| active.resolved_state())
     }
 
     pub(super) async fn tick(
@@ -505,11 +499,15 @@ impl MovementSystem {
         }
 
         match public_motion {
-            Some(state) => {
-                events.extend(self.execute_motion_state_at(state, world, session, now).await?)
-            }
+            Some(state) => events.extend(
+                self.execute_motion_state_at(state, world, session, now)
+                    .await?,
+            ),
             None if self.local_motion.is_some() || self.server_motion_active => {
-                events.extend(self.execute_stop_at(world, session, MovementPacketMetadata::default()).await?);
+                events.extend(
+                    self.execute_stop_at(world, session, MovementPacketMetadata::default())
+                        .await?,
+                );
             }
             None => {}
         }
@@ -662,7 +660,11 @@ impl MovementSystem {
         Ok(world_events)
     }
 
-    fn apply_motion_state(&mut self, state: MotionState, world: &mut WorldState) -> Vec<WorldEvent> {
+    fn apply_motion_state(
+        &mut self,
+        state: MotionState,
+        world: &mut WorldState,
+    ) -> Vec<WorldEvent> {
         self.local_motion = Some(state);
         self.sync_local_motion_vectors(world)
     }
@@ -794,7 +796,11 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: build_motion_state_raw_motion_state(world, state, metadata.motion_style),
+            raw_motion_state: build_motion_state_raw_motion_state(
+                world,
+                state,
+                metadata.motion_style,
+            ),
             position: world.player.position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
@@ -1092,11 +1098,7 @@ mod tests {
                 .flags
                 .contains(RawMotionFlags::TURN_COMMAND)
         );
-        assert!(
-            raw_motion_state
-                .flags
-                .contains(RawMotionFlags::TURN_SPEED)
-        );
+        assert!(raw_motion_state.flags.contains(RawMotionFlags::TURN_SPEED));
         assert_eq!(
             raw_motion_state.turn_command,
             Some(TURN_RIGHT_MOTION_COMMAND)
@@ -1147,11 +1149,7 @@ mod tests {
                 .flags
                 .contains(RawMotionFlags::TURN_COMMAND)
         );
-        assert!(
-            !raw_motion_state
-                .flags
-                .contains(RawMotionFlags::TURN_SPEED)
-        );
+        assert!(!raw_motion_state.flags.contains(RawMotionFlags::TURN_SPEED));
         assert_eq!(raw_motion_state.turn_command, None);
         assert_eq!(raw_motion_state.turn_speed, None);
     }
@@ -1222,8 +1220,10 @@ mod tests {
             .insert(Entity::new(player_guid, "Player".to_string(), position));
 
         let mut movement = MovementSystem::new();
-        let events =
-            movement.apply_motion_state(MotionState::builder().walk().turn_right().build(), &mut world);
+        let events = movement.apply_motion_state(
+            MotionState::builder().walk().turn_right().build(),
+            &mut world,
+        );
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1297,7 +1297,8 @@ mod tests {
         let _ = world.set_player_position(world.player.position);
 
         let mut movement = MovementSystem::new();
-        let events = movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
+        let events =
+            movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -1364,10 +1365,13 @@ mod tests {
             .entities
             .get(player_guid)
             .expect("synthetic player entity should exist");
-        assert!(events.is_empty() || events.iter().any(|event| matches!(
-            event,
-            WorldEvent::EntityVectorUpdated { guid, .. } if *guid == player_guid
-        )));
+        assert!(
+            events.is_empty()
+                || events.iter().any(|event| matches!(
+                    event,
+                    WorldEvent::EntityVectorUpdated { guid, .. } if *guid == player_guid
+                ))
+        );
         assert!(player.velocity.length_squared() <= 1e-6);
         assert!(player.omega.length_squared() <= 1e-6);
     }
@@ -1389,8 +1393,10 @@ mod tests {
         ));
 
         let mut movement = MovementSystem::new();
-        let events =
-            movement.apply_motion_state(MotionState::builder().walk().turn_left().build(), &mut world);
+        let events = movement.apply_motion_state(
+            MotionState::builder().walk().turn_left().build(),
+            &mut world,
+        );
 
         assert!(events.iter().any(|event| matches!(
             event,

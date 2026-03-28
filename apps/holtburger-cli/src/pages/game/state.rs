@@ -5,9 +5,7 @@ use holtburger_core::client::controllers::{
 };
 use holtburger_core::client::movement_types::MovementCommand;
 #[cfg(test)]
-use holtburger_core::client::movement_types::{
-    Locomotion, MotionState, Turn,
-};
+use holtburger_core::client::movement_types::{Locomotion, MotionState, Turn};
 use holtburger_core::client::navigation::{
     NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
     ResolvedNavigationTarget,
@@ -1909,7 +1907,10 @@ mod tests {
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
-        matches!(command, ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. }))
+        matches!(
+            command,
+            ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. })
+        )
     }
 
     fn seed_active_approach(
@@ -3535,14 +3536,11 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
 
-        let stop_index = result
-            .commands
-            .iter()
-            .position(|command| is_stop_movement_command(command));
+        let stop_index = result.commands.iter().position(is_stop_movement_command);
         let drive_index = result
             .commands
             .iter()
-            .position(|command| is_navigation_movement_command(command));
+            .position(is_navigation_movement_command);
 
         assert!(matches!((stop_index, drive_index), (Some(stop), Some(drive)) if stop < drive));
         assert!(has_active_approach(&state));
@@ -3811,7 +3809,12 @@ mod tests {
 
         let slipped_again = state.handle_tick(0.016);
 
-        assert!(slipped_again.commands.iter().any(is_navigation_movement_command));
+        assert!(
+            slipped_again
+                .commands
+                .iter()
+                .any(is_navigation_movement_command)
+        );
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(sticky_is_pursuing(&state));
     }

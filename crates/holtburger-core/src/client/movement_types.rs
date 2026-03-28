@@ -148,9 +148,16 @@ impl MotionStateBuilder {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MovementCommand {
-    SetMotion { state: MotionState },
-    PulseMotion { state: MotionState, duration: Duration },
-    SnapFacing { heading: f32 },
+    SetMotion {
+        state: MotionState,
+    },
+    PulseMotion {
+        state: MotionState,
+        duration: Duration,
+    },
+    SnapFacing {
+        heading: f32,
+    },
     Stop,
 }
 
@@ -257,12 +264,7 @@ mod tests {
     fn snap_facing_command_is_one_shot() {
         let command = MovementCommand::SnapFacing { heading: 1.0 };
 
-        assert_eq!(
-            command,
-            MovementCommand::SnapFacing {
-                heading: 1.0,
-            }
-        );
+        assert_eq!(command, MovementCommand::SnapFacing { heading: 1.0 });
     }
 
     #[test]

@@ -1846,7 +1846,6 @@ mod tests {
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::client::navigation::{ApproachSyncInput, StickyMeleeSyncInput};
     use holtburger_core::{ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode};
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
@@ -1917,55 +1916,31 @@ mod tests {
         state: &mut GameState,
         target: Guid,
         arrival_distance: f32,
-        input: ApproachSyncInput,
+        input: NavigationSyncInput,
     ) {
         let _ = state.runtime.navigation.reconcile_navigation(
             NavigationIntent::Approach {
                 target,
                 arrival_distance,
             },
-            NavigationSyncInput {
-                now: input.now,
-                player_position: input.player_position,
-                target: input
-                    .target_position
-                    .map(|target_position| ResolvedNavigationTarget {
-                        guid: target,
-                        sample: EntitySpatialSample {
-                            guid: target,
-                            authoritative_pose: target_position,
-                            projected_pose: target_position,
-                            velocity: Vector3::zero(),
-                            omega: Vector3::zero(),
-                            motion_state: None,
-                            projection_mode: ProjectionMode::AuthoritativeOnly,
-                        },
-                        use_radius: input.target_use_radius,
-                    }),
-                max_run_rate: input.max_run_rate,
-            },
+            input,
         );
     }
 
-    fn seed_sticky_melee(state: &mut GameState, input: StickyMeleeSyncInput) {
+    fn seed_sticky_melee(
+        state: &mut GameState,
+        target_guid: Option<Guid>,
+        combat_mode: CombatMode,
+        attack_sequence_active: bool,
+        input: NavigationSyncInput,
+    ) {
         let _ = state.runtime.navigation.reconcile_navigation(
             NavigationIntent::StickyMelee {
-                target_guid: input.target_guid,
-                combat_mode: input.combat_mode,
-                attack_sequence_active: input.attack_sequence_active,
+                target_guid,
+                combat_mode,
+                attack_sequence_active,
             },
-            NavigationSyncInput {
-                now: input.now,
-                player_position: input.player_position,
-                target: input.target_guid.zip(input.target).map(|(guid, target)| {
-                    ResolvedNavigationTarget {
-                        guid,
-                        sample: target,
-                        use_radius: input.target_use_radius,
-                    }
-                }),
-                max_run_rate: input.max_run_rate,
-            },
+            input,
         );
     }
 
@@ -2478,11 +2453,22 @@ mod tests {
             &mut state,
             target_guid,
             1.0,
-            ApproachSyncInput {
+            NavigationSyncInput {
                 now: Instant::now(),
                 player_position: Some(start_pos),
-                target_position: Some(target_pos),
-                target_use_radius: None,
+                target: Some(ResolvedNavigationTarget {
+                    guid: target_guid,
+                    sample: EntitySpatialSample {
+                        guid: target_guid,
+                        authoritative_pose: target_pos,
+                        projected_pose: target_pos,
+                        velocity: Vector3::zero(),
+                        omega: Vector3::zero(),
+                        motion_state: None,
+                        projection_mode: ProjectionMode::AuthoritativeOnly,
+                    },
+                    use_radius: None,
+                }),
                 max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
@@ -3206,14 +3192,17 @@ mod tests {
         );
         seed_sticky_melee(
             &mut state,
-            StickyMeleeSyncInput {
+            Some(target_guid),
+            CombatMode::Melee,
+            true,
+            NavigationSyncInput {
                 now: Instant::now() - Duration::from_millis(250),
-                combat_mode: CombatMode::Melee,
-                attack_sequence_active: true,
-                target_guid: Some(target_guid),
                 player_position,
-                target: Some(target_sample),
-                target_use_radius: None,
+                target: Some(ResolvedNavigationTarget {
+                    guid: target_guid,
+                    sample: target_sample,
+                    use_radius: None,
+                }),
                 max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
@@ -3780,30 +3769,33 @@ mod tests {
         let player_position = state.data.player_pos;
         seed_sticky_melee(
             &mut state,
-            StickyMeleeSyncInput {
+            Some(target_guid),
+            CombatMode::Melee,
+            true,
+            NavigationSyncInput {
                 now: Instant::now() - Duration::from_millis(250),
-                combat_mode: CombatMode::Melee,
-                attack_sequence_active: true,
-                target_guid: Some(target_guid),
                 player_position,
-                target: Some(holtburger_core::EntitySpatialSample {
+                target: Some(ResolvedNavigationTarget {
                     guid: target_guid,
-                    authoritative_pose: WorldPosition {
-                        landblock_id: Guid(0x01000000),
-                        coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
-                        ..WorldPosition::default()
+                    sample: holtburger_core::EntitySpatialSample {
+                        guid: target_guid,
+                        authoritative_pose: WorldPosition {
+                            landblock_id: Guid(0x01000000),
+                            coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
+                            ..WorldPosition::default()
+                        },
+                        projected_pose: WorldPosition {
+                            landblock_id: Guid(0x01000000),
+                            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+                            ..WorldPosition::default()
+                        },
+                        velocity: holtburger_common::Vector3::zero(),
+                        omega: holtburger_common::Vector3::zero(),
+                        motion_state: None,
+                        projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
                     },
-                    projected_pose: WorldPosition {
-                        landblock_id: Guid(0x01000000),
-                        coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
-                        ..WorldPosition::default()
-                    },
-                    velocity: holtburger_common::Vector3::zero(),
-                    omega: holtburger_common::Vector3::zero(),
-                    motion_state: None,
-                    projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
+                    use_radius: None,
                 }),
-                target_use_radius: None,
                 max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );

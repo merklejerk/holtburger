@@ -484,6 +484,139 @@ fn test_stale_player_autonomous_sync_is_ignored() {
 }
 
 #[test]
+fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advances() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6000_0001);
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
+    entity.sequences[4] = 30;
+    entity.sequences[6] = 40;
+    state.entities.insert(entity);
+
+    let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid,
+        pos: PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: Vector3::new(10.0, 20.0, 0.5),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            instance_sequence: 8,
+            position_sequence: 9,
+            teleport_sequence: 30,
+            force_position_sequence: 41,
+            ..PositionPack::default()
+        },
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert_eq!(state.entities.get(guid).unwrap().position.coords.x, 10.0);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ForcedReposition {
+            guid: event_guid,
+            pos,
+            sequence: 41,
+        } if *event_guid == guid && (pos.coords.x - 10.0).abs() < 1e-5
+    )));
+}
+
+#[test]
+fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0002);
+    let guid = Guid(0x6000_0002);
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(4.0, 5.0, 6.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.player.position = initial_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), initial_pos));
+
+    let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
+    entity.sequences[4] = 30;
+    entity.sequences[6] = 40;
+    state.add_entity(entity);
+
+    let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
+        guid,
+        pos: PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x2020FFFF),
+                coords: Vector3::new(40.0, 50.0, 60.0),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            instance_sequence: 8,
+            position_sequence: 9,
+            teleport_sequence: 30,
+            force_position_sequence: 39,
+            ..PositionPack::default()
+        },
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(events.is_empty());
+    assert_eq!(state.entities.get(guid).unwrap().position, initial_pos);
+
+    let nearby: std::collections::HashSet<_> = state
+        .get_nearby_entities()
+        .into_iter()
+        .map(|entity| entity.guid)
+        .collect();
+    assert!(nearby.contains(&guid));
+}
+
+#[test]
+fn test_remote_autonomous_position_emits_forced_reposition_even_without_sequence_change() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6000_0003);
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
+    entity.sequences[4] = 30;
+    entity.sequences[6] = 40;
+    state.entities.insert(entity);
+
+    let msg = GameMessage::AutonomousPosition(Box::new(ServerAutonomousPositionData {
+        guid,
+        position: WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(7.0, 8.0, 9.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+        instance_sequence: 12,
+        server_control_sequence: 13,
+        teleport_sequence: 30,
+        force_position_sequence: 40,
+        contact_flags: 0,
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert_eq!(state.entities.get(guid).unwrap().position.coords.x, 7.0);
+    assert_eq!(state.entities.get(guid).unwrap().sequences[5], 13);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ForcedReposition {
+            guid: event_guid,
+            pos,
+            sequence: 40,
+        } if *event_guid == guid && (pos.coords.x - 7.0).abs() < 1e-5
+    )));
+}
+
+#[test]
 fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
@@ -1728,7 +1861,12 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
     });
 
     let mut events = Vec::new();
-    let _ = state.move_entity_to_position(target_guid, player_pos, &mut events);
+    let _ = state.apply_public_position_update(
+        target_guid,
+        PositionType::Location,
+        player_pos,
+        &mut events,
+    );
     let tick_events = state.tick();
 
     assert!(state.entities.get(target_guid).is_some());

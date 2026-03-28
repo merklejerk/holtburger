@@ -165,6 +165,15 @@ struct NavigationPulsePlanner {
     issued_turn: Option<Turn>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ApproachEffectContext {
+    now: Option<Instant>,
+    current_heading: Option<f32>,
+    max_run_rate: f32,
+    target_guid: Guid,
+    arrival_distance: f32,
+}
+
 impl NavigationPulsePlanner {
     fn command_for_plan(
         &mut self,
@@ -715,22 +724,26 @@ impl NavigationAutomation {
                         );
                         let mut result = NavigationUpdate::default();
                         Self::apply_approach_target_effect(
-                            None,
-                            None,
-                            input.max_run_rate,
+                            ApproachEffectContext {
+                                now: None,
+                                current_heading: None,
+                                max_run_rate: input.max_run_rate,
+                                target_guid: state.target_guid,
+                                arrival_distance: state.controller.arrival_distance(),
+                            },
                             &mut state.planner,
-                            state.target_guid,
-                            state.controller.arrival_distance(),
                             ApproachTargetEffect::Stop,
                             &mut result,
                         );
                         Self::apply_approach_target_effect(
-                            None,
-                            None,
-                            input.max_run_rate,
+                            ApproachEffectContext {
+                                now: None,
+                                current_heading: None,
+                                max_run_rate: input.max_run_rate,
+                                target_guid: state.target_guid,
+                                arrival_distance: state.controller.arrival_distance(),
+                            },
                             &mut state.planner,
-                            state.target_guid,
-                            state.controller.arrival_distance(),
                             ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
                             &mut result,
                         );
@@ -1039,12 +1052,14 @@ impl NavigationAutomation {
         let mut result = NavigationUpdate::default();
         for effect in update.effects {
             Self::apply_approach_target_effect(
-                Some(input.now),
-                Some(player_position.rotation.to_heading()),
-                input.max_run_rate,
+                ApproachEffectContext {
+                    now: Some(input.now),
+                    current_heading: Some(player_position.rotation.to_heading()),
+                    max_run_rate: input.max_run_rate,
+                    target_guid,
+                    arrival_distance,
+                },
                 planner,
-                target_guid,
-                arrival_distance,
                 effect,
                 &mut result,
             );
@@ -1247,12 +1262,14 @@ impl NavigationAutomation {
         let mut result = NavigationUpdate::default();
         for effect in update.effects {
             Self::apply_approach_target_effect(
-                None,
-                None,
-                0.0,
+                ApproachEffectContext {
+                    now: None,
+                    current_heading: None,
+                    max_run_rate: 0.0,
+                    target_guid,
+                    arrival_distance,
+                },
                 planner,
-                target_guid,
-                arrival_distance,
                 effect,
                 &mut result,
             );
@@ -1261,12 +1278,8 @@ impl NavigationAutomation {
     }
 
     fn apply_approach_target_effect(
-        now: Option<Instant>,
-        current_heading: Option<f32>,
-        max_run_rate: f32,
+        context: ApproachEffectContext,
         planner: &mut NavigationPulsePlanner,
-        target_guid: Guid,
-        arrival_distance: f32,
         effect: ApproachTargetEffect,
         result: &mut NavigationUpdate,
     ) {
@@ -1274,23 +1287,23 @@ impl NavigationAutomation {
             ApproachTargetEffect::Pursue(plan) => {
                 log::info!(
                     "approach: target 0x{:08X} pursuing with heading {:.3} rad, remaining {:.2}m, navigation speed cap {:.2}, arrival {:.2}m",
-                    target_guid.0,
+                    context.target_guid.0,
                     plan.heading,
                     plan.remaining_distance,
-                    max_run_rate,
-                    arrival_distance,
+                    context.max_run_rate,
+                    context.arrival_distance,
                 );
-                if let Some(now) = now {
+                if let Some(now) = context.now {
                     let update = planner.command_for_plan(
                         now,
                         plan,
-                        current_heading.unwrap_or(plan.heading),
-                        max_run_rate,
+                        context.current_heading.unwrap_or(plan.heading),
+                        context.max_run_rate,
                     );
                     if !update.commands.is_empty() {
                         log::info!(
                             "approach: target 0x{:08X} emitted movement commands {:?}",
-                            target_guid.0,
+                            context.target_guid.0,
                             update.commands,
                         );
                     }
@@ -1301,7 +1314,7 @@ impl NavigationAutomation {
                 if let Some(command) = planner.stop_command() {
                     log::info!(
                         "approach: target 0x{:08X} emitted stop command {:?}",
-                        target_guid.0,
+                        context.target_guid.0,
                         command,
                     );
                     result.push_command(command);
@@ -1311,8 +1324,8 @@ impl NavigationAutomation {
                 ApproachTargetFinishReason::Arrived => {
                     log::info!(
                         "approach: arrived at target 0x{:08X} within {:.2}m",
-                        target_guid.0,
-                        arrival_distance
+                        context.target_guid.0,
+                        context.arrival_distance
                     );
                 }
                 ApproachTargetFinishReason::TargetUnavailable => {

@@ -529,22 +529,27 @@ fn test_remote_update_position_emits_forced_reposition_when_force_sequence_advan
 #[test]
 fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() {
     let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0002);
     let guid = Guid(0x6000_0002);
     let initial_pos = WorldPosition {
-        landblock_id: Guid(0x01000000),
+        landblock_id: Guid(0x0A0AFFFF),
         coords: Vector3::new(4.0, 5.0, 6.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
+    state.player.guid = player_guid;
+    state.player.position = initial_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), initial_pos));
+
     let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
     entity.sequences[4] = 30;
     entity.sequences[6] = 40;
-    state.entities.insert(entity);
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdatePosition(Box::new(UpdatePositionData {
         guid,
         pos: PositionPack {
             pos: WorldPosition {
-                landblock_id: Guid(0x01000000),
+                landblock_id: Guid(0x2020FFFF),
                 coords: Vector3::new(40.0, 50.0, 60.0),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
@@ -560,6 +565,13 @@ fn test_stale_remote_update_position_is_ignored_when_force_sequence_regresses() 
 
     assert!(events.is_empty());
     assert_eq!(state.entities.get(guid).unwrap().position, initial_pos);
+
+    let nearby: std::collections::HashSet<_> = state
+        .get_nearby_entities()
+        .into_iter()
+        .map(|entity| entity.guid)
+        .collect();
+    assert!(nearby.contains(&guid));
 }
 
 #[test]

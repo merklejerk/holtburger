@@ -400,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn slows_down_when_close_to_arrival_shell() {
+    fn computes_remaining_distance_near_arrival_threshold() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(0.5);
 

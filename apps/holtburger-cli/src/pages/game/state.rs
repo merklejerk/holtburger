@@ -3,9 +3,9 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-use holtburger_core::client::movement_types::{
-    MovementPacketMetadata, MovementPrimitive, MovementRequest,
-};
+use holtburger_core::client::movement_types::MovementCommand;
+#[cfg(test)]
+use holtburger_core::client::movement_types::{Locomotion, MotionState, Turn};
 use holtburger_core::client::navigation::{
     NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
     ResolvedNavigationTarget,
@@ -293,10 +293,23 @@ impl GameState {
             ClientViewEvent::PlayerGroundedUpdated { grounded } => {
                 self.data.player_grounded = Some(grounded);
             }
-            ClientViewEvent::ForcedReposition { guid, .. } => {
-                if Some(guid) == self.data.player_guid {
-                    self.handle_forced_reposition(&mut result);
+            ClientViewEvent::ForcedReposition { guid, pos, .. } => {
+                let is_player_move = Some(guid) == self.data.player_guid;
+                if let Some(entity) = self.data.entities.get_mut(&guid) {
+                    entity.position = pos;
+                    if is_player_move {
+                        self.data.player_pos = Some(pos);
+                    }
                 }
+                self.refresh_entity_context_if_visible(guid);
+                if is_player_move {
+                    self.handle_forced_reposition(&mut result);
+                } else {
+                    self.sync_approach_target(now, &mut result);
+                    self.sync_follow_target(now, &mut result);
+                    self.sync_sticky_melee_pursuit(&mut result);
+                }
+                result.needs_redraw = true;
             }
             ClientViewEvent::TeleportStarted { .. } => {
                 self.handle_teleport_start(&mut result);
@@ -763,10 +776,7 @@ impl GameState {
                     if Self::is_frontend_navigation_interaction(self.view.active_interaction)
                         && !Self::is_frontend_navigation_interaction(Some(interaction))
                     {
-                        let update = self
-                            .runtime
-                            .navigation
-                            .clear_navigation(self.current_movement_metadata());
+                        let update = self.runtime.navigation.clear_navigation();
                         result.commands.extend(update.commands);
                     }
                     self.set_active_interaction(Some(interaction), &mut result);
@@ -991,10 +1001,7 @@ impl GameState {
 
     pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
         if Self::is_frontend_navigation_interaction(self.view.active_interaction) {
-            let update = self
-                .runtime
-                .navigation
-                .clear_navigation(self.current_movement_metadata());
+            let update = self.runtime.navigation.clear_navigation();
             result.commands.extend(update.commands);
         }
 
@@ -1192,10 +1199,11 @@ impl GameState {
             CombatAutomationEffect::TurnTo { heading } => {
                 self.data.combat_runtime.queue_attack();
                 result.needs_redraw = true;
-                result.commands.push(ClientCommand::ExecuteMovement(
-                    MovementRequest::new(MovementPrimitive::SnapFacing { heading })
-                        .with_metadata(self.current_movement_metadata()),
-                ));
+                result
+                    .commands
+                    .push(ClientCommand::DriveMovement(MovementCommand::SnapFacing {
+                        heading,
+                    }));
             }
             CombatAutomationEffect::Attack(request) => {
                 self.data.combat_runtime.queue_attack();
@@ -1259,12 +1267,10 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let move_speed = self
+        let max_run_rate = self
             .data
-            .get_run_rate()
+            .player_run_rate()
             .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
-        let metadata = self.current_movement_metadata();
-
         NavigationSyncInput {
             now,
             player_position: self.data.player_pos,
@@ -1275,8 +1281,7 @@ impl GameState {
                     sample,
                     use_radius: target_use_radius,
                 }),
-            move_speed,
-            metadata,
+            max_run_rate,
         }
     }
 
@@ -1287,10 +1292,43 @@ impl GameState {
         now: Instant,
         result: &mut UpdateResult,
     ) {
-        let update = self
-            .runtime
-            .navigation
-            .reconcile_navigation(intent, self.navigation_sync_input(now, target_guid));
+        let input = self.navigation_sync_input(now, target_guid);
+        let authoritative_distance = input
+            .player_position
+            .zip(input.target.map(|target| target.sample.authoritative_pose))
+            .map(|(player, target)| player.distance_to(&target));
+        let projected_distance = input
+            .player_position
+            .zip(input.target.map(|target| target.sample.projected_pose))
+            .map(|(player, target)| player.distance_to(&target));
+
+        if !matches!(
+            intent,
+            NavigationIntent::StickyMelee {
+                target_guid: None,
+                combat_mode: CombatMode::NonCombat,
+                attack_sequence_active: false,
+            }
+        ) {
+            log::info!(
+                "tui navigation: syncing {:?} target={:?} player_present={} auth_distance={:?} projected_distance={:?} max_run_rate={:.2}",
+                intent,
+                target_guid.map(|guid| format!("0x{:08X}", guid.0)),
+                input.player_position.is_some(),
+                authoritative_distance,
+                projected_distance,
+                input.max_run_rate,
+            );
+        }
+
+        let update = self.runtime.navigation.reconcile_navigation(intent, input);
+        if !update.commands.is_empty() {
+            log::info!(
+                "tui navigation: emitted {} command(s): {:?}",
+                update.commands.len(),
+                update.commands,
+            );
+        }
         result.commands.extend(update.commands);
     }
 
@@ -1363,7 +1401,7 @@ impl GameState {
         self.reconcile_navigation(
             NavigationIntent::Follow {
                 target: target_guid,
-                arrival_distance: GENERIC_APPROACH_DISTANCE,
+                arrival_distance: FOLLOW_DISTANCE,
             },
             Some(target_guid),
             now,
@@ -1379,10 +1417,7 @@ impl GameState {
     }
 
     fn handle_forced_reposition(&mut self, result: &mut UpdateResult) {
-        let update = self
-            .runtime
-            .navigation
-            .handle_forced_reposition(self.current_movement_metadata());
+        let update = self.runtime.navigation.handle_forced_reposition();
         result.commands.extend(update.commands);
         self.clear_finished_approach_interaction(result);
         if !matches!(
@@ -1394,10 +1429,7 @@ impl GameState {
     }
 
     fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
-        let update = self
-            .runtime
-            .navigation
-            .handle_teleport_start(self.current_movement_metadata());
+        let update = self.runtime.navigation.handle_teleport_start();
         result.commands.extend(update.commands);
 
         if matches!(
@@ -1722,10 +1754,6 @@ impl GameState {
         result
     }
 
-    pub(crate) fn current_movement_metadata(&self) -> MovementPacketMetadata {
-        MovementPacketMetadata::default()
-    }
-
     fn refresh_entity_context_if_visible(&mut self, guid: Guid) {
         if matches!(
             self.view.context_view,
@@ -1816,7 +1844,6 @@ mod tests {
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::client::navigation::{ApproachSyncInput, StickyMeleeSyncInput};
     use holtburger_core::{ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode};
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
@@ -1840,61 +1867,81 @@ mod tests {
         state.runtime.navigation.sticky_is_pursuing()
     }
 
+    fn is_run_movement_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
+                    ..
+                },
+            }) | ClientCommand::DriveMovement(MovementCommand::PulseMotion {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
+                    ..
+                },
+                ..
+            })
+        )
+    }
+
+    fn is_turn_movement_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::DriveMovement(MovementCommand::SetMotion {
+                state: MotionState {
+                    locomotion: None,
+                    turning: Some(Turn::Left | Turn::Right),
+                    ..
+                },
+            })
+        )
+    }
+
+    fn is_navigation_movement_command(command: &ClientCommand) -> bool {
+        is_run_movement_command(command) || is_turn_movement_command(command)
+    }
+
+    fn is_stop_movement_command(command: &ClientCommand) -> bool {
+        matches!(command, ClientCommand::DriveMovement(MovementCommand::Stop))
+    }
+
+    fn is_snap_facing_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. })
+        )
+    }
+
     fn seed_active_approach(
         state: &mut GameState,
         target: Guid,
         arrival_distance: f32,
-        input: ApproachSyncInput,
+        input: NavigationSyncInput,
     ) {
         let _ = state.runtime.navigation.reconcile_navigation(
             NavigationIntent::Approach {
                 target,
                 arrival_distance,
             },
-            NavigationSyncInput {
-                now: input.now,
-                player_position: input.player_position,
-                target: input
-                    .target_position
-                    .map(|target_position| ResolvedNavigationTarget {
-                        guid: target,
-                        sample: EntitySpatialSample {
-                            guid: target,
-                            authoritative_pose: target_position,
-                            projected_pose: target_position,
-                            velocity: Vector3::zero(),
-                            omega: Vector3::zero(),
-                            motion_state: None,
-                            projection_mode: ProjectionMode::AuthoritativeOnly,
-                        },
-                        use_radius: input.target_use_radius,
-                    }),
-                move_speed: input.move_speed,
-                metadata: input.metadata,
-            },
+            input,
         );
     }
 
-    fn seed_sticky_melee(state: &mut GameState, input: StickyMeleeSyncInput) {
+    fn seed_sticky_melee(
+        state: &mut GameState,
+        target_guid: Option<Guid>,
+        combat_mode: CombatMode,
+        attack_sequence_active: bool,
+        input: NavigationSyncInput,
+    ) {
         let _ = state.runtime.navigation.reconcile_navigation(
             NavigationIntent::StickyMelee {
-                target_guid: input.target_guid,
-                combat_mode: input.combat_mode,
-                attack_sequence_active: input.attack_sequence_active,
+                target_guid,
+                combat_mode,
+                attack_sequence_active,
             },
-            NavigationSyncInput {
-                now: input.now,
-                player_position: input.player_position,
-                target: input.target_guid.zip(input.target).map(|(guid, target)| {
-                    ResolvedNavigationTarget {
-                        guid,
-                        sample: target,
-                        use_radius: input.target_use_radius,
-                    }
-                }),
-                move_speed: input.move_speed,
-                metadata: input.metadata,
-            },
+            input,
         );
     }
 
@@ -2407,13 +2454,23 @@ mod tests {
             &mut state,
             target_guid,
             1.0,
-            ApproachSyncInput {
+            NavigationSyncInput {
                 now: Instant::now(),
                 player_position: Some(start_pos),
-                target_position: Some(target_pos),
-                target_use_radius: None,
-                move_speed: DEFAULT_APPROACH_RUN_RATE,
-                metadata: MovementPacketMetadata::default(),
+                target: Some(ResolvedNavigationTarget {
+                    guid: target_guid,
+                    sample: EntitySpatialSample {
+                        guid: target_guid,
+                        authoritative_pose: target_pos,
+                        projected_pose: target_pos,
+                        velocity: Vector3::zero(),
+                        omega: Vector3::zero(),
+                        motion_state: None,
+                        projection_mode: ProjectionMode::AuthoritativeOnly,
+                    },
+                    use_radius: None,
+                }),
+                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3097,11 +3154,7 @@ mod tests {
                 command,
                 ClientCommand::TargetedMeleeAttack { .. }
                     | ClientCommand::TargetedMissileAttack { .. }
-                    | ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive: MovementPrimitive::SnapFacing { .. },
-                        ..
-                    })
-            )
+            ) || is_snap_facing_command(command)
         }));
         assert!(!state.data.combat_runtime.attack_queued);
     }
@@ -3140,16 +3193,18 @@ mod tests {
         );
         seed_sticky_melee(
             &mut state,
-            StickyMeleeSyncInput {
+            Some(target_guid),
+            CombatMode::Melee,
+            true,
+            NavigationSyncInput {
                 now: Instant::now() - Duration::from_millis(250),
-                combat_mode: CombatMode::Melee,
-                attack_sequence_active: true,
-                target_guid: Some(target_guid),
                 player_position,
-                target: Some(target_sample),
-                target_use_radius: None,
-                move_speed: DEFAULT_APPROACH_RUN_RATE,
-                metadata: MovementPacketMetadata::default(),
+                target: Some(ResolvedNavigationTarget {
+                    guid: target_guid,
+                    sample: target_sample,
+                    use_radius: None,
+                }),
+                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3159,13 +3214,7 @@ mod tests {
             },
         ));
 
-        assert!(result.commands.iter().any(|command| matches!(
-            command,
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::SnapFacing { .. },
-                ..
-            })
-        )));
+        assert!(result.commands.iter().any(is_snap_facing_command));
         assert!(!has_active_approach(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
 
@@ -3212,15 +3261,8 @@ mod tests {
         ));
 
         assert!(!result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::TargetedMeleeAttack { .. }
-                    | ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-            )
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
         }));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3248,18 +3290,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(
-            started.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
@@ -3276,15 +3307,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3323,19 +3346,66 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(matches!(
             state.runtime.navigation.navigation_mode(),
             Some(NavigationMode::Follow { .. })
         ));
+        assert_eq!(
+            state.view.active_interaction,
+            Some(Interaction::Following { target_guid })
+        );
+    }
+
+    #[test]
+    fn remote_forced_reposition_updates_target_position_and_restarts_follow_when_out_of_range() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(
+                target_guid,
+                "Drudge",
+                WorldPosition {
+                    landblock_id: Guid(0x01000000),
+                    coords: holtburger_common::Vector3::new(FOLLOW_DISTANCE * 0.5, 0.0, 0.0),
+                    ..WorldPosition::default()
+                },
+            ),
+        );
+
+        let _ = state
+            .handle_action(AppAction::Follow { guid: target_guid })
+            .unwrap();
+
+        let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+            guid: target_guid,
+            pos: WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: holtburger_common::Vector3::new(6.0, 0.0, 0.0),
+                ..WorldPosition::default()
+            },
+            sequence: 42,
+        });
+
+        assert_eq!(
+            state
+                .data
+                .entities
+                .get(&target_guid)
+                .unwrap()
+                .position
+                .coords
+                .x,
+            6.0
+        );
+        assert!(result.commands.iter().any(is_navigation_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3366,16 +3436,7 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        assert!(started.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3390,15 +3451,7 @@ mod tests {
             },
         });
 
-        assert!(in_range.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(in_range.commands.iter().any(is_stop_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3413,16 +3466,7 @@ mod tests {
             },
         });
 
-        assert!(slipped.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(slipped.commands.iter().any(is_navigation_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3460,15 +3504,7 @@ mod tests {
 
         let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -3500,25 +3536,11 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
 
-        let stop_index = result.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        });
-        let drive_index = result.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        });
+        let stop_index = result.commands.iter().position(is_stop_movement_command);
+        let drive_index = result
+            .commands
+            .iter()
+            .position(is_navigation_movement_command);
 
         assert!(matches!((stop_index, drive_index), (Some(stop), Some(drive)) if stop < drive));
         assert!(has_active_approach(&state));
@@ -3555,31 +3577,12 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(
-            started.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3615,15 +3618,7 @@ mod tests {
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(
             result
                 .commands
@@ -3668,15 +3663,7 @@ mod tests {
 
         let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3704,18 +3691,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(
-            started.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(started.commands.iter().any(is_navigation_movement_command));
         assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::EntityMoved {
@@ -3727,15 +3703,7 @@ mod tests {
             },
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
     }
 
@@ -3766,13 +3734,7 @@ mod tests {
         let mut turn = UpdateResult::new();
         state.sync_combat_automation(now, CombatMode::Missile, true, &mut turn);
 
-        assert!(turn.commands.iter().any(|command| matches!(
-            command,
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::SnapFacing { .. },
-                ..
-            })
-        )));
+        assert!(turn.commands.iter().any(is_snap_facing_command));
         assert!(
             !turn
                 .commands
@@ -3805,46 +3767,40 @@ mod tests {
         let player_position = state.data.player_pos;
         seed_sticky_melee(
             &mut state,
-            StickyMeleeSyncInput {
+            Some(target_guid),
+            CombatMode::Melee,
+            true,
+            NavigationSyncInput {
                 now: Instant::now() - Duration::from_millis(250),
-                combat_mode: CombatMode::Melee,
-                attack_sequence_active: true,
-                target_guid: Some(target_guid),
                 player_position,
-                target: Some(holtburger_core::EntitySpatialSample {
+                target: Some(ResolvedNavigationTarget {
                     guid: target_guid,
-                    authoritative_pose: WorldPosition {
-                        landblock_id: Guid(0x01000000),
-                        coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
-                        ..WorldPosition::default()
+                    sample: holtburger_core::EntitySpatialSample {
+                        guid: target_guid,
+                        authoritative_pose: WorldPosition {
+                            landblock_id: Guid(0x01000000),
+                            coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
+                            ..WorldPosition::default()
+                        },
+                        projected_pose: WorldPosition {
+                            landblock_id: Guid(0x01000000),
+                            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+                            ..WorldPosition::default()
+                        },
+                        velocity: holtburger_common::Vector3::zero(),
+                        omega: holtburger_common::Vector3::zero(),
+                        motion_state: None,
+                        projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
                     },
-                    projected_pose: WorldPosition {
-                        landblock_id: Guid(0x01000000),
-                        coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
-                        ..WorldPosition::default()
-                    },
-                    velocity: holtburger_common::Vector3::zero(),
-                    omega: holtburger_common::Vector3::zero(),
-                    motion_state: None,
-                    projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
+                    use_radius: None,
                 }),
-                target_use_radius: None,
-                move_speed: DEFAULT_APPROACH_RUN_RATE,
-                metadata: MovementPacketMetadata::default(),
+                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
         let in_range = state.handle_tick(0.016);
 
-        assert!(in_range.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(in_range.commands.iter().any(is_stop_movement_command));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(!sticky_is_pursuing(&state));
 
@@ -3854,16 +3810,10 @@ mod tests {
         let slipped_again = state.handle_tick(0.016);
 
         assert!(
-            slipped_again.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
+            slipped_again
+                .commands
+                .iter()
+                .any(is_navigation_movement_command)
         );
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(sticky_is_pursuing(&state));
@@ -4034,29 +3984,12 @@ mod tests {
         let mut first = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut first);
 
-        assert!(first.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(first.commands.iter().any(is_navigation_movement_command));
 
         let mut second = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut second);
 
         assert!(second.commands.is_empty());
         assert!(has_active_approach(&state));
-    }
-
-    #[test]
-    fn movement_metadata_does_not_echo_server_grounded_state() {
-        let player_guid = Guid(0x50000001);
-        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-        state.data.player_grounded = Some(false);
-
-        assert_eq!(state.current_movement_metadata().contact, None);
     }
 }

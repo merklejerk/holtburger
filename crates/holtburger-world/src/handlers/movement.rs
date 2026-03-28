@@ -32,7 +32,7 @@ pub(crate) fn handle_message(
                 events.extend(state.set_player_position(data.pos.pos));
                 true
             } else {
-                state.move_entity_to_position(data.guid, data.pos.pos, events)
+                state.apply_entity_position_pack(data.guid, &data.pos, events)
             }
         }
         GameMessage::PrivateUpdatePosition(data) => {
@@ -47,7 +47,7 @@ pub(crate) fn handle_message(
                 events.extend(state.apply_player_autonomous_position(data));
                 true
             } else {
-                state.move_entity_to_position(data.guid, data.position, events)
+                state.apply_entity_autonomous_position(data, events)
             }
         }
         GameMessage::UpdateMotion(data) => {

@@ -409,6 +409,13 @@ impl WorldState {
         {
             self.entities.insert(entity.clone());
             self.scene.update_entity(guid, old_lb, entity.position);
+            self.reconcile_authoritative_body(
+                guid,
+                entity.position,
+                entity.velocity,
+                entity.omega,
+                crate::spatial::AuthoritativeBodySync::Snapshot,
+            );
             events.push(WorldEvent::EntityReplaced(Box::new(entity)));
             EntityUpsertKind::Replaced
         } else {

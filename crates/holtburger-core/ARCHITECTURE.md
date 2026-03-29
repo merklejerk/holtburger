@@ -63,7 +63,7 @@ The same split applies to entity motion coming back from the server:
 2. `holtburger-core` projects those snapshots into client-view events for frontends that want to render or inspect motion.
 3. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
 
-Render-oriented consumers should keep that boundary explicit: drive an `EntityProjectionSystem` from `ClientViewEvent`s, tick it from frame time, and batch-read projected transforms from `iter_projected_entities()` while leaving gameplay legality and authority checks on the world mirror.
+Render-oriented consumers should keep that boundary explicit: own a `SpatialScene` for runtime sampling, drive a `ClientViewSpatialBridge` against that scene from `ClientViewEvent`s, tick the scene from frame time, and batch-read projected transforms from `iter_projected_entities(&scene)` while leaving gameplay legality and authority checks on the world mirror.
 
 Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. Bootstrap and resume come from authoritative snapshots, authoritative pose updates, or explicit reset events.
 

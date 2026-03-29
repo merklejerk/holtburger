@@ -693,11 +693,16 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert_eq!(client.world.player.server_control_sequence, 10);
-        assert_eq!(client.world.player.position.landblock_id, destination.landblock_id);
-        assert_eq!(client.world.player.position.coords, destination.coords);
+        assert_eq!(client.world.player.position, start);
+        let body = client
+            .world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
+            .expect("server-controlled movement should update the local runtime body");
+        assert_eq!(body.pose.landblock_id, destination.landblock_id);
+        assert_eq!(body.pose.coords, destination.coords);
         assert!(
-            (client.world.player.position.rotation.to_heading() - 90.0_f32.to_radians()).abs()
-                < 1e-5
+            (body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5
         );
         assert_eq!(client.session.packet_sequence, 2);
     }

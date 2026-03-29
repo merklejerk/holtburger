@@ -14,12 +14,13 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
-use holtburger_core::{ClientViewEvent, EntityProjectionSystem};
+use holtburger_core::{ClientViewEvent, ClientViewSpatialBridge};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
+use holtburger_world::SpatialScene;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::fs::File;
@@ -154,7 +155,7 @@ impl GameState {
             ContextView::Debug(InspectTarget::Entity(_)) => Some(build_context_panel_content(
                 &self.data,
                 &self.view,
-                Some(&self.runtime.projection),
+                Some(&self.runtime.projection_scene),
             )),
             _ => None,
         }
@@ -163,7 +164,9 @@ impl GameState {
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         let now = Instant::now();
-        self.runtime.projection.handle_view_event(&event, now);
+        self.runtime
+            .spatial_bridge
+            .handle_view_event(&mut self.runtime.projection_scene, &event, now);
         match event {
             ClientViewEvent::LogMessage(_)
             | ClientViewEvent::ServerMessage { .. }
@@ -316,7 +319,9 @@ impl GameState {
             }
             ClientViewEvent::EntityDespawned { guid } => {
                 result.merge(self.handle_entity_removed(guid));
-                self.runtime.projection.reset_entity(guid);
+                self.runtime
+                    .spatial_bridge
+                    .reset_entity(&mut self.runtime.projection_scene, guid);
                 self.sync_approach_target(now, &mut result);
                 self.sync_follow_target(now, &mut result);
                 self.sync_sticky_melee_pursuit(&mut result);
@@ -822,7 +827,9 @@ impl GameState {
         let mut result = UpdateResult::new();
         let now = Instant::now();
         self.sync_inventory_notification_arming(now);
-        self.runtime.projection.tick(now);
+        self.runtime
+            .spatial_bridge
+            .tick(&mut self.runtime.projection_scene, now);
 
         // Proactive enchantment purge
         let old_count = self.data.player_enchantments.len();
@@ -859,8 +866,11 @@ impl GameState {
             self.render_state.context_buffer.clear();
             return;
         }
-        let content =
-            build_context_panel_content(&self.data, &self.view, Some(&self.runtime.projection));
+        let content = build_context_panel_content(
+            &self.data,
+            &self.view,
+            Some(&self.runtime.projection_scene),
+        );
         self.render_state.context_buffer = content;
     }
 
@@ -1259,11 +1269,8 @@ impl GameState {
         target_guid: Option<Guid>,
     ) -> NavigationSyncInput {
         let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
-        let target_sample = target_entity.map(|entity| {
-            self.runtime
-                .projection
-                .spatial_sample_or_authoritative(entity)
-        });
+        let target_sample =
+            target_entity.map(|entity| self.runtime.projection_scene.spatial_sample_or_authoritative(entity));
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
@@ -1787,12 +1794,13 @@ pub struct ViewState {
     pub active_busy_operation: Option<BusyOperationKind>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: NavigationAutomation,
-    projection: EntityProjectionSystem,
+    spatial_bridge: ClientViewSpatialBridge,
+    projection_scene: SpatialScene,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,
@@ -1844,9 +1852,10 @@ mod tests {
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::{ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode};
+    use holtburger_core::ActiveCharacterConfirmation;
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
+    use holtburger_world::{SpatialEntitySample, SpatialSampleMode};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
     fn is_weapon_swap_active(state: &GameState) -> bool {
         state.runtime.weapon_swap.is_active()
@@ -2459,14 +2468,14 @@ mod tests {
                 player_position: Some(start_pos),
                 target: Some(ResolvedNavigationTarget {
                     guid: target_guid,
-                    sample: EntitySpatialSample {
+                    sample: SpatialEntitySample {
                         guid: target_guid,
                         authoritative_pose: target_pos,
                         projected_pose: target_pos,
                         velocity: Vector3::zero(),
                         omega: Vector3::zero(),
                         motion_state: None,
-                        projection_mode: ProjectionMode::AuthoritativeOnly,
+                        projection_mode: SpatialSampleMode::AuthoritativeOnly,
                     },
                     use_radius: None,
                 }),
@@ -3184,13 +3193,16 @@ mod tests {
         );
 
         let player_position = state.data.player_pos;
-        let target_sample = state.runtime.projection.spatial_sample_or_authoritative(
-            state
-                .data
-                .entities
-                .get(&target_guid)
-                .expect("target entity should exist"),
-        );
+        let target_sample = state
+            .runtime
+            .projection_scene
+            .spatial_sample_or_authoritative(
+                state
+                    .data
+                    .entities
+                    .get(&target_guid)
+                    .expect("target entity should exist"),
+            );
         seed_sticky_melee(
             &mut state,
             Some(target_guid),
@@ -3775,7 +3787,7 @@ mod tests {
                 player_position,
                 target: Some(ResolvedNavigationTarget {
                     guid: target_guid,
-                    sample: holtburger_core::EntitySpatialSample {
+                    sample: SpatialEntitySample {
                         guid: target_guid,
                         authoritative_pose: WorldPosition {
                             landblock_id: Guid(0x01000000),
@@ -3790,7 +3802,7 @@ mod tests {
                         velocity: holtburger_common::Vector3::zero(),
                         omega: holtburger_common::Vector3::zero(),
                         motion_state: None,
-                        projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
+                        projection_mode: SpatialSampleMode::SimulatingVelocity,
                     },
                     use_radius: None,
                 }),

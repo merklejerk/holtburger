@@ -12,7 +12,7 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::{SolvedActorKinematics, WorldEvent, WorldState};
+use holtburger_world::{SolvedBodyKinematics, SpatialBodyId, WorldEvent, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
@@ -82,9 +82,9 @@ fn build_autonomous_position_heartbeat(
     world: &WorldState,
     metadata: MovementPacketMetadata,
 ) -> Option<AutonomousPositionActionData> {
-    let player_entity = world.entities.get(world.player.guid)?;
-    if player_entity.velocity.length_squared() < 0.0001
-        && player_entity.omega.length_squared() < 0.0001
+    let (_, velocity, omega) = world.local_player_runtime_kinematics()?;
+    if velocity.length_squared() < 0.0001
+        && omega.length_squared() < 0.0001
     {
         return None;
     }
@@ -96,12 +96,13 @@ fn build_autonomous_position_sync(
     world: &WorldState,
     metadata: MovementPacketMetadata,
 ) -> Option<AutonomousPositionActionData> {
-    if world.player.guid == Guid::NULL || world.player.position.landblock_id == Guid::NULL {
+    let position = world.local_player_runtime_pose()?;
+    if world.player.guid == Guid::NULL || position.landblock_id == Guid::NULL {
         return None;
     }
 
     Some(AutonomousPositionActionData {
-        position: world.player.position,
+        position,
         instance_sequence: world.player.instance_sequence,
         server_control_sequence: world.player.server_control_sequence,
         teleport_sequence: world.player.teleport_sequence,
@@ -507,7 +508,7 @@ impl MovementSystem {
         let locomotion = self.local_motion?;
 
         Some(LocalMotionIntent {
-            actor_id: world.player.guid,
+            body_id: SpatialBodyId::LocalPlayer(world.player.guid),
             locomotion,
         })
     }
@@ -515,7 +516,7 @@ impl MovementSystem {
     pub(super) fn handle_post_solve(
         &mut self,
         _world: &WorldState,
-        _solved: &SolvedActorKinematics,
+        _solved: &SolvedBodyKinematics,
     ) -> Vec<WorldEvent> {
         Vec::new()
     }
@@ -640,7 +641,10 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
     ) -> Result<Vec<WorldEvent>> {
         let normalized_heading = normalize_heading(desired_heading);
-        let current_heading = world.player.position.rotation.to_heading();
+        let Some(current_pose) = world.local_player_runtime_pose() else {
+            return Ok(Vec::new());
+        };
+        let current_heading = current_pose.rotation.to_heading();
 
         log::info!(
             "movement: snap facing from {:.3} rad to {:.3} rad",
@@ -652,9 +656,9 @@ impl MovementSystem {
             return Ok(Vec::new());
         }
 
-        let mut next_pos = world.player.position;
+        let mut next_pos = current_pose;
         next_pos.rotation = Quaternion::from_heading(normalized_heading);
-        let mut world_events = world.set_player_position(next_pos);
+        let mut world_events = world.set_local_player_runtime_pose(next_pos);
 
         if self.local_motion.is_some() {
             world_events.extend(self.sync_local_motion_vectors(world));
@@ -676,19 +680,22 @@ impl MovementSystem {
 
     fn apply_motion_state_stop(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
         self.local_motion = None;
-        world.set_player_vector(Vector3::zero(), Vector3::zero())
+        world.set_local_player_runtime_vectors(Vector3::zero(), Vector3::zero())
     }
 
     fn sync_local_motion_vectors(&self, world: &mut WorldState) -> Vec<WorldEvent> {
         let Some(state) = self.local_motion else {
-            return world.set_player_vector(Vector3::zero(), Vector3::zero());
+            return world.set_local_player_runtime_vectors(Vector3::zero(), Vector3::zero());
         };
 
-        let current_heading = world.player.position.rotation.to_heading();
+        let Some(current_pose) = world.local_player_runtime_pose() else {
+            return Vec::new();
+        };
+        let current_heading = current_pose.rotation.to_heading();
         let velocity = local_velocity_for_state(current_heading, state);
         let omega = local_omega_for_state(state);
 
-        world.set_player_vector(velocity, omega)
+        world.set_local_player_runtime_vectors(velocity, omega)
     }
 
     pub(super) async fn send_autonomous_position_heartbeat(
@@ -760,7 +767,7 @@ impl MovementSystem {
                 state,
                 metadata.motion_style,
             ),
-            position: world.player.position,
+            position: world.local_player_runtime_pose().unwrap_or(world.player.position),
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
@@ -784,7 +791,7 @@ impl MovementSystem {
                 RawMotionState::default(),
                 metadata.motion_style,
             ),
-            position: world.player.position,
+            position: world.local_player_runtime_pose().unwrap_or(world.player.position),
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
@@ -858,8 +865,8 @@ mod tests {
 
         let events = movement.handle_post_solve(
             &world,
-            &SolvedActorKinematics {
-                actor_id: guid,
+            &SolvedBodyKinematics {
+                body_id: SpatialBodyId::LocalPlayer(guid),
                 pose: world.player.position,
                 velocity: Vector3::zero(),
                 omega: Vector3::zero(),
@@ -1052,6 +1059,10 @@ mod tests {
         let events =
             movement.apply_motion_state(MotionState::builder().run().forward().build(), &mut world);
 
+        let body = world
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .expect("local player runtime body should exist");
         assert!(events.iter().any(|event| matches!(
             event,
             WorldEvent::EntityVectorUpdated { guid, velocity, .. }
@@ -1060,6 +1071,8 @@ mod tests {
                     && (velocity.y - 18.0).abs() < 1e-5
                     && velocity.z.abs() < 1e-5
         )));
+        assert!(body.velocity.x.abs() < 1e-5);
+        assert!((body.velocity.y - 18.0).abs() < 1e-5);
     }
 
     #[test]
@@ -1114,9 +1127,9 @@ mod tests {
         let events = movement.apply_motion_state_stop(&mut world);
 
         let player = world
-            .entities
-            .get(player_guid)
-            .expect("synthetic player entity should exist");
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .expect("local player runtime body should exist");
         assert!(
             events.is_empty()
                 || events.iter().any(|event| matches!(
@@ -1150,6 +1163,10 @@ mod tests {
             &mut world,
         );
 
+        let body = world
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .expect("local player runtime body should exist");
         assert!(events.iter().any(|event| matches!(
             event,
             WorldEvent::EntityVectorUpdated { guid, velocity, omega }
@@ -1157,6 +1174,8 @@ mod tests {
                     && velocity.length_squared() <= 1e-6
                     && omega.z.abs() > 1e-6
         )));
+        assert!(body.velocity.length_squared() <= 1e-6);
+        assert!(body.omega.z.abs() > 1e-6);
     }
 
     #[test]
@@ -1456,9 +1475,9 @@ mod tests {
             .expect("held run input should start moving");
 
         let player = world
-            .entities
-            .get(guid)
-            .expect("synthetic player entity should exist");
+            .scene
+            .body(SpatialBodyId::LocalPlayer(guid))
+            .expect("local player runtime body should exist");
         assert!(player.velocity.x.abs() < 1e-5);
         assert!((player.velocity.y - 18.0).abs() < 1e-5);
         assert_eq!(session.packet_sequence, 2);
@@ -1469,9 +1488,9 @@ mod tests {
             .expect("steady held run should not resend unchanged motion intent");
 
         let player = world
-            .entities
-            .get(guid)
-            .expect("synthetic player entity should exist");
+            .scene
+            .body(SpatialBodyId::LocalPlayer(guid))
+            .expect("local player runtime body should exist");
         assert!(player.velocity.x.abs() < 1e-5);
         assert!((player.velocity.y - 18.0).abs() < 1e-5);
         assert_eq!(session.packet_sequence, 2);
@@ -1578,7 +1597,7 @@ mod tests {
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
             coords: Vector3::new(12.0, -4.0, 1.5),
-            rotation: Quaternion::identity(),
+            rotation: Quaternion::from_heading(0.0),
         };
 
         world.player.guid = guid;
@@ -1601,8 +1620,12 @@ mod tests {
             .expect("snap facing should succeed");
 
         let _ = events;
-        assert!((world.player.position.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
-        assert_eq!(session.packet_sequence, 1);
+        let body = world
+            .scene
+            .body(SpatialBodyId::LocalPlayer(guid))
+            .expect("local player runtime body should exist");
+        assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
+        assert_eq!(session.packet_sequence, 2);
     }
 
     #[test]

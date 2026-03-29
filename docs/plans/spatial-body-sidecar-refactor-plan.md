@@ -356,22 +356,22 @@ The current codebase already shows which paths become redundant under this direc
 
 ### Task Checklist
 
-- [ ] Phase 1: add `SpatialBody` sidecar types and storage
-- [ ] Phase 1: add sidecar registration/query tests
-- [ ] Phase 1: define body-centric solver identity migration path
-- [ ] Phase 1: define scene-owned home for interpolation/dead-reckoning/suspend state
-- [ ] Phase 1: define ephemeral body registration/allocation contract
-- [ ] Phase 2: seed and reconcile authoritative entity/player state into sidecar bodies
-- [ ] Phase 2: add coherence tests for spawn/server-move/vector/despawn
-- [ ] Phase 2: define and test teleport/forced-reposition body reset behavior
-- [ ] Phase 3: route local solve and controller updates through sidecar bodies
-- [ ] Phase 3: migrate solve/apply contracts off raw `Guid`-only identity
-- [ ] Phase 3: remove routine local writes into authoritative world pose/vector fields
-- [ ] Phase 3: migrate movement packet-building reads onto body state
-- [ ] Phase 4: make scene-owned samples canonical
-- [ ] Phase 4: shrink or remove the standalone projection-owned store
-- [ ] Phase 5: migrate navigation/tracking consumers
-- [ ] Phase 5: add regression tests for migrated controller inputs
+- [x] Phase 1: add `SpatialBody` sidecar types and storage
+- [x] Phase 1: add sidecar registration/query tests
+- [x] Phase 1: define body-centric solver identity migration path
+- [x] Phase 1: define scene-owned home for interpolation/dead-reckoning/suspend state
+- [x] Phase 1: define ephemeral body registration/allocation contract
+- [x] Phase 2: seed and reconcile authoritative entity/player state into sidecar bodies
+- [x] Phase 2: add coherence tests for spawn/server-move/vector/despawn
+- [x] Phase 2: define and test teleport/forced-reposition body reset behavior
+- [x] Phase 3: route local solve and controller updates through sidecar bodies
+- [x] Phase 3: migrate solve/apply contracts off raw `Guid`-only identity
+- [x] Phase 3: remove routine local writes into authoritative world pose/vector fields
+- [x] Phase 3: migrate movement packet-building reads onto body state
+- [x] Phase 4: make scene-owned samples canonical
+- [x] Phase 4: shrink or remove the standalone projection-owned store
+- [x] Phase 5: migrate navigation/tracking consumers
+- [x] Phase 5: add regression tests for migrated controller inputs
 - [ ] Phase 6: add first non-entity body path
 - [ ] Phase 6: document constrained-prediction growth path
 
@@ -384,10 +384,34 @@ The current codebase already shows which paths become redundant under this direc
 - Open question resolution: keep `SpatialBodyId::LocalPlayer(Guid)` so the local player remains a tagged runtime identity while still carrying the underlying authoritative entity mapping.
 - Open question resolution: preserve server-faithful interpolation/runtime sampling behavior during migration rather than intentionally narrowing it in the first cut.
 - Open question resolution: navigation and controller migration should assume all authoritative spatial field reads and writes move to sidecar bodies unless a concrete counterexample appears during implementation.
+- Phase 1 implementation: `SpatialScene` owns `bodies: HashMap<SpatialBodyId, SpatialBody>` and a scene-wide `SpatialSamplingConfig` as the explicit home for future interpolation/dead-reckoning/suspend behavior.
+- Phase 1 implementation: the compatibility bridge keeps existing `Guid`-centric `SolveActorInput` / `SolvedActorKinematics` / `SpatialEvent` in place while adding `SolveBodyInput` / `SolvedBodyKinematics` / `SpatialBodyEvent` with conversions for `Entity(Guid)` and `LocalPlayer(Guid)` bodies.
+- Phase 1 implementation: ephemeral body IDs are allocated monotonically by `SpatialScene` via `SpatialBodyId::Ephemeral(u64)` starting at `1`; callers can register ephemeral bodies through scene-owned allocation instead of fabricating IDs ad hoc.
+- Phase 1 implementation: the temporary actor bridge is intentionally lossy on the way back from raw `Guid`-centric actor inputs; reconstructing `LocalPlayer(Guid)` from legacy solver contracts remains Phase 3 scheduler context, not a Phase 1 conversion guess.
+- Phase 2 implementation: authoritative world mutation remains the only source of body seeding and correction; remote entities reconcile to `SpatialBodyId::Entity(Guid)` while the local player reconciles to `SpatialBodyId::LocalPlayer(Guid)`.
+- Phase 2 implementation: authoritative snapshots and vector updates rewrite body pose/kinematics directly and clear interpolation state; ordinary accepted updates mark bodies `AuthoritativeOnly`, while forced-reposition or teleport-style resets mark bodies `Suspended` to stop runtime advancement across discontinuities.
+- Phase 2 implementation: retirement happens when authoritative world presence ends, not only on full despawn, so bodies are removed both on entity deletion and when inventory/container flows pull an object out of the world.
+- Phase 3 implementation: core runtime solve/apply now uses the body-aware compatibility layer (`LocalPlayer(Guid)` for the local runtime body, `Entity(Guid)` for tracked remote bodies) while the underlying physics trait remains temporarily `Guid`-centric.
+- Phase 3 implementation: routine local movement writes no longer call `set_player_position(...)` or `set_player_vector(...)`; movement pulses, snap-facing, local stop, and solve application now mutate only sidecar body state and leave authoritative player/entity snapshots untouched.
+- Phase 3 implementation: packet construction reads local pose/vector from the local-player body, with authoritative `PlayerState` sequences retained only for wire metadata.
+- Phase 3 implementation: compatibility `WorldEvent::EntityMoved` / `EntityVectorUpdated` / `ForcedReposition` emissions are temporarily preserved for runtime body updates so existing core view/projection consumers continue to observe local movement until Phase 4 collapses the separate projection-owned store.
+- Phase 4 implementation: interpolation, dead-reckoning, heading simulation, and suspension/reset semantics now live on `SpatialScene`/`SpatialBody` sampling state in `holtburger-world`; the remaining core bridge was renamed `ClientViewSpatialBridge` to reflect that it mutates a caller-owned `SpatialScene` from `ClientViewEvent`s instead of owning an internal runtime store.
+- Phase 4 implementation: core projection compatibility was narrowed to aliases over `SpatialProjectedEntityState` / `SpatialEntitySample`; redundant fallback sampling logic now lives only on `SpatialScene` rather than being duplicated in the core bridge.
+- Phase 5 implementation: shared navigation/controller inputs now consume `holtburger_world::SpatialEntitySample` / `SpatialSampleMode` directly, so the projection facade is no longer part of the predictive-sample contract for approach/follow/sticky or maintain-range logic.
+- Phase 5 implementation: `SpatialScene::spatial_sample_or_authoritative(&Entity)` is the temporary shared fallback helper for event-driven frontends that have an authoritative entity mirror plus a scene-owned runtime sample store but do not yet read directly from the authoritative world task.
 
 ### Verification Log
 
-- 2026-03-28: planning-only phase; no code changes executed under this plan yet.
+- 2026-03-28: implemented Phase 1 in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs) and [crates/holtburger-world/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/lib.rs).
+- 2026-03-28: added unit coverage for body registration, update, removal, ephemeral allocation, and the Guid compatibility bridge in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs).
+- 2026-03-29: implemented Phase 2 authoritative body reconciliation across [crates/holtburger-world/src/state/mutations.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/mutations.rs), [crates/holtburger-world/src/state/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/types.rs), [crates/holtburger-world/src/state/liveness.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/liveness.rs), and [crates/holtburger-world/src/handlers/inventory.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/handlers/inventory.rs).
+- 2026-03-29: added Phase 2 coherence coverage for spawn, player reconciliation, forced reposition reset, despawn, and world-presence retirement in [crates/holtburger-world/src/state/tests.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/tests.rs) plus scene-level reset semantics in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs).
+- 2026-03-29: implemented Phase 3 local runtime body migration across [crates/holtburger-world/src/state/mutations.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/mutations.rs), [crates/holtburger-core/src/client/simulation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/simulation.rs), [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs), and [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs).
+- 2026-03-29: validated Phase 3 with `cargo test -p holtburger-core` and `cargo test -p holtburger-world` after updating core/runtime expectations to assert against sidecar-owned local movement rather than authoritative player pose drift.
+- 2026-03-29: implemented Phase 4 scene-owned runtime sampling in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs), exporting scene-native projected entity/sample snapshots via [crates/holtburger-world/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/lib.rs), and narrowed [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) into a config-only facade over caller-owned scenes.
+- 2026-03-29: validated Phase 4 with `cargo test -p holtburger-world`, `cargo test -p holtburger-core`, and `cargo test -p holtburger-cli`, including the existing projection facade regression suite against explicit caller-owned scenes plus CLI runtime ownership changes that moved the scene out of `EntityProjectionSystem`.
+- 2026-03-29: implemented Phase 5 by migrating [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs), [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs), and CLI tracking/debug consumers in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) and [apps/holtburger-cli/src/pages/game/panels/dashboard/debug.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/debug.rs) onto `holtburger_world::SpatialEntitySample`, with the authoritative fallback helper added in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs).
+- 2026-03-29: validated Phase 5 with `cargo test -p holtburger-core`, `cargo test -p holtburger-cli`, and `cargo test -p holtburger-world`.
 
 ### Resolved Assumptions
 

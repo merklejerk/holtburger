@@ -1026,18 +1026,23 @@ mod tests {
             .build_solve_request(now, Duration::from_millis(PHYSICS_TICK_MS), &client.world, &client.movement)
             .expect("movement-backed local intent should produce a solve request");
 
-        let entity = client
-            .world
-            .entities
-            .get(guid)
-            .expect("player entity should exist after movement tick");
-
         assert_eq!(request.actors.len(), 1);
         let actor = request.actors[0];
         assert_eq!(actor.actor_id, guid);
-        assert_eq!(actor.pose, client.world.player.position);
-        assert_eq!(actor.velocity, entity.velocity);
-        assert_eq!(actor.omega, entity.omega);
+        assert_eq!(
+            actor.pose,
+            client
+                .world
+                .local_player_runtime_pose()
+                .expect("local player runtime pose should be readable")
+        );
+            let local_body = client
+                .world
+                .scene
+                .body(holtburger_world::SpatialBodyId::LocalPlayer(guid))
+                .expect("local player runtime body should exist after movement tick");
+            assert_eq!(actor.velocity, local_body.velocity);
+            assert_eq!(actor.omega, local_body.omega);
     }
 
     #[tokio::test]
@@ -1096,7 +1101,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn simulation_tick_advances_local_player_motion_authoritatively() {
+    async fn simulation_tick_advances_local_player_runtime_body_without_mutating_authoritative_pose() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1131,7 +1136,13 @@ mod tests {
         );
 
         assert_eq!(client.world.player.position.landblock_id, Guid(0x1000_0001));
-        assert!(client.world.player.position.coords.y > 0.0);
+        assert!(client.world.player.position.coords.y.abs() <= f32::EPSILON);
+        let body = client
+            .world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(guid))
+            .expect("local player runtime body should exist after solve");
+        assert!(body.pose.coords.y > 0.0);
         assert!(events.iter().any(|event| matches!(
             event,
             WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == guid
@@ -1169,12 +1180,18 @@ mod tests {
             .expect("tracked remote entity should exist before solve")
             .position
             .coords;
-        let remote = client
-            .world
-            .entities
-            .get_mut(remote_guid)
-            .expect("tracked remote entity should exist");
+        let mut remote = Entity::new(
+            remote_guid,
+            "Remote".to_string(),
+            holtburger_common::position::WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: holtburger_common::Vector3::new(8.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
         remote.velocity = holtburger_common::Vector3::new(2.0, 0.0, 0.0);
+        client.world.remove_entity(remote_guid);
+        client.world.add_entity(remote);
 
         client.simulation.track_actor(remote_guid);
         client.movement.enqueue_command(
@@ -1199,11 +1216,16 @@ mod tests {
 
         let remote_after = client
             .world
-            .entities
-            .get(remote_guid)
-            .expect("tracked remote entity should still exist after solve");
-        assert!(client.world.player.position.coords.y > 0.0);
-        assert!(remote_after.position.coords.x > remote_start.x);
+            .scene
+            .body(holtburger_world::SpatialBodyId::Entity(remote_guid))
+            .expect("tracked remote body should still exist after solve");
+        let player_body = client
+            .world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
+            .expect("local player runtime body should exist after solve");
+        assert!(player_body.pose.coords.y > 0.0);
+        assert!(remote_after.pose.coords.x > remote_start.x);
         assert!(events.iter().any(|event| matches!(
             event,
             WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == player_guid

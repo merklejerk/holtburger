@@ -34,13 +34,15 @@ pub struct ServerTimeSync {
 /// together. Protocol routing itself lives in `crate::handlers`; `WorldState::handle_message()` is
 /// just the stable facade used by callers such as `holtburger-core`.
 ///
-/// NOTE: The player's state is partially mirrored between `self.player` (session sequence data)
-/// and the `Entity` map (physical landblock/coords/velocity).
+/// NOTE: The player's authoritative state is partially mirrored between `self.player`
+/// (session sequence data plus authoritative snapshots) and the `Entity` map.
+/// Live local runtime motion now belongs to the `SpatialScene` sidecar body model.
 ///
 /// !!! CRITICAL !!!
-/// ALWAYS use the `set_player_*` mutation methods to update player position or velocity.
-/// Hand-writing to `self.player.position` or `self.entities` directly will cause
-/// physics desyncs and is considered "highly sus" behavior.
+/// Use `set_player_*` and related authoritative world mutation helpers for server-confirmed
+/// player updates and reconciliation. Use the runtime-body helpers for routine local simulation.
+/// Hand-writing to `self.player.position`, `self.entities`, or scene body state directly will
+/// break the authority/runtime split and is not allowed.
 pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
@@ -273,15 +275,25 @@ impl WorldState {
     pub fn add_entity(&mut self, entity: Entity) {
         let guid = entity.guid;
         let pos = entity.position;
+        let velocity = entity.velocity;
+        let omega = entity.omega;
 
         self.entities.insert(entity);
         self.scene.update_entity(guid, pos.landblock_id, pos);
+        self.reconcile_authoritative_body(
+            guid,
+            pos,
+            velocity,
+            omega,
+            crate::spatial::AuthoritativeBodySync::Snapshot,
+        );
     }
 
     pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
             self.scene.remove_entity(guid, entity.position.landblock_id);
+            self.retire_authoritative_body_for_guid(guid);
             self.entity_lifecycle.clear(guid);
 
             let dependent_guids: Vec<_> = self

@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
-use crate::{ContactState, SolvedActorKinematics};
+use crate::{ContactState, SolvedActorKinematics, SpatialBodyId, SpatialSampleMode};
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
@@ -1733,6 +1733,145 @@ fn test_upsert_entity_from_create_replaces_in_place() {
     );
     assert!(state.entity_lifecycle_state(guid).is_none());
     assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
+}
+
+#[test]
+fn test_add_entity_seeds_remote_body_sidecar() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0001);
+    let position = WorldPosition {
+        landblock_id: Guid(0x0101_FFFF),
+        coords: Vector3::new(3.0, 4.0, 5.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut entity = Entity::new(guid, "Remote".to_string(), position);
+    entity.velocity = Vector3::new(1.0, 2.0, 0.0);
+    entity.omega = Vector3::new(0.0, 0.0, 0.5);
+
+    state.add_entity(entity);
+
+    let body = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .expect("remote entity body should be seeded");
+    assert_eq!(body.authoritative_pose, Some(position));
+    assert_eq!(body.pose, position);
+    assert_eq!(body.velocity, Vector3::new(1.0, 2.0, 0.0));
+    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 0.5));
+    assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
+}
+
+#[test]
+fn test_player_authoritative_updates_seed_local_player_body() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0100);
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x1111_FFFF),
+        coords: Vector3::new(1.0, 1.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.player.position = initial_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), initial_pos));
+
+    let moved = WorldPosition {
+        landblock_id: Guid(0x2222_FFFF),
+        coords: Vector3::new(9.0, 8.0, 7.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.set_player_position(moved);
+    state.set_player_vector(Vector3::new(4.0, 5.0, 0.0), Vector3::new(0.0, 0.0, 2.0));
+
+    let body = state
+        .scene
+        .body(SpatialBodyId::LocalPlayer(player_guid))
+        .expect("local player body should be reconciled from authoritative mirror");
+    assert_eq!(body.authoritative_pose, Some(moved));
+    assert_eq!(body.pose, moved);
+    assert_eq!(body.velocity, Vector3::new(4.0, 5.0, 0.0));
+    assert_eq!(body.omega, Vector3::new(0.0, 0.0, 2.0));
+    assert_eq!(body.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
+}
+
+#[test]
+fn test_remote_position_reset_suspends_body_sampling() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0002);
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x0100_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
+    entity.sequences[4] = 30;
+    entity.sequences[6] = 40;
+    state.add_entity(entity);
+
+    let accepted = state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x0200_0000),
+                coords: Vector3::new(10.0, 20.0, 30.0),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            instance_sequence: 2,
+            position_sequence: 3,
+            teleport_sequence: 30,
+            force_position_sequence: 41,
+            ..PositionPack::default()
+        },
+        &mut Vec::new(),
+    );
+
+    assert!(accepted);
+    let body = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .expect("remote body should remain present after correction");
+    assert_eq!(body.pose.coords, Vector3::new(10.0, 20.0, 30.0));
+    assert_eq!(body.authoritative_pose.map(|pose| pose.coords), Some(Vector3::new(10.0, 20.0, 30.0)));
+    assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
+    assert_eq!(body.sampling.interpolation, None);
+}
+
+#[test]
+fn test_remove_entity_retires_body_sidecar() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0003);
+    state.add_entity(Entity::new(
+        guid,
+        "Disposable".to_string(),
+        WorldPosition {
+            landblock_id: Guid(0x0303_FFFF),
+            ..Default::default()
+        },
+    ));
+
+    let removed = state.remove_entity(guid);
+
+    assert!(removed.is_some());
+    assert!(state.scene.body(SpatialBodyId::Entity(guid)).is_none());
+}
+
+#[test]
+fn test_clear_world_presence_retires_body_sidecar() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0004);
+    state.add_entity(Entity::new(
+        guid,
+        "Contained".to_string(),
+        WorldPosition {
+            landblock_id: Guid(0x0404_FFFF),
+            ..Default::default()
+        },
+    ));
+
+    let cleared = state.clear_entity_world_presence(guid);
+
+    assert!(cleared.is_some());
+    assert!(state.scene.body(SpatialBodyId::Entity(guid)).is_none());
 }
 
 #[test]

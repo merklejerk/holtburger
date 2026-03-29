@@ -21,11 +21,11 @@ use crate::client::controllers::{
 };
 use crate::client::movement::{MovementSystem, SERVER_PULSE_PERIOD, SERVER_RUN_SPEED};
 use crate::client::movement_types::{Gait, Locomotion, MotionState, MovementCommand, Turn};
-use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_world::SpatialEntitySample;
 use std::time::{Duration, Instant};
 
 const MELEE_ATTACK_DISTANCE: f32 = 0.6;
@@ -44,7 +44,7 @@ const WALK_SPEED_CONTROL_RATE: f32 = 1.0;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedNavigationTarget {
     pub guid: Guid,
-    pub sample: EntitySpatialSample,
+    pub sample: SpatialEntitySample,
     pub use_radius: Option<f32>,
 }
 
@@ -65,7 +65,7 @@ impl NavigationSyncInput {
         self.target.map(|target| target.sample.authoritative_pose)
     }
 
-    fn projected_target_sample(self) -> Option<EntitySpatialSample> {
+    fn projected_target_sample(self) -> Option<SpatialEntitySample> {
         self.target.map(|target| target.sample)
     }
 }
@@ -1385,18 +1385,18 @@ impl NavigationAutomation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::projection::ProjectionMode;
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_world::SpatialSampleMode;
 
     fn resolved_target(
         guid: Guid,
         authoritative_pose: WorldPosition,
         projected_pose: WorldPosition,
-        projection_mode: ProjectionMode,
+        projection_mode: SpatialSampleMode,
     ) -> ResolvedNavigationTarget {
         ResolvedNavigationTarget {
             guid,
-            sample: EntitySpatialSample {
+            sample: SpatialEntitySample {
                 guid,
                 authoritative_pose,
                 projected_pose,
@@ -1422,7 +1422,7 @@ mod tests {
                     Guid(0x1234),
                     target_position,
                     target_position,
-                    ProjectionMode::AuthoritativeOnly,
+                    SpatialSampleMode::AuthoritativeOnly,
                 )
             }),
             max_run_rate: 4.5,
@@ -1625,7 +1625,7 @@ mod tests {
                     Guid(0x1234),
                     position(5.0),
                     position(5.0),
-                    ProjectionMode::AuthoritativeOnly,
+                    SpatialSampleMode::AuthoritativeOnly,
                 )),
                 max_run_rate: 4.5,
             },
@@ -1641,7 +1641,7 @@ mod tests {
                     Guid(0x5678),
                     position(6.0),
                     position(6.0),
-                    ProjectionMode::AuthoritativeOnly,
+                    SpatialSampleMode::AuthoritativeOnly,
                 )),
                 max_run_rate: 4.5,
             },
@@ -1680,7 +1680,7 @@ mod tests {
                     Guid(0x5678),
                     position(6.0),
                     position(6.0),
-                    ProjectionMode::AuthoritativeOnly,
+                    SpatialSampleMode::AuthoritativeOnly,
                 )),
                 max_run_rate: 4.5,
             },
@@ -1729,7 +1729,7 @@ mod tests {
                     follow_target_guid,
                     position(5.0),
                     position(5.0),
-                    ProjectionMode::AuthoritativeOnly,
+                    SpatialSampleMode::AuthoritativeOnly,
                 )),
                 max_run_rate: 4.5,
             },
@@ -1804,7 +1804,7 @@ mod tests {
                     Guid(0x1234),
                     position_xy(5.0, 0.0),
                     position_xy(0.0, 5.0),
-                    ProjectionMode::SimulatingVelocity,
+                    SpatialSampleMode::SimulatingVelocity,
                 )),
                 max_run_rate: 4.5,
             },

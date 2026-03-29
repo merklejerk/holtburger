@@ -6,12 +6,12 @@ use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
-use holtburger_core::EntitySpatialSample;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
+use holtburger_world::SpatialEntitySample;
 use ratatui::text::Line;
 use std::collections::HashMap;
 
@@ -27,7 +27,7 @@ pub fn get_debug_info(
     data: &GameData,
     view: Option<&ViewState>,
     target: InspectTarget,
-    projected_sample: Option<EntitySpatialSample>,
+    projected_sample: Option<SpatialEntitySample>,
     name_lookup: impl Fn(Guid) -> Option<String>,
     spell_lookup: Option<&SpellCatalog>,
     player_info: Option<PlayerDebugInfo>,

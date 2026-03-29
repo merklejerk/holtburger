@@ -7,7 +7,8 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{
-    ContactState, SolveActorInput, SolvedActorKinematics, SpatialSolveBatch,
+    ContactState, SolveActorInput, SolveBodyInput, SolvedActorKinematics,
+    SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialEvent, SpatialSolveBatch,
     SpatialSolveRequest, WorldEvent, WorldState,
 };
 use smallvec::SmallVec;
@@ -19,7 +20,7 @@ const ACTIVE_SOLVE_RADIUS_M: f32 = 96.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct LocalMotionIntent {
-    pub actor_id: Guid,
+    pub body_id: SpatialBodyId,
     pub locomotion: MotionState,
 }
 
@@ -40,7 +41,7 @@ fn calculate_arrival_position(
 
 #[derive(Debug, Default)]
 pub(super) struct ClientSimulationSystem {
-    tracked_actor_ids: SmallVec<[Guid; 4]>,
+    tracked_body_ids: SmallVec<[SpatialBodyId; 4]>,
 }
 
 impl ClientSimulationSystem {
@@ -50,13 +51,15 @@ impl ClientSimulationSystem {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn track_actor(&mut self, actor_id: Guid) {
-        if actor_id != Guid::NULL && !self.tracked_actor_ids.contains(&actor_id) {
-            self.tracked_actor_ids.push(actor_id);
+        let body_id = SpatialBodyId::Entity(actor_id);
+        if actor_id != Guid::NULL && !self.tracked_body_ids.contains(&body_id) {
+            self.tracked_body_ids.push(body_id);
         }
     }
 
     pub(super) fn untrack_actor(&mut self, actor_id: Guid) {
-        self.tracked_actor_ids.retain(|tracked| *tracked != actor_id);
+        self.tracked_body_ids
+            .retain(|tracked| *tracked != SpatialBodyId::Entity(actor_id));
     }
 
     pub(super) fn tick(
@@ -88,31 +91,43 @@ impl ClientSimulationSystem {
     ) -> Option<SpatialSolveRequest> {
         let local_intent = movement.current_local_intent(world);
         let local_pose = local_intent
-            .and_then(|intent| self.build_actor_input(world, intent.actor_id))
-            .map(|actor| actor.pose);
+            .and_then(|intent| self.build_body_input(world, intent.body_id))
+            .map(|body| body.pose);
         let nearby_tracked = local_pose
             .map(|pose| world.scene.get_entities_in_range(&pose, ACTIVE_SOLVE_RADIUS_M));
         let mut actors = SmallVec::<[SolveActorInput; 1]>::new();
 
         if let Some(intent) = local_intent
-            && let Some(actor) = self.build_actor_input(world, intent.actor_id)
+            && let Some(actor) = self
+                .build_body_input(world, intent.body_id)
+                .and_then(SolveBodyInput::into_actor_input)
         {
             actors.push(actor);
         }
 
-        for actor_id in self.tracked_actor_ids.iter().copied() {
-            if actors.iter().any(|actor| actor.actor_id == actor_id) {
+        for body_id in self.tracked_body_ids.iter().copied() {
+            if actors
+                .iter()
+                .any(|actor| Some(actor.actor_id) == body_id.authoritative_guid())
+            {
                 continue;
             }
 
             if nearby_tracked
                 .as_ref()
-                .is_some_and(|guids| !guids.contains(&actor_id))
+                .is_some_and(|guids| {
+                    body_id
+                        .authoritative_guid()
+                        .is_some_and(|guid| !guids.contains(&guid))
+                })
             {
                 continue;
             }
 
-            if let Some(actor) = self.build_actor_input(world, actor_id) {
+            if let Some(actor) = self
+                .build_body_input(world, body_id)
+                .and_then(SolveBodyInput::into_actor_input)
+            {
                 actors.push(actor);
             }
         }
@@ -127,19 +142,61 @@ impl ClientSimulationSystem {
         })
     }
 
-    fn build_actor_input(&self, world: &WorldState, actor_id: Guid) -> Option<SolveActorInput> {
-        let entity = world.entities.get(actor_id)?;
+    fn build_body_input(&self, world: &WorldState, body_id: SpatialBodyId) -> Option<SolveBodyInput> {
+        let guid = body_id.authoritative_guid()?;
+        let (resolved_body_id, pose, velocity, omega) = world.runtime_kinematics_for_guid(guid)?;
 
-        Some(SolveActorInput {
-            actor_id,
-            pose: if actor_id == world.player.guid {
-                world.player.position
+        Some(SolveBodyInput {
+            body_id: if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
+                body_id
             } else {
-                entity.position
+                resolved_body_id
             },
-            velocity: entity.velocity,
-            omega: entity.omega,
+            pose,
+            velocity,
+            omega,
         })
+    }
+
+    fn solve_body_kinematics_for_actor(
+        &self,
+        world: &WorldState,
+        solved: SolvedActorKinematics,
+    ) -> SolvedBodyKinematics {
+        let body_id = if solved.actor_id == world.player.guid {
+            SpatialBodyId::LocalPlayer(solved.actor_id)
+        } else {
+            SpatialBodyId::Entity(solved.actor_id)
+        };
+
+        SolvedBodyKinematics {
+            body_id,
+            pose: solved.pose,
+            velocity: solved.velocity,
+            omega: solved.omega,
+            contact: solved.contact,
+        }
+    }
+
+    fn solve_body_event_for_actor(&self, world: &WorldState, event: SpatialEvent) -> SpatialBodyEvent {
+        match event {
+            SpatialEvent::ContactChanged { actor_id, contact } => SpatialBodyEvent::ContactChanged {
+                body_id: if actor_id == world.player.guid {
+                    SpatialBodyId::LocalPlayer(actor_id)
+                } else {
+                    SpatialBodyId::Entity(actor_id)
+                },
+                contact,
+            },
+            SpatialEvent::ForcedReposition { actor_id, pose } => SpatialBodyEvent::ForcedReposition {
+                body_id: if actor_id == world.player.guid {
+                    SpatialBodyId::LocalPlayer(actor_id)
+                } else {
+                    SpatialBodyId::Entity(actor_id)
+                },
+                pose,
+            },
+        }
     }
 
     fn apply_solve_batch(
@@ -151,12 +208,14 @@ impl ClientSimulationSystem {
         let mut events = Vec::new();
 
         for actor in solved.solved {
-            events.extend(world.apply_solved_actor_kinematics(&actor));
-            events.extend(movement.handle_post_solve(world, &actor));
+            let solved_body = self.solve_body_kinematics_for_actor(world, actor);
+            events.extend(world.apply_solved_body_kinematics(&solved_body));
+            events.extend(movement.handle_post_solve(world, &solved_body));
         }
 
         for event in solved.events {
-            events.extend(world.apply_spatial_event(&event));
+            let body_event = self.solve_body_event_for_actor(world, event);
+            events.extend(world.apply_spatial_body_event(&body_event));
         }
 
         events
@@ -181,7 +240,7 @@ impl ClientSimulationSystem {
             return Ok((wire_events, Vec::new()));
         };
 
-        let mut world_events = world.apply_solved_actor_kinematics(&solved);
+        let mut world_events = world.apply_solved_body_kinematics(&solved);
         world_events.extend(movement.handle_post_solve(world, &solved));
         MovementSystem::send_autonomous_position_sync(
             world,
@@ -198,13 +257,13 @@ impl ClientSimulationSystem {
         data: &MovementEventData,
         world: &WorldState,
         wire_events: &mut Vec<WireEvent>,
-    ) -> Option<SolvedActorKinematics> {
+    ) -> Option<SolvedBodyKinematics> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return None;
         }
 
-        let mut next_pos = world.player.position;
+        let mut next_pos = world.local_player_runtime_pose()?;
 
         match &data.data {
             MovementTypeData::MoveToObject(mto) => {
@@ -213,9 +272,9 @@ impl ClientSimulationSystem {
 
                 let arrival_dist = mto.params.distance_to_object;
 
-                if (world.player.position.landblock_id >> 16) == (next_pos.landblock_id >> 16) {
+                if (next_pos.landblock_id >> 16) == (mto.origin.cell_id >> 16) {
                     next_pos.coords = calculate_arrival_position(
-                        &world.player.position,
+                        &next_pos,
                         &next_pos.coords,
                         arrival_dist,
                     );
@@ -239,7 +298,7 @@ impl ClientSimulationSystem {
                     next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
                 } else {
                     next_pos.rotation = Quaternion::from_heading(
-                        world.player.position.coords.heading_to(&next_pos.coords),
+                        next_pos.coords.heading_to(&mtp.origin.position),
                     );
                 }
             }
@@ -260,10 +319,10 @@ impl ClientSimulationSystem {
             _ => {}
         }
 
-        let distance = if world.player.position.landblock_id == Guid::NULL {
+        let distance = if next_pos.landblock_id == Guid::NULL {
             0.0
         } else {
-            world.player.position.distance_to(&next_pos)
+            world.local_player_runtime_pose().map_or(0.0, |current| current.distance_to(&next_pos))
         };
 
         if distance > AUTO_MOVE_DISTANCE_LIMIT {
@@ -279,14 +338,12 @@ impl ClientSimulationSystem {
             return None;
         }
 
-        let (velocity, omega) = world
-            .entities
-            .get(guid)
-            .map(|entity| (entity.velocity, entity.omega))
-            .unwrap_or((Vector3::zero(), Vector3::zero()));
+        let (_, velocity, omega) = world
+            .local_player_runtime_kinematics()
+            .unwrap_or((next_pos, Vector3::zero(), Vector3::zero()));
 
-        Some(SolvedActorKinematics {
-            actor_id: guid,
+        Some(SolvedBodyKinematics {
+            body_id: SpatialBodyId::LocalPlayer(guid),
             pose: next_pos,
             velocity,
             omega,
@@ -344,10 +401,10 @@ mod tests {
         assert_eq!(world.player.server_grounded, Some(true));
         assert_eq!(
             world
-                .entities
-                .get(remote_guid)
-                .expect("remote should still exist")
-                .position,
+                .scene
+                .body(SpatialBodyId::Entity(remote_guid))
+                .expect("remote runtime body should still exist")
+                .pose,
             remote_pose
         );
         assert!(events.iter().any(|event| matches!(

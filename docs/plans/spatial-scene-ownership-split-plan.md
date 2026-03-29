@@ -226,25 +226,44 @@ Mitigation:
 
 ### Task Checklist
 
-- [ ] Phase 1: extract shared runtime sampling store
-- [ ] Phase 1: retarget world-owned spatial types to composition
-- [ ] Phase 1: preserve or retarget sampling tests
-- [ ] Phase 2: introduce narrow projection cache
-- [ ] Phase 2: retarget `ClientViewSpatialBridge`
-- [ ] Phase 2: migrate CLI call sites to cache reads
-- [ ] Phase 3: delete overloaded app-facing scene APIs
-- [ ] Phase 3: update docs/comments/tests
-- [ ] Final verification across world/core/cli
+- [x] Phase 1: extract shared runtime sampling store
+- [x] Phase 1: retarget world-owned spatial types to composition
+- [x] Phase 1: preserve or retarget sampling tests
+- [x] Phase 2: introduce narrow projection cache
+- [x] Phase 2: retarget `ClientViewSpatialBridge`
+- [x] Phase 2: migrate CLI call sites to cache reads
+- [x] Phase 3: delete overloaded app-facing scene APIs
+- [x] Phase 3: update docs/comments/tests
+- [x] Final verification across world/core/cli
 
 ### Decisions Log
 
 - Resolved: keep `SpatialScene` as the world-owned composite/solve-context type; do not move that name onto the extracted sampling store.
 - Resolved: place `ClientProjectionCache` in `holtburger-core` as the app-facing narrow cache surface backed by shared sampling behavior.
 - Resolved: keep `SpatialPhysics::solve(..., &mut SpatialScene)` unchanged for this refactor; solving against the world-owned composite remains a separate concern from projection-cache ownership.
+- Phase 1 implementation: extracted runtime body-sampling state into `BodySamplingStore` in `holtburger-world` and kept `SpatialScene` as a delegating world-owned composite over authoritative indexing, solve context, and the shared sampling store.
+- Phase 1 implementation: preserved the existing `SpatialScene` sampling methods as delegation shims so world/core/cli callers keep compiling while the underlying ownership moves out of the scene struct.
+- Phase 1 implementation: replaced direct `SpatialScene` field mutation for sampling config and clear behavior with explicit scene methods (`set_body_sampling_config`, `clear_body_sampling`) so the extracted store can remain the owner of sampling internals.
+- Phase 1 implementation: re-exported `BodySamplingStore` from `holtburger-world` so Phase 2 can build a core-owned projection cache over the shared store instead of over the world composite.
+- Phase 2 implementation: `ClientProjectionCache` now owns `BodySamplingStore` privately inside `holtburger-core`, exposing only narrow read APIs (`projected_entity`, `spatial_sample`, authoritative fallback, and batch iteration) to app code.
+- Phase 2 implementation: `ClientViewSpatialBridge` now mutates `ClientProjectionCache` directly, keeping `ClientViewEvent` knowledge in core while removing the app-facing `SpatialScene` ownership lie.
+- Phase 2 implementation: the CLI game page now stores `projection_cache: ClientProjectionCache` and reads projected samples through the cache surface instead of through a world-owned `SpatialScene`.
+- Phase 3 implementation: removed the projection/config compatibility shims from `SpatialScene` (`set_body_sampling_config`, `clear_body_sampling`, projected/sample read helpers, and batch projection iteration) so the world scene exposes only world-facing indexing, solve-host, and authoritative-reconciliation APIs.
+- Phase 3 implementation: made the composed `BodySamplingStore` private inside `SpatialScene`; callers that genuinely need projection reads now go through `ClientProjectionCache` or through `BodySamplingStore` tests rather than reaching through the world scene.
+- Phase 3 implementation: moved shared sampling semantics coverage onto `BodySamplingStore`-direct tests in `holtburger-world`, preserving engine-level validation without implying that app code should own or query `SpatialScene` for projection state.
 
 ### Verification Log
 
-- Pending.
+- 2026-03-29: implemented Phase 1 extraction in [/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs), introducing `BodySamplingStore` and retargeting `SpatialScene` to compose it.
+- 2026-03-29: updated the projection bridge compatibility layer in [/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) to use scene sampling accessors instead of direct `SpatialScene` field access.
+- 2026-03-29: re-exported `BodySamplingStore` from [/home/cluracan/code/holtburger/crates/holtburger-world/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/lib.rs) as the new shared sampling-engine contract.
+- 2026-03-29: validated Phase 1 with `cargo test -p holtburger-world`, `cargo test -p holtburger-core`, and `cargo test -p holtburger-cli`.
+- 2026-03-29: implemented Phase 2 in [/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs), introducing `ClientProjectionCache` and retargeting `ClientViewSpatialBridge` to mutate cache-owned sampling state.
+- 2026-03-29: migrated the CLI game page and context-panel projection reads in [/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) and [/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/context.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/context.rs) off `projection_scene: SpatialScene` and onto `ClientProjectionCache`.
+- 2026-03-29: updated the core ownership guidance in [/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) so runtime sampling ownership now points at `ClientProjectionCache` rather than an app-owned `SpatialScene`.
+- 2026-03-29: completed Phase 3 surface cleanup in [/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs) by deleting the remaining projection/config facade methods from `SpatialScene` and making the composed sampling store private.
+- 2026-03-29: updated world ownership docs in [/home/cluracan/code/holtburger/crates/holtburger-world/src/state/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/types.rs) and [/home/cluracan/code/holtburger/crates/holtburger-world/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-world/ARCHITECTURE.md) to describe `SpatialScene` as a world-owned composite and `ClientProjectionCache` as the app-facing projection surface.
+- 2026-03-29: validated the final ownership split with `cargo test -p holtburger-world`, `cargo test -p holtburger-core`, and `cargo test -p holtburger-cli` after deleting the remaining app-facing `SpatialScene` surface.
 
 ### Open Questions
 

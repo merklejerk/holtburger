@@ -28,9 +28,10 @@ pub mod vendor;
 pub use self::state::WorldState;
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
-	AuthoritativeBodySync, BasicSpatialPhysics, ContactState, NoopSpatialPhysics, SolvedActorKinematics,
-	SolvedBodyKinematics, SolveActorInput, SolveBodyInput, SpatialBody, SpatialBodyEvent,
-	SpatialBodyId, SpatialEntitySample, SpatialEvent, SpatialInterpolationState, SpatialPhysics,
-	SpatialProjectedEntityState, SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState,
-	SpatialScene, SpatialSolveBatch, SpatialSolveRequest, advance_actor_kinematics,
+    AuthoritativeBodySync, BasicSpatialPhysics, BodySamplingStore, ContactState,
+    NoopSpatialPhysics, SolveActorInput, SolveBodyInput, SolvedActorKinematics,
+    SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample,
+    SpatialEvent, SpatialInterpolationState, SpatialPhysics, SpatialProjectedEntityState,
+    SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
+    SpatialSolveBatch, SpatialSolveRequest, advance_actor_kinematics,
 };

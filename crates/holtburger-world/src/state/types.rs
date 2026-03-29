@@ -36,7 +36,8 @@ pub struct ServerTimeSync {
 ///
 /// NOTE: The player's authoritative state is partially mirrored between `self.player`
 /// (session sequence data plus authoritative snapshots) and the `Entity` map.
-/// Live local runtime motion now belongs to the `SpatialScene` sidecar body model.
+/// Live local runtime motion is world-owned through `SpatialScene`, which composes
+/// shared body-sampling state without exposing it as an app-facing projection surface.
 ///
 /// !!! CRITICAL !!!
 /// Use `set_player_*` and related authoritative world mutation helpers for server-confirmed

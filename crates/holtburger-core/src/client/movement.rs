@@ -83,9 +83,7 @@ fn build_autonomous_position_heartbeat(
     metadata: MovementPacketMetadata,
 ) -> Option<AutonomousPositionActionData> {
     let (_, velocity, omega) = world.local_player_runtime_kinematics()?;
-    if velocity.length_squared() < 0.0001
-        && omega.length_squared() < 0.0001
-    {
+    if velocity.length_squared() < 0.0001 && omega.length_squared() < 0.0001 {
         return None;
     }
 
@@ -767,7 +765,9 @@ impl MovementSystem {
                 state,
                 metadata.motion_style,
             ),
-            position: world.local_player_runtime_pose().unwrap_or(world.player.position),
+            position: world
+                .local_player_runtime_pose()
+                .unwrap_or(world.player.position),
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
@@ -791,7 +791,9 @@ impl MovementSystem {
                 RawMotionState::default(),
                 metadata.motion_style,
             ),
-            position: world.local_player_runtime_pose().unwrap_or(world.player.position),
+            position: world
+                .local_player_runtime_pose()
+                .unwrap_or(world.player.position),
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,

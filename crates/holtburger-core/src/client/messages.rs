@@ -676,11 +676,10 @@ mod tests {
         client.world.player.guid = player_guid;
         client.world.player.position = start;
         client.world.player.server_control_sequence = 9;
-        client.world.entities.insert(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            start,
-        ));
+        client
+            .world
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), start));
 
         let encoded = encode_message(&server_controlled_move_to_position(
             player_guid,
@@ -701,9 +700,7 @@ mod tests {
             .expect("server-controlled movement should update the local runtime body");
         assert_eq!(body.pose.landblock_id, destination.landblock_id);
         assert_eq!(body.pose.coords, destination.coords);
-        assert!(
-            (body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5
-        );
+        assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
         assert_eq!(client.session.packet_sequence, 2);
     }
 

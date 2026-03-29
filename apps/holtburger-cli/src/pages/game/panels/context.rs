@@ -8,8 +8,8 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{ContextView, InspectTarget};
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_core::ClientProjectionCache;
 use holtburger_world::inspect::InspectableObject;
-use holtburger_world::SpatialScene;
 
 // In a fully dismantled view state, Context State should be passed directly here.
 pub fn render_context_pane(
@@ -70,7 +70,7 @@ pub fn render_context_pane(
 pub fn build_context_panel_content(
     data: &GameData,
     view: &ViewState,
-    projection_scene: Option<&SpatialScene>,
+    projection_cache: Option<&ClientProjectionCache>,
 ) -> Vec<Line<'static>> {
     match view.context_view {
         ContextView::Assess(target) => {
@@ -95,9 +95,8 @@ pub fn build_context_panel_content(
 
             if resolve_inspectable_target(data, view, target).is_some() {
                 let projected_sample = match target {
-                    InspectTarget::Entity(guid) => {
-                        projection_scene.and_then(|scene| scene.spatial_sample(guid).map(Into::into))
-                    }
+                    InspectTarget::Entity(guid) => projection_cache
+                        .and_then(|cache| cache.spatial_sample(guid).map(Into::into)),
                     InspectTarget::VendorItem(_) => None,
                 };
                 return debug::get_debug_info(

@@ -163,11 +163,9 @@ fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
 
     state.player.guid = player_guid;
     state.player.position = start_pos;
-    state.entities.insert(Entity::new(
-        player_guid,
-        "Player".to_string(),
-        start_pos,
-    ));
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
 
     let solved = SolvedActorKinematics {
         actor_id: player_guid,
@@ -202,10 +200,11 @@ fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
         WorldEvent::EntityVectorUpdated { guid, velocity, omega }
         if *guid == player_guid && *velocity == solved.velocity && *omega == solved.omega
     )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::PlayerGroundedUpdated { grounded: true }
-    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::PlayerGroundedUpdated { grounded: true }))
+    );
 }
 
 #[test]
@@ -217,11 +216,9 @@ fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_un
     state.player.guid = player_guid;
     state.player.position = start_pos;
     state.player.server_grounded = Some(true);
-    state.entities.insert(Entity::new(
-        player_guid,
-        "Player".to_string(),
-        start_pos,
-    ));
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
 
     let solved = SolvedActorKinematics {
         actor_id: player_guid,
@@ -237,10 +234,11 @@ fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_un
     let events = state.apply_solved_actor_kinematics(&solved);
 
     assert_eq!(state.player.server_grounded, Some(true));
-    assert!(!events.iter().any(|event| matches!(
-        event,
-        WorldEvent::PlayerGroundedUpdated { .. }
-    )));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::PlayerGroundedUpdated { .. }))
+    );
 }
 
 #[test]
@@ -1831,7 +1829,10 @@ fn test_remote_position_reset_suspends_body_sampling() {
         .body(SpatialBodyId::Entity(guid))
         .expect("remote body should remain present after correction");
     assert_eq!(body.pose.coords, Vector3::new(10.0, 20.0, 30.0));
-    assert_eq!(body.authoritative_pose.map(|pose| pose.coords), Some(Vector3::new(10.0, 20.0, 30.0)));
+    assert_eq!(
+        body.authoritative_pose.map(|pose| pose.coords),
+        Some(Vector3::new(10.0, 20.0, 30.0))
+    );
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
     assert_eq!(body.sampling.interpolation, None);
 }

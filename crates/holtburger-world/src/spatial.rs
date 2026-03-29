@@ -640,39 +640,35 @@ impl SpatialPhysics for NoopSpatialPhysics {
 }
 
 /// The SpatialScene is responsible for managing the "where" of everything.
-/// It tracks entity positions by landblock and handles spatial queries.
-#[derive(Clone)]
-pub struct SpatialScene {
-    /// Entities indexed by LandblockID for fast local queries.
-    pub landblock_map: HashMap<Guid, HashSet<Guid>>,
-    /// Latest authoritative pose snapshots for narrow spatial queries.
-    pub entity_poses: HashMap<Guid, WorldPosition>,
-    pub bodies: HashMap<SpatialBodyId, SpatialBody>,
-    pub body_sampling_config: SpatialSamplingConfig,
-    pub physics: Arc<dyn SpatialPhysics>,
+/// Shared runtime sampling state for tracked bodies.
+#[derive(Debug, Clone)]
+pub struct BodySamplingStore {
+    bodies: HashMap<SpatialBodyId, SpatialBody>,
+    config: SpatialSamplingConfig,
     next_ephemeral_body_id: u64,
 }
 
-impl Default for SpatialScene {
+impl Default for BodySamplingStore {
     fn default() -> Self {
-        Self::new()
+        Self {
+            bodies: HashMap::new(),
+            config: SpatialSamplingConfig::default(),
+            next_ephemeral_body_id: 1,
+        }
     }
 }
 
-impl SpatialScene {
-    pub fn new() -> Self {
-        Self::new_with_physics(Arc::new(BasicSpatialPhysics))
+impl BodySamplingStore {
+    pub fn config(&self) -> SpatialSamplingConfig {
+        self.config
     }
 
-    pub fn new_with_physics(physics: Arc<dyn SpatialPhysics>) -> Self {
-        Self {
-            landblock_map: HashMap::new(),
-            entity_poses: HashMap::new(),
-            bodies: HashMap::new(),
-            body_sampling_config: SpatialSamplingConfig::default(),
-            physics,
-            next_ephemeral_body_id: 1,
-        }
+    pub fn set_config(&mut self, config: SpatialSamplingConfig) {
+        self.config = config;
+    }
+
+    pub fn clear(&mut self) {
+        self.bodies.clear();
     }
 
     pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
@@ -788,7 +784,7 @@ impl SpatialScene {
             return;
         }
 
-        let config = self.body_sampling_config;
+        let config = self.config;
         let body = self
             .bodies
             .entry(body_id)
@@ -883,7 +879,7 @@ impl SpatialScene {
     }
 
     pub fn tick_sampling(&mut self, now: Instant) {
-        let config = self.body_sampling_config;
+        let config = self.config;
         for body in self.bodies.values_mut() {
             Self::advance_body_sampling_state(body, now, config);
         }
@@ -1000,6 +996,151 @@ impl SpatialScene {
         }
 
         true
+    }
+}
+
+/// The SpatialScene is responsible for managing the world-owned "where" of everything.
+/// It tracks authoritative entity positions by landblock, hosts solve context, and composes
+/// runtime body-sampling state.
+#[derive(Clone)]
+pub struct SpatialScene {
+    /// Entities indexed by LandblockID for fast local queries.
+    pub landblock_map: HashMap<Guid, HashSet<Guid>>,
+    /// Latest authoritative pose snapshots for narrow spatial queries.
+    pub entity_poses: HashMap<Guid, WorldPosition>,
+    body_sampling: BodySamplingStore,
+    pub physics: Arc<dyn SpatialPhysics>,
+}
+
+impl Default for SpatialScene {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SpatialScene {
+    pub fn new() -> Self {
+        Self::new_with_physics(Arc::new(BasicSpatialPhysics))
+    }
+
+    pub fn new_with_physics(physics: Arc<dyn SpatialPhysics>) -> Self {
+        Self {
+            landblock_map: HashMap::new(),
+            entity_poses: HashMap::new(),
+            body_sampling: BodySamplingStore::default(),
+            physics,
+        }
+    }
+
+    pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
+        self.body_sampling.body(body_id)
+    }
+
+    pub fn body_for_guid(&self, guid: Guid) -> Option<&SpatialBody> {
+        self.body_sampling.body_for_guid(guid)
+    }
+
+    pub fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
+        self.body_sampling.body_mut(body_id)
+    }
+
+    pub fn register_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
+        self.body_sampling.register_body(body)
+    }
+
+    pub fn update_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
+        self.body_sampling.update_body(body)
+    }
+
+    pub fn remove_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
+        self.body_sampling.remove_body(body_id)
+    }
+
+    pub fn allocate_ephemeral_body_id(&mut self) -> SpatialBodyId {
+        self.body_sampling.allocate_ephemeral_body_id()
+    }
+
+    pub fn register_ephemeral_body(&mut self, pose: WorldPosition, now: Instant) -> SpatialBodyId {
+        self.body_sampling.register_ephemeral_body(pose, now)
+    }
+
+    pub fn reconcile_authoritative_body(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        velocity: Vector3,
+        omega: Vector3,
+        sync: AuthoritativeBodySync,
+        now: Instant,
+    ) {
+        self.body_sampling
+            .reconcile_authoritative_body(body_id, pose, velocity, omega, sync, now);
+    }
+
+    pub fn retire_authoritative_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
+        self.body_sampling.retire_authoritative_body(body_id)
+    }
+
+    pub fn upsert_sampling_snapshot(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        velocity: Vector3,
+        omega: Vector3,
+        motion_state: Option<EntityMotionSnapshot>,
+        now: Instant,
+    ) {
+        self.body_sampling
+            .upsert_sampling_snapshot(body_id, pose, velocity, omega, motion_state, now);
+    }
+
+    pub fn update_sampling_authoritative_pose(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        bootstrap: bool,
+        now: Instant,
+    ) {
+        self.body_sampling
+            .update_sampling_authoritative_pose(body_id, pose, bootstrap, now);
+    }
+
+    pub fn update_sampling_kinematics(
+        &mut self,
+        body_id: SpatialBodyId,
+        velocity: Vector3,
+        omega: Vector3,
+    ) {
+        self.body_sampling
+            .update_sampling_kinematics(body_id, velocity, omega);
+    }
+
+    pub fn update_sampling_motion_state(
+        &mut self,
+        body_id: SpatialBodyId,
+        motion_state: Option<EntityMotionSnapshot>,
+    ) {
+        self.body_sampling
+            .update_sampling_motion_state(body_id, motion_state);
+    }
+
+    pub fn reset_sampling_body(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: Instant,
+        clear_kinematics: bool,
+    ) {
+        self.body_sampling
+            .reset_sampling_body(body_id, pose, now, clear_kinematics);
+    }
+
+    pub fn suspend_all_sampling(&mut self, now: Instant) {
+        self.body_sampling.suspend_all_sampling(now);
+    }
+
+    pub fn tick_sampling(&mut self, now: Instant) {
+        self.body_sampling.tick_sampling(now);
     }
 
     pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, pose: WorldPosition) {
@@ -1380,8 +1521,8 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_interpolates_authoritative_corrections() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_interpolates_authoritative_corrections() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0001);
         let start_pose = WorldPosition {
@@ -1395,7 +1536,7 @@ mod tests {
             rotation: Quaternion::from_heading(0.5),
         };
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             start_pose,
             Vector3::zero(),
@@ -1403,15 +1544,15 @@ mod tests {
             None,
             now,
         );
-        scene.update_sampling_authoritative_pose(
+        store.update_sampling_authoritative_pose(
             SpatialBodyId::Entity(guid),
             target_pose,
             false,
             now,
         );
-        scene.tick_sampling(now + Duration::from_millis(75));
+        store.tick_sampling(now + Duration::from_millis(75));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::InterpolatingPosition);
@@ -1420,8 +1561,8 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_dead_reckons_and_turns_from_motion_state() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_dead_reckons_and_turns_from_motion_state() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0002);
         let pose = WorldPosition {
@@ -1430,7 +1571,7 @@ mod tests {
             rotation: Quaternion::from_heading(0.0),
         };
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             pose,
             Vector3::new(2.0, 0.0, 0.0),
@@ -1446,9 +1587,9 @@ mod tests {
             }),
             now,
         );
-        scene.tick_sampling(now + Duration::from_millis(250));
+        store.tick_sampling(now + Duration::from_millis(250));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
@@ -1457,12 +1598,12 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_velocity_updates_drive_dead_reckoning_between_authoritative_moves() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_velocity_updates_drive_dead_reckoning_between_authoritative_moves() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0003);
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             make_position(10.0, 20.0, 0.0),
             Vector3::zero(),
@@ -1470,15 +1611,15 @@ mod tests {
             None,
             now,
         );
-        scene.update_sampling_kinematics(
+        store.update_sampling_kinematics(
             SpatialBodyId::Entity(guid),
             Vector3::new(2.0, 0.0, 0.0),
             Vector3::zero(),
         );
 
-        scene.tick_sampling(now + Duration::from_millis(250));
+        store.tick_sampling(now + Duration::from_millis(250));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingVelocity);
@@ -1486,12 +1627,12 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_velocity_dead_reckoning_crosses_landblock_boundaries_in_global_space() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_velocity_dead_reckoning_crosses_landblock_boundaries_in_global_space() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0004);
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             WorldPosition {
                 landblock_id: Guid(0x0102_0000),
@@ -1503,15 +1644,15 @@ mod tests {
             None,
             now,
         );
-        scene.update_sampling_kinematics(
+        store.update_sampling_kinematics(
             SpatialBodyId::Entity(guid),
             Vector3::new(2.0, 0.0, 0.0),
             Vector3::zero(),
         );
 
-        scene.tick_sampling(now + Duration::from_millis(250));
+        store.tick_sampling(now + Duration::from_millis(250));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingVelocity);
@@ -1521,12 +1662,12 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_continuous_turn_commands_advance_heading_over_time() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_continuous_turn_commands_advance_heading_over_time() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0005);
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             make_position(0.0, 0.0, 0.0),
             Vector3::zero(),
@@ -1543,9 +1684,9 @@ mod tests {
             now,
         );
 
-        scene.tick_sampling(now + Duration::from_secs(1));
+        store.tick_sampling(now + Duration::from_secs(1));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
@@ -1553,12 +1694,12 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_turn_to_heading_rotates_toward_target_without_snapping() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_turn_to_heading_rotates_toward_target_without_snapping() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0006);
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             make_position(0.0, 0.0, 0.0),
             Vector3::zero(),
@@ -1575,9 +1716,9 @@ mod tests {
             now,
         );
 
-        scene.tick_sampling(now + Duration::from_secs(1));
+        store.tick_sampling(now + Duration::from_secs(1));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
@@ -1585,8 +1726,8 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_completed_turn_keeps_authoritative_directive_visible() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_completed_turn_keeps_authoritative_directive_visible() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0007);
         let directive = EntityMotionDirective::TurnToHeading {
@@ -1596,7 +1737,7 @@ mod tests {
                 .expect("speed should encode"),
         };
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             make_position(0.0, 0.0, 0.0),
             Vector3::zero(),
@@ -1608,9 +1749,9 @@ mod tests {
             now,
         );
 
-        scene.tick_sampling(now + Duration::from_secs(1));
+        store.tick_sampling(now + Duration::from_secs(1));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(
@@ -1619,9 +1760,9 @@ mod tests {
         );
         assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
 
-        scene.tick_sampling(now + Duration::from_secs(2));
+        store.tick_sampling(now + Duration::from_secs(2));
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(
@@ -1633,16 +1774,16 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_large_authoritative_corrections_snap_instead_of_interpolating() {
-        let mut scene = SpatialScene::new();
-        scene.body_sampling_config = SpatialSamplingConfig {
+    fn body_sampling_store_large_authoritative_corrections_snap_instead_of_interpolating() {
+        let mut store = BodySamplingStore::default();
+        store.set_config(SpatialSamplingConfig {
             snap_distance_m: 1,
             ..SpatialSamplingConfig::default()
-        };
+        });
         let now = Instant::now();
         let guid = Guid(0x7100_0008);
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             make_position(0.0, 0.0, 0.0),
             Vector3::zero(),
@@ -1650,14 +1791,14 @@ mod tests {
             None,
             now,
         );
-        scene.update_sampling_authoritative_pose(
+        store.update_sampling_authoritative_pose(
             SpatialBodyId::Entity(guid),
             make_position(10.0, 0.0, 0.0),
             false,
             now,
         );
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::AuthoritativeOnly);
@@ -1665,35 +1806,35 @@ mod tests {
     }
 
     #[test]
-    fn scene_sampling_spatial_sample_is_coherent_after_bootstrap_move() {
-        let mut scene = SpatialScene::new();
+    fn body_sampling_store_spatial_sample_is_coherent_after_bootstrap_move() {
+        let mut store = BodySamplingStore::default();
         let now = Instant::now();
         let guid = Guid(0x7100_0009);
 
-        scene.update_sampling_authoritative_pose(
+        store.update_sampling_authoritative_pose(
             SpatialBodyId::Entity(guid),
             make_position(4.0, 5.0, 0.75),
             true,
             now,
         );
 
-        let sample = scene.spatial_sample(guid).expect("sample should exist");
+        let sample = store.spatial_sample(guid).expect("sample should exist");
         assert_eq!(sample.projection_mode, SpatialSampleMode::AuthoritativeOnly);
         assert_eq!(sample.authoritative_pose, make_position(4.0, 5.0, 0.75));
         assert_eq!(sample.projected_pose, make_position(4.0, 5.0, 0.75));
     }
 
     #[test]
-    fn scene_sampling_authoritative_move_interpolates_from_current_simulated_pose() {
-        let mut scene = SpatialScene::new();
-        scene.body_sampling_config = SpatialSamplingConfig {
+    fn body_sampling_store_authoritative_move_interpolates_from_current_simulated_pose() {
+        let mut store = BodySamplingStore::default();
+        store.set_config(SpatialSamplingConfig {
             max_position_interp: Duration::from_millis(200),
             ..SpatialSamplingConfig::default()
-        };
+        });
         let start = Instant::now();
         let guid = Guid(0x7100_000A);
 
-        scene.upsert_sampling_snapshot(
+        store.upsert_sampling_snapshot(
             SpatialBodyId::Entity(guid),
             make_position(0.0, 0.0, 0.0),
             Vector3::zero(),
@@ -1701,19 +1842,19 @@ mod tests {
             None,
             start,
         );
-        scene.update_sampling_kinematics(
+        store.update_sampling_kinematics(
             SpatialBodyId::Entity(guid),
             Vector3::new(2.0, 0.0, 0.0),
             Vector3::zero(),
         );
-        scene.update_sampling_authoritative_pose(
+        store.update_sampling_authoritative_pose(
             SpatialBodyId::Entity(guid),
             make_position(1.0, 0.0, 0.0),
             false,
             start + Duration::from_millis(100),
         );
 
-        let projected = scene
+        let projected = store
             .projected_entity_state(guid)
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::InterpolatingPosition);

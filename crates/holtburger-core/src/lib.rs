@@ -3,8 +3,8 @@ pub mod errors;
 
 // Flatten the events for compatibility
 pub use client::projection::{
-    ClientViewSpatialBridge, EntitySpatialSample, ProjectedEntityState, ProjectionConfig,
-    ProjectionMode,
+    ClientProjectionCache, ClientViewSpatialBridge, EntitySpatialSample, ProjectedEntityState,
+    ProjectionConfig, ProjectionMode,
 };
 pub use client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, BusyOperationResult, ClientCommand,

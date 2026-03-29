@@ -268,8 +268,8 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::{DatFileType, HbaReader, HbaWriter};
     use holtburger_common::{Guid, Vector3};
+    use holtburger_dat::{DatFileType, HbaReader, HbaWriter};
     use holtburger_world::{
         ContactState, SolveActorInput, SolvedActorKinematics, SpatialScene, SpatialSolveBatch,
         SpatialSolveRequest,

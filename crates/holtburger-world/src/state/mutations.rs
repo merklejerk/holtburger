@@ -43,8 +43,14 @@ impl WorldState {
             return;
         }
 
-        self.scene
-            .reconcile_authoritative_body(body_id, pose, velocity, omega, sync, Instant::now());
+        self.scene.reconcile_authoritative_body(
+            body_id,
+            pose,
+            velocity,
+            omega,
+            sync,
+            Instant::now(),
+        );
     }
 
     pub(crate) fn retire_authoritative_body_for_guid(&mut self, guid: Guid) {
@@ -204,7 +210,8 @@ impl WorldState {
         body.velocity = solved.velocity;
         body.omega = solved.omega;
         body.contact = solved.contact;
-        body.sampling.mode = Self::runtime_sample_mode_for_kinematics(solved.velocity, solved.omega);
+        body.sampling.mode =
+            Self::runtime_sample_mode_for_kinematics(solved.velocity, solved.omega);
         body.sampling.interpolation = None;
 
         let mut events = Vec::new();
@@ -268,11 +275,7 @@ impl WorldState {
         }
     }
 
-    fn apply_player_contact_state(
-        &mut self,
-        contact: ContactState,
-        events: &mut Vec<WorldEvent>,
-    ) {
+    fn apply_player_contact_state(&mut self, contact: ContactState, events: &mut Vec<WorldEvent>) {
         let Some(grounded) = contact.grounded() else {
             return;
         };
@@ -688,11 +691,13 @@ impl WorldState {
                     return events;
                 }
 
-                let Some((old_lb, velocity, omega)) = self.entities.get_mut(actor_id).map(|entity| {
-                    let old_lb = entity.position.landblock_id;
-                    entity.position = pose;
-                    (old_lb, entity.velocity, entity.omega)
-                }) else {
+                let Some((old_lb, velocity, omega)) =
+                    self.entities.get_mut(actor_id).map(|entity| {
+                        let old_lb = entity.position.landblock_id;
+                        entity.position = pose;
+                        (old_lb, entity.velocity, entity.omega)
+                    })
+                else {
                     return Vec::new();
                 };
 

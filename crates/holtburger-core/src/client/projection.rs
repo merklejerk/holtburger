@@ -1,33 +1,34 @@
-//! Thin client-view spatial bridge over scene-owned runtime sampling.
+//! Thin client-view spatial bridge over a core-owned projection cache.
 //!
-//! Runtime interpolation, dead reckoning, and suspension now live in `holtburger-world`
-//! [`SpatialScene`](holtburger_world::SpatialScene) bodies. Consumers still feed
-//! [`ClientViewEvent`] deltas into a [`ClientViewSpatialBridge`], but the bridge only updates and
-//! reads scene-owned sampling state rather than maintaining a second predictive cache.
+//! Runtime interpolation, dead reckoning, and suspension math live in the shared
+//! [`BodySamplingStore`](holtburger_world::BodySamplingStore). Consumers feed
+//! [`ClientViewEvent`] deltas into a [`ClientViewSpatialBridge`], which updates a narrow
+//! [`ClientProjectionCache`] rather than a world-shaped scene.
 //!
 //! Typical render-loop usage:
 //!
 //! ```rust,ignore
 //! use std::time::Instant;
-//! use holtburger_core::client::projection::{ClientViewSpatialBridge, ProjectionConfig};
+//! use holtburger_core::client::projection::{
+//!     ClientProjectionCache, ClientViewSpatialBridge, ProjectionConfig,
+//! };
 //! use holtburger_core::client::types::ClientViewEvent;
-//! use holtburger_world::SpatialScene;
 //!
 //! struct SceneFrame {
 //!     spatial_bridge: ClientViewSpatialBridge,
-//!     scene: SpatialScene,
+//!     cache: ClientProjectionCache,
 //! }
 //!
 //! impl SceneFrame {
 //!     fn on_view_event(&mut self, event: &ClientViewEvent) {
 //!         self.spatial_bridge
-//!             .handle_view_event(&mut self.scene, event, Instant::now());
+//!             .handle_view_event(&mut self.cache, event, Instant::now());
 //!     }
 //!
 //!     fn render(&mut self, now: Instant) {
-//!         self.spatial_bridge.tick(&mut self.scene, now);
+//!         self.spatial_bridge.tick(&mut self.cache, now);
 //!
-//!         for entity in self.spatial_bridge.iter_projected_entities(&self.scene) {
+//!         for entity in self.cache.iter_projected_entities() {
 //!             self.update_scene_node(entity.guid, entity.projected_pose);
 //!         }
 //!     }
@@ -42,25 +43,22 @@
 //! }
 //!
 //! let spatial_bridge = ClientViewSpatialBridge::new(ProjectionConfig::default());
-//! let _scene = spatial_bridge.new_scene();
+//! let _cache = spatial_bridge.new_cache();
 //! ```
 
 use crate::client::types::ClientViewEvent;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
 use holtburger_world::{
-    NoopSpatialPhysics, SpatialBodyId, SpatialEntitySample, SpatialProjectedEntityState,
-    SpatialSampleMode, SpatialSamplingConfig, SpatialScene,
+    entity::Entity, BodySamplingStore, SpatialBodyId, SpatialEntitySample,
+    SpatialProjectedEntityState, SpatialSampleMode, SpatialSamplingConfig,
 };
-use std::sync::Arc;
 use std::time::Instant;
 
 #[cfg(test)]
 use holtburger_common::math::Quaternion;
 #[cfg(test)]
 use holtburger_common::Vector3;
-#[cfg(test)]
-use holtburger_world::entity::Entity;
 #[cfg(test)]
 use holtburger_world::entity::EntityMotionSnapshot;
 #[cfg(test)]
@@ -71,6 +69,51 @@ pub type ProjectedEntityState = SpatialProjectedEntityState;
 pub type EntitySpatialSample = SpatialEntitySample;
 
 pub type ProjectionConfig = SpatialSamplingConfig;
+
+#[derive(Debug, Clone)]
+pub struct ClientProjectionCache {
+    sampling: BodySamplingStore,
+}
+
+impl Default for ClientProjectionCache {
+    fn default() -> Self {
+        Self::new(ProjectionConfig::default())
+    }
+}
+
+impl ClientProjectionCache {
+    pub fn new(config: ProjectionConfig) -> Self {
+        let mut sampling = BodySamplingStore::default();
+        sampling.set_config(config);
+        Self { sampling }
+    }
+
+    pub fn projected_entity(&self, guid: Guid) -> Option<ProjectedEntityState> {
+        self.sampling.projected_entity_state(guid)
+    }
+
+    pub fn spatial_sample(&self, guid: Guid) -> Option<EntitySpatialSample> {
+        self.sampling.spatial_sample(guid)
+    }
+
+    pub fn projected_pose(&self, guid: Guid) -> Option<WorldPosition> {
+        self.projected_entity(guid)
+            .map(|entity| entity.projected_pose)
+    }
+
+    pub fn authoritative_pose(&self, guid: Guid) -> Option<WorldPosition> {
+        self.projected_entity(guid)
+            .map(|entity| entity.authoritative_pose)
+    }
+
+    pub fn spatial_sample_or_authoritative(&self, entity: &Entity) -> EntitySpatialSample {
+        self.sampling.spatial_sample_or_authoritative(entity)
+    }
+
+    pub fn iter_projected_entities(&self) -> impl Iterator<Item = ProjectedEntityState> + '_ {
+        self.sampling.iter_projected_entities()
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientViewSpatialBridge {
@@ -88,28 +131,26 @@ impl ClientViewSpatialBridge {
         Self { config }
     }
 
-    pub fn new_scene(&self) -> SpatialScene {
-        let mut scene = SpatialScene::new_with_physics(Arc::new(NoopSpatialPhysics));
-        scene.body_sampling_config = self.config;
-        scene
+    pub fn new_cache(&self) -> ClientProjectionCache {
+        ClientProjectionCache::new(self.config)
     }
 
-    fn sync_scene_config(&self, scene: &mut SpatialScene) {
-        scene.body_sampling_config = self.config;
+    fn sync_cache_config(&self, cache: &mut ClientProjectionCache) {
+        cache.sampling.set_config(self.config);
     }
 
     pub fn handle_view_event(
         &self,
-        scene: &mut SpatialScene,
+        cache: &mut ClientProjectionCache,
         event: &ClientViewEvent,
         now: Instant,
     ) {
-        self.sync_scene_config(scene);
+        self.sync_cache_config(cache);
         match event {
             ClientViewEvent::EntitySpawned { entity }
             | ClientViewEvent::EntityReplaced { entity }
             | ClientViewEvent::EntityIdentified { entity } => {
-                scene.upsert_sampling_snapshot(
+                cache.sampling.upsert_sampling_snapshot(
                     SpatialBodyId::Entity(entity.guid),
                     entity.position,
                     entity.velocity,
@@ -119,10 +160,10 @@ impl ClientViewSpatialBridge {
                 );
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
-                scene.update_sampling_authoritative_pose(
+                cache.sampling.update_sampling_authoritative_pose(
                     SpatialBodyId::Entity(*guid),
                     *pos,
-                    scene.body(SpatialBodyId::Entity(*guid)).is_none(),
+                    cache.sampling.body(SpatialBodyId::Entity(*guid)).is_none(),
                     now,
                 );
             }
@@ -131,56 +172,71 @@ impl ClientViewSpatialBridge {
                 velocity,
                 omega,
             } => {
-                scene.update_sampling_kinematics(
+                cache.sampling.update_sampling_kinematics(
                     SpatialBodyId::Entity(*guid),
                     *velocity,
                     *omega,
                 );
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
-                scene.update_sampling_motion_state(SpatialBodyId::Entity(*guid), *snapshot);
+                cache
+                    .sampling
+                    .update_sampling_motion_state(SpatialBodyId::Entity(*guid), *snapshot);
             }
             ClientViewEvent::ForcedReposition { guid, pos, .. } => {
-                scene.reset_sampling_body(SpatialBodyId::Entity(*guid), *pos, now, true);
+                cache
+                    .sampling
+                    .reset_sampling_body(SpatialBodyId::Entity(*guid), *pos, now, true);
             }
             ClientViewEvent::TeleportStarted { .. } => {
-                scene.suspend_all_sampling(now);
+                cache.sampling.suspend_all_sampling(now);
             }
             ClientViewEvent::EntityDespawned { guid } => {
-                scene.remove_guid_bodies(*guid);
+                cache.sampling.remove_guid_bodies(*guid);
             }
             _ => {}
         }
     }
 
-    pub fn tick(&self, scene: &mut SpatialScene, now: Instant) {
-        self.sync_scene_config(scene);
-        scene.tick_sampling(now);
+    pub fn tick(&self, cache: &mut ClientProjectionCache, now: Instant) {
+        self.sync_cache_config(cache);
+        cache.sampling.tick_sampling(now);
     }
 
-    pub fn reset_entity(&self, scene: &mut SpatialScene, guid: Guid) {
-        scene.remove_guid_bodies(guid);
+    pub fn reset_entity(&self, cache: &mut ClientProjectionCache, guid: Guid) {
+        cache.sampling.remove_guid_bodies(guid);
     }
 
-    pub fn clear(&self, scene: &mut SpatialScene) {
-        scene.bodies.clear();
+    pub fn clear(&self, cache: &mut ClientProjectionCache) {
+        cache.sampling.clear();
     }
 
-    pub fn projected_entity(&self, scene: &SpatialScene, guid: Guid) -> Option<ProjectedEntityState> {
-        scene.projected_entity_state(guid)
+    pub fn projected_entity(
+        &self,
+        cache: &ClientProjectionCache,
+        guid: Guid,
+    ) -> Option<ProjectedEntityState> {
+        cache.projected_entity(guid)
     }
 
-    pub fn spatial_sample(&self, scene: &SpatialScene, guid: Guid) -> Option<EntitySpatialSample> {
-        scene.spatial_sample(guid)
+    pub fn spatial_sample(
+        &self,
+        cache: &ClientProjectionCache,
+        guid: Guid,
+    ) -> Option<EntitySpatialSample> {
+        cache.spatial_sample(guid)
     }
 
-    pub fn projected_pose(&self, scene: &SpatialScene, guid: Guid) -> Option<WorldPosition> {
-        self.projected_entity(scene, guid)
-            .map(|entity| entity.projected_pose)
+    pub fn projected_pose(&self, cache: &ClientProjectionCache, guid: Guid) -> Option<WorldPosition> {
+        cache.projected_pose(guid)
     }
 
-    pub fn authoritative_pose(&self, scene: &SpatialScene, guid: Guid) -> Option<WorldPosition> {
-        scene.projected_entity_state(guid).map(|entity| entity.authoritative_pose)
+    pub fn authoritative_pose(
+        &self,
+        cache: &ClientProjectionCache,
+        guid: Guid,
+    ) -> Option<WorldPosition> {
+        cache.authoritative_pose(guid)
     }
 
     /// Returns the current projected scene view for batch consumers such as renderers.
@@ -189,9 +245,9 @@ impl ClientViewSpatialBridge {
     /// transforms from `projected_pose` without losing access to the last server-authored pose.
     pub fn iter_projected_entities<'a>(
         &self,
-        scene: &'a SpatialScene,
+        cache: &'a ClientProjectionCache,
     ) -> impl Iterator<Item = ProjectedEntityState> + 'a {
-        scene.iter_projected_entities()
+        cache.iter_projected_entities()
     }
 }
 
@@ -202,34 +258,34 @@ mod tests {
 
     struct ProjectionHarness {
         system: super::ClientViewSpatialBridge,
-        scene: SpatialScene,
+        cache: ClientProjectionCache,
     }
 
     impl ProjectionHarness {
         fn new(config: ProjectionConfig) -> Self {
             let system = super::ClientViewSpatialBridge::new(config);
-            let scene = system.new_scene();
-            Self { system, scene }
+            let cache = system.new_cache();
+            Self { system, cache }
         }
 
         fn handle_view_event(&mut self, event: &ClientViewEvent, now: Instant) {
-            self.system.handle_view_event(&mut self.scene, event, now);
+            self.system.handle_view_event(&mut self.cache, event, now);
         }
 
         fn tick(&mut self, now: Instant) {
-            self.system.tick(&mut self.scene, now);
+            self.system.tick(&mut self.cache, now);
         }
 
         fn clear(&mut self) {
-            self.system.clear(&mut self.scene);
+            self.system.clear(&mut self.cache);
         }
 
         fn projected_entity(&self, guid: Guid) -> Option<ProjectedEntityState> {
-            self.system.projected_entity(&self.scene, guid)
+            self.system.projected_entity(&self.cache, guid)
         }
 
         fn iter_projected_entities(&self) -> impl Iterator<Item = ProjectedEntityState> + '_ {
-            self.system.iter_projected_entities(&self.scene)
+            self.system.iter_projected_entities(&self.cache)
         }
     }
 

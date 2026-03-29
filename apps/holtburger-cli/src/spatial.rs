@@ -32,16 +32,15 @@ impl TuiSpatialPhysics {
 
 impl Default for TuiSpatialPhysics {
     fn default() -> Self {
-        Self::new(Arc::new(BasicSpatialPhysics), TuiSpatialHackConfig::default())
+        Self::new(
+            Arc::new(BasicSpatialPhysics),
+            TuiSpatialHackConfig::default(),
+        )
     }
 }
 
 impl SpatialPhysics for TuiSpatialPhysics {
-    fn solve(
-        &self,
-        request: &SpatialSolveRequest,
-        scene: &mut SpatialScene,
-    ) -> SpatialSolveBatch {
+    fn solve(&self, request: &SpatialSolveRequest, scene: &mut SpatialScene) -> SpatialSolveBatch {
         let mut batch = self.base.solve(request, scene);
 
         if request.actors.len() != 1 {

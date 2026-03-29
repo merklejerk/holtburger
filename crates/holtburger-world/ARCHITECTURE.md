@@ -87,6 +87,10 @@ These modules own movement-facing invariants:
 - conservative visibility tracking for prune deadlines
 - player mirror helpers such as `set_player_position()` and `set_player_vector()`
 
+`SpatialScene` is the world-owned spatial composite and solve/query context. Shared runtime
+sampling behavior lives inside it via `BodySamplingStore`, but app-facing projection reads belong
+in `holtburger-core::ClientProjectionCache`, not on the world scene surface.
+
 Shared world no longer performs automatic local collision or local velocity integration during
 `tick()`. Those semantics are intentionally deferred until a future client can define a real
 client-side physics or prediction model.

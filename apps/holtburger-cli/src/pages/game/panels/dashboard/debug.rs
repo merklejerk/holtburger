@@ -7,11 +7,11 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
-use holtburger_world::SpatialEntitySample;
 use ratatui::text::Line;
 use std::collections::HashMap;
 

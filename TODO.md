@@ -229,6 +229,7 @@
 - [ ] Asset pipeline.
 - [ ] isn't it strange that `get_run_rate` lives in cli?
 - [ ] Rename `Client` -> `ClientRuntime`
+- [ ] Burden display missing.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

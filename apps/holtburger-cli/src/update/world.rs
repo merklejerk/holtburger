@@ -258,6 +258,7 @@ mod tests {
             account_password: "password".to_string(),
             character_preference: None,
             chat_log: None,
+            tui_spatial_hacks: crate::spatial::TuiSpatialHackHandle::default(),
             page: Page::Selection(SelectionState::default()),
             client_state,
             net_stats: NetStats::default(),

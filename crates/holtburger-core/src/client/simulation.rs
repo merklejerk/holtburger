@@ -90,9 +90,14 @@ impl ClientSimulationSystem {
         movement: &MovementSystem,
     ) -> Option<SpatialSolveRequest> {
         let local_intent = movement.current_local_intent(world);
-        let local_pose = local_intent
+        let local_body = local_intent
             .and_then(|intent| self.build_body_input(world, intent.body_id))
-            .map(|body| body.pose);
+            .or_else(|| {
+                (world.player.guid != Guid::NULL)
+                    .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
+                    .and_then(|body_id| self.build_body_input(world, body_id))
+            });
+        let local_pose = local_body.map(|body| body.pose);
         let nearby_tracked = local_pose.map(|pose| {
             world
                 .scene
@@ -100,10 +105,7 @@ impl ClientSimulationSystem {
         });
         let mut actors = SmallVec::<[SolveActorInput; 1]>::new();
 
-        if let Some(intent) = local_intent
-            && let Some(actor) = self
-                .build_body_input(world, intent.body_id)
-                .and_then(SolveBodyInput::into_actor_input)
+        if let Some(actor) = local_body.and_then(SolveBodyInput::into_actor_input)
         {
             actors.push(actor);
         }

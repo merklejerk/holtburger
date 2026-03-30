@@ -25,10 +25,6 @@ use std::time::{Duration, Instant};
 // value is the *maximum* run speed for a fully capped player, not the speed
 // every character should emit or simulate.
 pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
-// Outbound MoveToState control cadence for our own motion pulses and navigation planning.
-// This is intentionally separate from the roughly-1s AutonomousPosition heartbeat cadence that
-// ACE uses for observer-facing UpdatePosition rebroadcasts.
-pub(crate) const MOVE_TO_STATE_PULSE_PERIOD: Duration = Duration::from_millis(200);
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
 const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;

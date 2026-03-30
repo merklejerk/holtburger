@@ -6,10 +6,6 @@ use holtburger_core::client::controllers::{
 use holtburger_core::client::movement_types::MovementCommand;
 #[cfg(test)]
 use holtburger_core::client::movement_types::{Locomotion, MotionState, Turn};
-use holtburger_core::client::navigation::{
-    NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
-    ResolvedNavigationTarget,
-};
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
@@ -32,7 +28,12 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
-use crate::spatial::TuiSpatialHackHandle;
+use crate::navigation::{
+    DishonestNavigation, DishonestNavigationIntent as NavigationIntent,
+    DishonestNavigationMode as NavigationMode,
+    DishonestNavigationSyncInput as NavigationSyncInput, ResolvedNavigationTarget,
+};
+use crate::spatial::{TuiNavigationDirective, TuiSpatialHackHandle};
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
@@ -815,8 +816,7 @@ impl GameState {
                     if Self::is_frontend_navigation_interaction(self.view.active_interaction)
                         && !Self::is_frontend_navigation_interaction(Some(interaction))
                     {
-                        let update = self.runtime.navigation.clear_navigation();
-                        result.commands.extend(update.commands);
+                        self.runtime.navigation.clear_navigation();
                     }
                     self.set_active_interaction(Some(interaction), &mut result);
                 }
@@ -1042,8 +1042,7 @@ impl GameState {
 
     pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
         if Self::is_frontend_navigation_interaction(self.view.active_interaction) {
-            let update = self.runtime.navigation.clear_navigation();
-            result.commands.extend(update.commands);
+            self.runtime.navigation.clear_navigation();
         }
 
         self.set_active_interaction(None, result);
@@ -1302,7 +1301,7 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let max_run_rate = self
+        let run_rate = self
             .data
             .player_run_rate()
             .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
@@ -1316,7 +1315,7 @@ impl GameState {
                     sample,
                     use_radius: target_use_radius,
                 }),
-            max_run_rate,
+            run_rate,
         }
     }
 
@@ -1325,7 +1324,7 @@ impl GameState {
         intent: NavigationIntent,
         target_guid: Option<Guid>,
         now: Instant,
-        result: &mut UpdateResult,
+        _result: &mut UpdateResult,
     ) {
         let input = self.navigation_sync_input(now, target_guid);
         let authoritative_distance = input
@@ -1346,53 +1345,43 @@ impl GameState {
             }
         ) {
             log::trace!(
-                "tui navigation: syncing {:?} target={:?} player_present={} auth_distance={:?} projected_distance={:?} max_run_rate={:.2}",
+                "tui navigation: syncing {:?} target={:?} player_present={} auth_distance={:?} projected_distance={:?} run_rate={:.2}",
                 intent,
                 target_guid.map(|guid| format!("0x{:08X}", guid.0)),
                 input.player_position.is_some(),
                 authoritative_distance,
                 projected_distance,
-                input.max_run_rate,
+                input.run_rate,
             );
         }
 
-        let update = self.runtime.navigation.reconcile_navigation(intent, input);
-        if !update.commands.is_empty() {
-            log::info!(
-                "tui navigation: emitted {} command(s): {:?}",
-                update.commands.len(),
-                update.commands,
-            );
-        }
-        result.commands.extend(update.commands);
+        self.runtime.navigation.reconcile_navigation(intent, input);
     }
 
     fn start_approach_target(
         &mut self,
         target: Guid,
         arrival_distance: f32,
-        result: &mut UpdateResult,
+        _result: &mut UpdateResult,
     ) {
-        let update = self.runtime.navigation.activate_approach(
+        self.runtime.navigation.activate_approach(
             target,
             arrival_distance,
             self.navigation_sync_input(Instant::now(), Some(target)),
         );
-        result.commands.extend(update.commands);
     }
 
     fn start_follow_target(
         &mut self,
         target: Guid,
         arrival_distance: f32,
-        result: &mut UpdateResult,
+        _result: &mut UpdateResult,
     ) {
-        let update = self.runtime.navigation.activate_follow(
+        self.runtime.navigation.activate_follow(
             target,
             arrival_distance,
             self.navigation_sync_input(Instant::now(), Some(target)),
         );
-        result.commands.extend(update.commands);
     }
 
     fn sync_approach_target(&mut self, now: Instant, result: &mut UpdateResult) {
@@ -1452,8 +1441,7 @@ impl GameState {
     }
 
     fn handle_forced_reposition(&mut self, result: &mut UpdateResult) {
-        let update = self.runtime.navigation.handle_forced_reposition();
-        result.commands.extend(update.commands);
+        self.runtime.navigation.handle_forced_reposition();
         self.clear_finished_approach_interaction(result);
         if !matches!(
             self.runtime.navigation.navigation_mode(),
@@ -1464,8 +1452,7 @@ impl GameState {
     }
 
     fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
-        let update = self.runtime.navigation.handle_teleport_start();
-        result.commands.extend(update.commands);
+        self.runtime.navigation.handle_teleport_start();
 
         if matches!(
             self.view.active_interaction,
@@ -1533,14 +1520,21 @@ impl GameState {
     }
 
     fn sync_tui_spatial_hacks(&self) {
-        let target_pose = self
+        let directive = self
             .active_navigation_target_guid()
-            .and_then(|guid| self.data.runtime_sample_for_guid(guid))
-            .map(|sample| sample.projected_pose);
+            .and_then(|guid| {
+                self.runtime.navigation.active_directive(
+                    self.navigation_sync_input(Instant::now(), Some(guid)),
+                )
+            })
+            .map(|directive| TuiNavigationDirective {
+                target_pose: directive.target_pose,
+                world_speed_mps: directive.world_speed_mps,
+            });
 
         self.runtime
             .spatial_hacks
-            .set_navigation_target(self.data.player_guid, target_pose);
+            .set_navigation_directive(self.data.player_guid, directive);
     }
 
     fn is_valid_combat_target(&self, target_guid: Guid) -> bool {
@@ -1853,7 +1847,7 @@ pub struct ViewState {
 struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
-    navigation: NavigationAutomation,
+    navigation: DishonestNavigation,
     spatial_hacks: TuiSpatialHackHandle,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
@@ -1930,6 +1924,18 @@ mod tests {
         state.runtime.navigation.sticky_is_pursuing()
     }
 
+    fn has_active_dishonest_drive(state: &GameState) -> bool {
+        let Some(target_guid) = state.active_navigation_target_guid() else {
+            return false;
+        };
+
+        state
+            .runtime
+            .navigation
+            .active_directive(state.navigation_sync_input(Instant::now(), Some(target_guid)))
+            .is_some()
+    }
+
     fn is_run_movement_command(command: &ClientCommand) -> bool {
         matches!(
             command,
@@ -1963,10 +1969,6 @@ mod tests {
 
     fn is_navigation_movement_command(command: &ClientCommand) -> bool {
         is_run_movement_command(command) || is_turn_movement_command(command)
-    }
-
-    fn is_stop_movement_command(command: &ClientCommand) -> bool {
-        matches!(command, ClientCommand::DriveMovement(MovementCommand::Stop))
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
@@ -2550,7 +2552,7 @@ mod tests {
                     },
                     use_radius: None,
                 }),
-                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
+                run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3340,7 +3342,7 @@ mod tests {
                     sample: target_sample,
                     use_radius: None,
                 }),
-                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
+                run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3426,14 +3428,15 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(is_navigation_movement_command));
+        assert!(!started.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Approaching { target_guid })
         );
 
-        let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+        let _result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: player_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3443,7 +3446,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3472,7 +3475,7 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+        let _result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: player_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3482,7 +3485,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert!(matches!(
             state.runtime.navigation.navigation_mode(),
             Some(NavigationMode::Follow { .. })
@@ -3520,7 +3523,7 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+        let _result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3541,7 +3544,7 @@ mod tests {
                 .x,
             6.0
         );
-        assert!(result.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3572,13 +3575,14 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        assert!(started.commands.iter().any(is_navigation_movement_command));
+        assert!(!started.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
         );
 
-        let in_range = state.handle_view_event(ClientViewEvent::EntityMoved {
+        let _in_range = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3587,13 +3591,13 @@ mod tests {
             },
         });
 
-        assert!(in_range.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
         );
 
-        let slipped = state.handle_view_event(ClientViewEvent::EntityMoved {
+        let _slipped = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3602,7 +3606,7 @@ mod tests {
             },
         });
 
-        assert!(slipped.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3638,9 +3642,9 @@ mod tests {
             Some(Interaction::Following { target_guid })
         );
 
-        let result = state.handle_action(AppAction::CancelInteraction).unwrap();
+        let _result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -3672,13 +3676,8 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
 
-        let stop_index = result.commands.iter().position(is_stop_movement_command);
-        let drive_index = result
-            .commands
-            .iter()
-            .position(is_navigation_movement_command);
-
-        assert!(matches!((stop_index, drive_index), (Some(stop), Some(drive)) if stop < drive));
+        assert!(!result.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
         assert!(!matches!(
             state.runtime.navigation.navigation_mode(),
@@ -3713,12 +3712,13 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(is_navigation_movement_command));
+        assert!(!started.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
 
-        let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
+        let _result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3754,7 +3754,7 @@ mod tests {
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert!(
             result
                 .commands
@@ -3797,9 +3797,9 @@ mod tests {
             Some(Interaction::Approaching { target_guid })
         );
 
-        let result = state.handle_action(AppAction::CancelInteraction).unwrap();
+        let _result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3827,10 +3827,11 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(is_navigation_movement_command));
+        assert!(!started.commands.iter().any(is_navigation_movement_command));
+        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
 
-        let result = state.handle_view_event(ClientViewEvent::EntityMoved {
+        let _result = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3839,7 +3840,7 @@ mod tests {
             },
         });
 
-        assert!(result.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert!(!has_active_approach(&state));
     }
 
@@ -3930,27 +3931,22 @@ mod tests {
                     },
                     use_radius: None,
                 }),
-                max_run_rate: DEFAULT_APPROACH_RUN_RATE,
+                run_rate: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
-        let in_range = state.handle_tick(0.016);
+        let _in_range = state.handle_tick(0.016);
 
-        assert!(in_range.commands.iter().any(is_stop_movement_command));
+        assert!(!has_active_dishonest_drive(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(!sticky_is_pursuing(&state));
 
         target.position.coords = holtburger_common::Vector3::new(6.0, 0.0, 0.0);
         state.data.entities.insert(target_guid, target);
 
-        let slipped_again = state.handle_tick(0.016);
+        let _slipped_again = state.handle_tick(0.016);
 
-        assert!(
-            slipped_again
-                .commands
-                .iter()
-                .any(is_navigation_movement_command)
-        );
+        assert!(has_active_dishonest_drive(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(sticky_is_pursuing(&state));
     }
@@ -4120,7 +4116,8 @@ mod tests {
         let mut first = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut first);
 
-        assert!(first.commands.iter().any(is_navigation_movement_command));
+        assert!(first.commands.is_empty());
+        assert!(has_active_dishonest_drive(&state));
 
         let mut second = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut second);

@@ -15,7 +15,6 @@ mod messages;
 mod movement;
 mod simulation;
 pub mod movement_types;
-pub mod navigation;
 pub mod runtime_body_view_cache;
 pub mod types;
 use auth::AuthState;
@@ -1102,6 +1101,38 @@ mod tests {
         );
 
         assert!(request.is_none());
+    }
+
+    #[test]
+    fn simulation_build_request_includes_idle_local_player_runtime_body() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.player.position.rotation = Quaternion::identity();
+        client.world.entities.insert(Entity::new(
+            guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+
+        let request = client
+            .simulation
+            .build_solve_request(
+                Instant::now(),
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &client.world,
+                &client.movement,
+            )
+            .expect("idle local player should still be submitted to physics");
+
+        assert_eq!(request.actors.len(), 1);
+        let actor = request.actors[0];
+        assert_eq!(actor.actor_id, guid);
+        assert_eq!(actor.pose, client.world.player.position);
+        assert_eq!(actor.velocity, Vector3::zero());
+        assert_eq!(actor.omega, Vector3::zero());
     }
 
     #[tokio::test]

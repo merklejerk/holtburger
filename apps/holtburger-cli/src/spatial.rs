@@ -42,9 +42,15 @@ impl Default for TuiSpatialHackConfig {
 struct TuiSpatialHackState {
     /// The local player currently eligible for TUI-specific runtime-body hacks.
     local_player_guid: Option<Guid>,
-    /// The active TUI navigation target pose. `None` means no navigation cheat
-    /// should be applied and runtime movement should remain planar.
-    navigation_target_pose: Option<WorldPosition>,
+    /// The active TUI-only dishonest steering directive. `None` means runtime
+    /// movement should remain whatever the underlying solver produced.
+    navigation_directive: Option<TuiNavigationDirective>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TuiNavigationDirective {
+    pub target_pose: WorldPosition,
+    pub world_speed_mps: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -55,20 +61,20 @@ pub struct TuiSpatialHackHandle {
 }
 
 impl TuiSpatialHackHandle {
-    /// Updates the currently active local player and navigation target for the
-    /// TUI spatial hack. When `navigation_target_pose` is `None`, the hack is
-    /// considered inactive.
-    pub fn set_navigation_target(
+    /// Updates the currently active local player and dishonest steering
+    /// directive for the TUI spatial hack. When `navigation_directive` is
+    /// `None`, the hack is considered inactive.
+    pub fn set_navigation_directive(
         &self,
         local_player_guid: Option<Guid>,
-        navigation_target_pose: Option<WorldPosition>,
+        navigation_directive: Option<TuiNavigationDirective>,
     ) {
         let mut state = self
             .state
             .lock()
             .expect("tui spatial hack state lock poisoned");
         state.local_player_guid = local_player_guid;
-        state.navigation_target_pose = navigation_target_pose;
+        state.navigation_directive = navigation_directive;
     }
 
     fn snapshot(&self) -> TuiSpatialHackState {
@@ -83,9 +89,9 @@ impl TuiSpatialHackHandle {
 /// runtime-body movement.
 ///
 /// The wrapped solver still determines the baseline kinematic step. When the
-/// TUI has an active navigation target for the local player, this decorator
-/// rewrites that solved movement so the runtime body advances toward the target
-/// in full 3D rather than only along the planar velocity vector.
+/// TUI publishes an active dishonest navigation directive for the local player,
+/// this decorator can advance the runtime body toward that target in full 3D
+/// even if the baseline solve itself had no useful motion.
 pub struct TuiSpatialPhysics {
     base: Arc<dyn SpatialPhysics>,
     config: TuiSpatialHackConfig,
@@ -113,20 +119,22 @@ impl TuiSpatialPhysics {
     }
 
     /// Returns the shared hack-state handle so TUI navigation code can publish
-    /// the active local target that should receive dishonest 3D steering.
+    /// the active local steering directive that should receive dishonest 3D
+    /// runtime-body movement.
     pub fn hack_handle(&self) -> TuiSpatialHackHandle {
         self.hacks.clone()
     }
 
-    /// Reprojects a planar solved step toward the active navigation target in
-    /// full 3D while preserving the same movement budget for the tick.
+    /// Reprojects a solved step toward the active navigation target in full 3D,
+    /// borrowing either the baseline solve's planar movement budget or the
+    /// dishonest world-speed budget for the tick.
     fn target_directed_pose(
         &self,
         start_pose: WorldPosition,
         solved_pose: WorldPosition,
         solved_velocity: Vector3,
         dt_secs: f32,
-        target_pose: WorldPosition,
+        directive: TuiNavigationDirective,
     ) -> Option<(WorldPosition, Vector3)> {
         if dt_secs <= f32::EPSILON {
             return None;
@@ -134,14 +142,15 @@ impl TuiSpatialPhysics {
 
         let start_global = start_pose.global_coords();
         let solved_global = solved_pose.global_coords();
-        let target_global = target_pose.global_coords();
+        let target_global = directive.target_pose.global_coords();
         let delta = target_global - start_global;
-        let planar_delta = Vector3::new(delta.x, delta.y, 0.0);
-        let planar_distance = planar_delta.length();
-        if delta.length() <= f32::EPSILON {
+        let distance = delta.length();
+        if distance <= f32::EPSILON {
             return None;
         }
 
+        let planar_delta = Vector3::new(delta.x, delta.y, 0.0);
+        let planar_distance = planar_delta.length();
         let solved_planar_step = Vector3::new(
             solved_global.x - start_global.x,
             solved_global.y - start_global.y,
@@ -149,39 +158,44 @@ impl TuiSpatialPhysics {
         )
         .length();
         let solved_planar_speed = Vector3::new(solved_velocity.x, solved_velocity.y, 0.0).length();
-        let max_planar_step = solved_planar_step.max(solved_planar_speed * dt_secs);
-        if max_planar_step <= f32::EPSILON {
-            return None;
-        }
+        let baseline_planar_budget = solved_planar_step.max(solved_planar_speed * dt_secs);
+        let fallback_planar_budget = directive.world_speed_mps.max(0.0) * dt_secs;
+        let using_fallback_budget = baseline_planar_budget <= f32::EPSILON;
 
-        // Keep the same planar progress budget that the normal movement solve
-        // produced for this tick. The TUI cheat can invent vertical progress,
-        // but it should not burn horizontal run speed just because the target
-        // is above or below us.
-        let step_scale = if planar_distance <= f32::EPSILON {
+        let step_scale = if using_fallback_budget {
+            if fallback_planar_budget <= f32::EPSILON {
+                return None;
+            }
+            if planar_distance <= f32::EPSILON {
+                (fallback_planar_budget / distance).min(1.0)
+            } else {
+                (fallback_planar_budget / planar_distance).min(1.0)
+            }
+        } else if planar_distance <= f32::EPSILON {
             1.0
         } else {
-            (max_planar_step / planar_distance).min(1.0)
+            (baseline_planar_budget / planar_distance).min(1.0)
         };
+
         let next_global = start_global + (delta * step_scale);
         // Indoor cheating intentionally snaps intermediate poses into the
         // target's landblock/cell frame. The TUI does not have topology data,
         // and this hack exists to bias the local runtime body toward where the
         // target actually lives rather than preserving the starting cell.
-        let projection_anchor = if start_pose.is_indoors() || target_pose.is_indoors() {
-            target_pose
+        let projection_anchor = if start_pose.is_indoors() || directive.target_pose.is_indoors() {
+            directive.target_pose
         } else {
             start_pose
         };
         let next_pose = if step_scale >= 1.0 - 1e-6 {
             WorldPosition {
                 rotation: solved_pose.rotation,
-                ..target_pose
+                ..directive.target_pose
             }
         } else {
             world_position_from_global_coords(projection_anchor, next_global, solved_pose.rotation)
         };
-        let next_velocity = if step_scale >= 1.0 - 1e-6 {
+        let next_velocity = if using_fallback_budget || step_scale >= 1.0 - 1e-6 {
             (next_global - start_global) / dt_secs
         } else {
             Vector3::new(solved_velocity.x, solved_velocity.y, 0.0)
@@ -248,16 +262,16 @@ impl SpatialPhysics for TuiSpatialPhysics {
 
             // Only the actively navigated local player gets the dishonest 3D
             // steering and optional grounded-contact override.
-            let has_active_navigation = hacks.navigation_target_pose.is_some();
+            let has_active_navigation = hacks.navigation_directive.is_some();
 
-            if let Some(target_pose) = hacks.navigation_target_pose
+            if let Some(directive) = hacks.navigation_directive
                 && let Some(actor) = request.actors.iter().find(|actor| actor.actor_id == solved.actor_id)
                 && let Some((pose, velocity)) = self.target_directed_pose(
                     actor.pose,
                     solved.pose,
                     solved.velocity,
                     request.dt.as_secs_f32(),
-                    target_pose,
+                    directive,
                 )
             {
                 solved.pose = pose;
@@ -284,12 +298,15 @@ mod tests {
     fn tui_spatial_physics_moves_local_player_toward_navigation_target_in_3d() {
         let mut scene = SpatialScene::new_with_physics(Arc::new(BasicSpatialPhysics));
         let hacks = TuiSpatialHackHandle::default();
-        hacks.set_navigation_target(
+        hacks.set_navigation_directive(
             Some(Guid(0x5000_0001)),
-            Some(WorldPosition {
-                landblock_id: Guid(0x1234_0000),
-                coords: Vector3::new(10.0, 38.0, 39.0),
-                rotation: Quaternion::identity(),
+            Some(TuiNavigationDirective {
+                target_pose: WorldPosition {
+                    landblock_id: Guid(0x1234_0000),
+                    coords: Vector3::new(10.0, 38.0, 39.0),
+                    rotation: Quaternion::identity(),
+                },
+                world_speed_mps: 18.0,
             }),
         );
         let physics = TuiSpatialPhysics::with_handle(
@@ -340,10 +357,13 @@ mod tests {
                 },
                 Vector3::new(0.0, 18.0, 0.0),
                 0.5,
-                WorldPosition {
-                    landblock_id: Guid(0x1234_0000),
-                    coords: Vector3::new(10.0, 29.0, 39.0),
-                    rotation: Quaternion::identity(),
+                TuiNavigationDirective {
+                    target_pose: WorldPosition {
+                        landblock_id: Guid(0x1234_0000),
+                        coords: Vector3::new(10.0, 29.0, 39.0),
+                        rotation: Quaternion::identity(),
+                    },
+                    world_speed_mps: 18.0,
                 },
             )
             .expect("planar budget should allow snapping to elevated target");
@@ -355,12 +375,15 @@ mod tests {
     fn tui_spatial_physics_only_mutates_local_player_in_multi_actor_batches() {
         let mut scene = SpatialScene::new_with_physics(Arc::new(BasicSpatialPhysics));
         let hacks = TuiSpatialHackHandle::default();
-        hacks.set_navigation_target(
+        hacks.set_navigation_directive(
             Some(Guid(0x5000_0001)),
-            Some(WorldPosition {
-                landblock_id: Guid(0x1234_0000),
-                coords: Vector3::new(10.0, 29.0, 39.0),
-                rotation: Quaternion::identity(),
+            Some(TuiNavigationDirective {
+                target_pose: WorldPosition {
+                    landblock_id: Guid(0x1234_0000),
+                    coords: Vector3::new(10.0, 29.0, 39.0),
+                    rotation: Quaternion::identity(),
+                },
+                world_speed_mps: 18.0,
             }),
         );
         let physics = TuiSpatialPhysics::with_handle(
@@ -407,7 +430,7 @@ mod tests {
     fn tui_spatial_physics_leaves_planar_motion_when_no_navigation_target_is_set() {
         let mut scene = SpatialScene::new_with_physics(Arc::new(BasicSpatialPhysics));
         let hacks = TuiSpatialHackHandle::default();
-        hacks.set_navigation_target(Some(Guid(0x5000_0001)), None);
+        hacks.set_navigation_directive(Some(Guid(0x5000_0001)), None);
         let physics = TuiSpatialPhysics::with_handle(
             Arc::new(BasicSpatialPhysics),
             TuiSpatialHackConfig { force_grounded: true },
@@ -439,12 +462,15 @@ mod tests {
     fn tui_spatial_physics_keeps_indoor_landblock_stable() {
         let mut scene = SpatialScene::new_with_physics(Arc::new(BasicSpatialPhysics));
         let hacks = TuiSpatialHackHandle::default();
-        hacks.set_navigation_target(
+        hacks.set_navigation_directive(
             Some(Guid(0x5000_0001)),
-            Some(WorldPosition {
-                landblock_id: Guid(0x016C_0171),
-                coords: Vector3::new(12.0, -40.0, 0.004999995),
-                rotation: Quaternion::identity(),
+            Some(TuiNavigationDirective {
+                target_pose: WorldPosition {
+                    landblock_id: Guid(0x016C_0171),
+                    coords: Vector3::new(12.0, -40.0, 0.004999995),
+                    rotation: Quaternion::identity(),
+                },
+                world_speed_mps: 4.5147824,
             }),
         );
         let physics = TuiSpatialPhysics::with_handle(
@@ -490,10 +516,13 @@ mod tests {
             },
             Vector3::new(3.9111443, -2.2550743, 0.0),
             0.2,
-            WorldPosition {
-                landblock_id: Guid(0x016B_0171),
-                coords: Vector3::new(18.742691, 135.1211, 0.004999995),
-                rotation: Quaternion::identity(),
+            TuiNavigationDirective {
+                target_pose: WorldPosition {
+                    landblock_id: Guid(0x016B_0171),
+                    coords: Vector3::new(18.742691, 135.1211, 0.004999995),
+                    rotation: Quaternion::identity(),
+                },
+                world_speed_mps: 4.5147824,
             },
         )
         .expect("cross-cell indoor cheat should still project a pose");

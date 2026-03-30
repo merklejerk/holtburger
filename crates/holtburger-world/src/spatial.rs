@@ -135,7 +135,7 @@ impl Default for SpatialSamplingConfig {
     fn default() -> Self {
         Self {
             max_position_interp: Duration::from_millis(150),
-            max_dead_reckon: Duration::from_millis(250),
+            max_dead_reckon: Duration::from_millis(1250),
             snap_distance_m: 3,
             snap_heading_millirad: 785,
         }
@@ -536,6 +536,14 @@ fn project_pose_by_velocity(
         return authoritative_pose;
     }
 
+    if authoritative_pose.is_indoors() {
+        return WorldPosition {
+            landblock_id: authoritative_pose.landblock_id,
+            coords: authoritative_pose.coords + (velocity * dt_secs),
+            rotation: authoritative_pose.rotation,
+        };
+    }
+
     let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
     let landblock_x =
         (projected_global.x.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
@@ -552,6 +560,51 @@ fn project_pose_by_velocity(
         ),
         rotation: authoritative_pose.rotation,
     }
+}
+
+fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
+    Vector3::new(-heading.cos() * speed, heading.sin() * speed, 0.0)
+}
+
+fn projected_velocity_from_motion_state(
+    snapshot: Option<EntityMotionSnapshot>,
+    heading: f32,
+) -> Option<Vector3> {
+    let snapshot = snapshot?;
+    let mut velocity = Vector3::zero();
+    let mut has_translation = false;
+
+    if let (Some(command), Some(speed)) = (snapshot.forward_command, snapshot.forward_speed) {
+        let speed = speed.to_f32().abs();
+        if speed > EPSILON {
+            if command == InterpretedMotionCommand::WALK_FORWARD
+                || command == InterpretedMotionCommand::RUN_FORWARD
+            {
+                velocity = velocity + planar_velocity_for_heading(heading, speed);
+                has_translation = true;
+            } else if command == InterpretedMotionCommand::WALK_BACKWARDS {
+                velocity = velocity + planar_velocity_for_heading(normalize_heading(heading + PI), speed);
+                has_translation = true;
+            }
+        }
+    }
+
+    if let (Some(command), Some(speed)) = (snapshot.sidestep_command, snapshot.sidestep_speed) {
+        let speed = speed.to_f32().abs();
+        if speed > EPSILON {
+            if command == InterpretedMotionCommand::SIDESTEP_LEFT {
+                velocity = velocity
+                    + planar_velocity_for_heading(normalize_heading(heading - (PI / 2.0)), speed);
+                has_translation = true;
+            } else if command == InterpretedMotionCommand::SIDESTEP_RIGHT {
+                velocity = velocity
+                    + planar_velocity_for_heading(normalize_heading(heading + (PI / 2.0)), speed);
+                has_translation = true;
+            }
+        }
+    }
+
+    has_translation.then_some(velocity)
 }
 
 fn should_snap_to_authoritative(
@@ -624,13 +677,20 @@ fn advance_turn_toward_heading(
     true
 }
 
-fn turn_direction(command: InterpretedMotionCommand) -> Option<f32> {
-    if command == InterpretedMotionCommand::TURN_RIGHT {
-        Some(1.0)
-    } else if command == InterpretedMotionCommand::TURN_LEFT {
-        Some(-1.0)
-    } else {
-        None
+fn signed_turn_rate(snapshot: EntityMotionSnapshot) -> Option<f32> {
+    let speed = snapshot.turn_speed?.to_f32();
+    if !speed.is_finite() || speed.abs() <= EPSILON {
+        return None;
+    }
+
+    if speed < 0.0 {
+        return Some(speed);
+    }
+
+    match snapshot.turn_command {
+        Some(InterpretedMotionCommand::TURN_LEFT) => Some(-speed),
+        Some(InterpretedMotionCommand::TURN_RIGHT) | None => Some(speed),
+        Some(_) => None,
     }
 }
 
@@ -673,12 +733,11 @@ fn advance_heading_projection(body: &mut SpatialBody, dt: Duration) -> bool {
     }
 
     if let Some(snapshot) = body.motion_state
-        && let (Some(command), Some(speed)) = (snapshot.turn_command, snapshot.turn_speed)
-        && let Some(direction) = turn_direction(command)
+        && let Some(turn_rate) = signed_turn_rate(snapshot)
     {
         let heading = body.pose.rotation.to_heading();
         body.pose.rotation = Quaternion::from_heading(normalize_heading(
-            heading + (direction * speed.to_f32().abs() * dt_secs),
+            heading + (turn_rate * dt_secs),
         ));
         return true;
     }
@@ -863,15 +922,25 @@ impl BodySamplingStore {
             .remove(&body_id)
             .unwrap_or_else(|| SpatialBody::new(body_id, pose, now));
 
+        let preserve_local_runtime_pose = matches!(body_id, SpatialBodyId::LocalPlayer(_))
+            && matches!(sync, AuthoritativeBodySync::Snapshot)
+            && matches!(
+                body.sampling.mode,
+                SpatialSampleMode::SimulatingMotionState | SpatialSampleMode::SimulatingVelocity
+            );
+
         body.authoritative_pose = Some(pose);
-        body.pose = pose;
         body.velocity = velocity;
         body.omega = omega;
         body.motion_state = None;
-        body.sampling.mode = mode;
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
         body.sampling.interpolation = None;
+
+        if !preserve_local_runtime_pose {
+            body.pose = pose;
+            body.sampling.mode = mode;
+        }
 
         self.bodies.insert(body_id, body);
     }
@@ -1175,6 +1244,8 @@ impl BodySamplingStore {
         now: Instant,
         config: SpatialSamplingConfig,
     ) {
+        let previous_mode = body.sampling.mode;
+        let previous_pose = body.pose;
         let dt = now
             .checked_duration_since(body.sampling.last_derived_at)
             .unwrap_or_default();
@@ -1195,6 +1266,8 @@ impl BodySamplingStore {
             .checked_duration_since(body.sampling.last_authoritative_update)
             .unwrap_or_default()
             .min(config.max_dead_reckon);
+        let preserve_projected_pose = elapsed_since_authoritative > Duration::ZERO
+            && matches!(previous_mode, SpatialSampleMode::SimulatingMotionState | SpatialSampleMode::SimulatingVelocity);
 
         let mut mode = SpatialSampleMode::AuthoritativeOnly;
         if body.velocity.length_squared() > EPSILON && elapsed_since_authoritative > Duration::ZERO {
@@ -1204,13 +1277,28 @@ impl BodySamplingStore {
                 elapsed_since_authoritative.as_secs_f32(),
             );
             mode = SpatialSampleMode::SimulatingVelocity;
+        } else if elapsed_since_authoritative > Duration::ZERO
+            && let Some(projected_velocity) = projected_velocity_from_motion_state(
+                body.motion_state,
+                body.pose.rotation.to_heading(),
+            )
+        {
+            body.pose = project_pose_by_velocity(
+                authoritative_pose,
+                projected_velocity,
+                elapsed_since_authoritative.as_secs_f32(),
+            );
+            mode = SpatialSampleMode::SimulatingMotionState;
+        } else if preserve_projected_pose {
+            body.pose = previous_pose;
+            mode = previous_mode;
         } else {
-            body.pose.coords = authoritative_pose.coords;
+            body.pose = authoritative_pose;
         }
 
         if advance_heading_projection(body, dt) {
             mode = SpatialSampleMode::SimulatingMotionState;
-        } else {
+        } else if !preserve_projected_pose {
             body.pose.rotation = authoritative_pose.rotation;
         }
 
@@ -1689,6 +1777,27 @@ mod tests {
     }
 
     #[test]
+    fn project_pose_by_velocity_keeps_indoor_landblock_stable() {
+        let authoritative = WorldPosition {
+            landblock_id: Guid(0x016C_0155),
+            coords: Vector3::new(12.108355, -60.660404, 0.004999995),
+            rotation: Quaternion::identity(),
+        };
+
+        let projected = project_pose_by_velocity(
+            authoritative,
+            Vector3::new(8.345838, 15.9404335, 0.0),
+            1.0,
+        );
+
+        assert_eq!(projected.landblock_id, authoritative.landblock_id);
+        assert_eq!(
+            projected.coords,
+            Vector3::new(20.454193, -44.71997, 0.004999995)
+        );
+    }
+
+    #[test]
     fn noop_spatial_physics_returns_empty_batch() {
         let mut scene = SpatialScene::new_with_physics(Arc::new(NoopSpatialPhysics));
         let request = SpatialSolveRequest {
@@ -1973,6 +2082,110 @@ mod tests {
     }
 
     #[test]
+    fn body_sampling_store_projects_forward_motion_state_without_velocity() {
+        let mut store = BodySamplingStore::default();
+        let now = Instant::now();
+        let guid = Guid(0x7100_0002);
+
+        store.upsert_sampling_snapshot(
+            SpatialBodyId::Entity(guid),
+            make_position(10.0, 20.0, PI),
+            Vector3::zero(),
+            Vector3::zero(),
+            Some(EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                forward_speed: Some(
+                    crate::entity::OrderedMotionSpeed::from_f32(4.5)
+                        .expect("speed should encode"),
+                ),
+                ..Default::default()
+            }),
+            now,
+        );
+
+        store.tick_sampling(now + Duration::from_secs(1));
+
+        let projected = store
+            .projected_entity_state(guid)
+            .expect("entity should have projected state");
+        assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
+        assert!((projected.projected_pose.coords.x - 14.5).abs() < 1e-4);
+        assert!((projected.projected_pose.coords.y - 20.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn body_sampling_store_preserves_projected_translation_across_turn_only_update() {
+        let mut store = BodySamplingStore::default();
+        let now = Instant::now();
+        let guid = Guid(0x7100_0102);
+
+        store.upsert_sampling_snapshot(
+            SpatialBodyId::Entity(guid),
+            make_position(10.0, 20.0, PI),
+            Vector3::zero(),
+            Vector3::zero(),
+            Some(EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                forward_speed: Some(
+                    crate::entity::OrderedMotionSpeed::from_f32(4.5)
+                        .expect("speed should encode"),
+                ),
+                turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+                turn_speed: Some(
+                    crate::entity::OrderedMotionSpeed::from_f32(1.0)
+                        .expect("speed should encode"),
+                ),
+                ..Default::default()
+            }),
+            now,
+        );
+
+        let projected_at_run = now + Duration::from_millis(800);
+        store.tick_sampling(projected_at_run);
+        let projected_before_turn_only = store
+            .projected_entity_state(guid)
+            .expect("entity should have projected state");
+        assert!(projected_before_turn_only.projected_pose.coords.x > 13.0);
+
+        store.update_runtime_body_motion_state(
+            SpatialBodyId::Entity(guid),
+            Some(EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+                turn_speed: Some(
+                    crate::entity::OrderedMotionSpeed::from_f32(1.0)
+                        .expect("speed should encode"),
+                ),
+                ..Default::default()
+            }),
+        );
+
+        store.tick_sampling(projected_at_run + Duration::from_millis(30));
+
+        let projected_after_turn_only = store
+            .projected_entity_state(guid)
+            .expect("entity should have projected state");
+        assert_eq!(
+            projected_after_turn_only.projection_mode,
+            SpatialSampleMode::SimulatingMotionState
+        );
+        assert!(
+            projected_after_turn_only.projected_pose.coords.x > 13.0,
+            "turn-only updates should not snap projected translation back to authority"
+        );
+        assert!(
+            projected_after_turn_only.projected_pose.coords.x
+                >= projected_before_turn_only.projected_pose.coords.x - 0.2
+        );
+        assert!(
+            projected_after_turn_only.projected_pose.rotation.to_heading()
+                > projected_before_turn_only.projected_pose.rotation.to_heading()
+        );
+    }
+
+    #[test]
     fn body_sampling_store_velocity_updates_drive_dead_reckoning_between_authoritative_moves() {
         let mut store = BodySamplingStore::default();
         let now = Instant::now();
@@ -2066,6 +2279,38 @@ mod tests {
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
         assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn body_sampling_store_negative_turn_speed_rotates_left_from_canonical_turn_command() {
+        let mut store = BodySamplingStore::default();
+        let now = Instant::now();
+        let guid = Guid(0x7100_0007);
+
+        store.upsert_sampling_snapshot(
+            SpatialBodyId::Entity(guid),
+            make_position(0.0, 0.0, 0.0),
+            Vector3::zero(),
+            Vector3::zero(),
+            Some(EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+                turn_speed: Some(
+                    crate::entity::OrderedMotionSpeed::from_f32(-1.0)
+                        .expect("speed should encode"),
+                ),
+                ..Default::default()
+            }),
+            now,
+        );
+
+        store.tick_sampling(now + Duration::from_secs(1));
+
+        let projected = store
+            .projected_entity_state(guid)
+            .expect("entity should have projected state");
+        assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
+        assert!((projected.projected_pose.rotation.to_heading() - normalize_heading(TAU - 1.0)).abs() < 1e-4);
     }
 
     #[test]

@@ -405,6 +405,38 @@ Examples:
 - `TurnSpeed` refines an active turn, but does not by itself create one without `TurnCommand`.
 - A stop `MoveToState` is the normal way to terminate previously broadcast motion.
 
+#### Black-box validation against the stock ACE image
+
+We validated the observer-side packet shape against the unmodified Docker ACE image using paired logs from:
+
+- a moving holtburger TUI client (`Buddy`)
+- a moving retail client (`Merklejerk`)
+- a second holtburger TUI client acting only as an observer (`NotBuddy`)
+
+That test established an important constraint for future debugging work:
+
+- the stock ACE image can emit the same observer-visible movement shape for both retail and holtburger movers
+- nearby observers may receive an autonomous `UpdateMotion` start/change packet followed by sparse `UpdatePosition` anchors roughly once per second
+- those observer-facing `UpdatePosition` packets may omit `velocity` entirely for both clients
+
+So a remote actor looking choppy, rubber-bandy, or "2x slower" is **not** by itself evidence that the moving client sent a malformed locomotion stream. It can also mean the observing client failed to continue translating the remote actor from the last `UpdateMotion` state between authoritative position anchors.
+
+Practical rule: when validating remote movement quality, compare a retail mover and a custom-client mover from the same observer. If both receive sparse no-velocity `UpdatePosition` packets, then the remaining bug is likely in observer-side reconstruction rather than the outbound control packets.
+
+#### Two cadences, two jobs
+
+ACE effectively operates with two different movement cadences that should not be collapsed into a single client constant:
+
+- `MoveToState` control cadence: the mover can send control changes more frequently than once per second, and ACE still uses those updates for server-side movement / interpolation.
+- `AutonomousPosition` and observer `UpdatePosition` cadence: ACE documents `AutonomousPosition` as an approximately 1-second moving heartbeat, and `MoveToState`-driven observer `UpdatePosition` rebroadcasts are separately throttled to about 1 second.
+
+For holtburger this means:
+
+- navigation planning should use the outbound `MoveToState` pulse cadence, because that is the control resolution that determines how finely we can approach a target
+- observer reconstruction and heartbeat timing should model the slower approximately 1-second authoritative / rebroadcast cadence
+
+If these are conflated, navigation becomes too coarse and starts issuing one-second movement pulses, which produces the same visible "snap every second" failure mode we saw during investigation.
+
 #### Quick lifecycle table
 
 | Property | Comes from | Persists between packets? | Needs explicit clear/change? | Notes |
@@ -477,6 +509,10 @@ Typical cause: using `AutonomousPosition` without corresponding `MoveToState` st
 ### Rubber-banding during straight pursuit
 
 Typical cause: resending `AutonomousPosition` or `MoveToState` too aggressively while heading and speed are effectively unchanged.
+
+### Remote players look slower or advance in 1-second hops
+
+Typical cause: the observer records `UpdateMotion` intent but only translates remote actors when an authoritative `UpdatePosition` arrives. On the stock ACE image, both retail and custom movers may be observed through sparse no-velocity position anchors, so observers must continue projecting forward motion from the last sticky motion state between those anchors.
 
 ### Invisible server-side movement after local stop
 

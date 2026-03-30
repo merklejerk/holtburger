@@ -1,7 +1,7 @@
 use super::simulation::LocalMotionIntent;
 use crate::client::movement_types::{
-    Gait, Locomotion, MotionState, MotionStyle, MovementCommand, MovementPacketMetadata,
-    RUN_ANIM_SPEED, Turn, planar_velocity_for_heading,
+    Gait, Locomotion, MotionState, MotionStyle, MovementCommand, MovementPacketMetadata, Turn,
+    planar_velocity_for_heading,
 };
 use anyhow::Result;
 #[cfg(test)]
@@ -12,11 +12,23 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::{SolvedBodyKinematics, SpatialBodyId, WorldEvent, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
+
+// ACE's movement packets carry a run-rate / speed scalar, not a standalone
+// "already world-space" speed constant divorced from animation. In the retail
+// math that scalar is applied against the run animation base speed, and after
+// the engine's unit conversion it ends up numerically matching our meters/sec
+// representation. That coincidence is useful, but it is also the trap: this
+// value is the *maximum* run speed for a fully capped player, not the speed
+// every character should emit or simulate.
 pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
-pub(crate) const SERVER_PULSE_PERIOD: Duration = Duration::from_millis(200);
+// Outbound MoveToState control cadence for our own motion pulses and navigation planning.
+// This is intentionally separate from the roughly-1s AutonomousPosition heartbeat cadence that
+// ACE uses for observer-facing UpdatePosition rebroadcasts.
+pub(crate) const MOVE_TO_STATE_PULSE_PERIOD: Duration = Duration::from_millis(200);
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
 const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
@@ -116,9 +128,21 @@ fn hold_key_for_motion_state(state: MotionState) -> HoldKey {
     }
 }
 
-fn locomotion_command_for_state(locomotion: Locomotion, gait: Gait) -> (u32, f32) {
+fn player_run_speed_mps(world: &WorldState) -> f32 {
+    // Keep the outgoing ForwardSpeed/SidestepSpeed scalar and the local runtime
+    // body on the same ACE-derived run-rate. Hardcoding 4.5 here causes high
+    // run-skill characters to overdrive the local/runtime simulation and packet
+    // stream until the server corrects them.
+    world.player_run_rate().unwrap_or(SERVER_RUN_SPEED)
+}
+
+fn locomotion_command_for_state(
+    locomotion: Locomotion,
+    gait: Gait,
+    run_speed_mps: f32,
+) -> (u32, f32) {
     match (gait, locomotion) {
-        (Gait::Run, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, SERVER_RUN_SPEED),
+        (Gait::Run, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, run_speed_mps),
         (Gait::Walk, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, 1.0),
         (_, Locomotion::Backstep) => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
         (_, Locomotion::StrafeLeft) => (SIDESTEP_LEFT_MOTION_COMMAND, 1.0),
@@ -138,33 +162,43 @@ fn build_motion_state_raw_motion_state(
     state: MotionState,
     motion_style: MotionStyle,
 ) -> RawMotionState {
+    let run_speed_mps = player_run_speed_mps(world);
+    let axis_hold_key = hold_key_for_motion_state(state) as u32;
     let mut raw_motion_state = RawMotionState {
         flags: RawMotionFlags::CURRENT_HOLD_KEY,
-        current_hold_key: Some(hold_key_for_motion_state(state) as u32),
+        current_hold_key: Some(axis_hold_key),
         ..Default::default()
     };
 
     if let Some(locomotion) = state.locomotion {
-        let (command, speed) = locomotion_command_for_state(locomotion, state.gait);
+        let (command, speed) = locomotion_command_for_state(locomotion, state.gait, run_speed_mps);
         match locomotion {
             Locomotion::Forward | Locomotion::Backstep => {
                 raw_motion_state.flags |=
-                    RawMotionFlags::FORWARD_COMMAND | RawMotionFlags::FORWARD_SPEED;
+                    RawMotionFlags::FORWARD_COMMAND
+                        | RawMotionFlags::FORWARD_HOLD_KEY
+                        | RawMotionFlags::FORWARD_SPEED;
                 raw_motion_state.forward_command = Some(command);
+                raw_motion_state.forward_hold_key = Some(axis_hold_key);
                 raw_motion_state.forward_speed = Some(speed);
             }
             Locomotion::StrafeLeft | Locomotion::StrafeRight => {
                 raw_motion_state.flags |=
-                    RawMotionFlags::SIDE_STEP_COMMAND | RawMotionFlags::SIDE_STEP_SPEED;
+                    RawMotionFlags::SIDE_STEP_COMMAND
+                        | RawMotionFlags::SIDE_STEP_HOLD_KEY
+                        | RawMotionFlags::SIDE_STEP_SPEED;
                 raw_motion_state.sidestep_command = Some(command);
+                raw_motion_state.sidestep_hold_key = Some(axis_hold_key);
                 raw_motion_state.sidestep_speed = Some(speed);
             }
         }
     }
 
     if let Some(turn) = state.turning {
-        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND | RawMotionFlags::TURN_SPEED;
+        raw_motion_state.flags |=
+            RawMotionFlags::TURN_COMMAND | RawMotionFlags::TURN_HOLD_KEY | RawMotionFlags::TURN_SPEED;
         raw_motion_state.turn_command = Some(turn_motion_command_for_state(turn));
+        raw_motion_state.turn_hold_key = Some(axis_hold_key);
         raw_motion_state.turn_speed = Some(turn_speed_for_state(state));
     }
 
@@ -308,19 +342,19 @@ fn server_motion_intent(state: MotionState, motion_style: MotionStyle) -> Server
     }
 }
 
-fn locomotion_speed_for_state(state: MotionState) -> f32 {
+fn locomotion_speed_for_state(state: MotionState, run_speed_mps: f32) -> f32 {
     match (state.gait, state.locomotion) {
         (_, None) => 0.0,
-        (Gait::Run, Some(Locomotion::Forward)) => SERVER_RUN_SPEED,
+        (Gait::Run, Some(Locomotion::Forward)) => run_speed_mps,
         (Gait::Walk, Some(Locomotion::Forward)) => 1.0,
         (_, Some(Locomotion::Backstep | Locomotion::StrafeLeft | Locomotion::StrafeRight)) => 1.0,
     }
 }
 
-fn local_velocity_for_state(current_heading: f32, state: MotionState) -> Vector3 {
+fn local_velocity_for_state(current_heading: f32, state: MotionState, run_speed_mps: f32) -> Vector3 {
     match state.locomotion {
         Some(Locomotion::Forward) => {
-            planar_velocity_for_heading(current_heading, locomotion_speed_for_state(state))
+            planar_velocity_for_heading(current_heading, locomotion_speed_for_state(state, run_speed_mps))
         }
         Some(Locomotion::Backstep) => {
             planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
@@ -387,7 +421,9 @@ impl MovementSystem {
     }
 
     fn motion_state_speed_mps(&self, state: MotionState) -> f32 {
-        RUN_ANIM_SPEED * locomotion_speed_for_state(state)
+        // Generic planning helpers model the actuator's full run vocabulary.
+        // Callers with a player-specific cap must scale or override separately.
+        locomotion_speed_for_state(state, SERVER_RUN_SPEED)
     }
 
     fn ingest_public_command(&mut self, command: MovementCommand, now: Instant) {
@@ -466,20 +502,6 @@ impl MovementSystem {
         }
 
         let public_motion = self.public_motion_state_for_tick();
-        if self.pending_snap_facing.is_some()
-            || public_motion.is_some()
-            || self.local_motion.is_some()
-            || self.server_motion_active
-        {
-            log::info!(
-                "movement: tick state active_public_motion={:?} snap={:?} public_motion={:?} local_motion={:?} server_motion_active={}",
-                self.active_public_motion,
-                self.pending_snap_facing,
-                public_motion,
-                self.local_motion,
-                self.server_motion_active,
-            );
-        }
 
         match public_motion {
             Some(state) => events.extend(
@@ -605,15 +627,8 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
         world: &mut WorldState,
         session: &mut Session,
-        now: Instant,
+        _now: Instant,
     ) -> Result<Vec<WorldEvent>> {
-        log::info!(
-            "movement: resolved motion request state={:?} at tick {:?} (last_server_motion_intent={:?})",
-            state,
-            now,
-            self.last_server_motion_intent,
-        );
-
         let had_active_local_motion = self.local_motion.is_some();
         let state_events = self.apply_motion_state(state, world);
 
@@ -690,7 +705,8 @@ impl MovementSystem {
             return Vec::new();
         };
         let current_heading = current_pose.rotation.to_heading();
-        let velocity = local_velocity_for_state(current_heading, state);
+        let run_speed_mps = player_run_speed_mps(world);
+        let velocity = local_velocity_for_state(current_heading, state, run_speed_mps);
         let omega = local_omega_for_state(state);
 
         world.set_local_player_runtime_vectors(velocity, omega)
@@ -705,12 +721,6 @@ impl MovementSystem {
         let Some(pulse) = build_autonomous_position_heartbeat(world, metadata) else {
             return Ok(false);
         };
-
-        log::debug!(
-            ">>>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
-            world.player.server_control_sequence,
-            pulse.position
-        );
 
         session
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
@@ -727,12 +737,6 @@ impl MovementSystem {
         let Some(pulse) = build_autonomous_position_sync(world, metadata) else {
             return Ok(false);
         };
-
-        log::debug!(
-            ">>>> Sending AutonomousPosition sync. ServerSeq: {}, Pos: {:?}",
-            world.player.server_control_sequence,
-            pulse.position
-        );
 
         session
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
@@ -813,8 +817,41 @@ mod tests {
     use holtburger_common::Vector3;
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_session::Session;
+    use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
     use holtburger_world::WorldState;
     use holtburger_world::entity::Entity;
+
+    fn seed_player_run_rate(world: &mut WorldState, run_skill: u32) -> f32 {
+        world.player.attributes.insert(
+            AttributeType::StrengthAttr,
+            Attribute {
+                attr_type: AttributeType::StrengthAttr,
+                ranks: 0,
+                start: 100,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 100,
+                current: 100,
+            },
+        );
+        world.player.skills.insert(
+            SkillType::Run,
+            Skill {
+                skill_type: SkillType::Run,
+                ranks: 0,
+                init: run_skill,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: run_skill,
+                current: run_skill,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+
+        player_run_speed_mps(world)
+    }
 
     #[test]
     fn test_calculate_heading_to() {
@@ -994,6 +1031,25 @@ mod tests {
     }
 
     #[test]
+    fn motion_state_raw_motion_state_uses_player_run_rate_for_forward_speed() {
+        let mut world = WorldState::synthetic();
+        let expected_run_speed = seed_player_run_rate(&mut world, 300);
+
+        let raw_motion_state = build_motion_state_raw_motion_state(
+            &world,
+            MotionState::builder().run().forward().build(),
+            MotionStyle::PreserveServer,
+        );
+
+        assert_eq!(raw_motion_state.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
+        assert_eq!(raw_motion_state.forward_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw_motion_state.forward_speed, Some(expected_run_speed));
+        assert!(raw_motion_state
+            .flags
+            .contains(RawMotionFlags::FORWARD_HOLD_KEY));
+    }
+
+    #[test]
     fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
         let world = WorldState::synthetic();
 
@@ -1016,6 +1072,10 @@ mod tests {
             raw_motion_state.turn_speed,
             Some(RUN_HELD_TURN_SPEED_RAD_PER_SEC)
         );
+        assert_eq!(raw_motion_state.turn_hold_key, Some(HoldKey::Run as u32));
+        assert!(raw_motion_state
+            .flags
+            .contains(RawMotionFlags::TURN_HOLD_KEY));
     }
 
     #[test]
@@ -1043,6 +1103,7 @@ mod tests {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
+        let expected_run_speed = seed_player_run_rate(&mut world, 300);
         world.player.position = WorldPosition {
             landblock_id: Guid(0x12340000),
             coords: Vector3::new(10.0, 20.0, 0.0),
@@ -1067,14 +1128,12 @@ mod tests {
             .expect("local player runtime body should exist");
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
-                if *guid == player_guid
-                    && velocity.x.abs() < 1e-5
-                    && (velocity.y - 18.0).abs() < 1e-5
-                    && velocity.z.abs() < 1e-5
+            WorldEvent::RuntimeBodyChanged {
+                body_id: SpatialBodyId::LocalPlayer(guid)
+            } if *guid == player_guid
         )));
         assert!(body.velocity.x.abs() < 1e-5);
-        assert!((body.velocity.y - 18.0).abs() < 1e-5);
+        assert!((body.velocity.y - expected_run_speed).abs() < 1e-5);
     }
 
     #[test]
@@ -1086,7 +1145,7 @@ mod tests {
         let duration = movement.estimate_duration_for_distance(state, distance);
         let displacement = movement.estimate_displacement(state, duration);
 
-        assert!((duration.as_secs_f32() - 0.5).abs() < 1e-5);
+        assert!((duration.as_secs_f32() - 2.0).abs() < 1e-5);
         assert!((displacement - distance).abs() < 1e-4);
     }
 
@@ -1136,7 +1195,9 @@ mod tests {
             events.is_empty()
                 || events.iter().any(|event| matches!(
                     event,
-                    WorldEvent::EntityVectorUpdated { guid, .. } if *guid == player_guid
+                    WorldEvent::RuntimeBodyChanged {
+                        body_id: SpatialBodyId::LocalPlayer(guid)
+                    } if *guid == player_guid
                 ))
         );
         assert!(player.velocity.length_squared() <= 1e-6);
@@ -1171,10 +1232,9 @@ mod tests {
             .expect("local player runtime body should exist");
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::EntityVectorUpdated { guid, velocity, omega }
-                if *guid == player_guid
-                    && velocity.length_squared() <= 1e-6
-                    && omega.z.abs() > 1e-6
+            WorldEvent::RuntimeBodyChanged {
+                body_id: SpatialBodyId::LocalPlayer(guid)
+            } if *guid == player_guid
         )));
         assert!(body.velocity.length_squared() <= 1e-6);
         assert!(body.omega.z.abs() > 1e-6);
@@ -1481,7 +1541,7 @@ mod tests {
             .body(SpatialBodyId::LocalPlayer(guid))
             .expect("local player runtime body should exist");
         assert!(player.velocity.x.abs() < 1e-5);
-        assert!((player.velocity.y - 18.0).abs() < 1e-5);
+        assert!((player.velocity.y - 4.5).abs() < 1e-5);
         assert_eq!(session.packet_sequence, 2);
 
         movement
@@ -1494,7 +1554,7 @@ mod tests {
             .body(SpatialBodyId::LocalPlayer(guid))
             .expect("local player runtime body should exist");
         assert!(player.velocity.x.abs() < 1e-5);
-        assert!((player.velocity.y - 18.0).abs() < 1e-5);
+        assert!((player.velocity.y - 4.5).abs() < 1e-5);
         assert_eq!(session.packet_sequence, 2);
     }
 

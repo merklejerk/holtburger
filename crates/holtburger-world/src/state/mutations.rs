@@ -250,13 +250,7 @@ impl WorldState {
             return Vec::new();
         }
 
-        vec![
-            WorldEvent::RuntimeBodyChanged { body_id },
-            WorldEvent::EntityMoved {
-            guid: self.player.guid,
-            pos: pose,
-        },
-        ]
+        vec![WorldEvent::RuntimeBodyChanged { body_id }]
     }
 
     pub fn set_local_player_runtime_vectors(
@@ -281,14 +275,7 @@ impl WorldState {
             return Vec::new();
         }
 
-        vec![
-            WorldEvent::RuntimeBodyChanged { body_id },
-            WorldEvent::EntityVectorUpdated {
-            guid: self.player.guid,
-            velocity,
-            omega,
-        },
-        ]
+        vec![WorldEvent::RuntimeBodyChanged { body_id }]
     }
 
     pub fn apply_solved_body_kinematics(
@@ -305,7 +292,9 @@ impl WorldState {
 
         let mut events = Vec::new();
         Self::emit_runtime_body_changed(&mut events, solved.body_id);
-        if let Some(guid) = solved.body_id.authoritative_guid() {
+        if let Some(guid) = solved.body_id.authoritative_guid()
+            && !matches!(solved.body_id, SpatialBodyId::LocalPlayer(_))
+        {
             events.push(WorldEvent::EntityMoved {
                 guid,
                 pos: solved.pose,
@@ -869,6 +858,26 @@ impl WorldState {
             data.force_position_sequence,
         );
 
+        let runtime_delta_m = self
+            .local_player_runtime_pose()
+            .map(|pose| pose.distance_to(&data.position));
+        let auth_delta_m = self.player.position.distance_to(&data.position);
+
+        log::debug!(
+            "player: self AutonomousPosition {} pos {:?} runtime_delta={:?} auth_delta={:.2}m seqs inst={} server={} teleport={} force={} current teleport={} force={} server={}",
+            if accepted { "accepted" } else { "rejected" },
+            data.position,
+            runtime_delta_m,
+            auth_delta_m,
+            data.instance_sequence,
+            data.server_control_sequence,
+            data.teleport_sequence,
+            data.force_position_sequence,
+            self.player.teleport_sequence,
+            self.player.force_position_sequence,
+            self.player.server_control_sequence,
+        );
+
         if !accepted {
             return Vec::new();
         }
@@ -1256,6 +1265,11 @@ impl WorldState {
         data: &SetStateData,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
+        if data.guid == self.player.guid {
+            self.player.instance_sequence = data.instance_sequence;
+            return true;
+        }
+
         if let Some(entity) = self.entities.get_mut(data.guid) {
             entity.physics_state = data.physics_state;
             entity.properties.hydrate_from_set_state(data);

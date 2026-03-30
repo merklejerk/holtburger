@@ -1345,7 +1345,7 @@ impl GameState {
                 attack_sequence_active: false,
             }
         ) {
-            log::info!(
+            log::trace!(
                 "tui navigation: syncing {:?} target={:?} player_present={} auth_distance={:?} projected_distance={:?} max_run_rate={:.2}",
                 intent,
                 target_guid.map(|guid| format!("0x{:08X}", guid.0)),

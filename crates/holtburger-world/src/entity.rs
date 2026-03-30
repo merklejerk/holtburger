@@ -8,6 +8,9 @@ use holtburger_common::properties::{
 };
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::messages::movement::messages::motion::{
+    MoveToObject, MoveToPosition, MovementInvalid, TurnToHeading, TurnToObject,
+};
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, MotionStance, MovementEventData, MovementTypeData,
 };
@@ -16,6 +19,8 @@ use holtburger_protocol::messages::object::messages::description::ObjectDescript
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
+use holtburger_protocol::messages::MovementType;
+use holtburger_protocol::traits::ProtocolUnpack;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -116,6 +121,50 @@ impl EntityMotionSnapshot {
             || snapshot.directive.is_some();
 
         has_data.then_some(snapshot)
+    }
+
+    pub fn from_object_description(data: &ObjectDescriptionData) -> Option<Self> {
+        let movement_data = data.movement_data.as_deref()?;
+        let mut offset = 0;
+        let movement_type_raw = u8::unpack(movement_data, &mut offset)?;
+        let movement_type = MovementType::from_repr(movement_type_raw)?;
+        let motion_flags = u8::unpack(movement_data, &mut offset)?;
+        let current_style = u16::unpack(movement_data, &mut offset)?;
+
+        let payload = match movement_type {
+            MovementType::MoveToObject => {
+                MovementTypeData::MoveToObject(MoveToObject::unpack(movement_data, &mut offset)?)
+            }
+            MovementType::MoveToPosition => MovementTypeData::MoveToPosition(
+                MoveToPosition::unpack(movement_data, &mut offset)?,
+            ),
+            MovementType::TurnToObject => {
+                MovementTypeData::TurnToObject(TurnToObject::unpack(movement_data, &mut offset)?)
+            }
+            MovementType::TurnToHeading => MovementTypeData::TurnToHeading(
+                TurnToHeading::unpack(movement_data, &mut offset)?,
+            ),
+            MovementType::Invalid
+            | MovementType::RawCommand
+            | MovementType::InterpretedCommand
+            | MovementType::StopRawCommand
+            | MovementType::StopInterpretedCommand
+            | MovementType::StopCompletely => MovementTypeData::Invalid(
+                MovementInvalid::unpack_ext(movement_data, &mut offset, motion_flags)?,
+            ),
+        };
+
+        Self::from_movement_event(&MovementEventData {
+            guid: data.public_weenie_desc.guid,
+            object_instance_sequence: data.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX],
+            movement_sequence: 0,
+            server_control_sequence: data.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX],
+            is_autonomous: data.autonomous_movement.unwrap_or(false),
+            movement_type,
+            motion_flags,
+            current_style,
+            data: payload,
+        })
     }
 
     pub fn indicates_death_motion(self) -> bool {
@@ -376,6 +425,8 @@ impl Entity {
         if let Some(val) = data.autonomous_movement {
             self.autonomous_movement = val;
         }
+
+        self.motion_snapshot = EntityMotionSnapshot::from_object_description(data);
 
         // Hydrate properties from the description (using common mapping logic)
         self.properties.hydrate_from_odd(data);

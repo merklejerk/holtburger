@@ -26,7 +26,10 @@ use types::*;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
-const MOVEMENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+// ACE throttles MoveToState-driven UpdatePosition rebroadcasts to about 1 second and documents
+// AutonomousPosition as a ~1s moving heartbeat. Keep that observer-facing heartbeat separate from
+// our more frequent outbound MoveToState/navigation control cadence.
+const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +210,15 @@ impl Client {
     fn emit_initial_reference_data(&self) {
         self.emit_spell_catalog_loaded();
         self.emit_fellowship_state_updated();
+        self.emit_runtime_body_snapshot();
+    }
+
+    fn tick_runtime_body_sampling(&mut self, now: Instant) {
+        if !matches!(self.state, ClientState::InWorld) {
+            return;
+        }
+
+        self.world.tick_runtime_bodies(now);
         self.emit_runtime_body_snapshot();
     }
 
@@ -724,7 +736,7 @@ impl Client {
         self.send_status_event();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(MOVEMENT_HEARTBEAT_INTERVAL);
+        let mut net_tick = tokio::time::interval(AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
         let mut last_physics_time = Instant::now();
 
         loop {
@@ -839,6 +851,8 @@ impl Client {
                         self.handle_runtime_world_event(&event);
                     }
 
+                    self.tick_runtime_body_sampling(now);
+
                 }
             }
         }
@@ -851,8 +865,14 @@ impl Client {
 mod tests {
     use super::*;
     use holtburger_common::{Guid, Quaternion, Vector3};
+    use holtburger_protocol::messages::movement::{
+        InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementEventData,
+        MovementInvalid, MovementStateFlags, MovementTypeData,
+    };
+    use holtburger_protocol::messages::{GameMessage, MovementType};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
+    use holtburger_common::position::WorldPosition;
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
@@ -919,6 +939,66 @@ mod tests {
 
         assert!(!sent);
         assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[test]
+    fn runtime_body_sampling_tick_projects_remote_motion_and_emits_snapshot() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let guid = Guid(0x5000_00B0);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x016C_01DD),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::from_heading(0.0),
+        };
+        let entity = Entity::new(guid, "Remote".to_string(), pose);
+        client.world.entities.insert(entity);
+
+        let message = GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid,
+            object_instance_sequence: 1,
+            movement_sequence: 1,
+            server_control_sequence: 1,
+            is_autonomous: true,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid {
+                state: InterpretedMotionState {
+                    flags: MovementStateFlags::FORWARD_COMMAND | MovementStateFlags::FORWARD_SPEED,
+                    num_commands: 0,
+                    forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                    forward_speed: Some(4.5),
+                    ..Default::default()
+                },
+                sticky_object: None,
+            }),
+        }));
+
+        let world_events = client.world.handle_message(&message);
+        for event in &world_events {
+            client.handle_world_event(event);
+        }
+        while events.try_recv().is_ok() {}
+
+        client.tick_runtime_body_sampling(Instant::now() + Duration::from_millis(250));
+
+        let snapshot = loop {
+            match events.try_recv() {
+                Ok(ClientViewEvent::RuntimeBodySnapshot { bodies }) => break bodies,
+                Ok(_) => continue,
+                Err(error) => panic!("expected runtime body snapshot after sampling tick: {error}"),
+            }
+        };
+
+        let body = snapshot
+            .iter()
+            .find(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(guid))
+            .copied()
+            .expect("expected projected remote runtime body");
+        assert_eq!(body.sample_mode, holtburger_world::SpatialSampleMode::SimulatingMotionState);
+        assert!(body.runtime_pose.coords.x < pose.coords.x);
+        assert!((body.runtime_pose.coords.y - pose.coords.y).abs() < 1e-4);
     }
 
     #[test]
@@ -1176,7 +1256,9 @@ mod tests {
         assert!(body.pose.coords.y > 0.0);
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == guid
+            WorldEvent::RuntimeBodyChanged {
+                body_id: holtburger_world::SpatialBodyId::LocalPlayer(event_guid)
+            } if *event_guid == guid
         )));
     }
 
@@ -1259,7 +1341,9 @@ mod tests {
         assert!(remote_after.pose.coords.x > remote_start.x);
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == player_guid
+            WorldEvent::RuntimeBodyChanged {
+                body_id: holtburger_world::SpatialBodyId::LocalPlayer(event_guid)
+            } if *event_guid == player_guid
         )));
         assert!(events.iter().any(|event| matches!(
             event,

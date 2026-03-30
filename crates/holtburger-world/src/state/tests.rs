@@ -12,7 +12,7 @@ use crate::{
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
+    PhysicsState, PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
     WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
@@ -21,12 +21,16 @@ use holtburger_dat::{
     DatFileType, HbaReader, HbaWriter, MountedResourceProvider, ResourceProvider, ResourceScope,
     ScopedResourceResolver,
 };
+use holtburger_protocol::messages::movement::{
+    InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementStateFlags,
+};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 use holtburger_protocol::messages::{
     FellowUpdateType, FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
     FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
+use holtburger_protocol::traits::ProtocolPack;
 use tempfile::tempdir;
 
 fn repo_portal_hba_path() -> PathBuf {
@@ -113,6 +117,114 @@ fn test_player_mirror_invariant_on_set_vector() {
         WorldEvent::EntityVectorUpdated { guid, velocity, omega }
             if *guid == player_guid && *velocity == new_vel && *omega == new_omega
     )));
+}
+
+#[test]
+fn set_local_player_runtime_pose_only_emits_runtime_body_change() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0123);
+    let start_pos = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = start_pos;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
+
+    let events = state.set_local_player_runtime_pose(WorldPosition {
+        coords: Vector3::new(4.0, 5.0, 6.0),
+        ..start_pos
+    });
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged {
+            body_id: SpatialBodyId::LocalPlayer(guid)
+        } if *guid == player_guid
+    )));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, WorldEvent::EntityMoved { guid, .. } if *guid == player_guid)));
+}
+
+#[test]
+fn set_local_player_runtime_vectors_only_emits_runtime_body_change() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0124);
+    let start_pos = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = start_pos;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
+
+    let events = state.set_local_player_runtime_vectors(
+        Vector3::new(1.0, 2.0, 0.0),
+        Vector3::new(0.0, 0.0, 1.0),
+    );
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged {
+            body_id: SpatialBodyId::LocalPlayer(guid)
+        } if *guid == player_guid
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated { guid, .. } if *guid == player_guid
+    )));
+}
+
+#[test]
+fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0125);
+    let authoritative_pose = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let runtime_pose = WorldPosition {
+        coords: Vector3::new(10.0, 20.0, 3.0),
+        ..authoritative_pose
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = authoritative_pose;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), authoritative_pose));
+
+    let runtime_events = state.set_local_player_runtime_vectors(
+        Vector3::new(1.0, 0.0, 0.0),
+        Vector3::new(0.0, 0.0, 0.5),
+    );
+    assert!(!runtime_events.is_empty());
+    let pose_events = state.set_local_player_runtime_pose(runtime_pose);
+    assert!(!pose_events.is_empty());
+
+    let authoritative_update = WorldPosition {
+        coords: Vector3::new(2.0, 3.0, 3.0),
+        ..authoritative_pose
+    };
+    state.set_player_position(authoritative_update);
+
+    let body = state
+        .scene
+        .body(SpatialBodyId::LocalPlayer(player_guid))
+        .expect("local player runtime body should exist");
+    assert_eq!(body.pose, runtime_pose);
+    assert_eq!(body.authoritative_pose, Some(authoritative_update));
+    assert_eq!(body.sampling.mode, SpatialSampleMode::SimulatingMotionState);
 }
 
 #[test]
@@ -1609,6 +1721,12 @@ fn test_self_object_create_bootstraps_player_position() {
     let mut data = ObjectDescriptionData::with_guid(player_guid);
     data.public_weenie_desc.name = Some("Player".to_string());
     data.pos = Some(bootstrap_pos);
+    data.movement_data = Some(spawn_invalid_motion_data(
+        MotionStance::NonCombat,
+        InterpretedMotionCommand::RUN_FORWARD,
+        4.5,
+    ));
+    data.autonomous_movement = Some(true);
 
     let msg = GameMessage::ObjectCreate(Box::new(data));
     let events = state.handle_message(&msg);
@@ -1618,8 +1736,54 @@ fn test_self_object_create_bootstraps_player_position() {
         state.entities.get(player_guid).unwrap().position,
         bootstrap_pos
     );
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::NonCombat)
+    );
+    let motion_snapshot = state
+        .entities
+        .get(player_guid)
+        .unwrap()
+        .motion_snapshot
+        .expect("self object create should hydrate motion snapshot from spawn movement data");
+    assert_eq!(motion_snapshot.current_style, Some(MotionStance::NonCombat));
+    assert_eq!(
+        motion_snapshot.forward_command,
+        Some(InterpretedMotionCommand::RUN_FORWARD)
+    );
+    assert_eq!(
+        motion_snapshot.forward_speed.map(|speed| speed.to_f32()),
+        Some(4.5)
+    );
     assert!(state.entity_lifecycle_state(player_guid).is_none());
     assert!(!events.is_empty());
+}
+
+fn spawn_invalid_motion_data(
+    style: MotionStance,
+    forward_command: InterpretedMotionCommand,
+    forward_speed: f32,
+) -> Vec<u8> {
+    let mut data = Vec::new();
+    (MovementType::Invalid as u8).pack(&mut data);
+    0u8.pack(&mut data);
+    style.interpreted().pack(&mut data);
+    InterpretedMotionState {
+        flags: MovementStateFlags::CURRENT_STYLE
+            | MovementStateFlags::FORWARD_COMMAND
+            | MovementStateFlags::FORWARD_SPEED,
+        num_commands: 0,
+        current_style: Some(style.interpreted()),
+        forward_command: Some(forward_command),
+        sidestep_command: None,
+        turn_command: None,
+        forward_speed: Some(forward_speed),
+        sidestep_speed: None,
+        turn_speed: None,
+        commands: Vec::new(),
+    }
+    .pack(&mut data);
+    data
 }
 
 #[test]
@@ -2009,6 +2173,28 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
         )
     );
 }
+
+        #[test]
+        fn apply_set_state_updates_local_player_instance_sequence() {
+            let mut state = WorldState::synthetic();
+            state.player.guid = Guid(0x5000_0001);
+            state.player.instance_sequence = 0;
+            let mut events = Vec::new();
+
+            let handled = state.apply_set_state_update(
+                &SetStateData {
+                    guid: state.player.guid,
+                    physics_state: PhysicsState::REPORT_COLLISIONS,
+                    instance_sequence: 1649,
+                    state_sequence: 1,
+                },
+                &mut events,
+            );
+
+            assert!(handled);
+            assert!(events.is_empty());
+            assert_eq!(state.player.instance_sequence, 1649);
+        }
 
 #[test]
 fn test_tick_does_not_sweep_unexpired_deadline() {

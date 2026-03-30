@@ -32,6 +32,7 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
+use crate::spatial::TuiSpatialHackHandle;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
@@ -99,6 +100,11 @@ pub struct SalvagingState {
 impl GameState {
     pub(super) fn mark_fellowship_invite_accepted(&mut self) {
         self.runtime.open_party_tab_on_next_fellowship_update = true;
+    }
+
+    pub fn attach_tui_spatial_hacks(&mut self, hacks: TuiSpatialHackHandle) {
+        self.runtime.spatial_hacks = hacks;
+        self.sync_tui_spatial_hacks();
     }
 
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
@@ -428,6 +434,9 @@ impl GameState {
             }
             _ => {}
         }
+
+        self.sync_tui_spatial_hacks();
+
         result
     }
 
@@ -879,6 +888,7 @@ impl GameState {
         self.sync_approach_target(now, &mut result);
         self.sync_follow_target(now, &mut result);
         self.sync_sticky_melee_pursuit(&mut result);
+        self.sync_tui_spatial_hacks();
 
         result
     }
@@ -1037,6 +1047,7 @@ impl GameState {
         }
 
         self.set_active_interaction(None, result);
+        self.sync_tui_spatial_hacks();
     }
 
     fn set_active_interaction(
@@ -1508,6 +1519,30 @@ impl GameState {
         }
     }
 
+    fn active_navigation_target_guid(&self) -> Option<Guid> {
+        match self.runtime.navigation.navigation_mode() {
+            Some(NavigationMode::Approach { target, .. })
+            | Some(NavigationMode::Follow { target, .. }) => Some(target),
+            Some(NavigationMode::StickyMelee { target })
+                if self.runtime.navigation.sticky_is_pursuing() =>
+            {
+                Some(target)
+            }
+            _ => None,
+        }
+    }
+
+    fn sync_tui_spatial_hacks(&self) {
+        let target_pose = self
+            .active_navigation_target_guid()
+            .and_then(|guid| self.data.runtime_sample_for_guid(guid))
+            .map(|sample| sample.projected_pose);
+
+        self.runtime
+            .spatial_hacks
+            .set_navigation_target(self.data.player_guid, target_pose);
+    }
+
     fn is_valid_combat_target(&self, target_guid: Guid) -> bool {
         if !self.data.entities.contains_key(&target_guid) {
             return false;
@@ -1819,6 +1854,7 @@ struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: NavigationAutomation,
+    spatial_hacks: TuiSpatialHackHandle,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,

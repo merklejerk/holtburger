@@ -23,12 +23,13 @@ impl AppState {
                     self.display_client_info();
                 }
                 AppAction::TransitionToGame { guid, name } => {
-                    let game = GameState::with_chat_log(
+                    let mut game = GameState::with_chat_log(
                         guid,
                         name,
                         self.world_name.clone(),
                         self.chat_log.take(),
                     );
+                    game.attach_tui_spatial_hacks(self.tui_spatial_hacks.clone());
                     self.page = Page::Game(Box::new(game));
                     result.needs_redraw = true;
                 }
@@ -89,6 +90,7 @@ mod tests {
             account_password: "password".to_string(),
             character_preference: None,
             chat_log,
+            tui_spatial_hacks: crate::spatial::TuiSpatialHackHandle::default(),
             page: Page::Selection(SelectionState::default()),
             client_state: ClientState::Connected,
             net_stats: NetStats::default(),

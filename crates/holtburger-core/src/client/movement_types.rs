@@ -2,14 +2,10 @@ use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
 
-pub(crate) const RUN_ANIM_SPEED: f32 = 4.0;
-
 pub(crate) fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
-    let world_speed = speed * RUN_ANIM_SPEED;
-
     Vector3::new(
-        -heading.cos() * world_speed,
-        heading.sin() * world_speed,
+        -heading.cos() * speed,
+        heading.sin() * speed,
         0.0,
     )
 }
@@ -170,9 +166,9 @@ mod tests {
         let west_velocity = planar_velocity_for_heading(0.0, 2.0);
         let north_velocity = planar_velocity_for_heading(90.0f32.to_radians(), 2.0);
 
-        assert_eq!(west_velocity, Vector3::new(-8.0, 0.0, 0.0));
+        assert_eq!(west_velocity, Vector3::new(-2.0, 0.0, 0.0));
         assert!(north_velocity.x.abs() < 1e-5);
-        assert!((north_velocity.y - 8.0).abs() < 1e-5);
+        assert!((north_velocity.y - 2.0).abs() < 1e-5);
     }
 
     #[test]

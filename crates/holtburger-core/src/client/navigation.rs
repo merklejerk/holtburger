@@ -19,7 +19,7 @@ use crate::client::controllers::{
     ApproachTargetInput, Controller, MaintainRangeConfig, MaintainRangeController,
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
-use crate::client::movement::{MovementSystem, SERVER_PULSE_PERIOD, SERVER_RUN_SPEED};
+use crate::client::movement::{MOVE_TO_STATE_PULSE_PERIOD, MovementSystem, SERVER_RUN_SPEED};
 use crate::client::movement_types::{Gait, Locomotion, MotionState, MovementCommand, Turn};
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
@@ -243,7 +243,7 @@ impl NavigationPulsePlanner {
         };
         let estimator = MovementSystem::new();
         let full_pulse_distance =
-            estimator.estimate_displacement(locomotion_state, SERVER_PULSE_PERIOD);
+            estimator.estimate_displacement(locomotion_state, MOVE_TO_STATE_PULSE_PERIOD);
         let gait_rate_ratio = if gait_speed(gait) <= 1e-6 {
             0.0
         } else {
@@ -251,6 +251,18 @@ impl NavigationPulsePlanner {
         };
         let capped_pulse_distance = full_pulse_distance * gait_rate_ratio.max(MIN_PULSE_DUTY_CYCLE);
         let desired_distance = plan.remaining_distance.min(capped_pulse_distance);
+
+        log::trace!(
+            "navigation pulse: planner remaining_m={:.2} full_pulse_m={:.2} capped_pulse_m={:.2} desired_m={:.2} max_run_rate={:.2} gait={:?} gait_basis_mps={:.2} duty_ratio={:.2}",
+            plan.remaining_distance,
+            full_pulse_distance,
+            capped_pulse_distance,
+            desired_distance,
+            max_run_rate,
+            gait,
+            gait_speed(gait),
+            gait_rate_ratio,
+        );
 
         if desired_distance <= 1e-6 || gait_rate_ratio <= 1e-6 {
             log::info!(
@@ -277,7 +289,7 @@ impl NavigationPulsePlanner {
         match planned {
             PlannedLocomotion::Hold => match self.issued {
                 Some(IssuedLocomotion::Hold) => {
-                    log::info!(
+                    log::trace!(
                         "navigation pulse: retaining active hold toward heading {:.3} rad (remaining {:.2}m, navigation speed cap {:.2})",
                         plan.heading,
                         plan.remaining_distance,
@@ -309,7 +321,7 @@ impl NavigationPulsePlanner {
             },
             PlannedLocomotion::Pulse { duration } => match self.issued {
                 Some(IssuedLocomotion::Pulse { until }) if now < until => {
-                    log::info!(
+                    log::trace!(
                         "navigation pulse: keeping active pulse toward heading {:.3} rad for another {} ms (remaining {:.2}m, navigation speed cap {:.2})",
                         plan.heading,
                         until.saturating_duration_since(now).as_millis(),
@@ -1029,17 +1041,21 @@ impl NavigationAutomation {
         match target_position {
             Some(target_position) => {
                 let distance_to_target = player_position.distance_to(&target_position);
-                log::info!(
-                    "approach: sync target 0x{:08X} distance {:.2}m arrival {:.2}m navigation speed cap {:.2} heading {:.3} rad",
+                let authoritative_distance_to_target = input
+                    .authoritative_target_position()
+                    .map(|authoritative_target| player_position.distance_to(&authoritative_target));
+                log::trace!(
+                    "approach: sync target 0x{:08X} projected_distance {:.2}m authoritative_distance {:?} arrival {:.2}m navigation speed cap {:.2} heading {:.3} rad",
                     target_guid.0,
                     distance_to_target,
+                    authoritative_distance_to_target,
                     controller.arrival_distance(),
                     input.max_run_rate,
                     player_position.heading_to(&target_position),
                 );
             }
             None => {
-                log::info!(
+                log::trace!(
                     "approach: sync target 0x{:08X} without usable target position (navigation speed cap {:.2})",
                     target_guid.0,
                     input.max_run_rate,
@@ -1285,7 +1301,7 @@ impl NavigationAutomation {
     ) {
         match effect {
             ApproachTargetEffect::Pursue(plan) => {
-                log::info!(
+                log::trace!(
                     "approach: target 0x{:08X} pursuing with heading {:.3} rad, remaining {:.2}m, navigation speed cap {:.2}, arrival {:.2}m",
                     context.target_guid.0,
                     plan.heading,
@@ -1824,7 +1840,7 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 0.5,
             },
-            sync_input(now, Some(position(0.0)), Some(position(1.6))),
+            sync_input(now, Some(position(0.0)), Some(position(1.25))),
         );
 
         assert!(result.commands.iter().any(|command| matches!(
@@ -1852,7 +1868,7 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 0.5,
             },
-            sync_input(now, Some(position(0.0)), Some(position(1.6))),
+            sync_input(now, Some(position(0.0)), Some(position(1.25))),
         );
 
         let pulse_duration = first
@@ -1874,7 +1890,7 @@ mod tests {
             sync_input(
                 now + Duration::from_millis(16),
                 Some(position(0.0)),
-                Some(position(1.6)),
+                Some(position(1.25)),
             ),
         );
         assert!(steady.commands.is_empty());
@@ -1887,7 +1903,7 @@ mod tests {
             sync_input(
                 now + pulse_duration + Duration::from_millis(1),
                 Some(position(0.0)),
-                Some(position(1.6)),
+                Some(position(1.25)),
             ),
         );
         assert!(refreshed.commands.iter().any(|command| matches!(
@@ -1955,7 +1971,7 @@ mod tests {
             sync_input(
                 now + Duration::from_millis(16),
                 Some(position(0.0)),
-                Some(position(1.32)),
+                Some(position(1.12)),
             ),
         );
 

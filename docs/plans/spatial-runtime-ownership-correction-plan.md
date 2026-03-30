@@ -34,7 +34,7 @@ Make world-owned `SpatialBody` sidecars the single canonical client runtime body
 - [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs)
 - [crates/holtburger-world/src/state/mutations.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/mutations.rs)
 - [crates/holtburger-world/src/state/liveness.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/liveness.rs)
-- [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs)
+- [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs)
 - [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs)
 - [crates/holtburger-core/src/client/simulation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/simulation.rs)
 - [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs)
@@ -45,7 +45,7 @@ Make world-owned `SpatialBody` sidecars the single canonical client runtime body
 ### Existing Patterns
 
 - `SpatialBodyId`, `SpatialBody`, `SpatialSamplingState`, and `BodySamplingStore` already exist in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs).
-- `ClientProjectionCache` currently owns a private `BodySamplingStore` and advances it from `ClientViewEvent`s in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs).
+- `ClientProjectionCache` currently owns a private `BodySamplingStore` and advances it from `ClientViewEvent`s in [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs).
 - `ClientSimulationSystem` already builds solve inputs from runtime body state via `world.runtime_kinematics_for_guid(...)` and applies solved body outputs through world APIs in [crates/holtburger-core/src/client/simulation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/simulation.rs).
 - Navigation and maintain-range logic already treat projected samples as operational inputs, not presentation-only data, in [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs) and [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs).
 
@@ -313,7 +313,7 @@ But once the canonical runtime-body view stream exists:
 - Document that `ClientProjectionCache` is transitional and must become a read facade rather than a second runtime store.
 - Document the frontend delivery contract explicitly: frontend-owned navigation/render consumers read a mirrored cache fed by `ClientViewEvent`, not shared mutable runtime bodies.
 - Define the concrete runtime-body view type, event family, and initial-snapshot-plus-delta sync contract.
-- Audit all public APIs in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs) and [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) for wording that still implies dual ownership is acceptable.
+- Audit all public APIs in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs) and [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs) for wording that still implies dual ownership is acceptable.
 - Record the migration rule that any temporary compatibility layer may mirror reads but may not perform independent advancement once world-side sampling is authoritative.
 
 #### Acceptance Criteria
@@ -355,7 +355,7 @@ But once the canonical runtime-body view stream exists:
 
 #### Deliverables
 
-- Refactor [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) so `ClientProjectionCache` stops owning a private canonical `BodySamplingStore`.
+- Refactor [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs) so `ClientProjectionCache` stops owning a private canonical `BodySamplingStore`.
 - Replace cache-local mutation with one of these migration-safe shapes:
   - a facade over world-owned sampling reads, or
   - a lightweight snapshot cache that is repopulated from world-owned samples and never advances them independently
@@ -454,11 +454,11 @@ Mitigation:
 
 ### Task Checklist
 
-- [ ] Phase 1: document the ownership decision and migration rule
-- [ ] Phase 2: finish world-owned canonical sampling API surface
-- [ ] Phase 3: collapse `ClientProjectionCache` to read-only or snapshot-only behavior
-- [ ] Phase 4: migrate operational consumers to the canonical sample source
-- [ ] Phase 5: delete hybrid compatibility seams and dead tests
+- [x] Phase 1: document the ownership decision and migration rule
+- [x] Phase 2: finish world-owned canonical sampling API surface
+- [x] Phase 3: collapse `ClientProjectionCache` to read-only or snapshot-only behavior
+- [x] Phase 4: migrate operational consumers to the canonical sample source
+- [x] Phase 5: delete hybrid compatibility seams and dead tests
 - [ ] Final verification across world, core, and CLI consumers
 
 ### Decisions Log
@@ -471,14 +471,73 @@ Mitigation:
 - Resolved: the frontend keeps two read models during migration and likely after it: authoritative entity metadata plus mirrored runtime-body state.
 - Resolved: the first frontend migration targets entity-backed bodies and the local player; ephemeral frontend targets are a later extension.
 - Resolved: runtime-body mirror correctness requires a world/core dirty-signal path for changes that do not already surface through existing entity events.
+- 2026-03-29: Phase 1 wording freeze updated root, world, and core architecture docs plus public spatial/projection doc comments so they consistently describe world-owned `SpatialBody` sidecars as the sole canonical runtime body model and mark `ClientProjectionCache` as transitional mirrored read state.
+- 2026-03-29: Phase 1 locked the frontend delivery contract as runtime-body initial snapshot plus deltas with explicit reset-and-resnapshot recovery, rather than delta-only projection advancement.
+- 2026-03-29: Phase 2 introduced `RuntimeSpatialBodyView` and `RuntimeBodyResetCause` on the world side, plus canonical scene/world helpers for runtime sampling config, authoritative snapshot seeding, authoritative pose correction, runtime kinematics updates, runtime motion-state updates, forced-reposition reset, teleport suspension, and sampling ticks.
+- 2026-03-29: Phase 2 chose to surface runtime-body dirty/reset signals immediately as `WorldEvent::RuntimeBodyChanged`, `WorldEvent::RuntimeBodyRemoved`, and `WorldEvent::RuntimeBodiesReset`, while intentionally leaving `ClientViewEvent` unchanged until Phase 3.
+- 2026-03-29: Phase 2 moved remaining runtime-body mutation semantics out of ad hoc `body_mut()` call sites in `WorldState` helpers and into `BodySamplingStore`/`SpatialScene` runtime-body operations.
+- 2026-03-29: Phase 3 added `ClientViewEvent::RuntimeBodySnapshot`, `RuntimeBodyUpserted`, `RuntimeBodyRemoved`, and `RuntimeBodiesReset`, and core now projects those directly from canonical world runtime-body state plus `RequestInitialViewState` bootstrap.
+- 2026-03-29: Phase 3 converted `ClientProjectionCache` from a private advancing `BodySamplingStore` into a snapshot-only mirrored runtime-body cache while intentionally preserving the old projected-read helper API surface as a compatibility facade for Phase 4 consumers.
+- 2026-03-29: Phase 3 made runtime-body recovery explicit in the TUI by treating lagged client-view receivers as a `RuntimeBodiesReset { Resync }` condition followed by a fresh `RequestInitialViewState` bootstrap.
+- 2026-03-29: Phase 4 moved the frontend-owned mirrored runtime-body cache onto shared game-page data so navigation, combat automation, debug, HUD, and dashboard tabs now read the same mirrored runtime-body truth instead of mixing runtime cache reads with separate authoritative-only `player_pos` or raw entity positions.
+- 2026-03-29: Phase 4 kept the first-step `Guid`-centric targeting contract but changed resolution to prefer mirrored runtime-body samples and local-player runtime pose, with authoritative entity/player state retained only as fallback metadata until Phase 5 removes the old seams.
+- 2026-03-29: Phase 4 preserved the authoritative-versus-runtime distinction for consumers by continuing to surface both values through `SpatialEntitySample` while switching the sample source to the mirrored runtime-body cache.
+- 2026-03-29: Phase 5 deleted the `ClientViewSpatialBridge` compatibility layer, renamed the core/frontend mirror to `RuntimeBodyViewCache`, and made direct event-application on that cache the only public cache update path.
+- 2026-03-29: Phase 5 removed the old projection-flavored core re-exports so public APIs no longer imply core owns projection/runtime advancement policy separate from `holtburger-world`.
+- 2026-03-29: Phase 5 updated root/core/world architecture docs to describe the final ownership model only: world owns canonical runtime bodies, core emits runtime-body view events, and frontend caches are mirrored read models.
 
 ### Verification Log
 
 - 2026-03-29: confirmed current sidecar primitives and sampling types already exist in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs).
-- 2026-03-29: confirmed `ClientProjectionCache` still privately owns `BodySamplingStore` and advances it from `ClientViewEvent`s in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs).
+- 2026-03-29: confirmed `ClientProjectionCache` still privately owns `BodySamplingStore` and advances it from `ClientViewEvent`s in [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs).
 - 2026-03-29: confirmed operational consumers already depend on projected samples in [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs) and [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs).
 - 2026-03-29: confirmed the current TUI runs core on a spawned client task while the app game page owns navigation and projection cache state in [apps/holtburger-cli/src/bin/tui.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/bin/tui.rs) and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
 - 2026-03-29: dry-run found that `RequestInitialViewState` currently emits reference data only, the TUI navigation path consumes both `data.entities` and `projection_cache`, remote body contact changes do not currently surface as frontend-visible events, and lagged view-event recovery has no spatial resync contract yet.
+- 2026-03-29: Phase 1 audit corrected conflicting public wording in [ARCHITECTURE.md](/home/cluracan/code/holtburger/ARCHITECTURE.md), [crates/holtburger-world/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-world/ARCHITECTURE.md), [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md), [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs), and [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs).
+- 2026-03-29: Phase 2 added the canonical world-side runtime-body view/query surface in [crates/holtburger-world/src/spatial.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial.rs) and [crates/holtburger-world/src/state/mutations.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/mutations.rs).
+- 2026-03-29: Phase 2 added world dirty/reset signals in [crates/holtburger-world/src/events.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/events.rs), emitted them from world mutation and handler paths in [crates/holtburger-world/src/state/mutations.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/mutations.rs), [crates/holtburger-world/src/handlers/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/handlers/movement.rs), [crates/holtburger-world/src/handlers/player.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/handlers/player.rs), and [crates/holtburger-world/src/state/liveness.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/liveness.rs).
+- 2026-03-29: `cargo test -p holtburger-world` passed after updating one pre-existing vector-routing test to account for the new runtime-body dirty signal.
+- 2026-03-29: `cargo test -p holtburger-core` passed with Phase 2 compatibility handling for the new world runtime-body events in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs).
+- 2026-03-29: Phase 3 replaced the core projection owner path in [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs) with a snapshot-only runtime-body mirror cache and updated [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), and [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs) to emit runtime-body snapshot/delta/reset view events.
+- 2026-03-29: Phase 3 updated the TUI runtime mirror path in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) and [apps/holtburger-cli/src/bin/tui.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/bin/tui.rs) so the frontend no longer locally ticks projection state and now resynchronizes via runtime-body reset plus `RequestInitialViewState` when the client-view stream lags.
+- 2026-03-29: `cargo test -p holtburger-core` passed with the Phase 3 runtime-body `ClientViewEvent` contract and snapshot-only projection facade.
+- 2026-03-29: `cargo test -p holtburger-cli` passed with the Phase 3 mirrored runtime-body cache integration and lagged-stream resnapshot handling.
+- 2026-03-29: Phase 4 moved the frontend mirror cache into shared game data in [apps/holtburger-cli/src/pages/game/data.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/data.rs), updated navigation/combat/debug consumers in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) and [apps/holtburger-cli/src/pages/game/panels/context.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/context.rs), and switched HUD/input/dashboard distance reads to the same mirrored runtime-body truth in [apps/holtburger-cli/src/pages/game/hud/status.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/hud/status.rs), [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs), [apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs), [apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs), [apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/party/tab.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/party/tab.rs), and [apps/holtburger-cli/src/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/state.rs).
+- 2026-03-29: Phase 4 added CLI regressions proving navigation input and party-tab distance calculations prefer mirrored runtime-body samples over stale authoritative positions in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) and [apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/party/tab.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/party/tab.rs).
+- 2026-03-29: `cargo test -p holtburger-cli` passed after the Phase 4 consumer migration onto shared mirrored runtime-body state.
+- 2026-03-29: `cargo test -p holtburger-core` still passed after the Phase 4 frontend consumer migration, confirming the unchanged core controllers remained compatible with the new sample source.
+- 2026-03-29: Phase 5 removed the last bridge/config compatibility surface in [crates/holtburger-core/src/client/runtime_body_view_cache.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime_body_view_cache.rs), [crates/holtburger-core/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/lib.rs), [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), [apps/holtburger-cli/src/pages/game/data.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/data.rs), and [apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/party/tab.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/party/tab.rs).
+- 2026-03-29: `cargo test -p holtburger-core` passed after the Phase 5 API cleanup, confirming the renamed `RuntimeBodyViewCache` and direct event-application path preserved core behavior.
+- 2026-03-29: `cargo test -p holtburger-cli` passed after the Phase 5 bridge removal, confirming the TUI reads and updates mirrored runtime-body state without the deleted compatibility layer.
+
+### Phase 1 Deviations
+
+- No architectural pivot is needed. Phase 1 completed as a wording and contract freeze without changing runtime behavior.
+- The CLI architecture surface was left unchanged in this phase. The ownership ambiguity is now resolved in the root/core/world architecture docs and the public projection/spatial module docs, and the CLI-specific cache contract can be renamed or tightened when Phase 3 and Phase 4 replace the old projection path in code.
+
+### Phase 2 Deviations
+
+- No architectural pivot is needed. Phase 2 completed with the world-owned canonical runtime sampling API surface and dirty/reset signals in place.
+- The new world-side runtime-body view helper currently returns all tracked runtime bodies, not a narrower frontend-visibility-filtered subset. That is intentional for now because the world layer does not yet expose a richer frontend-visibility contract for ephemeral bodies; Phase 3 snapshot emission can layer any required filtering on top of this canonical helper.
+- The world/core dirty-signal path landed one phase earlier than the frontend mirror event family. Core now tolerates the new `WorldEvent` variants but intentionally does not project them into `ClientViewEvent` yet. That compatibility seam is deliberate and should be collapsed in Phase 3 rather than treated as the final design.
+
+### Phase 3 Deviations
+
+- No architectural pivot is needed. Phase 3 completed with explicit runtime-body snapshot/delta/reset view events, a snapshot-only core projection facade, and deterministic bootstrap/recovery wiring.
+- The compatibility facade names remained in place for Phase 4: `ClientProjectionCache`, `ClientViewSpatialBridge`, and the `Guid`-centric projected read helpers mirrored runtime-body views rather than owning runtime advancement. That delay was deliberate so Phase 4 could retarget consumers mechanically without conflating the API collapse with the consumer migration; Phase 5 deletes those names.
+- Lagged-stream recovery is implemented for the current TUI frontend by locally applying `RuntimeBodiesReset { Resync }` and reissuing `RequestInitialViewState`. Additional frontends will need to honor the same reset-and-resnapshot contract when they are introduced; that is a rollout consideration, not a reason to pivot.
+
+### Phase 4 Deviations
+
+- No architectural pivot is needed. Phase 4 completed with operational and presentation consumers reading shared mirrored runtime-body state instead of a separately advanced cache path.
+- The CLI still retains `data.player_pos` and raw entity positions as authoritative fallback metadata because bootstrap and a few non-spatial metadata paths still benefit from an authoritative cache even while runtime reads prefer the mirrored runtime-body cache. Phase 5 removes the dead bridge/config seams without deleting those authoritative metadata caches.
+- Frontend targeting remains `Guid`-centric by design in this phase. The migration now resolves those `Guid` targets onto mirrored runtime-body samples and the mirrored local-player pose, but explicit UI support for non-entity or ephemeral `SpatialBodyId` targets is still deferred as planned.
+
+### Phase 5 Deviations
+
+- No architectural pivot is needed. Phase 5 completed by deleting the transitional bridge/config surface and tightening the mirror-cache API to direct event application plus read queries.
+- The CLI still keeps authoritative entity and player caches as fallback metadata for non-runtime concerns. That is intentional and does not reintroduce hybrid runtime advancement because those caches no longer tick or mutate mirrored runtime-body state.
+- `Guid`-centric convenience reads remain on `RuntimeBodyViewCache` because current frontend interactions are still entity-targeted. The cache is keyed internally by `SpatialBodyId`, and explicit non-entity targeting can be added later without reviving a second runtime owner.
 
 ### Open Questions
 

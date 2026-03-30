@@ -3,6 +3,7 @@ use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
 use holtburger_world::{WorldEvent, WorldState};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
@@ -15,7 +16,7 @@ mod movement;
 mod simulation;
 pub mod movement_types;
 pub mod navigation;
-pub mod projection;
+pub mod runtime_body_view_cache;
 pub mod types;
 use auth::AuthState;
 pub use builder::ClientBuilder;
@@ -196,9 +197,17 @@ impl Client {
             });
     }
 
+    fn emit_runtime_body_snapshot(&self) {
+        let bodies: Arc<[_]> = self.world.runtime_body_views().into();
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::RuntimeBodySnapshot { bodies });
+    }
+
     fn emit_initial_reference_data(&self) {
         self.emit_spell_catalog_loaded();
         self.emit_fellowship_state_updated();
+        self.emit_runtime_body_snapshot();
     }
 
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
@@ -400,6 +409,9 @@ impl Client {
             WorldEvent::EntityDespawned(guid) => {
                 self.simulation.untrack_actor(*guid);
             }
+            WorldEvent::RuntimeBodyChanged { .. }
+            | WorldEvent::RuntimeBodyRemoved { .. }
+            | WorldEvent::RuntimeBodiesReset { .. } => {}
             _ => {}
         }
     }
@@ -622,6 +634,25 @@ impl Client {
                         pos: *pos,
                         sequence: *sequence,
                     });
+            }
+            WorldEvent::RuntimeBodyChanged { body_id } => {
+                if let Some(body) = self.world.runtime_body_view(*body_id) {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::RuntimeBodyUpserted {
+                            body: Box::new(body),
+                        });
+                }
+            }
+            WorldEvent::RuntimeBodyRemoved { body_id } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::RuntimeBodyRemoved { body_id: *body_id });
+            }
+            WorldEvent::RuntimeBodiesReset { cause } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::RuntimeBodiesReset { cause: *cause });
             }
             WorldEvent::EntityStateUpdated { .. } => {}
             WorldEvent::ServerTimeUpdate(time) => {

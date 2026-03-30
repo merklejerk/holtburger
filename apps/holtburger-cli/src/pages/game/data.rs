@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_core::PlayerCharacterOptions;
+use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
@@ -15,6 +15,7 @@ use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
+use holtburger_world::SpatialEntitySample;
 use std::sync::Arc;
 
 const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
@@ -270,7 +271,7 @@ pub struct GameData {
     pub armor: i32,
     /// Current vitae penalty (0.0 to 1.0, where 1.0 is no penalty).
     pub vitae: f32,
-    /// Current position in the world.
+    /// Last authoritative player position projected from entity-style view events.
     pub player_pos: Option<WorldPosition>,
     /// Last grounded state reported by the server for the player.
     pub player_grounded: Option<bool>,
@@ -280,6 +281,8 @@ pub struct GameData {
     pub player_spells: Vec<u32>,
     /// Projected current player character option masks from the core client view.
     pub player_options: Option<PlayerCharacterOptions>,
+    /// Mirrored runtime-body read cache fed from core runtime-body snapshot and delta events.
+    pub runtime_body_cache: RuntimeBodyViewCache,
     /// Full spell catalog loaded from portal.dat.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Local cache of nearby entities.
@@ -326,6 +329,7 @@ impl Default for GameData {
             player_enchantments: Vec::new(),
             player_spells: Vec::new(),
             player_options: None,
+            runtime_body_cache: RuntimeBodyViewCache::default(),
             spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
@@ -389,6 +393,59 @@ impl GameData {
     pub fn curated_option_enabled(&self, option: CuratedCharacterOption) -> Option<bool> {
         self.player_options
             .map(|player_options| option.is_enabled(player_options))
+    }
+
+    pub fn runtime_player_position(&self) -> Option<WorldPosition> {
+        let guid = self.player_guid?;
+        self.runtime_body_cache
+            .projected_pose(guid)
+            .or(self.player_pos)
+    }
+
+    pub fn runtime_position_for_guid(&self, guid: Guid) -> Option<WorldPosition> {
+        if Some(guid) == self.player_guid {
+            return self.runtime_player_position();
+        }
+
+        self.runtime_body_cache
+            .projected_pose(guid)
+            .or_else(|| self.entities.get(&guid).map(|entity| entity.position))
+    }
+
+    pub fn runtime_sample_for_guid(&self, guid: Guid) -> Option<SpatialEntitySample> {
+        if Some(guid) == self.player_guid {
+            if let Some(sample) = self.runtime_body_cache.spatial_sample(guid) {
+                return Some(sample);
+            }
+
+            let pose = self.player_pos?;
+            let (velocity, omega, motion_state) = self
+                .entities
+                .get(&guid)
+                .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
+                .unwrap_or_default();
+
+            return Some(SpatialEntitySample {
+                guid,
+                authoritative_pose: pose,
+                projected_pose: pose,
+                velocity,
+                omega,
+                motion_state,
+                projection_mode: holtburger_world::SpatialSampleMode::AuthoritativeOnly,
+            });
+        }
+
+        self.entities
+            .get(&guid)
+            .map(|entity| self.runtime_body_cache.spatial_sample_or_authoritative(entity))
+    }
+
+    pub fn runtime_heading(&self) -> f32 {
+        self.runtime_player_position()
+            .unwrap_or_default()
+            .rotation
+            .to_heading()
     }
 
     pub fn track_container_opened(&mut self, guid: Guid) {

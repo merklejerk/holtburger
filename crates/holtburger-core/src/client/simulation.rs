@@ -77,7 +77,7 @@ impl ClientSimulationSystem {
             return Vec::new();
         };
 
-        let physics = Arc::clone(&world.scene.physics);
+        let physics = Arc::clone(world.scene.physics());
         let solved = physics.solve(&request, &mut world.scene);
         self.apply_solve_batch(world, movement, solved)
     }

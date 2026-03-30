@@ -14,7 +14,7 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
-use holtburger_core::{ClientProjectionCache, ClientViewEvent, ClientViewSpatialBridge};
+use holtburger_core::ClientViewEvent;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -154,7 +154,6 @@ impl GameState {
             ContextView::Debug(InspectTarget::Entity(_)) => Some(build_context_panel_content(
                 &self.data,
                 &self.view,
-                Some(&self.runtime.projection_cache),
             )),
             _ => None,
         }
@@ -163,11 +162,7 @@ impl GameState {
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         let now = Instant::now();
-        self.runtime.spatial_bridge.handle_view_event(
-            &mut self.runtime.projection_cache,
-            &event,
-            now,
-        );
+        self.data.runtime_body_cache.apply_view_event(&event, now);
         match event {
             ClientViewEvent::LogMessage(_)
             | ClientViewEvent::ServerMessage { .. }
@@ -297,6 +292,38 @@ impl GameState {
             ClientViewEvent::PlayerGroundedUpdated { grounded } => {
                 self.data.player_grounded = Some(grounded);
             }
+            ClientViewEvent::RuntimeBodySnapshot { .. } => {
+                self.refresh_context_buffer();
+                self.sync_approach_target(now, &mut result);
+                self.sync_follow_target(now, &mut result);
+                self.sync_sticky_melee_pursuit(&mut result);
+                result.needs_redraw = true;
+            }
+            ClientViewEvent::RuntimeBodyUpserted { body } => {
+                if let Some(guid) = body.body_id.authoritative_guid() {
+                    self.refresh_entity_context_if_visible(guid);
+                }
+                self.sync_approach_target(now, &mut result);
+                self.sync_follow_target(now, &mut result);
+                self.sync_sticky_melee_pursuit(&mut result);
+                result.needs_redraw = true;
+            }
+            ClientViewEvent::RuntimeBodyRemoved { body_id } => {
+                if let Some(guid) = body_id.authoritative_guid() {
+                    self.refresh_entity_context_if_visible(guid);
+                }
+                self.sync_approach_target(now, &mut result);
+                self.sync_follow_target(now, &mut result);
+                self.sync_sticky_melee_pursuit(&mut result);
+                result.needs_redraw = true;
+            }
+            ClientViewEvent::RuntimeBodiesReset { .. } => {
+                self.refresh_context_buffer();
+                self.sync_approach_target(now, &mut result);
+                self.sync_follow_target(now, &mut result);
+                self.sync_sticky_melee_pursuit(&mut result);
+                result.needs_redraw = true;
+            }
             ClientViewEvent::ForcedReposition { guid, pos, .. } => {
                 let is_player_move = Some(guid) == self.data.player_guid;
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
@@ -320,9 +347,6 @@ impl GameState {
             }
             ClientViewEvent::EntityDespawned { guid } => {
                 result.merge(self.handle_entity_removed(guid));
-                self.runtime
-                    .spatial_bridge
-                    .reset_entity(&mut self.runtime.projection_cache, guid);
                 self.sync_approach_target(now, &mut result);
                 self.sync_follow_target(now, &mut result);
                 self.sync_sticky_melee_pursuit(&mut result);
@@ -828,9 +852,6 @@ impl GameState {
         let mut result = UpdateResult::new();
         let now = Instant::now();
         self.sync_inventory_notification_arming(now);
-        self.runtime
-            .spatial_bridge
-            .tick(&mut self.runtime.projection_cache, now);
 
         // Proactive enchantment purge
         let old_count = self.data.player_enchantments.len();
@@ -870,7 +891,6 @@ impl GameState {
         let content = build_context_panel_content(
             &self.data,
             &self.view,
-            Some(&self.runtime.projection_cache),
         );
         self.render_state.context_buffer = content;
     }
@@ -1171,18 +1191,15 @@ impl GameState {
         let target_guid = self.current_target_guid()?;
         let attack_profile = self.desired_attack_profile(mode)?;
         let target_position = self.runtime.navigation.automation_target_position(
-            self.data.player_pos,
-            self.data
-                .entities
-                .get(&target_guid)
-                .map(|entity| entity.position),
+            self.data.runtime_player_position(),
+            self.data.runtime_position_for_guid(target_guid),
         );
 
         Some(CombatAutomationInput::Tick {
             now,
             target_guid,
             target_available: self.is_valid_combat_target(target_guid),
-            player_position: self.data.player_pos,
+            player_position: self.data.runtime_player_position(),
             target_position,
             attack_profile,
             attack_sequence_active: self.data.combat_runtime.attack_sequence_active,
@@ -1270,11 +1287,7 @@ impl GameState {
         target_guid: Option<Guid>,
     ) -> NavigationSyncInput {
         let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
-        let target_sample = target_entity.map(|entity| {
-            self.runtime
-                .projection_cache
-                .spatial_sample_or_authoritative(entity)
-        });
+        let target_sample = target_guid.and_then(|guid| self.data.runtime_sample_for_guid(guid));
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
@@ -1284,7 +1297,7 @@ impl GameState {
             .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
         NavigationSyncInput {
             now,
-            player_position: self.data.player_pos,
+            player_position: self.data.runtime_player_position(),
             target: target_guid
                 .zip(target_sample)
                 .map(|(guid, sample)| ResolvedNavigationTarget {
@@ -1496,14 +1509,17 @@ impl GameState {
     }
 
     fn is_valid_combat_target(&self, target_guid: Guid) -> bool {
-        let Some(entity) = self.data.entities.get(&target_guid) else {
+        if !self.data.entities.contains_key(&target_guid) {
             return false;
-        };
+        }
 
         if self
             .runtime
             .navigation
-            .automation_target_position(self.data.player_pos, Some(entity.position))
+            .automation_target_position(
+                self.data.runtime_player_position(),
+                self.data.runtime_position_for_guid(target_guid),
+            )
             .is_none()
         {
             return false;
@@ -1803,8 +1819,6 @@ struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: NavigationAutomation,
-    spatial_bridge: ClientViewSpatialBridge,
-    projection_cache: ClientProjectionCache,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,
@@ -1860,7 +1874,7 @@ mod tests {
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
-    use holtburger_world::{SpatialEntitySample, SpatialSampleMode};
+    use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode};
     fn is_weapon_swap_active(state: &GameState) -> bool {
         state.runtime.weapon_swap.is_active()
     }
@@ -1956,6 +1970,23 @@ mod tests {
             },
             input,
         );
+    }
+
+    fn runtime_body_view(
+        body_id: SpatialBodyId,
+        authoritative_pose: WorldPosition,
+        runtime_pose: WorldPosition,
+    ) -> RuntimeSpatialBodyView {
+        RuntimeSpatialBodyView {
+            body_id,
+            authoritative_pose: Some(authoritative_pose),
+            runtime_pose,
+            velocity: Vector3::zero(),
+            omega: Vector3::zero(),
+            motion_state: None,
+            contact: holtburger_world::ContactState::Grounded,
+            sample_mode: SpatialSampleMode::SimulatingMotionState,
+        }
     }
 
     #[test]
@@ -2500,6 +2531,65 @@ mod tests {
         assert!(result.commands.is_empty());
         assert_eq!(state.data.player_pos, Some(moved_pos));
         assert!(has_active_approach(&state));
+    }
+
+    #[test]
+    fn navigation_sync_input_prefers_runtime_body_mirror_for_player_and_target() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let authoritative_player = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let authoritative_target = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(20.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let runtime_player = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(4.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let runtime_target = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+
+        state.data.player_pos = Some(authoritative_player);
+        state.data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), authoritative_player),
+        );
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(target_guid, "Drudge", authoritative_target),
+        );
+
+        let _ = state.handle_view_event(ClientViewEvent::RuntimeBodyUpserted {
+            body: Box::new(runtime_body_view(
+                SpatialBodyId::LocalPlayer(player_guid),
+                authoritative_player,
+                runtime_player,
+            )),
+        });
+        let _ = state.handle_view_event(ClientViewEvent::RuntimeBodyUpserted {
+            body: Box::new(runtime_body_view(
+                SpatialBodyId::Entity(target_guid),
+                authoritative_target,
+                runtime_target,
+            )),
+        });
+
+        let input = state.navigation_sync_input(Instant::now(), Some(target_guid));
+        let target = input.target.expect("target sample should exist");
+
+        assert_eq!(input.player_position, Some(runtime_player));
+        assert_eq!(target.sample.projected_pose, runtime_target);
+        assert_eq!(target.sample.authoritative_pose, authoritative_target);
     }
 
     #[test]
@@ -3196,17 +3286,11 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let player_position = state.data.player_pos;
+        let player_position = state.data.runtime_player_position();
         let target_sample = state
-            .runtime
-            .projection_cache
-            .spatial_sample_or_authoritative(
-                state
-                    .data
-                    .entities
-                    .get(&target_guid)
-                    .expect("target entity should exist"),
-            );
+            .data
+            .runtime_sample_for_guid(target_guid)
+            .expect("target runtime sample should exist");
         seed_sticky_melee(
             &mut state,
             Some(target_guid),

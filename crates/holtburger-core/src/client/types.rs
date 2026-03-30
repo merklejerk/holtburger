@@ -17,6 +17,7 @@ use holtburger_protocol::messages::{
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
+use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
@@ -364,6 +365,18 @@ pub enum ClientViewEvent {
     EntityMotionUpdated {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,
+    },
+    RuntimeBodySnapshot {
+        bodies: Arc<[RuntimeSpatialBodyView]>,
+    },
+    RuntimeBodyUpserted {
+        body: Box<RuntimeSpatialBodyView>,
+    },
+    RuntimeBodyRemoved {
+        body_id: SpatialBodyId,
+    },
+    RuntimeBodiesReset {
+        cause: RuntimeBodyResetCause,
     },
     PlayerGroundedUpdated {
         grounded: bool,

@@ -2,6 +2,7 @@ use crate::entity::{Entity, EntityMotionSnapshot};
 use crate::state;
 use crate::stats;
 use crate::vendor;
+use crate::spatial::{RuntimeBodyResetCause, SpatialBodyId};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyUpdate;
@@ -66,6 +67,15 @@ pub enum WorldEvent {
     EntityMotionUpdated {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,
+    },
+    RuntimeBodyChanged {
+        body_id: SpatialBodyId,
+    },
+    RuntimeBodyRemoved {
+        body_id: SpatialBodyId,
+    },
+    RuntimeBodiesReset {
+        cause: RuntimeBodyResetCause,
     },
     EntityDespawned(Guid),
     VitalUpdated(stats::Vital),

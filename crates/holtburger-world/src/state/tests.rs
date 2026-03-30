@@ -5,7 +5,10 @@ use std::time::Instant;
 
 use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
-use crate::{ContactState, SolvedActorKinematics, SpatialBodyId, SpatialSampleMode};
+use crate::{
+    ContactState, RuntimeBodyResetCause, SolvedActorKinematics, SpatialBodyEvent,
+    SpatialBodyId, SpatialSampleMode,
+};
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
@@ -22,7 +25,7 @@ use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 use holtburger_protocol::messages::{
     FellowUpdateType, FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
-    FellowshipUpdateFellowEventData,
+    FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
 use tempfile::tempdir;
 
@@ -238,6 +241,81 @@ fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_un
         !events
             .iter()
             .any(|event| matches!(event, WorldEvent::PlayerGroundedUpdated { .. }))
+    );
+}
+
+#[test]
+fn apply_spatial_body_event_emits_runtime_body_changed_for_remote_contact() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x5000_0200);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.add_entity(Entity::new(guid, "Drudge".to_string(), position));
+
+    let events = state.apply_spatial_body_event(&SpatialBodyEvent::ContactChanged {
+        body_id: SpatialBodyId::Entity(guid),
+        contact: ContactState::Grounded,
+    });
+
+    assert_eq!(
+        state
+            .scene
+            .body(SpatialBodyId::Entity(guid))
+            .expect("runtime body should exist")
+            .contact,
+        ContactState::Grounded
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged { body_id }
+            if *body_id == SpatialBodyId::Entity(guid)
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::PlayerGroundedUpdated { .. }
+    )));
+}
+
+#[test]
+fn player_teleport_suspends_runtime_bodies_and_emits_reset_signal() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0201);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(10.0, 20.0, 30.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = position;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), position));
+
+    let events = state.handle_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+        teleport_sequence: 7,
+    })));
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodiesReset {
+            cause: RuntimeBodyResetCause::TeleportOrWorldReset
+        }
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::TeleportStarted { sequence: 7 }
+    )));
+    assert_eq!(
+        state
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .expect("local player runtime body should exist")
+            .sampling
+            .mode,
+        SpatialSampleMode::Suspended
     );
 }
 

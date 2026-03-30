@@ -80,10 +80,9 @@ impl PartyTab {
             return Some(0.0);
         }
 
-        let player_pos = data.player_pos?;
+        let player_pos = data.runtime_player_position()?;
         let entity = data.entities.get(&guid)?;
-        (entity.position.landblock_id != Guid::NULL)
-            .then(|| entity.position.distance_to(&player_pos))
+        (entity.position.landblock_id != Guid::NULL).then(|| entity.position.distance_to(&player_pos))
     }
 
     fn is_member_nearby(&self, data: &GameData, guid: Guid) -> bool {
@@ -91,7 +90,7 @@ impl PartyTab {
             return true;
         }
 
-        let Some(player_pos) = data.player_pos else {
+        let Some(player_pos) = data.runtime_player_position() else {
             return false;
         };
         let Some(entity) = data.entities.get(&guid) else {
@@ -263,8 +262,11 @@ impl TabController for PartyTab {
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
+    use holtburger_core::ClientViewEvent;
     use holtburger_world::entity::Entity;
     use holtburger_world::state::FellowshipState;
+    use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode};
+    use std::time::Instant;
 
     fn select_member(tab: &mut PartyTab, data: &GameData, name: &str) {
         tab.selected_index = tab
@@ -272,6 +274,29 @@ mod tests {
             .iter()
             .position(|entry| entry.member.name == name)
             .expect("member should be visible");
+    }
+
+    fn seed_runtime_body(
+        data: &mut GameData,
+        body_id: SpatialBodyId,
+        authoritative_pose: WorldPosition,
+        runtime_pose: WorldPosition,
+    ) {
+        data.runtime_body_cache.apply_view_event(
+            &ClientViewEvent::RuntimeBodyUpserted {
+                body: Box::new(RuntimeSpatialBodyView {
+                    body_id,
+                    authoritative_pose: Some(authoritative_pose),
+                    runtime_pose,
+                    velocity: holtburger_common::Vector3::zero(),
+                    omega: holtburger_common::Vector3::zero(),
+                    motion_state: None,
+                    contact: holtburger_world::ContactState::Grounded,
+                    sample_mode: SpatialSampleMode::SimulatingMotionState,
+                }),
+            },
+            Instant::now(),
+        );
     }
 
     #[test]
@@ -371,6 +396,38 @@ mod tests {
         assert!(has_label(&verbs, "Trade"));
         assert!(has_label(&verbs, "Kick"));
         assert!(!has_label(&verbs, "Leave"));
+    }
+
+    #[test]
+    fn member_distance_uses_runtime_self_but_authoritative_other_member_pose() {
+        let player_guid = Guid(0x50000001);
+        let member_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(world_pos(0.0));
+        data.party = Some(party_state(player_guid, member_guid));
+
+        let authoritative_member = world_pos(50.0);
+        data.entities.insert(
+            member_guid,
+            Entity::new(member_guid, "Bestie".to_string(), authoritative_member),
+        );
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::LocalPlayer(player_guid),
+            world_pos(0.0),
+            world_pos(10.0),
+        );
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::Entity(member_guid),
+            authoritative_member,
+            world_pos(12.0),
+        );
+
+        let tab = PartyTab::default();
+
+        assert_eq!(tab.member_distance(&data, member_guid), Some(40.0));
     }
 
     #[test]

@@ -30,7 +30,7 @@ pub struct NearbyTab {
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     let entities = &data.entities;
-    let player_pos = data.player_pos.as_ref();
+    let player_pos = data.runtime_player_position();
     let open_containers = &data.open_containers;
 
     let candidates: Vec<_> = entities
@@ -90,12 +90,16 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
         let ea = &entities[&a];
         let eb = &entities[&b];
         let da = if let Some(p) = player_pos {
-            ea.position.distance_to(p)
+            data.runtime_position_for_guid(ea.guid)
+                .unwrap_or(ea.position)
+                .distance_to(&p)
         } else {
             999.0
         };
         let db = if let Some(p) = player_pos {
-            eb.position.distance_to(p)
+            data.runtime_position_for_guid(eb.guid)
+                .unwrap_or(eb.position)
+                .distance_to(&p)
         } else {
             999.0
         };
@@ -109,7 +113,9 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     while let Some((guid, depth)) = stack.pop() {
         let e = &entities[&guid];
         let dist = if let Some(p) = player_pos {
-            e.position.distance_to(p)
+            data.runtime_position_for_guid(guid)
+                .unwrap_or(e.position)
+                .distance_to(&p)
         } else {
             0.0
         };

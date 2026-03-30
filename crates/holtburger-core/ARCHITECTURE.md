@@ -63,9 +63,16 @@ The same split applies to entity motion coming back from the server:
 2. `holtburger-core` projects those snapshots into client-view events for frontends that want to render or inspect motion.
 3. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
 
-Render-oriented consumers should keep that boundary explicit: own a `ClientProjectionCache` for runtime sampling, drive a `ClientViewSpatialBridge` against that cache from `ClientViewEvent`s, tick the cache from frame time, and batch-read projected transforms from `iter_projected_entities(&cache)` while leaving gameplay legality and authority checks on the world mirror.
+Render-oriented consumers should keep that boundary explicit: core publishes a frontend-facing runtime-body view contract over `ClientViewEvent`, frontends keep mirrored read caches keyed by `SpatialBodyId`, and those caches are updated mechanically rather than ticked into an independent truth.
 
-Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. Bootstrap and resume come from authoritative snapshots, authoritative pose updates, or explicit reset events.
+Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. Phase 1 freezes the long-term sync model as initial snapshot plus deltas with explicit reset-and-resnapshot recovery. Bootstrap and recovery must therefore come from dedicated runtime-body snapshot/reset events rather than from event-free local ticking.
+
+The required delivery contract for frontend-owned navigation or rendering is:
+
+1. world owns canonical `SpatialBody` runtime advancement and future constraint resolution;
+2. core emits runtime-body view snapshots and deltas derived from that world-owned state;
+3. frontends keep mirrored read caches only;
+4. no cache outside `holtburger-world` may become a second advancing runtime store.
 
 That boundary keeps 3D-client rendering needs compatible with shared combat logic: frontends can observe motion directly, but they should not become the authority for interpreting death motion or similar gameplay signals.
 
@@ -122,7 +129,7 @@ The current ownership model is explicit:
 
 This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
 
-The important boundary is that the core preserves protocol fidelity for motion-style fields and motion-session lifecycle, but it does not own the frontend's movement policy. A 3D client may drive locomotion directly, supply explicit motion-style choices when needed, and provide richer local prediction hints without surrendering steering authority to `NavigationAutomation`.
+The important boundary is that the core preserves protocol fidelity for motion-style fields and motion-session lifecycle, but it does not own the frontend's movement policy and it does not own canonical runtime body advancement. A 3D client may drive locomotion directly, supply explicit motion-style choices when needed, and provide richer local prediction hints without surrendering steering authority to `NavigationAutomation`.
 
 ## Internal Data Flow
 

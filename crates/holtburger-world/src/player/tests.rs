@@ -445,20 +445,18 @@ fn test_vector_update_routing() {
     let msg = GameMessage::VectorUpdate(Box::new(data));
     let events = state.handle_message(&msg);
 
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 2);
     assert_eq!(state.player.instance_sequence, 123);
-    if let WorldEvent::EntityVectorUpdated {
-        guid,
-        velocity,
-        omega,
-    } = &events[0]
-    {
-        assert_eq!(*guid, Guid(0x50000001));
-        assert_eq!(velocity.x, 1.0);
-        assert_eq!(omega.x, 0.1);
-    } else {
-        panic!("Expected EntityVectorUpdated event");
-    }
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged { body_id }
+            if *body_id == crate::SpatialBodyId::LocalPlayer(Guid(0x50000001))
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated { guid, velocity, omega }
+            if *guid == Guid(0x50000001) && velocity.x == 1.0 && omega.x == 0.1
+    )));
 }
 
 #[test]

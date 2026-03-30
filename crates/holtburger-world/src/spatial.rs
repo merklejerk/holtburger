@@ -4,7 +4,7 @@ use holtburger_common::Quaternion;
 use holtburger_common::position::METERS_PER_LANDBLOCK;
 use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
-use crate::entity::{Entity, EntityMotionDirective, EntityMotionSnapshot};
+use crate::entity::{EntityMotionDirective, EntityMotionSnapshot};
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::{PI, TAU};
@@ -15,9 +15,12 @@ const EPSILON: f32 = 1e-4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ContactState {
+    /// The body contact state is not currently known.
     #[default]
     Unknown,
+    /// The body is not in ground contact.
     Airborne,
+    /// The body is in ground contact.
     Grounded,
 }
 
@@ -33,8 +36,11 @@ impl ContactState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpatialBodyId {
+    /// A world entity body keyed by the entity guid.
     Entity(Guid),
+    /// The local player's runtime body keyed by the player guid.
     LocalPlayer(Guid),
+    /// A runtime-only body with no authoritative guid backing.
     Ephemeral(u64),
 }
 
@@ -49,32 +55,56 @@ impl SpatialBodyId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpatialSampleMode {
+    /// Runtime pose currently matches authoritative pose with no extra derivation.
     #[default]
     AuthoritativeOnly,
+    /// Runtime pose is blending toward a newer authoritative correction.
     InterpolatingPosition,
+    /// Runtime pose is being advanced from motion-state-driven heading simulation.
     SimulatingMotionState,
+    /// Runtime pose is being advanced from linear and angular velocity.
     SimulatingVelocity,
+    /// Runtime sampling is intentionally paused until a reset or resync resumes it.
     Suspended,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthoritativeBodySync {
+    /// Apply the authoritative update as a normal snapshot/reconciliation step.
     Snapshot,
+    /// Apply the authoritative update as a hard reset/reposition.
     Reset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeBodyResetCause {
+    /// Initial world/bootstrap hydration populated or replaced the runtime bodies.
+    InitialHydration,
+    /// A teleport or broader world reset invalidated current runtime advancement.
+    TeleportOrWorldReset,
+    /// The frontend or bridge requested an explicit resynchronization.
+    Resync,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialInterpolationState {
+    /// Runtime pose at the moment interpolation began.
     pub start_pose: WorldPosition,
+    /// Clock time when interpolation started.
     pub started_at: Instant,
+    /// Intended interpolation duration.
     pub duration: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialSamplingState {
+    /// Current runtime sampling mode for the body.
     pub mode: SpatialSampleMode,
+    /// Time of the last authoritative pose update applied to the body.
     pub last_authoritative_update: Instant,
+    /// Time the runtime pose was last derived or advanced.
     pub last_derived_at: Instant,
+    /// Active interpolation state, if runtime pose is blending toward authority.
     pub interpolation: Option<SpatialInterpolationState>,
 }
 
@@ -91,9 +121,13 @@ impl SpatialSamplingState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpatialSamplingConfig {
+    /// Maximum duration allowed for authoritative position interpolation.
     pub max_position_interp: Duration,
+    /// Maximum amount of time to dead reckon from the last authoritative update.
     pub max_dead_reckon: Duration,
+    /// Distance threshold, in meters, beyond which corrections snap immediately.
     pub snap_distance_m: u32,
+    /// Heading threshold, in milliradians, beyond which corrections snap immediately.
     pub snap_heading_millirad: u32,
 }
 
@@ -120,36 +154,79 @@ impl SpatialSamplingConfig {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialProjectedEntityState {
+    /// Entity guid for this projected sample.
     pub guid: Guid,
+    /// Latest authoritative pose known for the entity.
     pub authoritative_pose: WorldPosition,
+    /// Runtime/projected pose derived from the authoritative state.
     pub projected_pose: WorldPosition,
+    /// Current linear velocity used by runtime derivation.
     pub velocity: Vector3,
+    /// Current angular velocity used by runtime derivation.
     pub omega: Vector3,
+    /// Latest motion snapshot associated with the entity.
     pub motion_state: Option<EntityMotionSnapshot>,
+    /// Runtime derivation mode that produced the projected pose.
     pub projection_mode: SpatialSampleMode,
+    /// Time of the authoritative update that the sample is based on.
     pub last_authoritative_update: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialEntitySample {
+    /// Entity guid for this spatial sample.
     pub guid: Guid,
+    /// Latest authoritative pose known for the entity.
     pub authoritative_pose: WorldPosition,
+    /// Runtime/projected pose exposed to consumers.
     pub projected_pose: WorldPosition,
+    /// Current linear velocity associated with the sample.
     pub velocity: Vector3,
+    /// Current angular velocity associated with the sample.
     pub omega: Vector3,
+    /// Latest motion snapshot associated with the sample.
     pub motion_state: Option<EntityMotionSnapshot>,
+    /// Runtime derivation mode that produced the sample.
     pub projection_mode: SpatialSampleMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RuntimeSpatialBodyView {
+    /// Stable runtime body identifier.
+    pub body_id: SpatialBodyId,
+    /// Latest authoritative pose when one exists for this body.
+    pub authoritative_pose: Option<WorldPosition>,
+    /// Current canonical runtime pose for the body.
+    pub runtime_pose: WorldPosition,
+    /// Current linear velocity for the runtime body.
+    pub velocity: Vector3,
+    /// Current angular velocity for the runtime body.
+    pub omega: Vector3,
+    /// Current motion snapshot driving runtime derivation, if any.
+    pub motion_state: Option<EntityMotionSnapshot>,
+    /// Current contact state for the body.
+    pub contact: ContactState,
+    /// Current runtime sampling mode for the body.
+    pub sample_mode: SpatialSampleMode,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialBody {
+    /// Stable runtime body identifier.
     pub id: SpatialBodyId,
+    /// Latest authoritative pose when one exists for this body.
     pub authoritative_pose: Option<WorldPosition>,
+    /// Current canonical runtime pose for the body.
     pub pose: WorldPosition,
+    /// Current linear velocity for the body.
     pub velocity: Vector3,
+    /// Current angular velocity for the body.
     pub omega: Vector3,
+    /// Current motion snapshot associated with the body.
     pub motion_state: Option<EntityMotionSnapshot>,
+    /// Current contact state for the body.
     pub contact: ContactState,
+    /// Runtime sampling metadata for interpolation and derivation.
     pub sampling: SpatialSamplingState,
 }
 
@@ -206,13 +283,30 @@ impl SpatialBody {
             projection_mode: state.projection_mode,
         })
     }
+
+    pub fn runtime_view(&self) -> RuntimeSpatialBodyView {
+        RuntimeSpatialBodyView {
+            body_id: self.id,
+            authoritative_pose: self.authoritative_pose,
+            runtime_pose: self.pose,
+            velocity: self.velocity,
+            omega: self.omega,
+            motion_state: self.motion_state,
+            contact: self.contact,
+            sample_mode: self.sampling.mode,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolveBodyInput {
+    /// Body being submitted to physics or constraint solving.
     pub body_id: SpatialBodyId,
+    /// Starting pose for this solve step.
     pub pose: WorldPosition,
+    /// Starting linear velocity for this solve step.
     pub velocity: Vector3,
+    /// Starting angular velocity for this solve step.
     pub omega: Vector3,
 }
 
@@ -238,10 +332,15 @@ impl SolveBodyInput {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolvedBodyKinematics {
+    /// Body whose kinematics were solved.
     pub body_id: SpatialBodyId,
+    /// Solved pose after the physics step.
     pub pose: WorldPosition,
+    /// Solved linear velocity after the physics step.
     pub velocity: Vector3,
+    /// Solved angular velocity after the physics step.
     pub omega: Vector3,
+    /// Solved contact state after the physics step.
     pub contact: ContactState,
 }
 
@@ -271,12 +370,18 @@ impl SolvedBodyKinematics {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpatialBodyEvent {
+    /// Body contact state changed.
     ContactChanged {
+        /// Body whose contact state changed.
         body_id: SpatialBodyId,
+        /// New contact state for the body.
         contact: ContactState,
     },
+    /// Body was forcibly repositioned.
     ForcedReposition {
+        /// Body that was repositioned.
         body_id: SpatialBodyId,
+        /// New pose applied to the body.
         pose: WorldPosition,
     },
 }
@@ -309,42 +414,61 @@ impl SpatialBodyEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolveActorInput {
+    /// Actor guid being solved.
     pub actor_id: Guid,
+    /// Starting pose for this solve step.
     pub pose: WorldPosition,
+    /// Starting linear velocity for this solve step.
     pub velocity: Vector3,
+    /// Starting angular velocity for this solve step.
     pub omega: Vector3,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveRequest {
+    /// Duration of the solve step.
     pub dt: Duration,
+    /// Actor inputs to advance during the solve step.
     pub actors: SmallVec<[SolveActorInput; 1]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolvedActorKinematics {
+    /// Actor guid whose kinematics were solved.
     pub actor_id: Guid,
+    /// Solved pose after the physics step.
     pub pose: WorldPosition,
+    /// Solved linear velocity after the physics step.
     pub velocity: Vector3,
+    /// Solved angular velocity after the physics step.
     pub omega: Vector3,
+    /// Solved contact state after the physics step.
     pub contact: ContactState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpatialEvent {
+    /// Actor contact state changed.
     ContactChanged {
+        /// Actor whose contact state changed.
         actor_id: Guid,
+        /// New contact state for the actor.
         contact: ContactState,
     },
+    /// Actor was forcibly repositioned.
     ForcedReposition {
+        /// Actor that was repositioned.
         actor_id: Guid,
+        /// New pose applied to the actor.
         pose: WorldPosition,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveBatch {
+    /// Solved kinematics for the actors that were advanced.
     pub solved: SmallVec<[SolvedActorKinematics; 1]>,
+    /// Side-effect events emitted by the solve step.
     pub events: SmallVec<[SpatialEvent; 4]>,
 }
 
@@ -639,12 +763,19 @@ impl SpatialPhysics for NoopSpatialPhysics {
     }
 }
 
-/// The SpatialScene is responsible for managing the "where" of everything.
-/// Shared runtime sampling state for tracked bodies.
+/// World-owned runtime sampling store for tracked `SpatialBody` sidecars.
+///
+/// This store is the canonical owner of client runtime body sampling state, including
+/// interpolation, dead reckoning, suspension, and forced-reposition resets. Core or frontend
+/// caches may mirror reads from this state during migration, but they must not become a second
+/// independently advancing runtime body model.
 #[derive(Debug, Clone)]
-pub struct BodySamplingStore {
+pub(crate) struct BodySamplingStore {
+    /// Canonical runtime bodies tracked by the sampling store.
     bodies: HashMap<SpatialBodyId, SpatialBody>,
+    /// Sampling policy for interpolation, dead reckoning, and snap thresholds.
     config: SpatialSamplingConfig,
+    /// Monotonic counter for allocating ephemeral runtime body ids.
     next_ephemeral_body_id: u64,
 }
 
@@ -659,57 +790,61 @@ impl Default for BodySamplingStore {
 }
 
 impl BodySamplingStore {
-    pub fn config(&self) -> SpatialSamplingConfig {
+    fn config(&self) -> SpatialSamplingConfig {
         self.config
     }
 
-    pub fn set_config(&mut self, config: SpatialSamplingConfig) {
+    fn set_config(&mut self, config: SpatialSamplingConfig) {
         self.config = config;
     }
 
-    pub fn clear(&mut self) {
-        self.bodies.clear();
+    fn runtime_body_view(&self, body_id: SpatialBodyId) -> Option<RuntimeSpatialBodyView> {
+        self.body(body_id).map(SpatialBody::runtime_view)
     }
 
-    pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
+    fn iter_runtime_body_views(&self) -> impl Iterator<Item = RuntimeSpatialBodyView> + '_ {
+        self.bodies.values().map(SpatialBody::runtime_view)
+    }
+
+    fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
         self.bodies.get(&body_id)
     }
 
-    pub fn body_for_guid(&self, guid: Guid) -> Option<&SpatialBody> {
+    fn body_for_guid(&self, guid: Guid) -> Option<&SpatialBody> {
         self.body(SpatialBodyId::LocalPlayer(guid))
             .or_else(|| self.body(SpatialBodyId::Entity(guid)))
     }
 
-    pub fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
+    fn body_mut(&mut self, body_id: SpatialBodyId) -> Option<&mut SpatialBody> {
         self.bodies.get_mut(&body_id)
     }
 
-    pub fn register_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
+    fn register_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
         self.bodies.insert(body.id, body)
     }
 
-    pub fn update_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
+    fn update_body(&mut self, body: SpatialBody) -> Option<SpatialBody> {
         let existing = self.bodies.get_mut(&body.id)?;
         Some(std::mem::replace(existing, body))
     }
 
-    pub fn remove_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
+    fn remove_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
         self.bodies.remove(&body_id)
     }
 
-    pub fn allocate_ephemeral_body_id(&mut self) -> SpatialBodyId {
+    fn allocate_ephemeral_body_id(&mut self) -> SpatialBodyId {
         let body_id = SpatialBodyId::Ephemeral(self.next_ephemeral_body_id);
         self.next_ephemeral_body_id += 1;
         body_id
     }
 
-    pub fn register_ephemeral_body(&mut self, pose: WorldPosition, now: Instant) -> SpatialBodyId {
+    fn register_ephemeral_body(&mut self, pose: WorldPosition, now: Instant) -> SpatialBodyId {
         let body_id = self.allocate_ephemeral_body_id();
         self.register_body(SpatialBody::new_ephemeral(body_id, pose, now));
         body_id
     }
 
-    pub fn reconcile_authoritative_body(
+    fn reconcile_authoritative_body(
         &mut self,
         body_id: SpatialBodyId,
         pose: WorldPosition,
@@ -741,11 +876,11 @@ impl BodySamplingStore {
         self.bodies.insert(body_id, body);
     }
 
-    pub fn retire_authoritative_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
+    fn retire_authoritative_body(&mut self, body_id: SpatialBodyId) -> Option<SpatialBody> {
         self.remove_body(body_id)
     }
 
-    pub fn upsert_sampling_snapshot(
+    fn upsert_sampling_snapshot(
         &mut self,
         body_id: SpatialBodyId,
         pose: WorldPosition,
@@ -772,7 +907,19 @@ impl BodySamplingStore {
         self.bodies.insert(body_id, body);
     }
 
-    pub fn update_sampling_authoritative_pose(
+    fn seed_authoritative_body_snapshot(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        velocity: Vector3,
+        omega: Vector3,
+        motion_state: Option<EntityMotionSnapshot>,
+        now: Instant,
+    ) {
+        self.upsert_sampling_snapshot(body_id, pose, velocity, omega, motion_state, now);
+    }
+
+    fn update_sampling_authoritative_pose(
         &mut self,
         body_id: SpatialBodyId,
         pose: WorldPosition,
@@ -816,7 +963,17 @@ impl BodySamplingStore {
         }
     }
 
-    pub fn update_sampling_kinematics(
+    fn correct_authoritative_body_pose(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        bootstrap: bool,
+        now: Instant,
+    ) {
+        self.update_sampling_authoritative_pose(body_id, pose, bootstrap, now);
+    }
+
+    fn update_sampling_kinematics(
         &mut self,
         body_id: SpatialBodyId,
         velocity: Vector3,
@@ -830,7 +987,16 @@ impl BodySamplingStore {
         body.omega = omega;
     }
 
-    pub fn update_sampling_motion_state(
+    fn update_runtime_body_kinematics(
+        &mut self,
+        body_id: SpatialBodyId,
+        velocity: Vector3,
+        omega: Vector3,
+    ) {
+        self.update_sampling_kinematics(body_id, velocity, omega);
+    }
+
+    fn update_sampling_motion_state(
         &mut self,
         body_id: SpatialBodyId,
         motion_state: Option<EntityMotionSnapshot>,
@@ -842,7 +1008,15 @@ impl BodySamplingStore {
         body.motion_state = motion_state;
     }
 
-    pub fn reset_sampling_body(
+    fn update_runtime_body_motion_state(
+        &mut self,
+        body_id: SpatialBodyId,
+        motion_state: Option<EntityMotionSnapshot>,
+    ) {
+        self.update_sampling_motion_state(body_id, motion_state);
+    }
+
+    fn reset_sampling_body(
         &mut self,
         body_id: SpatialBodyId,
         pose: WorldPosition,
@@ -867,7 +1041,99 @@ impl BodySamplingStore {
         body.sampling.interpolation = None;
     }
 
-    pub fn suspend_all_sampling(&mut self, now: Instant) {
+    fn reset_runtime_body_from_authoritative(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: Instant,
+        clear_kinematics: bool,
+    ) {
+        self.reset_sampling_body(body_id, pose, now, clear_kinematics);
+    }
+
+    fn apply_runtime_body_pose(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        sample_mode: SpatialSampleMode,
+    ) -> bool {
+        let Some(body) = self.bodies.get_mut(&body_id) else {
+            return false;
+        };
+
+        body.pose = pose;
+        body.sampling.mode = sample_mode;
+        body.sampling.interpolation = None;
+        true
+    }
+
+    fn apply_runtime_body_vectors(
+        &mut self,
+        body_id: SpatialBodyId,
+        velocity: Vector3,
+        omega: Vector3,
+        sample_mode: SpatialSampleMode,
+    ) -> bool {
+        let Some(body) = self.bodies.get_mut(&body_id) else {
+            return false;
+        };
+
+        body.velocity = velocity;
+        body.omega = omega;
+        body.sampling.mode = sample_mode;
+        body.sampling.interpolation = None;
+        true
+    }
+
+    fn apply_runtime_body_contact(
+        &mut self,
+        body_id: SpatialBodyId,
+        contact: ContactState,
+    ) -> bool {
+        let Some(body) = self.bodies.get_mut(&body_id) else {
+            return false;
+        };
+
+        body.contact = contact;
+        true
+    }
+
+    fn apply_solved_runtime_body_kinematics(
+        &mut self,
+        solved: &SolvedBodyKinematics,
+    ) -> bool {
+        let Some(body) = self.bodies.get_mut(&solved.body_id) else {
+            return false;
+        };
+
+        body.pose = solved.pose;
+        body.velocity = solved.velocity;
+        body.omega = solved.omega;
+        body.contact = solved.contact;
+        body.sampling.mode = if solved.velocity.length_squared() > EPSILON
+            || solved.omega.length_squared() > EPSILON
+        {
+            SpatialSampleMode::SimulatingVelocity
+        } else {
+            SpatialSampleMode::SimulatingMotionState
+        };
+        body.sampling.interpolation = None;
+        true
+    }
+
+    fn apply_forced_reposition_reset(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: Instant,
+    ) {
+        self.reset_runtime_body_from_authoritative(body_id, pose, now, true);
+        if let Some(body) = self.bodies.get_mut(&body_id) {
+            body.sampling.mode = SpatialSampleMode::Suspended;
+        }
+    }
+
+    fn suspend_all_sampling(&mut self, now: Instant) {
         for body in self.bodies.values_mut() {
             if let Some(authoritative_pose) = body.authoritative_pose {
                 body.pose = authoritative_pose;
@@ -878,51 +1144,30 @@ impl BodySamplingStore {
         }
     }
 
-    pub fn tick_sampling(&mut self, now: Instant) {
+    fn suspend_runtime_bodies(&mut self, now: Instant) {
+        self.suspend_all_sampling(now);
+    }
+
+    fn tick_sampling(&mut self, now: Instant) {
         let config = self.config;
         for body in self.bodies.values_mut() {
             Self::advance_body_sampling_state(body, now, config);
         }
     }
 
-    pub fn projected_entity_state(&self, guid: Guid) -> Option<SpatialProjectedEntityState> {
+    fn tick_runtime_bodies(&mut self, now: Instant) {
+        self.tick_sampling(now);
+    }
+
+    #[cfg(test)]
+    fn projected_entity_state(&self, guid: Guid) -> Option<SpatialProjectedEntityState> {
         self.body_for_guid(guid)
             .and_then(SpatialBody::projected_entity_state)
     }
 
-    pub fn spatial_sample(&self, guid: Guid) -> Option<SpatialEntitySample> {
+    #[cfg(test)]
+    fn spatial_sample(&self, guid: Guid) -> Option<SpatialEntitySample> {
         self.body_for_guid(guid).and_then(SpatialBody::spatial_sample)
-    }
-
-    pub fn spatial_sample_or_authoritative(&self, entity: &Entity) -> SpatialEntitySample {
-        self.spatial_sample(entity.guid)
-            .map(|sample| SpatialEntitySample {
-                authoritative_pose: entity.position,
-                velocity: entity.velocity,
-                omega: entity.omega,
-                motion_state: entity.motion_snapshot,
-                ..sample
-            })
-            .unwrap_or(SpatialEntitySample {
-                guid: entity.guid,
-                authoritative_pose: entity.position,
-                projected_pose: entity.position,
-                velocity: entity.velocity,
-                omega: entity.omega,
-                motion_state: entity.motion_snapshot,
-                projection_mode: SpatialSampleMode::AuthoritativeOnly,
-            })
-    }
-
-    pub fn remove_guid_bodies(&mut self, guid: Guid) {
-        self.bodies.remove(&SpatialBodyId::Entity(guid));
-        self.bodies.remove(&SpatialBodyId::LocalPlayer(guid));
-    }
-
-    pub fn iter_projected_entities(&self) -> impl Iterator<Item = SpatialProjectedEntityState> + '_ {
-        self.bodies
-            .values()
-            .filter_map(SpatialBody::projected_entity_state)
     }
 
     fn advance_body_sampling_state(
@@ -1000,16 +1245,18 @@ impl BodySamplingStore {
 }
 
 /// The SpatialScene is responsible for managing the world-owned "where" of everything.
-/// It tracks authoritative entity positions by landblock, hosts solve context, and composes
-/// runtime body-sampling state.
+/// It tracks authoritative entity positions by landblock, hosts solve context, and composes the
+/// canonical runtime body-sampling state used to derive projected/read-model spatial samples.
 #[derive(Clone)]
 pub struct SpatialScene {
     /// Entities indexed by LandblockID for fast local queries.
-    pub landblock_map: HashMap<Guid, HashSet<Guid>>,
+    landblock_map: HashMap<Guid, HashSet<Guid>>,
     /// Latest authoritative pose snapshots for narrow spatial queries.
-    pub entity_poses: HashMap<Guid, WorldPosition>,
+    entity_poses: HashMap<Guid, WorldPosition>,
+    /// Canonical runtime body sampling store owned by the world.
     body_sampling: BodySamplingStore,
-    pub physics: Arc<dyn SpatialPhysics>,
+    /// Physics implementation used to advance solve requests.
+    physics: Arc<dyn SpatialPhysics>,
 }
 
 impl Default for SpatialScene {
@@ -1030,6 +1277,26 @@ impl SpatialScene {
             body_sampling: BodySamplingStore::default(),
             physics,
         }
+    }
+
+    pub fn physics(&self) -> &Arc<dyn SpatialPhysics> {
+        &self.physics
+    }
+
+    pub fn runtime_sampling_config(&self) -> SpatialSamplingConfig {
+        self.body_sampling.config()
+    }
+
+    pub fn set_runtime_sampling_config(&mut self, config: SpatialSamplingConfig) {
+        self.body_sampling.set_config(config);
+    }
+
+    pub fn runtime_body_view(&self, body_id: SpatialBodyId) -> Option<RuntimeSpatialBodyView> {
+        self.body_sampling.runtime_body_view(body_id)
+    }
+
+    pub fn iter_runtime_body_views(&self) -> impl Iterator<Item = RuntimeSpatialBodyView> + '_ {
+        self.body_sampling.iter_runtime_body_views()
     }
 
     pub fn body(&self, body_id: SpatialBodyId) -> Option<&SpatialBody> {
@@ -1094,6 +1361,19 @@ impl SpatialScene {
             .upsert_sampling_snapshot(body_id, pose, velocity, omega, motion_state, now);
     }
 
+    pub fn seed_authoritative_body_snapshot(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        velocity: Vector3,
+        omega: Vector3,
+        motion_state: Option<EntityMotionSnapshot>,
+        now: Instant,
+    ) {
+        self.body_sampling
+            .seed_authoritative_body_snapshot(body_id, pose, velocity, omega, motion_state, now);
+    }
+
     pub fn update_sampling_authoritative_pose(
         &mut self,
         body_id: SpatialBodyId,
@@ -1103,6 +1383,17 @@ impl SpatialScene {
     ) {
         self.body_sampling
             .update_sampling_authoritative_pose(body_id, pose, bootstrap, now);
+    }
+
+    pub fn correct_authoritative_body_pose(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        bootstrap: bool,
+        now: Instant,
+    ) {
+        self.body_sampling
+            .correct_authoritative_body_pose(body_id, pose, bootstrap, now);
     }
 
     pub fn update_sampling_kinematics(
@@ -1115,6 +1406,16 @@ impl SpatialScene {
             .update_sampling_kinematics(body_id, velocity, omega);
     }
 
+    pub fn update_runtime_body_kinematics(
+        &mut self,
+        body_id: SpatialBodyId,
+        velocity: Vector3,
+        omega: Vector3,
+    ) {
+        self.body_sampling
+            .update_runtime_body_kinematics(body_id, velocity, omega);
+    }
+
     pub fn update_sampling_motion_state(
         &mut self,
         body_id: SpatialBodyId,
@@ -1122,6 +1423,15 @@ impl SpatialScene {
     ) {
         self.body_sampling
             .update_sampling_motion_state(body_id, motion_state);
+    }
+
+    pub fn update_runtime_body_motion_state(
+        &mut self,
+        body_id: SpatialBodyId,
+        motion_state: Option<EntityMotionSnapshot>,
+    ) {
+        self.body_sampling
+            .update_runtime_body_motion_state(body_id, motion_state);
     }
 
     pub fn reset_sampling_body(
@@ -1135,12 +1445,77 @@ impl SpatialScene {
             .reset_sampling_body(body_id, pose, now, clear_kinematics);
     }
 
+    pub fn reset_runtime_body_from_authoritative(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: Instant,
+        clear_kinematics: bool,
+    ) {
+        self.body_sampling
+            .reset_runtime_body_from_authoritative(body_id, pose, now, clear_kinematics);
+    }
+
+    pub fn apply_runtime_body_pose(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        sample_mode: SpatialSampleMode,
+    ) -> bool {
+        self.body_sampling
+            .apply_runtime_body_pose(body_id, pose, sample_mode)
+    }
+
+    pub fn apply_runtime_body_vectors(
+        &mut self,
+        body_id: SpatialBodyId,
+        velocity: Vector3,
+        omega: Vector3,
+        sample_mode: SpatialSampleMode,
+    ) -> bool {
+        self.body_sampling
+            .apply_runtime_body_vectors(body_id, velocity, omega, sample_mode)
+    }
+
+    pub fn apply_runtime_body_contact(
+        &mut self,
+        body_id: SpatialBodyId,
+        contact: ContactState,
+    ) -> bool {
+        self.body_sampling.apply_runtime_body_contact(body_id, contact)
+    }
+
+    pub fn apply_solved_runtime_body_kinematics(
+        &mut self,
+        solved: &SolvedBodyKinematics,
+    ) -> bool {
+        self.body_sampling.apply_solved_runtime_body_kinematics(solved)
+    }
+
+    pub fn apply_forced_reposition_reset(
+        &mut self,
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        now: Instant,
+    ) {
+        self.body_sampling
+            .apply_forced_reposition_reset(body_id, pose, now);
+    }
+
     pub fn suspend_all_sampling(&mut self, now: Instant) {
         self.body_sampling.suspend_all_sampling(now);
     }
 
+    pub fn suspend_runtime_bodies(&mut self, now: Instant) {
+        self.body_sampling.suspend_runtime_bodies(now);
+    }
+
     pub fn tick_sampling(&mut self, now: Instant) {
         self.body_sampling.tick_sampling(now);
+    }
+
+    pub fn tick_runtime_bodies(&mut self, now: Instant) {
+        self.body_sampling.tick_runtime_bodies(now);
     }
 
     pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, pose: WorldPosition) {
@@ -1321,7 +1696,7 @@ mod tests {
             actors: SmallVec::new(),
         };
 
-        let batch = Arc::clone(&scene.physics).solve(&request, &mut scene);
+        let batch = Arc::clone(scene.physics()).solve(&request, &mut scene);
 
         assert!(batch.solved.is_empty());
         assert!(batch.events.is_empty());
@@ -1859,5 +2234,53 @@ mod tests {
             .expect("entity should have projected state");
         assert_eq!(projected.projection_mode, SpatialSampleMode::InterpolatingPosition);
         assert!((projected.projected_pose.coords.x - 0.2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn spatial_scene_runtime_body_views_include_entity_local_player_and_ephemeral_bodies() {
+        let mut scene = SpatialScene::new();
+        let now = Instant::now();
+        let entity_id = SpatialBodyId::Entity(Guid(0x7100_0010));
+        let player_id = SpatialBodyId::LocalPlayer(Guid(0x7100_0011));
+
+        scene.register_body(SpatialBody::new(entity_id, make_position(1.0, 2.0, 0.0), now));
+        scene.register_body(SpatialBody::new(player_id, make_position(3.0, 4.0, 0.5), now));
+        let ephemeral_id = scene.register_ephemeral_body(make_position(5.0, 6.0, 1.0), now);
+
+        let views: Vec<_> = scene.iter_runtime_body_views().collect();
+
+        assert_eq!(views.len(), 3);
+        assert!(views.iter().any(|view| view.body_id == entity_id));
+        assert!(views.iter().any(|view| view.body_id == player_id));
+        assert!(views.iter().any(|view| view.body_id == ephemeral_id));
+    }
+
+    #[test]
+    fn forced_reposition_reset_clears_runtime_motion_and_suspends_body() {
+        let mut store = BodySamplingStore::default();
+        let now = Instant::now();
+        let body_id = SpatialBodyId::Entity(Guid(0x7100_0012));
+
+        store.seed_authoritative_body_snapshot(
+            body_id,
+            make_position(1.0, 2.0, 0.0),
+            Vector3::new(3.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 1.0),
+            Some(EntityMotionSnapshot {
+                turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+                ..Default::default()
+            }),
+            now,
+        );
+
+        store.apply_forced_reposition_reset(body_id, make_position(8.0, 9.0, 0.25), now);
+
+        let body = store.body(body_id).expect("body should remain tracked");
+        assert_eq!(body.pose, make_position(8.0, 9.0, 0.25));
+        assert_eq!(body.authoritative_pose, Some(make_position(8.0, 9.0, 0.25)));
+        assert_eq!(body.velocity, Vector3::zero());
+        assert_eq!(body.omega, Vector3::zero());
+        assert_eq!(body.motion_state, None);
+        assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
     }
 }

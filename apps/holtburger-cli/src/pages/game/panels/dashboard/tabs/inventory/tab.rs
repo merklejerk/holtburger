@@ -38,7 +38,7 @@ pub struct InventoryTab {
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     let entities = &data.entities;
-    let player_pos = data.player_pos.as_ref();
+    let player_pos = data.runtime_player_position();
 
     let candidates: Vec<_> = entities
         .values()
@@ -90,7 +90,9 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     while let Some((guid, depth)) = stack.pop() {
         let e = &entities[&guid];
         let dist = if let Some(p) = player_pos {
-            e.position.distance_to(p)
+            data.runtime_position_for_guid(guid)
+                .unwrap_or(e.position)
+                .distance_to(&p)
         } else {
             0.0
         };

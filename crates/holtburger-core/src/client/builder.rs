@@ -421,9 +421,9 @@ mod tests {
                 omega: Vector3::zero(),
             }],
         };
-        let mut scene = SpatialScene::new_with_physics(Arc::clone(&client.world.scene.physics));
+        let mut scene = SpatialScene::new_with_physics(Arc::clone(client.world.scene.physics()));
 
-        let batch = Arc::clone(&client.world.scene.physics).solve(&request, &mut scene);
+        let batch = Arc::clone(client.world.scene.physics()).solve(&request, &mut scene);
 
         assert_eq!(batch.solved.len(), 1);
         assert_eq!(batch.solved[0].contact, ContactState::Grounded);

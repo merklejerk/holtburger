@@ -2,8 +2,9 @@ use super::*;
 use crate::context::WorldContextExt;
 use crate::entity::EntityPositionSyncOutcome;
 use crate::spatial::{
-    AuthoritativeBodySync, ContactState, SolvedActorKinematics, SolvedBodyKinematics,
-    SpatialBodyEvent, SpatialBodyId, SpatialEvent, SpatialSampleMode,
+    AuthoritativeBodySync, ContactState, RuntimeBodyResetCause, RuntimeSpatialBodyView,
+    SolvedActorKinematics, SolvedBodyKinematics, SpatialBodyEvent, SpatialBodyId, SpatialEvent,
+    SpatialSampleMode, SpatialSamplingConfig,
 };
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
@@ -110,7 +111,55 @@ impl WorldState {
             .map(|(_, pose, velocity, omega)| (pose, velocity, omega))
     }
 
-    fn ensure_runtime_body(&mut self, body_id: SpatialBodyId) -> bool {
+    pub fn runtime_sampling_config(&self) -> SpatialSamplingConfig {
+        self.scene.runtime_sampling_config()
+    }
+
+    pub fn set_runtime_sampling_config(&mut self, config: SpatialSamplingConfig) {
+        self.scene.set_runtime_sampling_config(config);
+    }
+
+    pub fn runtime_body_view(&self, body_id: SpatialBodyId) -> Option<RuntimeSpatialBodyView> {
+        if let Some(view) = self.scene.runtime_body_view(body_id) {
+            return Some(view);
+        }
+
+        let guid = body_id.authoritative_guid()?;
+        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
+            let (velocity, omega, motion_state) = self
+                .entities
+                .get(guid)
+                .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
+                .unwrap_or((Vector3::zero(), Vector3::zero(), None));
+            return Some(RuntimeSpatialBodyView {
+                body_id,
+                authoritative_pose: Some(self.player.position),
+                runtime_pose: self.player.position,
+                velocity,
+                omega,
+                motion_state,
+                contact: ContactState::Unknown,
+                sample_mode: SpatialSampleMode::AuthoritativeOnly,
+            });
+        }
+
+        self.entities.get(guid).map(|entity| RuntimeSpatialBodyView {
+            body_id,
+            authoritative_pose: Some(entity.position),
+            runtime_pose: entity.position,
+            velocity: entity.velocity,
+            omega: entity.omega,
+            motion_state: entity.motion_snapshot,
+            contact: ContactState::Unknown,
+            sample_mode: SpatialSampleMode::AuthoritativeOnly,
+        })
+    }
+
+    pub fn runtime_body_views(&self) -> Vec<RuntimeSpatialBodyView> {
+        self.scene.iter_runtime_body_views().collect()
+    }
+
+    pub(crate) fn ensure_runtime_body(&mut self, body_id: SpatialBodyId) -> bool {
         if self.scene.body(body_id).is_some() {
             return true;
         }
@@ -134,12 +183,55 @@ impl WorldState {
         true
     }
 
+    pub fn suspend_runtime_bodies(
+        &mut self,
+        cause: RuntimeBodyResetCause,
+    ) -> Vec<WorldEvent> {
+        self.scene.suspend_runtime_bodies(Instant::now());
+        let mut events = Vec::new();
+        Self::emit_runtime_bodies_reset(&mut events, cause);
+        events
+    }
+
+    pub fn tick_runtime_bodies(&mut self, now: Instant) {
+        self.scene.tick_runtime_bodies(now);
+    }
+
+    pub(crate) fn update_runtime_body_motion_snapshot_for_guid(
+        &mut self,
+        guid: Guid,
+        motion_state: Option<crate::entity::EntityMotionSnapshot>,
+    ) -> Option<SpatialBodyId> {
+        let body_id = self.runtime_body_id_for_guid(guid)?;
+        if !self.ensure_runtime_body(body_id) {
+            return None;
+        }
+
+        self.scene.update_runtime_body_motion_state(body_id, motion_state);
+        Some(body_id)
+    }
+
     fn runtime_sample_mode_for_kinematics(velocity: Vector3, omega: Vector3) -> SpatialSampleMode {
         if velocity.length_squared() > 1e-6 || omega.length_squared() > 1e-6 {
             SpatialSampleMode::SimulatingVelocity
         } else {
             SpatialSampleMode::SimulatingMotionState
         }
+    }
+
+    fn emit_runtime_body_changed(events: &mut Vec<WorldEvent>, body_id: SpatialBodyId) {
+        events.push(WorldEvent::RuntimeBodyChanged { body_id });
+    }
+
+    fn emit_runtime_body_removed(events: &mut Vec<WorldEvent>, body_id: SpatialBodyId) {
+        events.push(WorldEvent::RuntimeBodyRemoved { body_id });
+    }
+
+    fn emit_runtime_bodies_reset(
+        events: &mut Vec<WorldEvent>,
+        cause: RuntimeBodyResetCause,
+    ) {
+        events.push(WorldEvent::RuntimeBodiesReset { cause });
     }
 
     pub fn set_local_player_runtime_pose(&mut self, pose: WorldPosition) -> Vec<WorldEvent> {
@@ -151,18 +243,20 @@ impl WorldState {
             return Vec::new();
         }
 
-        let Some(body) = self.scene.body_mut(body_id) else {
+        if !self
+            .scene
+            .apply_runtime_body_pose(body_id, pose, SpatialSampleMode::SimulatingMotionState)
+        {
             return Vec::new();
-        };
+        }
 
-        body.pose = pose;
-        body.sampling.mode = SpatialSampleMode::SimulatingMotionState;
-        body.sampling.interpolation = None;
-
-        vec![WorldEvent::EntityMoved {
+        vec![
+            WorldEvent::RuntimeBodyChanged { body_id },
+            WorldEvent::EntityMoved {
             guid: self.player.guid,
             pos: pose,
-        }]
+        },
+        ]
     }
 
     pub fn set_local_player_runtime_vectors(
@@ -178,20 +272,23 @@ impl WorldState {
             return Vec::new();
         }
 
-        let Some(body) = self.scene.body_mut(body_id) else {
+        if !self.scene.apply_runtime_body_vectors(
+            body_id,
+            velocity,
+            omega,
+            Self::runtime_sample_mode_for_kinematics(velocity, omega),
+        ) {
             return Vec::new();
-        };
+        }
 
-        body.velocity = velocity;
-        body.omega = omega;
-        body.sampling.mode = Self::runtime_sample_mode_for_kinematics(velocity, omega);
-        body.sampling.interpolation = None;
-
-        vec![WorldEvent::EntityVectorUpdated {
+        vec![
+            WorldEvent::RuntimeBodyChanged { body_id },
+            WorldEvent::EntityVectorUpdated {
             guid: self.player.guid,
             velocity,
             omega,
-        }]
+        },
+        ]
     }
 
     pub fn apply_solved_body_kinematics(
@@ -202,19 +299,12 @@ impl WorldState {
             return Vec::new();
         }
 
-        let Some(body) = self.scene.body_mut(solved.body_id) else {
+        if !self.scene.apply_solved_runtime_body_kinematics(solved) {
             return Vec::new();
-        };
-
-        body.pose = solved.pose;
-        body.velocity = solved.velocity;
-        body.omega = solved.omega;
-        body.contact = solved.contact;
-        body.sampling.mode =
-            Self::runtime_sample_mode_for_kinematics(solved.velocity, solved.omega);
-        body.sampling.interpolation = None;
+        }
 
         let mut events = Vec::new();
+        Self::emit_runtime_body_changed(&mut events, solved.body_id);
         if let Some(guid) = solved.body_id.authoritative_guid() {
             events.push(WorldEvent::EntityMoved {
                 guid,
@@ -241,16 +331,18 @@ impl WorldState {
                     return Vec::new();
                 }
 
-                if let Some(body) = self.scene.body_mut(body_id) {
-                    body.contact = contact;
+                if !self.scene.apply_runtime_body_contact(body_id, contact) {
+                    return Vec::new();
                 }
 
+                let mut events = Vec::new();
+                Self::emit_runtime_body_changed(&mut events, body_id);
+
                 if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-                    let mut events = Vec::new();
                     self.apply_player_contact_state(contact, &mut events);
                     events
                 } else {
-                    Vec::new()
+                    events
                 }
             }
             SpatialBodyEvent::ForcedReposition { body_id, pose } => {
@@ -258,18 +350,18 @@ impl WorldState {
                     return Vec::new();
                 }
 
-                if let Some(body) = self.scene.body_mut(body_id) {
-                    body.pose = pose;
-                    body.sampling.mode = SpatialSampleMode::Suspended;
-                    body.sampling.interpolation = None;
-                }
+                self.scene
+                    .apply_forced_reposition_reset(body_id, pose, Instant::now());
 
                 body_id.authoritative_guid().map_or_else(Vec::new, |guid| {
-                    vec![WorldEvent::ForcedReposition {
+                    vec![
+                        WorldEvent::RuntimeBodyChanged { body_id },
+                        WorldEvent::ForcedReposition {
                         guid,
                         pos: pose,
                         sequence: 0,
-                    }]
+                    },
+                    ]
                 })
             }
         }
@@ -312,6 +404,9 @@ impl WorldState {
                     omega,
                     AuthoritativeBodySync::Snapshot,
                 );
+                if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+                    Self::emit_runtime_body_changed(events, body_id);
+                }
                 events.push(WorldEvent::EntityMoved { guid, pos })
             }
             EntityPositionSyncOutcome::Reset { sequence } => {
@@ -328,6 +423,9 @@ impl WorldState {
                     omega,
                     AuthoritativeBodySync::Reset,
                 );
+                if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+                    Self::emit_runtime_body_changed(events, body_id);
+                }
                 events.push(WorldEvent::ForcedReposition {
                     guid,
                     pos,
@@ -549,6 +647,9 @@ impl WorldState {
             AuthoritativeBodySync::Snapshot,
         );
 
+        if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+            Self::emit_runtime_body_changed(&mut events, body_id);
+        }
         events.push(WorldEvent::EntityMoved { guid, pos });
         events
     }
@@ -610,6 +711,9 @@ impl WorldState {
                 omega,
                 AuthoritativeBodySync::Snapshot,
             );
+            if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+                Self::emit_runtime_body_changed(&mut events, body_id);
+            }
             events.push(WorldEvent::EntityVectorUpdated {
                 guid,
                 velocity,
@@ -643,7 +747,17 @@ impl WorldState {
         entity.omega = solved.omega;
         self.scene
             .update_entity(solved.actor_id, old_lb, solved.pose);
+        self.reconcile_authoritative_body(
+            solved.actor_id,
+            solved.pose,
+            solved.velocity,
+            solved.omega,
+            AuthoritativeBodySync::Snapshot,
+        );
 
+        if let Some(body_id) = self.runtime_body_id_for_guid(solved.actor_id) {
+            Self::emit_runtime_body_changed(&mut events, body_id);
+        }
         events.push(WorldEvent::EntityMoved {
             guid: solved.actor_id,
             pos: solved.pose,
@@ -661,10 +775,28 @@ impl WorldState {
         match *event {
             SpatialEvent::ContactChanged { actor_id, contact } => {
                 if actor_id != self.player.guid {
-                    return Vec::new();
+                    let Some(body_id) = self.runtime_body_id_for_guid(actor_id) else {
+                        return Vec::new();
+                    };
+
+                    if !self.ensure_runtime_body(body_id) {
+                        return Vec::new();
+                    }
+
+                    if !self.scene.apply_runtime_body_contact(body_id, contact) {
+                        return Vec::new();
+                    }
+
+                    return vec![WorldEvent::RuntimeBodyChanged { body_id }];
                 }
 
                 let mut events = Vec::new();
+                if let Some(body_id) = self.runtime_body_id_for_guid(actor_id) {
+                    if self.ensure_runtime_body(body_id) {
+                        let _ = self.scene.apply_runtime_body_contact(body_id, contact);
+                        Self::emit_runtime_body_changed(&mut events, body_id);
+                    }
+                }
                 self.apply_player_contact_state(contact, &mut events);
                 events
             }
@@ -683,6 +815,9 @@ impl WorldState {
                         omega,
                         AuthoritativeBodySync::Reset,
                     );
+                    if let Some(body_id) = self.runtime_body_id_for_guid(actor_id) {
+                        Self::emit_runtime_body_changed(&mut events, body_id);
+                    }
                     events.push(WorldEvent::ForcedReposition {
                         guid: actor_id,
                         pos: pose,
@@ -710,11 +845,16 @@ impl WorldState {
                     AuthoritativeBodySync::Reset,
                 );
 
-                vec![WorldEvent::ForcedReposition {
+                let mut events = Vec::new();
+                if let Some(body_id) = self.runtime_body_id_for_guid(actor_id) {
+                    Self::emit_runtime_body_changed(&mut events, body_id);
+                }
+                events.push(WorldEvent::ForcedReposition {
                     guid: actor_id,
                     pos: pose,
                     sequence: 0,
-                }]
+                });
+                events
             }
         }
     }
@@ -803,6 +943,9 @@ impl WorldState {
                 omega,
                 AuthoritativeBodySync::Snapshot,
             );
+            if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+                Self::emit_runtime_body_changed(events, body_id);
+            }
             events.push(WorldEvent::EntityVectorUpdated {
                 guid,
                 velocity,
@@ -893,6 +1036,9 @@ impl WorldState {
 
     fn emit_entity_world_presence_cleared(&mut self, guid: Guid, events: &mut Vec<WorldEvent>) {
         if let Some(pos) = self.clear_entity_world_presence(guid) {
+            if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+                Self::emit_runtime_body_removed(events, body_id);
+            }
             events.push(WorldEvent::EntityMoved { guid, pos });
         }
     }

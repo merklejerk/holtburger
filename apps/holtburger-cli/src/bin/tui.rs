@@ -14,6 +14,7 @@ use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
 use holtburger_core::{ClientBuilder, ClientCommand, ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;
+use holtburger_world::RuntimeBodyResetCause;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -389,7 +390,9 @@ async fn bootstrap_once(
                             ));
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         return Ok(BootstrapOutcome::Fatal {
                             message: "Client event stream closed before receiving character list.".to_string(),
@@ -642,10 +645,29 @@ async fn run() -> Result<()> {
         }
 
         // 2. Process Network Events (Drain batch)
-        while let Ok(event) = server_event_rx.try_recv() {
-            let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
-            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
-            should_quit |= app_state.has_pending_exit();
+        loop {
+            match server_event_rx.try_recv() {
+                Ok(event) => {
+                    let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+                    update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                    should_quit |= app_state.has_pending_exit();
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                    let reset = app_state.handle_app_event(AppEvent::ReceivedViewEvent(
+                        ClientViewEvent::RuntimeBodiesReset {
+                            cause: RuntimeBodyResetCause::Resync,
+                        },
+                    ));
+                    update_state(reset, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
+                    should_quit = true;
+                    break;
+                }
+            }
         }
 
         // 3. Poll Input (Short timeout, drain batch)

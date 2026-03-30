@@ -316,6 +316,9 @@ impl WorldState {
         }
 
         if self.remove_entity(guid).is_some() {
+            if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
+                events.push(WorldEvent::RuntimeBodyRemoved { body_id });
+            }
             events.push(WorldEvent::EntityDespawned(guid));
             true
         } else {

@@ -1,6 +1,7 @@
 use crate::WorldEvent;
 use crate::context::{WorldContext, WorldContextExt};
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
+use crate::spatial::RuntimeBodyResetCause;
 use crate::state::WorldState;
 use holtburger_protocol::messages::*;
 
@@ -58,6 +59,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PlayerTeleport(data) => {
             state.player.set_teleport_sequence(data.teleport_sequence);
+            events.extend(state.suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset));
             events.push(WorldEvent::TeleportStarted {
                 sequence: data.teleport_sequence,
             });

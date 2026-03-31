@@ -12,15 +12,6 @@ use holtburger_world::{
 use std::collections::HashMap;
 use std::time::Instant;
 
-#[cfg(test)]
-use holtburger_common::math::Quaternion;
-#[cfg(test)]
-use holtburger_common::Vector3;
-#[cfg(test)]
-use holtburger_world::RuntimeBodyResetCause;
-#[cfg(test)]
-use std::time::Duration;
-
 #[derive(Debug, Clone, Copy)]
 struct CachedRuntimeBodyView {
     view: RuntimeSpatialBodyView,
@@ -147,6 +138,11 @@ impl RuntimeBodyViewCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::math::Quaternion;
+    use holtburger_common::Vector3;
+    use holtburger_world::RuntimeBodyResetCause;
+    use std::time::Duration;
+
 
     struct CacheHarness {
         cache: RuntimeBodyViewCache,

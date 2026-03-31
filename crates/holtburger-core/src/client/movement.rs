@@ -395,31 +395,8 @@ impl MovementSystem {
         }
     }
 
-    /// Estimates the pulse duration needed to cover a planar distance for the given motion state.
-    /// This is planning math based on the current client actuator model, not a server guarantee.
-    pub fn estimate_duration_for_distance(&self, state: MotionState, distance_m: f32) -> Duration {
-        let speed = self.motion_state_speed_mps(state);
-        if speed <= 1e-6 {
-            Duration::ZERO
-        } else {
-            Duration::from_secs_f32((distance_m.max(0.0) / speed).max(0.0))
-        }
-    }
-
-    /// Estimates planar displacement for a motion state held for the given duration.
-    /// This is planning math based on the current client actuator model, not a server guarantee.
-    pub fn estimate_displacement(&self, state: MotionState, duration: Duration) -> f32 {
-        self.motion_state_speed_mps(state) * duration.as_secs_f32().max(0.0)
-    }
-
     pub(super) fn enqueue_command(&mut self, command: MovementCommand, _now: Instant) {
         self.queued_commands.push(command);
-    }
-
-    fn motion_state_speed_mps(&self, state: MotionState) -> f32 {
-        // Generic planning helpers model the actuator's full run vocabulary.
-        // Callers with a player-specific cap must scale or override separately.
-        locomotion_speed_for_state(state, SERVER_RUN_SPEED)
     }
 
     fn ingest_public_command(&mut self, command: MovementCommand, now: Instant) {
@@ -1132,33 +1109,6 @@ mod tests {
         assert!((body.velocity.y - expected_run_speed).abs() < 1e-5);
     }
 
-    #[test]
-    fn duration_and_displacement_helpers_share_one_run_vocabulary() {
-        let movement = MovementSystem::new();
-        let state = MotionState::builder().run().forward().build();
-        let distance = 9.0;
-
-        let duration = movement.estimate_duration_for_distance(state, distance);
-        let displacement = movement.estimate_displacement(state, duration);
-
-        assert!((duration.as_secs_f32() - 2.0).abs() < 1e-5);
-        assert!((displacement - distance).abs() < 1e-4);
-    }
-
-    #[test]
-    fn turn_only_motion_has_zero_displacement_and_duration_helpers() {
-        let movement = MovementSystem::new();
-        let state = MotionState::builder().walk().turn_left().build();
-
-        assert_eq!(
-            movement.estimate_duration_for_distance(state, 5.0),
-            Duration::ZERO
-        );
-        assert_eq!(
-            movement.estimate_displacement(state, Duration::from_secs(1)),
-            0.0
-        );
-    }
 
     #[test]
     fn stop_clears_local_velocity_and_turn_rate() {

@@ -5,7 +5,6 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::spatial::{LocalDriveControl, LocalDriveGait};
 use holtburger_world::{
     ContactState, SolveActorInput, SolveBodyInput, SolvedActorKinematics, SolvedBodyKinematics,
     SpatialBodyEvent, SpatialBodyId, SpatialEvent, SpatialSolveBatch, SpatialSolveRequest,
@@ -136,22 +135,6 @@ impl ClientSimulationSystem {
             actors,
             local_drive: movement.current_local_drive_control(world),
         })
-    }
-
-    pub(super) fn to_local_drive_control(
-        body_id: SpatialBodyId,
-        intent: crate::client::movement_types::AutonomousDriveIntent,
-    ) -> LocalDriveControl {
-        LocalDriveControl {
-            body_id,
-            desired_world_delta: intent.desired_world_delta,
-            desired_heading: intent.desired_heading,
-            gait: match intent.gait {
-                crate::client::movement_types::Gait::Walk => LocalDriveGait::Walk,
-                crate::client::movement_types::Gait::Run => LocalDriveGait::Run,
-            },
-            force_grounded: intent.force_grounded,
-        }
     }
 
     fn build_body_input(

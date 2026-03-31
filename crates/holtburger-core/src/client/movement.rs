@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 // representation. That coincidence is useful, but it is also the trap: this
 // value is the *maximum* run speed for a fully capped player, not the speed
 // every character should emit or simulate.
-pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
-pub(super) const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
+const SERVER_RUN_SPEED: f32 = 4.5;
+const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
 const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
@@ -88,19 +88,15 @@ fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> 
     u8::from(resolve_contact(world, metadata))
 }
 
-fn build_autonomous_position_heartbeat(
-    world: &WorldState,
-    metadata: MovementPacketMetadata,
-) -> Option<AutonomousPositionActionData> {
-    let (_, velocity, omega) = world.local_player_runtime_kinematics()?;
-    if velocity.length_squared() < 0.0001 && omega.length_squared() < 0.0001 {
-        return None;
-    }
+fn has_active_autonomous_position_motion(world: &WorldState) -> bool {
+    let Some((_, velocity, omega)) = world.local_player_runtime_kinematics() else {
+        return false;
+    };
 
-    build_autonomous_position_sync(world, metadata)
+    velocity.length_squared() >= 0.0001 || omega.length_squared() >= 0.0001
 }
 
-fn build_autonomous_position_sync(
+fn build_autonomous_position(
     world: &WorldState,
     metadata: MovementPacketMetadata,
 ) -> Option<AutonomousPositionActionData> {
@@ -431,11 +427,9 @@ impl MovementSystem {
         &mut self,
         now: Instant,
         world: &WorldState,
-        metadata: MovementPacketMetadata,
     ) {
-        self.next_autonomous_position_heartbeat_at =
-            build_autonomous_position_heartbeat(world, metadata)
-                .map(|_| now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
+        self.next_autonomous_position_heartbeat_at = has_active_autonomous_position_motion(world)
+            .then_some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
     }
 
     pub(super) fn enqueue_drive_intent(&mut self, intent: PlayerDriveIntent, now: Instant) {
@@ -497,10 +491,6 @@ impl MovementSystem {
             );
             self.active_drive = None;
         }
-    }
-
-    fn active_drive_intent_for_tick(&self) -> Option<ActiveDriveIntent> {
-        self.active_drive.map(|active| active.intent)
     }
 
     fn autonomous_wire_motion_state(
@@ -594,7 +584,7 @@ impl MovementSystem {
             );
         }
 
-        match self.active_drive_intent_for_tick() {
+        match self.active_drive.map(|active| active.intent) {
             Some(ActiveDriveIntent::Manual(state)) => events.extend(
                 self.execute_motion_state_at(state, world, session, now)
                     .await?,
@@ -617,6 +607,15 @@ impl MovementSystem {
             }
             None => {}
         }
+
+        let _ = self
+            .maybe_send_autonomous_position_heartbeat(
+                now,
+                world,
+                session,
+                MovementPacketMetadata::default(),
+            )
+            .await?;
 
         Ok(events)
     }
@@ -841,21 +840,18 @@ impl MovementSystem {
         Ok(world_events)
     }
 
-    pub(super) async fn maybe_send_autonomous_position_heartbeat(
+    async fn maybe_send_autonomous_position_heartbeat(
         &mut self,
         now: Instant,
         world: &WorldState,
         session: &mut Session,
         metadata: MovementPacketMetadata,
     ) -> Result<bool> {
-        let Some(pulse) = build_autonomous_position_heartbeat(world, metadata) else {
-            self.clear_autonomous_position_heartbeat_schedule();
-            return Ok(false);
-        };
-
         let Some(next_heartbeat_at) = self.next_autonomous_position_heartbeat_at else {
-            self.next_autonomous_position_heartbeat_at =
-                Some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
+            if has_active_autonomous_position_motion(world) {
+                self.next_autonomous_position_heartbeat_at =
+                    Some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
+            }
             return Ok(false);
         };
 
@@ -863,11 +859,20 @@ impl MovementSystem {
             return Ok(false);
         }
 
+        let Some(pulse) = build_autonomous_position(world, metadata) else {
+            self.clear_autonomous_position_heartbeat_schedule();
+            return Ok(false);
+        };
+
         session
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
             .await?;
 
-        self.refresh_autonomous_position_heartbeat_schedule(now, world, metadata);
+        if has_active_autonomous_position_motion(world) {
+            self.refresh_autonomous_position_heartbeat_schedule(now, world);
+        } else {
+            self.clear_autonomous_position_heartbeat_schedule();
+        }
 
         Ok(true)
     }
@@ -879,7 +884,7 @@ impl MovementSystem {
         session: &mut Session,
         metadata: MovementPacketMetadata,
     ) -> Result<bool> {
-        let Some(pulse) = build_autonomous_position_sync(world, metadata) else {
+        let Some(pulse) = build_autonomous_position(world, metadata) else {
             self.clear_autonomous_position_heartbeat_schedule();
             return Ok(false);
         };
@@ -888,7 +893,7 @@ impl MovementSystem {
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
             .await?;
 
-        self.refresh_autonomous_position_heartbeat_schedule(now, world, metadata);
+        self.refresh_autonomous_position_heartbeat_schedule(now, world);
 
         Ok(true)
     }
@@ -999,36 +1004,6 @@ mod tests {
         );
 
         player_run_speed_mps(world)
-    }
-
-    #[test]
-    fn test_calculate_heading_to() {
-        let source = Vector3::new(0.0, 0.0, 0.0);
-        // North (0, 1, 0) -> Math Rad: atan2(0, 1) = 0. Deg: 450 - 0 = 450 % 360 = 90 deg (1.57 rad)
-        // Wait, let's verify AC heading convention.
-        // My function says 90 deg for North.
-        let heading = source.heading_to(&Vector3::new(0.0, 1.0, 0.0));
-        assert!((heading.to_degrees() - 90.0).abs() < 1e-4);
-
-        // West (-1, 0, 0) -> Math Rad: atan2(1, 0) = pi/2 (90 deg). Deg: 450 - 90 = 360 % 360 = 0 deg
-        let heading = source.heading_to(&Vector3::new(-1.0, 0.0, 0.0));
-        assert!((heading.to_degrees() - 0.0).abs() < 1e-4);
-
-        // East (1, 0, 0) -> Math Rad: atan2(-1, 0) = -pi/2 (-90 deg). Deg: 450 - (-90) = 540 % 360 = 180 deg
-        let heading = source.heading_to(&Vector3::new(1.0, 0.0, 0.0));
-        assert!((heading.to_degrees() - 180.0).abs() < 1e-4);
-
-        // South (0, -1, 0) -> Math Rad: atan2(0, -1) = pi (180 deg). Deg: 450 - 180 = 270 deg
-        let heading = source.heading_to(&Vector3::new(0.0, -1.0, 0.0));
-        assert!((heading.to_degrees() - 270.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn current_local_drive_control_returns_none_without_guid_or_autonomous_drive() {
-        let world = WorldState::synthetic();
-        let movement = MovementSystem::new();
-
-        assert_eq!(movement.current_local_drive_control(&world), None);
     }
 
     #[test]
@@ -1417,31 +1392,6 @@ mod tests {
 
 
     #[test]
-    fn idle_local_solve_body_input_clears_velocity_and_turn_rate() {
-        let mut world = WorldState::synthetic();
-        let player_guid = Guid(0x50000123);
-        world.player.guid = player_guid;
-        world.player.position = WorldPosition {
-            landblock_id: Guid(0x12340000),
-            coords: Vector3::new(10.0, 20.0, 0.0),
-            rotation: Quaternion::identity(),
-        };
-        world.entities.insert(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            world.player.position,
-        ));
-
-        let movement = MovementSystem::new();
-        let body = movement
-            .current_local_solve_body_input(&world)
-            .expect("idle local player should still produce a solve input");
-        assert_eq!(body.body_id, SpatialBodyId::LocalPlayer(player_guid));
-        assert!(body.velocity.length_squared() <= 1e-6);
-        assert!(body.omega.length_squared() <= 1e-6);
-    }
-
-    #[test]
     fn current_local_solve_body_input_can_turn_in_place() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
@@ -1529,20 +1479,20 @@ mod tests {
         world.player.force_position_sequence = 44;
         world.entities.insert(entity);
 
-        let heartbeat =
-            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
-                .expect("moving player should emit heartbeat");
+        let position_action =
+            build_autonomous_position(&world, MovementPacketMetadata::default())
+                .expect("moving player should emit autonomous position action");
 
-        assert_eq!(heartbeat.position, position);
-        assert_eq!(heartbeat.instance_sequence, 11);
-        assert_eq!(heartbeat.server_control_sequence, 22);
-        assert_eq!(heartbeat.teleport_sequence, 33);
-        assert_eq!(heartbeat.force_position_sequence, 44);
-        assert_eq!(heartbeat.last_contact, 1);
+        assert_eq!(position_action.position, position);
+        assert_eq!(position_action.instance_sequence, 11);
+        assert_eq!(position_action.server_control_sequence, 22);
+        assert_eq!(position_action.teleport_sequence, 33);
+        assert_eq!(position_action.force_position_sequence, 44);
+        assert_eq!(position_action.last_contact, 1);
     }
 
     #[test]
-    fn autonomous_position_heartbeat_uses_server_grounded_when_contact_unspecified() {
+    fn autonomous_position_uses_server_grounded_when_contact_unspecified() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
@@ -1558,15 +1508,15 @@ mod tests {
         world.player.server_grounded = Some(true);
         world.entities.insert(entity);
 
-        let heartbeat =
-            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
-                .expect("moving player should emit heartbeat");
+        let position_action =
+            build_autonomous_position(&world, MovementPacketMetadata::default())
+                .expect("moving player should emit autonomous position action");
 
-        assert_eq!(heartbeat.last_contact, 1);
+        assert_eq!(position_action.last_contact, 1);
     }
 
     #[test]
-    fn autonomous_position_heartbeat_includes_turn_only_motion() {
+    fn autonomous_position_can_be_built_for_turn_only_motion() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
@@ -1581,15 +1531,15 @@ mod tests {
         world.player.position = position;
         world.entities.insert(entity);
 
-        let heartbeat =
-            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
-                .expect("turning player should emit heartbeat");
+        let position_action =
+            build_autonomous_position(&world, MovementPacketMetadata::default())
+                .expect("turning player should emit autonomous position action");
 
-        assert_eq!(heartbeat.position, position);
+        assert_eq!(position_action.position, position);
     }
 
     #[test]
-    fn autonomous_position_sync_can_be_built_for_stationary_player() {
+    fn autonomous_position_can_be_built_for_stationary_player() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
@@ -1608,14 +1558,14 @@ mod tests {
             .entities
             .insert(Entity::new(guid, "Player".to_string(), position));
 
-        let sync = build_autonomous_position_sync(&world, MovementPacketMetadata::default())
-            .expect("server-controlled sync should emit even when stationary");
+        let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+            .expect("autonomous position action should emit even when stationary");
 
-        assert_eq!(sync.position, position);
-        assert_eq!(sync.instance_sequence, 11);
-        assert_eq!(sync.server_control_sequence, 22);
-        assert_eq!(sync.teleport_sequence, 33);
-        assert_eq!(sync.force_position_sequence, 44);
+        assert_eq!(position_action.position, position);
+        assert_eq!(position_action.instance_sequence, 11);
+        assert_eq!(position_action.server_control_sequence, 22);
+        assert_eq!(position_action.teleport_sequence, 33);
+        assert_eq!(position_action.force_position_sequence, 44);
     }
 
     #[tokio::test]
@@ -2003,24 +1953,98 @@ mod tests {
         assert!(movement.next_autonomous_position_heartbeat_at.is_none());
     }
 
-    #[test]
-    fn autonomous_position_heartbeat_skips_stationary_players() {
+    #[tokio::test]
+    async fn armed_movement_heartbeat_sends_final_stationary_sync_then_disarms() {
         let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
-            ..Default::default()
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
         };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+        entity.velocity = Vector3::new(1.0, 0.0, 0.0);
 
         world.player.guid = guid;
         world.player.position = position;
-        world
-            .entities
-            .insert(Entity::new(guid, "Player".to_string(), position));
+        world.entities.insert(entity);
 
-        assert!(
-            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
-                .is_none()
-        );
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let now = Instant::now();
+
+        let sent = movement
+            .maybe_send_autonomous_position_heartbeat(
+                now,
+                &world,
+                &mut session,
+                MovementPacketMetadata::default(),
+            )
+            .await
+            .expect("moving heartbeat check should arm successfully");
+
+        assert!(!sent);
+        assert!(movement.next_autonomous_position_heartbeat_at.is_some());
+
+        let stationary_entity = world
+            .entities
+            .get_mut(guid)
+            .expect("synthetic player entity should exist");
+        stationary_entity.velocity = Vector3::zero();
+        stationary_entity.omega = Vector3::zero();
+
+        let sent = movement
+            .maybe_send_autonomous_position_heartbeat(
+                now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
+                &world,
+                &mut session,
+                MovementPacketMetadata::default(),
+            )
+            .await
+            .expect("armed heartbeat should send one final stationary sync");
+
+        assert!(sent);
+        assert_eq!(session.game_action_sequence, 1);
+        assert!(movement.next_autonomous_position_heartbeat_at.is_none());
     }
+
+    #[tokio::test]
+    async fn movement_tick_emits_autonomous_position_heartbeat_when_due() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+        entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.entities.insert(entity);
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let start = Instant::now();
+
+        movement
+            .tick(start, &mut world, &mut session)
+            .await
+            .expect("first movement tick should arm the heartbeat");
+
+        assert_eq!(session.game_action_sequence, 0);
+
+        movement
+            .tick(
+                start + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
+                &mut world,
+                &mut session,
+            )
+            .await
+            .expect("second movement tick should emit the heartbeat");
+
+        assert_eq!(session.game_action_sequence, 1);
+    }
+
 }

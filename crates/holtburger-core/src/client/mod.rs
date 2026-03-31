@@ -816,17 +816,6 @@ impl Client {
                         self.handle_runtime_world_event(&event);
                     }
 
-                    if matches!(self.state, ClientState::InWorld) {
-                        self.movement
-                            .maybe_send_autonomous_position_heartbeat(
-                                now,
-                                &self.world,
-                                &mut self.session,
-                                movement_types::MovementPacketMetadata::default(),
-                            )
-                            .await?;
-                    }
-
                 }
             }
         }

@@ -29,10 +29,11 @@ pub use self::state::WorldState;
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
     AuthoritativeBodySync, BasicSpatialPhysics, ContactState,
-    NoopSpatialPhysics, RuntimeBodyResetCause, RuntimeSpatialBodyView, SolveActorInput,
+    LocalDriveControl, LocalDriveGait, NoopSpatialPhysics, RuntimeBodyResetCause,
+    RuntimeSpatialBodyView, SelfPlayerDriveProjectionState, SolveActorInput,
     SolveBodyInput, SolvedActorKinematics, SolvedBodyKinematics, SpatialBody,
     SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialEvent,
-    SpatialInterpolationState, SpatialPhysics, SpatialProjectedEntityState,
-    SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
+    SpatialPhysics, SpatialProjectedEntityState, SpatialSampleMode,
+    SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
     SpatialSolveBatch, SpatialSolveRequest, advance_actor_kinematics,
 };

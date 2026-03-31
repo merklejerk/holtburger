@@ -47,6 +47,14 @@ pub enum Gait {
     Run,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutonomousDriveIntent {
+    pub desired_world_delta: Vector3,
+    pub desired_heading: Option<f32>,
+    pub gait: Gait,
+    pub force_grounded: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locomotion {
     Forward,
@@ -154,6 +162,14 @@ pub enum MovementCommand {
     SnapFacing {
         heading: f32,
     },
+    Stop,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PlayerDriveIntent {
+    ManualHeld(MotionState),
+    Autonomous(AutonomousDriveIntent),
+    SnapFacing { heading: f32 },
     Stop,
 }
 
@@ -278,5 +294,40 @@ mod tests {
                 state: MotionState::builder().walk().forward().build(),
             }
         );
+    }
+
+    #[test]
+    fn autonomous_drive_intent_preserves_requested_fields() {
+        let intent = AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 2.0, 3.0),
+            desired_heading: Some(1.25),
+            gait: Gait::Run,
+            force_grounded: true,
+        };
+
+        assert_eq!(intent.desired_world_delta, Vector3::new(1.0, 2.0, 3.0));
+        assert_eq!(intent.desired_heading, Some(1.25));
+        assert_eq!(intent.gait, Gait::Run);
+        assert!(intent.force_grounded);
+    }
+
+    #[test]
+    fn player_drive_intent_can_wrap_autonomous_drive() {
+        let intent = PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(0.0, 1.0, 0.0),
+            desired_heading: None,
+            gait: Gait::Walk,
+            force_grounded: false,
+        });
+
+        assert!(matches!(
+            intent,
+            PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+                desired_world_delta,
+                desired_heading: None,
+                gait: Gait::Walk,
+                force_grounded: false,
+            }) if desired_world_delta == Vector3::new(0.0, 1.0, 0.0)
+        ));
     }
 }

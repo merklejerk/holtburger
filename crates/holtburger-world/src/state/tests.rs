@@ -6,7 +6,8 @@ use std::time::Instant;
 use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
 use crate::{
-    ContactState, RuntimeBodyResetCause, SolvedActorKinematics, SpatialBodyEvent,
+    ContactState, RuntimeBodyResetCause, SolvedActorKinematics, SolvedBodyKinematics,
+    SpatialBodyEvent,
     SpatialBodyId, SpatialSampleMode,
 };
 
@@ -152,39 +153,6 @@ fn set_local_player_runtime_pose_only_emits_runtime_body_change() {
 }
 
 #[test]
-fn set_local_player_runtime_vectors_only_emits_runtime_body_change() {
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x5000_0124);
-    let start_pos = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-
-    state.player.guid = player_guid;
-    state.player.position = start_pos;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
-
-    let events = state.set_local_player_runtime_vectors(
-        Vector3::new(1.0, 2.0, 0.0),
-        Vector3::new(0.0, 0.0, 1.0),
-    );
-
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::RuntimeBodyChanged {
-            body_id: SpatialBodyId::LocalPlayer(guid)
-        } if *guid == player_guid
-    )));
-    assert!(!events.iter().any(|event| matches!(
-        event,
-        WorldEvent::EntityVectorUpdated { guid, .. } if *guid == player_guid
-    )));
-}
-
-#[test]
 fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0125);
@@ -204,13 +172,15 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
         .entities
         .insert(Entity::new(player_guid, "Player".to_string(), authoritative_pose));
 
-    let runtime_events = state.set_local_player_runtime_vectors(
-        Vector3::new(1.0, 0.0, 0.0),
-        Vector3::new(0.0, 0.0, 0.5),
-    );
+    let runtime_events = state.apply_solved_body_kinematics(&SolvedBodyKinematics {
+        body_id: SpatialBodyId::LocalPlayer(player_guid),
+        pose: runtime_pose,
+        velocity: Vector3::new(1.0, 0.0, 0.0),
+        omega: Vector3::new(0.0, 0.0, 0.5),
+        contact: ContactState::Grounded,
+        projection_state: Some(crate::SelfPlayerDriveProjectionState::LocalGroundedDirectDrive),
+    });
     assert!(!runtime_events.is_empty());
-    let pose_events = state.set_local_player_runtime_pose(runtime_pose);
-    assert!(!pose_events.is_empty());
 
     let authoritative_update = WorldPosition {
         coords: Vector3::new(2.0, 3.0, 3.0),
@@ -292,6 +262,7 @@ fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
         velocity: Vector3::new(1.0, 2.0, 3.0),
         omega: Vector3::new(0.0, 0.0, 4.0),
         contact: ContactState::Grounded,
+        projection_state: None,
     };
 
     let events = state.apply_solved_actor_kinematics(&solved);
@@ -344,6 +315,7 @@ fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_un
         velocity: Vector3::zero(),
         omega: Vector3::zero(),
         contact: ContactState::Unknown,
+        projection_state: None,
     };
 
     let events = state.apply_solved_actor_kinematics(&solved);
@@ -2076,7 +2048,6 @@ fn test_remote_position_reset_suspends_body_sampling() {
         Some(Vector3::new(10.0, 20.0, 30.0))
     );
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
-    assert_eq!(body.sampling.interpolation, None);
 }
 
 #[test]

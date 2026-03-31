@@ -1,7 +1,6 @@
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use crate::spatial::TuiSpatialHackHandle;
 use holtburger_common::Guid;
 use holtburger_core::ClientState;
 
@@ -35,7 +34,6 @@ pub struct AppState {
     pub account_password: String,
     pub character_preference: Option<String>,
     pub chat_log: Option<Mutex<File>>,
-    pub tui_spatial_hacks: TuiSpatialHackHandle,
     pub page: Page,
     pub client_state: ClientState,
     pub net_stats: NetStats,

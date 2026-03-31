@@ -183,7 +183,10 @@ Notes:
 ```rust
 pub struct LocalDriveControl {
     pub body_id: SpatialBodyId,
-    pub intent: PlayerDriveIntent,
+    pub desired_world_delta: Vector3,
+    pub desired_heading: Option<f32>,
+    pub gait: LocalDriveGait,
+    pub force_grounded: bool,
 }
 
 pub struct SpatialSolveRequest {
@@ -251,6 +254,8 @@ For the current TUI-oriented backend behavior, this realization is intentionally
 
 ### Phase 1: Add The Shared Drive Intent Seam
 
+Status: completed on March 31, 2026.
+
 #### Deliverables
 - Add shared self-player drive intent types in core.
 - Extend the core command surface so autonomous drive can reach `MovementSystem` through a real `ClientCommand` path rather than only through `MovementCommand`.
@@ -275,7 +280,16 @@ For the current TUI-oriented backend behavior, this realization is intentionally
 - All existing spatial backends still compile against the extended solve contract.
 - The workspace builds and updated type-level tests pass.
 
+#### Implementation Notes
+- `holtburger-core` now owns the player-facing `PlayerDriveIntent` and `AutonomousDriveIntent` types.
+- `ClientCommand` now has a dedicated self-player drive path in addition to legacy `DriveMovement`.
+- `MovementSystem` now stores pending autonomous drive and exposes it to simulation through a passive bridge without changing current runtime-body realization.
+- `SpatialSolveRequest` now carries a solver-facing `local_drive` field.
+- The phase intentionally does not yet make the solver consume `local_drive`; that remains Phase 3 work.
+
 ### Phase 2: Move MovementSystem To Active-Intent Arbitration
+
+Status: completed on March 31, 2026.
 
 #### Deliverables
 - Rewrite the internal control-flow of [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) from first principles around the new drive loop.
@@ -290,6 +304,7 @@ Implementation bias for this phase:
 - Prefer deleting or replacing legacy state holders and tick paths over threading new concepts through them.
 - Only carry forward helpers from the current file when they are still locally coherent in the rewritten design, for example packet encoding helpers and sequence bookkeeping.
 - Do not preserve the old structure just to minimize diff size; coherence matters more than edit count here.
+- Keep the new core-to-world conversion seam explicit. `PlayerDriveIntent` is core-owned, while the solve request currently carries a world-owned solver-facing control struct.
 
 #### Files And Symbols
 - [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs)
@@ -304,7 +319,16 @@ Implementation bias for this phase:
 - `MovementSystem` exposes the coalesced intent to simulation.
 - Existing manual movement behavior remains functional.
 
+#### Implementation Notes
+- `MovementSystem` now uses a queued-drive plus active-drive model rather than `active_public_motion` and `local_motion`.
+- Manual and autonomous drive arbitration is explicit and last-writer-wins within a movement tick.
+- Autonomous drive is now tick-scoped active input. It becomes visible only after the movement tick consumes it and expires if the frontend does not resend it on a later tick.
+- The temporary compatibility bridge is now named as such: `compatibility_motion_state` remains the pre-Phase-3 runtime-vector path, while `active_drive` is the architectural source of truth for arbitration and simulation exposure.
+- The temporary autonomous compatibility path derives a local heading plus forward motion from the autonomous request so the current runtime body and wire path stay coherent until the shared solver consumes `local_drive` directly.
+
 ### Phase 3: Teach The Shared Solver To Realize Self-Player Drive
+
+Status: completed on March 31, 2026.
 
 #### Deliverables
 - Implement shared-solver realization of `local_drive` for the self-player.
@@ -313,6 +337,7 @@ Implementation bias for this phase:
 - Remove reliance on direct runtime vector writes as the long-term realization path.
 - Preserve solved velocity, omega, and contact outputs for heartbeat and downstream logic.
 - Create any required post-solve movement bookkeeping explicitly rather than assuming `handle_post_solve` already does useful work.
+- Either keep the current core-to-world drive conversion seam as the stable architecture, or deliberately move shared drive primitives lower in the stack before asking the solver to understand broader manual-drive variants.
 
 #### Files And Symbols
 - [crates/holtburger-world/src/spatial/scene.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/scene.rs)
@@ -327,7 +352,16 @@ Implementation bias for this phase:
 - Heartbeat behavior is validated so grounded direct-drive still produces the solved kinematics needed by outbound autonomous position cadence.
 - Any new post-solve movement bookkeeping is implemented explicitly rather than being left as an implied future seam.
 
+#### Implementation Notes
+- `holtburger-world` now owns an explicit `SelfPlayerDriveProjectionState` and uses it during local-drive solve and solved-body sampling classification.
+- `BasicSpatialPhysics` now realizes `local_drive` for the self-player directly instead of forcing autonomous movement through prewritten runtime vectors.
+- Manual steady-state motion no longer relies on `world.set_local_player_runtime_vectors(...)`; simulation now derives local-player solve-time kinematics from the active manual drive intent.
+- The world-side solved kinematics now carry optional self-player projection state so runtime sampling can classify direct-drive, airborne, authority-frozen, and server-controlled results explicitly.
+- `MovementSystem::handle_post_solve` now records the last solved local kinematics explicitly as the post-solve observation seam for later phases.
+
 ### Phase 4: Migrate TUI Autonomous Pursuit To The Shared Drive Channel
+
+Status: completed on March 31, 2026.
 
 #### Deliverables
 - Update TUI navigation to translate its current pose-shaped dishonest navigation output into autonomous drive commands for core.
@@ -350,13 +384,29 @@ Implementation bias for this phase:
 - Forced-reposition and teleport-start reactions still behave correctly after the migration.
 - Approach, follow, and sticky-melee remain functional.
 
+Refinement after Phase 3:
+- Phase 4 is now narrower than it was at plan time. The shared solver already realizes local-drive, so the remaining work is primarily TUI command translation, navigation lifecycle integration, and removal of `TuiSpatialPhysics` architectural responsibility.
+
+#### Implementation Notes
+- `DishonestNavigation` no longer publishes a TUI-only target-pose directive. It now translates the current navigation state into a tick-scoped `AutonomousDriveIntent` with a bounded `desired_world_delta`, heading, gait, and grounded flag.
+- The TUI game page now emits `ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(...))` during its normal tick instead of mirroring navigation into a spatial hack handle.
+- Frontend-owned lifecycle edges now emit explicit `DriveSelf(PlayerDriveIntent::Stop)` commands when forced reposition, teleport start, or interaction cancellation shuts down active autonomous pursuit.
+- The TUI binary now boots against `BasicSpatialPhysics` directly. `TuiSpatialPhysics` is no longer part of the runtime self-player control loop.
+- The remaining `apps/holtburger-cli/src/spatial.rs` code is now dormant compatibility/test-only baggage rather than live architecture. Phase 5 should delete it and migrate only any still-useful edge-case coverage into shared solver tests.
+
 ### Phase 5: Cleanup And Hardening
+
+Status: completed on March 31, 2026.
 
 #### Deliverables
 - Remove temporary compatibility paths and dead code.
 - Tighten docs around the final control loop and ownership model.
 - Add regression coverage for arbitration, heartbeat cadence, stop edges, forced reposition, teleport-start interruption, and autonomous interruption.
 - Define the backend extension point a future collision-aware client will implement.
+- Delete `TuiSpatialPhysics` and any remaining TUI-only spatial hack plumbing.
+- Remove speculative world-side runtime projection for bodies outside the active solve neighborhood.
+- Make the active solve neighborhood explicit enough that bodies with meaningful local interaction are solver-owned rather than advanced by a second world-side motion path.
+- Delete tests that only validate the removed out-of-solve projection path or removed TUI spatial hack behavior. Migrate tests only when they encode solver behavior we still explicitly want.
 
 #### Files And Symbols
 - [docs/plans/self-player-direct-drive-plan.md](/home/cluracan/code/holtburger/docs/plans/self-player-direct-drive-plan.md)
@@ -366,9 +416,16 @@ Implementation bias for this phase:
 - There is one self-player drive loop shared by manual and autonomous movement.
 - `MovementSystem` owns intent and wire cadence, not runtime-body realization.
 - The active spatial backend owns self-player realization.
-- `TuiSpatialPhysics` is gone or reduced to zero long-term architectural responsibility.
+- `TuiSpatialPhysics` is deleted.
+- `SpatialScene` no longer owns a general speculative motion path for bodies that should have been solver-owned that frame.
 - Regression coverage proves the migrated path preserves heartbeat cadence and the TUI's forced-reposition or teleport lifecycle behavior.
 - Relevant build and test suites pass.
+
+#### Implementation Notes
+- `apps/holtburger-cli/src/spatial.rs` is deleted. The TUI no longer ships a dormant `TuiSpatialPhysics` compatibility layer.
+- `holtburger-world` no longer advances runtime bodies through a second interpolation or dead-reckoning pass between solve ticks. Authoritative updates now replace non-local runtime poses directly, while solve-owned runtime bodies keep their last solved state until the next real update.
+- The old local-player runtime-vector compatibility setter is gone. Tests that still mattered were re-homed onto solve-owned runtime-body application instead of preserving the deleted bridge.
+- The client no longer emits periodic runtime-body snapshots just to publish fake projected motion. Runtime body views now update through real world and solve events plus the normal bootstrap snapshot.
 
 ## Risks And Mitigations
 
@@ -416,11 +473,11 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Add the shared drive intent seam.
-- [ ] Phase 2: Move `MovementSystem` to active-intent arbitration.
-- [ ] Phase 3: Teach the shared solver to realize self-player drive.
-- [ ] Phase 4: Migrate TUI autonomous pursuit to the shared drive channel.
-- [ ] Phase 5: Remove temporary compatibility paths and harden tests and docs.
+- [x] Phase 1: Add the shared drive intent seam.
+- [x] Phase 2: Move `MovementSystem` to active-intent arbitration.
+- [x] Phase 3: Teach the shared solver to realize self-player drive.
+- [x] Phase 4: Migrate TUI autonomous pursuit to the shared drive channel.
+- [x] Phase 5: Remove temporary compatibility paths and harden tests and docs.
 
 ### Decisions Log
 - Decision: the plan follows a one-way control loop where movement owns intent and wire cadence, while the active spatial backend owns runtime-body realization.
@@ -429,9 +486,43 @@ Mitigation:
 - Decision: autonomous drive uses `Gait`, not arbitrary speed fields.
 - Decision: arrival heuristics remain frontend navigation policy.
 - Decision: the shared solver path eventually owns the TUI's geometry-blind direct-drive behavior.
+- Decision: the player-facing drive model stays in `holtburger-core`, but the solve request carries a world-owned solver-facing control struct because `holtburger-world` must not depend on `holtburger-core`.
+- Decision: autonomous drive is tick-scoped active input. Navigation must resend it on later ticks rather than expecting movement to replay stale drive forever.
+- Decision: the temporary pre-Phase-3 runtime-vector path is explicitly modeled as a compatibility bridge and should not be mistaken for the long-term movement architecture.
+- Decision: Phase 3 keeps the core-to-world conversion seam explicit rather than moving shared drive primitives lower. The solver consumes the existing world-owned `LocalDriveControl` shape.
+- Decision: manual steady-state runtime advancement is now solve-owned. Movement still owns wire cadence and intent arbitration, but not local runtime-vector mutation.
+- Decision: the CLI emits autonomous pursuit through normal tick-time `DriveSelf` commands and uses explicit stop edges for navigation shutdown, rather than keeping a side-channel handle synchronized with the solver.
+- Decision: `TuiSpatialPhysics` is no longer part of the live TUI runtime path. Any remaining value in that module is cleanup or test migration work for Phase 5, not active architecture.
+- Decision: shared world code should not preserve a second speculative motion system for bodies outside the active solve neighborhood. If a body matters for motion plausibility or constraints, it belongs in the solver; if it is too far away, dropping it is preferable to fake shared projection.
+- Decision: Phase 5 deletes `TuiSpatialPhysics` outright rather than preserving it as dormant compatibility code.
+- Decision: shared world code should not feed other systems derived poses layered on top of solver-owned poses. Server-controlled motion is solver input, not a reason to keep a second interpolation or reconciliation path in world.
+- Decision: tests for deleted projection systems should be deleted by default. They survive only if they are intentionally re-homed as solver tests for behavior we still want.
+- Decision: runtime body snapshots are now event-driven after bootstrap. The client no longer emits periodic projection snapshots for bodies that were not actually updated by solve or authority.
 
 ### Verification Log
-- Pending implementation.
+- March 31, 2026: `cargo test -p holtburger-core simulation_build_request_carries_pending_autonomous_drive -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-core enqueue_drive_intent_stores_pending_autonomous_drive -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-core builder_injects_custom_spatial_physics -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-world --lib spatial`
+- March 31, 2026: `cargo test -p holtburger-cli --lib spatial`
+- March 31, 2026: `cargo test -p holtburger-core movement:: --lib`
+- March 31, 2026: `cargo test -p holtburger-core simulation_build_request_reads_player_state_after_movement_tick -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-core simulation_build_request_carries_active_autonomous_drive -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-cli --lib`
+- March 31, 2026: `cargo test -p holtburger-world --lib spatial`
+- March 31, 2026: `cargo test -p holtburger-core movement:: --lib`
+- March 31, 2026: `cargo test -p holtburger-core simulation_build_request_reads_player_state_after_movement_tick -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-core simulation_build_request_carries_active_autonomous_drive -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-core simulation_tick_advances_local_player_runtime_body_without_mutating_authoritative_pose -- --nocapture`
+- March 31, 2026: `cargo test -p holtburger-cli --lib`
+- March 31, 2026: `cargo test -p holtburger-cli --lib`
+- March 31, 2026: `cargo test -p holtburger-core movement:: --lib`
+- March 31, 2026: `cargo check -p holtburger-cli --bin tui`
+- March 31, 2026: `cargo test -p holtburger-world --lib spatial`
+- March 31, 2026: `cargo test -p holtburger-world --lib state`
+- March 31, 2026: `cargo test -p holtburger-core --lib`
+- March 31, 2026: `cargo test -p holtburger-cli --lib`
+- March 31, 2026: `cargo check -p holtburger-cli --bin tui`
 
 ### Open Questions
-- None at plan level right now. Resolve naming and API details during implementation as long as they preserve the control loop and ownership rules above.
+- No open questions remain for the deleted out-of-solve projection path or `TuiSpatialPhysics`. Delete both the code and any tests that only existed to validate them.

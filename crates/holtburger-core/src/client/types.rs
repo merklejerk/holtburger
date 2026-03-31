@@ -1,4 +1,4 @@
-use crate::client::movement_types::MovementCommand;
+use crate::client::movement_types::{MovementCommand, PlayerDriveIntent};
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -519,6 +519,7 @@ pub enum ClientCommand {
         amount: u32,
     },
     DriveMovement(MovementCommand),
+    DriveSelf(PlayerDriveIntent),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,

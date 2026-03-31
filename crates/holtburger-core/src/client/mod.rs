@@ -212,15 +212,6 @@ impl Client {
         self.emit_runtime_body_snapshot();
     }
 
-    fn tick_runtime_body_sampling(&mut self, now: Instant) {
-        if !matches!(self.state, ClientState::InWorld) {
-            return;
-        }
-
-        self.world.tick_runtime_bodies(now);
-        self.emit_runtime_body_snapshot();
-    }
-
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
         self.wire_event_tx.subscribe()
     }
@@ -850,8 +841,6 @@ impl Client {
                         self.handle_runtime_world_event(&event);
                     }
 
-                    self.tick_runtime_body_sampling(now);
-
                 }
             }
         }
@@ -864,14 +853,8 @@ impl Client {
 mod tests {
     use super::*;
     use holtburger_common::{Guid, Quaternion, Vector3};
-    use holtburger_protocol::messages::movement::{
-        InterpretedMotionCommand, InterpretedMotionState, MotionStance, MovementEventData,
-        MovementInvalid, MovementStateFlags, MovementTypeData,
-    };
-    use holtburger_protocol::messages::{GameMessage, MovementType};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
-    use holtburger_common::position::WorldPosition;
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
@@ -938,66 +921,6 @@ mod tests {
 
         assert!(!sent);
         assert_eq!(client.session.game_action_sequence, 0);
-    }
-
-    #[test]
-    fn runtime_body_sampling_tick_projects_remote_motion_and_emits_snapshot() {
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let mut events = client.subscribe_client_view_events();
-        let guid = Guid(0x5000_00B0);
-        let pose = WorldPosition {
-            landblock_id: Guid(0x016C_01DD),
-            coords: Vector3::new(10.0, 20.0, 0.0),
-            rotation: Quaternion::from_heading(0.0),
-        };
-        let entity = Entity::new(guid, "Remote".to_string(), pose);
-        client.world.entities.insert(entity);
-
-        let message = GameMessage::UpdateMotion(Box::new(MovementEventData {
-            guid,
-            object_instance_sequence: 1,
-            movement_sequence: 1,
-            server_control_sequence: 1,
-            is_autonomous: true,
-            movement_type: MovementType::Invalid,
-            motion_flags: 0,
-            current_style: MotionStance::NonCombat.interpreted(),
-            data: MovementTypeData::Invalid(MovementInvalid {
-                state: InterpretedMotionState {
-                    flags: MovementStateFlags::FORWARD_COMMAND | MovementStateFlags::FORWARD_SPEED,
-                    num_commands: 0,
-                    forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
-                    forward_speed: Some(4.5),
-                    ..Default::default()
-                },
-                sticky_object: None,
-            }),
-        }));
-
-        let world_events = client.world.handle_message(&message);
-        for event in &world_events {
-            client.handle_world_event(event);
-        }
-        while events.try_recv().is_ok() {}
-
-        client.tick_runtime_body_sampling(Instant::now() + Duration::from_millis(250));
-
-        let snapshot = loop {
-            match events.try_recv() {
-                Ok(ClientViewEvent::RuntimeBodySnapshot { bodies }) => break bodies,
-                Ok(_) => continue,
-                Err(error) => panic!("expected runtime body snapshot after sampling tick: {error}"),
-            }
-        };
-
-        let body = snapshot
-            .iter()
-            .find(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(guid))
-            .copied()
-            .expect("expected projected remote runtime body");
-        assert_eq!(body.sample_mode, holtburger_world::SpatialSampleMode::SimulatingMotionState);
-        assert!(body.runtime_pose.coords.x < pose.coords.x);
-        assert!((body.runtime_pose.coords.y - pose.coords.y).abs() < 1e-4);
     }
 
     #[test]
@@ -1133,6 +1056,60 @@ mod tests {
         assert_eq!(actor.pose, client.world.player.position);
         assert_eq!(actor.velocity, Vector3::zero());
         assert_eq!(actor.omega, Vector3::zero());
+        assert_eq!(request.local_drive, None);
+    }
+
+    #[tokio::test]
+    async fn simulation_build_request_carries_active_autonomous_drive() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let now = Instant::now();
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.player.position.rotation = Quaternion::identity();
+        client.world.entities.insert(Entity::new(
+            guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::Autonomous(
+                movement_types::AutonomousDriveIntent {
+                    desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
+                    desired_heading: Some(1.5),
+                    gait: movement_types::Gait::Run,
+                    force_grounded: true,
+                },
+            ),
+            now,
+        );
+
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .expect("movement tick should activate autonomous drive for the current frame");
+
+        let request = client
+            .simulation
+            .build_solve_request(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &client.world,
+                &client.movement,
+            )
+            .expect("idle local player with active autonomous drive should produce a solve request");
+
+        let local_drive = request
+            .local_drive
+            .expect("active autonomous drive should be threaded into the solve request");
+        assert_eq!(local_drive.body_id, holtburger_world::SpatialBodyId::LocalPlayer(guid));
+        assert_eq!(local_drive.desired_world_delta, Vector3::new(3.0, 4.0, 0.0));
+        assert_eq!(local_drive.desired_heading, Some(1.5));
+        assert_eq!(local_drive.gait, holtburger_world::spatial::LocalDriveGait::Run);
+        assert!(local_drive.force_grounded);
     }
 
     #[tokio::test]
@@ -1178,13 +1155,9 @@ mod tests {
                 .local_player_runtime_pose()
                 .expect("local player runtime pose should be readable")
         );
-            let local_body = client
-                .world
-                .scene
-                .body(holtburger_world::SpatialBodyId::LocalPlayer(guid))
-                .expect("local player runtime body should exist after movement tick");
-            assert_eq!(actor.velocity, local_body.velocity);
-            assert_eq!(actor.omega, local_body.omega);
+        assert!(actor.velocity.x.abs() < 1e-5);
+        assert!((actor.velocity.y - 4.5).abs() < 1e-5);
+        assert_eq!(actor.omega, Vector3::zero());
     }
 
     #[tokio::test]

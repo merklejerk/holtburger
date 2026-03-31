@@ -193,10 +193,6 @@ impl WorldState {
         events
     }
 
-    pub fn tick_runtime_bodies(&mut self, now: Instant) {
-        self.scene.tick_runtime_bodies(now);
-    }
-
     pub(crate) fn update_runtime_body_motion_snapshot_for_guid(
         &mut self,
         guid: Guid,
@@ -209,14 +205,6 @@ impl WorldState {
 
         self.scene.update_runtime_body_motion_state(body_id, motion_state);
         Some(body_id)
-    }
-
-    fn runtime_sample_mode_for_kinematics(velocity: Vector3, omega: Vector3) -> SpatialSampleMode {
-        if velocity.length_squared() > 1e-6 || omega.length_squared() > 1e-6 {
-            SpatialSampleMode::SimulatingVelocity
-        } else {
-            SpatialSampleMode::SimulatingMotionState
-        }
     }
 
     fn emit_runtime_body_changed(events: &mut Vec<WorldEvent>, body_id: SpatialBodyId) {
@@ -247,31 +235,6 @@ impl WorldState {
             .scene
             .apply_runtime_body_pose(body_id, pose, SpatialSampleMode::SimulatingMotionState)
         {
-            return Vec::new();
-        }
-
-        vec![WorldEvent::RuntimeBodyChanged { body_id }]
-    }
-
-    pub fn set_local_player_runtime_vectors(
-        &mut self,
-        velocity: Vector3,
-        omega: Vector3,
-    ) -> Vec<WorldEvent> {
-        let Some(body_id) = self.runtime_body_id_for_guid(self.player.guid) else {
-            return Vec::new();
-        };
-
-        if !self.ensure_runtime_body(body_id) {
-            return Vec::new();
-        }
-
-        if !self.scene.apply_runtime_body_vectors(
-            body_id,
-            velocity,
-            omega,
-            Self::runtime_sample_mode_for_kinematics(velocity, omega),
-        ) {
             return Vec::new();
         }
 

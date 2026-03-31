@@ -8,12 +8,12 @@ use crossterm::{
 use directories::ProjectDirs;
 use holtburger_cli::pages;
 use holtburger_cli::pages::selection::SelectionState;
-use holtburger_cli::spatial::{TuiSpatialHackHandle, TuiSpatialPhysics};
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
 use holtburger_core::{ClientBuilder, ClientCommand, ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;
+use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
@@ -31,7 +31,6 @@ struct BootstrappedClient {
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     initial_events: Vec<ClientViewEvent>,
-    tui_spatial_hacks: TuiSpatialHackHandle,
 }
 
 enum BootstrapOutcome {
@@ -310,7 +309,6 @@ fn finalize_bootstrap_outcome(
     server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
-    tui_spatial_hacks: TuiSpatialHackHandle,
 ) -> BootstrapOutcome {
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
@@ -319,7 +317,6 @@ fn finalize_bootstrap_outcome(
                 server_event_rx,
                 client_task_handle,
                 initial_events,
-                tui_spatial_hacks,
             })
         }
         BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
@@ -333,12 +330,10 @@ async fn bootstrap_once(
     port: u16,
     dats_path: &std::path::Path,
 ) -> Result<BootstrapOutcome> {
-    let spatial_physics = TuiSpatialPhysics::default();
-    let tui_spatial_hacks = spatial_physics.hack_handle();
     let mut client = ClientBuilder::new(args.account.clone())
         .server(host.to_string(), port)
         .dats_path(dats_path.to_path_buf())
-        .spatial_physics(Arc::new(spatial_physics))
+        .spatial_physics(Arc::new(BasicSpatialPhysics))
         .connect()
         .await?;
 
@@ -370,7 +365,6 @@ async fn bootstrap_once(
                             server_cmd_tx,
                             server_event_rx,
                             client_task_handle,
-                            tui_spatial_hacks,
                         ));
                     }
                 }
@@ -393,7 +387,6 @@ async fn bootstrap_once(
                                 server_cmd_tx,
                                 server_event_rx,
                                 client_task_handle,
-                                tui_spatial_hacks,
                             ));
                         }
                     }
@@ -540,7 +533,6 @@ async fn run() -> Result<()> {
         mut server_event_rx,
         client_task_handle,
         initial_events,
-        tui_spatial_hacks,
     } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
@@ -560,7 +552,6 @@ async fn run() -> Result<()> {
         account_password: args.password.clone(),
         character_preference: args.character.clone(),
         chat_log,
-        tui_spatial_hacks,
         page: Page::Selection(SelectionState::default()),
         client_state: ClientState::Connected,
         verbosity: args.verbose,

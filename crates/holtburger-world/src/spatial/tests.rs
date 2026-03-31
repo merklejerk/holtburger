@@ -1,10 +1,8 @@
 use super::*;
-use crate::entity::{EntityMotionDirective, EntityMotionSnapshot};
+use crate::entity::EntityMotionSnapshot;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
-use holtburger_protocol::messages::movement::MotionStance;
-use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 
 fn make_position(x: f32, y: f32, heading_rad: f32) -> WorldPosition {
@@ -135,6 +133,99 @@ fn advance_actor_kinematics_rotates_velocity_with_turn_rate() {
     assert!((solved.pose.coords.x - 18.0).abs() < 1e-4);
     assert!(solved.pose.coords.y.abs() < 1e-4);
     assert_eq!(solved.contact, ContactState::Unknown);
+}
+
+#[test]
+fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
+    let mut scene = SpatialScene::new();
+    let now = Instant::now();
+    let guid = Guid(0x5000_0001);
+    let body_id = SpatialBodyId::LocalPlayer(guid);
+    let pose = make_position(10.0, 20.0, 0.0);
+
+    scene.upsert_runtime_body_snapshot(
+        body_id,
+        pose,
+        Vector3::zero(),
+        Vector3::zero(),
+        None,
+        now,
+    );
+
+    let request = SpatialSolveRequest {
+        dt: Duration::from_millis(100),
+        actors: smallvec::smallvec![SolveActorInput {
+            actor_id: guid,
+            pose,
+            velocity: Vector3::zero(),
+            omega: Vector3::zero(),
+        }],
+        local_drive: Some(LocalDriveControl {
+            body_id,
+            desired_world_delta: Vector3::new(0.0, 4.5, 1.0),
+            desired_heading: Some(90.0_f32.to_radians()),
+            gait: LocalDriveGait::Run,
+            force_grounded: true,
+        }),
+    };
+
+    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
+    assert_eq!(solved.solved.len(), 1);
+    let actor = solved.solved[0];
+    assert_eq!(actor.actor_id, guid);
+    assert!((actor.pose.coords.y - 24.5).abs() < 1e-4);
+    assert!((actor.pose.coords.z - 1.0).abs() < 1e-4);
+    assert_eq!(actor.contact, ContactState::Grounded);
+    assert_eq!(
+        actor.projection_state,
+        Some(SelfPlayerDriveProjectionState::LocalGroundedDirectDrive)
+    );
+}
+
+#[test]
+fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
+    let mut scene = SpatialScene::new();
+    let now = Instant::now();
+    let guid = Guid(0x5000_0002);
+    let body_id = SpatialBodyId::LocalPlayer(guid);
+    let pose = make_position(10.0, 20.0, 0.0);
+
+    scene.upsert_runtime_body_snapshot(
+        body_id,
+        pose,
+        Vector3::zero(),
+        Vector3::zero(),
+        None,
+        now,
+    );
+    scene.apply_forced_reposition_reset(body_id, pose, now);
+
+    let request = SpatialSolveRequest {
+        dt: Duration::from_millis(100),
+        actors: smallvec::smallvec![SolveActorInput {
+            actor_id: guid,
+            pose,
+            velocity: Vector3::zero(),
+            omega: Vector3::zero(),
+        }],
+        local_drive: Some(LocalDriveControl {
+            body_id,
+            desired_world_delta: Vector3::new(0.0, 4.5, 0.0),
+            desired_heading: Some(90.0_f32.to_radians()),
+            gait: LocalDriveGait::Run,
+            force_grounded: true,
+        }),
+    };
+
+    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
+    assert_eq!(solved.solved.len(), 1);
+    let actor = solved.solved[0];
+    assert_eq!(actor.pose, pose);
+    assert!(actor.velocity.length_squared() <= 1e-6);
+    assert_eq!(
+        actor.projection_state,
+        Some(SelfPlayerDriveProjectionState::AuthorityFrozen)
+    );
 }
 
 #[test]
@@ -274,463 +365,6 @@ fn reconcile_authoritative_body_resets_sampling_on_forced_reposition() {
     assert_eq!(body.motion_state, None);
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
     assert_eq!(body.sampling.last_derived_at, start + Duration::from_secs(1));
-    assert_eq!(body.sampling.interpolation, None);
-}
-
-#[test]
-fn spatial_scene_interpolates_authoritative_corrections() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0001);
-    let start_pose = WorldPosition {
-        landblock_id: Guid(0x0102_0000),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
-    let target_pose = WorldPosition {
-        landblock_id: Guid(0x0102_0000),
-        coords: Vector3::new(2.0, 0.0, 0.0),
-        rotation: Quaternion::from_heading(0.5),
-    };
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        start_pose,
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
-    scene.update_authoritative_body_pose(SpatialBodyId::Entity(guid), target_pose, false, now);
-    scene.tick_runtime_bodies(now + Duration::from_millis(75));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::InterpolatingPosition);
-    assert!((projected.projected_pose.coords.x - 1.0).abs() < 1e-4);
-    assert!((projected.projected_pose.rotation.to_heading() - 0.25).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_dead_reckons_and_turns_from_motion_state() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0002);
-    let pose = WorldPosition {
-        landblock_id: Guid(0x0102_0000),
-        coords: Vector3::new(10.0, 20.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        pose,
-        Vector3::new(2.0, 0.0, 0.0),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            turn_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(1.0)
-                    .expect("speed should encode"),
-            ),
-            ..Default::default()
-        }),
-        now,
-    );
-    scene.tick_runtime_bodies(now + Duration::from_millis(250));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
-    assert!((projected.projected_pose.coords.x - 10.5).abs() < 1e-4);
-    assert!((projected.projected_pose.rotation.to_heading() - 0.25).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_projects_forward_motion_state_without_velocity() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0002);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(10.0, 20.0, PI),
-        Vector3::zero(),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
-            forward_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(4.5)
-                    .expect("speed should encode"),
-            ),
-            ..Default::default()
-        }),
-        now,
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_secs(1));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
-    assert!((projected.projected_pose.coords.x - 14.5).abs() < 1e-4);
-    assert!((projected.projected_pose.coords.y - 20.0).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_preserves_projected_translation_across_turn_only_update() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0102);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(10.0, 20.0, PI),
-        Vector3::zero(),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
-            forward_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(4.5)
-                    .expect("speed should encode"),
-            ),
-            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            turn_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(1.0)
-                    .expect("speed should encode"),
-            ),
-            ..Default::default()
-        }),
-        now,
-    );
-
-    let projected_at_run = now + Duration::from_millis(800);
-    scene.tick_runtime_bodies(projected_at_run);
-    let projected_before_turn_only = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert!(projected_before_turn_only.projected_pose.coords.x > 13.0);
-
-    scene.update_runtime_body_motion_state(
-        SpatialBodyId::Entity(guid),
-        Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            turn_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(1.0)
-                    .expect("speed should encode"),
-            ),
-            ..Default::default()
-        }),
-    );
-
-    scene.tick_runtime_bodies(projected_at_run + Duration::from_millis(30));
-
-    let projected_after_turn_only = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(
-        projected_after_turn_only.projection_mode,
-        SpatialSampleMode::SimulatingMotionState
-    );
-    assert!(
-        projected_after_turn_only.projected_pose.coords.x > 13.0,
-        "turn-only updates should not snap projected translation back to authority"
-    );
-    assert!(
-        projected_after_turn_only.projected_pose.coords.x
-            >= projected_before_turn_only.projected_pose.coords.x - 0.2
-    );
-    assert!(
-        projected_after_turn_only.projected_pose.rotation.to_heading()
-            > projected_before_turn_only.projected_pose.rotation.to_heading()
-    );
-}
-
-#[test]
-fn spatial_scene_velocity_updates_drive_dead_reckoning_between_authoritative_moves() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0003);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(10.0, 20.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
-    scene.set_body_kinematics(
-        SpatialBodyId::Entity(guid),
-        Vector3::new(2.0, 0.0, 0.0),
-        Vector3::zero(),
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_millis(250));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingVelocity);
-    assert!((projected.projected_pose.coords.x - 10.5).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_velocity_dead_reckoning_crosses_landblock_boundaries_in_global_space() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0004);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        WorldPosition {
-            landblock_id: Guid(0x0102_0000),
-            coords: Vector3::new(191.8, 20.0, 0.0),
-            rotation: Quaternion::identity(),
-        },
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
-    scene.set_body_kinematics(
-        SpatialBodyId::Entity(guid),
-        Vector3::new(2.0, 0.0, 0.0),
-        Vector3::zero(),
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_millis(250));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingVelocity);
-    assert_eq!(projected.projected_pose.landblock_id, Guid(0x0202_0000));
-    assert!((projected.projected_pose.coords.x - 0.3).abs() < 1e-4);
-    assert!((projected.projected_pose.coords.y - 20.0).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_continuous_turn_commands_advance_heading_over_time() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0005);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(0.0, 0.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            turn_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(1.0)
-                    .expect("speed should encode"),
-            ),
-            ..Default::default()
-        }),
-        now,
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_secs(1));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
-    assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_negative_turn_speed_rotates_left_from_canonical_turn_command() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0007);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(0.0, 0.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
-            turn_speed: Some(
-                crate::entity::OrderedMotionSpeed::from_f32(-1.0)
-                    .expect("speed should encode"),
-            ),
-            ..Default::default()
-        }),
-        now,
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_secs(1));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
-    assert!(
-        (projected.projected_pose.rotation.to_heading() - (TAU - 1.0).rem_euclid(TAU)).abs()
-            < 1e-4
-    );
-}
-
-#[test]
-fn spatial_scene_turn_to_heading_rotates_toward_target_without_snapping() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0006);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(0.0, 0.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            directive: Some(EntityMotionDirective::TurnToHeading {
-                desired_heading: crate::entity::OrderedMotionSpeed::from_f32(2.0)
-                    .expect("heading should encode"),
-                speed: crate::entity::OrderedMotionSpeed::from_f32(1.0)
-                    .expect("speed should encode"),
-            }),
-            ..Default::default()
-        }),
-        now,
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_secs(1));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
-    assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_completed_turn_keeps_authoritative_directive_visible() {
-    let mut scene = SpatialScene::new();
-    let now = Instant::now();
-    let guid = Guid(0x7100_0007);
-    let directive = EntityMotionDirective::TurnToHeading {
-        desired_heading: crate::entity::OrderedMotionSpeed::from_f32(1.0)
-            .expect("heading should encode"),
-        speed: crate::entity::OrderedMotionSpeed::from_f32(1.0)
-            .expect("speed should encode"),
-    };
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(0.0, 0.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        Some(EntityMotionSnapshot {
-            directive: Some(directive),
-            ..Default::default()
-        }),
-        now,
-    );
-
-    scene.tick_runtime_bodies(now + Duration::from_secs(1));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(
-        projected.motion_state.and_then(|snapshot| snapshot.directive),
-        Some(directive)
-    );
-    assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
-
-    scene.tick_runtime_bodies(now + Duration::from_secs(2));
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(
-        projected.motion_state.and_then(|snapshot| snapshot.directive),
-        Some(directive)
-    );
-    assert_eq!(projected.projection_mode, SpatialSampleMode::SimulatingMotionState);
-    assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
-}
-
-#[test]
-fn spatial_scene_large_authoritative_corrections_snap_instead_of_interpolating() {
-    let mut scene = SpatialScene::new();
-    scene.set_runtime_sampling_config(SpatialSamplingConfig {
-        snap_distance_m: 1,
-        ..SpatialSamplingConfig::default()
-    });
-    let now = Instant::now();
-    let guid = Guid(0x7100_0008);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(0.0, 0.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
-    scene.update_authoritative_body_pose(
-        SpatialBodyId::Entity(guid),
-        make_position(10.0, 0.0, 0.0),
-        false,
-        now,
-    );
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::AuthoritativeOnly);
-    assert_eq!(projected.projected_pose.coords.x, 10.0);
-}
-
-#[test]
-fn spatial_scene_authoritative_move_interpolates_from_current_simulated_pose() {
-    let mut scene = SpatialScene::new();
-    scene.set_runtime_sampling_config(SpatialSamplingConfig {
-        max_position_interp: Duration::from_millis(200),
-        ..SpatialSamplingConfig::default()
-    });
-    let start = Instant::now();
-    let guid = Guid(0x7100_000A);
-
-    scene.upsert_runtime_body_snapshot(
-        SpatialBodyId::Entity(guid),
-        make_position(0.0, 0.0, 0.0),
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        start,
-    );
-    scene.set_body_kinematics(
-        SpatialBodyId::Entity(guid),
-        Vector3::new(2.0, 0.0, 0.0),
-        Vector3::zero(),
-    );
-    scene.update_authoritative_body_pose(
-        SpatialBodyId::Entity(guid),
-        make_position(1.0, 0.0, 0.0),
-        false,
-        start + Duration::from_millis(100),
-    );
-
-    let projected = scene
-        .projected_entity_state(guid)
-        .expect("entity should have projected state");
-    assert_eq!(projected.projection_mode, SpatialSampleMode::InterpolatingPosition);
-    assert!((projected.projected_pose.coords.x - 0.2).abs() < 1e-4);
 }
 
 #[test]

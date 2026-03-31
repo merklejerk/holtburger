@@ -1,5 +1,5 @@
 use crate::client::movement_types::{
-    AutonomousDriveIntent, Gait, Locomotion, MotionState, MotionStyle, MovementCommand,
+    AutonomousDriveIntent, Gait, Locomotion, MotionState, MotionStyle,
     MovementPacketMetadata, PlayerDriveIntent, Turn, planar_velocity_for_heading,
 };
 use anyhow::Result;
@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 // value is the *maximum* run speed for a fully capped player, not the speed
 // every character should emit or simulate.
 pub(crate) const SERVER_RUN_SPEED: f32 = 4.5;
+pub(super) const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
 const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
@@ -307,6 +308,7 @@ pub(super) struct MovementSystem {
     active_drive: Option<ActiveDriveState>,
     server_motion_active: bool,
     last_server_motion_intent: Option<ServerMotionIntent>,
+    next_autonomous_position_heartbeat_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -417,38 +419,38 @@ impl MovementSystem {
             active_drive: None,
             server_motion_active: false,
             last_server_motion_intent: None,
+            next_autonomous_position_heartbeat_at: None,
         }
     }
 
-    pub(super) fn enqueue_command(&mut self, command: MovementCommand, _now: Instant) {
-        let command = match command {
-            MovementCommand::SetMotion { state } => QueuedDriveCommand::ManualSet(state),
-            MovementCommand::PulseMotion { state, duration } => {
-                QueuedDriveCommand::ManualPulse { state, duration }
-            }
-            MovementCommand::SnapFacing { heading } => QueuedDriveCommand::SnapFacing { heading },
-            MovementCommand::Stop => QueuedDriveCommand::Stop,
-        };
+    fn clear_autonomous_position_heartbeat_schedule(&mut self) {
+        self.next_autonomous_position_heartbeat_at = None;
+    }
 
-        self.queued_drive_commands.push(command);
+    fn refresh_autonomous_position_heartbeat_schedule(
+        &mut self,
+        now: Instant,
+        world: &WorldState,
+        metadata: MovementPacketMetadata,
+    ) {
+        self.next_autonomous_position_heartbeat_at =
+            build_autonomous_position_heartbeat(world, metadata)
+                .map(|_| now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
     }
 
     pub(super) fn enqueue_drive_intent(&mut self, intent: PlayerDriveIntent, now: Instant) {
-        match intent {
-            PlayerDriveIntent::ManualHeld(state) => {
-                self.enqueue_command(MovementCommand::SetMotion { state }, now);
+        let _ = now;
+        let command = match intent {
+            PlayerDriveIntent::ManualHeld(state) => QueuedDriveCommand::ManualSet(state),
+            PlayerDriveIntent::ManualPulse { state, duration } => {
+                QueuedDriveCommand::ManualPulse { state, duration }
             }
-            PlayerDriveIntent::Autonomous(intent) => {
-                self.queued_drive_commands
-                    .push(QueuedDriveCommand::Autonomous(intent));
-            }
-            PlayerDriveIntent::SnapFacing { heading } => {
-                self.enqueue_command(MovementCommand::SnapFacing { heading }, now);
-            }
-            PlayerDriveIntent::Stop => {
-                self.enqueue_command(MovementCommand::Stop, now);
-            }
-        }
+            PlayerDriveIntent::Autonomous(intent) => QueuedDriveCommand::Autonomous(intent),
+            PlayerDriveIntent::SnapFacing { heading } => QueuedDriveCommand::SnapFacing { heading },
+            PlayerDriveIntent::Stop => QueuedDriveCommand::Stop,
+        };
+
+        self.queued_drive_commands.push(command);
     }
 
     fn ingest_drive_command(&mut self, command: QueuedDriveCommand, now: Instant) {
@@ -582,6 +584,7 @@ impl MovementSystem {
         if let Some(heading) = self.pending_snap_facing.take() {
             events.extend(
                 self.execute_snap_facing(
+                    now,
                     heading,
                     world,
                     session,
@@ -603,6 +606,7 @@ impl MovementSystem {
             None if had_active_manual_motion || self.server_motion_active => {
                 events.extend(
                     self.execute_stop_at(
+                        now,
                         world,
                         session,
                         MovementPacketMetadata::default(),
@@ -719,6 +723,7 @@ impl MovementSystem {
 
     async fn execute_stop_at(
         &mut self,
+        now: Instant,
         world: &mut WorldState,
         session: &mut Session,
         metadata: MovementPacketMetadata,
@@ -734,9 +739,14 @@ impl MovementSystem {
             );
             Self::send_stop_pulse(world, session, metadata).await?;
             if had_active_local_motion {
-                Self::send_autonomous_position_sync(world, session, metadata).await?;
+                self.send_autonomous_position_sync(now, world, session, metadata)
+                    .await?;
             }
             self.note_server_motion_cleared();
+        }
+
+        if !had_active_local_motion {
+            self.clear_autonomous_position_heartbeat_schedule();
         }
 
         Ok(state_events)
@@ -763,6 +773,7 @@ impl MovementSystem {
 
     async fn execute_snap_facing(
         &mut self,
+        now: Instant,
         desired_heading: f32,
         world: &mut WorldState,
         session: &mut Session,
@@ -788,7 +799,8 @@ impl MovementSystem {
         next_pos.rotation = Quaternion::from_heading(normalized_heading);
         let world_events = world.set_local_player_runtime_pose(next_pos);
 
-        Self::send_autonomous_position_sync(world, session, metadata).await?;
+        self.send_autonomous_position_sync(now, world, session, metadata)
+            .await?;
 
         Ok(world_events)
     }
@@ -817,6 +829,7 @@ impl MovementSystem {
 
         if self.should_send_stop_pulse() {
             self.execute_stop_at(
+                now,
                 world,
                 session,
                 MovementPacketMetadata::default(),
@@ -828,35 +841,54 @@ impl MovementSystem {
         Ok(world_events)
     }
 
-    pub(super) async fn send_autonomous_position_heartbeat(
+    pub(super) async fn maybe_send_autonomous_position_heartbeat(
         &mut self,
+        now: Instant,
         world: &WorldState,
         session: &mut Session,
         metadata: MovementPacketMetadata,
     ) -> Result<bool> {
         let Some(pulse) = build_autonomous_position_heartbeat(world, metadata) else {
+            self.clear_autonomous_position_heartbeat_schedule();
             return Ok(false);
         };
+
+        let Some(next_heartbeat_at) = self.next_autonomous_position_heartbeat_at else {
+            self.next_autonomous_position_heartbeat_at =
+                Some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
+            return Ok(false);
+        };
+
+        if now < next_heartbeat_at {
+            return Ok(false);
+        }
 
         session
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
             .await?;
+
+        self.refresh_autonomous_position_heartbeat_schedule(now, world, metadata);
 
         Ok(true)
     }
 
     pub(super) async fn send_autonomous_position_sync(
+        &mut self,
+        now: Instant,
         world: &WorldState,
         session: &mut Session,
         metadata: MovementPacketMetadata,
     ) -> Result<bool> {
         let Some(pulse) = build_autonomous_position_sync(world, metadata) else {
+            self.clear_autonomous_position_heartbeat_schedule();
             return Ok(false);
         };
 
         session
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
             .await?;
+
+        self.refresh_autonomous_position_heartbeat_schedule(now, world, metadata);
 
         Ok(true)
     }
@@ -1619,6 +1651,7 @@ mod tests {
 
         movement
             .execute_stop_at(
+                Instant::now(),
                 &mut world,
                 &mut session,
                 MovementPacketMetadata::default(),
@@ -1655,6 +1688,7 @@ mod tests {
 
         movement
             .execute_stop_at(
+                Instant::now(),
                 &mut world,
                 &mut session,
                 MovementPacketMetadata::default(),
@@ -1732,10 +1766,8 @@ mod tests {
         let mut session = Session::new_test();
         let start = Instant::now();
 
-        movement.enqueue_command(
-            MovementCommand::SetMotion {
-                state: MotionState::builder().run().forward().build(),
-            },
+        movement.enqueue_drive_intent(
+            PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
             start,
         );
 
@@ -1784,8 +1816,8 @@ mod tests {
         let mut session = Session::new_test();
         let start = Instant::now();
 
-        movement.enqueue_command(
-            MovementCommand::PulseMotion {
+        movement.enqueue_drive_intent(
+            PlayerDriveIntent::ManualPulse {
                 state: MotionState::builder().run().forward().build(),
                 duration: Duration::from_millis(50),
             },
@@ -1832,10 +1864,8 @@ mod tests {
         let mut session = Session::new_test();
         let start = Instant::now();
 
-        movement.enqueue_command(
-            MovementCommand::SetMotion {
-                state: MotionState::builder().run().forward().build(),
-            },
+        movement.enqueue_drive_intent(
+            PlayerDriveIntent::ManualHeld(MotionState::builder().run().forward().build()),
             start,
         );
         movement
@@ -1843,7 +1873,7 @@ mod tests {
             .await
             .expect("held run should start");
 
-        movement.enqueue_command(MovementCommand::Stop, start + Duration::from_millis(30));
+        movement.enqueue_drive_intent(PlayerDriveIntent::Stop, start + Duration::from_millis(30));
         movement
             .tick(start + Duration::from_millis(30), &mut world, &mut session)
             .await
@@ -1879,6 +1909,7 @@ mod tests {
 
         let events = movement
             .execute_snap_facing(
+                Instant::now(),
                 90.0_f32.to_radians(),
                 &mut world,
                 &mut session,
@@ -1894,6 +1925,82 @@ mod tests {
             .expect("local player runtime body should exist");
         assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
         assert_eq!(session.packet_sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn movement_heartbeat_arms_then_sends_when_local_velocity_is_nonzero() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+
+        world.player.guid = guid;
+        world.player.position.landblock_id = Guid(0x1000_0001);
+        let mut entity = Entity::new(guid, "Player".to_string(), world.player.position);
+        entity.velocity = Vector3::new(1.0, 0.0, 0.0);
+        world.entities.insert(entity);
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let now = Instant::now();
+
+        let sent = movement
+            .maybe_send_autonomous_position_heartbeat(
+                now,
+                &world,
+                &mut session,
+                MovementPacketMetadata::default(),
+            )
+            .await
+            .expect("movement heartbeat should arm successfully");
+
+        assert!(!sent);
+        assert_eq!(session.game_action_sequence, 0);
+
+        let sent = movement
+            .maybe_send_autonomous_position_heartbeat(
+                now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL + Duration::from_millis(1),
+                &world,
+                &mut session,
+                MovementPacketMetadata::default(),
+            )
+            .await
+            .expect("movement heartbeat should send once armed");
+
+        assert!(sent);
+        assert_eq!(session.game_action_sequence, 1);
+        assert!(session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn movement_heartbeat_skips_stationary_players_without_arming() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..Default::default()
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+
+        let sent = movement
+            .maybe_send_autonomous_position_heartbeat(
+                Instant::now(),
+                &world,
+                &mut session,
+                MovementPacketMetadata::default(),
+            )
+            .await
+            .expect("stationary heartbeat check should succeed");
+
+        assert!(!sent);
+        assert_eq!(session.game_action_sequence, 0);
+        assert!(movement.next_autonomous_position_heartbeat_at.is_none());
     }
 
     #[test]

@@ -3,7 +3,7 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-use holtburger_core::client::movement_types::{MovementCommand, PlayerDriveIntent};
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 #[cfg(test)]
 use holtburger_core::client::movement_types::{Locomotion, MotionState, Turn};
 use holtburger_core::client::types::ClientCommand;
@@ -1232,7 +1232,7 @@ impl GameState {
                 result.needs_redraw = true;
                 result
                     .commands
-                    .push(ClientCommand::DriveMovement(MovementCommand::SnapFacing {
+                    .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
                         heading,
                     }));
             }
@@ -1949,31 +1949,28 @@ mod tests {
     fn is_run_movement_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::DriveMovement(MovementCommand::SetMotion {
-                state: MotionState {
-                    locomotion: Some(Locomotion::Forward),
-                    ..
-                },
-            }) | ClientCommand::DriveMovement(MovementCommand::PulseMotion {
-                state: MotionState {
-                    locomotion: Some(Locomotion::Forward),
-                    ..
-                },
+            ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
+                locomotion: Some(Locomotion::Forward),
                 ..
-            })
+            }))
+                | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
+                    state: MotionState {
+                        locomotion: Some(Locomotion::Forward),
+                        ..
+                    },
+                    ..
+                })
         )
     }
 
     fn is_turn_movement_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::DriveMovement(MovementCommand::SetMotion {
-                state: MotionState {
-                    locomotion: None,
-                    turning: Some(Turn::Left | Turn::Right),
-                    ..
-                },
-            })
+            ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
+                locomotion: None,
+                turning: Some(Turn::Left | Turn::Right),
+                ..
+            }))
         )
     }
 
@@ -1992,7 +1989,7 @@ mod tests {
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
         matches!(
             command,
-            ClientCommand::DriveMovement(MovementCommand::SnapFacing { .. })
+            ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { .. })
         )
     }
 

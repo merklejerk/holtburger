@@ -25,10 +25,6 @@ use types::*;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
-// ACE throttles MoveToState-driven UpdatePosition rebroadcasts to about 1 second and documents
-// AutonomousPosition as a ~1s moving heartbeat. Keep that observer-facing heartbeat separate from
-// our more frequent outbound MoveToState/navigation control cadence.
-const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,23 +160,6 @@ impl Client {
             .expect("busy operation should still exist when timing out");
         self.emit_busy_state_updated();
         self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
-    }
-
-    async fn send_autonomous_movement_heartbeat_if_moving(&mut self) -> Result<bool> {
-        let Client {
-            movement,
-            world,
-            session,
-            ..
-        } = self;
-
-        movement
-            .send_autonomous_position_heartbeat(
-                world,
-                session,
-                movement_types::MovementPacketMetadata::default(),
-            )
-            .await
     }
 
     fn emit_spell_catalog_loaded(&self) {
@@ -726,7 +705,7 @@ impl Client {
         self.send_status_event();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
+        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
         let mut last_physics_time = Instant::now();
 
         loop {
@@ -737,10 +716,6 @@ impl Client {
             tokio::select! {
                 _ = net_tick.tick() => {
                     let now = Instant::now();
-
-                    if matches!(self.state, ClientState::InWorld) {
-                        self.send_autonomous_movement_heartbeat_if_moving().await?;
-                    }
 
                     // 1. Broadcast NetPulse
                     let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
@@ -841,6 +816,17 @@ impl Client {
                         self.handle_runtime_world_event(&event);
                     }
 
+                    if matches!(self.state, ClientState::InWorld) {
+                        self.movement
+                            .maybe_send_autonomous_position_heartbeat(
+                                now,
+                                &self.world,
+                                &mut self.session,
+                                movement_types::MovementPacketMetadata::default(),
+                            )
+                            .await?;
+                    }
+
                 }
             }
         }
@@ -881,46 +867,6 @@ mod tests {
 
         assert!(saw_busy_clear);
         assert!(saw_timeout);
-    }
-
-    #[tokio::test]
-    async fn movement_heartbeat_sends_autonomous_position_when_local_velocity_is_nonzero() {
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let guid = Guid(0x0102_0304);
-
-        client.world.player.guid = guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        let mut entity = Entity::new(guid, "Player".to_string(), client.world.player.position);
-        entity.velocity = Vector3::new(1.0, 0.0, 0.0);
-        client.world.entities.insert(entity);
-
-        let sent = client
-            .send_autonomous_movement_heartbeat_if_moving()
-            .await
-            .expect("movement heartbeat should succeed");
-
-        assert!(sent);
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
-    }
-
-    #[tokio::test]
-    async fn movement_heartbeat_skips_stationary_players() {
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let guid = Guid(0x0102_0304);
-
-        client.world.player.guid = guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        let entity = Entity::new(guid, "Player".to_string(), client.world.player.position);
-        client.world.entities.insert(entity);
-
-        let sent = client
-            .send_autonomous_movement_heartbeat_if_moving()
-            .await
-            .expect("stationary heartbeat check should succeed");
-
-        assert!(!sent);
-        assert_eq!(client.session.game_action_sequence, 0);
     }
 
     #[test]
@@ -1127,10 +1073,10 @@ mod tests {
             client.world.player.position,
         ));
 
-        client.movement.enqueue_command(
-            movement_types::MovementCommand::SetMotion {
-                state: movement_types::MotionState::builder().run().forward().build(),
-            },
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::ManualHeld(
+                movement_types::MotionState::builder().run().forward().build(),
+            ),
             now,
         );
 
@@ -1192,10 +1138,10 @@ mod tests {
         remote.velocity = holtburger_common::Vector3::new(1.0, 0.0, 0.0);
 
         client.simulation.track_actor(remote_guid);
-        client.movement.enqueue_command(
-            movement_types::MovementCommand::SetMotion {
-                state: movement_types::MotionState::builder().run().forward().build(),
-            },
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::ManualHeld(
+                movement_types::MotionState::builder().run().forward().build(),
+            ),
             now,
         );
 
@@ -1230,10 +1176,10 @@ mod tests {
             client.world.player.position,
         ));
 
-        client.movement.enqueue_command(
-            movement_types::MovementCommand::SetMotion {
-                state: movement_types::MotionState::builder().run().forward().build(),
-            },
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::ManualHeld(
+                movement_types::MotionState::builder().run().forward().build(),
+            ),
             now,
         );
 
@@ -1311,10 +1257,10 @@ mod tests {
         client.world.add_entity(remote);
 
         client.simulation.track_actor(remote_guid);
-        client.movement.enqueue_command(
-            movement_types::MovementCommand::SetMotion {
-                state: movement_types::MotionState::builder().run().forward().build(),
-            },
+        client.movement.enqueue_drive_intent(
+            movement_types::PlayerDriveIntent::ManualHeld(
+                movement_types::MotionState::builder().run().forward().build(),
+            ),
             now,
         );
 

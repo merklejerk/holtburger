@@ -247,6 +247,7 @@ impl ClientSimulationSystem {
     pub(super) async fn handle_server_controlled_movement(
         &mut self,
         data: MovementEventData,
+        movement: &mut MovementSystem,
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<(Vec<WireEvent>, Vec<WorldEvent>)> {
@@ -263,12 +264,14 @@ impl ClientSimulationSystem {
         };
 
         let world_events = world.apply_solved_body_kinematics(&solved);
-        MovementSystem::send_autonomous_position_sync(
+        movement
+            .send_autonomous_position_sync(
+            Instant::now(),
             world,
             session,
             super::movement_types::MovementPacketMetadata::default(),
         )
-        .await?;
+            .await?;
 
         Ok((wire_events, world_events))
     }

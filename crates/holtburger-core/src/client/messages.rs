@@ -46,12 +46,13 @@ impl Client {
                         let (wire_events, world_events) = {
                             let Client {
                                 simulation,
+                                movement,
                                 world,
                                 session,
                                 ..
                             } = self;
                             simulation
-                                .handle_server_controlled_movement(*data, world, session)
+                                .handle_server_controlled_movement(*data, movement, world, session)
                                 .await?
                         };
                         for event in wire_events {

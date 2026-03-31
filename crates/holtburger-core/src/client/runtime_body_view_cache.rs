@@ -7,8 +7,7 @@ use crate::client::types::ClientViewEvent;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
 use holtburger_world::{
-    entity::Entity, RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample,
-    SpatialProjectedEntityState, SpatialSampleMode,
+    entity::Entity, RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -25,7 +24,6 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy)]
 struct CachedRuntimeBodyView {
     view: RuntimeSpatialBodyView,
-    received_at: Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -43,12 +41,10 @@ impl Default for RuntimeBodyViewCache {
 
 impl RuntimeBodyViewCache {
     fn upsert_runtime_body(&mut self, body: RuntimeSpatialBodyView, received_at: Instant) {
+        let _ = received_at;
         self.bodies.insert(
             body.body_id,
-            CachedRuntimeBodyView {
-                view: body,
-                received_at,
-            },
+            CachedRuntimeBodyView { view: body },
         );
     }
 
@@ -96,13 +92,13 @@ impl RuntimeBodyViewCache {
             .or_else(|| self.bodies.get(&SpatialBodyId::Entity(guid)))
     }
 
-    fn projected_entity_from_cached(
+    fn spatial_sample_from_cached(
         view: &CachedRuntimeBodyView,
-    ) -> Option<SpatialProjectedEntityState> {
+    ) -> Option<SpatialEntitySample> {
         let guid = view.view.body_id.authoritative_guid()?;
         let authoritative_pose = view.view.authoritative_pose.unwrap_or(view.view.runtime_pose);
 
-        Some(SpatialProjectedEntityState {
+        Some(SpatialEntitySample {
             guid,
             authoritative_pose,
             projected_pose: view.view.runtime_pose,
@@ -110,34 +106,21 @@ impl RuntimeBodyViewCache {
             omega: view.view.omega,
             motion_state: view.view.motion_state,
             projection_mode: view.view.sample_mode,
-            last_authoritative_update: view.received_at,
         })
-    }
-
-    pub fn projected_entity(&self, guid: Guid) -> Option<SpatialProjectedEntityState> {
-        self.resolve_guid_body(guid)
-            .and_then(Self::projected_entity_from_cached)
     }
 
     pub fn spatial_sample(&self, guid: Guid) -> Option<SpatialEntitySample> {
-        self.projected_entity(guid).map(|state| SpatialEntitySample {
-            guid: state.guid,
-            authoritative_pose: state.authoritative_pose,
-            projected_pose: state.projected_pose,
-            velocity: state.velocity,
-            omega: state.omega,
-            motion_state: state.motion_state,
-            projection_mode: state.projection_mode,
-        })
+        self.resolve_guid_body(guid)
+            .and_then(Self::spatial_sample_from_cached)
     }
 
     pub fn projected_pose(&self, guid: Guid) -> Option<WorldPosition> {
-        self.projected_entity(guid)
+        self.spatial_sample(guid)
             .map(|entity| entity.projected_pose)
     }
 
     pub fn authoritative_pose(&self, guid: Guid) -> Option<WorldPosition> {
-        self.projected_entity(guid)
+        self.spatial_sample(guid)
             .map(|entity| entity.authoritative_pose)
     }
 
@@ -154,10 +137,10 @@ impl RuntimeBodyViewCache {
             })
     }
 
-    pub fn iter_projected_entities(&self) -> impl Iterator<Item = SpatialProjectedEntityState> + '_ {
+    pub fn iter_spatial_samples(&self) -> impl Iterator<Item = SpatialEntitySample> + '_ {
         self.bodies
             .values()
-            .filter_map(Self::projected_entity_from_cached)
+            .filter_map(Self::spatial_sample_from_cached)
     }
 }
 
@@ -180,12 +163,12 @@ mod tests {
             self.cache.apply_view_event(event, now);
         }
 
-        fn projected_entity(&self, guid: Guid) -> Option<SpatialProjectedEntityState> {
-            self.cache.projected_entity(guid)
+        fn spatial_sample(&self, guid: Guid) -> Option<SpatialEntitySample> {
+            self.cache.spatial_sample(guid)
         }
 
-        fn iter_projected_entities(&self) -> impl Iterator<Item = SpatialProjectedEntityState> + '_ {
-            self.cache.iter_projected_entities()
+        fn iter_spatial_samples(&self) -> impl Iterator<Item = SpatialEntitySample> + '_ {
+            self.cache.iter_spatial_samples()
         }
     }
 
@@ -224,7 +207,7 @@ mod tests {
             start,
         );
 
-        let projected = system.projected_entity(guid).expect("entity should exist");
+        let projected = system.spatial_sample(guid).expect("entity should exist");
         assert_eq!(projected.projected_pose, initial.runtime_pose);
         assert_eq!(projected.authoritative_pose, initial.authoritative_pose.unwrap());
         assert_eq!(projected.projection_mode, initial.sample_mode);
@@ -236,7 +219,7 @@ mod tests {
             start + Duration::from_millis(50),
         );
 
-        let updated = system.projected_entity(guid).expect("entity should still exist");
+        let updated = system.spatial_sample(guid).expect("entity should still exist");
         assert_eq!(updated.projected_pose, make_position(31.0, 42.0, 0.25));
 
         system.handle_view_event(
@@ -246,7 +229,7 @@ mod tests {
             start + Duration::from_millis(75),
         );
 
-        assert!(system.projected_entity(guid).is_none());
+        assert!(system.spatial_sample(guid).is_none());
     }
 
     #[test]
@@ -269,8 +252,8 @@ mod tests {
             start + Duration::from_millis(20),
         );
 
-        assert!(system.projected_entity(guid).is_none());
-        assert_eq!(system.iter_projected_entities().count(), 0);
+        assert!(system.spatial_sample(guid).is_none());
+        assert_eq!(system.iter_spatial_samples().count(), 0);
     }
 
     #[test]

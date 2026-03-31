@@ -151,23 +151,12 @@ impl MotionStateBuilder {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MovementCommand {
-    SetMotion {
-        state: MotionState,
-    },
-    PulseMotion {
+pub enum PlayerDriveIntent {
+    ManualHeld(MotionState),
+    ManualPulse {
         state: MotionState,
         duration: Duration,
     },
-    SnapFacing {
-        heading: f32,
-    },
-    Stop,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PlayerDriveIntent {
-    ManualHeld(MotionState),
     Autonomous(AutonomousDriveIntent),
     SnapFacing { heading: f32 },
     Stop,
@@ -233,34 +222,32 @@ mod tests {
     }
 
     #[test]
-    fn movement_command_preserves_resolved_state() {
-        let command = MovementCommand::SetMotion {
-            state: MotionState::builder().run().forward().turn_right().build(),
-        };
+    fn manual_held_intent_preserves_resolved_state() {
+        let intent = PlayerDriveIntent::ManualHeld(
+            MotionState::builder().run().forward().turn_right().build(),
+        );
 
         assert_eq!(
-            command,
-            MovementCommand::SetMotion {
-                state: MotionState {
-                    gait: Gait::Run,
-                    locomotion: Some(Locomotion::Forward),
-                    turning: Some(Turn::Right),
-                    turn_speed: None,
-                },
-            }
+            intent,
+            PlayerDriveIntent::ManualHeld(MotionState {
+                gait: Gait::Run,
+                locomotion: Some(Locomotion::Forward),
+                turning: Some(Turn::Right),
+                turn_speed: None,
+            })
         );
     }
 
     #[test]
-    fn pulse_motion_command_preserves_duration_and_state() {
-        let command = MovementCommand::PulseMotion {
+    fn manual_pulse_intent_preserves_duration_and_state() {
+        let intent = PlayerDriveIntent::ManualPulse {
             state: MotionState::builder().walk().forward().build(),
             duration: Duration::from_millis(120),
         };
 
         assert_eq!(
-            command,
-            MovementCommand::PulseMotion {
+            intent,
+            PlayerDriveIntent::ManualPulse {
                 state: MotionState {
                     gait: Gait::Walk,
                     locomotion: Some(Locomotion::Forward),
@@ -273,26 +260,24 @@ mod tests {
     }
 
     #[test]
-    fn snap_facing_command_is_one_shot() {
-        let command = MovementCommand::SnapFacing { heading: 1.0 };
+    fn snap_facing_intent_is_one_shot() {
+        let command = PlayerDriveIntent::SnapFacing { heading: 1.0 };
 
-        assert_eq!(command, MovementCommand::SnapFacing { heading: 1.0 });
+        assert_eq!(command, PlayerDriveIntent::SnapFacing { heading: 1.0 });
     }
 
     #[test]
-    fn stop_command_is_distinct_from_motion_commands() {
+    fn stop_intent_is_distinct_from_manual_motion_intents() {
         assert_ne!(
-            MovementCommand::Stop,
-            MovementCommand::PulseMotion {
+            PlayerDriveIntent::Stop,
+            PlayerDriveIntent::ManualPulse {
                 state: MotionState::builder().walk().forward().build(),
                 duration: Duration::from_millis(120),
             }
         );
         assert_ne!(
-            MovementCommand::Stop,
-            MovementCommand::SetMotion {
-                state: MotionState::builder().walk().forward().build(),
-            }
+            PlayerDriveIntent::Stop,
+            PlayerDriveIntent::ManualHeld(MotionState::builder().walk().forward().build())
         );
     }
 

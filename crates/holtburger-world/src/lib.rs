@@ -33,7 +33,7 @@ pub use spatial::{
     RuntimeSpatialBodyView, SelfPlayerDriveProjectionState, SolveActorInput,
     SolveBodyInput, SolvedActorKinematics, SolvedBodyKinematics, SpatialBody,
     SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialEvent,
-    SpatialPhysics, SpatialProjectedEntityState, SpatialSampleMode,
+    SpatialPhysics, SpatialSampleMode,
     SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
     SpatialSolveBatch, SpatialSolveRequest, advance_actor_kinematics,
 };

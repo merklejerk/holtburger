@@ -297,6 +297,7 @@ mod tests {
                         velocity: actor.velocity,
                         omega: actor.omega,
                         contact: ContactState::Grounded,
+                        projection_state: None,
                     })
                     .collect(),
                 events: Default::default(),
@@ -420,6 +421,7 @@ mod tests {
                 velocity: Vector3::zero(),
                 omega: Vector3::zero(),
             }],
+            local_drive: None,
         };
         let mut scene = SpatialScene::new_with_physics(Arc::clone(client.world.scene.physics()));
 

@@ -1,10 +1,9 @@
-use crate::entity::{EntityMotionDirective, EntityMotionSnapshot};
+use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::METERS_PER_LANDBLOCK;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
 use holtburger_common::Quaternion;
 use holtburger_common::Vector3;
-use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::{PI, TAU};
@@ -58,14 +57,20 @@ pub enum SpatialSampleMode {
     /// Runtime pose currently matches authoritative pose with no extra derivation.
     #[default]
     AuthoritativeOnly,
-    /// Runtime pose is blending toward a newer authoritative correction.
-    InterpolatingPosition,
-    /// Runtime pose is being advanced from motion-state-driven heading simulation.
+    /// Runtime pose was realized by solve-owned direct-drive control.
     SimulatingMotionState,
-    /// Runtime pose is being advanced from linear and angular velocity.
+    /// Runtime pose was realized by solve-owned velocity or angular velocity.
     SimulatingVelocity,
     /// Runtime sampling is intentionally paused until a reset or resync resumes it.
     Suspended,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelfPlayerDriveProjectionState {
+    LocalGroundedDirectDrive,
+    LocalAirborne,
+    ServerControlled,
+    AuthorityFrozen,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,16 +92,6 @@ pub enum RuntimeBodyResetCause {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpatialInterpolationState {
-    /// Runtime pose at the moment interpolation began.
-    pub start_pose: WorldPosition,
-    /// Clock time when interpolation started.
-    pub started_at: Instant,
-    /// Intended interpolation duration.
-    pub duration: Duration,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpatialSamplingState {
     /// Current runtime sampling mode for the body.
     pub mode: SpatialSampleMode,
@@ -104,8 +99,6 @@ pub struct SpatialSamplingState {
     pub last_authoritative_update: Instant,
     /// Time the runtime pose was last derived or advanced.
     pub last_derived_at: Instant,
-    /// Active interpolation state, if runtime pose is blending toward authority.
-    pub interpolation: Option<SpatialInterpolationState>,
 }
 
 impl SpatialSamplingState {
@@ -114,7 +107,6 @@ impl SpatialSamplingState {
             mode: SpatialSampleMode::AuthoritativeOnly,
             last_authoritative_update: now,
             last_derived_at: now,
-            interpolation: None,
         }
     }
 }
@@ -226,7 +218,7 @@ pub struct SpatialBody {
     pub motion_state: Option<EntityMotionSnapshot>,
     /// Current contact state for the body.
     pub contact: ContactState,
-    /// Runtime sampling metadata for interpolation and derivation.
+    /// Runtime sampling metadata for authority and solve-owned realization.
     pub sampling: SpatialSamplingState,
 }
 
@@ -342,6 +334,8 @@ pub struct SolvedBodyKinematics {
     pub omega: Vector3,
     /// Solved contact state after the physics step.
     pub contact: ContactState,
+    /// Optional self-player projection state used to classify local drive realization.
+    pub projection_state: Option<SelfPlayerDriveProjectionState>,
 }
 
 impl SolvedBodyKinematics {
@@ -352,6 +346,7 @@ impl SolvedBodyKinematics {
             velocity: kinematics.velocity,
             omega: kinematics.omega,
             contact: kinematics.contact,
+            projection_state: kinematics.projection_state,
         }
     }
 
@@ -364,6 +359,7 @@ impl SolvedBodyKinematics {
                 velocity: self.velocity,
                 omega: self.omega,
                 contact: self.contact,
+                projection_state: self.projection_state,
             })
     }
 }
@@ -424,12 +420,29 @@ pub struct SolveActorInput {
     pub omega: Vector3,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalDriveGait {
+    Walk,
+    Run,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LocalDriveControl {
+    pub body_id: SpatialBodyId,
+    pub desired_world_delta: Vector3,
+    pub desired_heading: Option<f32>,
+    pub gait: LocalDriveGait,
+    pub force_grounded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveRequest {
     /// Duration of the solve step.
     pub dt: Duration,
     /// Actor inputs to advance during the solve step.
     pub actors: SmallVec<[SolveActorInput; 1]>,
+    /// Optional solver-facing direct-drive request for the local player.
+    pub local_drive: Option<LocalDriveControl>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -444,6 +457,141 @@ pub struct SolvedActorKinematics {
     pub omega: Vector3,
     /// Solved contact state after the physics step.
     pub contact: ContactState,
+    /// Optional self-player projection state used to classify local drive realization.
+    pub projection_state: Option<SelfPlayerDriveProjectionState>,
+}
+
+fn sample_mode_for_projection_state(
+    projection_state: Option<SelfPlayerDriveProjectionState>,
+    velocity: Vector3,
+    omega: Vector3,
+) -> SpatialSampleMode {
+    match projection_state {
+        Some(SelfPlayerDriveProjectionState::AuthorityFrozen) => SpatialSampleMode::Suspended,
+        Some(SelfPlayerDriveProjectionState::LocalGroundedDirectDrive) => {
+            SpatialSampleMode::SimulatingMotionState
+        }
+        Some(SelfPlayerDriveProjectionState::LocalAirborne)
+        | Some(SelfPlayerDriveProjectionState::ServerControlled)
+        | None => {
+            if velocity.length_squared() > EPSILON || omega.length_squared() > EPSILON {
+                SpatialSampleMode::SimulatingVelocity
+            } else {
+                SpatialSampleMode::SimulatingMotionState
+            }
+        }
+    }
+}
+
+fn desired_heading_for_local_drive(
+    control: &LocalDriveControl,
+    current_heading: f32,
+) -> f32 {
+    if let Some(desired_heading) = control.desired_heading {
+        return normalize_heading(desired_heading);
+    }
+
+    let planar_delta = Vector3::new(
+        control.desired_world_delta.x,
+        control.desired_world_delta.y,
+        0.0,
+    );
+
+    if planar_delta.length_squared() <= EPSILON {
+        current_heading
+    } else {
+        Vector3::zero().heading_to(&planar_delta)
+    }
+}
+
+fn derive_self_player_projection_state(
+    scene: &SpatialScene,
+    control: &LocalDriveControl,
+) -> SelfPlayerDriveProjectionState {
+    let Some(body) = scene.body(control.body_id) else {
+        return if control.force_grounded {
+            SelfPlayerDriveProjectionState::LocalGroundedDirectDrive
+        } else {
+            SelfPlayerDriveProjectionState::LocalAirborne
+        };
+    };
+
+    if body.sampling.mode == SpatialSampleMode::Suspended {
+        return SelfPlayerDriveProjectionState::AuthorityFrozen;
+    }
+
+    if !control.force_grounded && body.contact == ContactState::Airborne {
+        return SelfPlayerDriveProjectionState::LocalAirborne;
+    }
+
+    SelfPlayerDriveProjectionState::LocalGroundedDirectDrive
+}
+
+fn solve_self_player_local_drive(
+    input: &SolveActorInput,
+    control: &LocalDriveControl,
+    dt: Duration,
+    scene: &SpatialScene,
+) -> SolvedActorKinematics {
+    let projection_state = derive_self_player_projection_state(scene, control);
+    let dt_secs = dt.as_secs_f32().max(0.0);
+    let current_contact = scene
+        .body(control.body_id)
+        .map(|body| body.contact)
+        .unwrap_or(ContactState::Unknown);
+
+    if dt_secs <= f32::EPSILON {
+        return SolvedActorKinematics {
+            actor_id: input.actor_id,
+            pose: input.pose,
+            velocity: input.velocity,
+            omega: input.omega,
+            contact: current_contact,
+            projection_state: Some(projection_state),
+        };
+    }
+
+    match projection_state {
+        SelfPlayerDriveProjectionState::AuthorityFrozen => SolvedActorKinematics {
+            actor_id: input.actor_id,
+            pose: input.pose,
+            velocity: Vector3::zero(),
+            omega: Vector3::zero(),
+            contact: current_contact,
+            projection_state: Some(projection_state),
+        },
+        SelfPlayerDriveProjectionState::LocalAirborne => {
+            let mut solved = advance_actor_kinematics(input, dt);
+            solved.contact = current_contact;
+            solved.projection_state = Some(projection_state);
+            solved
+        }
+        SelfPlayerDriveProjectionState::LocalGroundedDirectDrive
+        | SelfPlayerDriveProjectionState::ServerControlled => {
+            let desired_velocity = control.desired_world_delta / dt_secs;
+            let current_heading = input.pose.rotation.to_heading();
+            let desired_heading = desired_heading_for_local_drive(control, current_heading);
+            let mut next_pose = project_pose_by_velocity(input.pose, desired_velocity, dt_secs);
+            next_pose.rotation = Quaternion::from_heading(desired_heading);
+
+            SolvedActorKinematics {
+                actor_id: input.actor_id,
+                pose: next_pose,
+                velocity: desired_velocity,
+                omega: Vector3::new(
+                    0.0,
+                    0.0,
+                    signed_heading_delta(current_heading, desired_heading) / dt_secs,
+                ),
+                contact: if control.force_grounded {
+                    ContactState::Grounded
+                } else {
+                    current_contact
+                },
+                projection_state: Some(projection_state),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -509,24 +657,6 @@ fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
     delta
 }
 
-fn interpolate_pose(start: WorldPosition, end: WorldPosition, progress: f32) -> WorldPosition {
-    if start.landblock_id != end.landblock_id {
-        return end;
-    }
-
-    let start_heading = start.rotation.to_heading();
-    let end_heading = end.rotation.to_heading();
-    let heading = normalize_heading(
-        start_heading + (signed_heading_delta(start_heading, end_heading) * progress),
-    );
-
-    WorldPosition {
-        landblock_id: end.landblock_id,
-        coords: start.coords + ((end.coords - start.coords) * progress),
-        rotation: Quaternion::from_heading(heading),
-    }
-}
-
 pub(super) fn project_pose_by_velocity(
     authoritative_pose: WorldPosition,
     velocity: Vector3,
@@ -545,6 +675,11 @@ pub(super) fn project_pose_by_velocity(
     }
 
     let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
+    // Outdoor runtime projection currently reconstructs the high landblock bits
+    // from global coordinates and preserves the low-word cell portion from the
+    // authoritative pose. That is a deliberate fudge for now: we do not yet
+    // have the cell/topology data needed to derive the fully correct advanced
+    // cell or indoor/outdoor transition here.
     let landblock_x =
         (projected_global.x.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
     let landblock_y =
@@ -562,198 +697,6 @@ pub(super) fn project_pose_by_velocity(
     }
 }
 
-fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
-    Vector3::new(-heading.cos() * speed, heading.sin() * speed, 0.0)
-}
-
-fn projected_velocity_from_motion_state(
-    snapshot: Option<EntityMotionSnapshot>,
-    heading: f32,
-) -> Option<Vector3> {
-    let snapshot = snapshot?;
-    let mut velocity = Vector3::zero();
-    let mut has_translation = false;
-
-    if let (Some(command), Some(speed)) = (snapshot.forward_command, snapshot.forward_speed) {
-        let speed = speed.to_f32().abs();
-        if speed > EPSILON {
-            if command == InterpretedMotionCommand::WALK_FORWARD
-                || command == InterpretedMotionCommand::RUN_FORWARD
-            {
-                velocity = velocity + planar_velocity_for_heading(heading, speed);
-                has_translation = true;
-            } else if command == InterpretedMotionCommand::WALK_BACKWARDS {
-                velocity = velocity
-                    + planar_velocity_for_heading(normalize_heading(heading + PI), speed);
-                has_translation = true;
-            }
-        }
-    }
-
-    if let (Some(command), Some(speed)) = (snapshot.sidestep_command, snapshot.sidestep_speed) {
-        let speed = speed.to_f32().abs();
-        if speed > EPSILON {
-            if command == InterpretedMotionCommand::SIDESTEP_LEFT {
-                velocity = velocity
-                    + planar_velocity_for_heading(normalize_heading(heading - (PI / 2.0)), speed);
-                has_translation = true;
-            } else if command == InterpretedMotionCommand::SIDESTEP_RIGHT {
-                velocity = velocity
-                    + planar_velocity_for_heading(normalize_heading(heading + (PI / 2.0)), speed);
-                has_translation = true;
-            }
-        }
-    }
-
-    has_translation.then_some(velocity)
-}
-
-#[cfg(test)]
-fn should_snap_to_authoritative(
-    projected: WorldPosition,
-    authoritative: WorldPosition,
-    snap_distance_m: f32,
-    snap_heading_rad: f32,
-) -> bool {
-    if projected.landblock_id != authoritative.landblock_id {
-        return true;
-    }
-
-    if projected.coords.distance(&authoritative.coords) > snap_distance_m {
-        return true;
-    }
-
-    signed_heading_delta(
-        projected.rotation.to_heading(),
-        authoritative.rotation.to_heading(),
-    )
-    .abs()
-        > snap_heading_rad
-}
-
-fn simulated_turn_directive(
-    snapshot: Option<EntityMotionSnapshot>,
-) -> Option<EntityMotionDirective> {
-    match snapshot.and_then(|snapshot| snapshot.directive) {
-        Some(EntityMotionDirective::TurnToHeading {
-            desired_heading,
-            speed,
-        }) => Some(EntityMotionDirective::TurnToHeading {
-            desired_heading,
-            speed,
-        }),
-        Some(EntityMotionDirective::TurnToObject {
-            target,
-            desired_heading: Some(desired_heading),
-            speed,
-        }) => Some(EntityMotionDirective::TurnToObject {
-            target,
-            desired_heading: Some(desired_heading),
-            speed,
-        }),
-        _ => None,
-    }
-}
-
-fn advance_turn_toward_heading(
-    pose: &mut WorldPosition,
-    desired_heading: f32,
-    speed: f32,
-    dt_secs: f32,
-) -> bool {
-    let speed = speed.abs();
-    if !desired_heading.is_finite() || !speed.is_finite() || speed <= 0.0 || dt_secs <= 0.0 {
-        return false;
-    }
-
-    let current = pose.rotation.to_heading();
-    let delta = signed_heading_delta(current, desired_heading);
-    if delta.abs() <= EPSILON {
-        pose.rotation = Quaternion::from_heading(normalize_heading(desired_heading));
-        return true;
-    }
-
-    let max_step = speed * dt_secs;
-    let step = delta.clamp(-max_step, max_step);
-    pose.rotation = Quaternion::from_heading(normalize_heading(current + step));
-    true
-}
-
-fn signed_turn_rate(snapshot: EntityMotionSnapshot) -> Option<f32> {
-    let speed = snapshot.turn_speed?.to_f32();
-    if !speed.is_finite() || speed.abs() <= EPSILON {
-        return None;
-    }
-
-    if speed < 0.0 {
-        return Some(speed);
-    }
-
-    match snapshot.turn_command {
-        Some(InterpretedMotionCommand::TURN_LEFT) => Some(-speed),
-        Some(InterpretedMotionCommand::TURN_RIGHT) | None => Some(speed),
-        Some(_) => None,
-    }
-}
-
-fn advance_heading_projection(body: &mut SpatialBody, dt: Duration) -> bool {
-    let dt_secs = dt.as_secs_f32();
-    if dt_secs <= 0.0 {
-        return false;
-    }
-
-    if let Some(directive) = simulated_turn_directive(body.motion_state) {
-        let advanced = match directive {
-            EntityMotionDirective::TurnToHeading {
-                desired_heading,
-                speed,
-            } => advance_turn_toward_heading(
-                &mut body.pose,
-                desired_heading.to_f32(),
-                speed.to_f32(),
-                dt_secs,
-            ),
-            EntityMotionDirective::TurnToObject {
-                desired_heading: Some(desired_heading),
-                speed,
-                ..
-            } => advance_turn_toward_heading(
-                &mut body.pose,
-                desired_heading.to_f32(),
-                speed.to_f32(),
-                dt_secs,
-            ),
-            EntityMotionDirective::TurnToObject {
-                desired_heading: None,
-                ..
-            } => false,
-        };
-
-        if advanced {
-            return true;
-        }
-    }
-
-    if let Some(snapshot) = body.motion_state
-        && let Some(turn_rate) = signed_turn_rate(snapshot)
-    {
-        let heading = body.pose.rotation.to_heading();
-        body.pose.rotation = Quaternion::from_heading(normalize_heading(
-            heading + (turn_rate * dt_secs),
-        ));
-        return true;
-    }
-
-    if body.omega.length_squared() > EPSILON {
-        let heading = body.pose.rotation.to_heading();
-        body.pose.rotation =
-            Quaternion::from_heading(normalize_heading(heading + (body.omega.z * dt_secs)));
-        return true;
-    }
-
-    false
-}
-
 pub fn advance_actor_kinematics(
     input: &SolveActorInput,
     dt: Duration,
@@ -766,6 +709,7 @@ pub fn advance_actor_kinematics(
             velocity: input.velocity,
             omega: input.omega,
             contact: ContactState::Unknown,
+            projection_state: None,
         };
     }
 
@@ -783,6 +727,7 @@ pub fn advance_actor_kinematics(
         velocity: next_velocity,
         omega: input.omega,
         contact: ContactState::Unknown,
+        projection_state: None,
     }
 }
 
@@ -793,12 +738,23 @@ impl SpatialPhysics for BasicSpatialPhysics {
     fn solve(
         &self,
         request: &SpatialSolveRequest,
-        _scene: &mut SpatialScene,
+        scene: &mut SpatialScene,
     ) -> SpatialSolveBatch {
+        let local_drive_guid = request
+            .local_drive
+            .and_then(|control| control.body_id.authoritative_guid());
         let solved = request
             .actors
             .iter()
-            .map(|actor| advance_actor_kinematics(actor, request.dt))
+            .map(|actor| {
+                if Some(actor.actor_id) == local_drive_guid
+                    && let Some(control) = request.local_drive.as_ref()
+                {
+                    solve_self_player_local_drive(actor, control, request.dt, scene)
+                } else {
+                    advance_actor_kinematics(actor, request.dt)
+                }
+            })
             .collect();
 
         SpatialSolveBatch {
@@ -906,7 +862,7 @@ impl BodySamplingStore {
 
 /// The SpatialScene is responsible for managing the world-owned "where" of everything.
 /// It tracks authoritative entity positions by landblock, hosts solve context, and composes the
-/// canonical runtime body-sampling state used to derive projected/read-model spatial samples.
+/// canonical runtime body state exposed to read-model consumers.
 #[derive(Clone)]
 pub struct SpatialScene {
     /// Entities indexed by LandblockID for fast local queries.
@@ -926,107 +882,6 @@ impl Default for SpatialScene {
 }
 
 impl SpatialScene {
-    #[cfg(test)]
-    pub(super) fn projected_entity_state(&self, guid: Guid) -> Option<SpatialProjectedEntityState> {
-        self.body_for_guid(guid)
-            .and_then(SpatialBody::projected_entity_state)
-    }
-
-    fn advance_runtime_body_sampling(
-        body: &mut SpatialBody,
-        now: Instant,
-        config: SpatialSamplingConfig,
-    ) {
-        let previous_mode = body.sampling.mode;
-        let previous_pose = body.pose;
-        let dt = now
-            .checked_duration_since(body.sampling.last_derived_at)
-            .unwrap_or_default();
-        body.sampling.last_derived_at = now;
-
-        if body.sampling.mode == SpatialSampleMode::Suspended {
-            return;
-        }
-
-        if Self::advance_body_interpolation(body, now) {
-            return;
-        }
-
-        let authoritative_pose = body.authoritative_pose.unwrap_or(body.pose);
-        body.pose.landblock_id = authoritative_pose.landblock_id;
-
-        let elapsed_since_authoritative = now
-            .checked_duration_since(body.sampling.last_authoritative_update)
-            .unwrap_or_default()
-            .min(config.max_dead_reckon);
-        let preserve_projected_pose = elapsed_since_authoritative > Duration::ZERO
-            && matches!(
-                previous_mode,
-                SpatialSampleMode::SimulatingMotionState | SpatialSampleMode::SimulatingVelocity
-            );
-
-        let mut mode = SpatialSampleMode::AuthoritativeOnly;
-        if body.velocity.length_squared() > EPSILON && elapsed_since_authoritative > Duration::ZERO {
-            body.pose = project_pose_by_velocity(
-                authoritative_pose,
-                body.velocity,
-                elapsed_since_authoritative.as_secs_f32(),
-            );
-            mode = SpatialSampleMode::SimulatingVelocity;
-        } else if elapsed_since_authoritative > Duration::ZERO
-            && let Some(projected_velocity) = projected_velocity_from_motion_state(
-                body.motion_state,
-                body.pose.rotation.to_heading(),
-            )
-        {
-            body.pose = project_pose_by_velocity(
-                authoritative_pose,
-                projected_velocity,
-                elapsed_since_authoritative.as_secs_f32(),
-            );
-            mode = SpatialSampleMode::SimulatingMotionState;
-        } else if preserve_projected_pose {
-            body.pose = previous_pose;
-            mode = previous_mode;
-        } else {
-            body.pose = authoritative_pose;
-        }
-
-        if advance_heading_projection(body, dt) {
-            mode = SpatialSampleMode::SimulatingMotionState;
-        } else if !preserve_projected_pose {
-            body.pose.rotation = authoritative_pose.rotation;
-        }
-
-        body.sampling.mode = mode;
-    }
-
-    fn advance_body_interpolation(body: &mut SpatialBody, now: Instant) -> bool {
-        let Some(interpolation) = body.sampling.interpolation else {
-            return false;
-        };
-        let authoritative_pose = body.authoritative_pose.unwrap_or(body.pose);
-        let elapsed = now
-            .checked_duration_since(interpolation.started_at)
-            .unwrap_or_default();
-        let progress = if interpolation.duration == Duration::ZERO {
-            1.0
-        } else {
-            (elapsed.as_secs_f32() / interpolation.duration.as_secs_f32()).clamp(0.0, 1.0)
-        };
-
-        body.pose = interpolate_pose(interpolation.start_pose, authoritative_pose, progress);
-
-        if progress >= 1.0 {
-            body.sampling.interpolation = None;
-            body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
-        } else {
-            body.sampling.mode = SpatialSampleMode::InterpolatingPosition;
-        }
-
-        true
-    }
-
     pub fn new() -> Self {
         Self::new_with_physics(Arc::new(BasicSpatialPhysics))
     }
@@ -1124,8 +979,6 @@ impl SpatialScene {
         body.motion_state = None;
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
-        body.sampling.interpolation = None;
-
         if !preserve_local_runtime_pose {
             body.pose = pose;
             body.sampling.mode = mode;
@@ -1161,7 +1014,6 @@ impl SpatialScene {
         body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
-        body.sampling.interpolation = None;
 
         self.body_store.register_body(body);
     }
@@ -1177,67 +1029,6 @@ impl SpatialScene {
         now: Instant,
     ) {
         self.upsert_runtime_body_snapshot(body_id, pose, velocity, omega, motion_state, now);
-    }
-
-    #[cfg(test)]
-    pub(super) fn update_authoritative_body_pose(
-        &mut self,
-        body_id: SpatialBodyId,
-        pose: WorldPosition,
-        bootstrap: bool,
-        now: Instant,
-    ) {
-        if bootstrap {
-            self.reset_body_from_authority(body_id, pose, now, false);
-            return;
-        }
-
-        let config = self.body_store.config();
-        let body = self
-            .body_store
-            .bodies
-            .entry(body_id)
-            .or_insert_with(|| SpatialBody::new(body_id, pose, now));
-
-        Self::advance_runtime_body_sampling(body, now, config);
-        let should_snap = should_snap_to_authoritative(
-            body.pose,
-            pose,
-            config.snap_distance_meters(),
-            config.snap_heading_radians(),
-        ) || config.max_position_interp == Duration::ZERO;
-
-        body.authoritative_pose = Some(pose);
-        body.sampling.last_authoritative_update = now;
-        body.sampling.last_derived_at = now;
-
-        if should_snap {
-            body.pose = pose;
-            body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
-            body.sampling.interpolation = None;
-        } else {
-            body.sampling.mode = SpatialSampleMode::InterpolatingPosition;
-            body.sampling.interpolation = Some(SpatialInterpolationState {
-                start_pose: body.pose,
-                started_at: now,
-                duration: config.max_position_interp,
-            });
-        }
-    }
-
-    #[cfg(test)]
-    pub(super) fn set_body_kinematics(
-        &mut self,
-        body_id: SpatialBodyId,
-        velocity: Vector3,
-        omega: Vector3,
-    ) {
-        let Some(body) = self.body_store.body_mut(body_id) else {
-            return;
-        };
-
-        body.velocity = velocity;
-        body.omega = omega;
     }
 
     fn set_body_motion_state(
@@ -1283,7 +1074,6 @@ impl SpatialScene {
         body.sampling.last_authoritative_update = now;
         body.sampling.last_derived_at = now;
         body.sampling.mode = SpatialSampleMode::AuthoritativeOnly;
-        body.sampling.interpolation = None;
     }
 
     pub fn apply_runtime_body_pose(
@@ -1298,25 +1088,6 @@ impl SpatialScene {
 
         body.pose = pose;
         body.sampling.mode = sample_mode;
-        body.sampling.interpolation = None;
-        true
-    }
-
-    pub fn apply_runtime_body_vectors(
-        &mut self,
-        body_id: SpatialBodyId,
-        velocity: Vector3,
-        omega: Vector3,
-        sample_mode: SpatialSampleMode,
-    ) -> bool {
-        let Some(body) = self.body_store.body_mut(body_id) else {
-            return false;
-        };
-
-        body.velocity = velocity;
-        body.omega = omega;
-        body.sampling.mode = sample_mode;
-        body.sampling.interpolation = None;
         true
     }
 
@@ -1345,14 +1116,11 @@ impl SpatialScene {
         body.velocity = solved.velocity;
         body.omega = solved.omega;
         body.contact = solved.contact;
-        body.sampling.mode = if solved.velocity.length_squared() > EPSILON
-            || solved.omega.length_squared() > EPSILON
-        {
-            SpatialSampleMode::SimulatingVelocity
-        } else {
-            SpatialSampleMode::SimulatingMotionState
-        };
-        body.sampling.interpolation = None;
+        body.sampling.mode = sample_mode_for_projection_state(
+            solved.projection_state,
+            solved.velocity,
+            solved.omega,
+        );
         true
     }
 
@@ -1374,15 +1142,7 @@ impl SpatialScene {
                 body.pose = authoritative_pose;
             }
             body.sampling.mode = SpatialSampleMode::Suspended;
-            body.sampling.interpolation = None;
             body.sampling.last_derived_at = now;
-        }
-    }
-
-    pub fn tick_runtime_bodies(&mut self, now: Instant) {
-        let config = self.body_store.config();
-        for body in self.body_store.bodies.values_mut() {
-            Self::advance_runtime_body_sampling(body, now, config);
         }
     }
 

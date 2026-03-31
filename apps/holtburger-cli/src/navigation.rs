@@ -1,8 +1,9 @@
 use holtburger_common::position::WorldPosition;
-use holtburger_common::Guid;
+use holtburger_common::{Guid, Vector3};
+use holtburger_core::client::movement_types::{AutonomousDriveIntent, Gait};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_world::SpatialEntitySample;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const MELEE_ATTACK_DISTANCE: f32 = 0.6;
 const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
@@ -84,12 +85,6 @@ impl Default for ActiveDishonestNavigation {
     fn default() -> Self {
         Self::Idle
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DishonestNavigationDirective {
-    pub target_pose: WorldPosition,
-    pub world_speed_mps: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -274,7 +269,12 @@ impl DishonestNavigation {
         }
     }
 
-    pub fn active_directive(&self, input: DishonestNavigationSyncInput) -> Option<DishonestNavigationDirective> {
+    pub fn active_drive_intent(
+        &self,
+        input: DishonestNavigationSyncInput,
+        dt: Duration,
+    ) -> Option<AutonomousDriveIntent> {
+        let player_position = input.player_position?;
         let target_pose = match self.active {
             ActiveDishonestNavigation::Approach { .. } => input.projected_target_position(),
             ActiveDishonestNavigation::Follow { pursuing: true, .. }
@@ -286,9 +286,20 @@ impl DishonestNavigation {
             | ActiveDishonestNavigation::StickyMelee { pursuing: false, .. } => None,
         }?;
 
-        Some(DishonestNavigationDirective {
+        let desired_world_delta = dishonest_drive_delta(
+            player_position,
             target_pose,
-            world_speed_mps: dishonest_world_speed_mps(input.run_rate),
+            dishonest_world_speed_mps(input.run_rate),
+            dt,
+        )?;
+        let planar_delta = Vector3::new(desired_world_delta.x, desired_world_delta.y, 0.0);
+
+        Some(AutonomousDriveIntent {
+            desired_world_delta,
+            desired_heading: (planar_delta.length_squared() > f32::EPSILON)
+                .then(|| Vector3::zero().heading_to(&planar_delta)),
+            gait: navigation_gait(input.run_rate),
+            force_grounded: true,
         })
     }
 
@@ -410,6 +421,49 @@ fn dishonest_world_speed_mps(run_rate: f32) -> f32 {
     run_rate.max(0.0) * DISHONEST_MOVE_TO_SPEED_FACTOR
 }
 
+fn navigation_gait(run_rate: f32) -> Gait {
+    if run_rate > 1.0 {
+        Gait::Run
+    } else {
+        Gait::Walk
+    }
+}
+
+fn dishonest_drive_delta(
+    player_position: WorldPosition,
+    target_pose: WorldPosition,
+    world_speed_mps: f32,
+    dt: Duration,
+) -> Option<Vector3> {
+    let dt_secs = dt.as_secs_f32();
+    if dt_secs <= f32::EPSILON {
+        return None;
+    }
+
+    let player_global = player_position.global_coords();
+    let target_global = target_pose.global_coords();
+    let delta = target_global - player_global;
+    let distance = delta.length();
+    if distance <= f32::EPSILON {
+        return None;
+    }
+
+    let planar_delta = Vector3::new(delta.x, delta.y, 0.0);
+    let planar_distance = planar_delta.length();
+    let planar_budget = world_speed_mps.max(0.0) * dt_secs;
+    if planar_budget <= f32::EPSILON {
+        return None;
+    }
+
+    let step_scale = if planar_distance <= f32::EPSILON {
+        (planar_budget / distance).min(1.0)
+    } else {
+        (planar_budget / planar_distance).min(1.0)
+    };
+
+    Some(delta * step_scale)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,7 +472,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn active_directive_uses_move_to_world_speed_budget() {
+    fn active_drive_intent_uses_move_to_world_speed_budget() {
         let now = Instant::now();
         let player_position = world_position(0.0, 0.0, 0.0);
         let target_position = world_position(6.0, 0.0, 0.0);
@@ -431,21 +485,26 @@ mod tests {
             sync_input(now, Some(player_position), Some(target_sample(target_guid, target_position)), 4.5),
         );
 
-        let directive = navigation
-            .active_directive(sync_input(
+        let intent = navigation
+            .active_drive_intent(
+                sync_input(
                 now + Duration::from_millis(100),
                 Some(player_position),
                 Some(target_sample(target_guid, target_position)),
                 4.5,
-            ))
-            .expect("follow should produce a dishonest directive while out of range");
+            ),
+                Duration::from_secs_f32(1.0),
+            )
+            .expect("follow should produce an autonomous drive while out of range");
 
-        assert_eq!(directive.target_pose, target_position);
-        assert!((directive.world_speed_mps - 6.75).abs() < 0.0001);
+        assert_eq!(intent.desired_world_delta, Vector3::new(6.0, 0.0, 0.0));
+        assert_eq!(intent.desired_heading, Some(180.0f32.to_radians()));
+        assert_eq!(intent.gait, Gait::Run);
+        assert!(intent.force_grounded);
     }
 
     #[test]
-    fn active_directive_clamps_negative_run_rate() {
+    fn active_drive_intent_clamps_negative_run_rate() {
         let now = Instant::now();
         let player_position = world_position(0.0, 0.0, 0.0);
         let target_position = world_position(6.0, 0.0, 0.0);
@@ -463,16 +522,17 @@ mod tests {
             ),
         );
 
-        let directive = navigation
-            .active_directive(sync_input(
+        let intent = navigation.active_drive_intent(
+            sync_input(
                 now + Duration::from_millis(100),
                 Some(player_position),
                 Some(target_sample(target_guid, target_position)),
                 -3.0,
-            ))
-            .expect("follow should still produce a directive");
+            ),
+            Duration::from_secs_f32(1.0),
+        );
 
-        assert_eq!(directive.world_speed_mps, 0.0);
+        assert_eq!(intent, None);
     }
 
     fn sync_input(

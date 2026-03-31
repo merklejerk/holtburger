@@ -162,7 +162,9 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::DriveMovement(_) => self.handle_movement_command(cmd).await,
+            ClientCommand::DriveMovement(_) | ClientCommand::DriveSelf(_) => {
+                self.handle_movement_command(cmd).await
+            }
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -748,6 +750,11 @@ impl Client {
             ClientCommand::DriveMovement(command) => {
                 log::info!(">>> Queueing resolved movement command: {:?}", command);
                 self.movement.enqueue_command(command, Instant::now());
+                Ok(())
+            }
+            ClientCommand::DriveSelf(intent) => {
+                log::info!(">>> Queueing self drive intent: {:?}", intent);
+                self.movement.enqueue_drive_intent(intent, Instant::now());
                 Ok(())
             }
             _ => unreachable!(),

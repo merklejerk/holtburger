@@ -1,8 +1,7 @@
 //! Frontend runtime-body read cache over mirrored `ClientViewEvent` snapshots and deltas.
 //!
-//! Canonical runtime interpolation, dead reckoning, suspension, and future constraint-aware body
-//! advancement belong to the world-owned spatial model. This module is a mirrored read-model
-//! cache only; it does not own or advance runtime sampling state.
+//! Canonical runtime body state belongs to the world-owned spatial model. This module is a
+//! mirrored read-model cache only; it does not own or advance runtime state.
 
 use crate::client::types::ClientViewEvent;
 use holtburger_common::position::WorldPosition;

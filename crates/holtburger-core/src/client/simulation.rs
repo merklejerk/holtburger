@@ -1,11 +1,11 @@
 use super::movement::MovementSystem;
-use super::movement_types::MotionState;
 use crate::client::WireEvent;
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
+use holtburger_world::spatial::{LocalDriveControl, LocalDriveGait};
 use holtburger_world::{
     ContactState, SolveActorInput, SolveBodyInput, SolvedActorKinematics, SolvedBodyKinematics,
     SpatialBodyEvent, SpatialBodyId, SpatialEvent, SpatialSolveBatch, SpatialSolveRequest,
@@ -17,12 +17,6 @@ use std::time::{Duration, Instant};
 
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const ACTIVE_SOLVE_RADIUS_M: f32 = 96.0;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct LocalMotionIntent {
-    pub body_id: SpatialBodyId,
-    pub locomotion: MotionState,
-}
 
 fn calculate_arrival_position(
     source: &WorldPosition,
@@ -79,7 +73,7 @@ impl ClientSimulationSystem {
 
         let physics = Arc::clone(world.scene.physics());
         let solved = physics.solve(&request, &mut world.scene);
-        self.apply_solve_batch(world, movement, solved)
+        self.apply_solve_batch(world, solved)
     }
 
     pub(super) fn build_solve_request(
@@ -89,9 +83,8 @@ impl ClientSimulationSystem {
         world: &WorldState,
         movement: &MovementSystem,
     ) -> Option<SpatialSolveRequest> {
-        let local_intent = movement.current_local_intent(world);
-        let local_body = local_intent
-            .and_then(|intent| self.build_body_input(world, intent.body_id))
+        let local_body = movement
+            .current_local_solve_body_input(world)
             .or_else(|| {
                 (world.player.guid != Guid::NULL)
                     .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
@@ -138,7 +131,27 @@ impl ClientSimulationSystem {
             return None;
         }
 
-        Some(SpatialSolveRequest { dt, actors })
+        Some(SpatialSolveRequest {
+            dt,
+            actors,
+            local_drive: movement.current_local_drive_control(world),
+        })
+    }
+
+    pub(super) fn to_local_drive_control(
+        body_id: SpatialBodyId,
+        intent: crate::client::movement_types::AutonomousDriveIntent,
+    ) -> LocalDriveControl {
+        LocalDriveControl {
+            body_id,
+            desired_world_delta: intent.desired_world_delta,
+            desired_heading: intent.desired_heading,
+            gait: match intent.gait {
+                crate::client::movement_types::Gait::Walk => LocalDriveGait::Walk,
+                crate::client::movement_types::Gait::Run => LocalDriveGait::Run,
+            },
+            force_grounded: intent.force_grounded,
+        }
     }
 
     fn build_body_input(
@@ -178,6 +191,7 @@ impl ClientSimulationSystem {
             velocity: solved.velocity,
             omega: solved.omega,
             contact: solved.contact,
+            projection_state: solved.projection_state,
         }
     }
 
@@ -213,7 +227,6 @@ impl ClientSimulationSystem {
     fn apply_solve_batch(
         &mut self,
         world: &mut WorldState,
-        movement: &mut MovementSystem,
         solved: SpatialSolveBatch,
     ) -> Vec<WorldEvent> {
         let mut events = Vec::new();
@@ -221,7 +234,6 @@ impl ClientSimulationSystem {
         for actor in solved.solved {
             let solved_body = self.solve_body_kinematics_for_actor(world, actor);
             events.extend(world.apply_solved_body_kinematics(&solved_body));
-            events.extend(movement.handle_post_solve(world, &solved_body));
         }
 
         for event in solved.events {
@@ -236,7 +248,6 @@ impl ClientSimulationSystem {
         &mut self,
         data: MovementEventData,
         world: &mut WorldState,
-        movement: &mut MovementSystem,
         session: &mut Session,
     ) -> Result<(Vec<WireEvent>, Vec<WorldEvent>)> {
         let mut wire_events = Vec::new();
@@ -251,8 +262,7 @@ impl ClientSimulationSystem {
             return Ok((wire_events, Vec::new()));
         };
 
-        let mut world_events = world.apply_solved_body_kinematics(&solved);
-        world_events.extend(movement.handle_post_solve(world, &solved));
+        let world_events = world.apply_solved_body_kinematics(&solved);
         MovementSystem::send_autonomous_position_sync(
             world,
             session,
@@ -359,6 +369,7 @@ impl ClientSimulationSystem {
             velocity,
             omega,
             contact: ContactState::Unknown,
+            projection_state: Some(holtburger_world::SelfPlayerDriveProjectionState::ServerControlled),
         })
     }
 }
@@ -366,14 +377,12 @@ impl ClientSimulationSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::movement::MovementSystem;
     use holtburger_common::position::WorldPosition;
     use holtburger_world::{SpatialEvent, entity::Entity};
 
     #[test]
     fn apply_solve_batch_applies_spatial_events() {
         let mut simulation = ClientSimulationSystem::new();
-        let mut movement = MovementSystem::new();
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x5000_0001);
         let remote_guid = Guid(0x5000_0002);
@@ -401,7 +410,6 @@ mod tests {
 
         let events = simulation.apply_solve_batch(
             &mut world,
-            &mut movement,
             SpatialSolveBatch {
                 solved: SmallVec::new(),
                 events: SmallVec::from_vec(vec![

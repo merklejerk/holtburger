@@ -112,7 +112,7 @@ impl AppState {
         logs.push((ChatMessageKind::System, format!("State: {}", state_str)));
 
         if let Some(game) = self.game_option() {
-            if let Some(pos) = game.data.player_pos {
+            if let Some(pos) = game.data.runtime_player_position() {
                 logs.push((ChatMessageKind::System, "".to_string()));
                 logs.push((ChatMessageKind::System, "═══ POSITION ═══".to_string()));
                 logs.push((

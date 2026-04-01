@@ -289,11 +289,11 @@ This keeps ACE's requested location fresh without pretending that every predicti
 
 If your client uses an explicit snap-facing primitive, this is also the correct channel for that immediate facing update: send an `AutonomousPosition` carrying the new rotation, then continue with ordinary `MoveToState` locomotion if movement is beginning.
 
-Do not send `AutonomousPosition` on a fixed idle heartbeat just for simplicity.
-
 ACE's own handler comment in [GameActionAutonomousPosition.cs](../ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionAutonomousPosition.cs) describes it as being sent every `~1 second` when a player is moving. More importantly, `AutonomousPosition` calls `SetRequestedLocation(position)` with broadcast enabled, and [Player_Tick.cs](../ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs) will then send `UpdatePosition` whenever `RequestedLocationBroadcast` is true, even if the requested position is effectively unchanged.
 
-So an idle `AutonomousPosition` heartbeat is not just redundant. It creates unnecessary authoritative position traffic and can manufacture observer-visible correction breadcrumbs when nothing is actually happening.
+In practice, holtburger keeps a low-rate self-position sync armed for the whole in-world session once the client has a valid local pose. That is an implementation choice, not a claim that ACE requires a universal idle heartbeat. The reason is operational: sessions that never emit any `AutonomousPosition` breadcrumb are easier to desynchronize, while a `~1s` sync keeps the server's requested-location path warm without changing the higher-level `MoveToState` rules.
+
+That means the client still treats `MoveToState` as the control stream for starts, changes, and stops, but it no longer tears down `AutonomousPosition` heartbeats merely because local velocity reached zero.
 
 ### 8.5 Stop automation on server-owned movement epochs
 
@@ -405,6 +405,38 @@ Examples:
 - `TurnSpeed` refines an active turn, but does not by itself create one without `TurnCommand`.
 - A stop `MoveToState` is the normal way to terminate previously broadcast motion.
 
+#### Black-box validation against the stock ACE image
+
+We validated the observer-side packet shape against the unmodified Docker ACE image using paired logs from:
+
+- a moving holtburger TUI client (`Buddy`)
+- a moving retail client (`Merklejerk`)
+- a second holtburger TUI client acting only as an observer (`NotBuddy`)
+
+That test established an important constraint for future debugging work:
+
+- the stock ACE image can emit the same observer-visible movement shape for both retail and holtburger movers
+- nearby observers may receive an autonomous `UpdateMotion` start/change packet followed by sparse `UpdatePosition` anchors roughly once per second
+- those observer-facing `UpdatePosition` packets may omit `velocity` entirely for both clients
+
+So a remote actor looking choppy, rubber-bandy, or "2x slower" is **not** by itself evidence that the moving client sent a malformed locomotion stream. It can also mean the observing client failed to continue translating the remote actor from the last `UpdateMotion` state between authoritative position anchors.
+
+Practical rule: when validating remote movement quality, compare a retail mover and a custom-client mover from the same observer. If both receive sparse no-velocity `UpdatePosition` packets, then the remaining bug is likely in observer-side reconstruction rather than the outbound control packets.
+
+#### Two cadences, two jobs
+
+ACE effectively operates with two different movement cadences that should not be collapsed into a single client constant:
+
+- `MoveToState` control cadence: the mover can send control changes more frequently than once per second, and ACE still uses those updates for server-side movement / interpolation.
+- `AutonomousPosition` and observer `UpdatePosition` cadence: ACE documents `AutonomousPosition` as an approximately 1-second moving heartbeat, and `MoveToState`-driven observer `UpdatePosition` rebroadcasts are separately throttled to about 1 second.
+
+For holtburger this means:
+
+- navigation planning should use the outbound `MoveToState` pulse cadence, because that is the control resolution that determines how finely we can approach a target
+- observer reconstruction and heartbeat timing should model the slower approximately 1-second authoritative / rebroadcast cadence
+
+If these are conflated, navigation becomes too coarse and starts issuing one-second movement pulses, which produces the same visible "snap every second" failure mode we saw during investigation.
+
 #### Quick lifecycle table
 
 | Property | Comes from | Persists between packets? | Needs explicit clear/change? | Notes |
@@ -429,7 +461,7 @@ Only send it while the player is actually moving or otherwise needs a movement h
 
 ACE describes it as a moving-player heartbeat, not a universal idle heartbeat. It also sets requested location with broadcast enabled, and in [Player_Tick.cs](../ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs) that can trigger immediate `UpdatePosition` traffic instead of waiting for the normal `MoveToState` throttle path.
 
-If you send it every second while idle, you create pointless authoritative position updates and may make observers process unnecessary corrections.
+Holtburger currently accepts that extra low-rate position traffic as the safer tradeoff, because never emitting an `AutonomousPosition` during a session has proven more fragile than keeping a steady `~1s` self-position sync once the player is in world.
 
 ### Should `MoveToState` be sent when autonomous movement stops?
 
@@ -478,6 +510,10 @@ Typical cause: using `AutonomousPosition` without corresponding `MoveToState` st
 
 Typical cause: resending `AutonomousPosition` or `MoveToState` too aggressively while heading and speed are effectively unchanged.
 
+### Remote players look slower or advance in 1-second hops
+
+Typical cause: the observer records `UpdateMotion` intent but only translates remote actors when an authoritative `UpdatePosition` arrives. On the stock ACE image, both retail and custom movers may be observed through sparse no-velocity position anchors, so observers must continue projecting forward motion from the last sticky motion state between those anchors.
+
 ### Invisible server-side movement after local stop
 
 Typical cause: the client's local controller believes it stopped, but the last meaningful raw motion state was never cancelled with a stop pulse.
@@ -498,7 +534,7 @@ Use this as the minimum bar for an autonomous movement implementation.
 - Mirror server movement epochs back in client-authored movement packets; do not locally invent sequence increments.
 - Maintain a local locomotion controller that produces heading/speed intent, not raw packet spam.
 - Send `MoveToState` on start, stop, and meaningful intent changes.
-- Send `AutonomousPosition` only while actually moving, for explicit snap-facing updates, and as the final end-of-sequence position bookend before clearing motion; do not keep an idle 1-second heartbeat.
+- Keep a low-rate `AutonomousPosition` heartbeat running once the client has a valid self pose, and still send explicit syncs for snap-facing updates and movement end bookends.
 - Explicitly clear sticky motion commands with a stop or changed `MoveToState`; do not assume they decay on their own.
 - Include grounded/contact metadata truthfully.
 - Preserve or explicitly choose the correct ACE motion style in outbound `MoveToState` packets.

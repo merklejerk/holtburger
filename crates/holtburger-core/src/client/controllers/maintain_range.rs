@@ -1,6 +1,6 @@
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::projection::EntitySpatialSample;
 use holtburger_common::position::WorldPosition;
+use holtburger_world::SpatialEntitySample;
 use std::time::{Duration, Instant};
 
 const MAINTAIN_RANGE_RESTART_MARGIN_M: f32 = 0.25;
@@ -15,7 +15,7 @@ pub struct MaintainRangeConfig {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaintainRangeSpatialInput {
-    pub target: EntitySpatialSample,
+    pub target: SpatialEntitySample,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,6 +33,7 @@ pub enum MaintainRangeInput {
 }
 
 impl MaintainRangeInput {
+    #[cfg(test)]
     pub(crate) fn tick(input: MaintainRangeTickInput) -> Self {
         Self::Tick(Box::new(input))
     }
@@ -188,9 +189,9 @@ impl Controller for MaintainRangeController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::projection::ProjectionMode;
     use holtburger_common::Guid;
     use holtburger_common::Vector3;
+    use holtburger_world::SpatialSampleMode;
 
     fn position(x: f32) -> WorldPosition {
         WorldPosition {
@@ -211,10 +212,10 @@ mod tests {
     fn target(
         authoritative_x: f32,
         projected_x: f32,
-        mode: ProjectionMode,
+        mode: SpatialSampleMode,
     ) -> Option<MaintainRangeSpatialInput> {
         Some(MaintainRangeSpatialInput {
-            target: EntitySpatialSample {
+            target: SpatialEntitySample {
                 guid: Guid(0x1234),
                 authoritative_pose: position(authoritative_x),
                 projected_pose: position(projected_x),
@@ -227,7 +228,7 @@ mod tests {
     }
 
     fn authoritative_target(x: f32) -> Option<MaintainRangeSpatialInput> {
-        target(x, x, ProjectionMode::AuthoritativeOnly)
+        target(x, x, SpatialSampleMode::AuthoritativeOnly)
     }
 
     #[test]
@@ -449,7 +450,7 @@ mod tests {
         let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             player_position: position(0.0),
-            target: target(0.5, 1.5, ProjectionMode::SimulatingVelocity),
+            target: target(0.5, 1.5, SpatialSampleMode::SimulatingVelocity),
             target_use_radius: None,
         }));
 

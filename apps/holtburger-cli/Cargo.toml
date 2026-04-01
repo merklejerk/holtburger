@@ -25,3 +25,4 @@ unicode-width.workspace = true
 ratatui-textarea.workspace = true
 holtburger-world.workspace = true
 holtburger-session.workspace = true
+smallvec.workspace = true

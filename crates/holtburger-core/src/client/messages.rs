@@ -34,7 +34,7 @@ impl Client {
 
         while !pending_events.is_empty() {
             for event in &pending_events {
-                self.handle_world_event(event);
+                self.handle_runtime_world_event(event);
             }
 
             let mut follow_up_events = Vec::new();
@@ -45,13 +45,14 @@ impl Client {
                             .record_server_control_sequence(data.server_control_sequence);
                         let (wire_events, world_events) = {
                             let Client {
+                                simulation,
                                 movement,
                                 world,
                                 session,
                                 ..
                             } = self;
-                            movement
-                                .handle_server_controlled_movement(*data, world, session)
+                            simulation
+                                .handle_server_controlled_movement(*data, movement, world, session)
                                 .await?
                         };
                         for event in wire_events {
@@ -500,7 +501,7 @@ mod tests {
     use super::*;
     use crate::client::{ClientState, builder};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType};
+    use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType, Quaternion};
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::traits::ProtocolPack;
@@ -532,6 +533,36 @@ mod tests {
             motion_flags: 0,
             current_style: MotionStance::SwordCombat.interpreted(),
             data: MovementTypeData::Invalid(MovementInvalid::default()),
+        }))
+    }
+
+    fn server_controlled_move_to_position(
+        guid: holtburger_common::Guid,
+        server_control_sequence: u16,
+        movement_sequence: u16,
+        origin: WorldPosition,
+        desired_heading: f32,
+    ) -> GameMessage {
+        GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid,
+            object_instance_sequence: 7,
+            movement_sequence,
+            server_control_sequence,
+            is_autonomous: false,
+            movement_type: MovementType::MoveToPosition,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::MoveToPosition(MoveToPosition {
+                origin: Origin {
+                    cell_id: origin.landblock_id,
+                    position: origin.coords,
+                },
+                params: MoveToParameters {
+                    desired_heading,
+                    ..Default::default()
+                },
+                run_rate: 1.0,
+            }),
         }))
     }
 
@@ -625,6 +656,52 @@ mod tests {
         assert_eq!(client.world.player.server_control_sequence, 10);
         assert_eq!(client.session.packet_sequence, 1);
         assert_eq!(client.session.bytes_out, 0);
+    }
+
+    #[tokio::test]
+    async fn server_controlled_move_to_position_flows_through_world_apply() {
+        let mut client = build_test_client();
+        let player_guid = holtburger_common::Guid(0x50000001);
+        let start = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let destination = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(32.0, 48.0, 0.0),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+
+        client.world.player.guid = player_guid;
+        client.world.player.position = start;
+        client.world.player.server_control_sequence = 9;
+        client
+            .world
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), start));
+
+        let encoded = encode_message(&server_controlled_move_to_position(
+            player_guid,
+            10,
+            20,
+            destination,
+            90.0_f32.to_radians(),
+        ));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert_eq!(client.world.player.position, start);
+        let body = client
+            .world
+            .scene
+            .body(holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
+            .expect("server-controlled movement should update the local runtime body");
+        assert_eq!(body.pose.landblock_id, destination.landblock_id);
+        assert_eq!(body.pose.coords, destination.coords);
+        assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
+        assert_eq!(client.session.packet_sequence, 2);
     }
 
     #[tokio::test]

@@ -4,12 +4,15 @@ use holtburger_dat::{
     MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
 };
 use holtburger_session::Session;
-use holtburger_world::WorldState;
+use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldState};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-use super::{Client, ClientState, TurbineChatState, auth::AuthState, movement::MovementSystem};
+use super::{
+    Client, ClientState, TurbineChatState, auth::AuthState, movement::MovementSystem,
+    simulation::ClientSimulationSystem,
+};
 
 type Provider = Arc<dyn ResourceProvider>;
 
@@ -46,6 +49,7 @@ pub struct ClientBuilder {
     dats_path: Option<PathBuf>,
     server_endpoint: Option<ServerEndpoint>,
     mounted_providers: Vec<MountedResourceProvider>,
+    spatial_physics: Option<Arc<dyn SpatialPhysics>>,
 }
 
 impl ClientBuilder {
@@ -55,6 +59,7 @@ impl ClientBuilder {
             dats_path: None,
             server_endpoint: None,
             mounted_providers: Vec::new(),
+            spatial_physics: None,
         }
     }
 
@@ -74,6 +79,11 @@ impl ClientBuilder {
     pub fn mount_provider(mut self, scope: ResourceScope, provider: Provider) -> Self {
         self.mounted_providers
             .push(MountedResourceProvider::new(scope, provider));
+        self
+    }
+
+    pub fn spatial_physics(mut self, physics: Arc<dyn SpatialPhysics>) -> Self {
+        self.spatial_physics = Some(physics);
         self
     }
 
@@ -160,13 +170,16 @@ impl ClientBuilder {
 
     fn finish(self, session: Session, mounted: Arc<ScopedResourceResolver>) -> Result<Client> {
         self.validate_required_assets(&mounted)?;
+        let spatial_physics = self
+            .spatial_physics
+            .unwrap_or_else(|| Arc::new(BasicSpatialPhysics));
 
         let (wire_event_tx, _) = broadcast::channel(1024);
         let (client_view_event_tx, _) = broadcast::channel(256);
 
         Ok(Client {
             session,
-            world: WorldState::new(mounted)?,
+            world: WorldState::new_with_spatial_physics(mounted, spatial_physics)?,
             active_confirmation: None,
             active_busy_operation: None,
             state: ClientState::Connected,
@@ -176,6 +189,7 @@ impl ClientBuilder {
             message_dump_dir: None,
             message_counter: 0,
             movement: MovementSystem::new(),
+            simulation: ClientSimulationSystem::new(),
             auth: AuthState::new(self.account_name),
             turbine_chat: TurbineChatState::default(),
         })
@@ -233,7 +247,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
 
     let mut client = Client {
         session: Session::new_test(),
-        world: WorldState::synthetic(),
+        world: WorldState::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics)),
         active_confirmation: None,
         active_busy_operation: None,
         state: ClientState::Connected,
@@ -243,6 +257,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
         message_dump_dir: None,
         message_counter: 0,
         movement: MovementSystem::new(),
+        simulation: ClientSimulationSystem::new(),
         auth: AuthState::new("test".to_string()),
         turbine_chat: TurbineChatState::default(),
     };
@@ -253,8 +268,42 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::{Guid, Vector3};
     use holtburger_dat::{DatFileType, HbaReader, HbaWriter};
+    use holtburger_world::{
+        ContactState, SolveActorInput, SolvedActorKinematics, SpatialScene, SpatialSolveBatch,
+        SpatialSolveRequest,
+    };
+    use smallvec::smallvec;
+    use std::time::Duration;
     use tempfile::tempdir;
+
+    #[derive(Debug, Default)]
+    struct MarkerSpatialPhysics;
+
+    impl SpatialPhysics for MarkerSpatialPhysics {
+        fn solve(
+            &self,
+            request: &SpatialSolveRequest,
+            _scene: &mut SpatialScene,
+        ) -> SpatialSolveBatch {
+            SpatialSolveBatch {
+                solved: request
+                    .actors
+                    .iter()
+                    .map(|actor| SolvedActorKinematics {
+                        actor_id: actor.actor_id,
+                        pose: actor.pose,
+                        velocity: actor.velocity,
+                        omega: actor.omega,
+                        contact: ContactState::Grounded,
+                        projection_state: None,
+                    })
+                    .collect(),
+                events: Default::default(),
+            }
+        }
+    }
 
     fn repo_portal_hba_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
@@ -346,5 +395,39 @@ mod tests {
 
         assert!(error.to_string().contains("skill table"));
         assert!(error.to_string().contains("portal asset"));
+    }
+
+    #[test]
+    fn builder_injects_custom_spatial_physics() {
+        let dir = tempdir().expect("tempdir should be created");
+        if !write_hba(
+            &dir.path().join("portal.hba"),
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+        ) {
+            return;
+        }
+
+        let client = ClientBuilder::new("test")
+            .dats_path(dir.path().to_path_buf())
+            .spatial_physics(Arc::new(MarkerSpatialPhysics))
+            .build_with_session(Session::new_test())
+            .expect("builder should accept custom spatial physics");
+
+        let request = SpatialSolveRequest {
+            dt: Duration::from_millis(30),
+            actors: smallvec![SolveActorInput {
+                actor_id: Guid(0x5000_0001),
+                pose: Default::default(),
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(),
+            }],
+            local_drive: None,
+        };
+        let mut scene = SpatialScene::new_with_physics(Arc::clone(client.world.scene.physics()));
+
+        let batch = Arc::clone(client.world.scene.physics()).solve(&request, &mut scene);
+
+        assert_eq!(batch.solved.len(), 1);
+        assert_eq!(batch.solved[0].contact, ContactState::Grounded);
     }
 }

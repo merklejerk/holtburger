@@ -570,11 +570,14 @@ impl WorldState {
 
     /// Updates the player's position, ensuring the record in PlayerState,
     /// the mirrored Entity, and the SpatialScene stay in sync.
-    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<WorldEvent> {
-        let mut events = Vec::new();
+    fn update_player_position(
+        &mut self,
+        mut pos: WorldPosition,
+        sync: AuthoritativeBodySync,
+    ) -> Option<(Guid, WorldPosition)> {
         let guid = self.player.guid;
         if guid == Guid::NULL {
-            return events;
+            return None;
         }
 
         if !pos.rotation.w.is_finite()
@@ -597,13 +600,17 @@ impl WorldState {
             .get(guid)
             .map(|entity| (entity.velocity, entity.omega))
             .unwrap_or((Vector3::zero(), Vector3::zero()));
-        self.reconcile_authoritative_body(
-            guid,
-            pos,
-            velocity,
-            omega,
-            AuthoritativeBodySync::Snapshot,
-        );
+        self.reconcile_authoritative_body(guid, pos, velocity, omega, sync);
+
+        Some((guid, pos))
+    }
+
+    pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        let Some((guid, pos)) = self.update_player_position(pos, AuthoritativeBodySync::Snapshot)
+        else {
+            return events;
+        };
 
         if let Some(body_id) = self.runtime_body_id_for_guid(guid) {
             Self::emit_runtime_body_changed(&mut events, body_id);
@@ -616,39 +623,8 @@ impl WorldState {
     ///
     /// This is intended for hydration/bootstrap flows where the client is seeding authoritative
     /// state rather than reacting to a live movement update packet.
-    pub fn sync_player_position(&mut self, mut pos: WorldPosition) {
-        let guid = self.player.guid;
-        if guid == Guid::NULL {
-            return;
-        }
-
-        if !pos.rotation.w.is_finite()
-            || !pos.rotation.x.is_finite()
-            || !pos.rotation.y.is_finite()
-            || !pos.rotation.z.is_finite()
-        {
-            pos.rotation = self.player.position.rotation;
-        }
-
-        let old_lb = self.player.position.landblock_id;
-        self.player.position = pos;
-
-        if let Some(entity) = self.entities.get_mut(guid) {
-            entity.position = pos;
-        }
-        self.scene.update_entity(guid, old_lb, pos);
-        let (velocity, omega) = self
-            .entities
-            .get(guid)
-            .map(|entity| (entity.velocity, entity.omega))
-            .unwrap_or((Vector3::zero(), Vector3::zero()));
-        self.reconcile_authoritative_body(
-            guid,
-            pos,
-            velocity,
-            omega,
-            AuthoritativeBodySync::Snapshot,
-        );
+    pub fn sync_player_position(&mut self, pos: WorldPosition) {
+        let _ = self.update_player_position(pos, AuthoritativeBodySync::Snapshot);
     }
 
     pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<WorldEvent> {
@@ -760,24 +736,18 @@ impl WorldState {
             }
             SpatialEvent::ForcedReposition { actor_id, pose } => {
                 if actor_id == self.player.guid {
-                    let mut events = self.set_player_position(pose);
-                    let (velocity, omega) = self
-                        .entities
-                        .get(actor_id)
-                        .map(|entity| (entity.velocity, entity.omega))
-                        .unwrap_or((Vector3::zero(), Vector3::zero()));
-                    self.reconcile_authoritative_body(
-                        actor_id,
-                        pose,
-                        velocity,
-                        omega,
-                        AuthoritativeBodySync::Reset,
-                    );
+                    let Some((guid, pose)) =
+                        self.update_player_position(pose, AuthoritativeBodySync::Reset)
+                    else {
+                        return Vec::new();
+                    };
+
+                    let mut events = Vec::new();
                     if let Some(body_id) = self.runtime_body_id_for_guid(actor_id) {
                         Self::emit_runtime_body_changed(&mut events, body_id);
                     }
                     events.push(WorldEvent::ForcedReposition {
-                        guid: actor_id,
+                        guid,
                         pos: pose,
                         sequence: 0,
                     });

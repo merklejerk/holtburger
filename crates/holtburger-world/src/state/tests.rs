@@ -239,6 +239,62 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
 }
 
 #[test]
+fn local_forced_reposition_uses_single_reset_reconcile_path() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0999);
+    let start_pos = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let forced_pos = WorldPosition {
+        coords: Vector3::new(9.0, 8.0, 3.0),
+        ..start_pos
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = start_pos;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
+
+    let events = state.apply_spatial_event(&crate::SpatialEvent::ForcedReposition {
+        actor_id: player_guid,
+        pose: forced_pos,
+    });
+
+    assert_eq!(state.player.position, forced_pos);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        forced_pos
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                WorldEvent::RuntimeBodyChanged {
+                    body_id: SpatialBodyId::LocalPlayer(guid)
+                } if *guid == player_guid
+            ))
+            .count(),
+        1
+    );
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved { guid, .. } if *guid == player_guid
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::ForcedReposition {
+            guid,
+            pos,
+            sequence: 0,
+        } if *guid == player_guid && *pos == forced_pos
+    )));
+}
+
+#[test]
 fn test_set_player_position_sanitizes_nan_rotation() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);

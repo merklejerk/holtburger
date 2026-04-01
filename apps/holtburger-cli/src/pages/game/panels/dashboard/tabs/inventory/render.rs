@@ -36,37 +36,35 @@ pub fn render_inventory_tab(
     // Sticky summary line for the player's main inventory container
     if let Some(player_guid) = data.player_guid
         && let Some(player_entity) = data.entities.get(&player_guid)
-        && let Some(capacity) = player_entity.items_capacity()
-        && let Some(storage_usage) = data.storage_usage(player_guid)
     {
-        let container_capacity = player_entity.containers_capacity().unwrap_or(0);
+        let mut summary_spans = Vec::new();
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(0)])
-            .split(area);
-
-        let top_area = chunks[0];
-        bottom_area = chunks[1];
-
-        let mut summary_spans = vec![Span::styled(
-            format!("Main Pack ({}/{})", storage_usage.item_used, capacity),
-            Style::default().fg(theme::SUMMARY_FG),
-        )];
-
-        if container_capacity > 0 {
-            summary_spans.push(Span::raw(" | "));
+        if let Some(storage_usage) = data.storage_usage(player_guid)
+            && let Some(capacity) = player_entity.items_capacity()
+        {
             summary_spans.push(Span::styled(
-                format!(
-                    "Packs ({}/{})",
-                    storage_usage.container_used, container_capacity
-                ),
+                format!("Main Pack ({}/{})", storage_usage.item_used, capacity),
                 Style::default().fg(theme::SUMMARY_FG),
             ));
+
+            let container_capacity = player_entity.containers_capacity().unwrap_or(0);
+            if container_capacity > 0 {
+                summary_spans.push(Span::raw(" | "));
+                summary_spans.push(Span::styled(
+                    format!(
+                        "Packs ({}/{})",
+                        storage_usage.container_used, container_capacity
+                    ),
+                    Style::default().fg(theme::SUMMARY_FG),
+                ));
+            }
         }
 
         if let Some(burden) = data.player_burden() {
-            summary_spans.push(Span::raw(" | "));
+            if !summary_spans.is_empty() {
+                summary_spans.push(Span::raw(" | "));
+            }
+
             summary_spans.push(Span::styled(
                 format!("Burden {:.0}%", burden * 100.0),
                 Style::default().fg(if burden > 1.25 {
@@ -79,8 +77,18 @@ pub fn render_inventory_tab(
             ));
         }
 
-        let summary = Paragraph::new(Line::from(summary_spans));
-        f.render_widget(summary, top_area);
+        if !summary_spans.is_empty() {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .split(area);
+
+            let top_area = chunks[0];
+            bottom_area = chunks[1];
+
+            let summary = Paragraph::new(Line::from(summary_spans));
+            f.render_widget(summary, top_area);
+        }
     }
 
     let items = get_list_items(entities, data, view, &counts, selected_index);

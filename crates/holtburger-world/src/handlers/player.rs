@@ -1,6 +1,8 @@
 use crate::WorldEvent;
 use crate::context::{WorldContext, WorldContextExt};
+use crate::entity::EntityMotionSnapshot;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
+use crate::spatial::RuntimeBodyResetCause;
 use crate::state::WorldState;
 use holtburger_protocol::messages::*;
 
@@ -13,9 +15,18 @@ pub(crate) fn handle_message(
         GameMessage::ObjectCreate(data) => {
             if data.public_weenie_desc.guid == state.player.guid
                 && state.player.guid != holtburger_common::Guid::NULL
-                && let Some(pos) = data.pos
             {
-                state.sync_player_position(pos);
+                if let Some(pos) = data.pos {
+                    state.sync_player_position(pos);
+                }
+
+                if let Some(current_style) = EntityMotionSnapshot::from_object_description(data)
+                    .and_then(|snapshot| snapshot.current_style)
+                {
+                    state
+                        .player
+                        .update_last_server_motion_style(current_style.interpreted());
+                }
             }
             false
         }
@@ -58,6 +69,8 @@ pub(crate) fn handle_message(
         }
         GameMessage::PlayerTeleport(data) => {
             state.player.set_teleport_sequence(data.teleport_sequence);
+            events
+                .extend(state.suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset));
             events.push(WorldEvent::TeleportStarted {
                 sequence: data.teleport_sequence,
             });

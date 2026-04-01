@@ -55,8 +55,7 @@ fn render_status_panel(
 
     // 1. Coords + Compass
     let pos_info = data
-        .player_pos
-        .as_ref()
+        .runtime_player_position()
         .map(|pos| pos.to_world_coords().to_string_with_precision(2))
         .unwrap_or_else(|| "0.00N, 0.00E".to_string());
     let compass_str = get_compass_str(data);
@@ -75,11 +74,7 @@ fn render_status_panel(
 }
 
 fn get_compass_str(data: &GameData) -> String {
-    let heading_rad = data
-        .player_pos
-        .as_ref()
-        .map(|p| p.rotation.to_heading())
-        .unwrap_or(0.0);
+    let heading_rad = data.runtime_heading();
     // Normalize 0-360
     let heading_deg =
         (heading_rad.to_degrees() % DEGREES_IN_CIRCLE + DEGREES_IN_CIRCLE) % DEGREES_IN_CIRCLE;

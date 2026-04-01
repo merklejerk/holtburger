@@ -221,6 +221,7 @@
     - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
 - [x] Interpolate entity motion properties.
 - [x] Harden reconnect. (Just quit on DC)
+- [x] Burden display missing.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
@@ -229,7 +230,6 @@
 - [ ] Asset pipeline.
 - [ ] isn't it strange that `get_run_rate` lives in cli?
 - [ ] Rename `Client` -> `ClientRuntime`
-- [ ] Burden display missing.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

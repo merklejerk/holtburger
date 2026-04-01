@@ -52,7 +52,7 @@ pub struct GameState {
     pub chat_input: ChatInputState,
 }
 
-const DEFAULT_APPROACH_RUN_RATE: f32 = 4.5;
+const FALLBACK_APPROACH_RUN_RATE: f32 = 4.5;
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -1228,7 +1228,7 @@ impl GameState {
         let run_rate = self
             .data
             .player_run_rate()
-            .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
+            .unwrap_or(FALLBACK_APPROACH_RUN_RATE);
         NavigationSnapshot {
             player_position: self.data.runtime_player_position(),
             run_rate,

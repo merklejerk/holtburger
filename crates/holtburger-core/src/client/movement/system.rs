@@ -1,7 +1,7 @@
 use super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, build_autonomous_position,
     build_motion_state_raw_motion_state, encode_contact_long_jump,
-    has_active_autonomous_position_motion, local_omega_for_state, local_velocity_for_state,
+    has_autonomous_position_sync_target, local_omega_for_state, local_velocity_for_state,
     normalize_heading, player_run_speed_mps, raw_motion_state_with_motion_style,
     signed_heading_delta,
 };
@@ -205,7 +205,7 @@ impl MovementSystem {
         now: Instant,
         world: &WorldState,
     ) {
-        self.next_autonomous_position_heartbeat_at = has_active_autonomous_position_motion(world)
+        self.next_autonomous_position_heartbeat_at = has_autonomous_position_sync_target(world)
             .then_some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
     }
 
@@ -531,10 +531,6 @@ impl MovementSystem {
             self.note_server_motion_cleared();
         }
 
-        if !had_active_local_motion {
-            self.clear_autonomous_position_heartbeat_schedule();
-        }
-
         Ok(state_events)
     }
 
@@ -635,7 +631,7 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
     ) -> Result<bool> {
         let Some(next_heartbeat_at) = self.next_autonomous_position_heartbeat_at else {
-            if has_active_autonomous_position_motion(world) {
+            if has_autonomous_position_sync_target(world) {
                 self.next_autonomous_position_heartbeat_at =
                     Some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
             }
@@ -655,7 +651,7 @@ impl MovementSystem {
             .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
             .await?;
 
-        if has_active_autonomous_position_motion(world) {
+        if has_autonomous_position_sync_target(world) {
             self.refresh_autonomous_position_heartbeat_schedule(now, world);
         } else {
             self.clear_autonomous_position_heartbeat_schedule();

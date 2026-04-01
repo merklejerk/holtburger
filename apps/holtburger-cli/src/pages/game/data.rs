@@ -2,12 +2,15 @@ use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::{
+    PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
+};
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_core::PlayerCharacterOptions;
+use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
 use holtburger_world::spell::SpellCatalog;
@@ -270,7 +273,7 @@ pub struct GameData {
     pub armor: i32,
     /// Current vitae penalty (0.0 to 1.0, where 1.0 is no penalty).
     pub vitae: f32,
-    /// Current position in the world.
+    /// Last authoritative player position projected from entity-style view events.
     pub player_pos: Option<WorldPosition>,
     /// Last grounded state reported by the server for the player.
     pub player_grounded: Option<bool>,
@@ -280,6 +283,8 @@ pub struct GameData {
     pub player_spells: Vec<u32>,
     /// Projected current player character option masks from the core client view.
     pub player_options: Option<PlayerCharacterOptions>,
+    /// Mirrored runtime-body read cache fed from core runtime-body snapshot and delta events.
+    pub runtime_body_cache: RuntimeBodyViewCache,
     /// Full spell catalog loaded from portal.dat.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Local cache of nearby entities.
@@ -326,6 +331,7 @@ impl Default for GameData {
             player_enchantments: Vec::new(),
             player_spells: Vec::new(),
             player_options: None,
+            runtime_body_cache: RuntimeBodyViewCache::default(),
             spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
@@ -391,6 +397,60 @@ impl GameData {
             .map(|player_options| option.is_enabled(player_options))
     }
 
+    pub fn runtime_player_position(&self) -> Option<WorldPosition> {
+        let guid = self.player_guid?;
+        self.runtime_body_cache
+            .projected_pose(guid)
+            .or(self.player_pos)
+    }
+
+    pub fn runtime_position_for_guid(&self, guid: Guid) -> Option<WorldPosition> {
+        if Some(guid) == self.player_guid {
+            return self.runtime_player_position();
+        }
+
+        self.runtime_body_cache
+            .projected_pose(guid)
+            .or_else(|| self.entities.get(&guid).map(|entity| entity.position))
+    }
+
+    pub fn runtime_sample_for_guid(&self, guid: Guid) -> Option<SpatialEntitySample> {
+        if Some(guid) == self.player_guid {
+            if let Some(sample) = self.runtime_body_cache.spatial_sample(guid) {
+                return Some(sample);
+            }
+
+            let pose = self.player_pos?;
+            let (velocity, omega, motion_state) = self
+                .entities
+                .get(&guid)
+                .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
+                .unwrap_or_default();
+
+            return Some(SpatialEntitySample {
+                guid,
+                authoritative_pose: pose,
+                projected_pose: pose,
+                velocity,
+                omega,
+                motion_state,
+                projection_mode: holtburger_world::SpatialSampleMode::AuthoritativeOnly,
+            });
+        }
+
+        self.entities.get(&guid).map(|entity| {
+            self.runtime_body_cache
+                .spatial_sample_or_authoritative(entity)
+        })
+    }
+
+    pub fn runtime_heading(&self) -> f32 {
+        self.runtime_player_position()
+            .unwrap_or_default()
+            .rotation
+            .to_heading()
+    }
+
     pub fn track_container_opened(&mut self, guid: Guid) {
         self.open_containers.insert(guid);
 
@@ -443,14 +503,30 @@ impl WorldContext for GameData {
     fn is_open_container(&self, guid: Guid) -> bool {
         self.open_containers.contains(&guid)
     }
+
+    fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
+        self.attributes
+            .get(&attr)
+            .map(|attribute| attribute.current)
+    }
+
+    fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {
+        let player_guid = self.player_guid?;
+        self.entities.get(&player_guid)?.get_int_prop(prop)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{CuratedCharacterOption, GameData, OPENED_CONTAINER_HISTORY_LIMIT};
     use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{CharacterOptions1, CharacterOptions2};
     use holtburger_core::PlayerCharacterOptions;
+    use holtburger_world::context::WorldContextExt;
+    use holtburger_world::entity::Entity;
+    use holtburger_world::stats::{Attribute, AttributeType};
 
     #[test]
     fn opened_container_history_is_bounded() {
@@ -546,5 +622,42 @@ mod tests {
             data.curated_option_enabled(CuratedCharacterOption::GeneralChat),
             Some(false)
         );
+    }
+
+    #[test]
+    fn player_burden_uses_cached_strength_and_player_properties() {
+        let player_guid = Guid(1);
+        let item_guid = Guid(2);
+
+        let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+        player.set_int_prop(PropertyInt::AugmentationIncreasedCarryingCapacity, 1);
+
+        let mut item = Entity::new(item_guid, "Pack Item".to_string(), WorldPosition::default());
+        item.set_int_prop(PropertyInt::EncumbranceVal, 300);
+        item.properties.iids.insert(
+            holtburger_common::properties::PropertyInstanceId::Container,
+            player_guid,
+        );
+
+        let data = GameData {
+            player_guid: Some(player_guid),
+            attributes: std::collections::HashMap::from([(
+                AttributeType::StrengthAttr,
+                Attribute {
+                    attr_type: AttributeType::StrengthAttr,
+                    ranks: 0,
+                    start: 100,
+                    spent_xp: 0,
+                    next_rank_xp: None,
+                    base: 100,
+                    current: 100,
+                },
+            )]),
+            entities: std::collections::HashMap::from([(player_guid, player), (item_guid, item)]),
+            inventory: std::collections::HashSet::from([item_guid]),
+            ..Default::default()
+        };
+
+        assert_eq!(data.player_burden(), Some(300.0 / 18_000.0));
     }
 }

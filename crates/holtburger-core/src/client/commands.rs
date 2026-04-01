@@ -162,7 +162,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::DriveMovement(_) => self.handle_movement_command(cmd).await,
+            ClientCommand::DriveSelf(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -745,9 +745,9 @@ impl Client {
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::DriveMovement(command) => {
-                log::info!(">>> Queueing resolved movement command: {:?}", command);
-                self.movement.enqueue_command(command, Instant::now());
+            ClientCommand::DriveSelf(intent) => {
+                log::info!(">>> Queueing self drive intent: {:?}", intent);
+                self.movement.enqueue_drive_intent(intent, Instant::now());
                 Ok(())
             }
             _ => unreachable!(),
@@ -1376,6 +1376,27 @@ mod tests {
         }
 
         assert!(saw_fellowship);
+    }
+
+    #[tokio::test]
+    async fn request_initial_view_state_projects_runtime_body_snapshot() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::RequestInitialViewState)
+            .await
+            .unwrap();
+
+        let mut saw_snapshot = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::RuntimeBodySnapshot { .. }) {
+                saw_snapshot = true;
+                break;
+            }
+        }
+
+        assert!(saw_snapshot);
     }
 
     #[tokio::test]

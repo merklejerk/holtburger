@@ -1,4 +1,5 @@
 use crate::entity::{Entity, EntityMotionSnapshot};
+use crate::spatial::{RuntimeBodyResetCause, SpatialBodyId};
 use crate::state;
 use crate::stats;
 use crate::vendor;
@@ -66,6 +67,15 @@ pub enum WorldEvent {
     EntityMotionUpdated {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,
+    },
+    RuntimeBodyChanged {
+        body_id: SpatialBodyId,
+    },
+    RuntimeBodyRemoved {
+        body_id: SpatialBodyId,
+    },
+    RuntimeBodiesReset {
+        cause: RuntimeBodyResetCause,
     },
     EntityDespawned(Guid),
     VitalUpdated(stats::Vital),

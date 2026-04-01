@@ -1,4 +1,5 @@
 pub mod components;
+pub mod navigation;
 pub mod pages;
 pub mod state;
 pub mod theme;

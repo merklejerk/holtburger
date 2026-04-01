@@ -1,17 +1,10 @@
 use holtburger_common::Vector3;
+use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
 
-pub(crate) const RUN_ANIM_SPEED: f32 = 4.0;
-
 pub(crate) fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
-    let world_speed = speed * RUN_ANIM_SPEED;
-
-    Vector3::new(
-        -heading.cos() * world_speed,
-        heading.sin() * world_speed,
-        0.0,
-    )
+    Vector3::new(-heading.cos() * speed, heading.sin() * speed, 0.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -49,6 +42,15 @@ pub enum Gait {
     #[default]
     Walk,
     Run,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutonomousDriveIntent {
+    pub desired_world_delta: Vector3,
+    pub desired_heading: Option<f32>,
+    pub target_hint: Option<WorldPosition>,
+    pub gait: Gait,
+    pub force_grounded: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,14 +149,13 @@ impl MotionStateBuilder {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum MovementCommand {
-    SetMotion {
-        state: MotionState,
-    },
-    PulseMotion {
+pub enum PlayerDriveIntent {
+    ManualHeld(MotionState),
+    ManualPulse {
         state: MotionState,
         duration: Duration,
     },
+    Autonomous(AutonomousDriveIntent),
     SnapFacing {
         heading: f32,
     },
@@ -164,15 +165,17 @@ pub enum MovementCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::{Guid, Quaternion};
 
     #[test]
     fn planar_velocity_matches_ac_heading_convention() {
         let west_velocity = planar_velocity_for_heading(0.0, 2.0);
         let north_velocity = planar_velocity_for_heading(90.0f32.to_radians(), 2.0);
 
-        assert_eq!(west_velocity, Vector3::new(-8.0, 0.0, 0.0));
+        assert_eq!(west_velocity, Vector3::new(-2.0, 0.0, 0.0));
         assert!(north_velocity.x.abs() < 1e-5);
-        assert!((north_velocity.y - 8.0).abs() < 1e-5);
+        assert!((north_velocity.y - 2.0).abs() < 1e-5);
     }
 
     #[test]
@@ -221,34 +224,32 @@ mod tests {
     }
 
     #[test]
-    fn movement_command_preserves_resolved_state() {
-        let command = MovementCommand::SetMotion {
-            state: MotionState::builder().run().forward().turn_right().build(),
-        };
+    fn manual_held_intent_preserves_resolved_state() {
+        let intent = PlayerDriveIntent::ManualHeld(
+            MotionState::builder().run().forward().turn_right().build(),
+        );
 
         assert_eq!(
-            command,
-            MovementCommand::SetMotion {
-                state: MotionState {
-                    gait: Gait::Run,
-                    locomotion: Some(Locomotion::Forward),
-                    turning: Some(Turn::Right),
-                    turn_speed: None,
-                },
-            }
+            intent,
+            PlayerDriveIntent::ManualHeld(MotionState {
+                gait: Gait::Run,
+                locomotion: Some(Locomotion::Forward),
+                turning: Some(Turn::Right),
+                turn_speed: None,
+            })
         );
     }
 
     #[test]
-    fn pulse_motion_command_preserves_duration_and_state() {
-        let command = MovementCommand::PulseMotion {
+    fn manual_pulse_intent_preserves_duration_and_state() {
+        let intent = PlayerDriveIntent::ManualPulse {
             state: MotionState::builder().walk().forward().build(),
             duration: Duration::from_millis(120),
         };
 
         assert_eq!(
-            command,
-            MovementCommand::PulseMotion {
+            intent,
+            PlayerDriveIntent::ManualPulse {
                 state: MotionState {
                     gait: Gait::Walk,
                     locomotion: Some(Locomotion::Forward),
@@ -261,26 +262,74 @@ mod tests {
     }
 
     #[test]
-    fn snap_facing_command_is_one_shot() {
-        let command = MovementCommand::SnapFacing { heading: 1.0 };
+    fn snap_facing_intent_is_one_shot() {
+        let command = PlayerDriveIntent::SnapFacing { heading: 1.0 };
 
-        assert_eq!(command, MovementCommand::SnapFacing { heading: 1.0 });
+        assert_eq!(command, PlayerDriveIntent::SnapFacing { heading: 1.0 });
     }
 
     #[test]
-    fn stop_command_is_distinct_from_motion_commands() {
+    fn stop_intent_is_distinct_from_manual_motion_intents() {
         assert_ne!(
-            MovementCommand::Stop,
-            MovementCommand::PulseMotion {
+            PlayerDriveIntent::Stop,
+            PlayerDriveIntent::ManualPulse {
                 state: MotionState::builder().walk().forward().build(),
                 duration: Duration::from_millis(120),
             }
         );
         assert_ne!(
-            MovementCommand::Stop,
-            MovementCommand::SetMotion {
-                state: MotionState::builder().walk().forward().build(),
-            }
+            PlayerDriveIntent::Stop,
+            PlayerDriveIntent::ManualHeld(MotionState::builder().walk().forward().build())
         );
+    }
+
+    #[test]
+    fn autonomous_drive_intent_preserves_requested_fields() {
+        let intent = AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 2.0, 3.0),
+            desired_heading: Some(1.25),
+            target_hint: Some(WorldPosition {
+                landblock_id: Guid(0x1234_0100),
+                coords: Vector3::new(4.0, 5.0, 6.0),
+                rotation: Quaternion::identity(),
+            }),
+            gait: Gait::Run,
+            force_grounded: true,
+        };
+
+        assert_eq!(intent.desired_world_delta, Vector3::new(1.0, 2.0, 3.0));
+        assert_eq!(intent.desired_heading, Some(1.25));
+        assert_eq!(
+            intent.target_hint,
+            Some(WorldPosition {
+                landblock_id: Guid(0x1234_0100),
+                coords: Vector3::new(4.0, 5.0, 6.0),
+                rotation: Quaternion::identity(),
+            })
+        );
+        assert_eq!(intent.gait, Gait::Run);
+        assert!(intent.force_grounded);
+    }
+
+    #[test]
+    fn player_drive_intent_can_wrap_autonomous_drive() {
+        let intent = PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(0.0, 1.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Walk,
+            force_grounded: false,
+        });
+
+        assert!(matches!(
+            intent,
+            PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+                desired_world_delta,
+                desired_heading: None,
+                target_hint: None,
+                gait: Gait::Walk,
+                force_grounded: false,
+            }) if desired_world_delta == Vector3::new(0.0, 1.0, 0.0)
+        ));
     }
 }

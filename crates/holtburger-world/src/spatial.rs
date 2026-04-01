@@ -1,117 +1,15 @@
-use holtburger_common::Guid;
-use holtburger_common::position::WorldPosition;
-use std::collections::{HashMap, HashSet};
+mod physics;
+mod scene;
+mod types;
 
-/// The SpatialScene is responsible for managing the "where" of everything.
-/// It tracks entity positions by landblock and handles spatial queries.
-pub struct SpatialScene {
-    /// Entities indexed by LandblockID for fast local queries.
-    pub landblock_map: HashMap<Guid, HashSet<Guid>>,
-}
-
-impl Default for SpatialScene {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SpatialScene {
-    pub fn new() -> Self {
-        Self {
-            landblock_map: HashMap::new(),
-        }
-    }
-
-    pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, new_lb: Guid) {
-        if old_lb != new_lb
-            && let Some(set) = self.landblock_map.get_mut(&old_lb)
-        {
-            set.remove(&guid);
-        }
-        self.landblock_map.entry(new_lb).or_default().insert(guid);
-    }
-
-    pub fn remove_entity(&mut self, guid: Guid, lb: Guid) {
-        if let Some(set) = self.landblock_map.get_mut(&lb) {
-            set.remove(&guid);
-        }
-    }
-
-    /// Find all entities in a given landblock.
-    pub fn get_in_landblock(&self, lb: Guid) -> Option<&HashSet<Guid>> {
-        self.landblock_map.get(&lb)
-    }
-
-    /// Get all entities in the landblock and its 8 immediate neighbors.
-    /// Useful for coarse filtering before doing fine-grained distance checks.
-    pub fn get_nearby_entities(&self, lb: Guid) -> HashSet<Guid> {
-        let mut nearby = HashSet::new();
-
-        let x = (lb >> 24) & 0xFF;
-        let y = (lb >> 16) & 0xFF;
-
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                // Outdoor bounds 0x01..0xFE
-                if nx > 0 && nx < 255 && ny > 0 && ny < 255 {
-                    // Try to add outdoor landblock (identifed by 0xFFFF)
-                    let neighbor_lb = ((nx as u32) << 24) | ((ny as u32) << 16) | 0xFFFF;
-                    if let Some(set) = self.landblock_map.get(&Guid(neighbor_lb)) {
-                        for &guid in set {
-                            nearby.insert(guid);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Also check the specific lb passed (might be an indoor cell)
-        if let Some(set) = self.landblock_map.get(&lb) {
-            for &guid in set {
-                nearby.insert(guid);
-            }
-        }
-
-        nearby
-    }
-
-    /// Query entities within a certain radius.
-    pub fn get_entities_in_range(&self, _pos: &WorldPosition, _radius: f32) -> Vec<Guid> {
-        // TODO: Implement distance calculations once we have access to Entity positions
-        Vec::new()
-    }
-}
+pub use physics::{
+    BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_actor_kinematics,
+};
+pub use scene::SpatialScene;
+pub use types::*;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) use physics::project_pose_by_velocity;
 
-    #[test]
-    fn test_spatial_neighbors() {
-        let mut scene = SpatialScene::new();
-        let guid_a = Guid(0x11223344);
-        let guid_b = Guid(0x55667788);
-
-        // Landblock (10, 10)
-        let lb_a = (10 << 24) | (10 << 16) | 0xFFFF;
-        // Landblock (11, 10) - direct neighbor to the east
-        let lb_b = (11 << 24) | (10 << 16) | 0xFFFF;
-
-        scene.update_entity(guid_a, Guid(lb_a), Guid(lb_a));
-        scene.update_entity(guid_b, Guid(lb_b), Guid(lb_b));
-
-        let nearby_a = scene.get_nearby_entities(Guid(lb_a));
-        assert!(nearby_a.contains(&guid_a));
-        assert!(
-            nearby_a.contains(&guid_b),
-            "Should find neighbor in adjacent landblock"
-        );
-
-        // Random landblock (50, 50) - far away
-        let lb_far = (50 << 24) | (50 << 16) | 0xFFFF;
-        let nearby_far = scene.get_nearby_entities(Guid(lb_far));
-        assert!(nearby_far.is_empty());
-    }
-}
+#[cfg(test)]
+mod tests;

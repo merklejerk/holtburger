@@ -131,6 +131,7 @@ pub(crate) fn handle_event(
 
                         if old_lb != Guid::NULL {
                             state.scene.remove_entity(guid, old_lb);
+                            state.retire_authoritative_body_for_guid(guid);
                         }
 
                         events.push(WorldEvent::PropertiesUpdated {

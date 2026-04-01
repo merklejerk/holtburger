@@ -1,4 +1,4 @@
-use crate::client::movement_types::MovementCommand;
+use crate::client::movement_types::PlayerDriveIntent;
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -23,6 +23,7 @@ use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 use holtburger_world::vendor::VendorState;
+use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -365,6 +366,18 @@ pub enum ClientViewEvent {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,
     },
+    RuntimeBodySnapshot {
+        bodies: Arc<[RuntimeSpatialBodyView]>,
+    },
+    RuntimeBodyUpserted {
+        body: Box<RuntimeSpatialBodyView>,
+    },
+    RuntimeBodyRemoved {
+        body_id: SpatialBodyId,
+    },
+    RuntimeBodiesReset {
+        cause: RuntimeBodyResetCause,
+    },
     PlayerGroundedUpdated {
         grounded: bool,
     },
@@ -505,7 +518,7 @@ pub enum ClientCommand {
         slot: Option<TargetSlot>,
         amount: u32,
     },
-    DriveMovement(MovementCommand),
+    DriveSelf(PlayerDriveIntent),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,

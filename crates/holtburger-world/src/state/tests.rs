@@ -2051,6 +2051,93 @@ fn test_remote_position_reset_suspends_body_sampling() {
 }
 
 #[test]
+fn test_remote_position_pack_updates_and_clears_linear_velocity() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x6200_0005);
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x0100_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let mut entity = Entity::new(guid, "Target".to_string(), initial_pos);
+    entity.velocity = Vector3::new(0.0, 0.0, 20.046_688);
+    state.add_entity(entity);
+
+    let mut falling_events = Vec::new();
+    let applied = state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x0100_0000),
+                coords: Vector3::new(9.745_981, -58.954_994, 0.004_999_995),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            velocity: Some(Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)),
+            instance_sequence: 88,
+            position_sequence: 285,
+            teleport_sequence: 0,
+            force_position_sequence: 0,
+            flags: UpdatePositionFlag::HAS_VELOCITY,
+            ..PositionPack::default()
+        },
+        &mut falling_events,
+    );
+
+    assert!(applied);
+    assert_eq!(
+        state.entities.get(guid).expect("entity should exist").velocity,
+        Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)
+    );
+    assert!(falling_events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated {
+            guid: event_guid,
+            velocity,
+            ..
+        } if *event_guid == guid
+            && *velocity == Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)
+    )));
+
+    let mut grounded_events = Vec::new();
+    let applied = state.apply_entity_position_pack(
+        guid,
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x0100_0000),
+                coords: Vector3::new(9.745_981, -58.954_994, 0.004_999_995),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            instance_sequence: 88,
+            position_sequence: 286,
+            teleport_sequence: 0,
+            force_position_sequence: 0,
+            flags: UpdatePositionFlag::IS_GROUNDED,
+            ..PositionPack::default()
+        },
+        &mut grounded_events,
+    );
+
+    assert!(applied);
+    assert_eq!(
+        state.entities.get(guid).expect("entity should exist").velocity,
+        Vector3::zero()
+    );
+    let body = state
+        .scene
+        .body(SpatialBodyId::Entity(guid))
+        .expect("remote body should remain present after grounded snap");
+    assert_eq!(body.velocity, Vector3::zero());
+    assert!(grounded_events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated {
+            guid: event_guid,
+            velocity,
+            ..
+        } if *event_guid == guid && *velocity == Vector3::zero()
+    )));
+}
+
+#[test]
 fn test_remove_entity_retires_body_sidecar() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0003);

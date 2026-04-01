@@ -10,7 +10,7 @@ use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::messages::movement::{
-    PositionPack, PositionType, ServerAutonomousPositionData,
+    PositionPack, PositionType, ServerAutonomousPositionData, UpdatePositionFlag,
 };
 use std::time::Instant;
 
@@ -520,7 +520,28 @@ impl WorldState {
             None,
         );
         let accepted = !matches!(outcome, EntityPositionSyncOutcome::Rejected);
+
+        let mut velocity_event = None;
+        if accepted {
+            if let Some(velocity) = pos_pack.velocity {
+                entity.velocity = velocity;
+                velocity_event = Some((velocity, entity.omega));
+            } else if pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED)
+                && entity.velocity != Vector3::zero()
+            {
+                entity.velocity = Vector3::zero();
+                velocity_event = Some((entity.velocity, entity.omega));
+            }
+        }
+
         self.emit_entity_position_sync(guid, old_lb, pos, outcome, events);
+        if let Some((velocity, omega)) = velocity_event {
+            events.push(WorldEvent::EntityVectorUpdated {
+                guid,
+                velocity,
+                omega,
+            });
+        }
         accepted
     }
 

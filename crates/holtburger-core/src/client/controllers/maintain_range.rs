@@ -33,6 +33,7 @@ pub enum MaintainRangeInput {
 }
 
 impl MaintainRangeInput {
+    #[cfg(test)]
     pub(crate) fn tick(input: MaintainRangeTickInput) -> Self {
         Self::Tick(Box::new(input))
     }

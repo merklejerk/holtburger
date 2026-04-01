@@ -1,4 +1,5 @@
 use holtburger_common::Guid;
+use holtburger_core::ClientViewEvent;
 use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
@@ -10,7 +11,6 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
-use holtburger_core::ClientViewEvent;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -22,24 +22,24 @@ use std::fs::File;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::navigation::{
+    NavigationInput, NavigationInteractionChange, NavigationSnapshot, NavigationTick,
+    NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
+};
+#[cfg(test)]
+use crate::navigation::{NavigationMode, NavigationSyncInput};
 use crate::pages::game::GameData;
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
-use crate::navigation::{
-    TuiNavigation, NavigationInput, NavigationInteractionChange, NavigationSnapshot,
-    NavigationTick, NavigationUpdate, ResolvedNavigationTarget,
-};
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
     Interaction, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
-#[cfg(test)]
-use crate::navigation::{NavigationMode as NavigationMode, NavigationSyncInput};
 
 #[derive(Default)]
 pub struct GameState {
@@ -151,10 +151,9 @@ impl GameState {
 
     pub(super) fn live_context_buffer(&self) -> Option<Vec<Line<'static>>> {
         match self.view.context_view {
-            ContextView::Debug(InspectTarget::Entity(_)) => Some(build_context_panel_content(
-                &self.data,
-                &self.view,
-            )),
+            ContextView::Debug(InspectTarget::Entity(_)) => {
+                Some(build_context_panel_content(&self.data, &self.view))
+            }
             _ => None,
         }
     }
@@ -467,7 +466,8 @@ impl GameState {
             }
             AppAction::Approach { .. } | AppAction::Follow { .. } => {
                 self.apply_navigation_input(
-                    navigation_input.expect("navigation actions should project to navigation input"),
+                    navigation_input
+                        .expect("navigation actions should project to navigation input"),
                     &mut result,
                 );
             }
@@ -832,7 +832,10 @@ impl GameState {
         self.refresh_stale_attack_sequence(now, &mut result);
         self.sync_weapon_swap_controller(now, &mut result);
 
-        let update = self.runtime.navigation.tick(self.navigation_tick(now, elapsed));
+        let update = self
+            .runtime
+            .navigation
+            .tick(self.navigation_tick(now, elapsed));
         self.apply_navigation_update(update, &mut result);
 
         result
@@ -843,10 +846,7 @@ impl GameState {
             self.render_state.context_buffer.clear();
             return;
         }
-        let content = build_context_panel_content(
-            &self.data,
-            &self.view,
-        );
+        let content = build_context_panel_content(&self.data, &self.view);
         self.render_state.context_buffer = content;
     }
 
@@ -1239,13 +1239,13 @@ impl GameState {
                 .combat_runtime
                 .attack_activity(self.data.combat_mode)
                 .is_some(),
-            tracked_target: target_guid
-                .zip(target_sample)
-                .map(|(guid, sample)| ResolvedNavigationTarget {
+            tracked_target: target_guid.zip(target_sample).map(|(guid, sample)| {
+                ResolvedNavigationTarget {
                     guid,
                     sample,
                     use_radius: target_use_radius,
-                }),
+                }
+            }),
         }
     }
 
@@ -1280,8 +1280,9 @@ impl GameState {
 
     fn apply_navigation_input(&mut self, input: NavigationInput, result: &mut UpdateResult) {
         let target_guid = match input {
-            NavigationInput::StartApproach { target }
-            | NavigationInput::StartFollow { target } => Some(target),
+            NavigationInput::StartApproach { target } | NavigationInput::StartFollow { target } => {
+                Some(target)
+            }
             NavigationInput::Cancel
             | NavigationInput::ForcedReposition
             | NavigationInput::TeleportStarted => self.navigation_tick_target_guid(),
@@ -1319,7 +1320,10 @@ impl GameState {
     ) -> Option<NavigationInput> {
         match event {
             ClientViewEvent::ForcedReposition { guid, .. }
-                if Some(*guid) == self.data.player_guid => Some(NavigationInput::ForcedReposition),
+                if Some(*guid) == self.data.player_guid =>
+            {
+                Some(NavigationInput::ForcedReposition)
+            }
             ClientViewEvent::TeleportStarted { .. } => Some(NavigationInput::TeleportStarted),
             _ => None,
         }
@@ -1748,14 +1752,13 @@ mod tests {
             ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
                 locomotion: Some(Locomotion::Forward),
                 ..
-            }))
-                | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
-                    state: MotionState {
-                        locomotion: Some(Locomotion::Forward),
-                        ..
-                    },
+            })) | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
+                state: MotionState {
+                    locomotion: Some(Locomotion::Forward),
                     ..
-                })
+                },
+                ..
+            })
         )
     }
 
@@ -1792,9 +1795,10 @@ mod tests {
     }
 
     fn has_stop_navigation_command(result: &UpdateResult) -> bool {
-        result.commands.iter().any(|command| {
-            matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop))
-        })
+        result
+            .commands
+            .iter()
+            .any(|command| matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop)))
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
@@ -3064,7 +3068,9 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let _ = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
+        let _ = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
 
         let result = state.handle_tick(0.1);
 
@@ -3099,7 +3105,9 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let _ = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
+        let _ = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
 
         let first_tick = state.handle_tick(0.1);
         assert!(has_autonomous_navigation_command(&first_tick));
@@ -3565,8 +3573,8 @@ mod tests {
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_sequence_active);
 
-            let post_teleport_tick = state.handle_tick(0.016);
-            assert!(!has_autonomous_navigation_command(&post_teleport_tick));
+        let post_teleport_tick = state.handle_tick(0.016);
+        assert!(!has_autonomous_navigation_command(&post_teleport_tick));
     }
 
     #[test]
@@ -3898,14 +3906,18 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let first = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
+        let first = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
 
         assert!(first.commands.is_empty());
 
         let first_tick = state.handle_tick(0.016);
         assert!(has_autonomous_navigation_command(&first_tick));
 
-        let second = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
+        let second = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
 
         assert!(second.commands.is_empty());
         assert!(has_active_approach(&state));

@@ -69,7 +69,8 @@ pub(crate) fn handle_message(
         }
         GameMessage::PlayerTeleport(data) => {
             state.player.set_teleport_sequence(data.teleport_sequence);
-            events.extend(state.suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset));
+            events
+                .extend(state.suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset));
             events.push(WorldEvent::TeleportStarted {
                 sequence: data.teleport_sequence,
             });

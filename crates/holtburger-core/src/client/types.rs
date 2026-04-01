@@ -17,13 +17,13 @@ use holtburger_protocol::messages::{
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
-use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 use holtburger_world::vendor::VendorState;
+use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

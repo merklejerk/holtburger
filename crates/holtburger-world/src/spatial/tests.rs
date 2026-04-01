@@ -1,7 +1,7 @@
 use super::*;
 use crate::entity::EntityMotionSnapshot;
-use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::time::{Duration, Instant};
 
@@ -167,14 +167,7 @@ fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
     let body_id = SpatialBodyId::LocalPlayer(guid);
     let pose = make_position(10.0, 20.0, 0.0);
 
-    scene.upsert_runtime_body_snapshot(
-        body_id,
-        pose,
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
+    scene.upsert_runtime_body_snapshot(body_id, pose, Vector3::zero(), Vector3::zero(), None, now);
 
     let request = SpatialSolveRequest {
         dt: Duration::from_millis(100),
@@ -215,14 +208,7 @@ fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
     let body_id = SpatialBodyId::LocalPlayer(guid);
     let pose = make_position(10.0, 20.0, 0.0);
 
-    scene.upsert_runtime_body_snapshot(
-        body_id,
-        pose,
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
+    scene.upsert_runtime_body_snapshot(body_id, pose, Vector3::zero(), Vector3::zero(), None, now);
     scene.apply_forced_reposition_reset(body_id, pose, now);
 
     let request = SpatialSolveRequest {
@@ -271,14 +257,7 @@ fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
         rotation: Quaternion::identity(),
     };
 
-    scene.upsert_runtime_body_snapshot(
-        body_id,
-        pose,
-        Vector3::zero(),
-        Vector3::zero(),
-        None,
-        now,
-    );
+    scene.upsert_runtime_body_snapshot(body_id, pose, Vector3::zero(), Vector3::zero(), None, now);
 
     let request = SpatialSolveRequest {
         dt: Duration::from_secs(1),
@@ -334,7 +313,9 @@ fn spatial_scene_tracks_body_registration_update_and_removal() {
         .expect("registered body should update");
     assert_eq!(previous.pose, initial_pose);
 
-    let stored = scene.body(body_id).expect("updated body should remain present");
+    let stored = scene
+        .body(body_id)
+        .expect("updated body should remain present");
     assert_eq!(stored.pose.coords, Vector3::new(4.0, 5.0, 6.0));
     assert_eq!(stored.velocity, Vector3::new(7.0, 8.0, 0.0));
     assert_eq!(stored.sampling.mode, SpatialSampleMode::SimulatingVelocity);
@@ -361,7 +342,10 @@ fn spatial_scene_allocates_ephemeral_bodies_monotonically() {
 
     assert_eq!(first, SpatialBodyId::Ephemeral(1));
     assert_eq!(second, SpatialBodyId::Ephemeral(2));
-    assert_eq!(scene.body(first).and_then(|body| body.authoritative_pose), None);
+    assert_eq!(
+        scene.body(first).and_then(|body| body.authoritative_pose),
+        None
+    );
     assert_eq!(scene.body(second).map(|body| body.pose), Some(pose));
 }
 
@@ -383,7 +367,10 @@ fn body_solver_bridge_supports_guid_backed_inputs_and_rejects_ephemeral_events()
     let entity_actor_input = entity_body_input
         .into_actor_input()
         .expect("entity body should bridge to Guid-backed actor input");
-    assert_eq!(SolveBodyInput::from_actor_input(entity_actor_input), entity_body_input);
+    assert_eq!(
+        SolveBodyInput::from_actor_input(entity_actor_input),
+        entity_body_input
+    );
 
     let body_input = SolveBodyInput {
         body_id: SpatialBodyId::LocalPlayer(Guid(0x7000_0002)),
@@ -434,14 +421,19 @@ fn reconcile_authoritative_body_resets_sampling_on_forced_reposition() {
         start + Duration::from_secs(1),
     );
 
-    let body = scene.body(body_id).expect("body should exist after reconcile");
+    let body = scene
+        .body(body_id)
+        .expect("body should exist after reconcile");
     assert_eq!(body.authoritative_pose, Some(reset_pose));
     assert_eq!(body.pose, reset_pose);
     assert_eq!(body.velocity, Vector3::new(4.0, 5.0, 6.0));
     assert_eq!(body.omega, Vector3::new(0.0, 0.0, 1.0));
     assert_eq!(body.motion_state, None);
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
-    assert_eq!(body.sampling.last_derived_at, start + Duration::from_secs(1));
+    assert_eq!(
+        body.sampling.last_derived_at,
+        start + Duration::from_secs(1)
+    );
 }
 
 #[test]
@@ -451,8 +443,16 @@ fn spatial_scene_runtime_body_views_include_entity_local_player_and_ephemeral_bo
     let entity_id = SpatialBodyId::Entity(Guid(0x7100_0010));
     let player_id = SpatialBodyId::LocalPlayer(Guid(0x7100_0011));
 
-    scene.register_body(SpatialBody::new(entity_id, make_position(1.0, 2.0, 0.0), now));
-    scene.register_body(SpatialBody::new(player_id, make_position(3.0, 4.0, 0.5), now));
+    scene.register_body(SpatialBody::new(
+        entity_id,
+        make_position(1.0, 2.0, 0.0),
+        now,
+    ));
+    scene.register_body(SpatialBody::new(
+        player_id,
+        make_position(3.0, 4.0, 0.5),
+        now,
+    ));
     let ephemeral_id = scene.register_ephemeral_body(make_position(5.0, 6.0, 1.0), now);
 
     let views: Vec<_> = scene.iter_runtime_body_views().collect();

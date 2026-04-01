@@ -143,16 +143,18 @@ impl WorldState {
             });
         }
 
-        self.entities.get(guid).map(|entity| RuntimeSpatialBodyView {
-            body_id,
-            authoritative_pose: Some(entity.position),
-            runtime_pose: entity.position,
-            velocity: entity.velocity,
-            omega: entity.omega,
-            motion_state: entity.motion_snapshot,
-            contact: ContactState::Unknown,
-            sample_mode: SpatialSampleMode::AuthoritativeOnly,
-        })
+        self.entities
+            .get(guid)
+            .map(|entity| RuntimeSpatialBodyView {
+                body_id,
+                authoritative_pose: Some(entity.position),
+                runtime_pose: entity.position,
+                velocity: entity.velocity,
+                omega: entity.omega,
+                motion_state: entity.motion_snapshot,
+                contact: ContactState::Unknown,
+                sample_mode: SpatialSampleMode::AuthoritativeOnly,
+            })
     }
 
     pub fn runtime_body_views(&self) -> Vec<RuntimeSpatialBodyView> {
@@ -183,10 +185,7 @@ impl WorldState {
         true
     }
 
-    pub fn suspend_runtime_bodies(
-        &mut self,
-        cause: RuntimeBodyResetCause,
-    ) -> Vec<WorldEvent> {
+    pub fn suspend_runtime_bodies(&mut self, cause: RuntimeBodyResetCause) -> Vec<WorldEvent> {
         self.scene.suspend_runtime_bodies(Instant::now());
         let mut events = Vec::new();
         Self::emit_runtime_bodies_reset(&mut events, cause);
@@ -203,7 +202,8 @@ impl WorldState {
             return None;
         }
 
-        self.scene.update_runtime_body_motion_state(body_id, motion_state);
+        self.scene
+            .update_runtime_body_motion_state(body_id, motion_state);
         Some(body_id)
     }
 
@@ -215,10 +215,7 @@ impl WorldState {
         events.push(WorldEvent::RuntimeBodyRemoved { body_id });
     }
 
-    fn emit_runtime_bodies_reset(
-        events: &mut Vec<WorldEvent>,
-        cause: RuntimeBodyResetCause,
-    ) {
+    fn emit_runtime_bodies_reset(events: &mut Vec<WorldEvent>, cause: RuntimeBodyResetCause) {
         events.push(WorldEvent::RuntimeBodiesReset { cause });
     }
 
@@ -231,10 +228,11 @@ impl WorldState {
             return Vec::new();
         }
 
-        if !self
-            .scene
-            .apply_runtime_body_pose(body_id, pose, SpatialSampleMode::SimulatingMotionState)
-        {
+        if !self.scene.apply_runtime_body_pose(
+            body_id,
+            pose,
+            SpatialSampleMode::SimulatingMotionState,
+        ) {
             return Vec::new();
         }
 
@@ -309,10 +307,10 @@ impl WorldState {
                     vec![
                         WorldEvent::RuntimeBodyChanged { body_id },
                         WorldEvent::ForcedReposition {
-                        guid,
-                        pos: pose,
-                        sequence: 0,
-                    },
+                            guid,
+                            pos: pose,
+                            sequence: 0,
+                        },
                     ]
                 })
             }
@@ -764,11 +762,11 @@ impl WorldState {
                 }
 
                 let mut events = Vec::new();
-                if let Some(body_id) = self.runtime_body_id_for_guid(actor_id) {
-                    if self.ensure_runtime_body(body_id) {
-                        let _ = self.scene.apply_runtime_body_contact(body_id, contact);
-                        Self::emit_runtime_body_changed(&mut events, body_id);
-                    }
+                if let Some(body_id) = self.runtime_body_id_for_guid(actor_id)
+                    && self.ensure_runtime_body(body_id)
+                {
+                    let _ = self.scene.apply_runtime_body_contact(body_id, contact);
+                    Self::emit_runtime_body_changed(&mut events, body_id);
                 }
                 self.apply_player_contact_state(contact, &mut events);
                 events

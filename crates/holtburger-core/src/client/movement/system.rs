@@ -15,8 +15,8 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionState;
 use holtburger_session::Session;
-use holtburger_world::spatial::{LocalDriveControl, LocalDriveGait};
 use holtburger_world::SolveBodyInput;
+use holtburger_world::spatial::{LocalDriveControl, LocalDriveGait};
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
 use std::time::{Duration, Instant};
 
@@ -200,11 +200,7 @@ impl MovementSystem {
         self.next_autonomous_position_heartbeat_at = None;
     }
 
-    fn refresh_autonomous_position_heartbeat_schedule(
-        &mut self,
-        now: Instant,
-        world: &WorldState,
-    ) {
+    fn refresh_autonomous_position_heartbeat_schedule(&mut self, now: Instant, world: &WorldState) {
         self.next_autonomous_position_heartbeat_at = has_autonomous_position_sync_target(world)
             .then_some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);
     }
@@ -230,10 +226,7 @@ impl MovementSystem {
                 self.active_drive = Some(ActiveDriveState::manual(state, None));
             }
             QueuedDriveCommand::ManualPulse { state, duration } => {
-                self.active_drive = Some(ActiveDriveState::manual(
-                    state,
-                    Some(now + duration),
-                ));
+                self.active_drive = Some(ActiveDriveState::manual(state, Some(now + duration)));
             }
             QueuedDriveCommand::Autonomous(intent) => {
                 self.active_drive = Some(ActiveDriveState::autonomous(intent));
@@ -284,15 +277,11 @@ impl MovementSystem {
             intent.desired_world_delta.y,
             0.0,
         );
-        let locomotion = (planar_delta.length_squared() > 1e-6)
-            .then_some(Locomotion::Forward);
-        let desired_heading = intent
-            .desired_heading
-            .map(normalize_heading)
-            .or_else(|| {
-                (planar_delta.length_squared() > 1e-6)
-                    .then(|| Vector3::zero().heading_to(&planar_delta))
-            });
+        let locomotion = (planar_delta.length_squared() > 1e-6).then_some(Locomotion::Forward);
+        let desired_heading = intent.desired_heading.map(normalize_heading).or_else(|| {
+            (planar_delta.length_squared() > 1e-6)
+                .then(|| Vector3::zero().heading_to(&planar_delta))
+        });
         let turning = desired_heading.and_then(|desired_heading| {
             let delta = signed_heading_delta(current_heading, desired_heading);
             if delta.abs() <= 1e-4 {
@@ -400,7 +389,10 @@ impl MovementSystem {
         Ok(events)
     }
 
-    pub(crate) fn current_local_drive_control(&self, world: &WorldState) -> Option<LocalDriveControl> {
+    pub(crate) fn current_local_drive_control(
+        &self,
+        world: &WorldState,
+    ) -> Option<LocalDriveControl> {
         if world.player.guid == Guid::NULL {
             return None;
         }
@@ -424,14 +416,19 @@ impl MovementSystem {
         })
     }
 
-    pub(crate) fn current_local_solve_body_input(&self, world: &WorldState) -> Option<SolveBodyInput> {
+    pub(crate) fn current_local_solve_body_input(
+        &self,
+        world: &WorldState,
+    ) -> Option<SolveBodyInput> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return None;
         }
 
         let body_id = SpatialBodyId::LocalPlayer(guid);
-        let pose = world.local_player_runtime_pose().unwrap_or(world.player.position);
+        let pose = world
+            .local_player_runtime_pose()
+            .unwrap_or(world.player.position);
         let (velocity, omega) = match self.active_drive.map(|active| active.intent) {
             Some(ActiveDriveIntent::Manual(state)) => {
                 let heading = pose.rotation.to_heading();

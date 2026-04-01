@@ -1,14 +1,10 @@
-use holtburger_common::position::WorldPosition;
 use holtburger_common::Vector3;
+use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
 
 pub(crate) fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
-    Vector3::new(
-        -heading.cos() * speed,
-        heading.sin() * speed,
-        0.0,
-    )
+    Vector3::new(-heading.cos() * speed, heading.sin() * speed, 0.0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -160,7 +156,9 @@ pub enum PlayerDriveIntent {
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
-    SnapFacing { heading: f32 },
+    SnapFacing {
+        heading: f32,
+    },
     Stop,
 }
 

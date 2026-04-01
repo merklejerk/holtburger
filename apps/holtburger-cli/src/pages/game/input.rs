@@ -470,7 +470,9 @@ mod tests {
         assert!(result.needs_redraw);
         assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { .. }))
+            Some(ClientCommand::DriveSelf(
+                PlayerDriveIntent::SnapFacing { .. }
+            ))
         ));
     }
 

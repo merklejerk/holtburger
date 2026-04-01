@@ -1,6 +1,6 @@
 use super::{
-    ContactState, LocalDriveControl, SelfPlayerDriveProjectionState, SolvedActorKinematics,
-    SpatialSampleMode, SpatialScene, SpatialSolveBatch, SpatialSolveRequest, SolveActorInput,
+    ContactState, LocalDriveControl, SelfPlayerDriveProjectionState, SolveActorInput,
+    SolvedActorKinematics, SpatialSampleMode, SpatialScene, SpatialSolveBatch, SpatialSolveRequest,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Quaternion, Vector3};
@@ -17,7 +17,9 @@ pub(super) fn sample_mode_for_projection_state(
 ) -> SpatialSampleMode {
     match projection_state {
         Some(SelfPlayerDriveProjectionState::AuthorityFrozen) => SpatialSampleMode::Suspended,
-        Some(SelfPlayerDriveProjectionState::LocalGroundedDirectDrive) => SpatialSampleMode::SimulatingMotionState,
+        Some(SelfPlayerDriveProjectionState::LocalGroundedDirectDrive) => {
+            SpatialSampleMode::SimulatingMotionState
+        }
         Some(SelfPlayerDriveProjectionState::LocalAirborne)
         | Some(SelfPlayerDriveProjectionState::ServerControlled)
         | None => {
@@ -35,7 +37,11 @@ fn desired_heading_for_local_drive(control: &LocalDriveControl, current_heading:
         return normalize_heading(desired_heading);
     }
 
-    let planar_delta = Vector3::new(control.desired_world_delta.x, control.desired_world_delta.y, 0.0);
+    let planar_delta = Vector3::new(
+        control.desired_world_delta.x,
+        control.desired_world_delta.y,
+        0.0,
+    );
     if planar_delta.length_squared() <= EPSILON {
         current_heading
     } else {
@@ -74,7 +80,10 @@ fn solve_self_player_local_drive(
 ) -> SolvedActorKinematics {
     let projection_state = derive_self_player_projection_state(scene, control);
     let dt_secs = dt.as_secs_f32().max(0.0);
-    let current_contact = scene.body(control.body_id).map(|body| body.contact).unwrap_or(ContactState::Unknown);
+    let current_contact = scene
+        .body(control.body_id)
+        .map(|body| body.contact)
+        .unwrap_or(ContactState::Unknown);
 
     if dt_secs <= f32::EPSILON {
         return SolvedActorKinematics {
@@ -119,8 +128,16 @@ fn solve_self_player_local_drive(
                 actor_id: input.actor_id,
                 pose: next_pose,
                 velocity: desired_velocity,
-                omega: Vector3::new(0.0, 0.0, signed_heading_delta(current_heading, desired_heading) / dt_secs),
-                contact: if control.force_grounded { ContactState::Grounded } else { current_contact },
+                omega: Vector3::new(
+                    0.0,
+                    0.0,
+                    signed_heading_delta(current_heading, desired_heading) / dt_secs,
+                ),
+                contact: if control.force_grounded {
+                    ContactState::Grounded
+                } else {
+                    current_contact
+                },
                 projection_state: Some(projection_state),
             }
         }
@@ -152,7 +169,11 @@ fn rotate_planar_velocity(velocity: Vector3, turn_step: f32) -> Vector3 {
     }
     let sin = turn_step.sin();
     let cos = turn_step.cos();
-    Vector3::new((velocity.x * cos) + (velocity.y * sin), (-velocity.x * sin) + (velocity.y * cos), velocity.z)
+    Vector3::new(
+        (velocity.x * cos) + (velocity.y * sin),
+        (-velocity.x * sin) + (velocity.y * cos),
+        velocity.z,
+    )
 }
 
 fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
@@ -175,7 +196,8 @@ pub(crate) fn project_pose_by_velocity(
         return authoritative_pose;
     }
 
-    if let Some(indoor_landblock_id) = indoor_projection_landblock_id(authoritative_pose, target_hint)
+    if let Some(indoor_landblock_id) =
+        indoor_projection_landblock_id(authoritative_pose, target_hint)
     {
         let indoor_origin = WorldPosition {
             landblock_id: indoor_landblock_id,
@@ -197,8 +219,10 @@ pub(crate) fn project_pose_by_velocity(
     }
 
     let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
-    let landblock_x = (projected_global.x.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
-    let landblock_y = (projected_global.y.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
+    let landblock_x =
+        (projected_global.x.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
+    let landblock_y =
+        (projected_global.y.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
     let low_word = authoritative_pose.landblock_id.0 & 0xFFFF;
 
     WorldPosition {
@@ -252,16 +276,27 @@ pub struct BasicSpatialPhysics;
 
 impl SpatialPhysics for BasicSpatialPhysics {
     fn solve(&self, request: &SpatialSolveRequest, scene: &mut SpatialScene) -> SpatialSolveBatch {
-        let local_drive_guid = request.local_drive.and_then(|control| control.body_id.authoritative_guid());
-        let solved = request.actors.iter().map(|actor| {
-            if Some(actor.actor_id) == local_drive_guid && let Some(control) = request.local_drive.as_ref() {
-                solve_self_player_local_drive(actor, control, request.dt, scene)
-            } else {
-                advance_actor_kinematics(actor, request.dt)
-            }
-        }).collect();
+        let local_drive_guid = request
+            .local_drive
+            .and_then(|control| control.body_id.authoritative_guid());
+        let solved = request
+            .actors
+            .iter()
+            .map(|actor| {
+                if Some(actor.actor_id) == local_drive_guid
+                    && let Some(control) = request.local_drive.as_ref()
+                {
+                    solve_self_player_local_drive(actor, control, request.dt, scene)
+                } else {
+                    advance_actor_kinematics(actor, request.dt)
+                }
+            })
+            .collect();
 
-        SpatialSolveBatch { solved, events: SmallVec::new() }
+        SpatialSolveBatch {
+            solved,
+            events: SmallVec::new(),
+        }
     }
 }
 
@@ -269,7 +304,14 @@ impl SpatialPhysics for BasicSpatialPhysics {
 pub struct NoopSpatialPhysics;
 
 impl SpatialPhysics for NoopSpatialPhysics {
-    fn solve(&self, _request: &SpatialSolveRequest, _scene: &mut SpatialScene) -> SpatialSolveBatch {
-        SpatialSolveBatch { solved: SmallVec::new(), events: SmallVec::new() }
+    fn solve(
+        &self,
+        _request: &SpatialSolveRequest,
+        _scene: &mut SpatialScene,
+    ) -> SpatialSolveBatch {
+        SpatialSolveBatch {
+            solved: SmallVec::new(),
+            events: SmallVec::new(),
+        }
     }
 }

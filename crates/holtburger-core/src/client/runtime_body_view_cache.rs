@@ -4,10 +4,10 @@
 //! mirrored read-model cache only; it does not own or advance runtime state.
 
 use crate::client::types::ClientViewEvent;
-use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_world::{
-    entity::Entity, RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode,
+    RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode, entity::Entity,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -17,26 +17,16 @@ struct CachedRuntimeBodyView {
     view: RuntimeSpatialBodyView,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RuntimeBodyViewCache {
     bodies: HashMap<SpatialBodyId, CachedRuntimeBodyView>,
-}
-
-impl Default for RuntimeBodyViewCache {
-    fn default() -> Self {
-        Self {
-            bodies: HashMap::new(),
-        }
-    }
 }
 
 impl RuntimeBodyViewCache {
     fn upsert_runtime_body(&mut self, body: RuntimeSpatialBodyView, received_at: Instant) {
         let _ = received_at;
-        self.bodies.insert(
-            body.body_id,
-            CachedRuntimeBodyView { view: body },
-        );
+        self.bodies
+            .insert(body.body_id, CachedRuntimeBodyView { view: body });
     }
 
     fn clear(&mut self) {
@@ -83,11 +73,12 @@ impl RuntimeBodyViewCache {
             .or_else(|| self.bodies.get(&SpatialBodyId::Entity(guid)))
     }
 
-    fn spatial_sample_from_cached(
-        view: &CachedRuntimeBodyView,
-    ) -> Option<SpatialEntitySample> {
+    fn spatial_sample_from_cached(view: &CachedRuntimeBodyView) -> Option<SpatialEntitySample> {
         let guid = view.view.body_id.authoritative_guid()?;
-        let authoritative_pose = view.view.authoritative_pose.unwrap_or(view.view.runtime_pose);
+        let authoritative_pose = view
+            .view
+            .authoritative_pose
+            .unwrap_or(view.view.runtime_pose);
 
         Some(SpatialEntitySample {
             guid,
@@ -117,7 +108,7 @@ impl RuntimeBodyViewCache {
 
     pub fn spatial_sample_or_authoritative(&self, entity: &Entity) -> SpatialEntitySample {
         self.spatial_sample(entity.guid)
-            .unwrap_or_else(|| SpatialEntitySample {
+            .unwrap_or(SpatialEntitySample {
                 guid: entity.guid,
                 authoritative_pose: entity.position,
                 projected_pose: entity.position,
@@ -138,11 +129,10 @@ impl RuntimeBodyViewCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_common::math::Quaternion;
     use holtburger_common::Vector3;
+    use holtburger_common::math::Quaternion;
     use holtburger_world::RuntimeBodyResetCause;
     use std::time::Duration;
-
 
     struct CacheHarness {
         cache: RuntimeBodyViewCache,
@@ -205,7 +195,10 @@ mod tests {
 
         let projected = system.spatial_sample(guid).expect("entity should exist");
         assert_eq!(projected.projected_pose, initial.runtime_pose);
-        assert_eq!(projected.authoritative_pose, initial.authoritative_pose.unwrap());
+        assert_eq!(
+            projected.authoritative_pose,
+            initial.authoritative_pose.unwrap()
+        );
         assert_eq!(projected.projection_mode, initial.sample_mode);
 
         system.handle_view_event(
@@ -215,7 +208,9 @@ mod tests {
             start + Duration::from_millis(50),
         );
 
-        let updated = system.spatial_sample(guid).expect("entity should still exist");
+        let updated = system
+            .spatial_sample(guid)
+            .expect("entity should still exist");
         assert_eq!(updated.projected_pose, make_position(31.0, 42.0, 0.25));
 
         system.handle_view_event(
@@ -261,7 +256,10 @@ mod tests {
 
         let authoritative = system.cache.spatial_sample_or_authoritative(&entity);
         assert_eq!(authoritative.projected_pose, entity.position);
-        assert_eq!(authoritative.projection_mode, SpatialSampleMode::AuthoritativeOnly);
+        assert_eq!(
+            authoritative.projection_mode,
+            SpatialSampleMode::AuthoritativeOnly
+        );
 
         system.handle_view_event(
             &ClientViewEvent::RuntimeBodyUpserted {
@@ -272,6 +270,9 @@ mod tests {
 
         let mirrored = system.cache.spatial_sample_or_authoritative(&entity);
         assert_eq!(mirrored.projected_pose, make_position(11.0, 22.0, 0.25));
-        assert_eq!(mirrored.projection_mode, SpatialSampleMode::SimulatingVelocity);
+        assert_eq!(
+            mirrored.projection_mode,
+            SpatialSampleMode::SimulatingVelocity
+        );
     }
 }

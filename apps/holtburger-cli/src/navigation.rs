@@ -96,8 +96,9 @@ pub(crate) enum NavigationMode {
     StickyMelee { target: Guid },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 enum ActiveNavigation {
+    #[default]
     Idle,
     Approach {
         target_guid: Guid,
@@ -113,12 +114,6 @@ enum ActiveNavigation {
         latched_target_guid: Option<Guid>,
         pursuing: bool,
     },
-}
-
-impl Default for ActiveNavigation {
-    fn default() -> Self {
-        Self::Idle
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -147,11 +142,7 @@ impl TuiNavigation {
         self.drive_active = false;
     }
 
-    fn sync_input(
-        &self,
-        now: Instant,
-        snapshot: NavigationSnapshot,
-    ) -> NavigationSyncInput {
+    fn sync_input(&self, now: Instant, snapshot: NavigationSnapshot) -> NavigationSyncInput {
         NavigationSyncInput {
             now,
             player_position: snapshot.player_position,
@@ -188,7 +179,9 @@ impl TuiNavigation {
                     NavigationUpdate {
                         drive_command: None,
                         interaction_change: NavigationInteractionChange::Set(Some(
-                            Interaction::Approaching { target_guid: target },
+                            Interaction::Approaching {
+                                target_guid: target,
+                            },
                         )),
                     }
                 } else {
@@ -198,14 +191,13 @@ impl TuiNavigation {
             NavigationInput::StartFollow { target } => {
                 self.activate_follow(target, sync_input);
 
-                if matches!(
-                    self.navigation_mode(),
-                    Some(NavigationMode::Follow { .. })
-                ) {
+                if matches!(self.navigation_mode(), Some(NavigationMode::Follow { .. })) {
                     NavigationUpdate {
                         drive_command: None,
                         interaction_change: NavigationInteractionChange::Set(Some(
-                            Interaction::Following { target_guid: target },
+                            Interaction::Following {
+                                target_guid: target,
+                            },
                         )),
                     }
                 } else {
@@ -260,15 +252,12 @@ impl TuiNavigation {
 
         NavigationUpdate {
             drive_command,
-            interaction_change: self.clear_finished_interaction(mode_before, self.navigation_mode()),
+            interaction_change: self
+                .clear_finished_interaction(mode_before, self.navigation_mode()),
         }
     }
 
-    fn activate_approach(
-        &mut self,
-        target: Guid,
-        input: NavigationSyncInput,
-    ) {
+    fn activate_approach(&mut self, target: Guid, input: NavigationSyncInput) {
         self.activate_approach_with_distance(target, self.default_approach_distance, input);
     }
 
@@ -285,11 +274,7 @@ impl TuiNavigation {
         self.sync_approach(input);
     }
 
-    fn activate_follow(
-        &mut self,
-        target: Guid,
-        input: NavigationSyncInput,
-    ) {
+    fn activate_follow(&mut self, target: Guid, input: NavigationSyncInput) {
         self.activate_follow_with_distance(target, self.default_follow_distance, input);
     }
 
@@ -361,7 +346,9 @@ impl TuiNavigation {
             ActiveNavigation::StickyMelee {
                 latched_target_guid: Some(target_guid),
                 ..
-            } => Some(NavigationMode::StickyMelee { target: target_guid }),
+            } => Some(NavigationMode::StickyMelee {
+                target: target_guid,
+            }),
             ActiveNavigation::StickyMelee {
                 latched_target_guid: None,
                 ..
@@ -394,8 +381,12 @@ impl TuiNavigation {
                 input.projected_target_position()
             }
             ActiveNavigation::Idle
-            | ActiveNavigation::Follow { pursuing: false, .. }
-            | ActiveNavigation::StickyMelee { pursuing: false, .. } => None,
+            | ActiveNavigation::Follow {
+                pursuing: false, ..
+            }
+            | ActiveNavigation::StickyMelee {
+                pursuing: false, ..
+            } => None,
         }?;
 
         let desired_world_delta = navigation_drive_delta(
@@ -529,9 +520,7 @@ impl TuiNavigation {
                 NavigationInteractionChange::Unchanged
             }
             (Some(NavigationMode::Approach { .. }), _)
-            | (Some(NavigationMode::Follow { .. }), _) => {
-                NavigationInteractionChange::Set(None)
-            }
+            | (Some(NavigationMode::Follow { .. }), _) => NavigationInteractionChange::Set(None),
             _ => NavigationInteractionChange::Unchanged,
         }
     }
@@ -647,11 +636,11 @@ mod tests {
         let intent = navigation
             .active_drive_intent(
                 sync_input(
-                now + Duration::from_millis(100),
-                Some(player_position),
-                Some(target_sample(target_guid, target_position)),
-                4.5,
-            ),
+                    now + Duration::from_millis(100),
+                    Some(player_position),
+                    Some(target_sample(target_guid, target_position)),
+                    4.5,
+                ),
                 Duration::from_secs_f32(1.0),
             )
             .expect("follow should produce an autonomous drive while out of range");
@@ -703,7 +692,9 @@ mod tests {
         let mut navigation = TuiNavigation::default();
 
         let update = navigation.handle_input(
-            NavigationInput::StartApproach { target: target_guid },
+            NavigationInput::StartApproach {
+                target: target_guid,
+            },
             snapshot(
                 Some(player_position),
                 Some(target_sample(target_guid, target_position)),
@@ -713,9 +704,7 @@ mod tests {
 
         assert_eq!(
             update.interaction_change,
-            NavigationInteractionChange::Set(Some(Interaction::Approaching {
-                target_guid,
-            }))
+            NavigationInteractionChange::Set(Some(Interaction::Approaching { target_guid }))
         );
         assert!(matches!(
             navigation.navigation_mode(),
@@ -729,9 +718,10 @@ mod tests {
         let player_position = world_position(0.0, 0.0, 0.0);
         let target_position = world_position(0.2, 0.0, 0.0);
         let target_guid = Guid(0x5000_0004);
-        let mut navigation = TuiNavigation::default();
-
-        navigation.drive_active = true;
+        let mut navigation = TuiNavigation {
+            drive_active: true,
+            ..Default::default()
+        };
         navigation.activate_approach_with_distance(
             target_guid,
             1.0,
@@ -763,9 +753,10 @@ mod tests {
         let player_position = world_position(0.0, 0.0, 0.0);
         let target_position = world_position(6.0, 0.0, 0.0);
         let target_guid = Guid(0x5000_0005);
-        let mut navigation = TuiNavigation::default();
-
-        navigation.drive_active = true;
+        let mut navigation = TuiNavigation {
+            drive_active: true,
+            ..Default::default()
+        };
         navigation.activate_approach_with_distance(
             target_guid,
             1.0,
@@ -787,7 +778,10 @@ mod tests {
         );
 
         assert_eq!(update.drive_command, Some(PlayerDriveIntent::Stop));
-        assert_eq!(update.interaction_change, NavigationInteractionChange::Set(None));
+        assert_eq!(
+            update.interaction_change,
+            NavigationInteractionChange::Set(None)
+        );
         assert_eq!(navigation.navigation_mode(), None);
     }
 
@@ -878,7 +872,10 @@ mod tests {
             ),
         });
 
-        assert_eq!(update.interaction_change, NavigationInteractionChange::Set(None));
+        assert_eq!(
+            update.interaction_change,
+            NavigationInteractionChange::Set(None)
+        );
         assert_eq!(navigation.navigation_mode(), None);
     }
 

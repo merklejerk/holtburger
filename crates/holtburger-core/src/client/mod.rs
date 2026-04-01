@@ -13,9 +13,9 @@ mod commands;
 pub mod controllers;
 mod messages;
 mod movement;
-mod simulation;
 pub mod movement_types;
 pub mod runtime_body_view_cache;
+mod simulation;
 pub mod types;
 use auth::AuthState;
 pub use builder::ClientBuilder;
@@ -970,8 +970,7 @@ mod tests {
 
         let mut saw_event = false;
         while let Ok(event) = events.try_recv() {
-            if matches!(event, ClientViewEvent::ServerTimeUpdated { time } if time == server_time)
-            {
+            if matches!(event, ClientViewEvent::ServerTimeUpdated { time } if time == server_time) {
                 saw_event = true;
                 break;
             }
@@ -1043,19 +1042,17 @@ mod tests {
         ));
 
         client.movement.enqueue_drive_intent(
-            movement_types::PlayerDriveIntent::Autonomous(
-                movement_types::AutonomousDriveIntent {
-                    desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
-                    desired_heading: Some(1.5),
-                    target_hint: Some(WorldPosition {
-                        landblock_id: Guid(0x1000_0100),
-                        coords: Vector3::new(30.0, 40.0, 0.0),
-                        rotation: Quaternion::identity(),
-                    }),
-                    gait: movement_types::Gait::Run,
-                    force_grounded: true,
-                },
-            ),
+            movement_types::PlayerDriveIntent::Autonomous(movement_types::AutonomousDriveIntent {
+                desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
+                desired_heading: Some(1.5),
+                target_hint: Some(WorldPosition {
+                    landblock_id: Guid(0x1000_0100),
+                    coords: Vector3::new(30.0, 40.0, 0.0),
+                    rotation: Quaternion::identity(),
+                }),
+                gait: movement_types::Gait::Run,
+                force_grounded: true,
+            }),
             now,
         );
 
@@ -1073,15 +1070,23 @@ mod tests {
                 &client.world,
                 &client.movement,
             )
-            .expect("idle local player with active autonomous drive should produce a solve request");
+            .expect(
+                "idle local player with active autonomous drive should produce a solve request",
+            );
 
         let local_drive = request
             .local_drive
             .expect("active autonomous drive should be threaded into the solve request");
-        assert_eq!(local_drive.body_id, holtburger_world::SpatialBodyId::LocalPlayer(guid));
+        assert_eq!(
+            local_drive.body_id,
+            holtburger_world::SpatialBodyId::LocalPlayer(guid)
+        );
         assert_eq!(local_drive.desired_world_delta, Vector3::new(3.0, 4.0, 0.0));
         assert_eq!(local_drive.desired_heading, Some(1.5));
-        assert_eq!(local_drive.gait, holtburger_world::spatial::LocalDriveGait::Run);
+        assert_eq!(
+            local_drive.gait,
+            holtburger_world::spatial::LocalDriveGait::Run
+        );
         assert!(local_drive.force_grounded);
     }
 
@@ -1102,7 +1107,10 @@ mod tests {
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder().run().forward().build(),
+                movement_types::MotionState::builder()
+                    .run()
+                    .forward()
+                    .build(),
             ),
             now,
         );
@@ -1115,7 +1123,12 @@ mod tests {
 
         let request = client
             .simulation
-            .build_solve_request(now, Duration::from_millis(PHYSICS_TICK_MS), &client.world, &client.movement)
+            .build_solve_request(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &client.world,
+                &client.movement,
+            )
             .expect("movement-backed local intent should produce a solve request");
 
         assert_eq!(request.actors.len(), 1);
@@ -1167,7 +1180,10 @@ mod tests {
         client.simulation.track_actor(remote_guid);
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder().run().forward().build(),
+                movement_types::MotionState::builder()
+                    .run()
+                    .forward()
+                    .build(),
             ),
             now,
         );
@@ -1180,16 +1196,32 @@ mod tests {
 
         let request = client
             .simulation
-            .build_solve_request(now, Duration::from_millis(PHYSICS_TICK_MS), &client.world, &client.movement)
+            .build_solve_request(
+                now,
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &client.world,
+                &client.movement,
+            )
             .expect("tracked nearby actor should join the solve set");
 
         assert_eq!(request.actors.len(), 2);
-        assert!(request.actors.iter().any(|actor| actor.actor_id == player_guid));
-        assert!(request.actors.iter().any(|actor| actor.actor_id == remote_guid));
+        assert!(
+            request
+                .actors
+                .iter()
+                .any(|actor| actor.actor_id == player_guid)
+        );
+        assert!(
+            request
+                .actors
+                .iter()
+                .any(|actor| actor.actor_id == remote_guid)
+        );
     }
 
     #[tokio::test]
-    async fn simulation_tick_advances_local_player_runtime_body_without_mutating_authoritative_pose() {
+    async fn simulation_tick_advances_local_player_runtime_body_without_mutating_authoritative_pose()
+     {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
@@ -1205,7 +1237,10 @@ mod tests {
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder().run().forward().build(),
+                movement_types::MotionState::builder()
+                    .run()
+                    .forward()
+                    .build(),
             ),
             now,
         );
@@ -1286,7 +1321,10 @@ mod tests {
         client.simulation.track_actor(remote_guid);
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder().run().forward().build(),
+                movement_types::MotionState::builder()
+                    .run()
+                    .forward()
+                    .build(),
             ),
             now,
         );
@@ -1365,10 +1403,12 @@ mod tests {
         );
 
         assert!(request.is_some());
-        assert!(request
-            .expect("tracked remote mover should produce a solve request")
-            .actors
-            .iter()
-            .any(|actor| actor.actor_id == remote_guid));
+        assert!(
+            request
+                .expect("tracked remote mover should produce a solve request")
+                .actors
+                .iter()
+                .any(|actor| actor.actor_id == remote_guid)
+        );
     }
 }

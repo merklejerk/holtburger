@@ -82,13 +82,11 @@ impl ClientSimulationSystem {
         world: &WorldState,
         movement: &MovementSystem,
     ) -> Option<SpatialSolveRequest> {
-        let local_body = movement
-            .current_local_solve_body_input(world)
-            .or_else(|| {
-                (world.player.guid != Guid::NULL)
-                    .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
-                    .and_then(|body_id| self.build_body_input(world, body_id))
-            });
+        let local_body = movement.current_local_solve_body_input(world).or_else(|| {
+            (world.player.guid != Guid::NULL)
+                .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
+                .and_then(|body_id| self.build_body_input(world, body_id))
+        });
         let local_pose = local_body.map(|body| body.pose);
         let nearby_tracked = local_pose.map(|pose| {
             world
@@ -97,8 +95,7 @@ impl ClientSimulationSystem {
         });
         let mut actors = SmallVec::<[SolveActorInput; 1]>::new();
 
-        if let Some(actor) = local_body.and_then(SolveBodyInput::into_actor_input)
-        {
+        if let Some(actor) = local_body.and_then(SolveBodyInput::into_actor_input) {
             actors.push(actor);
         }
 
@@ -249,11 +246,11 @@ impl ClientSimulationSystem {
         let world_events = world.apply_solved_body_kinematics(&solved);
         movement
             .send_autonomous_position_sync(
-            Instant::now(),
-            world,
-            session,
-            super::movement_types::MovementPacketMetadata::default(),
-        )
+                Instant::now(),
+                world,
+                session,
+                super::movement_types::MovementPacketMetadata::default(),
+            )
             .await?;
 
         Ok((wire_events, world_events))
@@ -311,12 +308,12 @@ impl ClientSimulationSystem {
             MovementTypeData::TurnToObject(tto) => {
                 if tto.desired_heading.abs() > 1e-6 {
                     next_pos.rotation = Quaternion::from_heading(tto.desired_heading);
-                } else if let Some(target) = world.get_visible_entity(tto.target) {
-                    if target.position.landblock_id == next_pos.landblock_id {
-                        next_pos.rotation = Quaternion::from_heading(
-                            next_pos.coords.heading_to(&target.position.coords),
-                        );
-                    }
+                } else if let Some(target) = world.get_visible_entity(tto.target)
+                    && target.position.landblock_id == next_pos.landblock_id
+                {
+                    next_pos.rotation = Quaternion::from_heading(
+                        next_pos.coords.heading_to(&target.position.coords),
+                    );
                 }
             }
             _ => {}
@@ -355,7 +352,9 @@ impl ClientSimulationSystem {
             velocity,
             omega,
             contact: ContactState::Unknown,
-            projection_state: Some(holtburger_world::SelfPlayerDriveProjectionState::ServerControlled),
+            projection_state: Some(
+                holtburger_world::SelfPlayerDriveProjectionState::ServerControlled,
+            ),
         })
     }
 }

@@ -66,10 +66,7 @@ pub fn render_context_pane(
     );
 }
 
-pub fn build_context_panel_content(
-    data: &GameData,
-    view: &ViewState,
-) -> Vec<Line<'static>> {
+pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
     match view.context_view {
         ContextView::Assess(target) => {
             if let Some(object) = resolve_inspectable_target(data, view, target) {
@@ -93,10 +90,7 @@ pub fn build_context_panel_content(
 
             if resolve_inspectable_target(data, view, target).is_some() {
                 let projected_sample = match target {
-                    InspectTarget::Entity(guid) => data
-                        .runtime_body_cache
-                        .spatial_sample(guid)
-                        .map(Into::into),
+                    InspectTarget::Entity(guid) => data.runtime_body_cache.spatial_sample(guid),
                     InspectTarget::VendorItem(_) => None,
                 };
                 return debug::get_debug_info(

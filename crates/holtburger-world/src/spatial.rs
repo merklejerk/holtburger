@@ -2,7 +2,9 @@ mod physics;
 mod scene;
 mod types;
 
-pub use physics::{advance_actor_kinematics, BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics};
+pub use physics::{
+    BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_actor_kinematics,
+};
 pub use scene::SpatialScene;
 pub use types::*;
 

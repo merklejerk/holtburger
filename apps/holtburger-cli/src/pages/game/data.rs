@@ -10,6 +10,7 @@ use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
 use holtburger_world::spell::SpellCatalog;
@@ -17,7 +18,6 @@ use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
-use holtburger_world::SpatialEntitySample;
 use std::sync::Arc;
 
 const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
@@ -438,9 +438,10 @@ impl GameData {
             });
         }
 
-        self.entities
-            .get(&guid)
-            .map(|entity| self.runtime_body_cache.spatial_sample_or_authoritative(entity))
+        self.entities.get(&guid).map(|entity| {
+            self.runtime_body_cache
+                .spatial_sample_or_authoritative(entity)
+        })
     }
 
     pub fn runtime_heading(&self) -> f32 {
@@ -504,7 +505,9 @@ impl WorldContext for GameData {
     }
 
     fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
-        self.attributes.get(&attr).map(|attribute| attribute.current)
+        self.attributes
+            .get(&attr)
+            .map(|attribute| attribute.current)
     }
 
     fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {
@@ -516,9 +519,9 @@ impl WorldContext for GameData {
 #[cfg(test)]
 mod tests {
     use super::{CuratedCharacterOption, GameData, OPENED_CONTAINER_HISTORY_LIMIT};
+    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
-    use holtburger_common::Guid;
     use holtburger_common::{CharacterOptions1, CharacterOptions2};
     use holtburger_core::PlayerCharacterOptions;
     use holtburger_world::context::WorldContextExt;

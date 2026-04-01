@@ -8,6 +8,7 @@ use holtburger_common::properties::{
 };
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::messages::MovementType;
 use holtburger_protocol::messages::movement::messages::motion::{
     MoveToObject, MoveToPosition, MovementInvalid, TurnToHeading, TurnToObject,
 };
@@ -19,7 +20,6 @@ use holtburger_protocol::messages::object::messages::description::ObjectDescript
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
-use holtburger_protocol::messages::MovementType;
 use holtburger_protocol::traits::ProtocolUnpack;
 use std::collections::HashMap;
 
@@ -141,9 +141,9 @@ impl EntityMotionSnapshot {
             MovementType::TurnToObject => {
                 MovementTypeData::TurnToObject(TurnToObject::unpack(movement_data, &mut offset)?)
             }
-            MovementType::TurnToHeading => MovementTypeData::TurnToHeading(
-                TurnToHeading::unpack(movement_data, &mut offset)?,
-            ),
+            MovementType::TurnToHeading => {
+                MovementTypeData::TurnToHeading(TurnToHeading::unpack(movement_data, &mut offset)?)
+            }
             MovementType::Invalid
             | MovementType::RawCommand
             | MovementType::InterpretedCommand

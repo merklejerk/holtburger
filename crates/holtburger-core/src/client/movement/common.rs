@@ -6,8 +6,8 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
-use holtburger_world::context::WorldContextExt;
 use holtburger_world::WorldState;
+use holtburger_world::context::WorldContextExt;
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
@@ -161,19 +161,17 @@ pub(super) fn build_motion_state_raw_motion_state(
         let (command, speed) = locomotion_command_for_state(locomotion, state.gait, run_speed_mps);
         match locomotion {
             Locomotion::Forward | Locomotion::Backstep => {
-                raw_motion_state.flags |=
-                    RawMotionFlags::FORWARD_COMMAND
-                        | RawMotionFlags::FORWARD_HOLD_KEY
-                        | RawMotionFlags::FORWARD_SPEED;
+                raw_motion_state.flags |= RawMotionFlags::FORWARD_COMMAND
+                    | RawMotionFlags::FORWARD_HOLD_KEY
+                    | RawMotionFlags::FORWARD_SPEED;
                 raw_motion_state.forward_command = Some(command);
                 raw_motion_state.forward_hold_key = Some(axis_hold_key);
                 raw_motion_state.forward_speed = Some(speed);
             }
             Locomotion::StrafeLeft | Locomotion::StrafeRight => {
-                raw_motion_state.flags |=
-                    RawMotionFlags::SIDE_STEP_COMMAND
-                        | RawMotionFlags::SIDE_STEP_HOLD_KEY
-                        | RawMotionFlags::SIDE_STEP_SPEED;
+                raw_motion_state.flags |= RawMotionFlags::SIDE_STEP_COMMAND
+                    | RawMotionFlags::SIDE_STEP_HOLD_KEY
+                    | RawMotionFlags::SIDE_STEP_SPEED;
                 raw_motion_state.sidestep_command = Some(command);
                 raw_motion_state.sidestep_hold_key = Some(axis_hold_key);
                 raw_motion_state.sidestep_speed = Some(speed);
@@ -182,8 +180,9 @@ pub(super) fn build_motion_state_raw_motion_state(
     }
 
     if let Some(turn) = state.turning {
-        raw_motion_state.flags |=
-            RawMotionFlags::TURN_COMMAND | RawMotionFlags::TURN_HOLD_KEY | RawMotionFlags::TURN_SPEED;
+        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND
+            | RawMotionFlags::TURN_HOLD_KEY
+            | RawMotionFlags::TURN_SPEED;
         raw_motion_state.turn_command = Some(turn_motion_command_for_state(turn));
         raw_motion_state.turn_hold_key = Some(axis_hold_key);
         raw_motion_state.turn_speed = Some(turn_speed_for_state(state));
@@ -201,11 +200,16 @@ fn locomotion_speed_for_state(state: MotionState, run_speed_mps: f32) -> f32 {
     }
 }
 
-pub(super) fn local_velocity_for_state(current_heading: f32, state: MotionState, run_speed_mps: f32) -> Vector3 {
+pub(super) fn local_velocity_for_state(
+    current_heading: f32,
+    state: MotionState,
+    run_speed_mps: f32,
+) -> Vector3 {
     match state.locomotion {
-        Some(Locomotion::Forward) => {
-            planar_velocity_for_heading(current_heading, locomotion_speed_for_state(state, run_speed_mps))
-        }
+        Some(Locomotion::Forward) => planar_velocity_for_heading(
+            current_heading,
+            locomotion_speed_for_state(state, run_speed_mps),
+        ),
         Some(Locomotion::Backstep) => {
             planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
         }

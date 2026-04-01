@@ -1,19 +1,19 @@
-use super::*;
 use super::super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
-    build_autonomous_position, build_motion_state_raw_motion_state,
-    player_run_speed_mps, raw_motion_state_with_motion_style,
+    build_autonomous_position, build_motion_state_raw_motion_state, player_run_speed_mps,
+    raw_motion_state_with_motion_style,
 };
+use super::*;
 use crate::client::movement_types::Gait;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::movement::{HoldKey, MotionStance};
 use holtburger_session::Session;
+use holtburger_world::WorldState;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
-use holtburger_world::WorldState;
 
 fn seed_player_run_rate(world: &mut WorldState, run_skill: u32) -> f32 {
     world.player.attributes.insert(
@@ -357,12 +357,17 @@ fn motion_state_raw_motion_state_uses_player_run_rate_for_forward_speed() {
         MotionStyle::PreserveServer,
     );
 
-    assert_eq!(raw_motion_state.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
+    assert_eq!(
+        raw_motion_state.forward_command,
+        Some(WALK_FORWARD_MOTION_COMMAND)
+    );
     assert_eq!(raw_motion_state.forward_hold_key, Some(HoldKey::Run as u32));
     assert_eq!(raw_motion_state.forward_speed, Some(expected_run_speed));
-    assert!(raw_motion_state
-        .flags
-        .contains(RawMotionFlags::FORWARD_HOLD_KEY));
+    assert!(
+        raw_motion_state
+            .flags
+            .contains(RawMotionFlags::FORWARD_HOLD_KEY)
+    );
 }
 
 #[test]
@@ -389,9 +394,11 @@ fn motion_state_raw_motion_state_adds_left_turn_when_requested() {
         Some(RUN_HELD_TURN_SPEED_RAD_PER_SEC)
     );
     assert_eq!(raw_motion_state.turn_hold_key, Some(HoldKey::Run as u32));
-    assert!(raw_motion_state
-        .flags
-        .contains(RawMotionFlags::TURN_HOLD_KEY));
+    assert!(
+        raw_motion_state
+            .flags
+            .contains(RawMotionFlags::TURN_HOLD_KEY)
+    );
 }
 
 #[test]
@@ -447,7 +454,6 @@ fn current_local_solve_body_input_uses_planar_run_velocity() {
     assert!(body.velocity.x.abs() < 1e-5);
     assert!((body.velocity.y - expected_run_speed).abs() < 1e-5);
 }
-
 
 #[test]
 fn current_local_solve_body_input_can_turn_in_place() {
@@ -537,9 +543,8 @@ fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
     world.player.force_position_sequence = 44;
     world.entities.insert(entity);
 
-    let position_action =
-        build_autonomous_position(&world, MovementPacketMetadata::default())
-            .expect("moving player should emit autonomous position action");
+    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+        .expect("moving player should emit autonomous position action");
 
     assert_eq!(position_action.position, position);
     assert_eq!(position_action.instance_sequence, 11);
@@ -566,9 +571,8 @@ fn autonomous_position_uses_server_grounded_when_contact_unspecified() {
     world.player.server_grounded = Some(true);
     world.entities.insert(entity);
 
-    let position_action =
-        build_autonomous_position(&world, MovementPacketMetadata::default())
-            .expect("moving player should emit autonomous position action");
+    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+        .expect("moving player should emit autonomous position action");
 
     assert_eq!(position_action.last_contact, 1);
 }
@@ -589,9 +593,8 @@ fn autonomous_position_can_be_built_for_turn_only_motion() {
     world.player.position = position;
     world.entities.insert(entity);
 
-    let position_action =
-        build_autonomous_position(&world, MovementPacketMetadata::default())
-            .expect("turning player should emit autonomous position action");
+    let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
+        .expect("turning player should emit autonomous position action");
 
     assert_eq!(position_action.position, position);
 }

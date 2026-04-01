@@ -1,7 +1,7 @@
 use super::{
-    physics::sample_mode_for_projection_state, AuthoritativeBodySync, BasicSpatialPhysics,
-    ContactState, RuntimeSpatialBodyView, SolvedBodyKinematics, SpatialBody, SpatialBodyId,
-    SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig,
+    AuthoritativeBodySync, BasicSpatialPhysics, ContactState, RuntimeSpatialBodyView,
+    SolvedBodyKinematics, SpatialBody, SpatialBodyId, SpatialPhysics, SpatialSampleMode,
+    SpatialSamplingConfig, physics::sample_mode_for_projection_state,
 };
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
@@ -361,7 +361,9 @@ impl SpatialScene {
 
     pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, pose: WorldPosition) {
         let new_lb = pose.landblock_id;
-        if old_lb != new_lb && let Some(set) = self.landblock_map.get_mut(&old_lb) {
+        if old_lb != new_lb
+            && let Some(set) = self.landblock_map.get_mut(&old_lb)
+        {
             set.remove(&guid);
         }
         self.landblock_map.entry(new_lb).or_default().insert(guid);

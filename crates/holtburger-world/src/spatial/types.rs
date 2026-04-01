@@ -223,12 +223,14 @@ impl SolveBodyInput {
     }
 
     pub fn into_actor_input(self) -> Option<SolveActorInput> {
-        self.body_id.authoritative_guid().map(|actor_id| SolveActorInput {
-            actor_id,
-            pose: self.pose,
-            velocity: self.velocity,
-            omega: self.omega,
-        })
+        self.body_id
+            .authoritative_guid()
+            .map(|actor_id| SolveActorInput {
+                actor_id,
+                pose: self.pose,
+                velocity: self.velocity,
+                omega: self.omega,
+            })
     }
 }
 
@@ -255,21 +257,29 @@ impl SolvedBodyKinematics {
     }
 
     pub fn into_actor_kinematics(self) -> Option<SolvedActorKinematics> {
-        self.body_id.authoritative_guid().map(|actor_id| SolvedActorKinematics {
-            actor_id,
-            pose: self.pose,
-            velocity: self.velocity,
-            omega: self.omega,
-            contact: self.contact,
-            projection_state: self.projection_state,
-        })
+        self.body_id
+            .authoritative_guid()
+            .map(|actor_id| SolvedActorKinematics {
+                actor_id,
+                pose: self.pose,
+                velocity: self.velocity,
+                omega: self.omega,
+                contact: self.contact,
+                projection_state: self.projection_state,
+            })
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpatialBodyEvent {
-    ContactChanged { body_id: SpatialBodyId, contact: ContactState },
-    ForcedReposition { body_id: SpatialBodyId, pose: WorldPosition },
+    ContactChanged {
+        body_id: SpatialBodyId,
+        contact: ContactState,
+    },
+    ForcedReposition {
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+    },
 }
 
 impl SpatialBodyEvent {
@@ -288,8 +298,12 @@ impl SpatialBodyEvent {
 
     pub fn into_spatial_event(self) -> Option<SpatialEvent> {
         match self {
-            Self::ContactChanged { body_id, contact } => body_id.authoritative_guid().map(|actor_id| SpatialEvent::ContactChanged { actor_id, contact }),
-            Self::ForcedReposition { body_id, pose } => body_id.authoritative_guid().map(|actor_id| SpatialEvent::ForcedReposition { actor_id, pose }),
+            Self::ContactChanged { body_id, contact } => body_id
+                .authoritative_guid()
+                .map(|actor_id| SpatialEvent::ContactChanged { actor_id, contact }),
+            Self::ForcedReposition { body_id, pose } => body_id
+                .authoritative_guid()
+                .map(|actor_id| SpatialEvent::ForcedReposition { actor_id, pose }),
         }
     }
 }
@@ -337,8 +351,14 @@ pub struct SolvedActorKinematics {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpatialEvent {
-    ContactChanged { actor_id: Guid, contact: ContactState },
-    ForcedReposition { actor_id: Guid, pose: WorldPosition },
+    ContactChanged {
+        actor_id: Guid,
+        contact: ContactState,
+    },
+    ForcedReposition {
+        actor_id: Guid,
+        pose: WorldPosition,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

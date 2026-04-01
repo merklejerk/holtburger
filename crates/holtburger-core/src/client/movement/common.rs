@@ -81,12 +81,12 @@ fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> 
     u8::from(resolve_contact(world, metadata))
 }
 
-pub(super) fn has_active_autonomous_position_motion(world: &WorldState) -> bool {
-    let Some((_, velocity, omega)) = world.local_player_runtime_kinematics() else {
+pub(super) fn has_autonomous_position_sync_target(world: &WorldState) -> bool {
+    let Some(position) = world.local_player_runtime_pose() else {
         return false;
     };
 
-    velocity.length_squared() >= 0.0001 || omega.length_squared() >= 0.0001
+    world.player.guid != Guid::NULL && position.landblock_id != Guid::NULL
 }
 
 pub(super) fn build_autonomous_position(

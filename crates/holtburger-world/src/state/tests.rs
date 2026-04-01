@@ -152,6 +152,46 @@ fn set_local_player_runtime_pose_only_emits_runtime_body_change() {
 }
 
 #[test]
+fn solved_remote_runtime_body_only_emits_runtime_body_change() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x5000_0222);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(2.0, 3.0, 4.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.add_entity(Entity::new(guid, "Remote".to_string(), pose));
+
+    let events = state.apply_solved_body_kinematics(&SolvedBodyKinematics {
+        body_id: SpatialBodyId::Entity(guid),
+        pose: WorldPosition {
+            coords: Vector3::new(5.0, 6.0, 4.0),
+            ..pose
+        },
+        velocity: Vector3::new(1.0, 0.0, 0.0),
+        omega: Vector3::zero(),
+        contact: ContactState::Grounded,
+        projection_state: None,
+    });
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::RuntimeBodyChanged {
+            body_id: SpatialBodyId::Entity(event_guid)
+        } if *event_guid == guid
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == guid
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated { guid: event_guid, .. } if *event_guid == guid
+    )));
+}
+
+#[test]
 fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0125);

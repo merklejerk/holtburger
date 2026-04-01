@@ -1,9 +1,7 @@
-use anyhow::Result;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
 use holtburger_world::{WorldEvent, WorldState};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
@@ -14,6 +12,7 @@ pub mod controllers;
 mod messages;
 mod movement;
 pub mod movement_types;
+mod runtime;
 pub mod runtime_body_view_cache;
 mod simulation;
 pub mod types;
@@ -145,23 +144,6 @@ impl Client {
         );
     }
 
-    fn poll_busy_timeout(&mut self, now: Instant) {
-        let Some(pending) = self.active_busy_operation.as_ref() else {
-            return;
-        };
-
-        if now < pending.deadline {
-            return;
-        }
-
-        let pending = self
-            .active_busy_operation
-            .take()
-            .expect("busy operation should still exist when timing out");
-        self.emit_busy_state_updated();
-        self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
-    }
-
     fn emit_spell_catalog_loaded(&self) {
         let _ = self
             .client_view_event_tx
@@ -176,19 +158,6 @@ impl Client {
             .send(ClientViewEvent::FellowshipStateUpdated {
                 fellowship: self.world.fellowship.clone(),
             });
-    }
-
-    fn emit_runtime_body_snapshot(&self) {
-        let bodies: Arc<[_]> = self.world.runtime_body_views().into();
-        let _ = self
-            .client_view_event_tx
-            .send(ClientViewEvent::RuntimeBodySnapshot { bodies });
-    }
-
-    fn emit_initial_reference_data(&self) {
-        self.emit_spell_catalog_loaded();
-        self.emit_fellowship_state_updated();
-        self.emit_runtime_body_snapshot();
     }
 
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
@@ -355,57 +324,6 @@ impl Client {
     }
 
     pub fn handle_world_event(&self, event: &WorldEvent) {
-        self.emit_world_view_projection(event);
-    }
-
-    fn sync_server_time(&mut self, server_time: f64, local_time: Instant) {
-        let world_events = self.world.set_server_time_sync(server_time, local_time);
-        for event in world_events {
-            self.handle_world_event(&event);
-        }
-    }
-
-    fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
-        const EPSILON: f32 = 1e-6;
-
-        match event {
-            WorldEvent::EntitySpawned(entity)
-            | WorldEvent::EntityReplaced(entity)
-            | WorldEvent::EntityIdentified(entity) => {
-                if entity.guid != self.world.player.guid
-                    && (entity.velocity.length_squared() > EPSILON
-                        || entity.omega.length_squared() > EPSILON)
-                {
-                    self.simulation.track_actor(entity.guid);
-                }
-            }
-            WorldEvent::EntityVectorUpdated {
-                guid,
-                velocity,
-                omega,
-            } => {
-                if *guid == self.world.player.guid {
-                    return;
-                }
-
-                if velocity.length_squared() > EPSILON || omega.length_squared() > EPSILON {
-                    self.simulation.track_actor(*guid);
-                } else {
-                    self.simulation.untrack_actor(*guid);
-                }
-            }
-            WorldEvent::EntityDespawned(guid) => {
-                self.simulation.untrack_actor(*guid);
-            }
-            WorldEvent::RuntimeBodyChanged { .. }
-            | WorldEvent::RuntimeBodyRemoved { .. }
-            | WorldEvent::RuntimeBodiesReset { .. } => {}
-            _ => {}
-        }
-    }
-
-    fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
-        self.observe_runtime_world_event(event);
         self.emit_world_view_projection(event);
     }
 
@@ -705,125 +623,6 @@ impl Client {
             }
             _ => {}
         }
-    }
-
-    pub async fn run(&mut self) -> Result<()> {
-        // Initial handshake: If this is an activation/logon session, the bin should send ClientCommand::Login
-        self.send_status_event();
-
-        let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
-        let mut last_physics_time = Instant::now();
-
-        loop {
-            if matches!(self.state, ClientState::Disconnected) {
-                break;
-            }
-
-            tokio::select! {
-                _ = net_tick.tick() => {
-                    let now = Instant::now();
-
-                    // 1. Broadcast NetPulse
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
-                        bytes_in: self.session.bytes_in,
-                        bytes_out: self.session.bytes_out,
-                    });
-
-                    // 2. Disconnect Detection (15s timeout)
-                    if now.duration_since(self.session.last_recv_time) > Duration::from_secs(15) {
-                        log::warn!("Connection timed out (no data for 15s)");
-                        self.state = ClientState::Disconnected;
-                        let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);
-                        self.send_status_event();
-                        break;
-                    }
-
-                    // 3. Keep-alive Heartbeat (5s idle)
-                    if now.duration_since(self.session.last_send_time) > Duration::from_secs(5) {
-                        use holtburger_protocol::messages::misc::actions::PingRequestActionData;
-                        self.session.send_action(holtburger_protocol::messages::GameAction::PingRequest(Box::new(PingRequestActionData))).await?;
-                    }
-
-                    self.poll_busy_timeout(now);
-                }
-                res = self.session.recv_message() => {
-                    use holtburger_session::SessionEvent;
-                    match res {
-                        Ok(events) => {
-                            for event in events {
-                                match event {
-                                    SessionEvent::Message(msg_data) => {
-                                        self.handle_message(&msg_data).await?;
-
-                                        if matches!(self.state, ClientState::Disconnected) {
-                                            return Ok(());
-                                        }
-                                    }
-                                    SessionEvent::HandshakeRequest(crd) => {
-                                        self.sync_server_time(crd.time, Instant::now());
-                                        self.auth.handle_handshake_request(crd, &mut self.session).await?;
-                                    }
-                                    SessionEvent::HandshakeResponse { cookie, client_id } => {
-                                        self.auth.handle_handshake_response(cookie, client_id, &mut self.session).await?;
-                                    }
-                                    SessionEvent::TimeSync(server_time) => {
-                                        self.sync_server_time(server_time, Instant::now());
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            log::error!("Session error: {}", e);
-                            self.state = ClientState::Disconnected;
-                            self.send_status_event();
-                            return Err(e);
-                        }
-                    }
-                }
-                Some(cmd) = async {
-                    if let Some(rx) = &mut self.command_rx {
-                        rx.recv().await
-                    } else {
-                        None
-                    }
-                } => {
-                    self.handle_command(cmd).await?;
-                }
-                _ = physics_tick.tick() => {
-                    let now = Instant::now();
-                    let dt = now.duration_since(last_physics_time).as_secs_f32();
-                    let dt_duration = Duration::from_secs_f32(dt.max(0.0));
-                    last_physics_time = now;
-
-                    let movement_events = self
-                        .movement
-                        .tick(now, &mut self.world, &mut self.session)
-                        .await?;
-                    for event in movement_events {
-                        self.handle_runtime_world_event(&event);
-                    }
-
-                    let physics_events = self.world.tick();
-                    for event in physics_events {
-                        self.handle_runtime_world_event(&event);
-                    }
-
-                    let simulation_events = self.simulation.tick(
-                        now,
-                        dt_duration,
-                        &mut self.world,
-                        &mut self.movement,
-                    );
-                    for event in simulation_events {
-                        self.handle_runtime_world_event(&event);
-                    }
-
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -1362,7 +1161,9 @@ mod tests {
         )));
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::EntityMoved { guid: event_guid, .. } if *event_guid == remote_guid
+            WorldEvent::RuntimeBodyChanged {
+                body_id: holtburger_world::SpatialBodyId::Entity(event_guid)
+            } if *event_guid == remote_guid
         )));
     }
 
@@ -1389,11 +1190,24 @@ mod tests {
             },
         ));
 
-        client.observe_runtime_world_event(&WorldEvent::EntityVectorUpdated {
-            guid: remote_guid,
-            velocity: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
-            omega: holtburger_common::Vector3::zero(),
-        });
+        let runtime_events =
+            client
+                .world
+                .apply_solved_body_kinematics(&holtburger_world::SolvedBodyKinematics {
+                    body_id: holtburger_world::SpatialBodyId::Entity(remote_guid),
+                    pose: holtburger_common::position::WorldPosition {
+                        landblock_id: Guid(0x1000_0001),
+                        coords: holtburger_common::Vector3::new(12.5, 0.0, 0.0),
+                        rotation: Quaternion::identity(),
+                    },
+                    velocity: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
+                    omega: holtburger_common::Vector3::zero(),
+                    contact: holtburger_world::ContactState::Grounded,
+                    projection_state: None,
+                });
+        for event in runtime_events {
+            client.observe_runtime_world_event(&event);
+        }
 
         let request = client.simulation.build_solve_request(
             Instant::now(),

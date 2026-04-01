@@ -253,19 +253,6 @@ impl WorldState {
 
         let mut events = Vec::new();
         Self::emit_runtime_body_changed(&mut events, solved.body_id);
-        if let Some(guid) = solved.body_id.authoritative_guid()
-            && !matches!(solved.body_id, SpatialBodyId::LocalPlayer(_))
-        {
-            events.push(WorldEvent::EntityMoved {
-                guid,
-                pos: solved.pose,
-            });
-            events.push(WorldEvent::EntityVectorUpdated {
-                guid,
-                velocity: solved.velocity,
-                omega: solved.omega,
-            });
-        }
 
         if matches!(solved.body_id, SpatialBodyId::LocalPlayer(_)) {
             self.apply_player_contact_state(solved.contact, &mut events);

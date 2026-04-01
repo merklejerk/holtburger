@@ -12,37 +12,30 @@ use holtburger_world::{
 use std::collections::HashMap;
 use std::time::Instant;
 
-#[derive(Debug, Clone, Copy)]
-struct CachedRuntimeBodyView {
-    view: RuntimeSpatialBodyView,
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeBodyViewCache {
-    bodies: HashMap<SpatialBodyId, CachedRuntimeBodyView>,
+    bodies: HashMap<SpatialBodyId, RuntimeSpatialBodyView>,
 }
 
 impl RuntimeBodyViewCache {
-    fn upsert_runtime_body(&mut self, body: RuntimeSpatialBodyView, received_at: Instant) {
-        let _ = received_at;
-        self.bodies
-            .insert(body.body_id, CachedRuntimeBodyView { view: body });
+    fn upsert_runtime_body(&mut self, body: RuntimeSpatialBodyView) {
+        self.bodies.insert(body.body_id, body);
     }
 
     fn clear(&mut self) {
         self.bodies.clear();
     }
 
-    pub fn apply_view_event(&mut self, event: &ClientViewEvent, now: Instant) {
+    pub fn apply_view_event(&mut self, event: &ClientViewEvent, _now: Instant) {
         match event {
             ClientViewEvent::RuntimeBodySnapshot { bodies } => {
                 self.clear();
                 for body in bodies.iter().copied() {
-                    self.upsert_runtime_body(body, now);
+                    self.upsert_runtime_body(body);
                 }
             }
             ClientViewEvent::RuntimeBodyUpserted { body } => {
-                self.upsert_runtime_body(**body, now);
+                self.upsert_runtime_body(**body);
             }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 self.bodies.remove(body_id);
@@ -60,34 +53,31 @@ impl RuntimeBodyViewCache {
     }
 
     pub fn runtime_body(&self, body_id: SpatialBodyId) -> Option<RuntimeSpatialBodyView> {
-        self.bodies.get(&body_id).map(|cached| cached.view)
+        self.bodies.get(&body_id).copied()
     }
 
     pub fn iter_runtime_bodies(&self) -> impl Iterator<Item = RuntimeSpatialBodyView> + '_ {
-        self.bodies.values().map(|cached| cached.view)
+        self.bodies.values().copied()
     }
 
-    fn resolve_guid_body(&self, guid: Guid) -> Option<&CachedRuntimeBodyView> {
+    fn resolve_guid_body(&self, guid: Guid) -> Option<&RuntimeSpatialBodyView> {
         self.bodies
             .get(&SpatialBodyId::LocalPlayer(guid))
             .or_else(|| self.bodies.get(&SpatialBodyId::Entity(guid)))
     }
 
-    fn spatial_sample_from_cached(view: &CachedRuntimeBodyView) -> Option<SpatialEntitySample> {
-        let guid = view.view.body_id.authoritative_guid()?;
-        let authoritative_pose = view
-            .view
-            .authoritative_pose
-            .unwrap_or(view.view.runtime_pose);
+    fn spatial_sample_from_cached(view: &RuntimeSpatialBodyView) -> Option<SpatialEntitySample> {
+        let guid = view.body_id.authoritative_guid()?;
+        let authoritative_pose = view.authoritative_pose.unwrap_or(view.runtime_pose);
 
         Some(SpatialEntitySample {
             guid,
             authoritative_pose,
-            projected_pose: view.view.runtime_pose,
-            velocity: view.view.velocity,
-            omega: view.view.omega,
-            motion_state: view.view.motion_state,
-            projection_mode: view.view.sample_mode,
+            projected_pose: view.runtime_pose,
+            velocity: view.velocity,
+            omega: view.omega,
+            motion_state: view.motion_state,
+            projection_mode: view.sample_mode,
         })
     }
 

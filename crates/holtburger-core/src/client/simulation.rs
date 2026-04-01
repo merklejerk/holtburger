@@ -267,18 +267,21 @@ impl ClientSimulationSystem {
             return None;
         }
 
-        let mut next_pos = world.local_player_runtime_pose()?;
+        let current_pos = world.local_player_runtime_pose()?;
+        let mut next_pos = current_pos;
 
         match &data.data {
             MovementTypeData::MoveToObject(mto) => {
                 next_pos.landblock_id = mto.origin.cell_id;
-                next_pos.coords = mto.origin.position;
 
                 let arrival_dist = mto.params.distance_to_object;
 
-                if (next_pos.landblock_id >> 16) == (mto.origin.cell_id >> 16) {
-                    next_pos.coords =
-                        calculate_arrival_position(&next_pos, &next_pos.coords, arrival_dist);
+                if (current_pos.landblock_id >> 16) == (mto.origin.cell_id >> 16) {
+                    next_pos.coords = calculate_arrival_position(
+                        &current_pos,
+                        &mto.origin.position,
+                        arrival_dist,
+                    );
 
                     if mto.params.desired_heading.abs() <= 1e-6 {
                         next_pos.rotation = Quaternion::from_heading(
@@ -288,6 +291,7 @@ impl ClientSimulationSystem {
                         next_pos.rotation = Quaternion::from_heading(mto.params.desired_heading);
                     }
                 } else {
+                    next_pos.coords = mto.origin.position;
                     next_pos.coords.x += arrival_dist;
                 }
             }
@@ -298,8 +302,9 @@ impl ClientSimulationSystem {
                 if mtp.params.desired_heading.abs() > 1e-6 {
                     next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
                 } else {
-                    next_pos.rotation =
-                        Quaternion::from_heading(next_pos.coords.heading_to(&mtp.origin.position));
+                    next_pos.rotation = Quaternion::from_heading(
+                        current_pos.coords.heading_to(&mtp.origin.position),
+                    );
                 }
             }
             MovementTypeData::TurnToHeading(tth) => {
@@ -322,9 +327,7 @@ impl ClientSimulationSystem {
         let distance = if next_pos.landblock_id == Guid::NULL {
             0.0
         } else {
-            world
-                .local_player_runtime_pose()
-                .map_or(0.0, |current| current.distance_to(&next_pos))
+            current_pos.distance_to(&next_pos)
         };
 
         if distance > AUTO_MOVE_DISTANCE_LIMIT {
@@ -363,7 +366,30 @@ impl ClientSimulationSystem {
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
+    use holtburger_protocol::messages::motion::{
+        MoveToObject, MoveToParameters, MoveToPosition, Origin,
+    };
+    use holtburger_protocol::messages::{
+        MotionStance, MovementEventData, MovementType, MovementTypeData,
+    };
     use holtburger_world::{SpatialEvent, entity::Entity};
+
+    fn make_world_position(x: f32, y: f32, heading: f32) -> WorldPosition {
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            coords: Vector3::new(x, y, 0.0),
+            rotation: Quaternion::from_heading(heading),
+        }
+    }
+
+    fn synthetic_player_world(start: WorldPosition) -> (WorldState, Guid) {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x5000_0001);
+        world.player.guid = player_guid;
+        world.player.position = start;
+        world.add_entity(Entity::new(player_guid, "Player".to_string(), start));
+        (world, player_guid)
+    }
 
     #[test]
     fn apply_solve_batch_applies_spatial_events() {
@@ -428,5 +454,100 @@ mod tests {
             WorldEvent::ForcedReposition { guid, pos, sequence }
                 if *guid == remote_guid && *pos == remote_pose && *sequence == 0
         )));
+    }
+
+    #[test]
+    fn move_to_position_without_desired_heading_uses_current_pose_for_facing() {
+        let simulation = ClientSimulationSystem::new();
+        let start = make_world_position(10.0, 20.0, 1.25);
+        let destination = make_world_position(32.0, 48.0, 0.0);
+        let (world, player_guid) = synthetic_player_world(start);
+        let mut wire_events = Vec::new();
+
+        let solved = simulation
+            .build_server_controlled_result(
+                &MovementEventData {
+                    guid: player_guid,
+                    object_instance_sequence: 7,
+                    movement_sequence: 20,
+                    server_control_sequence: 10,
+                    is_autonomous: false,
+                    movement_type: MovementType::MoveToPosition,
+                    motion_flags: 0,
+                    current_style: MotionStance::SwordCombat.interpreted(),
+                    data: MovementTypeData::MoveToPosition(MoveToPosition {
+                        origin: Origin {
+                            cell_id: destination.landblock_id,
+                            position: destination.coords,
+                        },
+                        params: MoveToParameters {
+                            desired_heading: 0.0,
+                            ..Default::default()
+                        },
+                        run_rate: 1.0,
+                    }),
+                },
+                &world,
+                &mut wire_events,
+            )
+            .expect("server-controlled move should resolve");
+
+        assert!(wire_events.is_empty());
+        assert_eq!(solved.pose.landblock_id, destination.landblock_id);
+        assert_eq!(solved.pose.coords, destination.coords);
+        assert!(
+            (solved.pose.rotation.to_heading() - start.coords.heading_to(&destination.coords))
+                .abs()
+                < 1e-5
+        );
+    }
+
+    #[test]
+    fn move_to_object_without_desired_heading_uses_current_pose_for_arrival_and_facing() {
+        let simulation = ClientSimulationSystem::new();
+        let start = make_world_position(10.0, 20.0, 1.25);
+        let target = make_world_position(13.0, 24.0, 0.0);
+        let arrival_distance = 2.0;
+        let expected_coords = calculate_arrival_position(&start, &target.coords, arrival_distance);
+        let (world, player_guid) = synthetic_player_world(start);
+        let mut wire_events = Vec::new();
+
+        let solved = simulation
+            .build_server_controlled_result(
+                &MovementEventData {
+                    guid: player_guid,
+                    object_instance_sequence: 7,
+                    movement_sequence: 20,
+                    server_control_sequence: 10,
+                    is_autonomous: false,
+                    movement_type: MovementType::MoveToObject,
+                    motion_flags: 0,
+                    current_style: MotionStance::SwordCombat.interpreted(),
+                    data: MovementTypeData::MoveToObject(MoveToObject {
+                        target: Guid(0x5000_00AA),
+                        origin: Origin {
+                            cell_id: target.landblock_id,
+                            position: target.coords,
+                        },
+                        params: MoveToParameters {
+                            desired_heading: 0.0,
+                            distance_to_object: arrival_distance,
+                            ..Default::default()
+                        },
+                        run_rate: 1.0,
+                    }),
+                },
+                &world,
+                &mut wire_events,
+            )
+            .expect("server-controlled move should resolve");
+
+        assert!(wire_events.is_empty());
+        assert_eq!(solved.pose.landblock_id, target.landblock_id);
+        assert_eq!(solved.pose.coords, expected_coords);
+        assert!(
+            (solved.pose.rotation.to_heading() - expected_coords.heading_to(&target.coords)).abs()
+                < 1e-5
+        );
     }
 }

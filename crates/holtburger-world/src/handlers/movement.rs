@@ -17,6 +17,9 @@ fn update_entity_motion_snapshot(
 
     if entity.motion_snapshot != snapshot {
         entity.motion_snapshot = snapshot;
+        if let Some(body_id) = state.update_runtime_body_motion_snapshot_for_guid(guid, snapshot) {
+            events.push(WorldEvent::RuntimeBodyChanged { body_id });
+        }
         events.push(WorldEvent::EntityMotionUpdated { guid, snapshot });
     }
 }

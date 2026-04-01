@@ -1,0 +1,228 @@
+use super::*;
+use anyhow::Result;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+impl Client {
+    pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
+        let Some(pending) = self.active_busy_operation.as_ref() else {
+            return;
+        };
+
+        if now < pending.deadline {
+            return;
+        }
+
+        let pending = self
+            .active_busy_operation
+            .take()
+            .expect("busy operation should still exist when timing out");
+        self.emit_busy_state_updated();
+        self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
+    }
+
+    pub(super) fn emit_runtime_body_snapshot(&self) {
+        let bodies: Arc<[_]> = self.world.runtime_body_views().into();
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::RuntimeBodySnapshot { bodies });
+    }
+
+    pub(super) fn emit_initial_reference_data(&self) {
+        self.emit_spell_catalog_loaded();
+        self.emit_fellowship_state_updated();
+        self.emit_runtime_body_snapshot();
+    }
+
+    pub(super) fn sync_server_time(&mut self, server_time: f64, local_time: Instant) {
+        let world_events = self.world.set_server_time_sync(server_time, local_time);
+        for event in world_events {
+            self.handle_world_event(&event);
+        }
+    }
+
+    pub(super) fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
+        const EPSILON: f32 = 1e-6;
+
+        match event {
+            WorldEvent::EntitySpawned(entity)
+            | WorldEvent::EntityReplaced(entity)
+            | WorldEvent::EntityIdentified(entity) => {
+                if entity.guid != self.world.player.guid
+                    && (entity.velocity.length_squared() > EPSILON
+                        || entity.omega.length_squared() > EPSILON)
+                {
+                    self.simulation.track_actor(entity.guid);
+                }
+            }
+            WorldEvent::EntityVectorUpdated {
+                guid,
+                velocity,
+                omega,
+            } => {
+                if *guid == self.world.player.guid {
+                    return;
+                }
+
+                if velocity.length_squared() > EPSILON || omega.length_squared() > EPSILON {
+                    self.simulation.track_actor(*guid);
+                } else {
+                    self.simulation.untrack_actor(*guid);
+                }
+            }
+            WorldEvent::EntityDespawned(guid) => {
+                self.simulation.untrack_actor(*guid);
+            }
+            WorldEvent::RuntimeBodyChanged { body_id } => {
+                let Some(guid) = body_id.authoritative_guid() else {
+                    return;
+                };
+
+                if guid == self.world.player.guid {
+                    return;
+                }
+
+                let Some(body) = self.world.runtime_body_view(*body_id) else {
+                    return;
+                };
+
+                if body.velocity.length_squared() > EPSILON || body.omega.length_squared() > EPSILON
+                {
+                    self.simulation.track_actor(guid);
+                } else {
+                    self.simulation.untrack_actor(guid);
+                }
+            }
+            WorldEvent::RuntimeBodyRemoved { body_id } => {
+                if let Some(guid) = body_id.authoritative_guid() {
+                    self.simulation.untrack_actor(guid);
+                }
+            }
+            WorldEvent::RuntimeBodiesReset { .. } => {}
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_runtime_world_event(&mut self, event: &WorldEvent) {
+        self.observe_runtime_world_event(event);
+        self.emit_world_view_projection(event);
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
+        self.send_status_event();
+
+        let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
+        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
+        let mut last_physics_time = Instant::now();
+
+        loop {
+            if matches!(self.state, ClientState::Disconnected) {
+                break;
+            }
+
+            tokio::select! {
+                _ = net_tick.tick() => {
+                    let now = Instant::now();
+
+                    let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
+                        bytes_in: self.session.bytes_in,
+                        bytes_out: self.session.bytes_out,
+                    });
+
+                    if now.duration_since(self.session.last_recv_time) > Duration::from_secs(15) {
+                        log::warn!("Connection timed out (no data for 15s)");
+                        self.state = ClientState::Disconnected;
+                        let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);
+                        self.send_status_event();
+                        break;
+                    }
+
+                    if now.duration_since(self.session.last_send_time) > Duration::from_secs(5) {
+                        use holtburger_protocol::messages::misc::actions::PingRequestActionData;
+                        self.session
+                            .send_action(holtburger_protocol::messages::GameAction::PingRequest(
+                                Box::new(PingRequestActionData),
+                            ))
+                            .await?;
+                    }
+
+                    self.poll_busy_timeout(now);
+                }
+                res = self.session.recv_message() => {
+                    use holtburger_session::SessionEvent;
+                    match res {
+                        Ok(events) => {
+                            for event in events {
+                                match event {
+                                    SessionEvent::Message(msg_data) => {
+                                        self.handle_message(&msg_data).await?;
+
+                                        if matches!(self.state, ClientState::Disconnected) {
+                                            return Ok(());
+                                        }
+                                    }
+                                    SessionEvent::HandshakeRequest(crd) => {
+                                        self.sync_server_time(crd.time, Instant::now());
+                                        self.auth.handle_handshake_request(crd, &mut self.session).await?;
+                                    }
+                                    SessionEvent::HandshakeResponse { cookie, client_id } => {
+                                        self.auth.handle_handshake_response(cookie, client_id, &mut self.session).await?;
+                                    }
+                                    SessionEvent::TimeSync(server_time) => {
+                                        self.sync_server_time(server_time, Instant::now());
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Session error: {}", e);
+                            self.state = ClientState::Disconnected;
+                            self.send_status_event();
+                            return Err(e);
+                        }
+                    }
+                }
+                Some(cmd) = async {
+                    if let Some(rx) = &mut self.command_rx {
+                        rx.recv().await
+                    } else {
+                        None
+                    }
+                } => {
+                    self.handle_command(cmd).await?;
+                }
+                _ = physics_tick.tick() => {
+                    let now = Instant::now();
+                    let dt = now.duration_since(last_physics_time).as_secs_f32();
+                    let dt_duration = Duration::from_secs_f32(dt.max(0.0));
+                    last_physics_time = now;
+
+                    let movement_events = self
+                        .movement
+                        .tick(now, &mut self.world, &mut self.session)
+                        .await?;
+                    for event in movement_events {
+                        self.handle_runtime_world_event(&event);
+                    }
+
+                    let physics_events = self.world.tick();
+                    for event in physics_events {
+                        self.handle_runtime_world_event(&event);
+                    }
+
+                    let simulation_events = self.simulation.tick(
+                        now,
+                        dt_duration,
+                        &mut self.world,
+                        &mut self.movement,
+                    );
+                    for event in simulation_events {
+                        self.handle_runtime_world_event(&event);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}

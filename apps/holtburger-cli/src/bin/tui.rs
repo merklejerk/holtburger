@@ -13,10 +13,13 @@ use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
 use holtburger_core::{ClientBuilder, ClientCommand, ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;
+use holtburger_world::BasicSpatialPhysics;
+use holtburger_world::RuntimeBodyResetCause;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -255,6 +258,7 @@ fn apply_capture_path(client: &mut holtburger_core::Client, capture: Option<&Str
 fn bootstrap_ready_events(
     latest_status: &Option<ClientState>,
     latest_world_name: &Option<String>,
+    latest_server_time: &Option<f64>,
     characters: Vec<holtburger_protocol::messages::CharacterEntry>,
 ) -> Vec<ClientViewEvent> {
     let mut initial_events = Vec::new();
@@ -267,6 +271,10 @@ fn bootstrap_ready_events(
         initial_events.push(ClientViewEvent::WorldNameUpdated(name));
     }
 
+    if let Some(time) = latest_server_time {
+        initial_events.push(ClientViewEvent::ServerTimeUpdated { time: *time });
+    }
+
     initial_events.push(ClientViewEvent::CharacterList(characters));
     initial_events
 }
@@ -275,6 +283,7 @@ fn process_bootstrap_event(
     event: ClientViewEvent,
     latest_status: &mut Option<ClientState>,
     latest_world_name: &mut Option<String>,
+    latest_server_time: &mut Option<f64>,
 ) -> Option<BootstrapEventOutcome> {
     match event {
         ClientViewEvent::StatusUpdate { state } => {
@@ -285,8 +294,17 @@ fn process_bootstrap_event(
             *latest_world_name = Some(name);
             None
         }
+        ClientViewEvent::ServerTimeUpdated { time } => {
+            *latest_server_time = Some(time);
+            None
+        }
         ClientViewEvent::CharacterList(characters) => Some(BootstrapEventOutcome::Ready {
-            initial_events: bootstrap_ready_events(latest_status, latest_world_name, characters),
+            initial_events: bootstrap_ready_events(
+                latest_status,
+                latest_world_name,
+                latest_server_time,
+                characters,
+            ),
         }),
         ClientViewEvent::ErrorRaised {
             reason, message, ..
@@ -330,6 +348,7 @@ async fn bootstrap_once(
     let mut client = ClientBuilder::new(args.account.clone())
         .server(host.to_string(), port)
         .dats_path(dats_path.to_path_buf())
+        .spatial_physics(Arc::new(BasicSpatialPhysics))
         .connect()
         .await?;
 
@@ -345,6 +364,7 @@ async fn bootstrap_once(
 
     let mut latest_status = Some(ClientState::Connected);
     let mut latest_world_name = None;
+    let mut latest_server_time = None;
 
     loop {
         tokio::select! {
@@ -355,7 +375,12 @@ async fn bootstrap_once(
                 };
 
                 while let Ok(event) = server_event_rx.try_recv() {
-                    if let Some(outcome) = process_bootstrap_event(event, &mut latest_status, &mut latest_world_name) {
+                    if let Some(outcome) = process_bootstrap_event(
+                        event,
+                        &mut latest_status,
+                        &mut latest_world_name,
+                        &mut latest_server_time,
+                    ) {
                         return Ok(finalize_bootstrap_outcome(
                             outcome,
                             server_cmd_tx,
@@ -377,7 +402,12 @@ async fn bootstrap_once(
             event = server_event_rx.recv() => {
                 match event {
                     Ok(event) => {
-                        if let Some(outcome) = process_bootstrap_event(event, &mut latest_status, &mut latest_world_name) {
+                        if let Some(outcome) = process_bootstrap_event(
+                            event,
+                            &mut latest_status,
+                            &mut latest_world_name,
+                            &mut latest_server_time,
+                        ) {
                             return Ok(finalize_bootstrap_outcome(
                                 outcome,
                                 server_cmd_tx,
@@ -386,7 +416,9 @@ async fn bootstrap_once(
                             ));
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         return Ok(BootstrapOutcome::Fatal {
                             message: "Client event stream closed before receiving character list.".to_string(),
@@ -639,10 +671,29 @@ async fn run() -> Result<()> {
         }
 
         // 2. Process Network Events (Drain batch)
-        while let Ok(event) = server_event_rx.try_recv() {
-            let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
-            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
-            should_quit |= app_state.has_pending_exit();
+        loop {
+            match server_event_rx.try_recv() {
+                Ok(event) => {
+                    let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+                    update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                    should_quit |= app_state.has_pending_exit();
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                    let reset = app_state.handle_app_event(AppEvent::ReceivedViewEvent(
+                        ClientViewEvent::RuntimeBodiesReset {
+                            cause: RuntimeBodyResetCause::Resync,
+                        },
+                    ));
+                    update_state(reset, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    break;
+                }
+                Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
+                    should_quit = true;
+                    break;
+                }
+            }
         }
 
         // 3. Poll Input (Short timeout, drain batch)
@@ -798,6 +849,7 @@ mod tests {
             },
             &mut Some(ClientState::Connected),
             &mut None,
+            &mut None,
         );
 
         assert!(matches!(outcome, Some(BootstrapEventOutcome::Retry { .. })));
@@ -813,9 +865,43 @@ mod tests {
             },
             &mut Some(ClientState::Connected),
             &mut None,
+            &mut None,
         );
 
         assert!(matches!(outcome, Some(BootstrapEventOutcome::Fatal { .. })));
+    }
+
+    #[test]
+    fn bootstrap_preserves_server_time_before_character_list() {
+        let mut latest_status = Some(ClientState::Connected);
+        let mut latest_world_name = Some("ACEmulator".to_string());
+        let mut latest_server_time = None;
+
+        let outcome = process_bootstrap_event(
+            ClientViewEvent::ServerTimeUpdated { time: 1234.5 },
+            &mut latest_status,
+            &mut latest_world_name,
+            &mut latest_server_time,
+        );
+
+        assert!(outcome.is_none());
+        assert_eq!(latest_server_time, Some(1234.5));
+
+        let outcome = process_bootstrap_event(
+            ClientViewEvent::CharacterList(Vec::new()),
+            &mut latest_status,
+            &mut latest_world_name,
+            &mut latest_server_time,
+        );
+
+        let Some(BootstrapEventOutcome::Ready { initial_events }) = outcome else {
+            panic!("expected bootstrap ready outcome");
+        };
+
+        assert!(initial_events.iter().any(|event| matches!(
+            event,
+            ClientViewEvent::ServerTimeUpdated { time } if *time == 1234.5
+        )));
     }
 
     #[test]

@@ -87,9 +87,15 @@ These modules own movement-facing invariants:
 - conservative visibility tracking for prune deadlines
 - player mirror helpers such as `set_player_position()` and `set_player_vector()`
 
+`SpatialScene` is the world-owned spatial composite and solve/query context. Shared runtime
+sampling behavior lives inside it via `BodySamplingStore`, and that world-owned sampling state is
+the canonical runtime body model for the client. Any app-facing cache in `holtburger-core` or a
+frontend is mirrored read state only; it must not independently advance runtime bodies.
+
 Shared world no longer performs automatic local collision or local velocity integration during
 `tick()`. Those semantics are intentionally deferred until a future client can define a real
-client-side physics or prediction model.
+client-side physics or prediction model, but when constraint-aware runtime advancement does land it
+belongs here on the world-owned runtime body path rather than in a parallel core/frontend cache.
 
 ### Lifecycle / retention helpers
 Files: [src/state/liveness.rs](src/state/liveness.rs), [src/state/mutations.rs](src/state/mutations.rs)
@@ -108,6 +114,11 @@ File: [src/context.rs](src/context.rs)
 `WorldContext` and `WorldContextExt` provide a pure query boundary for higher-level logic. That lets
 lossy projections or UI layers answer gameplay questions without duplicating rules or depending on
 engine-thread state directly.
+
+For runtime spatial reads, the long-term contract is the same: higher layers consume projected or
+authoritative samples derived from world-owned `SpatialBody` state through explicit read-model
+surfaces. They do not get shared mutable access to canonical runtime bodies, and they do not define
+their own interpolation or dead-reckoning truth on the side.
 
 This is also the boundary for shared combat-target semantics. Frontends may receive compact motion
 updates for rendering or inspection, but gameplay queries such as combat-target viability should be

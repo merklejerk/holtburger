@@ -7,7 +7,7 @@ Welcome to the root architecture guide for the Holtburger project. This document
 Holtburger is designed around **deliberate crate boundaries**. The wire protocol stays separate from world authority, the world model stays separate from transport, and the frontend talks to the engine through commands, queries, and semantic event streams instead of reaching into hidden engine state.
 
 By separating concerns into discrete library crates, we achieve:
-1. **Coherent ownership**: `session` owns transport, `world` owns authoritative gameplay state, and `core` owns orchestration plus reusable client behavior.
+1. **Coherent ownership**: `session` owns transport, `world` owns authoritative gameplay state plus canonical runtime body state, and `core` owns orchestration plus reusable client behavior.
 2. **Performance**: Heavy tasks such as UDP chunk reassembly, DAT access, and world mutation stay off the rendering path.
 3. **Ergonomics**: Frontends consume `ClientViewEvent`s and pure world-query helpers, so they can keep local projection state without needing shared mutable access to engine internals.
 
@@ -68,16 +68,16 @@ Encapsulates pure networking logic. It handles the lowest levels of transport wi
 - **Provides**: UDP fragment reassembly, packet sequencing, RC4 stream encryption/decryption, and socket loops.
 
 ### 5. The Authority: [`holtburger-world`](crates/holtburger-world/ARCHITECTURE.md)
-The authoritative in-memory world model for the client. It tracks hydrated entities, player state, spatial placement, retention/liveness rules, trade or vendor state, and world-domain helpers that other crates can query without re-deriving gameplay semantics.
-- **Provides**: `WorldState`, `PlayerState`, entity hydration, spatial and retention helpers, trade or vendor state, and world query surfaces.
+The authoritative in-memory world model for the client. It tracks hydrated entities, player state, spatial placement, retention/liveness rules, trade or vendor state, and world-domain helpers that other crates can query without re-deriving gameplay semantics. It also owns the canonical runtime `SpatialBody` sidecars and their sampling policy; projected samples are derived from world-owned runtime state rather than advanced in parallel elsewhere.
+- **Provides**: `WorldState`, `PlayerState`, entity hydration, canonical runtime body state, spatial and retention helpers, trade or vendor state, and world query surfaces.
 
 ### 6. The Brain: [`holtburger-core`](crates/holtburger-core/ARCHITECTURE.md)
-The primary engine orchestrator. It ties networking (`session`) and authority (`world`) together, executes movement and interaction primitives, and projects raw protocol plus world changes into frontend-safe semantic events.
+The primary engine orchestrator. It ties networking (`session`) and authority (`world`) together, executes movement and interaction primitives, and projects raw protocol plus world changes into frontend-safe semantic events. Its runtime-body delivery surfaces publish mirrored read models over world-owned runtime state, not a second owner of runtime advancement.
 - **Provides**: Handshake coordination, primitive movement execution and prediction, protocol-to-world orchestration, optional reusable controllers, and `ClientViewEvent` streams for applications to consume.
 
 ### 7. The Frontend: [`holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
-The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, maintains local projection state for rendering, and owns frontend-specific control policy such as when to drive optional navigation or combat helpers.
-- **Provides**: Real-time ratatui screens, input mapping, local projection and modal state, and frontend orchestration around shared core controllers.
+The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, owns frontend-specific control policy such as when to drive optional navigation or combat helpers, and currently keeps mirrored read caches for presentation and app-thread decisions. Those caches are frontend-owned views only; they must not become a second runtime body authority.
+- **Provides**: Real-time ratatui screens, input mapping, mirrored read caches and modal state, and frontend orchestration around shared core controllers.
 
 ---
 
@@ -111,4 +111,4 @@ sequenceDiagram
 2. **Parser (`protocol`)** turns data into Rust struct representations.
 3. **Engine (`core`)** coordinates protocol handling, movement execution, and world mutation requests.
 4. **Authority (`world`)** applies the mutation, preserves world invariants, and tells the engine what observably changed.
-5. **App (`cli`)** receives semantic deltas, updates its local projection, and may feed optional shared controllers with world-derived inputs before issuing new commands.
+5. **App (`cli`)** receives semantic deltas, updates mirrored read caches, and may feed optional shared controllers with world-derived inputs before issuing new commands.

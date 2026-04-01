@@ -61,6 +61,7 @@ fn autonomous_wire_motion_state_adds_turn_when_heading_differs() {
         AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
             desired_heading: Some(90.0_f32.to_radians()),
+            target_hint: None,
             gait: Gait::Run,
             force_grounded: true,
         },
@@ -86,6 +87,7 @@ fn autonomous_wire_motion_state_can_turn_in_place() {
         AutonomousDriveIntent {
             desired_world_delta: Vector3::zero(),
             desired_heading: Some(90.0_f32.to_radians()),
+            target_hint: None,
             gait: Gait::Walk,
             force_grounded: false,
         },
@@ -111,6 +113,7 @@ fn autonomous_wire_motion_state_skips_idle_aligned_requests() {
         AutonomousDriveIntent {
             desired_world_delta: Vector3::zero(),
             desired_heading: Some(0.0),
+            target_hint: None,
             gait: Gait::Walk,
             force_grounded: false,
         },
@@ -137,6 +140,11 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
         PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 2.0, 3.0),
             desired_heading: Some(0.75),
+            target_hint: Some(WorldPosition {
+                landblock_id: Guid(0x1234_0100),
+                coords: Vector3::new(5.0, 6.0, 7.0),
+                rotation: Quaternion::identity(),
+            }),
             gait: Gait::Run,
             force_grounded: true,
         }),
@@ -157,6 +165,14 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
     assert_eq!(drive.body_id, SpatialBodyId::LocalPlayer(world.player.guid));
     assert_eq!(drive.desired_world_delta, Vector3::new(1.0, 2.0, 3.0));
     assert_eq!(drive.desired_heading, Some(0.75));
+    assert_eq!(
+        drive.target_hint,
+        Some(WorldPosition {
+            landblock_id: Guid(0x1234_0100),
+            coords: Vector3::new(5.0, 6.0, 7.0),
+            rotation: Quaternion::identity(),
+        })
+    );
     assert_eq!(drive.gait, holtburger_world::spatial::LocalDriveGait::Run);
     assert!(drive.force_grounded);
 
@@ -186,6 +202,7 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
         PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
             desired_heading: None,
+            target_hint: None,
             gait: Gait::Walk,
             force_grounded: false,
         }),
@@ -876,6 +893,95 @@ async fn stop_input_clears_held_run_and_sends_stop_transition() {
         .expect("synthetic player entity should exist");
     assert!(player.velocity.length_squared() <= 1e-6);
     assert!(player.omega.length_squared() <= 1e-6);
+    assert_eq!(session.packet_sequence, 4);
+}
+
+#[tokio::test]
+async fn autonomous_drive_gap_does_not_send_stop_pulse_without_explicit_stop() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    world.player.guid = guid;
+    world.player.position = position;
+    world
+        .entities
+        .insert(Entity::new(guid, "Player".to_string(), position));
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        start,
+    );
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("autonomous drive should emit a motion pulse");
+
+    assert_eq!(session.packet_sequence, 2);
+
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("autonomous drive gap should not synthesize a stop pulse");
+
+    assert_eq!(session.packet_sequence, 2);
+}
+
+#[tokio::test]
+async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    world.player.guid = guid;
+    world.player.position = position;
+    world
+        .entities
+        .insert(Entity::new(guid, "Player".to_string(), position));
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        start,
+    );
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("autonomous drive should emit a motion pulse");
+
+    movement.enqueue_drive_intent(PlayerDriveIntent::Stop, start + Duration::from_millis(30));
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("explicit stop should still emit a stop pulse");
+
     assert_eq!(session.packet_sequence, 4);
 }
 

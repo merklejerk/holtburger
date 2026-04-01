@@ -103,13 +103,37 @@ fn project_pose_by_velocity_keeps_indoor_landblock_stable() {
         authoritative,
         Vector3::new(8.345838, 15.9404335, 0.0),
         1.0,
+        None,
     );
 
     assert_eq!(projected.landblock_id, authoritative.landblock_id);
-    assert_eq!(
-        projected.coords,
-        Vector3::new(20.454193, -44.71997, 0.004999995)
+    assert!((projected.coords.x - 20.454193).abs() < 1e-4);
+    assert!((projected.coords.y - (-44.71997)).abs() < 2e-3);
+    assert!((projected.coords.z - 0.004999995).abs() < 1e-6);
+}
+
+#[test]
+fn project_pose_by_velocity_uses_indoor_target_hint_landblock() {
+    let authoritative = WorldPosition {
+        landblock_id: Guid(0x016C_0000),
+        coords: Vector3::new(180.0, 188.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let target_hint = WorldPosition {
+        landblock_id: Guid(0x016D_0100),
+        coords: Vector3::new(2.0, -3.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+
+    let projected = project_pose_by_velocity(
+        authoritative,
+        Vector3::new(20.0, 10.0, 0.0),
+        1.0,
+        Some(target_hint),
     );
+
+    assert_eq!(projected.landblock_id, target_hint.landblock_id);
+    assert_eq!(projected.coords, Vector3::new(200.0, 6.0, 0.0));
 }
 
 #[test]
@@ -164,6 +188,7 @@ fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
             body_id,
             desired_world_delta: Vector3::new(0.0, 4.5, 1.0),
             desired_heading: Some(90.0_f32.to_radians()),
+            target_hint: None,
             gait: LocalDriveGait::Run,
             force_grounded: true,
         }),
@@ -212,6 +237,7 @@ fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
             body_id,
             desired_world_delta: Vector3::new(0.0, 4.5, 0.0),
             desired_heading: Some(90.0_f32.to_radians()),
+            target_hint: None,
             gait: LocalDriveGait::Run,
             force_grounded: true,
         }),
@@ -226,6 +252,57 @@ fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
         actor.projection_state,
         Some(SelfPlayerDriveProjectionState::AuthorityFrozen)
     );
+}
+
+#[test]
+fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
+    let mut scene = SpatialScene::new();
+    let now = Instant::now();
+    let guid = Guid(0x5000_0003);
+    let body_id = SpatialBodyId::LocalPlayer(guid);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x016C_0000),
+        coords: Vector3::new(180.0, 188.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let target_hint = WorldPosition {
+        landblock_id: Guid(0x016D_0100),
+        coords: Vector3::new(2.0, -3.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+
+    scene.upsert_runtime_body_snapshot(
+        body_id,
+        pose,
+        Vector3::zero(),
+        Vector3::zero(),
+        None,
+        now,
+    );
+
+    let request = SpatialSolveRequest {
+        dt: Duration::from_secs(1),
+        actors: smallvec::smallvec![SolveActorInput {
+            actor_id: guid,
+            pose,
+            velocity: Vector3::zero(),
+            omega: Vector3::zero(),
+        }],
+        local_drive: Some(LocalDriveControl {
+            body_id,
+            desired_world_delta: Vector3::new(20.0, 10.0, 0.0),
+            desired_heading: None,
+            target_hint: Some(target_hint),
+            gait: LocalDriveGait::Run,
+            force_grounded: true,
+        }),
+    };
+
+    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
+    let actor = solved.solved[0];
+
+    assert_eq!(actor.pose.landblock_id, target_hint.landblock_id);
+    assert_eq!(actor.pose.coords, Vector3::new(200.0, 6.0, 0.0));
 }
 
 #[test]

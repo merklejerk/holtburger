@@ -107,7 +107,12 @@ fn solve_self_player_local_drive(
             let desired_velocity = control.desired_world_delta / dt_secs;
             let current_heading = input.pose.rotation.to_heading();
             let desired_heading = desired_heading_for_local_drive(control, current_heading);
-            let mut next_pose = project_pose_by_velocity(input.pose, desired_velocity, dt_secs);
+            let mut next_pose = project_pose_by_velocity(
+                input.pose,
+                desired_velocity,
+                dt_secs,
+                control.target_hint,
+            );
             next_pose.rotation = Quaternion::from_heading(desired_heading);
 
             SolvedActorKinematics {
@@ -120,6 +125,21 @@ fn solve_self_player_local_drive(
             }
         }
     }
+}
+
+fn indoor_projection_landblock_id(
+    authoritative_pose: WorldPosition,
+    target_hint: Option<WorldPosition>,
+) -> Option<Guid> {
+    let indoor_hint_landblock_id = target_hint
+        .filter(|hint| hint.is_indoors())
+        .map(|hint| hint.landblock_id);
+
+    indoor_hint_landblock_id.or_else(|| {
+        authoritative_pose
+            .is_indoors()
+            .then_some(authoritative_pose.landblock_id)
+    })
 }
 
 fn normalize_heading(heading: f32) -> f32 {
@@ -145,15 +165,33 @@ fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
     delta
 }
 
-pub(crate) fn project_pose_by_velocity(authoritative_pose: WorldPosition, velocity: Vector3, dt_secs: f32) -> WorldPosition {
+pub(crate) fn project_pose_by_velocity(
+    authoritative_pose: WorldPosition,
+    velocity: Vector3,
+    dt_secs: f32,
+    target_hint: Option<WorldPosition>,
+) -> WorldPosition {
     if dt_secs <= 0.0 {
         return authoritative_pose;
     }
 
-    if authoritative_pose.is_indoors() {
+    if let Some(indoor_landblock_id) = indoor_projection_landblock_id(authoritative_pose, target_hint)
+    {
+        let indoor_origin = WorldPosition {
+            landblock_id: indoor_landblock_id,
+            coords: Vector3::zero(),
+            rotation: authoritative_pose.rotation,
+        }
+        .global_coords();
+        let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
+
         return WorldPosition {
-            landblock_id: authoritative_pose.landblock_id,
-            coords: authoritative_pose.coords + (velocity * dt_secs),
+            landblock_id: indoor_landblock_id,
+            coords: Vector3::new(
+                projected_global.x - indoor_origin.x,
+                projected_global.y - indoor_origin.y,
+                projected_global.z,
+            ),
             rotation: authoritative_pose.rotation,
         };
     }

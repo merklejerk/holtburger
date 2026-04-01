@@ -2,7 +2,9 @@ use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::{
+    PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
+};
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
@@ -500,14 +502,28 @@ impl WorldContext for GameData {
     fn is_open_container(&self, guid: Guid) -> bool {
         self.open_containers.contains(&guid)
     }
+
+    fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
+        self.attributes.get(&attr).map(|attribute| attribute.current)
+    }
+
+    fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {
+        let player_guid = self.player_guid?;
+        self.entities.get(&player_guid)?.get_int_prop(prop)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{CuratedCharacterOption, GameData, OPENED_CONTAINER_HISTORY_LIMIT};
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::Guid;
     use holtburger_common::{CharacterOptions1, CharacterOptions2};
     use holtburger_core::PlayerCharacterOptions;
+    use holtburger_world::context::WorldContextExt;
+    use holtburger_world::entity::Entity;
+    use holtburger_world::stats::{Attribute, AttributeType};
 
     #[test]
     fn opened_container_history_is_bounded() {
@@ -603,5 +619,42 @@ mod tests {
             data.curated_option_enabled(CuratedCharacterOption::GeneralChat),
             Some(false)
         );
+    }
+
+    #[test]
+    fn player_burden_uses_cached_strength_and_player_properties() {
+        let player_guid = Guid(1);
+        let item_guid = Guid(2);
+
+        let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+        player.set_int_prop(PropertyInt::AugmentationIncreasedCarryingCapacity, 1);
+
+        let mut item = Entity::new(item_guid, "Pack Item".to_string(), WorldPosition::default());
+        item.set_int_prop(PropertyInt::EncumbranceVal, 300);
+        item.properties.iids.insert(
+            holtburger_common::properties::PropertyInstanceId::Container,
+            player_guid,
+        );
+
+        let data = GameData {
+            player_guid: Some(player_guid),
+            attributes: std::collections::HashMap::from([(
+                AttributeType::StrengthAttr,
+                Attribute {
+                    attr_type: AttributeType::StrengthAttr,
+                    ranks: 0,
+                    start: 100,
+                    spent_xp: 0,
+                    next_rank_xp: None,
+                    base: 100,
+                    current: 100,
+                },
+            )]),
+            entities: std::collections::HashMap::from([(player_guid, player), (item_guid, item)]),
+            inventory: std::collections::HashSet::from([item_guid]),
+            ..Default::default()
+        };
+
+        assert_eq!(data.player_burden(), Some(300.0 / 18_000.0));
     }
 }

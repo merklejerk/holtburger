@@ -258,6 +258,7 @@ fn apply_capture_path(client: &mut holtburger_core::Client, capture: Option<&Str
 fn bootstrap_ready_events(
     latest_status: &Option<ClientState>,
     latest_world_name: &Option<String>,
+    latest_server_time: &Option<f64>,
     characters: Vec<holtburger_protocol::messages::CharacterEntry>,
 ) -> Vec<ClientViewEvent> {
     let mut initial_events = Vec::new();
@@ -270,6 +271,10 @@ fn bootstrap_ready_events(
         initial_events.push(ClientViewEvent::WorldNameUpdated(name));
     }
 
+    if let Some(time) = latest_server_time {
+        initial_events.push(ClientViewEvent::ServerTimeUpdated { time: *time });
+    }
+
     initial_events.push(ClientViewEvent::CharacterList(characters));
     initial_events
 }
@@ -278,6 +283,7 @@ fn process_bootstrap_event(
     event: ClientViewEvent,
     latest_status: &mut Option<ClientState>,
     latest_world_name: &mut Option<String>,
+    latest_server_time: &mut Option<f64>,
 ) -> Option<BootstrapEventOutcome> {
     match event {
         ClientViewEvent::StatusUpdate { state } => {
@@ -288,8 +294,17 @@ fn process_bootstrap_event(
             *latest_world_name = Some(name);
             None
         }
+        ClientViewEvent::ServerTimeUpdated { time } => {
+            *latest_server_time = Some(time);
+            None
+        }
         ClientViewEvent::CharacterList(characters) => Some(BootstrapEventOutcome::Ready {
-            initial_events: bootstrap_ready_events(latest_status, latest_world_name, characters),
+            initial_events: bootstrap_ready_events(
+                latest_status,
+                latest_world_name,
+                latest_server_time,
+                characters,
+            ),
         }),
         ClientViewEvent::ErrorRaised {
             reason, message, ..
@@ -349,6 +364,7 @@ async fn bootstrap_once(
 
     let mut latest_status = Some(ClientState::Connected);
     let mut latest_world_name = None;
+    let mut latest_server_time = None;
 
     loop {
         tokio::select! {
@@ -359,7 +375,12 @@ async fn bootstrap_once(
                 };
 
                 while let Ok(event) = server_event_rx.try_recv() {
-                    if let Some(outcome) = process_bootstrap_event(event, &mut latest_status, &mut latest_world_name) {
+                    if let Some(outcome) = process_bootstrap_event(
+                        event,
+                        &mut latest_status,
+                        &mut latest_world_name,
+                        &mut latest_server_time,
+                    ) {
                         return Ok(finalize_bootstrap_outcome(
                             outcome,
                             server_cmd_tx,
@@ -381,7 +402,12 @@ async fn bootstrap_once(
             event = server_event_rx.recv() => {
                 match event {
                     Ok(event) => {
-                        if let Some(outcome) = process_bootstrap_event(event, &mut latest_status, &mut latest_world_name) {
+                        if let Some(outcome) = process_bootstrap_event(
+                            event,
+                            &mut latest_status,
+                            &mut latest_world_name,
+                            &mut latest_server_time,
+                        ) {
                             return Ok(finalize_bootstrap_outcome(
                                 outcome,
                                 server_cmd_tx,
@@ -823,6 +849,7 @@ mod tests {
             },
             &mut Some(ClientState::Connected),
             &mut None,
+            &mut None,
         );
 
         assert!(matches!(outcome, Some(BootstrapEventOutcome::Retry { .. })));
@@ -838,9 +865,43 @@ mod tests {
             },
             &mut Some(ClientState::Connected),
             &mut None,
+            &mut None,
         );
 
         assert!(matches!(outcome, Some(BootstrapEventOutcome::Fatal { .. })));
+    }
+
+    #[test]
+    fn bootstrap_preserves_server_time_before_character_list() {
+        let mut latest_status = Some(ClientState::Connected);
+        let mut latest_world_name = Some("ACEmulator".to_string());
+        let mut latest_server_time = None;
+
+        let outcome = process_bootstrap_event(
+            ClientViewEvent::ServerTimeUpdated { time: 1234.5 },
+            &mut latest_status,
+            &mut latest_world_name,
+            &mut latest_server_time,
+        );
+
+        assert!(outcome.is_none());
+        assert_eq!(latest_server_time, Some(1234.5));
+
+        let outcome = process_bootstrap_event(
+            ClientViewEvent::CharacterList(Vec::new()),
+            &mut latest_status,
+            &mut latest_world_name,
+            &mut latest_server_time,
+        );
+
+        let Some(BootstrapEventOutcome::Ready { initial_events }) = outcome else {
+            panic!("expected bootstrap ready outcome");
+        };
+
+        assert!(initial_events.iter().any(|event| matches!(
+            event,
+            ClientViewEvent::ServerTimeUpdated { time } if *time == 1234.5
+        )));
     }
 
     #[test]

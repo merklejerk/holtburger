@@ -358,6 +358,13 @@ impl Client {
         self.emit_world_view_projection(event);
     }
 
+    fn sync_server_time(&mut self, server_time: f64, local_time: Instant) {
+        let world_events = self.world.set_server_time_sync(server_time, local_time);
+        for event in world_events {
+            self.handle_world_event(&event);
+        }
+    }
+
     fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
         const EPSILON: f32 = 1e-6;
 
@@ -754,18 +761,14 @@ impl Client {
                                         }
                                     }
                                     SessionEvent::HandshakeRequest(crd) => {
+                                        self.sync_server_time(crd.time, Instant::now());
                                         self.auth.handle_handshake_request(crd, &mut self.session).await?;
                                     }
                                     SessionEvent::HandshakeResponse { cookie, client_id } => {
                                         self.auth.handle_handshake_response(cookie, client_id, &mut self.session).await?;
                                     }
                                     SessionEvent::TimeSync(server_time) => {
-                                        let world_events = self
-                                            .world
-                                            .set_server_time_sync(server_time, Instant::now());
-                                        for event in world_events {
-                                            self.handle_world_event(&event);
-                                        }
+                                        self.sync_server_time(server_time, Instant::now());
                                     }
                                 }
                             }
@@ -946,6 +949,35 @@ mod tests {
         }
 
         assert!(saw_kinematics);
+    }
+
+    #[test]
+    fn sync_server_time_updates_world_state_and_emits_client_view_event() {
+        let mut client = builder::build_test_client(ClientState::EnteringWorld);
+        let mut events = client.subscribe_client_view_events();
+        let synced_at = Instant::now();
+        let server_time = 289_184_283.365_664_66;
+
+        client.sync_server_time(server_time, synced_at);
+
+        let sync = client
+            .world
+            .server_time
+            .as_ref()
+            .expect("server time should be recorded");
+        assert_eq!(sync.server_time, server_time);
+        assert_eq!(sync.local_time, synced_at);
+
+        let mut saw_event = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::ServerTimeUpdated { time } if time == server_time)
+            {
+                saw_event = true;
+                break;
+            }
+        }
+
+        assert!(saw_event);
     }
 
     #[test]

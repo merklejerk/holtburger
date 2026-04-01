@@ -343,6 +343,9 @@ impl MovementSystem {
                 queued,
             );
         }
+        let explicit_stop_requested = queued
+            .iter()
+            .any(|command| matches!(command, QueuedDriveCommand::Stop));
         for command in queued {
             self.ingest_drive_command(command, now);
         }
@@ -370,14 +373,14 @@ impl MovementSystem {
                 self.execute_autonomous_drive_intent(intent, world, session, now)
                     .await?,
             ),
-            None if had_active_manual_motion || self.server_motion_active => {
+            None if had_active_manual_motion || explicit_stop_requested => {
                 events.extend(
                     self.execute_stop_at(
                         now,
                         world,
                         session,
                         MovementPacketMetadata::default(),
-                        had_active_manual_motion,
+                        had_active_manual_motion || explicit_stop_requested,
                     )
                     .await?,
                 );
@@ -412,6 +415,7 @@ impl MovementSystem {
             body_id,
             desired_world_delta: intent.desired_world_delta,
             desired_heading: intent.desired_heading,
+            target_hint: intent.target_hint,
             gait: match intent.gait {
                 crate::client::movement_types::Gait::Walk => LocalDriveGait::Walk,
                 crate::client::movement_types::Gait::Run => LocalDriveGait::Run,

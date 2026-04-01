@@ -1,3 +1,4 @@
+use holtburger_common::position::WorldPosition;
 use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
@@ -51,6 +52,7 @@ pub enum Gait {
 pub struct AutonomousDriveIntent {
     pub desired_world_delta: Vector3,
     pub desired_heading: Option<f32>,
+    pub target_hint: Option<WorldPosition>,
     pub gait: Gait,
     pub force_grounded: bool,
 }
@@ -165,6 +167,8 @@ pub enum PlayerDriveIntent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::{Guid, Quaternion};
 
     #[test]
     fn planar_velocity_matches_ac_heading_convention() {
@@ -286,12 +290,25 @@ mod tests {
         let intent = AutonomousDriveIntent {
             desired_world_delta: Vector3::new(1.0, 2.0, 3.0),
             desired_heading: Some(1.25),
+            target_hint: Some(WorldPosition {
+                landblock_id: Guid(0x1234_0100),
+                coords: Vector3::new(4.0, 5.0, 6.0),
+                rotation: Quaternion::identity(),
+            }),
             gait: Gait::Run,
             force_grounded: true,
         };
 
         assert_eq!(intent.desired_world_delta, Vector3::new(1.0, 2.0, 3.0));
         assert_eq!(intent.desired_heading, Some(1.25));
+        assert_eq!(
+            intent.target_hint,
+            Some(WorldPosition {
+                landblock_id: Guid(0x1234_0100),
+                coords: Vector3::new(4.0, 5.0, 6.0),
+                rotation: Quaternion::identity(),
+            })
+        );
         assert_eq!(intent.gait, Gait::Run);
         assert!(intent.force_grounded);
     }
@@ -301,6 +318,7 @@ mod tests {
         let intent = PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
             desired_world_delta: Vector3::new(0.0, 1.0, 0.0),
             desired_heading: None,
+            target_hint: None,
             gait: Gait::Walk,
             force_grounded: false,
         });
@@ -310,6 +328,7 @@ mod tests {
             PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
                 desired_world_delta,
                 desired_heading: None,
+                target_hint: None,
                 gait: Gait::Walk,
                 force_grounded: false,
             }) if desired_world_delta == Vector3::new(0.0, 1.0, 0.0)

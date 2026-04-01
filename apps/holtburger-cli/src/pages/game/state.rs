@@ -29,9 +29,8 @@ use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::navigation::{
-    DishonestNavigation, DishonestNavigationIntent as NavigationIntent,
-    DishonestNavigationMode as NavigationMode,
-    DishonestNavigationSyncInput as NavigationSyncInput, ResolvedNavigationTarget,
+    TuiNavigation, NavigationInput, NavigationInteractionChange, NavigationSnapshot,
+    NavigationTick, NavigationUpdate, ResolvedNavigationTarget,
 };
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
@@ -39,6 +38,8 @@ use crate::types::{
     Interaction, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
+#[cfg(test)]
+use crate::navigation::{NavigationMode as NavigationMode, NavigationSyncInput};
 
 #[derive(Default)]
 pub struct GameState {
@@ -51,8 +52,6 @@ pub struct GameState {
     pub chat_input: ChatInputState,
 }
 
-const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
-const FOLLOW_DISTANCE: f32 = 0.01;
 const DEFAULT_APPROACH_RUN_RATE: f32 = 4.5;
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
@@ -163,6 +162,7 @@ impl GameState {
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         let now = Instant::now();
+        let navigation_interrupt = self.navigation_interrupt_for_view_event(&event);
         self.data.runtime_body_cache.apply_view_event(&event, now);
         match event {
             ClientViewEvent::LogMessage(_)
@@ -185,7 +185,6 @@ impl GameState {
                     ClientViewEvent::CombatFeedback(feedback),
                     self.data.character_name.as_deref(),
                 );
-                self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::PlayerEnchantmentsUpdated { .. }
@@ -199,7 +198,6 @@ impl GameState {
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
                 self.sync_weapon_swap_controller(Instant::now(), &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::BusyOperationFinished { .. } => {
@@ -261,11 +259,6 @@ impl GameState {
                     }
                 }
                 self.refresh_entity_context_if_visible(guid);
-                if !is_player_move {
-                    self.sync_approach_target(now, &mut result);
-                    self.sync_follow_target(now, &mut result);
-                    self.sync_sticky_melee_pursuit(&mut result);
-                }
                 result.needs_redraw = true;
             }
             ClientViewEvent::EntityKinematicsUpdated {
@@ -284,9 +277,6 @@ impl GameState {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.motion_snapshot = snapshot;
                     self.refresh_entity_context_if_visible(guid);
-                    self.sync_approach_target(now, &mut result);
-                    self.sync_follow_target(now, &mut result);
-                    self.sync_sticky_melee_pursuit(&mut result);
                     result.needs_redraw = true;
                 }
             }
@@ -295,34 +285,22 @@ impl GameState {
             }
             ClientViewEvent::RuntimeBodySnapshot { .. } => {
                 self.refresh_context_buffer();
-                self.sync_approach_target(now, &mut result);
-                self.sync_follow_target(now, &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::RuntimeBodyUpserted { body } => {
                 if let Some(guid) = body.body_id.authoritative_guid() {
                     self.refresh_entity_context_if_visible(guid);
                 }
-                self.sync_approach_target(now, &mut result);
-                self.sync_follow_target(now, &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 if let Some(guid) = body_id.authoritative_guid() {
                     self.refresh_entity_context_if_visible(guid);
                 }
-                self.sync_approach_target(now, &mut result);
-                self.sync_follow_target(now, &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::RuntimeBodiesReset { .. } => {
                 self.refresh_context_buffer();
-                self.sync_approach_target(now, &mut result);
-                self.sync_follow_target(now, &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::ForcedReposition { guid, pos, .. } => {
@@ -334,23 +312,11 @@ impl GameState {
                     }
                 }
                 self.refresh_entity_context_if_visible(guid);
-                if is_player_move {
-                    self.handle_forced_reposition(&mut result);
-                } else {
-                    self.sync_approach_target(now, &mut result);
-                    self.sync_follow_target(now, &mut result);
-                    self.sync_sticky_melee_pursuit(&mut result);
-                }
                 result.needs_redraw = true;
             }
-            ClientViewEvent::TeleportStarted { .. } => {
-                self.handle_teleport_start(&mut result);
-            }
+            ClientViewEvent::TeleportStarted { .. } => {}
             ClientViewEvent::EntityDespawned { guid } => {
                 result.merge(self.handle_entity_removed(guid));
-                self.sync_approach_target(now, &mut result);
-                self.sync_follow_target(now, &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
             }
             ClientViewEvent::VendorStateUpdated { vendor } => {
                 if self.data.trade.is_some() {
@@ -430,11 +396,16 @@ impl GameState {
             _ => {}
         }
 
+        if let Some(input) = navigation_interrupt {
+            self.handle_navigation_interrupt(input, &mut result);
+        }
+
         result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = UpdateResult::new();
+        let navigation_input = self.navigation_input_for_app_action(&action);
         match action {
             AppAction::Assess { target } => {
                 let guid = match target {
@@ -494,31 +465,11 @@ impl GameState {
                 self.view.salvaging = None;
                 result.needs_redraw = true;
             }
-            AppAction::Approach { guid } => {
-                self.start_approach_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
-                if matches!(
-                    self.runtime.navigation.navigation_mode(),
-                    Some(NavigationMode::Approach { .. })
-                ) {
-                    self.set_active_interaction(
-                        Some(Interaction::Approaching { target_guid: guid }),
-                        &mut result,
-                    );
-                    result.needs_redraw = true;
-                }
-            }
-            AppAction::Follow { guid } => {
-                self.start_follow_target(guid, FOLLOW_DISTANCE, &mut result);
-                if matches!(
-                    self.runtime.navigation.navigation_mode(),
-                    Some(NavigationMode::Follow { .. })
-                ) {
-                    self.set_active_interaction(
-                        Some(Interaction::Following { target_guid: guid }),
-                        &mut result,
-                    );
-                    result.needs_redraw = true;
-                }
+            AppAction::Approach { .. } | AppAction::Follow { .. } => {
+                self.apply_navigation_input(
+                    navigation_input.expect("navigation actions should project to navigation input"),
+                    &mut result,
+                );
             }
             AppAction::Drop { guid } => {
                 result.commands.push(ClientCommand::Drop(guid));
@@ -801,22 +752,26 @@ impl GameState {
             }
             AppAction::BeginInteraction { interaction } => {
                 if interaction == Interaction::Salvaging {
+                    if let Some(input) = navigation_input {
+                        self.apply_navigation_input(input, &mut result);
+                    }
                     if !self.reset_salvaging_state(&mut result) {
                         return Some(result);
                     }
                 } else {
-                    if Self::is_frontend_navigation_interaction(self.view.active_interaction)
-                        && !Self::is_frontend_navigation_interaction(Some(interaction))
-                    {
-                        self.runtime.navigation.clear_navigation();
-                        self.stop_active_navigation_drive(&mut result);
+                    if let Some(input) = navigation_input {
+                        self.apply_navigation_input(input, &mut result);
                     }
                     self.set_active_interaction(Some(interaction), &mut result);
                 }
                 result.needs_redraw = true;
             }
             AppAction::CancelInteraction => {
-                self.clear_active_interaction(&mut result);
+                if let Some(input) = navigation_input {
+                    self.apply_navigation_input(input, &mut result);
+                } else {
+                    self.clear_active_interaction(&mut result);
+                }
                 self.view.salvaging = None;
                 result.needs_redraw = true;
             }
@@ -839,7 +794,6 @@ impl GameState {
             }
             _ => return None,
         }
-        self.sync_sticky_melee_pursuit(&mut result);
 
         Some(result)
     }
@@ -878,10 +832,8 @@ impl GameState {
         self.refresh_stale_attack_sequence(now, &mut result);
         self.sync_weapon_swap_controller(now, &mut result);
 
-        self.sync_approach_target(now, &mut result);
-        self.sync_follow_target(now, &mut result);
-        self.sync_sticky_melee_pursuit(&mut result);
-        self.sync_navigation_drive(now, elapsed, &mut result);
+        let update = self.runtime.navigation.tick(self.navigation_tick(now, elapsed));
+        self.apply_navigation_update(update, &mut result);
 
         result
     }
@@ -1035,8 +987,12 @@ impl GameState {
 
     pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
         if Self::is_frontend_navigation_interaction(self.view.active_interaction) {
-            self.runtime.navigation.clear_navigation();
-            self.stop_active_navigation_drive(result);
+            let update = self.runtime.navigation.handle_input(
+                NavigationInput::Cancel,
+                self.navigation_snapshot(self.navigation_tick_target_guid()),
+            );
+            self.apply_navigation_update(update, result);
+            return;
         }
 
         self.set_active_interaction(None, result);
@@ -1263,32 +1219,7 @@ impl GameState {
         }
     }
 
-    fn sync_sticky_melee_pursuit(&mut self, result: &mut UpdateResult) {
-        let now = Instant::now();
-        let target_guid = self
-            .current_target_guid()
-            .filter(|guid| self.is_valid_combat_target(*guid));
-        self.reconcile_navigation(
-            NavigationIntent::StickyMelee {
-                target_guid,
-                combat_mode: self.data.combat_mode,
-                attack_sequence_active: self
-                    .data
-                    .combat_runtime
-                    .attack_activity(self.data.combat_mode)
-                    .is_some(),
-            },
-            target_guid,
-            now,
-            result,
-        );
-    }
-
-    fn navigation_sync_input(
-        &self,
-        now: Instant,
-        target_guid: Option<Guid>,
-    ) -> NavigationSyncInput {
+    fn navigation_snapshot(&self, target_guid: Option<Guid>) -> NavigationSnapshot {
         let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
         let target_sample = target_guid.and_then(|guid| self.data.runtime_sample_for_guid(guid));
         let target_use_radius = target_entity
@@ -1298,156 +1229,108 @@ impl GameState {
             .data
             .player_run_rate()
             .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
-        NavigationSyncInput {
-            now,
+        NavigationSnapshot {
             player_position: self.data.runtime_player_position(),
-            target: target_guid
+            run_rate,
+            combat_target_guid: self.current_target_guid(),
+            combat_mode: self.data.combat_mode,
+            attack_sequence_active: self
+                .data
+                .combat_runtime
+                .attack_activity(self.data.combat_mode)
+                .is_some(),
+            tracked_target: target_guid
                 .zip(target_sample)
                 .map(|(guid, sample)| ResolvedNavigationTarget {
                     guid,
                     sample,
                     use_radius: target_use_radius,
                 }),
-            run_rate,
         }
     }
 
-    fn reconcile_navigation(
-        &mut self,
-        intent: NavigationIntent,
-        target_guid: Option<Guid>,
-        now: Instant,
-        _result: &mut UpdateResult,
-    ) {
-        let input = self.navigation_sync_input(now, target_guid);
-        let authoritative_distance = input
-            .player_position
-            .zip(input.target.map(|target| target.sample.authoritative_pose))
-            .map(|(player, target)| player.distance_to(&target));
-        let projected_distance = input
-            .player_position
-            .zip(input.target.map(|target| target.sample.projected_pose))
-            .map(|(player, target)| player.distance_to(&target));
+    fn navigation_tick(&self, now: Instant, elapsed: f64) -> NavigationTick {
+        NavigationTick {
+            now,
+            dt: Duration::from_secs_f64(elapsed.max(0.0)),
+            snapshot: self.navigation_snapshot(self.navigation_tick_target_guid()),
+        }
+    }
 
-        if !matches!(
-            intent,
-            NavigationIntent::StickyMelee {
-                target_guid: None,
-                combat_mode: CombatMode::NonCombat,
-                attack_sequence_active: false,
+    fn navigation_tick_target_guid(&self) -> Option<Guid> {
+        self.runtime.navigation.tracked_target_guid().or_else(|| {
+            self.current_target_guid()
+                .filter(|guid| self.is_valid_combat_target(*guid))
+        })
+    }
+
+    fn apply_navigation_update(&mut self, update: NavigationUpdate, result: &mut UpdateResult) {
+        if let Some(command) = update.drive_command {
+            result.commands.push(ClientCommand::DriveSelf(command));
+        }
+
+        match update.interaction_change {
+            NavigationInteractionChange::Unchanged => {}
+            NavigationInteractionChange::Set(next_interaction) => {
+                self.set_active_interaction(next_interaction, result);
+                result.needs_redraw = true;
             }
-        ) {
-            log::trace!(
-                "tui navigation: syncing {:?} target={:?} player_present={} auth_distance={:?} projected_distance={:?} run_rate={:.2}",
-                intent,
-                target_guid.map(|guid| format!("0x{:08X}", guid.0)),
-                input.player_position.is_some(),
-                authoritative_distance,
-                projected_distance,
-                input.run_rate,
-            );
         }
-
-        self.runtime.navigation.reconcile_navigation(intent, input);
     }
 
-    fn start_approach_target(
-        &mut self,
-        target: Guid,
-        arrival_distance: f32,
-        _result: &mut UpdateResult,
-    ) {
-        self.runtime.navigation.activate_approach(
-            target,
-            arrival_distance,
-            self.navigation_sync_input(Instant::now(), Some(target)),
-        );
-    }
-
-    fn start_follow_target(
-        &mut self,
-        target: Guid,
-        arrival_distance: f32,
-        _result: &mut UpdateResult,
-    ) {
-        self.runtime.navigation.activate_follow(
-            target,
-            arrival_distance,
-            self.navigation_sync_input(Instant::now(), Some(target)),
-        );
-    }
-
-    fn sync_approach_target(&mut self, now: Instant, result: &mut UpdateResult) {
-        let Some(NavigationMode::Approach {
-            target: target_guid,
-            ..
-        }) = self.runtime.navigation.navigation_mode()
-        else {
-            self.clear_finished_approach_interaction(result);
-            return;
+    fn apply_navigation_input(&mut self, input: NavigationInput, result: &mut UpdateResult) {
+        let target_guid = match input {
+            NavigationInput::StartApproach { target }
+            | NavigationInput::StartFollow { target } => Some(target),
+            NavigationInput::Cancel
+            | NavigationInput::ForcedReposition
+            | NavigationInput::TeleportStarted => self.navigation_tick_target_guid(),
         };
 
-        self.reconcile_navigation(
-            NavigationIntent::Approach {
-                target: target_guid,
-                arrival_distance: GENERIC_APPROACH_DISTANCE,
-            },
-            Some(target_guid),
-            now,
-            result,
-        );
+        let update = self
+            .runtime
+            .navigation
+            .handle_input(input, self.navigation_snapshot(target_guid));
+        self.apply_navigation_update(update, result);
+    }
 
-        if !matches!(
-            self.runtime.navigation.navigation_mode(),
-            Some(NavigationMode::Approach { .. })
-        ) {
-            self.clear_finished_approach_interaction(result);
+    fn navigation_input_for_app_action(&self, action: &AppAction) -> Option<NavigationInput> {
+        match action {
+            AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
+            AppAction::Follow { guid } => Some(NavigationInput::StartFollow { target: *guid }),
+            AppAction::CancelInteraction
+                if Self::is_frontend_navigation_interaction(self.view.active_interaction) =>
+            {
+                Some(NavigationInput::Cancel)
+            }
+            AppAction::BeginInteraction { interaction }
+                if Self::is_frontend_navigation_interaction(self.view.active_interaction)
+                    && !Self::is_frontend_navigation_interaction(Some(*interaction)) =>
+            {
+                Some(NavigationInput::Cancel)
+            }
+            _ => None,
         }
     }
 
-    fn sync_follow_target(&mut self, now: Instant, result: &mut UpdateResult) {
-        let Some(NavigationMode::Follow {
-            target: target_guid,
-            ..
-        }) = self.runtime.navigation.navigation_mode()
-        else {
-            self.clear_finished_follow_interaction(result);
+    fn navigation_interrupt_for_view_event(
+        &self,
+        event: &ClientViewEvent,
+    ) -> Option<NavigationInput> {
+        match event {
+            ClientViewEvent::ForcedReposition { guid, .. }
+                if Some(*guid) == self.data.player_guid => Some(NavigationInput::ForcedReposition),
+            ClientViewEvent::TeleportStarted { .. } => Some(NavigationInput::TeleportStarted),
+            _ => None,
+        }
+    }
+
+    fn handle_navigation_interrupt(&mut self, input: NavigationInput, result: &mut UpdateResult) {
+        self.apply_navigation_input(input, result);
+
+        if input != NavigationInput::TeleportStarted {
             return;
-        };
-
-        self.reconcile_navigation(
-            NavigationIntent::Follow {
-                target: target_guid,
-                arrival_distance: FOLLOW_DISTANCE,
-            },
-            Some(target_guid),
-            now,
-            result,
-        );
-
-        if !matches!(
-            self.runtime.navigation.navigation_mode(),
-            Some(NavigationMode::Follow { .. })
-        ) {
-            self.clear_finished_follow_interaction(result);
         }
-    }
-
-    fn handle_forced_reposition(&mut self, result: &mut UpdateResult) {
-        self.runtime.navigation.handle_forced_reposition();
-        self.stop_active_navigation_drive(result);
-        self.clear_finished_approach_interaction(result);
-        if !matches!(
-            self.runtime.navigation.navigation_mode(),
-            Some(NavigationMode::Follow { .. })
-        ) {
-            self.clear_finished_follow_interaction(result);
-        }
-    }
-
-    fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
-        self.runtime.navigation.handle_teleport_start();
-        self.stop_active_navigation_drive(result);
 
         if matches!(
             self.view.active_interaction,
@@ -1474,74 +1357,11 @@ impl GameState {
         }
     }
 
-    fn clear_finished_approach_interaction(&mut self, result: &mut UpdateResult) {
-        if matches!(
-            self.view.active_interaction,
-            Some(Interaction::Approaching { .. })
-        ) {
-            self.view.active_interaction = None;
-            result.needs_redraw = true;
-        }
-    }
-
-    fn clear_finished_follow_interaction(&mut self, result: &mut UpdateResult) {
-        if matches!(
-            self.view.active_interaction,
-            Some(Interaction::Following { .. })
-        ) {
-            self.view.active_interaction = None;
-            result.needs_redraw = true;
-        }
-    }
-
     fn current_target_guid(&self) -> Option<Guid> {
         match self.view.active_interaction {
             Some(Interaction::Targeting { target_guid }) => Some(target_guid),
             _ => None,
         }
-    }
-
-    fn active_navigation_target_guid(&self) -> Option<Guid> {
-        match self.runtime.navigation.navigation_mode() {
-            Some(NavigationMode::Approach { target, .. })
-            | Some(NavigationMode::Follow { target, .. }) => Some(target),
-            Some(NavigationMode::StickyMelee { target })
-                if self.runtime.navigation.sticky_is_pursuing() =>
-            {
-                Some(target)
-            }
-            _ => None,
-        }
-    }
-
-    fn sync_navigation_drive(&mut self, now: Instant, elapsed: f64, result: &mut UpdateResult) {
-        let dt = Duration::from_secs_f64(elapsed.max(0.0));
-        let drive_intent = self.active_navigation_target_guid().and_then(|guid| {
-            self.runtime
-                .navigation
-                .active_drive_intent(self.navigation_sync_input(now, Some(guid)), dt)
-        });
-
-        match drive_intent {
-            Some(intent) => {
-                result
-                    .commands
-                    .push(ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(intent)));
-                self.runtime.navigation_drive_active = true;
-            }
-            None => self.stop_active_navigation_drive(result),
-        }
-    }
-
-    fn stop_active_navigation_drive(&mut self, result: &mut UpdateResult) {
-        if !self.runtime.navigation_drive_active {
-            return;
-        }
-
-        result
-            .commands
-            .push(ClientCommand::DriveSelf(PlayerDriveIntent::Stop));
-        self.runtime.navigation_drive_active = false;
     }
 
     fn is_valid_combat_target(&self, target_guid: Guid) -> bool {
@@ -1854,8 +1674,7 @@ pub struct ViewState {
 struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
-    navigation: DishonestNavigation,
-    navigation_drive_active: bool,
+    navigation: TuiNavigation,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,
@@ -1911,7 +1730,7 @@ mod tests {
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
-    use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode};
+    use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode};
     fn is_weapon_swap_active(state: &GameState) -> bool {
         state.runtime.weapon_swap.is_active()
     }
@@ -1921,29 +1740,6 @@ mod tests {
             state.runtime.navigation.navigation_mode(),
             Some(NavigationMode::Approach { .. })
         )
-    }
-
-    fn sticky_latched_target_guid(state: &GameState) -> Option<Guid> {
-        state.runtime.navigation.sticky_latched_target_guid()
-    }
-
-    fn sticky_is_pursuing(state: &GameState) -> bool {
-        state.runtime.navigation.sticky_is_pursuing()
-    }
-
-    fn has_active_dishonest_drive(state: &GameState) -> bool {
-        let Some(target_guid) = state.active_navigation_target_guid() else {
-            return false;
-        };
-
-        state
-            .runtime
-            .navigation
-            .active_drive_intent(
-                state.navigation_sync_input(Instant::now(), Some(target_guid)),
-                Duration::from_millis(100),
-            )
-            .is_some()
     }
 
     fn is_run_movement_command(command: &ClientCommand) -> bool {
@@ -1986,43 +1782,26 @@ mod tests {
         )
     }
 
+    fn has_autonomous_navigation_command(result: &UpdateResult) -> bool {
+        result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(_))
+            )
+        })
+    }
+
+    fn has_stop_navigation_command(result: &UpdateResult) -> bool {
+        result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop))
+        })
+    }
+
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
         matches!(
             command,
             ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { .. })
         )
-    }
-
-    fn seed_active_approach(
-        state: &mut GameState,
-        target: Guid,
-        arrival_distance: f32,
-        input: NavigationSyncInput,
-    ) {
-        let _ = state.runtime.navigation.reconcile_navigation(
-            NavigationIntent::Approach {
-                target,
-                arrival_distance,
-            },
-            input,
-        );
-    }
-
-    fn seed_sticky_melee(
-        state: &mut GameState,
-        target_guid: Option<Guid>,
-        combat_mode: CombatMode,
-        attack_sequence_active: bool,
-        input: NavigationSyncInput,
-    ) {
-        let _ = state.runtime.navigation.reconcile_navigation(
-            NavigationIntent::StickyMelee {
-                target_guid,
-                combat_mode,
-                attack_sequence_active,
-            },
-            input,
-        );
     }
 
     fn runtime_body_view(
@@ -2547,29 +2326,9 @@ mod tests {
             target_guid,
             creature_entity(target_guid, "Drudge", target_pos),
         );
-        seed_active_approach(
-            &mut state,
-            target_guid,
-            1.0,
-            NavigationSyncInput {
-                now: Instant::now(),
-                player_position: Some(start_pos),
-                target: Some(ResolvedNavigationTarget {
-                    guid: target_guid,
-                    sample: SpatialEntitySample {
-                        guid: target_guid,
-                        authoritative_pose: target_pos,
-                        projected_pose: target_pos,
-                        velocity: Vector3::zero(),
-                        omega: Vector3::zero(),
-                        motion_state: None,
-                        projection_mode: SpatialSampleMode::AuthoritativeOnly,
-                    },
-                    use_radius: None,
-                }),
-                run_rate: DEFAULT_APPROACH_RUN_RATE,
-            },
-        );
+        let _ = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
 
         let moved_pos = WorldPosition {
             landblock_id: Guid(0x01000000),
@@ -2637,7 +2396,13 @@ mod tests {
             )),
         });
 
-        let input = state.navigation_sync_input(Instant::now(), Some(target_guid));
+        let snapshot = state.navigation_snapshot(Some(target_guid));
+        let input = NavigationSyncInput {
+            now: Instant::now(),
+            player_position: snapshot.player_position,
+            target: snapshot.tracked_target,
+            run_rate: snapshot.run_rate,
+        };
         let target = input.target.expect("target sample should exist");
 
         assert_eq!(input.player_position, Some(runtime_player));
@@ -3277,7 +3042,6 @@ mod tests {
         let _result = state.handle_tick(0.016);
 
         assert!(!has_active_approach(&state));
-        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
     }
 
     #[test]
@@ -3313,7 +3077,6 @@ mod tests {
                         && intent.desired_world_delta.x > 0.0
             )
         }));
-        assert!(state.runtime.navigation_drive_active);
     }
 
     #[test]
@@ -3325,11 +3088,10 @@ mod tests {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
         });
-        state.runtime.navigation_drive_active = true;
 
         let target_position = WorldPosition {
             landblock_id: Guid(0x01000000),
-            coords: Vector3::new(0.2, 0.0, 0.0),
+            coords: Vector3::new(5.0, 0.0, 0.0),
             ..WorldPosition::default()
         };
         state.data.entities.insert(
@@ -3339,12 +3101,21 @@ mod tests {
 
         let _ = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
 
+        let first_tick = state.handle_tick(0.1);
+        assert!(has_autonomous_navigation_command(&first_tick));
+
+        let _ = state.handle_view_event(ClientViewEvent::EntityMoved {
+            guid: target_guid,
+            pos: WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: Vector3::new(0.2, 0.0, 0.0),
+                ..WorldPosition::default()
+            },
+        });
+
         let result = state.handle_tick(0.1);
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop))
-        }));
-        assert!(!state.runtime.navigation_drive_active);
+        assert!(has_stop_navigation_command(&result));
     }
 
     #[test]
@@ -3380,77 +3151,6 @@ mod tests {
             ) || is_snap_facing_command(command)
         }));
         assert!(!state.data.combat_runtime.attack_queued);
-    }
-
-    #[test]
-    fn cancelled_attack_stops_sticky_melee_follow() {
-        let player_guid = Guid(0x50000001);
-        let target_guid = Guid(0x60000001);
-        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-        state.data.combat_mode = CombatMode::Melee;
-        state.data.player_pos = Some(WorldPosition {
-            landblock_id: Guid(0x01000000),
-            rotation: holtburger_common::Quaternion::from_heading(0.0),
-            ..WorldPosition::default()
-        });
-        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-        state.data.combat_runtime.attack_sequence_active = true;
-
-        let target_position = WorldPosition {
-            landblock_id: Guid(0x01000000),
-            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
-            ..WorldPosition::default()
-        };
-        state.data.entities.insert(
-            target_guid,
-            creature_entity(target_guid, "Drudge", target_position),
-        );
-
-        let player_position = state.data.runtime_player_position();
-        let target_sample = state
-            .data
-            .runtime_sample_for_guid(target_guid)
-            .expect("target runtime sample should exist");
-        seed_sticky_melee(
-            &mut state,
-            Some(target_guid),
-            CombatMode::Melee,
-            true,
-            NavigationSyncInput {
-                now: Instant::now() - Duration::from_millis(250),
-                player_position,
-                target: Some(ResolvedNavigationTarget {
-                    guid: target_guid,
-                    sample: target_sample,
-                    use_radius: None,
-                }),
-                run_rate: DEFAULT_APPROACH_RUN_RATE,
-            },
-        );
-
-        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
-            CombatFeedback::AttackDone {
-                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
-            },
-        ));
-
-        assert!(result.commands.iter().any(is_snap_facing_command));
-        assert!(!has_active_approach(&state));
-        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
-
-        state.data.player_pos = Some(WorldPosition {
-            landblock_id: Guid(0x01000000),
-            rotation: holtburger_common::Quaternion::from_heading(180.0_f32.to_radians()),
-            ..WorldPosition::default()
-        });
-
-        let mut retry = UpdateResult::new();
-        state
-            .refresh_stale_attack_sequence(Instant::now() + Duration::from_millis(200), &mut retry);
-
-        assert!(retry.commands.iter().any(|command| {
-            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
-        }));
     }
 
     #[test]
@@ -3511,14 +3211,14 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
         assert!(!started.commands.iter().any(is_navigation_drive_command));
-        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Approaching { target_guid })
         );
 
-        state.runtime.navigation_drive_active = true;
+        let driving_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&driving_tick));
 
         let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: player_guid,
@@ -3530,10 +3230,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop))
-        }));
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(has_stop_navigation_command(&result));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3562,7 +3259,8 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        state.runtime.navigation_drive_active = true;
+        let driving_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&driving_tick));
 
         let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: player_guid,
@@ -3574,10 +3272,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop))
-        }));
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(has_stop_navigation_command(&result));
         assert!(matches!(
             state.runtime.navigation.navigation_mode(),
             Some(NavigationMode::Follow { .. })
@@ -3605,7 +3300,7 @@ mod tests {
                 "Drudge",
                 WorldPosition {
                     landblock_id: Guid(0x01000000),
-                    coords: holtburger_common::Vector3::new(FOLLOW_DISTANCE * 0.5, 0.0, 0.0),
+                    coords: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
                     ..WorldPosition::default()
                 },
             ),
@@ -3615,7 +3310,7 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        let _result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+        let event_result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3624,6 +3319,8 @@ mod tests {
             },
             sequence: 42,
         });
+
+        assert!(event_result.needs_redraw);
 
         assert_eq!(
             state
@@ -3636,7 +3333,10 @@ mod tests {
                 .x,
             6.0
         );
-        assert!(has_active_dishonest_drive(&state));
+
+        let tick_result = state.handle_tick(0.016);
+
+        assert!(has_autonomous_navigation_command(&tick_result));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3668,28 +3368,34 @@ mod tests {
             .unwrap();
 
         assert!(!started.commands.iter().any(is_navigation_movement_command));
-        assert!(has_active_dishonest_drive(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
         );
 
-        let _in_range = state.handle_view_event(ClientViewEvent::EntityMoved {
+        let first_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&first_tick));
+
+        let in_range_event = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
-                coords: holtburger_common::Vector3::new(FOLLOW_DISTANCE * 0.5, 0.0, 0.0),
+                coords: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
                 ..WorldPosition::default()
             },
         });
 
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(in_range_event.needs_redraw);
+
+        let in_range_tick = state.handle_tick(0.016);
+
+        assert!(has_stop_navigation_command(&in_range_tick));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
         );
 
-        let _slipped = state.handle_view_event(ClientViewEvent::EntityMoved {
+        let slipped_event = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3698,7 +3404,11 @@ mod tests {
             },
         });
 
-        assert!(has_active_dishonest_drive(&state));
+        assert!(slipped_event.needs_redraw);
+
+        let slipped_tick = state.handle_tick(0.016);
+
+        assert!(has_autonomous_navigation_command(&slipped_tick));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3729,14 +3439,12 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        assert_eq!(
-            state.view.active_interaction,
-            Some(Interaction::Following { target_guid })
-        );
+        let driving_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&driving_tick));
 
-        let _result = state.handle_action(AppAction::CancelInteraction).unwrap();
+        let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(has_stop_navigation_command(&result));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -3769,7 +3477,6 @@ mod tests {
             .unwrap();
 
         assert!(!result.commands.iter().any(is_navigation_movement_command));
-        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
         assert!(!matches!(
             state.runtime.navigation.navigation_mode(),
@@ -3779,6 +3486,9 @@ mod tests {
             state.view.active_interaction,
             Some(Interaction::Approaching { target_guid })
         );
+
+        let tick_result = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&tick_result));
     }
 
     #[test]
@@ -3805,12 +3515,14 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
         assert!(!started.commands.iter().any(is_navigation_movement_command));
-        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
 
-        let _result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
+        let driving_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&driving_tick));
 
-        assert!(!has_active_dishonest_drive(&state));
+        let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
+
+        assert!(has_stop_navigation_command(&result));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3838,15 +3550,12 @@ mod tests {
         );
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
-        let mut initial = UpdateResult::new();
-        state.sync_sticky_melee_pursuit(&mut initial);
-
-        assert!(sticky_is_pursuing(&state));
-        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
+        let initial = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&initial));
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(has_stop_navigation_command(&result));
         assert!(
             result
                 .commands
@@ -3854,9 +3563,10 @@ mod tests {
                 .any(|command| { matches!(command, ClientCommand::CancelAttack) })
         );
         assert_eq!(state.view.active_interaction, None);
-        assert_eq!(sticky_latched_target_guid(&state), None);
-        assert!(!sticky_is_pursuing(&state));
         assert!(!state.data.combat_runtime.attack_sequence_active);
+
+            let post_teleport_tick = state.handle_tick(0.016);
+            assert!(!has_autonomous_navigation_command(&post_teleport_tick));
     }
 
     #[test]
@@ -3883,15 +3593,18 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
 
+        let driving_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&driving_tick));
+
         assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Approaching { target_guid })
         );
 
-        let _result = state.handle_action(AppAction::CancelInteraction).unwrap();
+        let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(has_stop_navigation_command(&result));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3920,10 +3633,12 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
         assert!(!started.commands.iter().any(is_navigation_movement_command));
-        assert!(has_active_dishonest_drive(&state));
         assert!(has_active_approach(&state));
 
-        let _result = state.handle_view_event(ClientViewEvent::EntityMoved {
+        let first_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&first_tick));
+
+        let event_result = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
@@ -3932,7 +3647,56 @@ mod tests {
             },
         });
 
-        assert!(!has_active_dishonest_drive(&state));
+        assert!(event_result.needs_redraw);
+        assert!(has_active_approach(&state));
+
+        let tick_result = state.handle_tick(0.016);
+
+        assert!(has_stop_navigation_command(&tick_result));
+        assert!(!has_active_approach(&state));
+    }
+
+    #[test]
+    fn ordinary_navigation_world_churn_reconciles_on_next_tick() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(
+                target_guid,
+                "Drudge",
+                WorldPosition {
+                    landblock_id: Guid(0x01000000),
+                    coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+                    ..WorldPosition::default()
+                },
+            ),
+        );
+
+        let _ = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
+
+        let moved = state.handle_view_event(ClientViewEvent::EntityMoved {
+            guid: target_guid,
+            pos: WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: holtburger_common::Vector3::new(385.0, 0.0, 0.0),
+                ..WorldPosition::default()
+            },
+        });
+
+        assert!(moved.needs_redraw);
+        assert!(has_active_approach(&state));
+
+        let _ = state.handle_tick(0.016);
+
         assert!(!has_active_approach(&state));
     }
 
@@ -3970,77 +3734,6 @@ mod tests {
                 .iter()
                 .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
         );
-    }
-
-    #[test]
-    fn sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range() {
-        let player_guid = Guid(0x50000001);
-        let target_guid = Guid(0x60000001);
-        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-        state.data.combat_mode = CombatMode::Melee;
-        state.data.player_pos = Some(WorldPosition {
-            landblock_id: Guid(0x01000000),
-            ..WorldPosition::default()
-        });
-        state.data.combat_runtime.attack_sequence_active = true;
-        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-
-        let target_position = WorldPosition {
-            landblock_id: Guid(0x01000000),
-            coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
-            ..WorldPosition::default()
-        };
-        let mut target = creature_entity(target_guid, "Drudge", target_position);
-        state.data.entities.insert(target_guid, target.clone());
-
-        let player_position = state.data.player_pos;
-        seed_sticky_melee(
-            &mut state,
-            Some(target_guid),
-            CombatMode::Melee,
-            true,
-            NavigationSyncInput {
-                now: Instant::now() - Duration::from_millis(250),
-                player_position,
-                target: Some(ResolvedNavigationTarget {
-                    guid: target_guid,
-                    sample: SpatialEntitySample {
-                        guid: target_guid,
-                        authoritative_pose: WorldPosition {
-                            landblock_id: Guid(0x01000000),
-                            coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
-                            ..WorldPosition::default()
-                        },
-                        projected_pose: WorldPosition {
-                            landblock_id: Guid(0x01000000),
-                            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
-                            ..WorldPosition::default()
-                        },
-                        velocity: holtburger_common::Vector3::zero(),
-                        omega: holtburger_common::Vector3::zero(),
-                        motion_state: None,
-                        projection_mode: SpatialSampleMode::SimulatingVelocity,
-                    },
-                    use_radius: None,
-                }),
-                run_rate: DEFAULT_APPROACH_RUN_RATE,
-            },
-        );
-
-        let _in_range = state.handle_tick(0.016);
-
-        assert!(!has_active_dishonest_drive(&state));
-        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
-        assert!(!sticky_is_pursuing(&state));
-
-        target.position.coords = holtburger_common::Vector3::new(6.0, 0.0, 0.0);
-        state.data.entities.insert(target_guid, target);
-
-        let _slipped_again = state.handle_tick(0.016);
-
-        assert!(has_active_dishonest_drive(&state));
-        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
-        assert!(sticky_is_pursuing(&state));
     }
 
     #[test]
@@ -4205,14 +3898,14 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let mut first = UpdateResult::new();
-        state.start_approach_target(target_guid, 1.0, &mut first);
+        let first = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
 
         assert!(first.commands.is_empty());
-        assert!(has_active_dishonest_drive(&state));
 
-        let mut second = UpdateResult::new();
-        state.start_approach_target(target_guid, 1.0, &mut second);
+        let first_tick = state.handle_tick(0.016);
+        assert!(has_autonomous_navigation_command(&first_tick));
+
+        let second = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
 
         assert!(second.commands.is_empty());
         assert!(has_active_approach(&state));

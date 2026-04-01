@@ -680,14 +680,14 @@ Mitigation:
 
 ### Task Checklist
 
-- [ ] Identify the exact extraction boundary for TUI navigation orchestration.
-- [ ] Add the navigation-specific input/tick feed.
-- [ ] Extend `DishonestNavigation` with stop-edge and output handling.
-- [ ] Move navigation runtime ownership fully behind `DishonestNavigation`.
-- [ ] Move explicit input handling into navigation.
-- [ ] Move sticky-melee derivation and interruption handling into navigation.
-- [ ] Collapse repeated navigation call sites into projected feed delivery.
-- [ ] Add or update tests.
+- [x] Identify the exact extraction boundary for TUI navigation orchestration.
+- [x] Add the navigation-specific input/tick feed.
+- [x] Extend `DishonestNavigation` with stop-edge and output handling.
+- [x] Move navigation runtime ownership fully behind `DishonestNavigation` for default distances and drive-active bookkeeping.
+- [x] Move explicit input handling into navigation.
+- [x] Move sticky-melee derivation and interruption handling into navigation.
+- [x] Collapse repeated navigation call sites into projected feed delivery.
+- [x] Add or update tests.
 
 ### Decisions Log
 
@@ -701,10 +701,57 @@ Mitigation:
 - Decision: the first extraction should rely on next-tick reconciliation for ordinary world changes and keep immediate events only for hard interrupts.
 - Decision: teleport-triggered combat cancellation should remain split at first: navigation owns navigation shutdown, while `GameState` keeps the direct combat-runtime mutation.
 - Decision: default approach and follow arrival distances should move into navigation because page state is only forwarding fixed constants today.
+- Decision: phase 1 keeps the legacy `reconcile_navigation(...)` and explicit start helpers as compatibility shims while the new feed types and navigation-owned defaults land underneath them.
+- Decision: `NavigationSnapshot` is now the page-owned assembly surface for world-derived navigation inputs, even before later phases route `handle_input(...)` and `tick(...)` through it directly.
+- Decision: phase 2 uses a tiny `NavigationUpdate` with `drive_command` plus `interaction_change`; that shape is sufficient for current action and tick paths without introducing a broader effect vocabulary.
+- Decision: interruption-driven stop cleanup remains temporarily page-owned through `stop_active_navigation_drive(...)` until phase 3 folds forced reposition and teleport onto `NavigationInput`.
+- Decision: phase 3 keeps ordinary explicit-mode event resync in `state.rs` for now, but removes sticky-melee event orchestration entirely and lets `DishonestNavigation::tick(...)` derive sticky behavior from the current snapshot.
+- Decision: `NavigationInput::Cancel`, `ForcedReposition`, and `TeleportStarted` now return their own stop-edge and interaction cleanup through `NavigationUpdate` rather than depending on page-owned post-processing.
+- Decision: `GameState` now chooses the tick snapshot target by preferring `DishonestNavigation::tracked_target_guid()` and only falling back to the current valid combat target when navigation is otherwise idle.
+- Decision: phase 4 removes ordinary event-time approach/follow resync from `state.rs`; entity motion, runtime-body churn, despawns, and remote target movement now update page state immediately and let `DishonestNavigation::tick(...)` reconcile on the next tick.
+- Decision: page action handling now projects approach, follow, and navigation-cancel edges through `navigation_input_for_app_action(...)`, including switching from a navigation interaction into salvaging or other non-navigation interactions.
 
 ### Verification Log
 
-- Pending.
+- Implemented phase 1 code changes:
+  - added `NavigationInput`, `NavigationSnapshot`, and `NavigationTick` in `apps/holtburger-cli/src/navigation.rs`
+  - moved default approach/follow distances into `DishonestNavigation`
+  - moved drive-active bookkeeping into `DishonestNavigation`
+  - updated `GameState` to build `NavigationSnapshot` and delegate sync-input assembly back to navigation
+- Validation:
+  - `cargo test -p holtburger-cli --lib` passed after the phase-1 patch.
+- Implemented phase 2 code changes:
+  - added `NavigationUpdate` and `NavigationInteractionChange` in `apps/holtburger-cli/src/navigation.rs`
+  - moved explicit approach and follow startup into `DishonestNavigation::handle_input(...)`
+  - moved regular autonomous/stop emission into `DishonestNavigation::tick(...)`
+  - added page-owned `apply_navigation_update(...)` in `apps/holtburger-cli/src/pages/game/state.rs`
+  - removed the regular `start_*` and `sync_navigation_drive(...)` page control path
+  - added focused navigation tests for explicit interaction output and stop-edge emission
+- Validation:
+  - `cargo test -p holtburger-cli --lib` passed after the phase-2 patch.
+- Implemented phase 3 code changes:
+  - moved sticky-melee derivation behind `DishonestNavigation::tick(...)`
+  - moved forced reposition and teleport shutdown handling behind `DishonestNavigation::handle_input(...)`
+  - moved navigation interaction cleanup for completed approach/cancel/interrupt paths behind `NavigationUpdate`
+  - routed page-owned navigation cancellation edges through `NavigationInput::Cancel`
+  - removed page-owned `sync_sticky_melee_pursuit(...)` and the old approach/follow interaction cleanup helpers
+  - added focused navigation tests for forced-reposition cleanup and tick-time approach completion cleanup
+- Validation:
+  - `cargo test -p holtburger-cli --lib` passed after the phase-3 patch.
+- Implemented phase 4 code changes:
+  - removed the remaining page-owned `sync_approach_target(...)`, `sync_follow_target(...)`, `reconcile_navigation(...)`, and `navigation_sync_input(...)` helpers from `apps/holtburger-cli/src/pages/game/state.rs`
+  - added `navigation_input_for_app_action(...)`, `navigation_interrupt_for_view_event(...)`, and `apply_navigation_input(...)` so page actions and hard interrupts now project into the navigation feed instead of manually resyncing navigation state
+  - collapsed ordinary world-churn branches in `handle_view_event(...)` so they only update cached page state and redraw state, leaving navigation reconciliation to `DishonestNavigation::tick(...)`
+  - routed `CancelInteraction` and navigation-to-non-navigation `BeginInteraction` transitions through `NavigationInput::Cancel`, including salvaging handoff
+  - updated game-page integration tests to assert next-tick reconciliation for ordinary world churn and added focused coverage for the new tick-only contract
+- Validation:
+  - `cargo test -p holtburger-cli --lib` passed after the phase-4 patch.
+
+### Phase 4 Note
+
+No pivot is required.
+
+The planned extraction is complete: `state.rs` now projects navigation-relevant actions and hard interrupts into `DishonestNavigation`, while ordinary world churn settles on the next tick. If follow-up work happens here, it should be opportunistic cleanup rather than a new phase of this plan.
 
 ### Open Questions
 

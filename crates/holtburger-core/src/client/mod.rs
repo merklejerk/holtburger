@@ -827,6 +827,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::position::WorldPosition;
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
@@ -1014,6 +1015,11 @@ mod tests {
                 movement_types::AutonomousDriveIntent {
                     desired_world_delta: Vector3::new(3.0, 4.0, 0.0),
                     desired_heading: Some(1.5),
+                    target_hint: Some(WorldPosition {
+                        landblock_id: Guid(0x1000_0100),
+                        coords: Vector3::new(30.0, 40.0, 0.0),
+                        rotation: Quaternion::identity(),
+                    }),
                     gait: movement_types::Gait::Run,
                     force_grounded: true,
                 },

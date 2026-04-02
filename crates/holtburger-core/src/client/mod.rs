@@ -98,6 +98,34 @@ impl Client {
             .send(ClientViewEvent::BusyOperationFinished { operation, result });
     }
 
+    fn emit_self_movement_kinematics_updated(&self) {
+        let kinematics = match self.world.resolve_self_movement_kinematics() {
+            Ok(kinematics) => Some(kinematics),
+            Err(error) => {
+                log::warn!("self movement kinematics unavailable: {error}");
+                None
+            }
+        };
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::SelfMovementKinematicsUpdated { kinematics });
+    }
+
+    fn updates_affect_self_movement_kinematics(
+        updates: &[holtburger_common::properties::PropertyUpdate],
+    ) -> bool {
+        updates.iter().any(|update| {
+            matches!(
+                update,
+                holtburger_common::properties::PropertyUpdate::DataId(
+                    holtburger_common::properties::PropertyDataId::MotionTable
+                        | holtburger_common::properties::PropertyDataId::Setup,
+                    _,
+                )
+            )
+        })
+    }
+
     pub(super) fn arm_busy_operation(&mut self, operation: BusyOperationKind) -> bool {
         if let Some(active) = self.active_busy_operation.as_ref() {
             log::warn!(
@@ -450,6 +478,7 @@ impl Client {
                             entity: entity.clone(),
                         });
                 }
+                self.emit_self_movement_kinematics_updated();
             }
             WorldEvent::TeleportStarted { sequence } => {
                 let _ = self
@@ -464,6 +493,9 @@ impl Client {
                     .send(ClientViewEvent::EntitySpawned {
                         entity: entity.clone(),
                     });
+                if entity.guid == self.world.player.guid {
+                    self.emit_self_movement_kinematics_updated();
+                }
             }
             WorldEvent::EntityReplaced(entity) => {
                 let _ = self
@@ -471,6 +503,9 @@ impl Client {
                     .send(ClientViewEvent::EntityReplaced {
                         entity: entity.clone(),
                     });
+                if entity.guid == self.world.player.guid {
+                    self.emit_self_movement_kinematics_updated();
+                }
             }
             WorldEvent::EntityIdentified(entity) => {
                 let _ = self
@@ -483,6 +518,9 @@ impl Client {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
+                if *guid == self.world.player.guid {
+                    self.emit_self_movement_kinematics_updated();
+                }
             }
             WorldEvent::PropertiesUpdated { guid, updates } => {
                 let _ = self
@@ -491,6 +529,11 @@ impl Client {
                         guid: *guid,
                         updates: updates.clone(),
                     });
+                if *guid == self.world.player.guid
+                    && Self::updates_affect_self_movement_kinematics(updates.as_slice())
+                {
+                    self.emit_self_movement_kinematics_updated();
+                }
             }
             WorldEvent::EntityMoved { guid, pos } => {
                 let _ = self
@@ -633,6 +676,29 @@ mod tests {
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
+    use holtburger_world::{PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics};
+
+    fn test_self_movement_capabilities(
+        run_rate_scalar: f32,
+        walk_speed: f32,
+        run_speed: f32,
+        turn_speed_rad_per_sec: f32,
+    ) -> SelfMovementCapabilities {
+        SelfMovementCapabilities {
+            kinematics: SelfMovementKinematics {
+                source: PlayerMotionTableSource::DirectProperty {
+                    motion_table_id: 0x0900_0020,
+                },
+                motion_table_id: 0x0900_0020,
+                stance: 0x8000_003D,
+                base_walk_forward_velocity: Vector3::new(walk_speed, 0.0, 0.0),
+                base_run_forward_velocity: Vector3::new(run_speed, 0.0, 0.0),
+                base_turn_left_omega: Vector3::new(0.0, 0.0, -turn_speed_rad_per_sec),
+                base_turn_right_omega: Vector3::new(0.0, 0.0, turn_speed_rad_per_sec),
+            },
+            run_rate_scalar,
+        }
+    }
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
@@ -748,6 +814,89 @@ mod tests {
         }
 
         assert!(saw_kinematics);
+    }
+
+    #[test]
+    fn player_entity_projection_emits_self_movement_kinematics_update() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let player_guid = Guid(0x5000_0001);
+        let capabilities = test_self_movement_capabilities(4.5, 1.0, 2.0, 1.5);
+        let expected_kinematics = capabilities.kinematics().clone();
+
+        client.world.player.guid = player_guid;
+        client
+            .world
+            .set_self_movement_capabilities_override(capabilities.clone());
+
+        client.handle_world_event(&WorldEvent::EntitySpawned(Box::new(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            WorldPosition::default(),
+        ))));
+
+        let mut saw_kinematics = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::SelfMovementKinematicsUpdated {
+                    kinematics: Some(event_kinematics)
+                } if event_kinematics == expected_kinematics
+            ) {
+                saw_kinematics = true;
+                break;
+            }
+        }
+
+        assert!(saw_kinematics);
+    }
+
+    #[test]
+    fn player_entity_projection_emits_empty_self_movement_kinematics_when_resolution_fails() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let player_guid = Guid(0x5000_0001);
+
+        client.world.player.guid = player_guid;
+
+        client.handle_world_event(&WorldEvent::EntitySpawned(Box::new(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            WorldPosition::default(),
+        ))));
+
+        let mut saw_kinematics_none = false;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::SelfMovementKinematicsUpdated { kinematics: None } => {
+                    saw_kinematics_none = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_kinematics_none);
+    }
+
+    #[test]
+    fn repeated_self_movement_capability_failures_do_not_emit_client_errors() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let player_guid = Guid(0x5000_0001);
+
+        client.world.player.guid = player_guid;
+
+        let entity = Box::new(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            WorldPosition::default(),
+        ));
+        client.handle_world_event(&WorldEvent::EntitySpawned(entity.clone()));
+        client.handle_world_event(&WorldEvent::EntityReplaced(entity));
+
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(event, ClientViewEvent::ErrorRaised { .. }));
+        }
     }
 
     #[test]

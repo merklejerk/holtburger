@@ -66,7 +66,7 @@ This value answers “how much faster than baseline run motion can this actor mo
 #### ACE Self-Movement Speed Shape
 ACE derives final self-motion speed by combining multiple inputs.
 
-- motion-table data provides the base velocity for a motion such as walk, run, or turn
+- motion-table data plus any referenced animation displacement provide the base kinematics for a motion such as walk, run, or turn
 - `run_rate` scales run-capable motion
 - MoveTo-style flows may apply an explicit `MoveToParameters.Speed` multiplier on top
 
@@ -78,7 +78,7 @@ For server-authored player charge movement, [ACE/Source/ACE.Server/WorldObjects/
 
 `resolved_move_to_speed = base_run_speed * run_rate * 1.5`
 
-The motion table is what supplies the missing base run speed term. That is why motion tables tie directly back to the original bug: without that base term, downstream code is forced to guess at unit conversion.
+The motion table is what supplies the missing base run-speed lookup path, but for player locomotion that path is not always just `MotionData.velocity`. ACE's `GetRunSpeed()` derives forward speed from the referenced animation `PosFrames` when needed. That is why motion tables still tie directly back to the original bug: without following the same motion-table-plus-animation path, downstream code is forced to guess at unit conversion.
 
 #### Observer-Motion Formula Is Related But Different
 ACE's observer `MovementData` conversion in [ACE/Source/ACE.Server/Network/Motion/MovementData.cs](../../ACE/Source/ACE.Server/Network/Motion/MovementData.cs) is not the same as the self-physics path.
@@ -228,6 +228,12 @@ Do not parse DAT on the hot movement tick in `holtburger-core` or the CLI. Resol
 - The remaining fallback constants are named according to what they actually represent.
 - Tests no longer describe the conflated behavior as the intended semantic truth.
 
+#### Phase 1 Outcome
+- Completed on `feat/motion-tables`.
+- Core now distinguishes `player_run_rate_scalar()` from `local_run_speed_estimate_from_run_rate()`, making the current compatibility identity mapping explicit instead of hiding it behind `*_speed_mps` names.
+- CLI navigation now uses names that admit it is still doing a temporary run-rate-to-world-speed estimate, and the navigation snapshot/input fields now carry `player_run_rate` instead of an unqualified `run_rate`.
+- Tests were renamed to assert transitional scalar-derived behavior rather than implying that the current estimate is the final ACE-shaped model.
+
 ### Phase 2: Resolve Motion-Table Source Chain And Decode DAT Data
 
 #### Deliverables
@@ -248,6 +254,12 @@ Do not parse DAT on the hot movement tick in `holtburger-core` or the CLI. Resol
 - The DAT crate can load a motion-table record by id and return motion data for the relevant movement commands.
 - Tests verify decoding for at least the commands needed by self run/walk/turn resolution.
 - The exposed API is narrow and does not force higher layers to understand raw DAT layout details.
+
+#### Phase 2 Outcome
+- Completed on `feat/motion-tables`.
+- `holtburger-dat` now parses motion-table files using ACE's actual dictionary and `MotionData` layout, and exposes a narrow `MotionTableMovementProfile` for default-stance walk/run/turn kinematics.
+- `holtburger-world` now owns the explicit player motion-table source chain: prefer direct `MotionTable`, otherwise read `SetupModel.default_motion_table`, otherwise return an explicit unavailable/error result.
+- The first world-facing query API returns both the resolved source and the extracted movement profile, without yet combining it with `run_rate` or exposing a broader self-movement capability model.
 
 ### Phase 3: Add A Shared Self-Movement Speed Model
 
@@ -273,6 +285,12 @@ Do not parse DAT on the hot movement tick in `holtburger-core` or the CLI. Resol
 - The API names make it impossible to confuse run scalar with resolved world speed.
 - Synthetic movement tests can seed a resolved self-movement profile without mounting real DAT resources.
 
+#### Phase 3 Outcome
+- Completed on `feat/motion-tables`.
+- `holtburger-world` now exposes `resolve_self_movement_capabilities()`, which validates the player's resolved motion-table profile, combines it with ACE `run_rate`, and returns one shared capability object with explicit helpers for base walk/run speeds, resolved manual run speed, and MoveTo-style multiplied run speed.
+- Synthetic worlds now have an explicit self-movement-capabilities override seam, so movement tests can seed the shared model without mounting DAT resources.
+- Phase 3 stops at the shared world-facing API boundary. Core and CLI consumers will switch over in Phases 4 and 5 rather than partially rewriting those callers here.
+
 ### Phase 4: Refactor Manual Self Movement To Use The Shared Model
 
 #### Deliverables
@@ -288,6 +306,12 @@ Do not parse DAT on the hot movement tick in `holtburger-core` or the CLI. Resol
 - Manual forward local velocity uses the shared resolved self-run speed, not raw `run_rate`.
 - Walk, run, sidestep, and turn code paths remain internally consistent after the change.
 - Existing movement-system tests are updated to assert the new semantics explicitly, including the distinction between wire scalar fields and resolved local world velocity.
+
+#### Phase 4 Outcome
+- Completed on `feat/motion-tables`.
+- `holtburger-core` manual local solve now resolves `SelfMovementCapabilities` from `holtburger-world` and uses shared world-speed semantics for forward locomotion and turn omega instead of reusing packet scalar helpers.
+- Wire-facing raw-motion generation remains ACE-shaped: forward packet speed for run still uses the player run-rate scalar, and held-turn packet speed still uses the wire scalar conventions expected by the protocol.
+- Focused core tests now assert that local manual solve uses shared resolved run speed and shared turn omega, while separate raw-motion tests continue to assert packet-facing run-rate behavior.
 
 ### Phase 5: Refactor CLI Navigation Delta Budgeting
 
@@ -308,6 +332,12 @@ Do not parse DAT on the hot movement tick in `holtburger-core` or the CLI. Resol
 - Any remaining autonomous-mode-specific multiplier is explicit, named, and justified by ACE references.
 - Navigation tests no longer encode `run_rate * 1.5` as an intrinsic truth independent of motion-table base speed.
 
+#### Phase 5 Outcome
+- Completed on `feat/motion-tables`.
+- CLI navigation now budgets autonomous world deltas from shared `SelfMovementCapabilities` instead of converting `player_run_rate` through a guessed `1.5` world-speed factor.
+- Navigation now defaults to explicit run gait as policy, while the actual world-speed budget comes from `resolved_autonomous_run_speed(1.0)` on the shared movement capabilities.
+- The CLI now mirrors self-movement capabilities through a narrow core `ClientViewEvent` projection instead of trying to resolve motion-table-backed movement data inside the frontend.
+
 ### Phase 6: Verification, Cleanup, And Documentation
 
 #### Deliverables
@@ -324,6 +354,12 @@ Do not parse DAT on the hot movement tick in `holtburger-core` or the CLI. Resol
 - Tests demonstrate that manual movement and navigation use the same resolved self-speed model.
 - Documentation clearly states what `run_rate` means and what it does not mean.
 - No remaining public helper implies that raw ACE `run_rate` is already measured in meters per second.
+
+#### Phase 6 Outcome
+- Completed on `feat/motion-tables`.
+- Added cross-layer tests that verify shared self-movement capabilities project from core into the CLI and that the CLI navigation snapshot carries those projected capabilities through to the navigation budget path.
+- Updated the autonomous movement guide to document the resolved speed model explicitly: `run_rate` remains a scalar, motion tables provide base kinematics, and local world speed must be resolved rather than guessed.
+- The remaining compatibility caveat is now documented explicitly: reverse and lateral local-motion parity still needs additional motion-table coverage if we want to remove the current compatibility constants there.
 
 ## Risks And Mitigations
 
@@ -355,12 +391,12 @@ Mitigation: prove the values from decoded motion tables and keep tests grounded 
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: audit and rename unit boundaries
-- [ ] Phase 2: resolve motion-table source chain and decode DAT data
-- [ ] Phase 3: add a shared self-movement speed model
-- [ ] Phase 4: refactor manual self movement
-- [ ] Phase 5: refactor CLI navigation delta budgeting
-- [ ] Phase 6: verify, clean up, and document
+- [x] Phase 1: audit and rename unit boundaries
+- [x] Phase 2: resolve motion-table source chain and decode DAT data
+- [x] Phase 3: add a shared self-movement speed model
+- [x] Phase 4: refactor manual self movement
+- [x] Phase 5: refactor CLI navigation delta budgeting
+- [x] Phase 6: verify, clean up, and document
 
 ### Decisions Log
 - Preferred ownership seam: use a world-owned resolved self-movement profile/query API backed by mounted resources, with `holtburger-core` and the CLI as consumers.
@@ -369,12 +405,57 @@ Mitigation: prove the values from decoded motion tables and keep tests grounded 
 - For the first pass, autonomous navigation uses ordinary shared run semantics with an explicit multiplier of `1.0`. Any future charge-like mode must be opt-in, explicitly named, and justified by ACE-backed parity evidence.
 - The first public DAT-facing surface should be a narrow extracted movement-speed profile for the commands we care about, not a raw motion-table structure leak into higher layers.
 - Missing self motion-table resolution should surface as an explicit unavailable result. If a temporary compatibility fallback is needed during rollout, it must be opt-in, clearly named, and treated as transitional.
+- Phase 1 should preserve runtime behavior while making every remaining scalar-to-speed assumption explicit and easy to delete in later phases.
+- Phase 2 should expose motion-table-derived movement kinematics as a narrow data surface first, not jump directly to a full self-movement profile that also bakes in `run_rate` semantics.
+- Phase 3 should validate the minimum required self-movement kinematics at the world boundary instead of returning another optional-heavy bag to downstream callers.
+- Real player motion tables can derive forward speed from referenced animation displacement instead of explicit `MotionData.velocity`, so the runtime and micro asset profile must include the relevant animation records rather than assuming motion tables alone are sufficient.
 
 ### Verification Log
 - Dry-ran current code paths and found three concrete plan gaps:
   - world already owns the resource resolver, so core-first ownership would add unnecessary plumbing
   - motion-table sourcing likely needs a setup-model fallback path
   - current tests in core and CLI encode the bad unit model and must be updated as part of the refactor, not only at the end
+- Phase 1 implementation added one necessary compatibility seam:
+  - core now uses an explicit `run_rate scalar -> local run speed estimate` helper so no call site directly treats `player_run_rate()` as world velocity while Phase 2/3 are still pending
+- Phase 2 implementation verified three key behaviors:
+  - reduced binary motion-table fixtures decode walk/run/turn velocity and omega correctly
+  - player motion-table lookup prefers the direct `MotionTable` property when present
+  - setup-model fallback works and reports missing default motion tables explicitly instead of silently degrading to guessed speed math
+- Phase 3 implementation verifies three key behaviors:
+  - the shared world-facing capabilities object combines motion-table base kinematics with ACE `run_rate` using the intended formulas
+  - synthetic worlds can override self-movement capabilities directly without mounted DAT resources
+  - missing required run/walk/turn kinematics surface as explicit errors instead of degraded fallback math
+- Phase 4 implementation verifies two core separation properties:
+  - manual local solve uses shared resolved run speed and shared turn omega from `SelfMovementCapabilities`
+  - raw-motion packet generation still emits ACE-shaped wire scalars for run forward speed and held-turn speed
+- Phase 5 implementation verifies three CLI-facing properties:
+  - autonomous drive intent uses shared static self-movement kinematics plus the locally derived run-rate scalar instead of a guessed world-speed estimate
+  - navigation refuses to emit a drive budget when shared self-movement kinematics or the local run-rate scalar are unavailable instead of silently falling back to guessed units
+  - the CLI navigation snapshot path still prefers runtime-body mirrored poses for both player and target after adding the projected kinematics field
+- Phase 6 implementation verifies the cross-layer projection seam explicitly:
+  - core emits `SelfMovementKinematicsUpdated` only when player-facing world state changes the shared static motion profile
+  - the CLI caches that projected kinematics profile and combines it with shared world-owned `player_run_rate()` logic locally without losing the existing runtime-body pose preference
+  - the movement guide now states the shared unit model directly so code and docs agree about the distinction among run scalar, base motion speed, and resolved world speed
+- Post-Phase-6 investigation against the live player motion table `0x09000001` found the missing parity detail:
+  - ACE's server-side `GetRunSpeed()` uses animation displacement from the motion table's referenced animation records, not just `MotionData.velocity`
+  - the real player run cycle in `0x09000001` points at animation `0x03000003`
+  - the old micro bundle omitted `0x03xxxxxx` animation assets, so even a correct motion-table parser could never reproduce ACE's speed derivation from the bundled HBA
+  - after adding minimal animation parsing plus animation-backed forward-speed derivation and regenerating the micro HBA with animation assets included, the repo-local `portal.hba` probe resolves `0x09000001` successfully
+
+### Pivots And Course Corrections
+- Keep the current runtime behavior stable during Phase 1. Rename and isolate the assumptions first; do not quietly substitute guessed new speed math before motion-table data exists.
+- The original assumption that player base run speed lived directly on `MotionData.velocity` was incomplete. The correct ACE-shaped model for player locomotion is `motion table lookup -> referenced animation displacement -> derived forward speed`, so the data dependency widened from motion tables alone to motion tables plus animations.
+- Treat the CLI gait helper as transitional compatibility logic. The user-facing design decision remains that navigation should own gait and default to run, but the actual semantic cleanup will land with the shared movement profile in Phase 5 rather than via an isolated partial tweak here.
+- Fix real source-chain defects as they are uncovered. During Phase 2 implementation, `csetup_id` hydration was found to be landing in the wrong property slot, which would have broken the setup-model fallback path even with a correct DAT parser.
+- Keep the DAT-facing API narrower than the eventual world-facing API. This phase stops at extracted motion-table command kinematics; the cross-product of `run_rate`, gait policy, and mode-specific multipliers remains Phase 3 territory.
+- Treat setup-model trailer fields as contiguous positional data, not independently sparse optionals. Reduced fixtures and serializers must write placeholder values for earlier trailer slots when later ones such as `default_motion_table` are present.
+- Use an explicit world-state override for synthetic self-movement capabilities instead of forcing tests to mount fake portal resources or introducing a separate cache object too early. That keeps the production API resource-backed while giving tests a narrow injection seam.
+- Promote from optional raw motion-table entries to validated required self-movement kinematics at the Phase 3 boundary. Downstream shared callers should not each rediscover whether run velocity or turn omega was missing.
+- Keep the packet path and the local-simulation path explicitly separate in core. Phase 4 showed that trying to share one helper across both is what caused the original scalar/world-speed conflation.
+- Backstep and sidestep local simulation remain temporary compatibility constants in this phase because the current shared motion-table surface only validates walk-forward, run-forward, and turn kinematics. If those lateral/reverse motions need parity later, Phase 6 or follow-up work should extend the decoded capability surface rather than sneaking in new guessed constants.
+- Project shared self-movement capabilities from core to the CLI instead of trying to recompute them in `GameData`. Phase 5 confirmed the frontend mirror only has projected player/entity state, not mounted DAT resources or world-owned motion-table resolution.
+- Treat missing projected self-movement capabilities as an explicit navigation stop condition for now. That is cleaner than reintroducing guessed run-rate conversion in the CLI, and any future fallback must be deliberate and clearly transitional.
+- Phase 6 confirmed that the useful cross-layer parity seam is the projected capability snapshot, not an end-to-end test that boots the full client stack. Focused projection and consumer tests give better signal while keeping failures localized.
 
 ### Open Questions
 - None at the planning level right now. Any new uncertainty should be recorded here only if it blocks implementation or requires new ACE evidence.

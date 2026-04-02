@@ -11,6 +11,10 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
+#[cfg(test)]
+use holtburger_world::{PlayerMotionTableSource, SelfMovementKinematics};
+#[cfg(test)]
+use holtburger_world::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -52,7 +56,6 @@ pub struct GameState {
     pub chat_input: ChatInputState,
 }
 
-const FALLBACK_APPROACH_RUN_RATE: f32 = 4.5;
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -281,6 +284,9 @@ impl GameState {
             }
             ClientViewEvent::PlayerGroundedUpdated { grounded } => {
                 self.data.player_grounded = Some(grounded);
+            }
+            ClientViewEvent::SelfMovementKinematicsUpdated { kinematics } => {
+                self.data.self_movement_kinematics = kinematics;
             }
             ClientViewEvent::RuntimeBodySnapshot { .. } => {
                 self.refresh_context_buffer();
@@ -1225,13 +1231,10 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let run_rate = self
-            .data
-            .player_run_rate()
-            .unwrap_or(FALLBACK_APPROACH_RUN_RATE);
         NavigationSnapshot {
             player_position: self.data.runtime_player_position(),
-            run_rate,
+            self_movement_kinematics: self.data.self_movement_kinematics.clone(),
+            run_rate_scalar: self.data.player_run_rate(),
             combat_target_guid: self.current_target_guid(),
             combat_mode: self.data.combat_mode,
             attack_sequence_active: self
@@ -1825,6 +1828,35 @@ mod tests {
         }
     }
 
+    fn seed_navigation_motion_model(state: &mut GameState) {
+        state.data.self_movement_kinematics = Some(SelfMovementKinematics {
+            source: PlayerMotionTableSource::DirectProperty {
+                motion_table_id: 0x0900_0020,
+            },
+            motion_table_id: 0x0900_0020,
+            stance: 0x8000_003D,
+            base_walk_forward_velocity: Vector3::new(1.0, 0.0, 0.0),
+            base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
+            base_turn_left_omega: Vector3::new(0.0, 0.0, -1.5),
+            base_turn_right_omega: Vector3::new(0.0, 0.0, 1.5),
+        });
+        state.data.skills.insert(
+            SkillType::Run,
+            Skill {
+                skill_type: SkillType::Run,
+                ranks: 0,
+                init: 300,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 300,
+                current: 300,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+    }
+
     #[test]
     fn test_entity_replaced_updates_cached_entity_state() {
         let player_guid = Guid(0x50000001);
@@ -2405,13 +2437,39 @@ mod tests {
             now: Instant::now(),
             player_position: snapshot.player_position,
             target: snapshot.tracked_target,
-            run_rate: snapshot.run_rate,
+            self_movement_kinematics: snapshot.self_movement_kinematics,
+            run_rate_scalar: snapshot.run_rate_scalar,
         };
         let target = input.target.expect("target sample should exist");
 
         assert_eq!(input.player_position, Some(runtime_player));
         assert_eq!(target.sample.projected_pose, runtime_target);
         assert_eq!(target.sample.authoritative_pose, authoritative_target);
+    }
+
+    #[test]
+    fn navigation_snapshot_includes_projected_self_movement_kinematics() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        let kinematics = SelfMovementKinematics {
+            source: PlayerMotionTableSource::DirectProperty {
+                motion_table_id: 0x0900_0020,
+            },
+            motion_table_id: 0x0900_0020,
+            stance: 0x8000_003D,
+            base_walk_forward_velocity: Vector3::new(1.0, 0.0, 0.0),
+            base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
+            base_turn_left_omega: Vector3::new(0.0, 0.0, -1.5),
+            base_turn_right_omega: Vector3::new(0.0, 0.0, 1.5),
+        };
+
+        let result = state.handle_view_event(ClientViewEvent::SelfMovementKinematicsUpdated {
+            kinematics: Some(kinematics.clone()),
+        });
+
+        assert!(result.commands.is_empty());
+        let snapshot = state.navigation_snapshot(None);
+        assert_eq!(snapshot.self_movement_kinematics, Some(kinematics));
     }
 
     #[test]
@@ -3053,6 +3111,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3090,6 +3149,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3200,6 +3260,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3248,6 +3309,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3296,6 +3358,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3356,6 +3419,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3428,6 +3492,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3461,6 +3526,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3504,6 +3570,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3540,6 +3607,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3582,6 +3650,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3622,6 +3691,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3669,6 +3739,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
@@ -3891,6 +3962,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()

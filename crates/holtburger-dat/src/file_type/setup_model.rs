@@ -184,6 +184,10 @@ pub struct SetupModel {
 }
 
 impl SetupModel {
+    pub fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
+        Self::unpack(reader)
+    }
+
     pub fn unpack<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
         let id = u32::read_le(reader)?;
         let flags = u32::read_le(reader)?;
@@ -388,20 +392,19 @@ impl SetupModel {
             self.lights.get(&k).unwrap().write_le(writer)?;
         }
 
-        if let Some(v) = self.default_animation {
-            v.write_le(writer)?;
-        }
-        if let Some(v) = self.default_script {
-            v.write_le(writer)?;
-        }
-        if let Some(v) = self.default_motion_table {
-            v.write_le(writer)?;
-        }
-        if let Some(v) = self.default_sound_table {
-            v.write_le(writer)?;
-        }
-        if let Some(v) = self.default_script_table {
-            v.write_le(writer)?;
+        let trailer = [
+            self.default_animation,
+            self.default_script,
+            self.default_motion_table,
+            self.default_sound_table,
+            self.default_script_table,
+        ];
+        let last_present = trailer.iter().rposition(Option::is_some);
+
+        if let Some(last_present) = last_present {
+            for value in trailer.iter().take(last_present + 1) {
+                value.unwrap_or(0).write_le(writer)?;
+            }
         }
 
         Ok(())

@@ -16,7 +16,7 @@ use holtburger_common::properties::{
     WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{MotionTable, SetupModel, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{
     DatFileType, HbaReader, HbaWriter, MountedResourceProvider, ResourceProvider, ResourceScope,
     ScopedResourceResolver,
@@ -31,6 +31,7 @@ use holtburger_protocol::messages::{
     FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
 use holtburger_protocol::traits::ProtocolPack;
+use crate::stats::{Skill, SkillType, TrainingLevel};
 use tempfile::tempdir;
 
 fn repo_portal_hba_path() -> PathBuf {
@@ -94,6 +95,642 @@ fn test_player_mirror_invariant_on_set_position() {
 
     assert_eq!(state.player.position, new_pos);
     assert_eq!(state.entities.get(player_guid).unwrap().position, new_pos);
+}
+
+#[derive(Default)]
+struct TestProvider {
+    files: std::collections::HashMap<u32, Vec<u8>>,
+}
+
+impl TestProvider {
+    fn with_file(mut self, id: u32, bytes: Vec<u8>) -> Self {
+        self.files.insert(id, bytes);
+        self
+    }
+}
+
+impl ResourceProvider for TestProvider {
+    fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
+        self.files
+            .get(&id)
+            .cloned()
+            .ok_or(holtburger_dat::error::DatError::NotFound(id))
+    }
+
+    fn get_metadata(&self, id: u32) -> Option<holtburger_dat::FileMetadata> {
+        self.files.get(&id).map(|bytes| holtburger_dat::FileMetadata {
+            id,
+            size: bytes.len() as u32,
+            is_pruned: false,
+        })
+    }
+}
+
+fn test_motion_table_bytes() -> Vec<u8> {
+    test_motion_table_bytes_with_run_velocity(0x0900_0020, Some(Vector3::new(2.5, 0.0, 0.0)))
+}
+
+fn test_motion_table_bytes_with_velocities(
+    motion_table_id: u32,
+    walk_velocity: Option<Vector3>,
+    run_velocity: Option<Vector3>,
+) -> Vec<u8> {
+    let default_stance = MotionStance::NonCombat as u32;
+    let walk_key = ((default_stance & 0xFFFF) << 16) | 0x0005;
+    let run_key = ((default_stance & 0xFFFF) << 16) | 0x0007;
+    let turn_left_key = ((default_stance & 0xFFFF) << 16) | 0x000E;
+    let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
+
+    fn push_motion(bytes: &mut Vec<u8>, flags: u8, velocity: Option<Vector3>, omega: Option<Vector3>) {
+        bytes.push(0);
+        bytes.push(0);
+        bytes.push(flags);
+        bytes.push(0);
+
+        if let Some(velocity) = velocity {
+            bytes.extend_from_slice(&velocity.x.to_le_bytes());
+            bytes.extend_from_slice(&velocity.y.to_le_bytes());
+            bytes.extend_from_slice(&velocity.z.to_le_bytes());
+        }
+
+        if let Some(omega) = omega {
+            bytes.extend_from_slice(&omega.x.to_le_bytes());
+            bytes.extend_from_slice(&omega.y.to_le_bytes());
+            bytes.extend_from_slice(&omega.z.to_le_bytes());
+        }
+    }
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&motion_table_id.to_le_bytes());
+    bytes.extend_from_slice(&default_stance.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&default_stance.to_le_bytes());
+    bytes.extend_from_slice(&MotionTable::WALK_FORWARD_COMMAND.to_le_bytes());
+    bytes.extend_from_slice(&4u32.to_le_bytes());
+
+    bytes.extend_from_slice(&walk_key.to_le_bytes());
+    push_motion(
+        &mut bytes,
+        u8::from(walk_velocity.is_some()),
+        walk_velocity,
+        None,
+    );
+
+    bytes.extend_from_slice(&run_key.to_le_bytes());
+    push_motion(
+        &mut bytes,
+        u8::from(run_velocity.is_some()),
+        run_velocity,
+        None,
+    );
+
+    bytes.extend_from_slice(&turn_left_key.to_le_bytes());
+    push_motion(&mut bytes, 0x02, None, Some(Vector3::new(0.0, 0.0, -1.5)));
+
+    bytes.extend_from_slice(&turn_right_key.to_le_bytes());
+    push_motion(&mut bytes, 0x02, None, Some(Vector3::new(0.0, 0.0, 1.5)));
+
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes
+}
+
+fn test_animation_bytes(animation_id: u32, pos_origins: &[Vector3]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&animation_id.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&(pos_origins.len() as u32).to_le_bytes());
+
+    for origin in pos_origins {
+        bytes.extend_from_slice(&origin.x.to_le_bytes());
+        bytes.extend_from_slice(&origin.y.to_le_bytes());
+        bytes.extend_from_slice(&origin.z.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    }
+
+    for _ in pos_origins {
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+    }
+
+    bytes
+}
+
+fn test_motion_table_bytes_with_animation_derived_run(
+    motion_table_id: u32,
+    run_animation_id: u32,
+    run_framerate: f32,
+) -> Vec<u8> {
+    let default_stance = MotionStance::NonCombat as u32;
+    let walk_key = ((default_stance & 0xFFFF) << 16) | 0x0005;
+    let run_key = ((default_stance & 0xFFFF) << 16) | 0x0007;
+    let turn_left_key = ((default_stance & 0xFFFF) << 16) | 0x000E;
+    let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&motion_table_id.to_le_bytes());
+    bytes.extend_from_slice(&default_stance.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&default_stance.to_le_bytes());
+    bytes.extend_from_slice(&MotionTable::WALK_FORWARD_COMMAND.to_le_bytes());
+    bytes.extend_from_slice(&4u32.to_le_bytes());
+
+    bytes.extend_from_slice(&walk_key.to_le_bytes());
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0x01);
+    bytes.push(0);
+    bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+
+    bytes.extend_from_slice(&run_key.to_le_bytes());
+    bytes.push(1);
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0);
+    bytes.extend_from_slice(&run_animation_id.to_le_bytes());
+    bytes.extend_from_slice(&0i32.to_le_bytes());
+    bytes.extend_from_slice(&(-1i32).to_le_bytes());
+    bytes.extend_from_slice(&run_framerate.to_le_bytes());
+
+    bytes.extend_from_slice(&turn_left_key.to_le_bytes());
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0x02);
+    bytes.push(0);
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&(-1.5f32).to_le_bytes());
+
+    bytes.extend_from_slice(&turn_right_key.to_le_bytes());
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0x02);
+    bytes.push(0);
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&1.5f32.to_le_bytes());
+
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes
+}
+
+fn test_motion_table_bytes_with_run_velocity(
+    motion_table_id: u32,
+    run_velocity: Option<Vector3>,
+) -> Vec<u8> {
+    test_motion_table_bytes_with_velocities(
+        motion_table_id,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        run_velocity,
+    )
+}
+
+fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
+    world.player.skills.insert(
+        SkillType::Run,
+        Skill {
+            skill_type: SkillType::Run,
+            ranks: 0,
+            init: run_skill,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: run_skill,
+            current: run_skill,
+            training: TrainingLevel::Trained,
+            trained_cost: 0,
+            specialized_cost: 0,
+        },
+    );
+}
+
+fn test_setup_model_bytes(default_motion_table: Option<u32>) -> Vec<u8> {
+    let setup = SetupModel {
+        id: 0x0200_0010,
+        flags: 0,
+        parts: vec![],
+        parent_index: vec![],
+        default_scale: vec![],
+        holding_locations: std::collections::HashMap::new(),
+        connection_points: std::collections::HashMap::new(),
+        placement_frames: std::collections::HashMap::new(),
+        cyl_spheres: vec![],
+        spheres: vec![],
+        height: 0.0,
+        radius: 0.0,
+        step_up: 0.0,
+        step_down: 0.0,
+        sorting_sphere: holtburger_common::Sphere {
+            center: Vector3::zero(),
+            radius: 0.0,
+        },
+        selection_sphere: holtburger_common::Sphere {
+            center: Vector3::zero(),
+            radius: 0.0,
+        },
+        lights: std::collections::HashMap::new(),
+        default_animation: None,
+        default_script: None,
+        default_motion_table,
+        default_sound_table: None,
+        default_script_table: None,
+    };
+
+    let mut bytes = Vec::new();
+    let mut writer = std::io::Cursor::new(&mut bytes);
+    setup.pack(&mut writer).expect("setup model should pack");
+    bytes
+}
+
+#[test]
+fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
+    let motion_table_id = 0x0900_0020;
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(
+            ResourceScope::Portal,
+            Arc::new(TestProvider::default().with_file(motion_table_id, test_motion_table_bytes())),
+        ),
+    ]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0001);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::Setup,
+        Guid(0x0200_0010),
+    );
+    state.entities.insert(player);
+
+    let resolved = state
+        .resolve_player_motion_table_profile()
+        .expect("direct motion table should resolve");
+
+    assert_eq!(
+        resolved.source,
+        PlayerMotionTableSource::DirectProperty { motion_table_id }
+    );
+    assert_eq!(
+        resolved
+            .movement_profile
+            .run_forward
+            .and_then(|entry| entry.velocity),
+        Some(Vector3::new(2.5, 0.0, 0.0))
+    );
+}
+
+#[test]
+fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
+    let motion_table_id = 0x0900_0020;
+    let setup_model_id = 0x0200_0010;
+    let provider = TestProvider::default()
+        .with_file(setup_model_id, test_setup_model_bytes(Some(motion_table_id)))
+        .with_file(motion_table_id, test_motion_table_bytes());
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
+    ]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0002);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::Setup,
+        Guid(setup_model_id),
+    );
+    state.entities.insert(player);
+
+    let resolved = state
+        .resolve_player_motion_table_profile()
+        .expect("setup-model fallback should resolve");
+
+    assert_eq!(
+        resolved.source,
+        PlayerMotionTableSource::SetupModelDefault {
+            setup_model_id,
+            motion_table_id,
+        }
+    );
+    assert_eq!(
+        resolved
+            .movement_profile
+            .turn_right
+            .and_then(|entry| entry.omega),
+        Some(Vector3::new(0.0, 0.0, 1.5))
+    );
+}
+
+#[test]
+fn resolve_player_motion_table_profile_derives_run_speed_from_animation_pos_frames() {
+    let motion_table_id = 0x0900_0023;
+    let animation_id = 0x0300_0023;
+    let provider = TestProvider::default()
+        .with_file(
+            motion_table_id,
+            test_motion_table_bytes_with_animation_derived_run(motion_table_id, animation_id, 2.5),
+        )
+        .with_file(
+            animation_id,
+            test_animation_bytes(animation_id, &[Vector3::new(1.0, 0.0, 0.0)]),
+        );
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
+    ]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0004);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let resolved = state
+        .resolve_player_motion_table_profile()
+        .expect("run speed should derive from animation position frames");
+
+    assert_eq!(resolved.movement_profile.motion_table_id, motion_table_id);
+    assert_eq!(
+        resolved
+            .movement_profile
+            .run_forward
+            .and_then(|entry| entry.velocity),
+        Some(Vector3::new(2.5, 0.0, 0.0))
+    );
+}
+
+#[test]
+fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_table() {
+    let setup_model_id = 0x0200_0011;
+    let provider = TestProvider::default().with_file(setup_model_id, test_setup_model_bytes(None));
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
+    ]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0003);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::Setup,
+        Guid(setup_model_id),
+    );
+    state.entities.insert(player);
+
+    let error = state
+        .resolve_player_motion_table_profile()
+        .expect_err("missing setup default motion table should be explicit");
+
+    assert!(matches!(
+        error,
+        PlayerMotionTableLookupError::SetupModelMissingDefaultMotionTable { setup_model_id: id }
+            if id == setup_model_id
+    ));
+}
+
+#[test]
+fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinematics() {
+    let motion_table_id = 0x0900_0020;
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
+        ResourceScope::Portal,
+        Arc::new(TestProvider::default().with_file(motion_table_id, test_motion_table_bytes())),
+    )]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0100);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let capabilities = state
+        .resolve_self_movement_capabilities()
+        .expect("self-movement capabilities should resolve");
+
+    assert_eq!(capabilities.motion_table_id(), motion_table_id);
+    assert_eq!(capabilities.run_rate_scalar, 4.5);
+    assert_eq!(capabilities.base_walk_forward_speed(), 1.0);
+    assert_eq!(capabilities.base_run_forward_speed(), 2.5);
+    assert_eq!(capabilities.resolved_manual_run_speed(), 11.25);
+    assert_eq!(capabilities.resolved_autonomous_run_speed(1.0), 11.25);
+    assert_eq!(capabilities.resolved_autonomous_run_speed(1.5), 16.875);
+    assert_eq!(capabilities.base_turn_left_speed_rad_per_sec(), 1.5);
+    assert_eq!(capabilities.base_turn_right_speed_rad_per_sec(), 1.5);
+    assert_eq!(
+        capabilities.resolved_manual_run_velocity(),
+        Vector3::new(11.25, 0.0, 0.0)
+    );
+}
+
+#[test]
+fn resolve_self_movement_capabilities_prefers_synthetic_override() {
+    let mut state = WorldState::synthetic();
+    let override_capabilities = SelfMovementCapabilities {
+        kinematics: crate::state::SelfMovementKinematics {
+            source: PlayerMotionTableSource::DirectProperty {
+                motion_table_id: 0x0900_00AA,
+            },
+            motion_table_id: 0x0900_00AA,
+            stance: MotionStance::NonCombat as u32,
+            base_walk_forward_velocity: Vector3::new(0.75, 0.0, 0.0),
+            base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
+            base_turn_left_omega: Vector3::new(0.0, 0.0, -1.25),
+            base_turn_right_omega: Vector3::new(0.0, 0.0, 1.25),
+        },
+        run_rate_scalar: 3.25,
+    };
+    state.set_self_movement_capabilities_override(override_capabilities.clone());
+
+    let resolved = state
+        .resolve_self_movement_capabilities()
+        .expect("synthetic override should bypass resource lookup");
+
+    assert_eq!(resolved, override_capabilities);
+}
+
+#[test]
+fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
+    let motion_table_id = 0x0900_0021;
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
+        ResourceScope::Portal,
+        Arc::new(
+            TestProvider::default()
+                .with_file(
+                    motion_table_id,
+                    test_motion_table_bytes_with_run_velocity(motion_table_id, None),
+                ),
+        ),
+    )]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0101);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let error = state
+        .resolve_self_movement_capabilities()
+        .expect_err("missing run velocity should be explicit");
+
+    assert!(matches!(
+        error,
+        SelfMovementCapabilitiesError::Kinematics(
+            crate::state::SelfMovementKinematicsError::MissingRequiredKinematics {
+                motion_table_id: id,
+                kind: RequiredSelfMovementKinematics::RunForwardVelocity,
+                ..
+            }
+        ) if id == motion_table_id
+    ));
+}
+
+#[test]
+fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing() {
+    let motion_table_id = 0x0900_0022;
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
+        ResourceScope::Portal,
+        Arc::new(
+            TestProvider::default()
+                .with_file(
+                    motion_table_id,
+                    test_motion_table_bytes_with_velocities(
+                        motion_table_id,
+                        None,
+                        Some(Vector3::new(2.5, 0.0, 0.0)),
+                    ),
+                ),
+        ),
+    )]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0102);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let capabilities = state
+        .resolve_self_movement_capabilities()
+        .expect("missing walk velocity should fall back to run-forward data");
+
+    assert_eq!(capabilities.base_walk_forward_speed(), 2.5);
+    assert_eq!(capabilities.base_run_forward_speed(), 2.5);
+}
+
+#[test]
+fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() {
+    let motion_table_id: u32 = 0x0900_0024;
+    let default_stance = MotionStance::NonCombat as u32;
+    let walk_key = ((default_stance & 0xFFFF) << 16) | 0x0005;
+    let run_key = ((default_stance & 0xFFFF) << 16) | 0x0007;
+    let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&motion_table_id.to_le_bytes());
+    bytes.extend_from_slice(&default_stance.to_le_bytes());
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&default_stance.to_le_bytes());
+    bytes.extend_from_slice(&MotionTable::WALK_FORWARD_COMMAND.to_le_bytes());
+    bytes.extend_from_slice(&3u32.to_le_bytes());
+
+    bytes.extend_from_slice(&walk_key.to_le_bytes());
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0x01);
+    bytes.push(0);
+    bytes.extend_from_slice(&1.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+
+    bytes.extend_from_slice(&run_key.to_le_bytes());
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0x01);
+    bytes.push(0);
+    bytes.extend_from_slice(&2.5f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+
+    bytes.extend_from_slice(&turn_right_key.to_le_bytes());
+    bytes.push(0);
+    bytes.push(0);
+    bytes.push(0x02);
+    bytes.push(0);
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&0.0f32.to_le_bytes());
+    bytes.extend_from_slice(&(-1.5f32).to_le_bytes());
+
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
+        ResourceScope::Portal,
+        Arc::new(TestProvider::default().with_file(motion_table_id, bytes)),
+    )]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0103);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let capabilities = state
+        .resolve_self_movement_capabilities()
+        .expect("single-turn motion tables should still resolve turn capabilities");
+
+    assert_eq!(
+        capabilities.kinematics().base_turn_right_omega,
+        Vector3::new(0.0, 0.0, -1.5)
+    );
+    assert_eq!(
+        capabilities.kinematics().base_turn_left_omega,
+        Vector3::new(0.0, 0.0, 1.5)
+    );
 }
 
 #[test]
@@ -684,6 +1321,49 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         expected_costs
     );
     assert!(updated_skill.trained_cost > 0 || updated_skill.specialized_cost > 0);
+}
+
+#[test]
+fn repo_portal_bundle_supports_default_player_motion_table_profile() {
+    let portal_path = repo_portal_hba_path();
+    if !portal_path.is_file() {
+        eprintln!(
+            "skipping motion-table integration probe; missing repo-local {}",
+            portal_path.display()
+        );
+        return;
+    }
+
+    let provider = Arc::new(HbaReader::open(&portal_path).expect("repo portal.hba should open"));
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
+        ResourceScope::Portal,
+        provider,
+    )]));
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0200);
+    state.resources = Some(resources);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(0x0900_0001),
+    );
+    state.entities.insert(player);
+
+    let resolved = state.resolve_player_motion_table_profile();
+    match resolved {
+        Ok(profile) => {
+            eprintln!(
+                "resolved repo motion-table profile: run={:?} walk={:?} turn_right={:?}",
+                profile.movement_profile.run_forward,
+                profile.movement_profile.walk_forward,
+                profile.movement_profile.turn_right,
+            );
+        }
+        Err(error) => panic!("repo portal bundle failed to resolve motion table 0x09000001: {error}"),
+    }
 }
 
 #[test]

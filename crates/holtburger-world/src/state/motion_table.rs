@@ -1,19 +1,20 @@
 use crate::state::WorldState;
 use holtburger_common::Guid;
-use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_dat::file_type::{
-    Animation, MotionCommandKinematics, MotionTable, MotionTableMovementProfile,
-    SetupModel,
-};
-use holtburger_dat::file_type::motion_table::MotionData;
-use holtburger_dat::{DatError, ResourceScope};
 use holtburger_common::Vector3;
+use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_dat::file_type::motion_table::MotionData;
+use holtburger_dat::file_type::{
+    Animation, MotionCommandKinematics, MotionTable, MotionTableMovementProfile, SetupModel,
+};
+use holtburger_dat::{DatError, ResourceScope};
 use std::io::Cursor;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerMotionTableSource {
-    DirectProperty { motion_table_id: u32 },
+    DirectProperty {
+        motion_table_id: u32,
+    },
     SetupModelDefault {
         setup_model_id: u32,
         motion_table_id: u32,
@@ -141,7 +142,10 @@ impl WorldState {
         };
 
         if kinematics.velocity.is_none()
-            && matches!(command, MotionTable::WALK_FORWARD_COMMAND | MotionTable::RUN_FORWARD_COMMAND)
+            && matches!(
+                command,
+                MotionTable::WALK_FORWARD_COMMAND | MotionTable::RUN_FORWARD_COMMAND
+            )
         {
             kinematics.velocity = self
                 .resolve_animation_forward_speed(motion_data)?
@@ -209,9 +213,11 @@ impl WorldState {
                 source,
             })?;
 
-        parser(&mut Cursor::new(bytes)).map_err(|err| PlayerMotionTableLookupError::ResourceParseFailed {
-            resource_id,
-            message: err.to_string(),
+        parser(&mut Cursor::new(bytes)).map_err(|err| {
+            PlayerMotionTableLookupError::ResourceParseFailed {
+                resource_id,
+                message: err.to_string(),
+            }
         })
     }
 }

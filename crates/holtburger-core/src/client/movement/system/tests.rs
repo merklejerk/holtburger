@@ -1,8 +1,8 @@
 use super::super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
-    build_autonomous_position, build_motion_state_raw_motion_state,
-    player_run_rate_scalar, raw_motion_state_with_motion_style,
+    build_autonomous_position, build_motion_state_raw_motion_state, player_run_rate_scalar,
+    raw_motion_state_with_motion_style,
 };
 use super::*;
 use crate::client::movement_types::Gait;
@@ -11,11 +11,11 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::movement::{HoldKey, MotionStance};
 use holtburger_session::Session;
+use holtburger_world::entity::Entity;
+use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
 use holtburger_world::{
     PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics, WorldState,
 };
-use holtburger_world::entity::Entity;
-use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
 
 fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
     world.player.attributes.insert(
@@ -389,7 +389,10 @@ fn motion_state_raw_motion_state_uses_player_run_rate_scalar_for_forward_speed()
         Some(WALK_FORWARD_MOTION_COMMAND)
     );
     assert_eq!(raw_motion_state.forward_hold_key, Some(HoldKey::Run as u32));
-    assert_eq!(raw_motion_state.forward_speed, Some(expected_run_rate_scalar));
+    assert_eq!(
+        raw_motion_state.forward_speed,
+        Some(expected_run_rate_scalar)
+    );
     assert!(
         raw_motion_state
             .flags

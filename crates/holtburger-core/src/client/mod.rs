@@ -676,7 +676,9 @@ mod tests {
     use holtburger_common::{Guid, Quaternion, Vector3};
     use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
-    use holtburger_world::{PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics};
+    use holtburger_world::{
+        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
+    };
 
     fn test_self_movement_capabilities(
         run_rate_scalar: f32,
@@ -867,11 +869,8 @@ mod tests {
 
         let mut saw_kinematics_none = false;
         while let Ok(event) = events.try_recv() {
-            match event {
-                ClientViewEvent::SelfMovementKinematicsUpdated { kinematics: None } => {
-                    saw_kinematics_none = true;
-                }
-                _ => {}
+            if let ClientViewEvent::SelfMovementKinematicsUpdated { kinematics: None } = event {
+                saw_kinematics_none = true;
             }
         }
 

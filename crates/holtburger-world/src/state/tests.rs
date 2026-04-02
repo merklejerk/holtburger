@@ -10,6 +10,7 @@ use crate::{
     SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
 };
 
+use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PhysicsState, PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
@@ -31,7 +32,6 @@ use holtburger_protocol::messages::{
     FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
 use holtburger_protocol::traits::ProtocolPack;
-use crate::stats::{Skill, SkillType, TrainingLevel};
 use tempfile::tempdir;
 
 fn repo_portal_hba_path() -> PathBuf {
@@ -118,11 +118,13 @@ impl ResourceProvider for TestProvider {
     }
 
     fn get_metadata(&self, id: u32) -> Option<holtburger_dat::FileMetadata> {
-        self.files.get(&id).map(|bytes| holtburger_dat::FileMetadata {
-            id,
-            size: bytes.len() as u32,
-            is_pruned: false,
-        })
+        self.files
+            .get(&id)
+            .map(|bytes| holtburger_dat::FileMetadata {
+                id,
+                size: bytes.len() as u32,
+                is_pruned: false,
+            })
     }
 }
 
@@ -141,7 +143,12 @@ fn test_motion_table_bytes_with_velocities(
     let turn_left_key = ((default_stance & 0xFFFF) << 16) | 0x000E;
     let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
 
-    fn push_motion(bytes: &mut Vec<u8>, flags: u8, velocity: Option<Vector3>, omega: Option<Vector3>) {
+    fn push_motion(
+        bytes: &mut Vec<u8>,
+        flags: u8,
+        velocity: Option<Vector3>,
+        omega: Option<Vector3>,
+    ) {
         bytes.push(0);
         bytes.push(0);
         bytes.push(flags);
@@ -395,7 +402,10 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
     let motion_table_id = 0x0900_0020;
     let setup_model_id = 0x0200_0010;
     let provider = TestProvider::default()
-        .with_file(setup_model_id, test_setup_model_bytes(Some(motion_table_id)))
+        .with_file(
+            setup_model_id,
+            test_setup_model_bytes(Some(motion_table_id)),
+        )
         .with_file(motion_table_id, test_motion_table_bytes());
     let resources = Arc::new(ScopedResourceResolver::from_mounted([
         MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
@@ -510,10 +520,12 @@ fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_tabl
 #[test]
 fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinematics() {
     let motion_table_id = 0x0900_0020;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
-        ResourceScope::Portal,
-        Arc::new(TestProvider::default().with_file(motion_table_id, test_motion_table_bytes())),
-    )]));
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(
+            ResourceScope::Portal,
+            Arc::new(TestProvider::default().with_file(motion_table_id, test_motion_table_bytes())),
+        ),
+    ]));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
@@ -576,16 +588,15 @@ fn resolve_self_movement_capabilities_prefers_synthetic_override() {
 #[test]
 fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
     let motion_table_id = 0x0900_0021;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
-        ResourceScope::Portal,
-        Arc::new(
-            TestProvider::default()
-                .with_file(
-                    motion_table_id,
-                    test_motion_table_bytes_with_run_velocity(motion_table_id, None),
-                ),
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(
+            ResourceScope::Portal,
+            Arc::new(TestProvider::default().with_file(
+                motion_table_id,
+                test_motion_table_bytes_with_run_velocity(motion_table_id, None),
+            )),
         ),
-    )]));
+    ]));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0101);
@@ -619,20 +630,19 @@ fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
 #[test]
 fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing() {
     let motion_table_id = 0x0900_0022;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
-        ResourceScope::Portal,
-        Arc::new(
-            TestProvider::default()
-                .with_file(
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(
+            ResourceScope::Portal,
+            Arc::new(TestProvider::default().with_file(
+                motion_table_id,
+                test_motion_table_bytes_with_velocities(
                     motion_table_id,
-                    test_motion_table_bytes_with_velocities(
-                        motion_table_id,
-                        None,
-                        Some(Vector3::new(2.5, 0.0, 0.0)),
-                    ),
+                    None,
+                    Some(Vector3::new(2.5, 0.0, 0.0)),
                 ),
+            )),
         ),
-    )]));
+    ]));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0102);
@@ -701,10 +711,12 @@ fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() 
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
 
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
-        ResourceScope::Portal,
-        Arc::new(TestProvider::default().with_file(motion_table_id, bytes)),
-    )]));
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(
+            ResourceScope::Portal,
+            Arc::new(TestProvider::default().with_file(motion_table_id, bytes)),
+        ),
+    ]));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0103);
@@ -1335,10 +1347,9 @@ fn repo_portal_bundle_supports_default_player_motion_table_profile() {
     }
 
     let provider = Arc::new(HbaReader::open(&portal_path).expect("repo portal.hba should open"));
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
-        ResourceScope::Portal,
-        provider,
-    )]));
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(ResourceScope::Portal, provider),
+    ]));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0200);
@@ -1362,7 +1373,9 @@ fn repo_portal_bundle_supports_default_player_motion_table_profile() {
                 profile.movement_profile.turn_right,
             );
         }
-        Err(error) => panic!("repo portal bundle failed to resolve motion table 0x09000001: {error}"),
+        Err(error) => {
+            panic!("repo portal bundle failed to resolve motion table 0x09000001: {error}")
+        }
     }
 }
 

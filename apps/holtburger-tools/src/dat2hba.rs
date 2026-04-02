@@ -198,9 +198,7 @@ fn process_loaded_input(
     for chunk in ids.chunks(PROCESSING_CHUNK_SIZE) {
         let processed_entries: Vec<Option<ProcessedEntry>> = chunk
             .par_iter()
-            .map(|&id| {
-                process_entry(&loaded.db, &loaded.spec.namespace, id, state)
-            })
+            .map(|&id| process_entry(&loaded.db, &loaded.spec.namespace, id, state))
             .collect();
 
         for entry in processed_entries.into_iter().flatten() {

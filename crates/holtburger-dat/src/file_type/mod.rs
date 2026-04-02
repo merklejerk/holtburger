@@ -10,9 +10,7 @@ pub mod xp_table;
 pub use animation::Animation;
 pub use env_cell::EnvCell;
 pub use gfx_obj::GfxObj;
-pub use motion_table::{
-    MotionCommandKinematics, MotionTable, MotionTableMovementProfile,
-};
+pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
 pub use setup_model::SetupModel;
 pub use skill_table::SkillTable;
 pub use spell_table::SpellTable;

@@ -44,7 +44,11 @@ impl SelfMovementKinematics {
         self.base_run_forward_speed() * run_rate_scalar
     }
 
-    pub fn resolved_autonomous_run_speed(&self, run_rate_scalar: f32, speed_multiplier: f32) -> f32 {
+    pub fn resolved_autonomous_run_speed(
+        &self,
+        run_rate_scalar: f32,
+        speed_multiplier: f32,
+    ) -> f32 {
         self.resolved_manual_run_speed(run_rate_scalar) * speed_multiplier
     }
 
@@ -165,8 +169,7 @@ impl WorldState {
             &resolution,
             RequiredSelfMovementKinematics::RunForwardVelocity,
         )?;
-        let (base_turn_left_omega, base_turn_right_omega) =
-            resolved_turn_omegas(&resolution)?;
+        let (base_turn_left_omega, base_turn_right_omega) = resolved_turn_omegas(&resolution)?;
         let movement_profile = &resolution.movement_profile;
 
         Ok(SelfMovementKinematics {

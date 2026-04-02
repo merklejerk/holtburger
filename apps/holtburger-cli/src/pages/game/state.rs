@@ -11,15 +11,15 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
-#[cfg(test)]
-use holtburger_world::{PlayerMotionTableSource, SelfMovementKinematics};
-#[cfg(test)]
-use holtburger_world::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
+#[cfg(test)]
+use holtburger_world::stats::{Skill, SkillType, TrainingLevel};
+#[cfg(test)]
+use holtburger_world::{PlayerMotionTableSource, SelfMovementKinematics};
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::fs::File;

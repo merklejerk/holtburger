@@ -6,8 +6,8 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
-use holtburger_world::{SelfMovementCapabilities, WorldState};
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::{SelfMovementCapabilities, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
@@ -116,9 +116,7 @@ fn hold_key_for_motion_state(state: MotionState) -> HoldKey {
 }
 
 pub(super) fn player_run_rate_scalar(world: &WorldState) -> f32 {
-    world
-        .player_run_rate()
-        .unwrap_or(FALLBACK_RUN_RATE_SCALAR)
+    world.player_run_rate().unwrap_or(FALLBACK_RUN_RATE_SCALAR)
 }
 
 fn locomotion_command_for_state(

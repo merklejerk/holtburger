@@ -135,12 +135,8 @@ impl NavigationDriveBlockReason {
             Self::Idle => "navigation is not actively pursuing a target",
             Self::MissingPlayerPosition => "player position is unavailable",
             Self::MissingTargetPose => "target pose is unavailable or out of range",
-            Self::MissingSelfMovementKinematics => {
-                "self movement kinematics are unavailable"
-            }
-            Self::MissingRunRateScalar => {
-                "player run-rate scalar is unavailable"
-            }
+            Self::MissingSelfMovementKinematics => "self movement kinematics are unavailable",
+            Self::MissingRunRateScalar => "player run-rate scalar is unavailable",
             Self::ZeroDeltaTime => "tick delta time is zero",
             Self::ZeroDistanceToTarget => "target is already at the current position",
             Self::ZeroWorldSpeedBudget => "resolved world-speed budget is zero",
@@ -432,10 +428,9 @@ impl TuiNavigation {
                 .projected_target_position()
                 .ok_or(NavigationDriveBlockReason::MissingTargetPose)?,
             ActiveNavigation::Follow { pursuing: true, .. }
-            | ActiveNavigation::StickyMelee { pursuing: true, .. } => {
-                input.projected_target_position()
-                    .ok_or(NavigationDriveBlockReason::MissingTargetPose)?
-            }
+            | ActiveNavigation::StickyMelee { pursuing: true, .. } => input
+                .projected_target_position()
+                .ok_or(NavigationDriveBlockReason::MissingTargetPose)?,
             ActiveNavigation::Idle
             | ActiveNavigation::Follow {
                 pursuing: false, ..
@@ -457,12 +452,8 @@ impl TuiNavigation {
             }
         })?;
 
-        let desired_world_delta = navigation_drive_delta(
-            player_position,
-            target_pose,
-            world_speed_budget,
-            dt,
-        )?;
+        let desired_world_delta =
+            navigation_drive_delta(player_position, target_pose, world_speed_budget, dt)?;
         let planar_delta = Vector3::new(desired_world_delta.x, desired_world_delta.y, 0.0);
 
         Ok(AutonomousDriveIntent {
@@ -582,7 +573,10 @@ impl TuiNavigation {
             return;
         }
 
-        log::info!("tui navigation: autonomous drive blocked: {}", reason.label());
+        log::info!(
+            "tui navigation: autonomous drive blocked: {}",
+            reason.label()
+        );
         self.last_drive_block_reason = Some(reason);
     }
 
@@ -806,7 +800,10 @@ mod tests {
             Duration::from_secs_f32(1.0),
         );
 
-        assert_eq!(intent, Err(NavigationDriveBlockReason::MissingRunRateScalar));
+        assert_eq!(
+            intent,
+            Err(NavigationDriveBlockReason::MissingRunRateScalar)
+        );
     }
 
     #[test]

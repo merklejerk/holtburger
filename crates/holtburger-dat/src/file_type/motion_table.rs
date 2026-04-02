@@ -184,7 +184,9 @@ fn parse_motion_data_map<R: Read + Seek>(reader: &mut R) -> BinResult<HashMap<u3
     Ok(values)
 }
 
-fn parse_nested_motion_data_map<R: Read + Seek>(reader: &mut R) -> BinResult<HashMap<u32, HashMap<u32, MotionData>>> {
+fn parse_nested_motion_data_map<R: Read + Seek>(
+    reader: &mut R,
+) -> BinResult<HashMap<u32, HashMap<u32, MotionData>>> {
     let count = u32::read_le(reader)? as usize;
     let mut values = HashMap::with_capacity(count);
     for _ in 0..count {
@@ -280,7 +282,10 @@ mod tests {
         let profile = table.default_movement_profile();
 
         assert_eq!(table.default_style, default_stance);
-        assert_eq!(table.style_defaults.get(&default_stance), Some(&MotionTable::WALK_FORWARD_COMMAND));
+        assert_eq!(
+            table.style_defaults.get(&default_stance),
+            Some(&MotionTable::WALK_FORWARD_COMMAND)
+        );
         assert_eq!(profile.motion_table_id, 0x0900_0001);
         assert_eq!(profile.stance, default_stance);
         assert_eq!(

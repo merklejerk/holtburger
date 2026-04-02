@@ -24,6 +24,9 @@ pub enum ToolError {
 
     #[error("Validation error: {0}")]
     Validation(String),
+
+    #[error("Failed to derive required asset: {0}")]
+    AssetDerivation(String),
 }
 
 pub type Result<T> = std::result::Result<T, ToolError>;

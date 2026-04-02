@@ -1,6 +1,7 @@
 pub mod animation;
 pub mod env_cell;
 pub mod gfx_obj;
+pub mod motion_kinematics;
 pub mod motion_table;
 pub mod setup_model;
 pub mod skill_table;
@@ -10,6 +11,7 @@ pub mod xp_table;
 pub use animation::Animation;
 pub use env_cell::EnvCell;
 pub use gfx_obj::GfxObj;
+pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
 pub use setup_model::SetupModel;
 pub use skill_table::SkillTable;
@@ -17,6 +19,8 @@ pub use spell_table::SpellTable;
 pub use xp_table::XpTable;
 
 use std::fmt;
+
+pub const MOTION_KINEMATICS_TYPE_ID: u32 = 0xFFFF_FF01;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,6 +46,7 @@ pub enum DatFileType {
     LanguageString = 0x31,
     Font = 0x40,
     Custom = 0xFFFF_FF00,
+    MotionKinematics = MOTION_KINEMATICS_TYPE_ID,
 
     // Cell Range (Suffix)
     Landblock = 0xFE, // XXYYFFFF (using FE as internal marker for simplicity or specific logic)
@@ -144,6 +149,7 @@ impl DatFileType {
             0xFE01 => DatFileType::Iteration,
             0xFF => DatFileType::LandblockInfo,
             0xFFFF_FF00 => DatFileType::Custom,
+            MOTION_KINEMATICS_TYPE_ID => DatFileType::MotionKinematics,
             _ => DatFileType::Unknown,
         }
     }
@@ -172,6 +178,7 @@ impl fmt::Display for DatFileType {
             DatFileType::LanguageString => "LanguageString",
             DatFileType::Font => "Font",
             DatFileType::Custom => "Custom",
+            DatFileType::MotionKinematics => "MotionKinematics",
             DatFileType::Landblock => "Landblock (Terrain)",
             DatFileType::LandblockInfo => "LandblockInfo (Static)",
             DatFileType::IndoorCell => "IndoorCell",
@@ -211,6 +218,10 @@ mod tests {
 
         assert_eq!(DatFileType::from_type_id(0x0E), DatFileType::Table);
         assert_eq!(DatFileType::from_type_id(0xFFFF_FF00), DatFileType::Custom);
+        assert_eq!(
+            DatFileType::from_type_id(MOTION_KINEMATICS_TYPE_ID),
+            DatFileType::MotionKinematics
+        );
         assert_eq!(DatFileType::from_type_id(0xDEADBEEF), DatFileType::Unknown);
     }
 

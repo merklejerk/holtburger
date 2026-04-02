@@ -5,7 +5,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectExt as _,
     WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{
     MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
 };
@@ -53,6 +53,7 @@ pub struct WorldState {
     pub xp_table: XpTable,
     pub skill_table: Arc<SkillTable>,
     pub spell_catalog: Arc<SpellCatalog>,
+    pub motion_kinematics: Arc<MotionKinematics>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
@@ -209,6 +210,14 @@ impl WorldState {
         let spell_table = SpellTable::read(&mut std::io::Cursor::new(spell_table_data))
             .context("failed to parse required spell table")?;
 
+        let motion_kinematics_data = resources
+            .get_file_for::<MotionKinematics>()
+            .context("missing required motion kinematics table from mounted resources")?;
+        let motion_kinematics = MotionKinematics::read(&mut std::io::Cursor::new(
+            motion_kinematics_data,
+        ))
+        .context("failed to parse required motion kinematics table")?;
+
         Ok(Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
@@ -217,6 +226,7 @@ impl WorldState {
             xp_table,
             skill_table: Arc::new(skill_table),
             spell_catalog: Arc::new(spell_table.into()),
+            motion_kinematics: Arc::new(motion_kinematics),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
@@ -242,6 +252,7 @@ impl WorldState {
             xp_table: XpTable::default(),
             skill_table: Arc::new(SkillTable::default()),
             spell_catalog: Arc::new(SpellCatalog::default()),
+            motion_kinematics: Arc::new(MotionKinematics::default()),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
@@ -266,6 +277,11 @@ impl WorldState {
         provider: Arc<dyn ResourceProvider>,
     ) -> Result<Self> {
         Self::with_provider_for_namespace(scope.namespace(), provider)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_motion_kinematics(&mut self, motion_kinematics: MotionKinematics) {
+        self.motion_kinematics = Arc::new(motion_kinematics);
     }
 
     pub fn current_server_time(&self) -> f64 {

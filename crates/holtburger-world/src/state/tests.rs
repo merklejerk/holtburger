@@ -17,10 +17,13 @@ use holtburger_common::properties::{
     WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
-use holtburger_dat::file_type::{MotionTable, SetupModel, SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{
+    MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable, SkillTable,
+    SpellTable, XpTable,
+};
 use holtburger_dat::{
-    DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter, MountedResourceProvider,
-    ResourceProvider, ScopedResourceResolver,
+    DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
+    MountedResourceProvider, ResourceProvider, ScopedResourceResolver,
 };
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
@@ -36,6 +39,14 @@ use tempfile::tempdir;
 
 fn repo_assets_hba_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
+}
+
+fn test_motion_kinematics_bytes() -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    MotionKinematics::new()
+        .write(&mut bytes)
+        .expect("test motion kinematics asset should write");
+    bytes.into_inner()
 }
 
 fn write_micro_portal_hba(path: &Path) -> bool {
@@ -75,6 +86,15 @@ fn write_micro_portal_hba(path: &Path) -> bool {
     }
 
     writer
+        .add(
+            HOLTBURGER_CORE_NAMESPACE,
+            MotionKinematics::FILE_ID,
+            DatFileType::MotionKinematics as u32,
+            test_motion_kinematics_bytes(),
+        )
+        .expect("motion kinematics table should be added to test HBA");
+
+    writer
         .write(path)
         .expect("micro portal.hba should be written");
 
@@ -95,233 +115,89 @@ fn portal_resources(provider: Arc<dyn ResourceProvider>) -> Arc<ScopedResourceRe
     ]))
 }
 
-#[test]
-fn test_player_mirror_invariant_on_set_position() {
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000123);
-    state.player.guid = player_guid;
+fn motion_kinematics_asset_with_table(
+    motion_table_id: u32,
+    default_style: u32,
+    walk_velocity: Option<Vector3>,
+    run_velocity: Option<Vector3>,
+    turn_left_omega: Option<Vector3>,
+    turn_right_omega: Option<Vector3>,
+) -> MotionKinematics {
+    let mut asset = MotionKinematics::new();
+    let mut table = MotionKinematicsTable::new(motion_table_id, default_style);
 
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-
-    // Register player as an entity too
-    let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
-    state.entities.insert(player_entity);
-
-    let new_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(10.0, 20.0, 30.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-
-    state.set_player_position(new_pos);
-
-    assert_eq!(state.player.position, new_pos);
-    assert_eq!(state.entities.get(player_guid).unwrap().position, new_pos);
-}
-
-#[derive(Default)]
-struct TestProvider {
-    files: std::collections::HashMap<u32, Vec<u8>>,
-}
-
-impl TestProvider {
-    fn with_file(mut self, id: u32, bytes: Vec<u8>) -> Self {
-        self.files.insert(id, bytes);
-        self
+    if let Some(velocity) = walk_velocity {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::WALK_FORWARD_COMMAND,
+            MotionCommandKinematics {
+                velocity: Some(velocity),
+                omega: None,
+            },
+        );
     }
+
+    if let Some(velocity) = run_velocity {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::RUN_FORWARD_COMMAND,
+            MotionCommandKinematics {
+                velocity: Some(velocity),
+                omega: None,
+            },
+        );
+    }
+
+    if let Some(omega) = turn_left_omega {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::TURN_LEFT_COMMAND,
+            MotionCommandKinematics {
+                velocity: None,
+                omega: Some(omega),
+            },
+        );
+    }
+
+    if let Some(omega) = turn_right_omega {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::TURN_RIGHT_COMMAND,
+            MotionCommandKinematics {
+                velocity: None,
+                omega: Some(omega),
+            },
+        );
+    }
+
+    asset.motion_tables.insert(motion_table_id, table);
+    asset
 }
 
-impl ResourceProvider for TestProvider {
+fn test_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
+    motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+    )
+}
+
+struct NamespacedArchiveProvider {
+    namespace: &'static str,
+    archive: Arc<HbaReader>,
+}
+
+impl ResourceProvider for NamespacedArchiveProvider {
     fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
-        self.files
-            .get(&id)
-            .cloned()
-            .ok_or(holtburger_dat::error::DatError::NotFound(id))
+        self.archive.get_file_in_namespace(self.namespace, id)
     }
 
     fn get_metadata(&self, id: u32) -> Option<holtburger_dat::FileMetadata> {
-        self.files
-            .get(&id)
-            .map(|bytes| holtburger_dat::FileMetadata {
-                id,
-                size: bytes.len() as u32,
-                is_pruned: false,
-            })
+        self.archive.get_metadata_in_namespace(self.namespace, id)
     }
-}
-
-fn test_motion_table_bytes() -> Vec<u8> {
-    test_motion_table_bytes_with_run_velocity(0x0900_0020, Some(Vector3::new(2.5, 0.0, 0.0)))
-}
-
-fn test_motion_table_bytes_with_velocities(
-    motion_table_id: u32,
-    walk_velocity: Option<Vector3>,
-    run_velocity: Option<Vector3>,
-) -> Vec<u8> {
-    let default_stance = MotionStance::NonCombat as u32;
-    let walk_key = ((default_stance & 0xFFFF) << 16) | 0x0005;
-    let run_key = ((default_stance & 0xFFFF) << 16) | 0x0007;
-    let turn_left_key = ((default_stance & 0xFFFF) << 16) | 0x000E;
-    let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
-
-    fn push_motion(
-        bytes: &mut Vec<u8>,
-        flags: u8,
-        velocity: Option<Vector3>,
-        omega: Option<Vector3>,
-    ) {
-        bytes.push(0);
-        bytes.push(0);
-        bytes.push(flags);
-        bytes.push(0);
-
-        if let Some(velocity) = velocity {
-            bytes.extend_from_slice(&velocity.x.to_le_bytes());
-            bytes.extend_from_slice(&velocity.y.to_le_bytes());
-            bytes.extend_from_slice(&velocity.z.to_le_bytes());
-        }
-
-        if let Some(omega) = omega {
-            bytes.extend_from_slice(&omega.x.to_le_bytes());
-            bytes.extend_from_slice(&omega.y.to_le_bytes());
-            bytes.extend_from_slice(&omega.z.to_le_bytes());
-        }
-    }
-
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&motion_table_id.to_le_bytes());
-    bytes.extend_from_slice(&default_stance.to_le_bytes());
-    bytes.extend_from_slice(&1u32.to_le_bytes());
-    bytes.extend_from_slice(&default_stance.to_le_bytes());
-    bytes.extend_from_slice(&MotionTable::WALK_FORWARD_COMMAND.to_le_bytes());
-    bytes.extend_from_slice(&4u32.to_le_bytes());
-
-    bytes.extend_from_slice(&walk_key.to_le_bytes());
-    push_motion(
-        &mut bytes,
-        u8::from(walk_velocity.is_some()),
-        walk_velocity,
-        None,
-    );
-
-    bytes.extend_from_slice(&run_key.to_le_bytes());
-    push_motion(
-        &mut bytes,
-        u8::from(run_velocity.is_some()),
-        run_velocity,
-        None,
-    );
-
-    bytes.extend_from_slice(&turn_left_key.to_le_bytes());
-    push_motion(&mut bytes, 0x02, None, Some(Vector3::new(0.0, 0.0, -1.5)));
-
-    bytes.extend_from_slice(&turn_right_key.to_le_bytes());
-    push_motion(&mut bytes, 0x02, None, Some(Vector3::new(0.0, 0.0, 1.5)));
-
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes
-}
-
-fn test_animation_bytes(animation_id: u32, pos_origins: &[Vector3]) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&animation_id.to_le_bytes());
-    bytes.extend_from_slice(&1u32.to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes.extend_from_slice(&(pos_origins.len() as u32).to_le_bytes());
-
-    for origin in pos_origins {
-        bytes.extend_from_slice(&origin.x.to_le_bytes());
-        bytes.extend_from_slice(&origin.y.to_le_bytes());
-        bytes.extend_from_slice(&origin.z.to_le_bytes());
-        bytes.extend_from_slice(&1.0f32.to_le_bytes());
-        bytes.extend_from_slice(&0.0f32.to_le_bytes());
-        bytes.extend_from_slice(&0.0f32.to_le_bytes());
-        bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    }
-
-    for _ in pos_origins {
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-    }
-
-    bytes
-}
-
-fn test_motion_table_bytes_with_animation_derived_run(
-    motion_table_id: u32,
-    run_animation_id: u32,
-    run_framerate: f32,
-) -> Vec<u8> {
-    let default_stance = MotionStance::NonCombat as u32;
-    let walk_key = ((default_stance & 0xFFFF) << 16) | 0x0005;
-    let run_key = ((default_stance & 0xFFFF) << 16) | 0x0007;
-    let turn_left_key = ((default_stance & 0xFFFF) << 16) | 0x000E;
-    let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
-
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&motion_table_id.to_le_bytes());
-    bytes.extend_from_slice(&default_stance.to_le_bytes());
-    bytes.extend_from_slice(&1u32.to_le_bytes());
-    bytes.extend_from_slice(&default_stance.to_le_bytes());
-    bytes.extend_from_slice(&MotionTable::WALK_FORWARD_COMMAND.to_le_bytes());
-    bytes.extend_from_slice(&4u32.to_le_bytes());
-
-    bytes.extend_from_slice(&walk_key.to_le_bytes());
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0x01);
-    bytes.push(0);
-    bytes.extend_from_slice(&1.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-
-    bytes.extend_from_slice(&run_key.to_le_bytes());
-    bytes.push(1);
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0);
-    bytes.extend_from_slice(&run_animation_id.to_le_bytes());
-    bytes.extend_from_slice(&0i32.to_le_bytes());
-    bytes.extend_from_slice(&(-1i32).to_le_bytes());
-    bytes.extend_from_slice(&run_framerate.to_le_bytes());
-
-    bytes.extend_from_slice(&turn_left_key.to_le_bytes());
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0x02);
-    bytes.push(0);
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&(-1.5f32).to_le_bytes());
-
-    bytes.extend_from_slice(&turn_right_key.to_le_bytes());
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0x02);
-    bytes.push(0);
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&1.5f32.to_le_bytes());
-
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes
-}
-
-fn test_motion_table_bytes_with_run_velocity(
-    motion_table_id: u32,
-    run_velocity: Option<Vector3>,
-) -> Vec<u8> {
-    test_motion_table_bytes_with_velocities(
-        motion_table_id,
-        Some(Vector3::new(1.0, 0.0, 0.0)),
-        run_velocity,
-    )
 }
 
 fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
@@ -342,54 +218,13 @@ fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
     );
 }
 
-fn test_setup_model_bytes(default_motion_table: Option<u32>) -> Vec<u8> {
-    let setup = SetupModel {
-        id: 0x0200_0010,
-        flags: 0,
-        parts: vec![],
-        parent_index: vec![],
-        default_scale: vec![],
-        holding_locations: std::collections::HashMap::new(),
-        connection_points: std::collections::HashMap::new(),
-        placement_frames: std::collections::HashMap::new(),
-        cyl_spheres: vec![],
-        spheres: vec![],
-        height: 0.0,
-        radius: 0.0,
-        step_up: 0.0,
-        step_down: 0.0,
-        sorting_sphere: holtburger_common::Sphere {
-            center: Vector3::zero(),
-            radius: 0.0,
-        },
-        selection_sphere: holtburger_common::Sphere {
-            center: Vector3::zero(),
-            radius: 0.0,
-        },
-        lights: std::collections::HashMap::new(),
-        default_animation: None,
-        default_script: None,
-        default_motion_table,
-        default_sound_table: None,
-        default_script_table: None,
-    };
-
-    let mut bytes = Vec::new();
-    let mut writer = std::io::Cursor::new(&mut bytes);
-    setup.pack(&mut writer).expect("setup model should pack");
-    bytes
-}
-
 #[test]
 fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
     let motion_table_id = 0x0900_0020;
-    let resources = portal_resources(Arc::new(
-        TestProvider::default().with_file(motion_table_id, test_motion_table_bytes()),
-    ));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0001);
-    state.resources = Some(resources);
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -424,17 +259,14 @@ fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
 fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
     let motion_table_id = 0x0900_0020;
     let setup_model_id = 0x0200_0010;
-    let provider = TestProvider::default()
-        .with_file(
-            setup_model_id,
-            test_setup_model_bytes(Some(motion_table_id)),
-        )
-        .with_file(motion_table_id, test_motion_table_bytes());
-    let resources = portal_resources(Arc::new(provider));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
-    state.resources = Some(resources);
+    let mut motion_kinematics = test_motion_kinematics_asset(motion_table_id);
+    motion_kinematics
+        .setup_model_defaults
+        .insert(setup_model_id, motion_table_id);
+    state.set_motion_kinematics(motion_kinematics);
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -465,23 +297,12 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
 }
 
 #[test]
-fn resolve_player_motion_table_profile_derives_run_speed_from_animation_pos_frames() {
+fn resolve_player_motion_table_profile_reads_run_speed_from_required_motion_kinematics_asset() {
     let motion_table_id = 0x0900_0023;
-    let animation_id = 0x0300_0023;
-    let provider = TestProvider::default()
-        .with_file(
-            motion_table_id,
-            test_motion_table_bytes_with_animation_derived_run(motion_table_id, animation_id, 2.5),
-        )
-        .with_file(
-            animation_id,
-            test_animation_bytes(animation_id, &[Vector3::new(1.0, 0.0, 0.0)]),
-        );
-    let resources = portal_resources(Arc::new(provider));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0004);
-    state.resources = Some(resources);
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -508,12 +329,9 @@ fn resolve_player_motion_table_profile_derives_run_speed_from_animation_pos_fram
 #[test]
 fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_table() {
     let setup_model_id = 0x0200_0011;
-    let provider = TestProvider::default().with_file(setup_model_id, test_setup_model_bytes(None));
-    let resources = portal_resources(Arc::new(provider));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0003);
-    state.resources = Some(resources);
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
@@ -537,13 +355,10 @@ fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_tabl
 #[test]
 fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinematics() {
     let motion_table_id = 0x0900_0020;
-    let resources = portal_resources(Arc::new(
-        TestProvider::default().with_file(motion_table_id, test_motion_table_bytes()),
-    ));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
-    state.resources = Some(resources);
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
     state.player.guid = player_guid;
     seed_player_run_skill(&mut state, 800);
 
@@ -602,14 +417,17 @@ fn resolve_self_movement_capabilities_prefers_synthetic_override() {
 #[test]
 fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
     let motion_table_id = 0x0900_0021;
-    let resources = portal_resources(Arc::new(TestProvider::default().with_file(
-        motion_table_id,
-        test_motion_table_bytes_with_run_velocity(motion_table_id, None),
-    )));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0101);
-    state.resources = Some(resources);
+    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        None,
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+    ));
     state.player.guid = player_guid;
     seed_player_run_skill(&mut state, 800);
 
@@ -639,18 +457,17 @@ fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
 #[test]
 fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing() {
     let motion_table_id = 0x0900_0022;
-    let resources = portal_resources(Arc::new(TestProvider::default().with_file(
-        motion_table_id,
-        test_motion_table_bytes_with_velocities(
-            motion_table_id,
-            None,
-            Some(Vector3::new(2.5, 0.0, 0.0)),
-        ),
-    )));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0102);
-    state.resources = Some(resources);
+    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        None,
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+    ));
     state.player.guid = player_guid;
     seed_player_run_skill(&mut state, 800);
 
@@ -672,56 +489,16 @@ fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing()
 #[test]
 fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() {
     let motion_table_id: u32 = 0x0900_0024;
-    let default_stance = MotionStance::NonCombat as u32;
-    let walk_key = ((default_stance & 0xFFFF) << 16) | 0x0005;
-    let run_key = ((default_stance & 0xFFFF) << 16) | 0x0007;
-    let turn_right_key = ((default_stance & 0xFFFF) << 16) | 0x000D;
-
-    let mut bytes = Vec::new();
-    bytes.extend_from_slice(&motion_table_id.to_le_bytes());
-    bytes.extend_from_slice(&default_stance.to_le_bytes());
-    bytes.extend_from_slice(&1u32.to_le_bytes());
-    bytes.extend_from_slice(&default_stance.to_le_bytes());
-    bytes.extend_from_slice(&MotionTable::WALK_FORWARD_COMMAND.to_le_bytes());
-    bytes.extend_from_slice(&3u32.to_le_bytes());
-
-    bytes.extend_from_slice(&walk_key.to_le_bytes());
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0x01);
-    bytes.push(0);
-    bytes.extend_from_slice(&1.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-
-    bytes.extend_from_slice(&run_key.to_le_bytes());
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0x01);
-    bytes.push(0);
-    bytes.extend_from_slice(&2.5f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-
-    bytes.extend_from_slice(&turn_right_key.to_le_bytes());
-    bytes.push(0);
-    bytes.push(0);
-    bytes.push(0x02);
-    bytes.push(0);
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&0.0f32.to_le_bytes());
-    bytes.extend_from_slice(&(-1.5f32).to_le_bytes());
-
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-    bytes.extend_from_slice(&0u32.to_le_bytes());
-
-    let resources = portal_resources(Arc::new(
-        TestProvider::default().with_file(motion_table_id, bytes),
-    ));
-
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0103);
-    state.resources = Some(resources);
+    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        None,
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+    ));
     state.player.guid = player_guid;
     seed_player_run_skill(&mut state, 800);
 
@@ -1234,11 +1011,24 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         return;
     }
 
-    let provider = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"))
-        as Arc<dyn ResourceProvider>;
-
-    let mut state = WorldState::with_provider_for_namespace(EOR_PORTAL_NAMESPACE, provider)
-        .expect("provider-backed world should load required tables");
+    let archive = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"));
+    let mut state = WorldState::new(Arc::new(ScopedResourceResolver::from_mounted([
+        mounted_namespace_provider(
+            EOR_PORTAL_NAMESPACE,
+            Arc::new(NamespacedArchiveProvider {
+                namespace: EOR_PORTAL_NAMESPACE,
+                archive: Arc::clone(&archive),
+            }),
+        ),
+        mounted_namespace_provider(
+            HOLTBURGER_CORE_NAMESPACE,
+            Arc::new(NamespacedArchiveProvider {
+                namespace: HOLTBURGER_CORE_NAMESPACE,
+                archive,
+            }),
+        ),
+    ])))
+    .expect("provider-backed world should load required tables");
 
     assert!(!state.skill_table.skill_base_hash.is_empty());
     assert!(!state.xp_table.character_level_xp_list.is_empty());
@@ -1359,11 +1149,24 @@ fn repo_portal_bundle_supports_default_player_motion_table_profile() {
             return;
         }
     };
-    let resources = portal_resources(provider);
-
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0200);
-    state.resources = Some(resources);
+    let motion_kinematics_bytes = match provider
+        .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
+    {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            eprintln!(
+                "skipping motion-table integration probe; repo-local {} does not yet contain holtburger/core motion kinematics",
+                portal_path.display()
+            );
+            return;
+        }
+    };
+    state.set_motion_kinematics(
+        MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_bytes))
+            .expect("repo motion kinematics asset should parse"),
+    );
     state.player.guid = player_guid;
 
     let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());

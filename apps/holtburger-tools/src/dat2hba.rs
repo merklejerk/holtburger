@@ -24,6 +24,19 @@ struct LoadedDatInput {
     db: DatDatabase,
 }
 
+struct ProcessingState<'a> {
+    manifest: Option<&'a StripperManifest>,
+    should_prune_records: bool,
+    pb: &'a ProgressBar,
+    kept_count: &'a AtomicUsize,
+    pruned_count: &'a AtomicUsize,
+}
+
+struct WriteContext<'a> {
+    writer: &'a mut HbaStreamWriter,
+    output_path: &'a Path,
+}
+
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveProfile {
     Pruned,
@@ -143,18 +156,20 @@ pub fn process_inputs(
 
     let kept_count = AtomicUsize::new(0);
     let pruned_count = AtomicUsize::new(0);
+    let state = ProcessingState {
+        manifest: manifest.as_ref(),
+        should_prune_records,
+        pb: &pb,
+        kept_count: &kept_count,
+        pruned_count: &pruned_count,
+    };
+    let mut write_context = WriteContext {
+        writer: &mut writer,
+        output_path,
+    };
 
     for loaded in &loaded_inputs {
-        process_loaded_input(
-            loaded,
-            &mut writer,
-            manifest.as_ref(),
-            should_prune_records,
-            &pb,
-            &kept_count,
-            &pruned_count,
-            output_path,
-        )?;
+        process_loaded_input(loaded, &mut write_context, &state)?;
     }
 
     writer
@@ -174,13 +189,8 @@ pub fn process_inputs(
 
 fn process_loaded_input(
     loaded: &LoadedDatInput,
-    writer: &mut HbaStreamWriter,
-    manifest: Option<&StripperManifest>,
-    should_prune_records: bool,
-    pb: &ProgressBar,
-    kept_count: &AtomicUsize,
-    pruned_count: &AtomicUsize,
-    output_path: &Path,
+    write_context: &mut WriteContext<'_>,
+    state: &ProcessingState<'_>,
 ) -> Result<()> {
     let mut ids: Vec<u32> = loaded.db.files.keys().copied().collect();
     ids.sort_unstable();
@@ -189,31 +199,30 @@ fn process_loaded_input(
         let processed_entries: Vec<Option<ProcessedEntry>> = chunk
             .par_iter()
             .map(|&id| {
-                process_entry(
-                    &loaded.db,
-                    &loaded.spec.namespace,
-                    manifest,
-                    should_prune_records,
-                    id,
-                    pb,
-                    kept_count,
-                    pruned_count,
-                )
+                process_entry(&loaded.db, &loaded.spec.namespace, id, state)
             })
             .collect();
 
         for entry in processed_entries.into_iter().flatten() {
             if entry.is_pruned {
-                writer
+                write_context
+                    .writer
                     .add_pruned(&loaded.spec.namespace, entry.id, entry.type_id, entry.data)
                     .map_err(|error| {
-                        ToolError::HbaWrite(output_path.to_path_buf(), error.to_string())
+                        ToolError::HbaWrite(
+                            write_context.output_path.to_path_buf(),
+                            error.to_string(),
+                        )
                     })?;
             } else {
-                writer
+                write_context
+                    .writer
                     .add(&loaded.spec.namespace, entry.id, entry.type_id, entry.data)
                     .map_err(|error| {
-                        ToolError::HbaWrite(output_path.to_path_buf(), error.to_string())
+                        ToolError::HbaWrite(
+                            write_context.output_path.to_path_buf(),
+                            error.to_string(),
+                        )
                     })?;
             }
         }
@@ -265,19 +274,16 @@ fn infer_input_namespace_fallback(path: &Path) -> &'static str {
 fn process_entry(
     db: &DatDatabase,
     namespace: &str,
-    manifest: Option<&StripperManifest>,
-    should_prune_records: bool,
     id: u32,
-    pb: &ProgressBar,
-    kept_count: &AtomicUsize,
-    pruned_count: &AtomicUsize,
+    state: &ProcessingState<'_>,
 ) -> Option<ProcessedEntry> {
     let file_type = DatFileType::from_id(id);
-    let should_keep =
-        manifest.is_none_or(|manifest| manifest.should_keep_entry(namespace, id, file_type));
+    let should_keep = state
+        .manifest
+        .is_none_or(|manifest| manifest.should_keep_entry(namespace, id, file_type));
 
     if !should_keep {
-        pb.inc(1);
+        state.pb.inc(1);
         return None;
     }
 
@@ -285,14 +291,14 @@ fn process_entry(
         Ok(data) => data,
         Err(error) => {
             log::warn!("{}", ToolError::DatRead { id, source: error });
-            pb.inc(1);
+            state.pb.inc(1);
             return None;
         }
     };
 
     let mut is_pruned = false;
 
-    if should_prune_records {
+    if state.should_prune_records {
         match file_type {
             DatFileType::Model => {
                 let mut cursor = std::io::Cursor::new(&data);
@@ -303,7 +309,7 @@ fn process_entry(
                     if gfx.pack(&mut out_cursor).is_ok() {
                         data = pruned_data;
                         is_pruned = true;
-                        pruned_count.fetch_add(1, Ordering::SeqCst);
+                        state.pruned_count.fetch_add(1, Ordering::SeqCst);
                     }
                 }
             }
@@ -316,7 +322,7 @@ fn process_entry(
                     if setup.pack(&mut out_cursor).is_ok() {
                         data = pruned_data;
                         is_pruned = true;
-                        pruned_count.fetch_add(1, Ordering::SeqCst);
+                        state.pruned_count.fetch_add(1, Ordering::SeqCst);
                     }
                 }
             }
@@ -329,7 +335,7 @@ fn process_entry(
                     if cell.pack(&mut out_cursor).is_ok() {
                         data = pruned_data;
                         is_pruned = true;
-                        pruned_count.fetch_add(1, Ordering::SeqCst);
+                        state.pruned_count.fetch_add(1, Ordering::SeqCst);
                     }
                 }
             }
@@ -337,8 +343,8 @@ fn process_entry(
         }
     }
 
-    kept_count.fetch_add(1, Ordering::SeqCst);
-    pb.inc(1);
+    state.kept_count.fetch_add(1, Ordering::SeqCst);
+    state.pb.inc(1);
 
     Some(ProcessedEntry {
         id,

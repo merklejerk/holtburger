@@ -188,6 +188,10 @@ impl SetupModel {
         Self::unpack(reader)
     }
 
+    fn decode_optional_resource_id(raw: u32) -> Option<u32> {
+        (raw != 0).then_some(raw)
+    }
+
     pub fn unpack<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
         let id = u32::read_le(reader)?;
         let flags = u32::read_le(reader)?;
@@ -280,19 +284,19 @@ impl SetupModel {
         reader.seek(std::io::SeekFrom::Start(current_pos))?;
 
         if current_pos + 4 <= end_pos {
-            default_animation = Some(u32::read_le(reader)?);
+            default_animation = Self::decode_optional_resource_id(u32::read_le(reader)?);
         }
         if current_pos + 8 <= end_pos {
-            default_script = Some(u32::read_le(reader)?);
+            default_script = Self::decode_optional_resource_id(u32::read_le(reader)?);
         }
         if current_pos + 12 <= end_pos {
-            default_motion_table = Some(u32::read_le(reader)?);
+            default_motion_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
         }
         if current_pos + 16 <= end_pos {
-            default_sound_table = Some(u32::read_le(reader)?);
+            default_sound_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
         }
         if current_pos + 20 <= end_pos {
-            default_script_table = Some(u32::read_le(reader)?);
+            default_script_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
         }
 
         Ok(SetupModel {
@@ -477,5 +481,52 @@ mod tests {
         let unpacked = SetupModel::unpack(&mut reader).unwrap();
         assert_eq!(unpacked.lights.len(), 0);
         assert_eq!(unpacked.parts.len(), 2);
+    }
+
+    #[test]
+    fn test_setup_model_sparse_trailer_placeholders_round_trip_as_none() {
+        let setup = SetupModel {
+            id: 0x02000002,
+            flags: 0,
+            parts: vec![0],
+            parent_index: vec![],
+            default_scale: vec![],
+            holding_locations: HashMap::new(),
+            connection_points: HashMap::new(),
+            placement_frames: HashMap::new(),
+            cyl_spheres: vec![],
+            spheres: vec![],
+            height: 1.0,
+            radius: 1.0,
+            step_up: 0.1,
+            step_down: 0.1,
+            sorting_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 1.0,
+            },
+            selection_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 1.0,
+            },
+            lights: HashMap::new(),
+            default_animation: None,
+            default_script: None,
+            default_motion_table: None,
+            default_sound_table: None,
+            default_script_table: Some(0x0E00_0123),
+        };
+
+        let mut data = Vec::new();
+        let mut writer = Cursor::new(&mut data);
+        setup.pack(&mut writer).unwrap();
+
+        let mut reader = Cursor::new(data);
+        let unpacked = SetupModel::unpack(&mut reader).unwrap();
+
+        assert_eq!(unpacked.default_animation, None);
+        assert_eq!(unpacked.default_script, None);
+        assert_eq!(unpacked.default_motion_table, None);
+        assert_eq!(unpacked.default_sound_table, None);
+        assert_eq!(unpacked.default_script_table, Some(0x0E00_0123));
     }
 }

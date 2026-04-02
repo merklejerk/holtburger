@@ -230,13 +230,95 @@ fn wire_turn_speed_for_state(state: MotionState) -> f32 {
     })
 }
 
+fn local_turn_omega(base_omega: Vector3, override_speed: Option<f32>) -> Vector3 {
+    match override_speed {
+        Some(speed) => {
+            let base_magnitude = base_omega.length();
+            if base_magnitude > 0.0 {
+                base_omega.normalize() * speed
+            } else {
+                Vector3::zero()
+            }
+        }
+        None => base_omega,
+    }
+}
+
 pub(super) fn local_omega_for_state(
     state: MotionState,
     capabilities: &SelfMovementCapabilities,
 ) -> Vector3 {
     match state.turning {
-        Some(Turn::Right) => capabilities.kinematics().base_turn_right_omega,
-        Some(Turn::Left) => capabilities.kinematics().base_turn_left_omega,
+        Some(Turn::Right) => local_turn_omega(
+            capabilities.kinematics().base_turn_right_omega,
+            state.turn_speed,
+        ),
+        Some(Turn::Left) => local_turn_omega(
+            capabilities.kinematics().base_turn_left_omega,
+            state.turn_speed,
+        ),
         None => Vector3::zero(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_world::{
+        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
+    };
+
+    fn test_capabilities() -> SelfMovementCapabilities {
+        SelfMovementCapabilities {
+            kinematics: SelfMovementKinematics {
+                source: PlayerMotionTableSource::DirectProperty {
+                    motion_table_id: 0x0900_0020,
+                },
+                motion_table_id: 0x0900_0020,
+                stance: MotionStance::NonCombat as u32,
+                base_walk_forward_velocity: Vector3::new(1.0, 0.0, 0.0),
+                base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
+                base_turn_left_omega: Vector3::new(0.0, 0.0, -1.5),
+                base_turn_right_omega: Vector3::new(0.0, 0.0, 1.5),
+            },
+            run_rate_scalar: 1.0,
+        }
+    }
+
+    #[test]
+    fn local_omega_for_state_preserves_base_turn_omega_without_override() {
+        let capabilities = test_capabilities();
+
+        assert_eq!(
+            local_omega_for_state(
+                MotionState {
+                    gait: Gait::Run,
+                    locomotion: None,
+                    turning: Some(Turn::Left),
+                    turn_speed: None,
+                },
+                &capabilities,
+            ),
+            Vector3::new(0.0, 0.0, -1.5)
+        );
+    }
+
+    #[test]
+    fn local_omega_for_state_applies_turn_speed_override_to_base_direction() {
+        let capabilities = test_capabilities();
+
+        assert_eq!(
+            local_omega_for_state(
+                MotionState {
+                    gait: Gait::Walk,
+                    locomotion: None,
+                    turning: Some(Turn::Left),
+                    turn_speed: Some(0.75),
+                },
+                &capabilities,
+            ),
+            Vector3::new(0.0, 0.0, -0.75)
+        );
     }
 }

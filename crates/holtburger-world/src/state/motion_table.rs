@@ -183,6 +183,10 @@ impl WorldState {
             return Ok(Some(0.0));
         }
 
+        // ACE's MotionTable.GetAnimDist uses the total PosFrame displacement across
+        // all referenced animations, divides by total frame count, then scales by
+        // the first animation entry's framerate. Keep this odd-looking formula for
+        // parity unless we have stronger retail ground truth than ACE.
         Ok(Some(
             distance / total_frames as f32 * motion_data.anims[0].framerate,
         ))

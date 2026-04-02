@@ -1,7 +1,7 @@
 use super::super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     TURN_LEFT_MOTION_COMMAND, TURN_RIGHT_MOTION_COMMAND, WALK_FORWARD_MOTION_COMMAND,
-    build_autonomous_position, build_motion_state_raw_motion_state, player_run_speed_mps,
+    build_autonomous_position, build_motion_state_raw_motion_state, player_run_rate_scalar,
     raw_motion_state_with_motion_style,
 };
 use super::*;
@@ -11,11 +11,13 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::movement::{HoldKey, MotionStance};
 use holtburger_session::Session;
-use holtburger_world::WorldState;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
+use holtburger_world::{
+    PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics, WorldState,
+};
 
-fn seed_player_run_rate(world: &mut WorldState, run_skill: u32) -> f32 {
+fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
     world.player.attributes.insert(
         AttributeType::StrengthAttr,
         Attribute {
@@ -44,7 +46,32 @@ fn seed_player_run_rate(world: &mut WorldState, run_skill: u32) -> f32 {
         },
     );
 
-    player_run_speed_mps(world)
+    player_run_rate_scalar(world)
+}
+
+fn seed_self_movement_capabilities_override(
+    world: &mut WorldState,
+    run_rate_scalar: f32,
+    base_walk_speed: f32,
+    base_run_speed: f32,
+    turn_speed_rad_per_sec: f32,
+) -> SelfMovementCapabilities {
+    let capabilities = SelfMovementCapabilities {
+        kinematics: SelfMovementKinematics {
+            source: PlayerMotionTableSource::DirectProperty {
+                motion_table_id: 0x0900_0020,
+            },
+            motion_table_id: 0x0900_0020,
+            stance: MotionStance::NonCombat as u32,
+            base_walk_forward_velocity: Vector3::new(base_walk_speed, 0.0, 0.0),
+            base_run_forward_velocity: Vector3::new(base_run_speed, 0.0, 0.0),
+            base_turn_left_omega: Vector3::new(0.0, 0.0, -turn_speed_rad_per_sec),
+            base_turn_right_omega: Vector3::new(0.0, 0.0, turn_speed_rad_per_sec),
+        },
+        run_rate_scalar,
+    };
+    world.set_self_movement_capabilities_override(capabilities.clone());
+    capabilities
 }
 
 #[test]
@@ -347,9 +374,9 @@ fn motion_state_raw_motion_state_adds_right_turn_when_requested() {
 }
 
 #[test]
-fn motion_state_raw_motion_state_uses_player_run_rate_for_forward_speed() {
+fn motion_state_raw_motion_state_uses_player_run_rate_scalar_for_forward_speed() {
     let mut world = WorldState::synthetic();
-    let expected_run_speed = seed_player_run_rate(&mut world, 300);
+    let expected_run_rate_scalar = seed_player_run_rate_scalar(&mut world, 300);
 
     let raw_motion_state = build_motion_state_raw_motion_state(
         &world,
@@ -362,7 +389,10 @@ fn motion_state_raw_motion_state_uses_player_run_rate_for_forward_speed() {
         Some(WALK_FORWARD_MOTION_COMMAND)
     );
     assert_eq!(raw_motion_state.forward_hold_key, Some(HoldKey::Run as u32));
-    assert_eq!(raw_motion_state.forward_speed, Some(expected_run_speed));
+    assert_eq!(
+        raw_motion_state.forward_speed,
+        Some(expected_run_rate_scalar)
+    );
     assert!(
         raw_motion_state
             .flags
@@ -422,11 +452,12 @@ fn motion_state_raw_motion_state_omits_turn_when_not_requested() {
 }
 
 #[test]
-fn current_local_solve_body_input_uses_planar_run_velocity() {
+fn current_local_solve_body_input_uses_shared_resolved_manual_run_speed() {
     let mut world = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     world.player.guid = player_guid;
-    let expected_run_speed = seed_player_run_rate(&mut world, 300);
+    let capabilities = seed_self_movement_capabilities_override(&mut world, 3.25, 1.0, 2.0, 1.25);
+    let expected_local_run_speed = capabilities.resolved_manual_run_speed();
     world.player.position = WorldPosition {
         landblock_id: Guid(0x12340000),
         coords: Vector3::new(10.0, 20.0, 0.0),
@@ -452,14 +483,15 @@ fn current_local_solve_body_input_uses_planar_run_velocity() {
         .expect("active manual drive should produce local solve input");
     assert_eq!(body.body_id, SpatialBodyId::LocalPlayer(player_guid));
     assert!(body.velocity.x.abs() < 1e-5);
-    assert!((body.velocity.y - expected_run_speed).abs() < 1e-5);
+    assert!((body.velocity.y - expected_local_run_speed).abs() < 1e-5);
 }
 
 #[test]
-fn current_local_solve_body_input_can_turn_in_place() {
+fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
     let mut world = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     world.player.guid = player_guid;
+    let capabilities = seed_self_movement_capabilities_override(&mut world, 3.25, 1.0, 2.0, 1.25);
     world.player.position = WorldPosition {
         landblock_id: Guid(0x12340000),
         coords: Vector3::new(10.0, 20.0, 0.0),
@@ -481,7 +513,7 @@ fn current_local_solve_body_input_can_turn_in_place() {
         .current_local_solve_body_input(&world)
         .expect("turn-in-place manual drive should produce local solve input");
     assert!(body.velocity.length_squared() <= 1e-6);
-    assert!(body.omega.z.abs() > 1e-6);
+    assert_eq!(body.omega, capabilities.kinematics().base_turn_left_omega);
 }
 
 #[test]

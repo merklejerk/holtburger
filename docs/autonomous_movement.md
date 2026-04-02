@@ -254,6 +254,32 @@ The raw packet must describe intent, not just velocity. In ACE, `BroadcastMoveme
 
 The safest autonomous client design mirrors ACE's separation of concerns.
 
+## 8.5. Unit Model For Local Controllers
+
+The client should keep three movement quantities distinct.
+
+### `run_rate` is not world speed
+
+ACE `run_rate` is a dimensionless scalar derived from burden and Run skill. It is the right value to echo in the run-facing observer packet fields, but it is not by itself a local meters-per-second budget.
+
+### Motion tables provide base kinematics
+
+The player's resolved motion table supplies the base walk/run/turn kinematics for the active stance. Those are the missing terms that make a local self-movement budget meaningful.
+
+### Local world speed must be resolved, not guessed
+
+For local self simulation and autonomous navigation, the correct shape is:
+
+`resolved_world_speed = base_motion_table_speed * run_rate * optional_speed_multiplier`
+
+In the current client architecture that means:
+
+- `holtburger-world` resolves `SelfMovementCapabilities`
+- `holtburger-core` uses those capabilities for local manual simulation
+- `apps/holtburger-cli` uses projected capabilities for autonomous navigation budgeting
+
+The important practical rule is: do not reintroduce guessed constants that convert `run_rate` directly into meters per second. If the client does not have resolved self-movement capabilities available, the safer behavior is to pause autonomous budgeting and wait for synchronized state rather than inventing a fallback speed model.
+
 ### 8.1 Local controller owns desired locomotion intent
 
 The client-side automation layer should decide:

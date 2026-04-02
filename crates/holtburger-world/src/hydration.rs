@@ -210,7 +210,7 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         }
         if let Some(v) = odd.csetup_id {
             self.dids
-                .insert(PropertyDataId::CombatTable, holtburger_common::Guid(v));
+                .insert(PropertyDataId::Setup, holtburger_common::Guid(v));
         }
         if let Some(v) = odd.parent_id {
             self.iids.insert(PropertyInstanceId::Wielder, v); // Note: Could be Container contextually, but Wielder is common for parent

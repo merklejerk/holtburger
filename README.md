@@ -175,7 +175,7 @@ The TUI client needs a modern terminal emulator to render correctly. The built-i
 
 The TUI client requires game data (`portal.hba`/`portal.dat` and `cell.hba`/`cell.dat`) to function. It supports both the original DAT files and the much smaller HBA format.
 
-- Release archives already include the micro `portal.hba` needed for the current runtime path.
+- Release archives already include the micro `portal.hba` needed for the current runtime path, including all motion tables and animations packaged in the micro archive.
 - Flatpak builds also include that bundled micro `portal.hba`.
 - Source builds and local development setups require you to provide the data files yourself.
 

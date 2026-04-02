@@ -27,10 +27,10 @@ impl StripperManifest {
         }
     }
 
-    /// Returns the exact-ID manifest for the current TUI-oriented micro archive.
+    /// Returns the manifest for the current TUI-oriented micro archive.
     pub fn micro() -> Self {
         Self {
-            keep_types: HashSet::new(),
+            keep_types: HashSet::from([DatFileType::MotionTable, DatFileType::Animation]),
             keep_ids: HashSet::from([SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID]),
         }
     }
@@ -60,12 +60,14 @@ mod tests {
     }
 
     #[test]
-    fn micro_manifest_keeps_only_expected_exact_ids() {
+    fn micro_manifest_keeps_required_table_ids_motion_tables_and_animations() {
         let manifest = StripperManifest::micro();
 
         assert!(manifest.should_keep_file(SkillTable::FILE_ID, DatFileType::Table));
         assert!(manifest.should_keep_file(SpellTable::FILE_ID, DatFileType::Table));
         assert!(manifest.should_keep_file(XpTable::FILE_ID, DatFileType::Table));
+        assert!(manifest.should_keep_file(0x09000001, DatFileType::MotionTable));
+        assert!(manifest.should_keep_file(0x03000003, DatFileType::Animation));
         assert!(!manifest.should_keep_file(0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_file(0x01000001, DatFileType::Model));
     }

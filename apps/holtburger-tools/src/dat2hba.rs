@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn micro_profile_keeps_only_required_table_ids() {
+    fn micro_profile_keeps_required_table_ids_motion_tables_and_animations() {
         let manifest = ArchiveProfile::Micro
             .manifest()
             .expect("micro mode should have a manifest");
@@ -246,6 +246,8 @@ mod tests {
         assert!(manifest.should_keep_file(SkillTable::FILE_ID, DatFileType::Table));
         assert!(manifest.should_keep_file(SpellTable::FILE_ID, DatFileType::Table));
         assert!(manifest.should_keep_file(XpTable::FILE_ID, DatFileType::Table));
+        assert!(manifest.should_keep_file(0x09000001, DatFileType::MotionTable));
+        assert!(manifest.should_keep_file(0x03000003, DatFileType::Animation));
         assert!(!manifest.should_keep_file(0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_file(0x01000001, DatFileType::Model));
     }

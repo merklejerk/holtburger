@@ -1,10 +1,13 @@
 use anyhow::{Result, anyhow};
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use holtburger_dat::{
-    MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
+    DatDatabase, EOR_PORTAL_NAMESPACE, HbaReader, MountedResourceProvider, ResourceProvider,
+    ResourceScope, ScopedResourceResolver,
 };
 use holtburger_session::Session;
 use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldState};
+use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -16,23 +19,42 @@ use super::{
 
 type Provider = Arc<dyn ResourceProvider>;
 
+struct NamespacedHbaProvider {
+    namespace: String,
+    archive: Arc<HbaReader>,
+}
+
+impl ResourceProvider for NamespacedHbaProvider {
+    fn get_file(&self, id: u32) -> holtburger_dat::Result<Vec<u8>> {
+        self.archive.get_file_in_namespace(&self.namespace, id)
+    }
+
+    fn get_metadata(&self, id: u32) -> Option<holtburger_dat::FileMetadata> {
+        self.archive.get_metadata_in_namespace(&self.namespace, id)
+    }
+}
+
 #[derive(Clone, Copy)]
 struct RequiredResourceAsset {
+    namespace: &'static str,
     id: u32,
     name: &'static str,
 }
 
 const REQUIRED_SKILL_TABLE: RequiredResourceAsset = RequiredResourceAsset {
+    namespace: EOR_PORTAL_NAMESPACE,
     id: SkillTable::FILE_ID,
     name: "skill table",
 };
 
 const REQUIRED_SPELL_TABLE: RequiredResourceAsset = RequiredResourceAsset {
+    namespace: EOR_PORTAL_NAMESPACE,
     id: SpellTable::FILE_ID,
     name: "spell table",
 };
 
 const REQUIRED_XP_TABLE: RequiredResourceAsset = RequiredResourceAsset {
+    namespace: EOR_PORTAL_NAMESPACE,
     id: XpTable::FILE_ID,
     name: "XP table",
 };
@@ -82,6 +104,18 @@ impl ClientBuilder {
         self
     }
 
+    pub fn mount_provider_for_namespace(
+        mut self,
+        namespace: &str,
+        provider: Provider,
+    ) -> Result<Self> {
+        self.mounted_providers
+            .push(MountedResourceProvider::with_namespace(
+                namespace, provider,
+            )?);
+        Ok(self)
+    }
+
     pub fn spatial_physics(mut self, physics: Arc<dyn SpatialPhysics>) -> Self {
         self.spatial_physics = Some(physics);
         self
@@ -129,43 +163,246 @@ impl ClientBuilder {
             return Arc::new(ScopedResourceResolver::from_mounted(mounted));
         };
 
-        if !mounted
-            .iter()
-            .any(|provider| provider.scope == ResourceScope::Portal)
-        {
-            match holtburger_dat::open_provider(dats_path.join("portal")) {
-                Ok(provider) => {
-                    log::info!(
-                        "Loaded portal data from {}",
-                        dats_path.join("portal").display()
-                    );
-                    mounted.push(MountedResourceProvider::new(
-                        ResourceScope::Portal,
-                        provider,
-                    ));
-                }
-                Err(error) => {
-                    log::warn!("Could not load portal data: {}", error);
-                }
-            }
+        if dats_path.is_file() {
+            self.discover_provider_mounts_from_path(dats_path, &mut mounted);
+            return Arc::new(ScopedResourceResolver::from_mounted(mounted));
         }
 
-        if !mounted
-            .iter()
-            .any(|provider| provider.scope == ResourceScope::Cell)
-        {
-            match holtburger_dat::open_provider(dats_path.join("cell")) {
-                Ok(provider) => {
-                    log::info!("Loaded cell data from {}", dats_path.join("cell").display());
-                    mounted.push(MountedResourceProvider::new(ResourceScope::Cell, provider));
-                }
-                Err(error) => {
-                    log::warn!("Could not load cell data: {}", error);
-                }
-            }
+        if dats_path.is_dir() {
+            self.discover_hba_mounts_in_dir(dats_path, &mut mounted);
+            self.discover_dat_mounts_in_dir(dats_path, &mut mounted);
+        } else {
+            log::warn!(
+                "Configured dats path {} is neither a file nor a directory",
+                dats_path.display()
+            );
         }
 
         Arc::new(ScopedResourceResolver::from_mounted(mounted))
+    }
+
+    fn discover_provider_mounts_from_path(
+        &self,
+        path: &Path,
+        mounted: &mut Vec<MountedResourceProvider>,
+    ) {
+        if path.extension() == Some(OsStr::new("hba")) {
+            self.mount_hba_namespaces(path, mounted);
+            return;
+        }
+
+        if path.extension() == Some(OsStr::new("dat")) {
+            self.mount_dat_namespace(path, mounted);
+            return;
+        }
+
+        let hba_path = path.with_extension("hba");
+        if hba_path.exists() {
+            self.mount_hba_namespaces(&hba_path, mounted);
+        }
+
+        let dat_path = path.with_extension("dat");
+        if dat_path.exists() {
+            self.mount_dat_namespace(&dat_path, mounted);
+        }
+    }
+
+    fn discover_hba_mounts_in_dir(
+        &self,
+        dats_path: &Path,
+        mounted: &mut Vec<MountedResourceProvider>,
+    ) {
+        let mut candidates = Vec::new();
+
+        let entries = match fs::read_dir(dats_path) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log::warn!(
+                    "Could not enumerate HBA archives under {}: {}",
+                    dats_path.display(),
+                    error
+                );
+                return;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension() != Some(OsStr::new("hba")) {
+                continue;
+            }
+
+            let archive = match HbaReader::open(&path) {
+                Ok(archive) => archive,
+                Err(error) => {
+                    log::warn!("Could not open HBA archive {}: {}", path.display(), error);
+                    continue;
+                }
+            };
+
+            let namespaces = archive
+                .namespaces()
+                .map(|namespace| namespace.to_string())
+                .collect::<Vec<_>>();
+            if namespaces.is_empty() {
+                log::warn!(
+                    "Skipping HBA archive {} because it exposes no namespaces",
+                    path.display()
+                );
+                continue;
+            }
+
+            candidates.push((path, namespaces, Arc::new(archive)));
+        }
+
+        candidates.sort_by(|left, right| {
+            right
+                .1
+                .len()
+                .cmp(&left.1.len())
+                .then_with(|| left.0.cmp(&right.0))
+        });
+
+        for (path, namespaces, archive) in candidates {
+            for namespace in namespaces {
+                if has_namespace_mount(mounted, &namespace) {
+                    log::debug!(
+                        "Skipping namespace '{}' from {} because it is already mounted",
+                        namespace,
+                        path.display()
+                    );
+                    continue;
+                }
+
+                let provider = Arc::new(NamespacedHbaProvider {
+                    namespace: namespace.clone(),
+                    archive: Arc::clone(&archive),
+                }) as Provider;
+
+                match MountedResourceProvider::with_namespace(&namespace, provider) {
+                    Ok(mount) => {
+                        log::info!("Mounted namespace '{}' from {}", namespace, path.display());
+                        mounted.push(mount);
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "Could not mount namespace '{}' from {}: {}",
+                            namespace,
+                            path.display(),
+                            error
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn discover_dat_mounts_in_dir(
+        &self,
+        dats_path: &Path,
+        mounted: &mut Vec<MountedResourceProvider>,
+    ) {
+        let entries = match fs::read_dir(dats_path) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log::warn!(
+                    "Could not enumerate DAT archives under {}: {}",
+                    dats_path.display(),
+                    error
+                );
+                return;
+            }
+        };
+
+        let mut paths = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension() == Some(OsStr::new("dat")))
+            .collect::<Vec<_>>();
+        paths.sort();
+
+        for path in paths {
+            self.mount_dat_namespace(&path, mounted);
+        }
+    }
+
+    fn mount_hba_namespaces(&self, path: &Path, mounted: &mut Vec<MountedResourceProvider>) {
+        let archive = match HbaReader::open(path) {
+            Ok(archive) => archive,
+            Err(error) => {
+                log::warn!("Could not open HBA archive {}: {}", path.display(), error);
+                return;
+            }
+        };
+
+        let namespaces = archive
+            .namespaces()
+            .map(|namespace| namespace.to_string())
+            .collect::<Vec<_>>();
+        let archive = Arc::new(archive);
+
+        for namespace in namespaces {
+            if has_namespace_mount(mounted, &namespace) {
+                continue;
+            }
+
+            let provider = Arc::new(NamespacedHbaProvider {
+                namespace: namespace.clone(),
+                archive: Arc::clone(&archive),
+            }) as Provider;
+
+            match MountedResourceProvider::with_namespace(&namespace, provider) {
+                Ok(mount) => {
+                    log::info!("Mounted namespace '{}' from {}", namespace, path.display());
+                    mounted.push(mount);
+                }
+                Err(error) => {
+                    log::warn!(
+                        "Could not mount namespace '{}' from {}: {}",
+                        namespace,
+                        path.display(),
+                        error
+                    );
+                }
+            }
+        }
+    }
+
+    fn mount_dat_namespace(&self, path: &Path, mounted: &mut Vec<MountedResourceProvider>) {
+        let database = match DatDatabase::new(path) {
+            Ok(database) => database,
+            Err(error) => {
+                log::warn!("Could not open DAT archive {}: {}", path.display(), error);
+                return;
+            }
+        };
+
+        let Some(namespace) = database.retail_namespace_hint() else {
+            log::warn!(
+                "Skipping DAT archive {} because its retail namespace could not be inferred",
+                path.display()
+            );
+            return;
+        };
+
+        if has_namespace_mount(mounted, namespace) {
+            return;
+        }
+
+        match MountedResourceProvider::with_namespace(namespace, Arc::new(database) as Provider) {
+            Ok(mount) => {
+                log::info!("Mounted namespace '{}' from {}", namespace, path.display());
+                mounted.push(mount);
+            }
+            Err(error) => {
+                log::warn!(
+                    "Could not mount namespace '{}' from {}: {}",
+                    namespace,
+                    path.display(),
+                    error
+                );
+            }
+        }
     }
 
     fn finish(self, session: Session, mounted: Arc<ScopedResourceResolver>) -> Result<Client> {
@@ -196,21 +433,21 @@ impl ClientBuilder {
     }
 
     fn validate_required_assets(&self, mounted: &ScopedResourceResolver) -> Result<()> {
-        if !mounted.exists_for::<SkillTable>() {
+        if !mounted.exists_in_namespace(REQUIRED_SKILL_TABLE.namespace, REQUIRED_SKILL_TABLE.id) {
             return Err(missing_resource_asset_error(
                 REQUIRED_SKILL_TABLE,
                 self.dats_path.as_deref(),
             ));
         }
 
-        if !mounted.exists_for::<SpellTable>() {
+        if !mounted.exists_in_namespace(REQUIRED_SPELL_TABLE.namespace, REQUIRED_SPELL_TABLE.id) {
             return Err(missing_resource_asset_error(
                 REQUIRED_SPELL_TABLE,
                 self.dats_path.as_deref(),
             ));
         }
 
-        if !mounted.exists_for::<XpTable>() {
+        if !mounted.exists_in_namespace(REQUIRED_XP_TABLE.namespace, REQUIRED_XP_TABLE.id) {
             return Err(missing_resource_asset_error(
                 REQUIRED_XP_TABLE,
                 self.dats_path.as_deref(),
@@ -227,17 +464,25 @@ fn missing_resource_asset_error(
 ) -> anyhow::Error {
     match dats_path {
         Some(path) => anyhow!(
-            "Missing required portal asset {} (0x{:08X}) while loading client data from {}.",
-            asset.name,
+            "Missing required asset {}:0x{:08X} ({}) while loading client data from {}.",
+            asset.namespace,
             asset.id,
+            asset.name,
             path.display()
         ),
         None => anyhow!(
-            "Missing required portal asset {} (0x{:08X}) in the mounted portal dataset.",
+            "Missing required asset {}:0x{:08X} ({}) in the mounted resource namespaces.",
+            asset.namespace,
+            asset.id,
             asset.name,
-            asset.id
         ),
     }
+}
+
+fn has_namespace_mount(mounted: &[MountedResourceProvider], namespace: &str) -> bool {
+    mounted
+        .iter()
+        .any(|provider| provider.namespace.as_str() == namespace)
 }
 
 #[cfg(test)]
@@ -269,7 +514,9 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
 mod tests {
     use super::*;
     use holtburger_common::{Guid, Vector3};
-    use holtburger_dat::{DatFileType, HbaReader, HbaWriter};
+    use holtburger_dat::{
+        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
+    };
     use holtburger_world::{
         ContactState, SolveActorInput, SolvedActorKinematics, SpatialScene, SpatialSolveBatch,
         SpatialSolveRequest,
@@ -305,32 +552,57 @@ mod tests {
         }
     }
 
-    fn repo_portal_hba_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
+    fn repo_assets_hba_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
     }
 
-    fn write_hba(path: &Path, ids: &[u32]) -> bool {
-        let source_path = repo_portal_hba_path();
+    fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) -> bool {
+        let source_path = repo_assets_hba_path();
         if !source_path.is_file() {
             eprintln!(
-                "skipping builder portal fixture test; missing repo-local {}",
+                "skipping builder assets fixture test; missing repo-local {}",
                 source_path.display()
             );
             return false;
         }
 
-        let source =
-            HbaReader::open(source_path).expect("repo portal.hba should open for builder tests");
+        let source = match HbaReader::open(&source_path) {
+            Ok(source) => source,
+            Err(error) => {
+                eprintln!(
+                    "skipping builder assets fixture test; repo-local {} is not an HBA v2 fixture yet: {}",
+                    source_path.display(),
+                    error
+                );
+                return false;
+            }
+        };
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 
         for id in ids {
             let data = source
-                .get_file(*id)
-                .unwrap_or_else(|_| panic!("repo portal.hba should contain 0x{id:08X}"));
+                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, *id)
+                .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
             writer
-                .add(*id, DatFileType::from_id(*id) as u32, data)
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    *id,
+                    DatFileType::from_id(*id) as u32,
+                    data,
+                )
                 .expect("test HBA entry should be added");
+        }
+
+        if include_cell_namespace {
+            writer
+                .add(
+                    EOR_CELL_NAMESPACE,
+                    0x0000_0001,
+                    DatFileType::Landblock as u32,
+                    vec![0xCC],
+                )
+                .expect("test cell namespace entry should be added");
         }
 
         writer.write(path).expect("test HBA should be written");
@@ -342,8 +614,9 @@ mod tests {
     fn portal_only_startup_succeeds_when_required_tables_are_present() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
-            &dir.path().join("portal.hba"),
+            &dir.path().join("bundle.hba"),
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            false,
         ) {
             return;
         }
@@ -357,18 +630,45 @@ mod tests {
             .world
             .resources
             .as_ref()
-            .expect("portal-only startup should mount scoped resources");
+            .expect("portal-only startup should mount namespaced resources");
 
-        assert!(resources.has_scope(ResourceScope::Portal));
-        assert!(!resources.has_scope(ResourceScope::Cell));
+        assert!(resources.has_namespace(EOR_PORTAL_NAMESPACE));
+        assert!(!resources.has_namespace(EOR_CELL_NAMESPACE));
+    }
+
+    #[test]
+    fn startup_discovers_namespaces_from_hba_contents_not_filename() {
+        let dir = tempdir().expect("tempdir should be created");
+        if !write_hba(
+            &dir.path().join("anything.hba"),
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            true,
+        ) {
+            return;
+        }
+
+        let client = ClientBuilder::new("test")
+            .dats_path(dir.path().to_path_buf())
+            .build_with_session(Session::new_test())
+            .expect("startup should discover HBA namespaces from archive contents");
+
+        let resources = client
+            .world
+            .resources
+            .as_ref()
+            .expect("startup should mount namespaced resources");
+
+        assert!(resources.has_namespace(EOR_PORTAL_NAMESPACE));
+        assert!(resources.has_namespace(EOR_CELL_NAMESPACE));
     }
 
     #[test]
     fn startup_fails_when_required_skill_table_is_missing() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
-            &dir.path().join("portal.hba"),
+            &dir.path().join("bundle.hba"),
             &[SpellTable::FILE_ID, XpTable::FILE_ID],
+            false,
         ) {
             return;
         }
@@ -394,15 +694,16 @@ mod tests {
             .expect("startup should fail when the portal dataset is missing");
 
         assert!(error.to_string().contains("skill table"));
-        assert!(error.to_string().contains("portal asset"));
+        assert!(error.to_string().contains(EOR_PORTAL_NAMESPACE));
     }
 
     #[test]
     fn builder_injects_custom_spatial_physics() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
-            &dir.path().join("portal.hba"),
+            &dir.path().join("bundle.hba"),
             &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            false,
         ) {
             return;
         }

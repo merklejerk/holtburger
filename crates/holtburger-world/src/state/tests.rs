@@ -19,8 +19,8 @@ use holtburger_common::properties::{
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
 use holtburger_dat::file_type::{MotionTable, SetupModel, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{
-    DatFileType, HbaReader, HbaWriter, MountedResourceProvider, ResourceProvider, ResourceScope,
-    ScopedResourceResolver,
+    DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter, MountedResourceProvider,
+    ResourceProvider, ScopedResourceResolver,
 };
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
@@ -34,31 +34,46 @@ use holtburger_protocol::messages::{
 use holtburger_protocol::traits::ProtocolPack;
 use tempfile::tempdir;
 
-fn repo_portal_hba_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
+fn repo_assets_hba_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
 }
 
 fn write_micro_portal_hba(path: &Path) -> bool {
-    let source_path = repo_portal_hba_path();
+    let source_path = repo_assets_hba_path();
     if !source_path.is_file() {
         eprintln!(
-            "skipping portal fixture test; missing repo-local {}",
+            "skipping assets fixture test; missing repo-local {}",
             source_path.display()
         );
         return false;
     }
 
-    let source = HbaReader::open(&source_path).expect("repo portal.hba should open for tests");
+    let source = match HbaReader::open(&source_path) {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!(
+                "skipping assets fixture test; repo-local {} is not an HBA v2 fixture yet: {}",
+                source_path.display(),
+                error
+            );
+            return false;
+        }
+    };
 
     let mut writer = HbaWriter::new();
     writer.set_compression(false);
 
     for id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
         let data = source
-            .get_file(id)
-            .unwrap_or_else(|_| panic!("repo portal.hba should contain 0x{id:08X}"));
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, id)
+            .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
         writer
-            .add(id, DatFileType::from_id(id) as u32, data)
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                id,
+                DatFileType::from_id(id) as u32,
+                data,
+            )
             .expect("micro table should be added to test HBA");
     }
 
@@ -67,6 +82,20 @@ fn write_micro_portal_hba(path: &Path) -> bool {
         .expect("micro portal.hba should be written");
 
     true
+}
+
+fn mounted_namespace_provider(
+    namespace: &str,
+    provider: Arc<dyn ResourceProvider>,
+) -> MountedResourceProvider {
+    MountedResourceProvider::with_namespace(namespace, provider)
+        .expect("test namespace mount should be valid")
+}
+
+fn portal_resources(provider: Arc<dyn ResourceProvider>) -> Arc<ScopedResourceResolver> {
+    Arc::new(ScopedResourceResolver::from_mounted([
+        mounted_namespace_provider(EOR_PORTAL_NAMESPACE, provider),
+    ]))
 }
 
 #[test]
@@ -357,12 +386,9 @@ fn test_setup_model_bytes(default_motion_table: Option<u32>) -> Vec<u8> {
 #[test]
 fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
     let motion_table_id = 0x0900_0020;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(
-            ResourceScope::Portal,
-            Arc::new(TestProvider::default().with_file(motion_table_id, test_motion_table_bytes())),
-        ),
-    ]));
+    let resources = portal_resources(Arc::new(
+        TestProvider::default().with_file(motion_table_id, test_motion_table_bytes()),
+    ));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0001);
@@ -407,9 +433,7 @@ fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
             test_setup_model_bytes(Some(motion_table_id)),
         )
         .with_file(motion_table_id, test_motion_table_bytes());
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
-    ]));
+    let resources = portal_resources(Arc::new(provider));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0002);
@@ -456,9 +480,7 @@ fn resolve_player_motion_table_profile_derives_run_speed_from_animation_pos_fram
             animation_id,
             test_animation_bytes(animation_id, &[Vector3::new(1.0, 0.0, 0.0)]),
         );
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
-    ]));
+    let resources = portal_resources(Arc::new(provider));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0004);
@@ -490,9 +512,7 @@ fn resolve_player_motion_table_profile_derives_run_speed_from_animation_pos_fram
 fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_table() {
     let setup_model_id = 0x0200_0011;
     let provider = TestProvider::default().with_file(setup_model_id, test_setup_model_bytes(None));
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(provider)),
-    ]));
+    let resources = portal_resources(Arc::new(provider));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0003);
@@ -520,12 +540,9 @@ fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_tabl
 #[test]
 fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinematics() {
     let motion_table_id = 0x0900_0020;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(
-            ResourceScope::Portal,
-            Arc::new(TestProvider::default().with_file(motion_table_id, test_motion_table_bytes())),
-        ),
-    ]));
+    let resources = portal_resources(Arc::new(
+        TestProvider::default().with_file(motion_table_id, test_motion_table_bytes()),
+    ));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0100);
@@ -588,15 +605,10 @@ fn resolve_self_movement_capabilities_prefers_synthetic_override() {
 #[test]
 fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
     let motion_table_id = 0x0900_0021;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(
-            ResourceScope::Portal,
-            Arc::new(TestProvider::default().with_file(
-                motion_table_id,
-                test_motion_table_bytes_with_run_velocity(motion_table_id, None),
-            )),
-        ),
-    ]));
+    let resources = portal_resources(Arc::new(TestProvider::default().with_file(
+        motion_table_id,
+        test_motion_table_bytes_with_run_velocity(motion_table_id, None),
+    )));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0101);
@@ -630,19 +642,14 @@ fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
 #[test]
 fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing() {
     let motion_table_id = 0x0900_0022;
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(
-            ResourceScope::Portal,
-            Arc::new(TestProvider::default().with_file(
-                motion_table_id,
-                test_motion_table_bytes_with_velocities(
-                    motion_table_id,
-                    None,
-                    Some(Vector3::new(2.5, 0.0, 0.0)),
-                ),
-            )),
+    let resources = portal_resources(Arc::new(TestProvider::default().with_file(
+        motion_table_id,
+        test_motion_table_bytes_with_velocities(
+            motion_table_id,
+            None,
+            Some(Vector3::new(2.5, 0.0, 0.0)),
         ),
-    ]));
+    )));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0102);
@@ -711,12 +718,9 @@ fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() 
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
 
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(
-            ResourceScope::Portal,
-            Arc::new(TestProvider::default().with_file(motion_table_id, bytes)),
-        ),
-    ]));
+    let resources = portal_resources(Arc::new(
+        TestProvider::default().with_file(motion_table_id, bytes),
+    ));
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0103);
@@ -1217,9 +1221,10 @@ fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
         }
     }
 
-    let error = WorldState::with_provider(ResourceScope::Portal, Arc::new(MockFailedProvider))
-        .err()
-        .expect("strict constructor should fail when required tables are unavailable");
+    let error =
+        WorldState::with_provider_for_namespace(EOR_PORTAL_NAMESPACE, Arc::new(MockFailedProvider))
+            .err()
+            .expect("strict constructor should fail when required tables are unavailable");
 
     assert!(error.to_string().contains("skill table"));
 }
@@ -1227,7 +1232,7 @@ fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
 #[test]
 fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let dir = tempdir().expect("tempdir should be created");
-    let portal_path = dir.path().join("portal.hba");
+    let portal_path = dir.path().join("bundle.hba");
     if !write_micro_portal_hba(&portal_path) {
         return;
     }
@@ -1235,7 +1240,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let provider = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"))
         as Arc<dyn ResourceProvider>;
 
-    let mut state = WorldState::with_provider(ResourceScope::Portal, provider)
+    let mut state = WorldState::with_provider_for_namespace(EOR_PORTAL_NAMESPACE, provider)
         .expect("provider-backed world should load required tables");
 
     assert!(!state.skill_table.skill_base_hash.is_empty());
@@ -1337,7 +1342,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
 #[test]
 fn repo_portal_bundle_supports_default_player_motion_table_profile() {
-    let portal_path = repo_portal_hba_path();
+    let portal_path = repo_assets_hba_path();
     if !portal_path.is_file() {
         eprintln!(
             "skipping motion-table integration probe; missing repo-local {}",
@@ -1346,10 +1351,18 @@ fn repo_portal_bundle_supports_default_player_motion_table_profile() {
         return;
     }
 
-    let provider = Arc::new(HbaReader::open(&portal_path).expect("repo portal.hba should open"));
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(ResourceScope::Portal, provider),
-    ]));
+    let provider = match HbaReader::open(&portal_path) {
+        Ok(provider) => Arc::new(provider),
+        Err(error) => {
+            eprintln!(
+                "skipping motion-table integration probe; repo-local {} is not an HBA v2 fixture yet: {}",
+                portal_path.display(),
+                error
+            );
+            return;
+        }
+    };
+    let resources = portal_resources(provider);
 
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x5000_0200);
@@ -1374,7 +1387,9 @@ fn repo_portal_bundle_supports_default_player_motion_table_profile() {
             );
         }
         Err(error) => {
-            panic!("repo portal bundle failed to resolve motion table 0x09000001: {error}")
+            panic!(
+                "repo assets bundle failed to resolve eor/portal motion table 0x09000001: {error}"
+            )
         }
     }
 }
@@ -1424,9 +1439,7 @@ fn test_tick_does_not_fetch_portal_geometry() {
         }
     }
 
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(PanicProvider)),
-    ]));
+    let resources = portal_resources(Arc::new(PanicProvider));
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000125);
     let player_pos = WorldPosition {

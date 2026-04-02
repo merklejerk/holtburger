@@ -99,7 +99,7 @@ There are three practical ways to get started:
 
 ### Binary Releases (Recommended)
 
-Nightly prebuilt archives are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives already include the bundled micro `portal.hba` needed for the current TUI/runtime path, so this is the fastest way to get to a running client.
+Nightly prebuilt archives are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives already include the bundled namespaced `assets.hba` needed for the current TUI/runtime path, so this is the fastest way to get to a running client.
 
 1. Download the archive for your platform.
 2. Extract it.
@@ -120,7 +120,7 @@ flatpak install ./holtburger-cli.flatpak
 flatpak run io.github.merklejerk.holtburger-cli --help
 ```
 
-The Flatpak ships with the same bundled micro `portal.hba`, so it is ready to run immediately.
+The Flatpak ships with the same bundled namespaced `assets.hba`, so it is ready to run immediately.
 
 ### From Source
 
@@ -173,18 +173,35 @@ The TUI client needs a modern terminal emulator to render correctly. The built-i
 
 ## Data File Configuration
 
-The TUI client requires game data (`portal.hba`/`portal.dat` and `cell.hba`/`cell.dat`) to function. It supports both the original DAT files and the much smaller HBA format.
+The TUI client requires retail data under the `eor/portal` namespace and optionally richer world data under `eor/cell`. It supports either the original DAT files or the combined namespaced HBA v2 bundle.
 
-- Release archives already include the micro `portal.hba` needed for the current runtime path, including all motion tables and animations packaged in the micro archive.
-- Flatpak builds also include that bundled micro `portal.hba`.
+- Release archives already include the bundled `assets.hba` archive for the current runtime path.
+- Flatpak builds also include that bundled `assets.hba`.
 - Source builds and local development setups require you to provide the data files yourself.
 
-If you are setting up local data, you can either provide your own DAT files or download the latest `hba.zip` from the [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into a `./dats` folder at the project root.
+If you are setting up local data, you have two practical options:
+
+1. Download the latest HBA bundle from the [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into `./dats/` so `assets.hba` is present.
+2. Point Holtburger at retail DAT files such as `client_portal.dat` and `client_cell_1.dat`, or repack them into a namespaced HBA v2 bundle with `dat2hba`.
+
+### Repacking DATs Into HBA v2
+
+The supported migration path for legacy DAT-based setups is to emit a combined namespaced archive instead of relying on filename-scoped HBA v1 bundles:
+
+```bash
+cargo run -p holtburger-tools --bin dat2hba -- \
+    --profile pruned \
+    eor/portal=client_portal.dat \
+    eor/cell=client_cell_1.dat \
+    dats/assets.hba
+```
+
+Use `--profile full` if you want an unpruned archive. The current `micro` profile remains portal-focused and is mainly for release packaging.
 
 ### Release Maintenance
 The GitHub Actions workflows currently fetch release HBA assets from repository variables instead of committed archive files:
 
-- `HBA_MICRO_LATEST_URL`: used by CI, nightly release packaging, and Flatpak packaging to fetch the micro `portal.hba` bundle that ships with current releases.
+- `HBA_MICRO_LATEST_URL`: used by CI, nightly release packaging, and Flatpak packaging to fetch the bundled `assets.hba` archive that ships with current releases.
 - `HBA_PRUNED_LATEST_URL`: reserved for workflows that need the larger pruned archive set. The current release workflows do not consume it.
 
 **Search Priority:**
@@ -196,7 +213,17 @@ The GitHub Actions workflows currently fetch release HBA assets from repository 
     *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
-> **Note:** Official DAT files (`client_portal.dat` and `client_cell_1.dat`) must be renamed to `portal.dat` and `cell.dat` respectively.
+> **Note:** Official DAT files no longer need to be renamed. Holtburger infers retail namespaces from DAT header metadata when it scans a data directory.
+
+### Benchmarking
+
+For archive performance checks, run:
+
+```bash
+cargo bench -p holtburger-dat --bench provider_bench -- --noplot
+```
+
+That benchmark covers provider reads plus synthetic multi-namespace HBA lookup and full index iteration.
 
 ## License
 

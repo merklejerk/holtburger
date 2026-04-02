@@ -1,4 +1,4 @@
-use crate::{ResourceScope, ScopedResource};
+use crate::{EOR_PORTAL_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::BinRead;
 
 /// Experience Tables from client_portal.dat (file 0x0E000018).
@@ -113,9 +113,9 @@ impl Default for XpTable {
     }
 }
 
-impl ScopedResource for XpTable {
-    const FILE_ID: u32 = Self::FILE_ID;
-    const RESOURCE_SCOPE: ResourceScope = ResourceScope::Portal;
+impl StaticResourceKey for XpTable {
+    const RESOURCE_KEY: ResourceKey<'static> =
+        ResourceKey::new(EOR_PORTAL_NAMESPACE, Self::FILE_ID);
 }
 
 #[cfg(test)]

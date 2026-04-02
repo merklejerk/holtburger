@@ -568,14 +568,11 @@ mod tests {
 
         let source = match HbaReader::open(&source_path) {
             Ok(source) => source,
-            Err(error) => {
-                eprintln!(
-                    "skipping builder assets fixture test; repo-local {} is not an HBA v2 fixture yet: {}",
-                    source_path.display(),
-                    error
-                );
-                return false;
-            }
+            Err(error) => panic!(
+                "builder assets fixture test requires repo-local {} to be a valid HBA v2 fixture: {}",
+                source_path.display(),
+                error
+            ),
         };
         let mut writer = HbaWriter::new();
         writer.set_compression(false);

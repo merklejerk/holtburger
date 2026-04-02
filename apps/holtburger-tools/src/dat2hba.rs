@@ -253,54 +253,91 @@ fn derive_motion_kinematics_from_loaded_inputs(
 }
 
 fn derive_motion_kinematics_from_portal_db(db: &DatDatabase) -> Result<MotionKinematics> {
-    let mut motion_tables = Vec::new();
-    let mut setup_models = Vec::new();
-    let mut animations = HashMap::new();
+    let mut motion_table_ids = Vec::new();
+    let mut setup_model_ids = Vec::new();
 
-    let mut ids: Vec<u32> = db.files.keys().copied().collect();
-    ids.sort_unstable();
-
-    for id in ids {
-        let file_type = DatFileType::from_id(id);
-        match file_type {
-            DatFileType::MotionTable => {
-                let bytes = db
-                    .get_file(id)
-                    .map_err(|source| ToolError::DatRead { id, source })?;
-                let table = MotionTable::read(&mut Cursor::new(bytes)).map_err(|error| {
-                    ToolError::AssetDerivation(format!(
-                        "failed to parse motion table 0x{id:08X}: {error}"
-                    ))
-                })?;
-                motion_tables.push(table);
-            }
-            DatFileType::SetupModel => {
-                let bytes = db
-                    .get_file(id)
-                    .map_err(|source| ToolError::DatRead { id, source })?;
-                let setup = SetupModel::read(&mut Cursor::new(bytes)).map_err(|error| {
-                    ToolError::AssetDerivation(format!(
-                        "failed to parse setup model 0x{id:08X}: {error}"
-                    ))
-                })?;
-                setup_models.push(setup);
-            }
-            DatFileType::Animation => {
-                let bytes = db
-                    .get_file(id)
-                    .map_err(|source| ToolError::DatRead { id, source })?;
-                let animation = Animation::read(&mut Cursor::new(bytes)).map_err(|error| {
-                    ToolError::AssetDerivation(format!(
-                        "failed to parse animation 0x{id:08X}: {error}"
-                    ))
-                })?;
-                animations.insert(animation.id, animation);
-            }
+    for &id in db.files.keys() {
+        match DatFileType::from_id(id) {
+            DatFileType::MotionTable => motion_table_ids.push(id),
+            DatFileType::SetupModel => setup_model_ids.push(id),
             _ => {}
         }
     }
 
+    motion_table_ids.sort_unstable();
+    setup_model_ids.sort_unstable();
+
+    let mut setup_models = Vec::new();
+    let mut motion_tables = Vec::with_capacity(motion_table_ids.len());
+    let mut referenced_animation_ids = HashSet::new();
+
+    for id in setup_model_ids {
+        let bytes = db
+            .get_file(id)
+            .map_err(|source| ToolError::DatRead { id, source })?;
+        let setup = SetupModel::read(&mut Cursor::new(bytes)).map_err(|error| {
+            ToolError::AssetDerivation(format!("failed to parse setup model 0x{id:08X}: {error}"))
+        })?;
+        setup_models.push(setup);
+    }
+
+    for id in motion_table_ids {
+        let bytes = db
+            .get_file(id)
+            .map_err(|source| ToolError::DatRead { id, source })?;
+        let table = MotionTable::read(&mut Cursor::new(bytes)).map_err(|error| {
+            ToolError::AssetDerivation(format!("failed to parse motion table 0x{id:08X}: {error}"))
+        })?;
+        collect_referenced_animation_ids(&table, &mut referenced_animation_ids);
+        motion_tables.push(table);
+    }
+
+    let animations = load_animations(db, referenced_animation_ids)?;
+
     derive_motion_kinematics_from_parsed_portal_assets(motion_tables, setup_models, &animations)
+}
+
+fn collect_referenced_animation_ids(
+    motion_table: &MotionTable,
+    referenced_animation_ids: &mut HashSet<u32>,
+) {
+    let mut cycle_keys: Vec<u32> = motion_table.cycles.keys().copied().collect();
+    cycle_keys.sort_unstable();
+
+    for cycle_key in cycle_keys {
+        let Some(motion_data) = motion_table.cycles.get(&cycle_key) else {
+            continue;
+        };
+
+        if !should_derive_forward_velocity(cycle_key, motion_data) {
+            continue;
+        }
+
+        for anim in &motion_data.anims {
+            referenced_animation_ids.insert(anim.anim_id);
+        }
+    }
+}
+
+fn load_animations(
+    db: &DatDatabase,
+    referenced_animation_ids: HashSet<u32>,
+) -> Result<HashMap<u32, Animation>> {
+    let mut animation_ids = referenced_animation_ids.into_iter().collect::<Vec<_>>();
+    animation_ids.sort_unstable();
+
+    let mut animations = HashMap::with_capacity(animation_ids.len());
+    for id in animation_ids {
+        let bytes = db
+            .get_file(id)
+            .map_err(|source| ToolError::DatRead { id, source })?;
+        let animation = Animation::read(&mut Cursor::new(bytes)).map_err(|error| {
+            ToolError::AssetDerivation(format!("failed to parse animation 0x{id:08X}: {error}"))
+        })?;
+        animations.insert(animation.id, animation);
+    }
+
+    Ok(animations)
 }
 
 fn derive_motion_kinematics_from_parsed_portal_assets(
@@ -331,7 +368,7 @@ fn derive_motion_kinematics_from_parsed_portal_assets(
                 .expect("sorted cycle key should exist");
             derived_table.cycle_kinematics_by_key.insert(
                 cycle_key,
-                derive_motion_command_kinematics(motion_data, animations)?,
+                derive_motion_command_kinematics(cycle_key, motion_data, animations)?,
             );
         }
 
@@ -342,19 +379,43 @@ fn derive_motion_kinematics_from_parsed_portal_assets(
 }
 
 fn derive_motion_command_kinematics(
+    cycle_key: u32,
     motion_data: &MotionData,
     animations: &HashMap<u32, Animation>,
 ) -> Result<MotionCommandKinematics> {
     let velocity = match motion_data.velocity {
         Some(velocity) => Some(velocity),
-        None => derive_animation_forward_speed(motion_data, animations)?
-            .map(|speed| Vector3::new(speed, 0.0, 0.0)),
+        None if should_derive_forward_velocity(cycle_key, motion_data) => {
+            derive_animation_forward_speed(motion_data, animations)?
+                .map(|speed| Vector3::new(speed, 0.0, 0.0))
+        }
+        None => None,
     };
 
     Ok(MotionCommandKinematics {
         velocity,
         omega: motion_data.omega,
     })
+}
+
+fn should_derive_forward_velocity(cycle_key: u32, motion_data: &MotionData) -> bool {
+    if motion_data.velocity.is_some() || motion_data.anims.is_empty() {
+        return false;
+    }
+
+    matches!(
+        cycle_command_suffix(cycle_key),
+        command if command == command_suffix(MotionTable::WALK_FORWARD_COMMAND)
+            || command == command_suffix(MotionTable::RUN_FORWARD_COMMAND)
+    )
+}
+
+fn cycle_command_suffix(cycle_key: u32) -> u32 {
+    cycle_key & 0x0000_FFFF
+}
+
+fn command_suffix(command: u32) -> u32 {
+    command & 0x0000_FFFF
 }
 
 fn derive_animation_forward_speed(
@@ -751,12 +812,129 @@ mod tests {
             omega: None,
         };
 
-        let error = derive_motion_command_kinematics(&motion_data, &HashMap::new())
+        let cycle_key = cycle_key(0x8000_0003, MotionTable::RUN_FORWARD_COMMAND);
+        let error = derive_motion_command_kinematics(cycle_key, &motion_data, &HashMap::new())
             .expect_err("missing animation should fail derivation");
 
         assert!(
             matches!(error, ToolError::AssetDerivation(message) if message.contains("0x0300DEAD"))
         );
+    }
+
+    #[test]
+    fn derive_motion_kinematics_does_not_infer_forward_velocity_for_turn_cycles() {
+        let stance = 0x8000_0003;
+        let motion_table_id = 0x0900_0024;
+        let animation_id = 0x0300_0024;
+
+        let mut cycles = HashMap::new();
+        cycles.insert(
+            cycle_key(stance, MotionTable::TURN_RIGHT_COMMAND),
+            MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::empty(),
+                anims: vec![AnimData {
+                    anim_id: animation_id,
+                    low_frame: 0,
+                    high_frame: 0,
+                    framerate: 2.5,
+                }],
+                velocity: None,
+                omega: None,
+            },
+        );
+
+        let motion_table = MotionTable {
+            id: motion_table_id,
+            default_style: stance,
+            style_defaults: HashMap::new(),
+            cycles,
+            modifiers: HashMap::new(),
+            links: HashMap::new(),
+        };
+        let animations = HashMap::from([(
+            animation_id,
+            test_animation(animation_id, &[Vector3::new(1.0, 0.0, 0.0)]),
+        )]);
+
+        let derived = derive_motion_kinematics_from_parsed_portal_assets(
+            vec![motion_table],
+            Vec::new(),
+            &animations,
+        )
+        .expect("turn cycle derivation should succeed");
+
+        assert_eq!(
+            derived
+                .cycle_kinematics(motion_table_id, stance, MotionTable::TURN_RIGHT_COMMAND)
+                .and_then(|entry| entry.velocity),
+            None
+        );
+    }
+
+    #[test]
+    fn collect_referenced_animation_ids_only_keeps_supported_forward_cycles() {
+        let stance = 0x8000_0003;
+        let mut cycles = HashMap::new();
+        cycles.insert(
+            cycle_key(stance, MotionTable::RUN_FORWARD_COMMAND),
+            MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::empty(),
+                anims: vec![AnimData {
+                    anim_id: 0x0300_1001,
+                    low_frame: 0,
+                    high_frame: 0,
+                    framerate: 2.5,
+                }],
+                velocity: None,
+                omega: None,
+            },
+        );
+        cycles.insert(
+            cycle_key(stance, MotionTable::TURN_RIGHT_COMMAND),
+            MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::empty(),
+                anims: vec![AnimData {
+                    anim_id: 0x0300_1002,
+                    low_frame: 0,
+                    high_frame: 0,
+                    framerate: 1.0,
+                }],
+                velocity: None,
+                omega: None,
+            },
+        );
+        cycles.insert(
+            cycle_key(stance, MotionTable::WALK_FORWARD_COMMAND),
+            MotionData {
+                bitfield: 0,
+                flags: MotionDataFlags::HAS_VELOCITY,
+                anims: vec![AnimData {
+                    anim_id: 0x0300_1003,
+                    low_frame: 0,
+                    high_frame: 0,
+                    framerate: 1.0,
+                }],
+                velocity: Some(Vector3::new(1.0, 0.0, 0.0)),
+                omega: None,
+            },
+        );
+
+        let motion_table = MotionTable {
+            id: 0x0900_1000,
+            default_style: stance,
+            style_defaults: HashMap::new(),
+            cycles,
+            modifiers: HashMap::new(),
+            links: HashMap::new(),
+        };
+        let mut referenced_animation_ids = HashSet::new();
+
+        collect_referenced_animation_ids(&motion_table, &mut referenced_animation_ids);
+
+        assert_eq!(referenced_animation_ids, HashSet::from([0x0300_1001]));
     }
 
     fn cycle_key(stance: u32, command: u32) -> u32 {

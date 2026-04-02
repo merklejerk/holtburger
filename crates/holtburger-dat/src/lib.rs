@@ -9,7 +9,7 @@ pub mod utils;
 pub mod weenie;
 
 use crate::utils::FileExtPolyfill;
-pub use archive::{HbaProfile, HbaReader, HbaStreamWriter, HbaWriter};
+pub use archive::{HbaReader, HbaStreamWriter, HbaWriter};
 use binrw::{BinRead, io::Cursor};
 pub use error::{DatError, Result};
 pub use file_type::DatFileType;
@@ -21,12 +21,116 @@ use std::path::Path;
 
 pub const DAT_HEADER_OFFSET: u64 = 0x140;
 pub const DIRECTORY_NODE_SIZE: usize = 1716;
+pub const DAT_MAGIC: u32 = 0x0000_5442;
+pub const RESOURCE_NAMESPACE_LEN: usize = 32;
+pub const EOR_PORTAL_NAMESPACE: &str = "eor/portal";
+pub const EOR_CELL_NAMESPACE: &str = "eor/cell";
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
     pub id: u32,
     pub size: u32,
     pub is_pruned: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ResourceNamespace {
+    bytes: [u8; RESOURCE_NAMESPACE_LEN],
+}
+
+impl ResourceNamespace {
+    pub fn new(label: &str) -> Result<Self> {
+        let label_bytes = label.as_bytes();
+
+        if label_bytes.is_empty() {
+            return Err(DatError::InvalidNamespace(
+                "namespace label cannot be empty".to_string(),
+            ));
+        }
+
+        if label_bytes.len() > RESOURCE_NAMESPACE_LEN {
+            return Err(DatError::InvalidNamespace(format!(
+                "namespace label '{}' exceeds {} bytes",
+                label, RESOURCE_NAMESPACE_LEN
+            )));
+        }
+
+        if label_bytes.contains(&0) {
+            return Err(DatError::InvalidNamespace(format!(
+                "namespace label '{}' contains a NUL byte",
+                label
+            )));
+        }
+
+        let mut bytes = [0u8; RESOURCE_NAMESPACE_LEN];
+        bytes[..label_bytes.len()].copy_from_slice(label_bytes);
+
+        Ok(Self { bytes })
+    }
+
+    pub fn from_bytes(bytes: [u8; RESOURCE_NAMESPACE_LEN]) -> Result<Self> {
+        let first_nul = bytes.iter().position(|byte| *byte == 0);
+        if let Some(index) = first_nul
+            && bytes[index..].iter().any(|byte| *byte != 0)
+        {
+            return Err(DatError::InvalidNamespace(
+                "namespace bytes must be zero-padded without embedded trailing data".to_string(),
+            ));
+        }
+
+        let label_bytes = match first_nul {
+            Some(index) => &bytes[..index],
+            None => &bytes[..],
+        };
+
+        if label_bytes.is_empty() {
+            return Err(DatError::InvalidNamespace(
+                "namespace label cannot be empty".to_string(),
+            ));
+        }
+
+        std::str::from_utf8(label_bytes).map_err(|error| {
+            DatError::InvalidNamespace(format!("namespace bytes are not valid UTF-8: {error}"))
+        })?;
+
+        Ok(Self { bytes })
+    }
+
+    pub fn as_bytes(&self) -> &[u8; RESOURCE_NAMESPACE_LEN] {
+        &self.bytes
+    }
+
+    pub fn as_str(&self) -> &str {
+        let length = self
+            .bytes
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(RESOURCE_NAMESPACE_LEN);
+        std::str::from_utf8(&self.bytes[..length])
+            .expect("validated resource namespace should remain valid UTF-8")
+    }
+}
+
+impl std::fmt::Display for ResourceNamespace {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ResourceKey<'a> {
+    pub namespace: &'a str,
+    pub file_id: u32,
+}
+
+impl<'a> ResourceKey<'a> {
+    pub const fn new(namespace: &'a str, file_id: u32) -> Self {
+        Self { namespace, file_id }
+    }
+}
+
+pub trait StaticResourceKey {
+    const RESOURCE_KEY: ResourceKey<'static>;
 }
 
 pub trait ResourceProvider: Send + Sync {
@@ -48,20 +152,58 @@ pub enum ResourceScope {
     Cell,
 }
 
-pub trait ScopedResource {
-    const FILE_ID: u32;
-    const RESOURCE_SCOPE: ResourceScope;
+impl ResourceScope {
+    pub const fn namespace(self) -> &'static str {
+        match self {
+            Self::Portal => EOR_PORTAL_NAMESPACE,
+            Self::Cell => EOR_CELL_NAMESPACE,
+        }
+    }
+
+    pub fn from_namespace(namespace: &str) -> Option<Self> {
+        match namespace {
+            EOR_PORTAL_NAMESPACE => Some(Self::Portal),
+            EOR_CELL_NAMESPACE => Some(Self::Cell),
+            _ => None,
+        }
+    }
+
+    pub fn namespace_id(self) -> ResourceNamespace {
+        ResourceNamespace::new(self.namespace())
+            .expect("built-in resource scopes should always map to valid namespaces")
+    }
 }
 
 #[derive(Clone)]
 pub struct MountedResourceProvider {
-    pub scope: ResourceScope,
+    pub namespace: ResourceNamespace,
     pub provider: std::sync::Arc<dyn ResourceProvider>,
 }
 
 impl MountedResourceProvider {
     pub fn new(scope: ResourceScope, provider: std::sync::Arc<dyn ResourceProvider>) -> Self {
-        Self { scope, provider }
+        Self {
+            namespace: scope.namespace_id(),
+            provider,
+        }
+    }
+
+    pub fn with_namespace(
+        namespace: &str,
+        provider: std::sync::Arc<dyn ResourceProvider>,
+    ) -> Result<Self> {
+        Ok(Self {
+            namespace: ResourceNamespace::new(namespace)?,
+            provider,
+        })
+    }
+
+    pub fn matches_scope(&self, scope: ResourceScope) -> bool {
+        self.namespace.as_str() == scope.namespace()
+    }
+
+    pub fn scope(&self) -> Option<ResourceScope> {
+        ResourceScope::from_namespace(self.namespace.as_str())
     }
 }
 
@@ -86,6 +228,16 @@ pub struct DatHeader {
     #[br(count = 16)]
     pub version_string: Vec<u8>,
     pub version_minor: u32,
+}
+
+impl DatHeader {
+    pub fn retail_namespace_hint(&self) -> Option<&'static str> {
+        match (self.magic, self.block_size, self.dataset) {
+            (DAT_MAGIC, 1024, 1) => Some(EOR_PORTAL_NAMESPACE),
+            (DAT_MAGIC, 256, 2) => Some(EOR_CELL_NAMESPACE),
+            _ => None,
+        }
+    }
 }
 
 #[derive(BinRead, Debug, Clone)]
@@ -185,6 +337,10 @@ impl DatDatabase {
         } else {
             Ok(data)
         }
+    }
+
+    pub fn retail_namespace_hint(&self) -> Option<&'static str> {
+        self.header.retail_namespace_hint()
     }
 
     pub fn read_file_data(&self, offset: u32, size: u32) -> Result<Vec<u8>> {
@@ -314,23 +470,47 @@ impl ScopedResourceResolver {
             .push(MountedResourceProvider::new(scope, provider));
     }
 
+    pub fn add_provider_for_namespace(
+        &mut self,
+        namespace: &str,
+        provider: std::sync::Arc<dyn ResourceProvider>,
+    ) -> Result<()> {
+        self.providers.push(MountedResourceProvider::with_namespace(
+            namespace, provider,
+        )?);
+        Ok(())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.providers.is_empty()
     }
 
-    pub fn has_scope(&self, scope: ResourceScope) -> bool {
+    pub fn has_namespace(&self, namespace: &str) -> bool {
+        let Ok(namespace_id) = ResourceNamespace::new(namespace) else {
+            return false;
+        };
+
         self.providers
             .iter()
-            .any(|provider| provider.scope == scope)
+            .any(|provider| provider.namespace == namespace_id)
     }
 
-    pub fn get_file(&self, scope: ResourceScope, id: u32) -> Result<Vec<u8>> {
+    pub fn has_scope(&self, scope: ResourceScope) -> bool {
+        self.has_namespace(scope.namespace())
+    }
+
+    pub fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>> {
+        self.get_file_in_namespace(key.namespace, key.file_id)
+    }
+
+    pub fn get_file_in_namespace(&self, namespace: &str, id: u32) -> Result<Vec<u8>> {
+        let namespace_id = ResourceNamespace::new(namespace)?;
         let mut first_pruned_provider = None;
 
         for mounted in self
             .providers
             .iter()
-            .filter(|provider| provider.scope == scope)
+            .filter(|provider| provider.namespace == namespace_id)
         {
             if let Some(meta) = mounted.provider.get_metadata(id) {
                 if !meta.is_pruned {
@@ -350,17 +530,26 @@ impl ScopedResourceResolver {
         Err(DatError::NotFound(id))
     }
 
-    pub fn get_file_for<T: ScopedResource>(&self) -> Result<Vec<u8>> {
-        self.get_file(T::RESOURCE_SCOPE, T::FILE_ID)
+    pub fn get_file(&self, scope: ResourceScope, id: u32) -> Result<Vec<u8>> {
+        self.get_file_in_namespace(scope.namespace(), id)
     }
 
-    pub fn get_metadata(&self, scope: ResourceScope, id: u32) -> Option<FileMetadata> {
+    pub fn get_file_for<T: StaticResourceKey>(&self) -> Result<Vec<u8>> {
+        self.get_file_by_key(T::RESOURCE_KEY)
+    }
+
+    pub fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
+        self.get_metadata_in_namespace(key.namespace, key.file_id)
+    }
+
+    pub fn get_metadata_in_namespace(&self, namespace: &str, id: u32) -> Option<FileMetadata> {
+        let namespace_id = ResourceNamespace::new(namespace).ok()?;
         let mut first_pruned = None;
 
         for mounted in self
             .providers
             .iter()
-            .filter(|provider| provider.scope == scope)
+            .filter(|provider| provider.namespace == namespace_id)
         {
             if let Some(meta) = mounted.provider.get_metadata(id) {
                 if !meta.is_pruned {
@@ -375,16 +564,24 @@ impl ScopedResourceResolver {
         first_pruned
     }
 
-    pub fn get_metadata_for<T: ScopedResource>(&self) -> Option<FileMetadata> {
-        self.get_metadata(T::RESOURCE_SCOPE, T::FILE_ID)
+    pub fn get_metadata(&self, scope: ResourceScope, id: u32) -> Option<FileMetadata> {
+        self.get_metadata_in_namespace(scope.namespace(), id)
+    }
+
+    pub fn get_metadata_for<T: StaticResourceKey>(&self) -> Option<FileMetadata> {
+        self.get_metadata_by_key(T::RESOURCE_KEY)
     }
 
     pub fn exists(&self, scope: ResourceScope, id: u32) -> bool {
         self.get_metadata(scope, id).is_some()
     }
 
-    pub fn exists_for<T: ScopedResource>(&self) -> bool {
-        self.exists(T::RESOURCE_SCOPE, T::FILE_ID)
+    pub fn exists_in_namespace(&self, namespace: &str, id: u32) -> bool {
+        self.get_metadata_in_namespace(namespace, id).is_some()
+    }
+
+    pub fn exists_for<T: StaticResourceKey>(&self) -> bool {
+        self.get_metadata_for::<T>().is_some()
     }
 }
 
@@ -439,6 +636,12 @@ mod tests {
             resolver.get_file(ResourceScope::Cell, 0x1234).unwrap(),
             vec![0xBB]
         );
+        assert_eq!(
+            resolver
+                .get_file_by_key(ResourceKey::new(EOR_PORTAL_NAMESPACE, 0x1234))
+                .unwrap(),
+            vec![0xAA]
+        );
     }
 
     #[test]
@@ -489,5 +692,117 @@ mod tests {
                 .unwrap()
                 .is_pruned
         );
+    }
+
+    #[test]
+    fn test_namespace_validation_rejects_invalid_padding() {
+        let mut bytes = [0u8; RESOURCE_NAMESPACE_LEN];
+        bytes[0] = b'e';
+        bytes[1] = 0;
+        bytes[2] = b'x';
+
+        let error = ResourceNamespace::from_bytes(bytes)
+            .expect_err("embedded data after zero padding should be rejected");
+
+        assert!(error.to_string().contains("zero-padded"));
+    }
+
+    #[test]
+    fn test_scoped_resource_resolver_supports_explicit_namespace_mounts() {
+        let mut provider = MockProvider {
+            files: HashMap::new(),
+            pruned_ids: vec![],
+        };
+        provider.files.insert(0xDEAD, vec![0xCC]);
+
+        let resolver =
+            ScopedResourceResolver::from_mounted([MountedResourceProvider::with_namespace(
+                "derived/test",
+                Arc::new(provider),
+            )
+            .expect("custom namespace mount should be valid")]);
+
+        assert!(resolver.has_namespace("derived/test"));
+        assert_eq!(
+            resolver
+                .get_file_by_key(ResourceKey::new("derived/test", 0xDEAD))
+                .unwrap(),
+            vec![0xCC]
+        );
+    }
+
+    #[test]
+    fn test_dat_header_retail_namespace_hint_for_portal() {
+        let header = DatHeader {
+            magic: DAT_MAGIC,
+            block_size: 1024,
+            file_size: 0,
+            dataset: 1,
+            subset: 0,
+            free_head: 0,
+            free_tail: 0,
+            free_count: 0,
+            root_offset: 0,
+            new_lru: 0,
+            old_lru: 0,
+            use_lru: 0,
+            master_map_id: 0,
+            engine_version: 0,
+            game_version: 0,
+            version_string: vec![0; 16],
+            version_minor: 0,
+        };
+
+        assert_eq!(header.retail_namespace_hint(), Some(EOR_PORTAL_NAMESPACE));
+    }
+
+    #[test]
+    fn test_dat_header_retail_namespace_hint_for_cell() {
+        let header = DatHeader {
+            magic: DAT_MAGIC,
+            block_size: 256,
+            file_size: 0,
+            dataset: 2,
+            subset: 0,
+            free_head: 0,
+            free_tail: 0,
+            free_count: 0,
+            root_offset: 0,
+            new_lru: 0,
+            old_lru: 0,
+            use_lru: 0,
+            master_map_id: 0,
+            engine_version: 0,
+            game_version: 0,
+            version_string: vec![0; 16],
+            version_minor: 0,
+        };
+
+        assert_eq!(header.retail_namespace_hint(), Some(EOR_CELL_NAMESPACE));
+    }
+
+    #[test]
+    fn test_dat_header_retail_namespace_hint_rejects_unknown_metadata() {
+        let header = DatHeader {
+            magic: DAT_MAGIC,
+            block_size: 512,
+            file_size: 0,
+            dataset: 99,
+            subset: 0,
+            free_head: 0,
+            free_tail: 0,
+            free_count: 0,
+            root_offset: 0,
+            new_lru: 0,
+            old_lru: 0,
+            use_lru: 0,
+            master_map_id: 0,
+            engine_version: 0,
+            game_version: 0,
+            version_string: vec![0; 16],
+            version_minor: 0,
+        };
+
+        assert_eq!(header.retail_namespace_hint(), None);
     }
 }

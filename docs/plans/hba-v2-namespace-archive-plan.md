@@ -216,10 +216,10 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Land HBA v2 and the namespaced lookup seam
-- [ ] Phase 2: Update tooling and custom asset support
-- [ ] Phase 3: Migrate runtime, world, and tests to namespace policy
-- [ ] Phase 4: Documentation, migration tooling, benchmarks, and final verification
+- [x] Phase 1: Land HBA v2 and the namespaced lookup seam
+- [x] Phase 2: Update tooling and custom asset support
+- [x] Phase 3: Migrate runtime, world, and tests to namespace policy
+- [x] Phase 4: Documentation, migration tooling, benchmarks, and final verification
 
 ### Decisions Log
 - Canonical key: `(namespace, file_id)`
@@ -228,9 +228,44 @@ Mitigation:
 - `type_id` stays as metadata; custom assets start under `DatFileType::Custom`
 - Format compatibility: explicit breaking change, not transparent in-place compatibility
 - Consumer migration: update all consumers to use namespaced keys directly rather than preserving a long-lived scope compatibility layer
+- Namespace LUT placement: store namespace metadata immediately before the fixed entry index so `HbaStreamWriter` can remain append-friendly instead of buffering the whole archive just to prepend metadata.
+- Phase 1 tooling bridge: single-DAT retail tooling now prefers DAT header metadata (`magic`, `block_size`, `dataset`) to infer `eor/portal` vs `eor/cell`; directory packing still falls back to output filename hints until Phase 2 adds explicit namespace CLI arguments.
+- Phase 2 `dat2hba` CLI: multi-input packing now uses repeated `--input [namespace=]path` plus explicit `--output`, which avoids ambiguous positional parsing once multiple DAT inputs are supported.
+- Phase 2 namespace resolution order: explicit CLI namespace first, then retail DAT header metadata, then input filename fallback. Output filename heuristics are no longer used for `dat2hba`.
+- Phase 2 directory-input stance: `dat2hba` remains DAT-only. Directory packing stays in `dat-tool hba-pack` rather than growing a second packing mode into the DAT conversion command.
+- Phase 2 HBA inspection stance: `dat-tool` now treats `(namespace, file_id)` as the user-facing identity for multi-namespace HBA entries and reports stored `type_id` instead of recomputing logical type from `file_id`.
+- Phase 3 HBA discovery stance: runtime/bootstrap no longer infers HBA scope from filenames. HBA namespaces are mounted by inspecting archive namespace metadata, and multi-namespace archives bind one provider per namespace so `ResourceProvider` lookups stay namespace-correct under the existing resolver.
+- Phase 3 directory discovery policy: when a directory contains multiple HBA archives, bootstrap prefers broader archives first by namespace count and skips later duplicate namespaces. That lets a combined bundle such as `assets.hba` win cleanly over legacy single-namespace bundles without reintroducing filename-derived scope rules.
+- Phase 4 packaging stance: release bundles, Flatpak packaging, and fetch scripts now stage the combined namespaced `assets.hba` artifact instead of legacy filename-scoped `portal.hba` packaging.
+- Post-Phase 4 CLI refinement: `dat2hba` now accepts positional paths where the last argument is the output archive, and any earlier `NAMESPACE=PATH` arguments are treated as explicitly namespaced inputs. The documented migration path is `dat2hba [--profile ...] [namespace=]path ... dats/assets.hba`.
+- Phase 4 benchmark stance: provider benchmarks now include synthetic multi-namespace HBA lookup and full index iteration so namespace compare costs are measured directly rather than inferred from single-namespace reads.
+- Post-Phase 4 format cleanup: HBA v2 no longer encodes an archive-wide `profile` field. Producers still expose profile-style CLI modes for manifest/pruning behavior, but capability is represented by the actual entries present plus per-entry pruning metadata, not by header-level archive labels.
 
 ### Verification Log
-- Pending implementation.
+- Implemented HBA v2 in [crates/holtburger-dat/src/archive.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/archive.rs) with namespaced entries, a namespace span LUT, deterministic namespace-then-file ordering, duplicate detection on `(namespace, file_id)`, and explicit namespaced lookup APIs.
+- Added namespace/key/resolver abstractions in [crates/holtburger-dat/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/lib.rs) and replaced `ScopedResource` on the portal table decoders with namespace-aware static keys.
+- Updated Phase 1-compatible callers and tests in [crates/holtburger-core/src/client/builder.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/builder.rs), [crates/holtburger-world/src/state/tests.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/tests.rs), [apps/holtburger-tools/src/dat2hba.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/dat2hba.rs), and [apps/holtburger-tools/src/bin/dat-tool.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/bin/dat-tool.rs).
+- Refined the single-DAT tooling bridge so retail namespace inference now comes from DAT header metadata instead of only output filename heuristics.
+- Implemented Phase 2 multi-input packing in [apps/holtburger-tools/src/dat2hba.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/dat2hba.rs) and [apps/holtburger-tools/src/bin/dat2hba.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/bin/dat2hba.rs) with repeated namespaced inputs, per-input namespace resolution, duplicate namespace validation, and one combined HBA output.
+- Added `DatFileType::Custom` plus stored `type_id` decoding in [crates/holtburger-dat/src/file_type/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/file_type/mod.rs).
+- Refactored stripping manifests in [crates/holtburger-dat/src/manifest.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/manifest.rs) so rules can target namespace-qualified content and future custom asset types.
+- Updated HBA inspection/export behavior in [apps/holtburger-tools/src/bin/dat-tool.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/bin/dat-tool.rs) so list/meta/info/export and table scanning work against namespace-qualified HBA entries and stored `type_id` metadata.
+- Updated the format spec in [docs/hba_format.md](/home/cluracan/code/holtburger/docs/hba_format.md) to match the implemented v2 layout.
+- Refactored [crates/holtburger-core/src/client/builder.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/builder.rs) so client bootstrap discovers namespaces from HBA archive metadata instead of probing `portal`/`cell` filenames, mounts namespace-bound HBA providers, and still auto-discovers retail DAT namespaces from DAT header metadata.
+- Refactored [crates/holtburger-world/src/state/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/types.rs), [crates/holtburger-world/src/state/motion_table.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/motion_table.rs), and [crates/holtburger-world/src/state/tests.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/tests.rs) so world/runtime tests use namespace-qualified mounts and fixture helpers rather than `ResourceScope::Portal` plus hardcoded `portal.hba` naming.
+- Switched core/world repo-local fixture reads to [dats/assets.hba](/home/cluracan/code/holtburger/dats/assets.hba) and added a builder test that proves HBA namespaces are discovered from archive contents even when the file is named arbitrarily.
+- Updated [README.md](/home/cluracan/code/holtburger/README.md), [dats/README.md](/home/cluracan/code/holtburger/dats/README.md), and [docs/hba_format.md](/home/cluracan/code/holtburger/docs/hba_format.md) to describe the namespaced `assets.hba` flow, the DAT-to-HBA v2 repack command, and the benchmark command.
+- Updated release/packaging plumbing in [.github/scripts/fetch_micro_hba.sh](/home/cluracan/code/holtburger/.github/scripts/fetch_micro_hba.sh), [.github/workflows/nightly.yml](/home/cluracan/code/holtburger/.github/workflows/nightly.yml), and [apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml](/home/cluracan/code/holtburger/apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml) so bundled assets now stage `assets.hba` instead of `portal.hba`.
+- Expanded [crates/holtburger-dat/benches/provider_bench.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/benches/provider_bench.rs) with synthetic multi-namespace HBA lookup and entry-iteration benchmarks.
+- Removed the dead archive-wide `profile` field from [crates/holtburger-dat/src/archive.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/archive.rs), dropped the corresponding writer/tooling plumbing in [crates/holtburger-dat/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/lib.rs), [apps/holtburger-tools/src/dat2hba.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/dat2hba.rs), and [apps/holtburger-tools/src/bin/dat-tool.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/bin/dat-tool.rs), and updated [docs/hba_format.md](/home/cluracan/code/holtburger/docs/hba_format.md) to the 24-byte header layout.
+- Verified the no-profile cleanup with `cargo test -p holtburger-dat` and `cargo test -p holtburger-tools --no-run`.
+- Verified with `cargo test -p holtburger-dat`.
+- Verified Phase 2 tooling with `cargo test -p holtburger-tools`.
+- Verified touched integration surfaces with `cargo test -p holtburger-core client::builder::tests -- --nocapture` and `cargo test -p holtburger-world test_micro_portal_bundle_supports_runtime_table_lookups -- --nocapture`.
+- Verified Phase 3 namespace bootstrap and fixture migration with `cargo test -p holtburger-core client::builder::tests -- --nocapture`, `cargo test -p holtburger-world test_micro_portal_bundle_supports_runtime_table_lookups -- --nocapture`, and `cargo test -p holtburger-world repo_portal_bundle_supports_default_player_motion_table_profile -- --nocapture`.
+- Verified Phase 4 docs/bench packaging touch set with `cargo bench -p holtburger-dat --bench provider_bench -- --noplot --sample-size 10`.
+- Verified tooling still compiles with `cargo test -p holtburger-tools --no-run`.
+- `cargo test -p holtburger-world -p holtburger-core` still reports four unrelated movement/simulation failures in `holtburger-core` outside the Phase 1 touch set; these were not changed as part of this archive/resolver work.
 
 ### Open Questions
-- None at the plan level. Archive-format details should assume namespaced lookup tables are part of HBA v2 from the start.
+- Manual follow-up: repack the repo-local [dats/assets.hba](/home/cluracan/code/holtburger/dats/assets.hba) bundle with the updated 24-byte HBA v2 header before relying on integration tests or release assets built from that file.

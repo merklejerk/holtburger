@@ -15,11 +15,17 @@ pub enum DatError {
     #[error("Duplicate File ID {0:08X} detected")]
     DuplicateId(u32),
 
+    #[error("Duplicate namespaced file {namespace}:{file_id:08X} detected")]
+    DuplicateNamespacedId { namespace: String, file_id: u32 },
+
     #[error("Invalid magic for format: {0}")]
     InvalidMagic(String),
 
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
+
+    #[error("Invalid namespace: {0}")]
+    InvalidNamespace(String),
 
     #[error("Corruption detected: {0}")]
     Corruption(String),

@@ -6,7 +6,7 @@ use holtburger_dat::file_type::motion_table::MotionData;
 use holtburger_dat::file_type::{
     Animation, MotionCommandKinematics, MotionTable, MotionTableMovementProfile, SetupModel,
 };
-use holtburger_dat::{DatError, ResourceScope};
+use holtburger_dat::{DatError, EOR_PORTAL_NAMESPACE};
 use std::io::Cursor;
 use thiserror::Error;
 
@@ -211,7 +211,7 @@ impl WorldState {
             .as_ref()
             .ok_or(PlayerMotionTableLookupError::ResourcesUnavailable)?;
         let bytes = resources
-            .get_file(ResourceScope::Portal, resource_id)
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, resource_id)
             .map_err(|source| PlayerMotionTableLookupError::ResourceReadFailed {
                 resource_id,
                 source,

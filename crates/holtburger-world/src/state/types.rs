@@ -252,13 +252,20 @@ impl WorldState {
         }
     }
 
+    pub fn with_provider_for_namespace(
+        namespace: &str,
+        provider: Arc<dyn ResourceProvider>,
+    ) -> Result<Self> {
+        Self::new(Arc::new(ScopedResourceResolver::from_mounted([
+            MountedResourceProvider::with_namespace(namespace, provider)?,
+        ])))
+    }
+
     pub fn with_provider(
         scope: ResourceScope,
         provider: Arc<dyn ResourceProvider>,
     ) -> Result<Self> {
-        Self::new(Arc::new(ScopedResourceResolver::from_mounted([
-            MountedResourceProvider::new(scope, provider),
-        ])))
+        Self::with_provider_for_namespace(scope.namespace(), provider)
     }
 
     pub fn current_server_time(&self) -> f64 {

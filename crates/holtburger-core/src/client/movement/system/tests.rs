@@ -792,6 +792,7 @@ async fn unchanged_motion_state_requests_do_not_resend_motion_pulses() {
 #[tokio::test]
 async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent() {
     let mut world = WorldState::synthetic();
+    seed_self_movement_capabilities_override(&mut world, 2.25, 1.0, 2.0, 1.5);
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
         landblock_id: Guid(0x1000_0001),

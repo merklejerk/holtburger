@@ -702,6 +702,14 @@ mod tests {
         }
     }
 
+    fn seed_test_self_movement_capabilities(client: &mut Client) -> SelfMovementCapabilities {
+        let capabilities = test_self_movement_capabilities(2.25, 1.0, 2.0, 1.5);
+        client
+            .world
+            .set_self_movement_capabilities_override(capabilities.clone());
+        capabilities
+    }
+
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
         let mut client = builder::build_test_client(ClientState::Connected);
@@ -1043,6 +1051,8 @@ mod tests {
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
 
+        seed_test_self_movement_capabilities(&mut client);
+
         client.world.player.guid = guid;
         client.world.player.position.landblock_id = Guid(0x1000_0001);
         client.world.player.position.rotation = Quaternion::identity();
@@ -1099,6 +1109,8 @@ mod tests {
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
         let now = Instant::now();
+
+        seed_test_self_movement_capabilities(&mut client);
 
         client.world.player.guid = player_guid;
         client.world.player.position.landblock_id = Guid(0x1000_0001);
@@ -1173,6 +1185,8 @@ mod tests {
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
 
+        seed_test_self_movement_capabilities(&mut client);
+
         client.world.player.guid = guid;
         client.world.player.position.landblock_id = Guid(0x1000_0001);
         client.world.player.position.rotation = Quaternion::identity();
@@ -1227,6 +1241,8 @@ mod tests {
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
         let now = Instant::now();
+
+        seed_test_self_movement_capabilities(&mut client);
 
         client.world.player.guid = player_guid;
         client.world.player.position.landblock_id = Guid(0x1000_0001);

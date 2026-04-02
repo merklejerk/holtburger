@@ -26,6 +26,11 @@ pub mod stats;
 pub mod vendor;
 
 pub use self::state::WorldState;
+pub use state::{
+    PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
+    RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
+    SelfMovementKinematics, SelfMovementKinematicsError,
+};
 pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};
 pub use spatial::{
     AuthoritativeBodySync, BasicSpatialPhysics, ContactState, LocalDriveControl, LocalDriveGait,

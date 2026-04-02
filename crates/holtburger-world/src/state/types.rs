@@ -17,6 +17,7 @@ use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::{BasicSpatialPhysics, SpatialPhysics, SpatialScene};
 use crate::spell::{SpellCatalog, SpellInfo};
+use crate::state::self_movement::SelfMovementCapabilities;
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
 use crate::state::trade::TradeState;
@@ -58,6 +59,7 @@ pub struct WorldState {
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
+    pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
 
 impl WorldState {
@@ -221,6 +223,7 @@ impl WorldState {
             trade: None,
             open_containers: std::collections::HashSet::new(),
             entity_lifecycle: EntityLifecycleStore::default(),
+            self_movement_capabilities_override: None,
         })
     }
 
@@ -245,6 +248,7 @@ impl WorldState {
             trade: None,
             open_containers: std::collections::HashSet::new(),
             entity_lifecycle: EntityLifecycleStore::default(),
+            self_movement_capabilities_override: None,
         }
     }
 

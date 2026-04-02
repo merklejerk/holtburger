@@ -32,6 +32,9 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - If a change weakens crate separation, call that out explicitly and choose a cleaner design or explain the tradeoff.
 - Use the per-crate architecture docs for details, but treat the code and ACE/ACViewer references as the final source of truth when docs lag.
 
+# Lint Rules
+- Treat clippy warnings as errors that must be addressed.
+
 ## Machine-local guidance
 
 Before working, read the repository-root @local/AGENTS.md if it exists. It contains additional

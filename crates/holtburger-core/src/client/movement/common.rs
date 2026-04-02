@@ -6,8 +6,8 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
-use holtburger_world::WorldState;
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::{SelfMovementCapabilities, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
@@ -18,7 +18,7 @@ use std::time::Duration;
 // representation. That coincidence is useful, but it is also the trap: this
 // value is the *maximum* run speed for a fully capped player, not the speed
 // every character should emit or simulate.
-const SERVER_RUN_SPEED: f32 = 4.5;
+const FALLBACK_RUN_RATE_SCALAR: f32 = 4.5;
 pub(super) const AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 pub(super) const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const WALK_BACKWARD_MOTION_COMMAND: u32 = 0x4500_0006;
@@ -115,21 +115,17 @@ fn hold_key_for_motion_state(state: MotionState) -> HoldKey {
     }
 }
 
-pub(super) fn player_run_speed_mps(world: &WorldState) -> f32 {
-    // Keep the outgoing ForwardSpeed/SidestepSpeed scalar and the local runtime
-    // body on the same ACE-derived run-rate. Hardcoding 4.5 here causes high
-    // run-skill characters to overdrive the local/runtime simulation and packet
-    // stream until the server corrects them.
-    world.player_run_rate().unwrap_or(SERVER_RUN_SPEED)
+pub(super) fn player_run_rate_scalar(world: &WorldState) -> f32 {
+    world.player_run_rate().unwrap_or(FALLBACK_RUN_RATE_SCALAR)
 }
 
 fn locomotion_command_for_state(
     locomotion: Locomotion,
     gait: Gait,
-    run_speed_mps: f32,
+    run_rate_scalar: f32,
 ) -> (u32, f32) {
     match (gait, locomotion) {
-        (Gait::Run, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, run_speed_mps),
+        (Gait::Run, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, run_rate_scalar),
         (Gait::Walk, Locomotion::Forward) => (WALK_FORWARD_MOTION_COMMAND, 1.0),
         (_, Locomotion::Backstep) => (WALK_BACKWARD_MOTION_COMMAND, 1.0),
         (_, Locomotion::StrafeLeft) => (SIDESTEP_LEFT_MOTION_COMMAND, 1.0),
@@ -149,7 +145,7 @@ pub(super) fn build_motion_state_raw_motion_state(
     state: MotionState,
     motion_style: MotionStyle,
 ) -> RawMotionState {
-    let run_speed_mps = player_run_speed_mps(world);
+    let run_rate_scalar = player_run_rate_scalar(world);
     let axis_hold_key = hold_key_for_motion_state(state) as u32;
     let mut raw_motion_state = RawMotionState {
         flags: RawMotionFlags::CURRENT_HOLD_KEY,
@@ -158,7 +154,8 @@ pub(super) fn build_motion_state_raw_motion_state(
     };
 
     if let Some(locomotion) = state.locomotion {
-        let (command, speed) = locomotion_command_for_state(locomotion, state.gait, run_speed_mps);
+        let (command, speed) =
+            locomotion_command_for_state(locomotion, state.gait, run_rate_scalar);
         match locomotion {
             Locomotion::Forward | Locomotion::Backstep => {
                 raw_motion_state.flags |= RawMotionFlags::FORWARD_COMMAND
@@ -185,17 +182,20 @@ pub(super) fn build_motion_state_raw_motion_state(
             | RawMotionFlags::TURN_SPEED;
         raw_motion_state.turn_command = Some(turn_motion_command_for_state(turn));
         raw_motion_state.turn_hold_key = Some(axis_hold_key);
-        raw_motion_state.turn_speed = Some(turn_speed_for_state(state));
+        raw_motion_state.turn_speed = Some(wire_turn_speed_for_state(state));
     }
 
     raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
 }
 
-fn locomotion_speed_for_state(state: MotionState, run_speed_mps: f32) -> f32 {
+fn local_locomotion_speed_for_state(
+    state: MotionState,
+    capabilities: &SelfMovementCapabilities,
+) -> f32 {
     match (state.gait, state.locomotion) {
         (_, None) => 0.0,
-        (Gait::Run, Some(Locomotion::Forward)) => run_speed_mps,
-        (Gait::Walk, Some(Locomotion::Forward)) => 1.0,
+        (Gait::Run, Some(Locomotion::Forward)) => capabilities.resolved_manual_run_speed(),
+        (Gait::Walk, Some(Locomotion::Forward)) => capabilities.base_walk_forward_speed(),
         (_, Some(Locomotion::Backstep | Locomotion::StrafeLeft | Locomotion::StrafeRight)) => 1.0,
     }
 }
@@ -203,12 +203,12 @@ fn locomotion_speed_for_state(state: MotionState, run_speed_mps: f32) -> f32 {
 pub(super) fn local_velocity_for_state(
     current_heading: f32,
     state: MotionState,
-    run_speed_mps: f32,
+    capabilities: &SelfMovementCapabilities,
 ) -> Vector3 {
     match state.locomotion {
         Some(Locomotion::Forward) => planar_velocity_for_heading(
             current_heading,
-            locomotion_speed_for_state(state, run_speed_mps),
+            local_locomotion_speed_for_state(state, capabilities),
         ),
         Some(Locomotion::Backstep) => {
             planar_velocity_for_heading(normalize_heading(current_heading + PI), 1.0)
@@ -223,19 +223,102 @@ pub(super) fn local_velocity_for_state(
     }
 }
 
-fn turn_speed_for_state(state: MotionState) -> f32 {
+fn wire_turn_speed_for_state(state: MotionState) -> f32 {
     state.turn_speed.unwrap_or(match state.gait {
         Gait::Run => RUN_HELD_TURN_SPEED_RAD_PER_SEC,
         Gait::Walk => NON_RUN_HELD_TURN_SPEED_RAD_PER_SEC,
     })
 }
 
-pub(super) fn local_omega_for_state(state: MotionState) -> Vector3 {
-    let turn_speed = turn_speed_for_state(state);
+fn local_turn_omega(base_omega: Vector3, override_speed: Option<f32>) -> Vector3 {
+    match override_speed {
+        Some(speed) => {
+            let base_magnitude = base_omega.length();
+            if base_magnitude > 0.0 {
+                base_omega.normalize() * speed
+            } else {
+                Vector3::zero()
+            }
+        }
+        None => base_omega,
+    }
+}
 
+pub(super) fn local_omega_for_state(
+    state: MotionState,
+    capabilities: &SelfMovementCapabilities,
+) -> Vector3 {
     match state.turning {
-        Some(Turn::Right) => Vector3::new(0.0, 0.0, turn_speed),
-        Some(Turn::Left) => Vector3::new(0.0, 0.0, -turn_speed),
+        Some(Turn::Right) => local_turn_omega(
+            capabilities.kinematics().base_turn_right_omega,
+            state.turn_speed,
+        ),
+        Some(Turn::Left) => local_turn_omega(
+            capabilities.kinematics().base_turn_left_omega,
+            state.turn_speed,
+        ),
         None => Vector3::zero(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_world::{
+        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
+    };
+
+    fn test_capabilities() -> SelfMovementCapabilities {
+        SelfMovementCapabilities {
+            kinematics: SelfMovementKinematics {
+                source: PlayerMotionTableSource::DirectProperty {
+                    motion_table_id: 0x0900_0020,
+                },
+                motion_table_id: 0x0900_0020,
+                stance: MotionStance::NonCombat as u32,
+                base_walk_forward_velocity: Vector3::new(1.0, 0.0, 0.0),
+                base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
+                base_turn_left_omega: Vector3::new(0.0, 0.0, -1.5),
+                base_turn_right_omega: Vector3::new(0.0, 0.0, 1.5),
+            },
+            run_rate_scalar: 1.0,
+        }
+    }
+
+    #[test]
+    fn local_omega_for_state_preserves_base_turn_omega_without_override() {
+        let capabilities = test_capabilities();
+
+        assert_eq!(
+            local_omega_for_state(
+                MotionState {
+                    gait: Gait::Run,
+                    locomotion: None,
+                    turning: Some(Turn::Left),
+                    turn_speed: None,
+                },
+                &capabilities,
+            ),
+            Vector3::new(0.0, 0.0, -1.5)
+        );
+    }
+
+    #[test]
+    fn local_omega_for_state_applies_turn_speed_override_to_base_direction() {
+        let capabilities = test_capabilities();
+
+        assert_eq!(
+            local_omega_for_state(
+                MotionState {
+                    gait: Gait::Walk,
+                    locomotion: None,
+                    turning: Some(Turn::Left),
+                    turn_speed: Some(0.75),
+                },
+                &capabilities,
+            ),
+            Vector3::new(0.0, 0.0, -0.75)
+        );
     }
 }

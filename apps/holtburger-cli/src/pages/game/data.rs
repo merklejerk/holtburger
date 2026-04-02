@@ -10,6 +10,7 @@ use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::SelfMovementKinematics;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
@@ -285,6 +286,8 @@ pub struct GameData {
     pub player_options: Option<PlayerCharacterOptions>,
     /// Mirrored runtime-body read cache fed from core runtime-body snapshot and delta events.
     pub runtime_body_cache: RuntimeBodyViewCache,
+    /// Projected shared self-movement kinematics from core/world.
+    pub self_movement_kinematics: Option<SelfMovementKinematics>,
     /// Full spell catalog loaded from portal.dat.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Local cache of nearby entities.
@@ -332,6 +335,7 @@ impl Default for GameData {
             player_spells: Vec::new(),
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),
+            self_movement_kinematics: None,
             spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
@@ -508,6 +512,10 @@ impl WorldContext for GameData {
         self.attributes
             .get(&attr)
             .map(|attribute| attribute.current)
+    }
+
+    fn get_player_skill_current(&self, skill: SkillType) -> Option<u32> {
+        self.skills.get(&skill).map(|skill| skill.current)
     }
 
     fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {

@@ -2,8 +2,7 @@ use super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, build_autonomous_position,
     build_motion_state_raw_motion_state, encode_contact_long_jump,
     has_autonomous_position_sync_target, local_omega_for_state, local_velocity_for_state,
-    normalize_heading, player_run_speed_mps, raw_motion_state_with_motion_style,
-    signed_heading_delta,
+    normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
 };
 use crate::client::movement_types::{
     AutonomousDriveIntent, Locomotion, MotionState, MotionStyle, MovementPacketMetadata,
@@ -432,11 +431,18 @@ impl MovementSystem {
         let (velocity, omega) = match self.active_drive.map(|active| active.intent) {
             Some(ActiveDriveIntent::Manual(state)) => {
                 let heading = pose.rotation.to_heading();
-                let run_speed_mps = player_run_speed_mps(world);
-                (
-                    local_velocity_for_state(heading, state, run_speed_mps),
-                    local_omega_for_state(state),
-                )
+                match world.resolve_self_movement_capabilities() {
+                    Ok(capabilities) => (
+                        local_velocity_for_state(heading, state, &capabilities),
+                        local_omega_for_state(state, &capabilities),
+                    ),
+                    Err(error) => {
+                        log::warn!(
+                            "manual local solve missing self-movement capabilities: {error}"
+                        );
+                        (Vector3::zero(), Vector3::zero())
+                    }
+                }
             }
             _ => (Vector3::zero(), Vector3::zero()),
         };

@@ -6,6 +6,7 @@ authors = ["holtburger contributors"]
 default-run = "dat2hba"
 
 [dependencies]
+holtburger-common = { workspace = true }
 holtburger-dat = { path = "../../crates/holtburger-dat" }
 anyhow = { workspace = true }
 clap = { workspace = true }
@@ -14,3 +15,6 @@ env_logger = { workspace = true }
 indicatif = { workspace = true } # Progress bars for the win
 rayon = { workspace = true }
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = { workspace = true }

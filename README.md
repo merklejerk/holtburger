@@ -173,20 +173,20 @@ The TUI client needs a modern terminal emulator to render correctly. The built-i
 
 ## Data File Configuration
 
-The TUI client requires retail data under the `eor/portal` namespace and optionally richer world data under `eor/cell`. It supports either the original DAT files or the combined namespaced HBA v2 bundle.
+The TUI client requires a namespaced HBA bundle that carries retail data under `eor/portal` and the derived runtime asset under `holtburger/core`. Optional richer world data may also be present under `eor/cell`.
 
 - Release archives already include the bundled `assets.hba` archive for the current runtime path.
 - Flatpak builds also include that bundled `assets.hba`.
-- Source builds and local development setups require you to provide the data files yourself.
+- Source builds and local development setups require you to provide the archive yourself.
 
 If you are setting up local data, you have two practical options:
 
 1. Download the latest HBA bundle from the [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into `./dats/` so `assets.hba` is present.
-2. Point Holtburger at retail DAT files such as `client_portal.dat` and `client_cell_1.dat`, or repack them into a namespaced HBA v2 bundle with `dat2hba`.
+2. Repack retail DAT files such as `client_portal.dat` and `client_cell_1.dat` into a namespaced HBA v2 bundle with `dat2hba`.
 
 ### Repacking DATs Into HBA v2
 
-The supported migration path for legacy DAT-based setups is to emit a combined namespaced archive instead of relying on filename-scoped HBA v1 bundles:
+Runtime bootstrap is HBA-only now. The supported path for retail DAT inputs is to emit a combined namespaced archive instead of pointing the client at raw `.dat` files directly:
 
 ```bash
 cargo run -p holtburger-tools --bin dat2hba -- \
@@ -196,7 +196,7 @@ cargo run -p holtburger-tools --bin dat2hba -- \
     dats/assets.hba
 ```
 
-Use `--profile full` if you want an unpruned archive. The current `micro` profile remains portal-focused and is mainly for release packaging.
+Use `--profile full` if you want an unpruned archive. The current `micro` profile is the release-oriented minimal bundle and contains the required portal tables plus the derived `holtburger/core:MotionKinematics` asset.
 
 ### Release Maintenance
 The GitHub Actions workflows currently fetch release HBA assets from repository variables instead of committed archive files:
@@ -213,7 +213,7 @@ The GitHub Actions workflows currently fetch release HBA assets from repository 
     *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
-> **Note:** Official DAT files no longer need to be renamed. Holtburger infers retail namespaces from DAT header metadata when it scans a data directory.
+> **Note:** Official DAT files no longer need to be renamed when passed to tooling. Runtime startup no longer scans raw DAT files; use `dat2hba` to produce a namespaced `assets.hba` bundle first.
 
 ### Benchmarking
 

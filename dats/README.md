@@ -1,9 +1,8 @@
-Place either a combined namespaced HBA bundle or retail DAT files in this folder:
+Place a combined namespaced HBA bundle in this folder:
 
 - Preferred: `assets.hba`
-- Also supported: retail DATs such as `client_portal.dat` and `client_cell_1.dat`
 
-The bundled release and Flatpak packaging ship a namespaced `assets.hba` archive. It contains the current TUI-required portal content under `eor/portal` and may also include `eor/cell` content in the same file. The runtime discovers HBA namespaces from archive metadata, so filenames are no longer used to infer archive scope.
+The bundled release and Flatpak packaging ship a namespaced `assets.hba` archive. It contains the current TUI-required portal content under `eor/portal`, the required derived runtime asset under `holtburger/core`, and may also include `eor/cell` content in the same file. The runtime discovers HBA namespaces from archive metadata, so filenames are no longer used to infer archive scope.
 
 If you want to generate `assets.hba` yourself, use:
 
@@ -14,3 +13,5 @@ cargo run -p holtburger-tools --bin dat2hba -- \
 	eor/cell=client_cell_1.dat \
 	dats/assets.hba
 ```
+
+Raw retail DATs are tooling inputs only. Normal client startup expects the generated `assets.hba` bundle, not bare `.dat` files.

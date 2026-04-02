@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow};
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{
-    DatDatabase, EOR_PORTAL_NAMESPACE, HbaReader, MountedResourceProvider, ResourceProvider,
-    ResourceScope, ScopedResourceResolver,
+    EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, MountedResourceProvider,
+    ResourceProvider, ResourceScope, ScopedResourceResolver,
 };
 use holtburger_session::Session;
 use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldState};
@@ -57,6 +57,12 @@ const REQUIRED_XP_TABLE: RequiredResourceAsset = RequiredResourceAsset {
     namespace: EOR_PORTAL_NAMESPACE,
     id: XpTable::FILE_ID,
     name: "XP table",
+};
+
+const REQUIRED_MOTION_KINEMATICS: RequiredResourceAsset = RequiredResourceAsset {
+    namespace: HOLTBURGER_CORE_NAMESPACE,
+    id: MotionKinematics::FILE_ID,
+    name: "motion kinematics table",
 };
 
 #[derive(Clone)]
@@ -170,7 +176,6 @@ impl ClientBuilder {
 
         if dats_path.is_dir() {
             self.discover_hba_mounts_in_dir(dats_path, &mut mounted);
-            self.discover_dat_mounts_in_dir(dats_path, &mut mounted);
         } else {
             log::warn!(
                 "Configured dats path {} is neither a file nor a directory",
@@ -191,19 +196,9 @@ impl ClientBuilder {
             return;
         }
 
-        if path.extension() == Some(OsStr::new("dat")) {
-            self.mount_dat_namespace(path, mounted);
-            return;
-        }
-
         let hba_path = path.with_extension("hba");
         if hba_path.exists() {
             self.mount_hba_namespaces(&hba_path, mounted);
-        }
-
-        let dat_path = path.with_extension("dat");
-        if dat_path.exists() {
-            self.mount_dat_namespace(&dat_path, mounted);
         }
     }
 
@@ -297,35 +292,6 @@ impl ClientBuilder {
         }
     }
 
-    fn discover_dat_mounts_in_dir(
-        &self,
-        dats_path: &Path,
-        mounted: &mut Vec<MountedResourceProvider>,
-    ) {
-        let entries = match fs::read_dir(dats_path) {
-            Ok(entries) => entries,
-            Err(error) => {
-                log::warn!(
-                    "Could not enumerate DAT archives under {}: {}",
-                    dats_path.display(),
-                    error
-                );
-                return;
-            }
-        };
-
-        let mut paths = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.extension() == Some(OsStr::new("dat")))
-            .collect::<Vec<_>>();
-        paths.sort();
-
-        for path in paths {
-            self.mount_dat_namespace(&path, mounted);
-        }
-    }
-
     fn mount_hba_namespaces(&self, path: &Path, mounted: &mut Vec<MountedResourceProvider>) {
         let archive = match HbaReader::open(path) {
             Ok(archive) => archive,
@@ -364,43 +330,6 @@ impl ClientBuilder {
                         error
                     );
                 }
-            }
-        }
-    }
-
-    fn mount_dat_namespace(&self, path: &Path, mounted: &mut Vec<MountedResourceProvider>) {
-        let database = match DatDatabase::new(path) {
-            Ok(database) => database,
-            Err(error) => {
-                log::warn!("Could not open DAT archive {}: {}", path.display(), error);
-                return;
-            }
-        };
-
-        let Some(namespace) = database.retail_namespace_hint() else {
-            log::warn!(
-                "Skipping DAT archive {} because its retail namespace could not be inferred",
-                path.display()
-            );
-            return;
-        };
-
-        if has_namespace_mount(mounted, namespace) {
-            return;
-        }
-
-        match MountedResourceProvider::with_namespace(namespace, Arc::new(database) as Provider) {
-            Ok(mount) => {
-                log::info!("Mounted namespace '{}' from {}", namespace, path.display());
-                mounted.push(mount);
-            }
-            Err(error) => {
-                log::warn!(
-                    "Could not mount namespace '{}' from {}: {}",
-                    namespace,
-                    path.display(),
-                    error
-                );
             }
         }
     }
@@ -450,6 +379,16 @@ impl ClientBuilder {
         if !mounted.exists_in_namespace(REQUIRED_XP_TABLE.namespace, REQUIRED_XP_TABLE.id) {
             return Err(missing_resource_asset_error(
                 REQUIRED_XP_TABLE,
+                self.dats_path.as_deref(),
+            ));
+        }
+
+        if !mounted.exists_in_namespace(
+            REQUIRED_MOTION_KINEMATICS.namespace,
+            REQUIRED_MOTION_KINEMATICS.id,
+        ) {
+            return Err(missing_resource_asset_error(
+                REQUIRED_MOTION_KINEMATICS,
                 self.dats_path.as_deref(),
             ));
         }
@@ -515,7 +454,8 @@ mod tests {
     use super::*;
     use holtburger_common::{Guid, Vector3};
     use holtburger_dat::{
-        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
+        DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
+        HbaReader, HbaWriter,
     };
     use holtburger_world::{
         ContactState, SolveActorInput, SolvedActorKinematics, SpatialScene, SpatialSolveBatch,
@@ -556,6 +496,14 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
     }
 
+    fn test_motion_kinematics_bytes() -> Vec<u8> {
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        MotionKinematics::new()
+            .write(&mut bytes)
+            .expect("test motion kinematics asset should write");
+        bytes.into_inner()
+    }
+
     fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) -> bool {
         let source_path = repo_assets_hba_path();
         if !source_path.is_file() {
@@ -590,6 +538,15 @@ mod tests {
                 )
                 .expect("test HBA entry should be added");
         }
+
+        writer
+            .add(
+                HOLTBURGER_CORE_NAMESPACE,
+                MotionKinematics::FILE_ID,
+                DatFileType::MotionKinematics as u32,
+                test_motion_kinematics_bytes(),
+            )
+            .expect("motion kinematics test HBA entry should be added");
 
         if include_cell_namespace {
             writer

@@ -44,9 +44,6 @@ impl StripperManifest {
     /// Returns the manifest for the current TUI-oriented micro archive.
     pub fn micro() -> Self {
         let mut manifest = Self::new();
-        manifest.keep_namespaced_type(EOR_PORTAL_NAMESPACE, DatFileType::MotionTable);
-        manifest.keep_namespaced_type(EOR_PORTAL_NAMESPACE, DatFileType::Animation);
-
         for file_id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
             manifest.keep_namespaced_file(EOR_PORTAL_NAMESPACE, file_id);
         }
@@ -133,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn micro_manifest_keeps_required_table_ids_motion_tables_and_animations() {
+    fn micro_manifest_keeps_required_table_ids_and_excludes_raw_motion_assets() {
         let manifest = StripperManifest::micro();
 
         assert!(manifest.should_keep_entry(
@@ -151,12 +148,12 @@ mod tests {
             XpTable::FILE_ID,
             DatFileType::Table
         ));
-        assert!(manifest.should_keep_entry(
+        assert!(!manifest.should_keep_entry(
             EOR_PORTAL_NAMESPACE,
             0x09000001,
             DatFileType::MotionTable
         ));
-        assert!(manifest.should_keep_entry(
+        assert!(!manifest.should_keep_entry(
             EOR_PORTAL_NAMESPACE,
             0x03000003,
             DatFileType::Animation

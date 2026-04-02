@@ -1067,10 +1067,12 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "holtburger-common",
  "holtburger-dat",
  "indicatif",
  "log",
  "rayon",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

@@ -13,6 +13,12 @@ pub struct ManifestRule {
     pub file_id: Option<u32>,
 }
 
+impl Default for StripperManifest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StripperManifest {
     /// Returns the default manifest for a "Logic/Physics Only" (Lite) archive.
     pub fn logic_only() -> Self {

@@ -49,11 +49,11 @@ struct Args {
 
 impl Args {
     fn into_options(self) -> Result<Dat2HbaOptions, ToolError> {
-        let output = self
-            .paths
-            .last()
-            .map(PathBuf::from)
-            .ok_or_else(|| ToolError::Validation("dat2hba requires at least one input and one output path".to_string()))?;
+        let output = self.paths.last().map(PathBuf::from).ok_or_else(|| {
+            ToolError::Validation(
+                "dat2hba requires at least one input and one output path".to_string(),
+            )
+        })?;
 
         let inputs = self.paths[..self.paths.len() - 1]
             .iter()
@@ -95,7 +95,9 @@ mod tests {
     fn args_default_profile_is_pruned() {
         let args = Args::try_parse_from(["dat2hba", "portal.dat", "portal.hba"])
             .expect("default args should parse");
-        let options = args.into_options().expect("args should convert into options");
+        let options = args
+            .into_options()
+            .expect("args should convert into options");
 
         assert_eq!(options.profile, ArchiveProfile::Pruned);
         assert_eq!(options.inputs.len(), 1);
@@ -115,7 +117,9 @@ mod tests {
             "full",
         ])
         .expect("multi-input args should parse");
-        let options = args.into_options().expect("args should convert into options");
+        let options = args
+            .into_options()
+            .expect("args should convert into options");
 
         assert_eq!(options.profile, ArchiveProfile::Full);
         assert_eq!(options.inputs.len(), 2);
@@ -128,7 +132,9 @@ mod tests {
     fn output_path_is_not_parsed_as_namespaced_input() {
         let args = Args::try_parse_from(["dat2hba", "portal.dat", "derived=test.hba"])
             .expect("args should parse");
-        let options = args.into_options().expect("args should convert into options");
+        let options = args
+            .into_options()
+            .expect("args should convert into options");
 
         assert_eq!(options.inputs.len(), 1);
         assert_eq!(options.inputs[0].path, PathBuf::from("portal.dat"));

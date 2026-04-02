@@ -260,3 +260,4 @@
 - [x] Do tabs need to expose `item_count()`?
 - [x] Track "dead" creatures to avoid targeting them?
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
+- [ ] Strange login issues when indoors.

@@ -1,8 +1,7 @@
 use crate::file_type::MotionCommandKinematics;
 use crate::{HOLTBURGER_CORE_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::{
-    BinRead, BinWrite,
-    BinResult,
+    BinRead, BinResult, BinWrite,
     io::{Read, Seek, Write},
 };
 use holtburger_common::Vector3;
@@ -80,7 +79,8 @@ impl MotionKinematics {
     }
 
     pub fn default_style_for_motion_table(&self, motion_table_id: u32) -> Option<u32> {
-        self.motion_table(motion_table_id).map(|table| table.default_style)
+        self.motion_table(motion_table_id)
+            .map(|table| table.default_style)
     }
 
     pub fn cycle_kinematics(
@@ -170,18 +170,12 @@ impl MotionKinematicsTable {
             .insert(cycle_key(stance, command), kinematics);
     }
 
-    pub fn cycle_kinematics(
-        &self,
-        stance: u32,
-        command: u32,
-    ) -> Option<&MotionCommandKinematics> {
+    pub fn cycle_kinematics(&self, stance: u32, command: u32) -> Option<&MotionCommandKinematics> {
         self.cycle_kinematics_by_key
             .get(&cycle_key(stance, command))
     }
 
-    pub fn iter_cycle_kinematics(
-        &self,
-    ) -> impl Iterator<Item = (u32, &MotionCommandKinematics)> {
+    pub fn iter_cycle_kinematics(&self) -> impl Iterator<Item = (u32, &MotionCommandKinematics)> {
         self.cycle_kinematics_by_key
             .iter()
             .map(|(key, kinematics)| (*key, kinematics))
@@ -290,8 +284,8 @@ mod tests {
             .expect("motion kinematics asset should write");
         bytes.set_position(0);
 
-        let decoded = MotionKinematics::read(&mut bytes)
-            .expect("motion kinematics asset should read");
+        let decoded =
+            MotionKinematics::read(&mut bytes).expect("motion kinematics asset should read");
 
         assert_eq!(decoded.id, MotionKinematics::FILE_ID);
         assert_eq!(decoded.version, MotionKinematics::VERSION);
@@ -323,7 +317,13 @@ mod tests {
 
     #[test]
     fn motion_kinematics_static_resource_key_uses_core_namespace() {
-        assert_eq!(MotionKinematics::RESOURCE_KEY.namespace, HOLTBURGER_CORE_NAMESPACE);
-        assert_eq!(MotionKinematics::RESOURCE_KEY.file_id, MotionKinematics::FILE_ID);
+        assert_eq!(
+            MotionKinematics::RESOURCE_KEY.namespace,
+            HOLTBURGER_CORE_NAMESPACE
+        );
+        assert_eq!(
+            MotionKinematics::RESOURCE_KEY.file_id,
+            MotionKinematics::FILE_ID
+        );
     }
 }

@@ -87,8 +87,7 @@ mod tests {
         bytes.extend_from_slice(&0.0f32.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
 
-        let animation =
-            Animation::read(&mut Cursor::new(bytes)).expect("animation should parse");
+        let animation = Animation::read(&mut Cursor::new(bytes)).expect("animation should parse");
 
         assert_eq!(animation.id, 0x0300_1234);
         assert_eq!(animation.num_parts, 1);

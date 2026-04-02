@@ -33,7 +33,9 @@ pub enum PlayerMotionTableLookupError {
     MotionTableSourceUnavailable,
     #[error("setup model 0x{setup_model_id:08X} did not define a default motion table")]
     SetupModelMissingDefaultMotionTable { setup_model_id: u32 },
-    #[error("motion table 0x{motion_table_id:08X} is missing from the required motion-kinematics asset")]
+    #[error(
+        "motion table 0x{motion_table_id:08X} is missing from the required motion-kinematics asset"
+    )]
     MotionTableMissingKinematics { motion_table_id: u32 },
 }
 
@@ -55,12 +57,14 @@ impl WorldState {
             .csetup_id()
             .map(u32::from)
             .ok_or(PlayerMotionTableLookupError::MotionTableSourceUnavailable)?;
-        let motion_table_id =
-            self.motion_kinematics
-                .default_motion_table_for_setup(setup_model_id)
-                .ok_or(PlayerMotionTableLookupError::SetupModelMissingDefaultMotionTable {
+        let motion_table_id = self
+            .motion_kinematics
+            .default_motion_table_for_setup(setup_model_id)
+            .ok_or(
+                PlayerMotionTableLookupError::SetupModelMissingDefaultMotionTable {
                     setup_model_id,
-                })?;
+                },
+            )?;
 
         Ok(PlayerMotionTableSource::SetupModelDefault {
             setup_model_id,
@@ -91,12 +95,9 @@ impl WorldState {
         &self,
         motion_table_id: u32,
     ) -> Result<MotionTableMovementProfile, PlayerMotionTableLookupError> {
-        let table = self
-            .motion_kinematics
-            .motion_table(motion_table_id)
-            .ok_or(PlayerMotionTableLookupError::MotionTableMissingKinematics {
-                motion_table_id,
-            })?;
+        let table = self.motion_kinematics.motion_table(motion_table_id).ok_or(
+            PlayerMotionTableLookupError::MotionTableMissingKinematics { motion_table_id },
+        )?;
         let stance = table.default_style;
 
         Ok(MotionTableMovementProfile {

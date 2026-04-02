@@ -213,10 +213,9 @@ impl WorldState {
         let motion_kinematics_data = resources
             .get_file_for::<MotionKinematics>()
             .context("missing required motion kinematics table from mounted resources")?;
-        let motion_kinematics = MotionKinematics::read(&mut std::io::Cursor::new(
-            motion_kinematics_data,
-        ))
-        .context("failed to parse required motion kinematics table")?;
+        let motion_kinematics =
+            MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_data))
+                .context("failed to parse required motion kinematics table")?;
 
         Ok(Self {
             entities: EntityManager::new(),

@@ -1,13 +1,13 @@
 use crate::error::{Result, ToolError};
 use holtburger_common::Vector3;
-use holtburger_dat::file_type::{
-    Animation, EnvCell, GfxObj, MotionCommandKinematics, MotionKinematics,
-    MotionKinematicsTable, MotionTable, SetupModel,
-};
 use holtburger_dat::file_type::motion_table::MotionData;
+use holtburger_dat::file_type::{
+    Animation, EnvCell, GfxObj, MotionCommandKinematics, MotionKinematics, MotionKinematicsTable,
+    MotionTable, SetupModel,
+};
 use holtburger_dat::{
-    DatDatabase, DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE,
-    HOLTBURGER_CORE_NAMESPACE, HbaStreamWriter, StripperManifest,
+    DatDatabase, DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
+    HbaStreamWriter, StripperManifest,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -264,7 +264,9 @@ fn derive_motion_kinematics_from_portal_db(db: &DatDatabase) -> Result<MotionKin
         let file_type = DatFileType::from_id(id);
         match file_type {
             DatFileType::MotionTable => {
-                let bytes = db.get_file(id).map_err(|source| ToolError::DatRead { id, source })?;
+                let bytes = db
+                    .get_file(id)
+                    .map_err(|source| ToolError::DatRead { id, source })?;
                 let table = MotionTable::read(&mut Cursor::new(bytes)).map_err(|error| {
                     ToolError::AssetDerivation(format!(
                         "failed to parse motion table 0x{id:08X}: {error}"
@@ -273,7 +275,9 @@ fn derive_motion_kinematics_from_portal_db(db: &DatDatabase) -> Result<MotionKin
                 motion_tables.push(table);
             }
             DatFileType::SetupModel => {
-                let bytes = db.get_file(id).map_err(|source| ToolError::DatRead { id, source })?;
+                let bytes = db
+                    .get_file(id)
+                    .map_err(|source| ToolError::DatRead { id, source })?;
                 let setup = SetupModel::read(&mut Cursor::new(bytes)).map_err(|error| {
                     ToolError::AssetDerivation(format!(
                         "failed to parse setup model 0x{id:08X}: {error}"
@@ -282,7 +286,9 @@ fn derive_motion_kinematics_from_portal_db(db: &DatDatabase) -> Result<MotionKin
                 setup_models.push(setup);
             }
             DatFileType::Animation => {
-                let bytes = db.get_file(id).map_err(|source| ToolError::DatRead { id, source })?;
+                let bytes = db
+                    .get_file(id)
+                    .map_err(|source| ToolError::DatRead { id, source })?;
                 let animation = Animation::read(&mut Cursor::new(bytes)).map_err(|error| {
                     ToolError::AssetDerivation(format!(
                         "failed to parse animation 0x{id:08X}: {error}"
@@ -313,7 +319,8 @@ fn derive_motion_kinematics_from_parsed_portal_assets(
     }
 
     for motion_table in motion_tables {
-        let mut derived_table = MotionKinematicsTable::new(motion_table.id, motion_table.default_style);
+        let mut derived_table =
+            MotionKinematicsTable::new(motion_table.id, motion_table.default_style);
 
         let mut cycle_keys: Vec<u32> = motion_table.cycles.keys().copied().collect();
         cycle_keys.sort_unstable();
@@ -411,10 +418,7 @@ fn write_motion_kinematics_asset(
             data,
         )
         .map_err(|error| {
-            ToolError::HbaWrite(
-                write_context.output_path.to_path_buf(),
-                error.to_string(),
-            )
+            ToolError::HbaWrite(write_context.output_path.to_path_buf(), error.to_string())
         })
 }
 
@@ -554,11 +558,11 @@ pub fn run(options: Dat2HbaOptions) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+    use holtburger_common::{Quaternion, Sphere, Vector3};
+    use holtburger_dat::HbaReader;
     use holtburger_dat::file_type::animation::AnimationFlags;
     use holtburger_dat::file_type::motion_table::{AnimData, MotionDataFlags};
-    use holtburger_dat::HbaReader;
-    use holtburger_common::{Quaternion, Sphere, Vector3};
+    use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
     use holtburger_dat::graphics::Frame;
     use std::collections::HashMap;
     use tempfile::tempdir;
@@ -673,7 +677,10 @@ mod tests {
             derived.default_motion_table_for_setup(setup_model_id),
             Some(motion_table_id)
         );
-        assert_eq!(derived.default_style_for_motion_table(motion_table_id), Some(stance));
+        assert_eq!(
+            derived.default_style_for_motion_table(motion_table_id),
+            Some(stance)
+        );
         assert_eq!(
             derived
                 .cycle_kinematics(motion_table_id, stance, MotionTable::RUN_FORWARD_COMMAND)
@@ -723,7 +730,10 @@ mod tests {
         let decoded = MotionKinematics::read(&mut Cursor::new(bytes))
             .expect("motion kinematics asset should decode");
         assert_eq!(decoded.id, MotionKinematics::FILE_ID);
-        assert_eq!(decoded.default_motion_table_for_setup(0x0200_0001), Some(0x0900_0001));
+        assert_eq!(
+            decoded.default_motion_table_for_setup(0x0200_0001),
+            Some(0x0900_0001)
+        );
     }
 
     #[test]
@@ -744,7 +754,9 @@ mod tests {
         let error = derive_motion_command_kinematics(&motion_data, &HashMap::new())
             .expect_err("missing animation should fail derivation");
 
-        assert!(matches!(error, ToolError::AssetDerivation(message) if message.contains("0x0300DEAD")));
+        assert!(
+            matches!(error, ToolError::AssetDerivation(message) if message.contains("0x0300DEAD"))
+        );
     }
 
     fn cycle_key(stance: u32, command: u32) -> u32 {

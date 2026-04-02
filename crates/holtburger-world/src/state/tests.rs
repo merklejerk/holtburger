@@ -50,14 +50,11 @@ fn write_micro_portal_hba(path: &Path) -> bool {
 
     let source = match HbaReader::open(&source_path) {
         Ok(source) => source,
-        Err(error) => {
-            eprintln!(
-                "skipping assets fixture test; repo-local {} is not an HBA v2 fixture yet: {}",
-                source_path.display(),
-                error
-            );
-            return false;
-        }
+        Err(error) => panic!(
+            "repo-local {} must be a valid HBA v2 fixture for this test: {}",
+            source_path.display(),
+            error
+        ),
     };
 
     let mut writer = HbaWriter::new();

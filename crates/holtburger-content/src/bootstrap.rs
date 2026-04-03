@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use binrw::BinRead;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
-use holtburger_dat::{LayeredResourceResolver, ResourceSource};
+use holtburger_dat::{LayeredResourceResolver, ResourceSource, StaticResourceKey};
 use holtburger_world::WorldBootstrap;
 use std::io::Cursor;
 use std::sync::Arc;
@@ -10,35 +10,46 @@ pub fn world_bootstrap_from_mounts<I>(mounts: I) -> Result<Arc<WorldBootstrap>>
 where
     I: IntoIterator<Item = Arc<dyn ResourceSource>>,
 {
+    world_bootstrap_from_mounts_with_source(mounts, None)
+}
+
+pub(crate) fn world_bootstrap_from_mounts_with_source<I>(
+    mounts: I,
+    source_description: Option<&str>,
+) -> Result<Arc<WorldBootstrap>>
+where
+    I: IntoIterator<Item = Arc<dyn ResourceSource>>,
+{
     let resources = LayeredResourceResolver::from_sources(mounts);
 
-    let skill_table = SkillTable::read(&mut Cursor::new(
-        resources
-            .get_file_for::<SkillTable>()
-            .context("missing required skill table from mounted resources")?,
-    ))
+    let skill_table = SkillTable::read(&mut Cursor::new(required_asset_bytes::<SkillTable>(
+        &resources,
+        source_description,
+        "skill table",
+    )?))
     .context("failed to parse required skill table")?;
 
-    let xp_table = XpTable::read(&mut Cursor::new(
-        resources
-            .get_file_for::<XpTable>()
-            .context("missing required XP table from mounted resources")?,
-    ))
+    let xp_table = XpTable::read(&mut Cursor::new(required_asset_bytes::<XpTable>(
+        &resources,
+        source_description,
+        "XP table",
+    )?))
     .context("failed to parse required XP table")?;
 
-    let spell_table = SpellTable::read(&mut Cursor::new(
-        resources
-            .get_file_for::<SpellTable>()
-            .context("missing required spell table from mounted resources")?,
-    ))
+    let spell_table = SpellTable::read(&mut Cursor::new(required_asset_bytes::<SpellTable>(
+        &resources,
+        source_description,
+        "spell table",
+    )?))
     .context("failed to parse required spell table")?;
 
-    let motion_kinematics = MotionKinematics::read(&mut Cursor::new(
-        resources
-            .get_file_for::<MotionKinematics>()
-            .context("missing required motion kinematics table from mounted resources")?,
-    ))
-    .context("failed to parse required motion kinematics table")?;
+    let motion_kinematics =
+        MotionKinematics::read(&mut Cursor::new(required_asset_bytes::<MotionKinematics>(
+            &resources,
+            source_description,
+            "motion kinematics table",
+        )?))
+        .context("failed to parse required motion kinematics table")?;
 
     Ok(Arc::new(WorldBootstrap::new(
         skill_table,
@@ -46,6 +57,55 @@ where
         xp_table,
         motion_kinematics,
     )))
+}
+
+pub(crate) fn required_asset_bytes<T>(
+    resources: &LayeredResourceResolver,
+    source_description: Option<&str>,
+    asset_name: &'static str,
+) -> Result<Vec<u8>>
+where
+    T: StaticResourceKey,
+{
+    let key = T::RESOURCE_KEY;
+
+    if let Some(metadata) = resources.get_metadata_by_key(key)
+        && !metadata.is_pruned
+    {
+        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
+    }
+
+    if resources.get_metadata_by_key(key).is_some() {
+        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
+    }
+
+    Err(missing_required_asset_error(
+        key,
+        asset_name,
+        source_description,
+    ))
+}
+
+fn missing_required_asset_error(
+    key: holtburger_dat::ResourceKey<'static>,
+    asset_name: &'static str,
+    source_description: Option<&str>,
+) -> anyhow::Error {
+    match source_description {
+        Some(source) => anyhow::anyhow!(
+            "Missing required asset {}:0x{:08X} ({}) while loading client data from {}.",
+            key.namespace,
+            key.file_id,
+            asset_name,
+            source
+        ),
+        None => anyhow::anyhow!(
+            "Missing required asset {}:0x{:08X} ({}) in the mounted resource namespaces.",
+            key.namespace,
+            key.file_id,
+            asset_name,
+        ),
+    }
 }
 
 #[cfg(test)]

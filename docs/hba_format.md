@@ -1,9 +1,9 @@
 # Holtburger Archive (.hba) Specification
 
 ## 1. Introduction
-The Holtburger Archive (`.hba`) format is a simplified, high-performance binary container designed for Asheron's Call asset management. It is optimized for use within the `ResourceProvider` Virtual File System (VFS).
+The Holtburger Archive (`.hba`) format is a simplified, high-performance binary container designed for Asheron's Call asset management. HBA v2 is namespace-aware so one archive can carry multiple asset domains without `file_id` collisions.
 
-Unlike the original block-based AC DAT format, HBA uses a flat structure with a contiguous index at the end of the file, allowing for easy appending and O(log n) or O(1) lookups depending on index implementation.
+Unlike the original block-based AC DAT format, HBA uses a flat blob region with a contiguous namespace metadata block and index at the end of the file. Lookups are a two-stage binary search: resolve the namespace span first, then binary-search by `file_id` inside that span.
 
 ## 2. Global Design Goals
 - **Simplicity**: Easy to parse in any language.
@@ -15,37 +15,36 @@ Unlike the original block-based AC DAT format, HBA uses a flat structure with a 
 
 | Section | Size | Description |
 | :--- | :--- | :--- |
-| **Header** | 28 bytes | Magic, Version, Entry Count, Index Offset, Metadata Size, Profile. |
-| **Metadata** | Variable | Structured or JSON data (optional). |
+| **Header** | 24 bytes | Magic, Version, Entry Count, Index Offset, Metadata Size. |
 | **Blobs** | Variable | Contiguous file data (may be compressed). |
-| **Index** | Entry Count * 28 bytes | Fixed-size list of File Entries. |
+| **Namespace Metadata** | Variable | Namespace lookup table stored immediately before the index. |
+| **Index** | Entry Count * 60 bytes | Fixed-size list of namespaced File Entries. |
 
 ### 3.1. Header (HbaHeader)
 | Field | Type | Size | Description |
 | :--- | :--- | :--- | :--- |
 | Magic | `char[4]` | 4 | Fixed value `HBA\0`. |
-| Version | `u32le` | 4 | Current version: `1`. |
+| Version | `u32le` | 4 | Current version: `2`. |
 | Entry Count | `u32le` | 4 | Number of entries in the index. |
 | Index Offset | `u64le` | 8 | Absolute byte offset to the start of the index. |
-| Metadata Size | `u32le` | 4 | Size of the metadata block following the header. |
-| Profile | `u32le` | 4 | Archive profile identifier. See profile values below. Runtime capability checks should still be based on the assets actually present. |
+| Metadata Size | `u32le` | 4 | Size of the namespace metadata block immediately before the index. |
 
-#### Header Metadata
-The `Profile` field records the archive mode emitted by tooling, but the runtime still does not treat it as the sole contract for what an archive can satisfy. Systems should continue probing for the specific assets they require.
+### 3.2. Namespace Metadata
+HBA v2 stores a namespace lookup table immediately before the index so readers can resolve a namespace without scanning the entire archive.
 
-#### Profile Values
-| Value | Name | Meaning |
-| :--- | :--- | :--- |
-| `0` | `Unspecified` | No profile was recorded. Reserved for legacy or manually authored archives. |
-| `1` | `Full` | Full archive mode with no manifest filtering and no forced record pruning. |
-| `2` | `Pruned` | Logic/physics-oriented archive mode that keeps broader essential file classes and may contain pruned records. |
-| `3` | `Micro` | Minimal portal-table archive mode for the current TUI/runtime path. Contains only the explicitly selected required table IDs and may contain pruned records if applicable. |
+| Field | Type | Size | Description |
+| :--- | :--- | :--- | :--- |
+| Namespace Count | `u32le` | 4 | Number of namespace partitions described below. |
+| Namespace Span | `char[32] + u32le + u32le` | 40 each | Namespace label, starting entry index, and number of entries in that namespace partition. |
 
-### 3.2. File Entry (HbaEntry - 28 bytes)
+Namespace spans are sorted lexicographically by their serialized namespace bytes and must cover the full index contiguously.
+
+### 3.3. File Entry (HbaEntry - 60 bytes)
 Each entry in the index describes a single asset.
 
 | Field | Type | Size | Description |
 | :--- | :--- | :--- | :--- |
+| Namespace | `char[32]` | 32 | Fixed-width case-sensitive zero-padded namespace label. |
 | File ID | `u32le` | 4 | The Asheron's Call Object ID (DID/WID). |
 | Type ID | `u32le` | 4 | **Logical Type**. Mapping to `DatFileType` (e.g., `0x06` for `GfxObj`). |
 | Offset | `u64le` | 8 | Absolute byte offset to the start of the data blob. |
@@ -55,25 +54,70 @@ Each entry in the index describes a single asset.
 | Storage ID | `u8` | 1 | ID of external store (if ref flag set). |
 | Reserved | `u8[2]` | 2 | Alignment. |
 
-### 3.3. Entry Flags
+Canonical index ordering is lexical namespace bytes first, then `file_id` within each namespace.
+
+### 3.4. Entry Flags
 - `0x01` (**Zstd**): Data blob is compressed with Zstandard.
 - `0x02` (**External**): Blob is stored in an external file (identified by `Storage ID`).
 - `0x04` (**Pruned**): Data is a "Lite" version of the original record (e.g., visual data removed from a physics object).
 
 ## 4. Quality-Aware Prioritization
-The `Pruned` flag is used by the scoped resource resolver to ensure the best possible data is served to the client within a mounted dataset scope:
-- If multiple mounted providers in the same scope offer the same `File ID`, runtime lookup prefers any entry where `Pruned` is **not** set.
-- If all available entries in that scope are marked as `Pruned`, the first matching provider in that scope is used.
+The `Pruned` flag is used by the mounted resource resolver to ensure the best possible data is served to the client within a mounted namespace:
+- If multiple mounted providers in the same namespace offer the same `File ID`, runtime lookup prefers any entry where `Pruned` is **not** set.
+- If all available entries in that namespace are marked as `Pruned`, the first matching provider in that namespace is used.
 - This allows Lite HBA archives to serve as space-saving fallbacks or overrides without breaking higher-fidelity assets that may also be mounted in the same scope.
 
-## 5. Current Bundle Strategy (VFS)
-The current runtime uses a scoped resource resolver that keeps mounted providers partitioned by dataset role while still allowing quality-aware fallback within each scope:
+## 5. Namespace Semantics
+The archive format treats namespaces as opaque labels. Current reserved runtime labels include:
 
-1. `portal.hba` may be a full, pruned, or micro bundle depending on what the user ships.
-2. `cell.hba` is optional for the current TUI/runtime path.
-3. Runtime capabilities are determined by probing for required scoped assets, not by trusting archive profile tags or filenames alone.
+1. `eor/portal`
+2. `eor/cell`
+3. `holtburger/core` for required Holtburger-generated runtime assets
+4. `derived/*` for other Holtburger-generated or experimental assets
 
-For the current terminal client, the smallest supported bundle is a portal-only micro archive containing the skill, spell, and XP tables.
+Namespaces are case-sensitive, encoded as UTF-8, stored as zero-padded `char[32]`, and validated on read. The archive format itself does not interpret them hierarchically.
 
-## 6. Implementation Notes (Rust)
-HBA files are generated by `holtburger-tools` and consumed via the `HbaProvider` implementation of `ResourceProvider` in the `holtburger-dat` crate.
+## 6. Current Runtime State
+The runtime now mounts HBA archives by inspecting their namespace metadata instead of inferring dataset roles from filenames. Combined bundles such as `assets.hba` can expose multiple namespaces from one artifact, while single-domain archives still work as long as they contain exactly one namespace. Runtime capability checks probe for the required assets directly.
+
+Normal client/runtime bootstrap is HBA-only. Raw retail DATs are tooling inputs, not a runtime discovery path.
+
+Current required runtime content includes:
+
+1. `eor/portal:0E000004` (`SkillTable`)
+2. `eor/portal:0E00000E` (`SpellTable`)
+3. `eor/portal:0E000018` (`XpTable`)
+4. `holtburger/core:4D4F544B` (`MotionKinematics`)
+
+`MotionKinematics` is a derived asset emitted by `dat2hba`. It precomputes grounded motion-table command kinematics plus setup-model fallback so runtime consumers do not need to reopen raw motion tables, animations, or setup models just to recover locomotion rates.
+
+## 7. Implementation Notes (Rust)
+HBA files are generated by `holtburger-tools` and consumed via `HbaReader` in the `holtburger-dat` crate. For explicit namespace lookups, use the namespaced archive and resolver APIs rather than assuming a single implicit dataset role.
+
+For required derived assets, prefer typed resource-key lookups instead of hand-rolled probing. `MotionKinematics` is the current example of a required `holtburger/core` asset loaded this way.
+
+## 8. Migration And Repack Workflow
+HBA v1 is an explicit legacy format. The supported migration path is to re-pack retail DATs into HBA v2 instead of trying to transparently reinterpret older HBA files.
+
+Example:
+
+```bash
+cargo run -p holtburger-tools --bin dat2hba -- \
+	--profile pruned \
+	eor/portal=client_portal.dat \
+	eor/cell=client_cell_1.dat \
+	dats/assets.hba
+```
+
+That produces a single namespaced bundle suitable for the current runtime/bootstrap flow.
+
+Use `--profile micro` for the release-oriented minimal bundle. The current micro profile contains the three required portal tables plus the synthetic `holtburger/core:MotionKinematics` asset and no longer retains raw motion tables or animations solely for movement timing.
+
+## 9. Benchmarking
+The primary archive benchmark lives in `crates/holtburger-dat/benches/provider_bench.rs` and measures both provider reads and synthetic multi-namespace HBA operations.
+
+Run it with:
+
+```bash
+cargo bench -p holtburger-dat --bench provider_bench -- --noplot
+```

@@ -254,6 +254,32 @@ The raw packet must describe intent, not just velocity. In ACE, `BroadcastMoveme
 
 The safest autonomous client design mirrors ACE's separation of concerns.
 
+## 8.5. Unit Model For Local Controllers
+
+The client should keep three movement quantities distinct.
+
+### `run_rate` is not world speed
+
+ACE `run_rate` is a dimensionless scalar derived from burden and Run skill. It is the right value to echo in the run-facing observer packet fields, but it is not by itself a local meters-per-second budget.
+
+### Motion tables provide base kinematics
+
+The player's resolved motion table supplies the base walk/run/turn kinematics for the active stance. Those are the missing terms that make a local self-movement budget meaningful.
+
+### Local world speed must be resolved, not guessed
+
+For local self simulation and autonomous navigation, the correct shape is:
+
+`resolved_world_speed = base_motion_table_speed * run_rate * optional_speed_multiplier`
+
+In the current client architecture that means:
+
+- `holtburger-world` resolves `SelfMovementCapabilities`
+- `holtburger-core` uses those capabilities for local manual simulation
+- `apps/holtburger-cli` uses projected capabilities for autonomous navigation budgeting
+
+The important practical rule is: do not reintroduce guessed constants that convert `run_rate` directly into meters per second. If the client does not have resolved self-movement capabilities available, the safer behavior is to pause autonomous budgeting and wait for synchronized state rather than inventing a fallback speed model.
+
 ### 8.1 Local controller owns desired locomotion intent
 
 The client-side automation layer should decide:
@@ -436,6 +462,26 @@ For holtburger this means:
 - observer reconstruction and heartbeat timing should model the slower approximately 1-second authoritative / rebroadcast cadence
 
 If these are conflated, navigation becomes too coarse and starts issuing one-second movement pulses, which produces the same visible "snap every second" failure mode we saw during investigation.
+
+#### Holtburger observer-projection contract
+
+For holtburger's shared runtime, observer reconstruction should split responsibilities like this:
+
+- authoritative pose comes from `UpdatePosition` / `EntityMoved`
+- sticky locomotion intent comes from `UpdateMotion` / `EntityMotionUpdated`
+- retained velocity and angular velocity come from `VectorUpdate` / `EntityKinematicsUpdated`
+- grounded command kinematics come from the required `holtburger/core:MotionKinematics` asset emitted by `dat2hba`
+
+That last point matters. ACE often does not send a usable grounded meters-per-second value for ordinary locomotion, and observer-facing `UpdatePosition` anchors may omit velocity entirely. So a client that wants stable remote grounded simulation cannot rely on packet velocity alone.
+
+The runtime rule should be:
+
+1. Use authoritative position updates as the correction baseline.
+2. Use sticky interpreted motion state plus resolved motion-table command kinematics for grounded forward, sidestep, backpedal, and turn simulation.
+3. Use retained server velocity and omega for bounded dead reckoning when the actor is airborne, server-controlled, or lacks a resolvable grounded command path.
+4. Suspend or snap projection instead of guessing when teleport, force-position, despawn, landblock change, or missing required kinematics invalidate the prior simulation state.
+
+The derived `MotionKinematics` asset is the canonical source for step 2. Runtime consumers should not reopen raw motion tables, setup models, or animation payloads just to recover grounded movement rates.
 
 #### Quick lifecycle table
 

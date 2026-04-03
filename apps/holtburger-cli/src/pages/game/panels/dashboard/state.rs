@@ -1,6 +1,8 @@
 use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppUiAction, DashboardTab, TabController, UpdateResult, VerbInputState};
+use crate::types::{
+    AppUiAction, DashboardTab, RedrawPriority, TabController, UpdateResult, VerbInputState,
+};
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Default)]
@@ -106,7 +108,7 @@ impl DashboardState {
 
         if let AppUiAction::SetDashboardActiveTab(tab) = action {
             self.active_tab = tab;
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
 
         if let Some(tab_result) = self.nearby.handle_ui_action(&action, data, view) {
@@ -131,7 +133,7 @@ impl DashboardState {
             result.merge(tab_result);
         }
 
-        if result.needs_redraw || !result.actions.is_empty() || !result.commands.is_empty() {
+        if result.redraw_requested() || !result.actions.is_empty() || !result.commands.is_empty() {
             Some(result)
         } else {
             None

@@ -323,16 +323,16 @@ impl UpdateResult {
     }
 
     pub fn with_redraw(mut self, requested: bool) -> Self {
-        self.request_redraw(if requested {
+        self.redraw_priority = if requested {
             RedrawPriority::Immediate
         } else {
             RedrawPriority::None
-        });
+        };
         self
     }
 
     pub fn with_redraw_priority(mut self, priority: RedrawPriority) -> Self {
-        self.request_redraw(priority);
+        self.redraw_priority = priority;
         self
     }
 

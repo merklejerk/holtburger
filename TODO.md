@@ -222,6 +222,7 @@
 - [x] Interpolate entity motion properties.
 - [x] Harden reconnect. (Just quit on DC)
 - [x] Burden display missing.
+- [x] We should make HBAs support arbitrary file types and introduce a custom "MotionFrames" (come up with a better name) table file type, which dat2hba generates by walking the motion tables and resolving the necessary animation frame data from the referenced animation files to get the animation metadata needed to simulate movement accurately.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
@@ -236,7 +237,6 @@
     - Client runtime should have predefined asset dependencies that need to be passed into the builder.
     - Or maybe Client is split in two:: pre-DDD and post-DDD, with only the latter lazily built with asset dependencies.
     - The assets passed into client don't even have to be disk-shaped, they can be narrower.
-- [] We should make HBAs support arbitrary file types and introduce a custom "MotionFrames" (come up with a better name) table file type, which dat2hba generates by walking the motion tables and resolving the necessary animation frame data from the referenced animation files to get the animation metadata needed to simulate movement accurately.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

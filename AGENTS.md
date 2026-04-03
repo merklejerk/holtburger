@@ -10,6 +10,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - The real target is a traditional 3D client that can replace the closed-source retail client. Judge shared APIs and abstractions against that future client, not just today's TUI.
 - Do not let the TUI's lower-fidelity needs push shared crates toward narrow models that will block richer rendering, motion, visibility, animation, or interaction later.
 - Shared crates should contain behavior, data, and APIs that are plausibly common to both the TUI and a future 3D client. Frontend-specific UX or control policy should stay in the frontend.
+- Don't sacrifice cleaner design for backwards compatibility, especially for tests.
 
 ## Crate Boundaries
 

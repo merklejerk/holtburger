@@ -8,7 +8,6 @@ repository.workspace = true
 
 [dependencies]
 holtburger-common.workspace = true
-holtburger-dat.workspace = true
 holtburger-protocol.workspace = true
 holtburger-session.workspace = true
 holtburger-world.workspace = true

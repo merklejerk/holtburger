@@ -1,4 +1,4 @@
-use super::{Client, types::*};
+use super::{ClientRuntime, types::*};
 use anyhow::Result;
 use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
@@ -18,7 +18,7 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
     )
 }
 
-impl Client {
+impl ClientRuntime {
     async fn enter_world(&mut self) -> Result<()> {
         if self.state == ClientState::InWorld {
             return Ok(());
@@ -44,7 +44,7 @@ impl Client {
                         self.movement
                             .record_server_control_sequence(data.server_control_sequence);
                         let (wire_events, world_events) = {
-                            let Client {
+                            let ClientRuntime {
                                 simulation,
                                 movement,
                                 world,
@@ -508,7 +508,7 @@ mod tests {
     use holtburger_world::WorldEvent;
     use holtburger_world::stats::CharacterLevelInfo;
 
-    fn build_test_client() -> Client {
+    fn build_test_client() -> ClientRuntime {
         builder::build_test_client(ClientState::Connected)
     }
 

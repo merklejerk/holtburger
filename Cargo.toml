@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/holtburger-content",
     "crates/holtburger-core",
     "crates/holtburger-common",
     "crates/holtburger-dat",
@@ -21,6 +22,7 @@ license = "AGPL-3.0"
 repository = "https://github.com/merklejerk/holtburger"
 
 [workspace.dependencies]
+holtburger-content = { path = "crates/holtburger-content" }
 holtburger-core = { path = "crates/holtburger-core" }
 holtburger-world = { path = "crates/holtburger-world" }
 holtburger-session = { path = "crates/holtburger-session" }

@@ -6,6 +6,7 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
+use holtburger_content::ContentRepository;
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
@@ -14,7 +15,7 @@ use holtburger_world::SelfMovementKinematics;
 use holtburger_world::SpatialEntitySample;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
-use holtburger_world::spell::SpellCatalog;
+use holtburger_world::spell::{SpellCatalog, SpellInfo};
 use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
@@ -288,8 +289,8 @@ pub struct GameData {
     pub runtime_body_cache: RuntimeBodyViewCache,
     /// Projected shared self-movement kinematics from core/world.
     pub self_movement_kinematics: Option<SelfMovementKinematics>,
-    /// Full spell catalog loaded from portal.dat.
-    pub spell_catalog: Option<Arc<SpellCatalog>>,
+    /// Frontend-owned static content/query surface.
+    pub content: Option<Arc<ContentRepository>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
     /// Server name (e.g. "Morningthaw").
@@ -336,7 +337,7 @@ impl Default for GameData {
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),
             self_movement_kinematics: None,
-            spell_catalog: None,
+            content: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
@@ -384,15 +385,24 @@ impl GameData {
         }
     }
 
-    pub fn spell_name(&self, spell_id: u32) -> Option<&str> {
-        self.spell_catalog
+    pub fn spell_catalog(&self) -> Option<Arc<SpellCatalog>> {
+        self.content
             .as_ref()
-            .and_then(|catalog| catalog.resolve_name(spell_id))
+            .and_then(|content| content.spell_catalog().ok())
+    }
+
+    pub fn spell_info(&self, spell_id: u32) -> Option<SpellInfo> {
+        self.spell_catalog()
+            .and_then(|catalog| catalog.get(spell_id).cloned())
+    }
+
+    pub fn spell_name(&self, spell_id: u32) -> Option<String> {
+        self.spell_catalog()
+            .and_then(|catalog| catalog.resolve_name(spell_id).map(str::to_string))
     }
 
     pub fn spell_name_or_fallback(&self, spell_id: u32) -> String {
         self.spell_name(spell_id)
-            .map(str::to_string)
             .unwrap_or_else(|| format!("Spell #{}", spell_id))
     }
 

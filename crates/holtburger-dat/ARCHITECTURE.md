@@ -4,16 +4,17 @@ The library crate responsible for reading, mounting, and parsing Asheron's Call 
 
 ## Core Philosophical Principles
 - **Read Only**: This library is strictly designed to query and project bytes read off the disk into structured domain models. Mutating DAT file contents or building DAT repacking tools is considered out of scope here.
-- **Runtime HBA First**: Client/runtime consumers load required assets from namespaced HBA bundles or mounted providers. Raw retail DAT access remains valid for tooling and offline derivation, not normal runtime bootstrap.
+- **Runtime HBA First**: Client/runtime consumers load required assets from namespaced HBA bundles through layered mounted sources. Raw retail DAT access remains valid for tooling and offline derivation, not normal runtime bootstrap.
 - **Fast / Memoized**: Heavy lookup calls are structurally optimized or cached so indexing does not block the real-time game engine or UI ticks.
 
 ## Key Components
 
 ### 1. Resource Backends ([src/lib.rs](src/lib.rs))
-The crate exposes two primary runtime-facing resource backends:
+The crate exposes two primary resource backends plus one runtime-facing composition layer:
 
 - `DatDatabase` for direct retail DAT access in tooling, diagnostics, and offline derivation
-- `HbaReader` plus mounted resolver types for namespaced HBA runtime access
+- `HbaReader` for namespaced HBA runtime access
+- `ResourceSource` plus `LayeredResourceResolver` for source-oriented runtime composition
 
 `DatDatabase` mounts the underlying local file buffers and reconstructs the DAT B-tree directory structure internally to map resource IDs to disk offsets. The HBA reader resolves namespaced assets from archive metadata and fixed-width index entries.
 
@@ -25,8 +26,8 @@ Contains distinct semantic parsers for the actual internal file blobs unpacked f
 - **`motion_kinematics`**: Holtburger-derived runtime asset containing precomputed grounded locomotion rates and setup-model fallback mappings.
 - **`skill_table` / `spell_table` / `xp_table`**: Required gameplay tables loaded directly from namespaced resources.
 
-### 3. Mounted Resource Resolution
-The mounted resolver layer lets runtime code compose multiple namespaced providers and prefer higher-fidelity resources within a namespace.
+### 3. Layered Resource Resolution
+The layered resolver lets runtime code compose multiple mixed-namespace sources and prefer higher-fidelity resources for a full `ResourceKey`.
 
 This is the seam used by `holtburger-core` and `holtburger-world` to hard-require assets such as:
 
@@ -44,7 +45,7 @@ Includes specialized interpretation logic mapping Asheron's Call's multi-layered
 ```mermaid
 sequenceDiagram
     participant Core as Engine/WorldState
-    participant Resolver as ScopedResourceResolver
+    participant Resolver as LayeredResourceResolver
     participant Hba as HBA Bundle
 
     Core->>Resolver: get_file_for<MotionKinematics>()
@@ -54,7 +55,7 @@ sequenceDiagram
 ```
 
 1. Runtime lookups begin from a namespaced resource key or typed required asset lookup.
-2. The mounted resolver selects the best provider for that namespace and file id.
+2. The layered resolver selects the best mounted source for that namespace and file id.
 3. Relevant file-type parsers unpack the byte buffer into strongly typed runtime models.
 
 For tooling, the flow is similar except the source backend is usually `DatDatabase`, which reads retail records directly before optional derivation into HBA assets.

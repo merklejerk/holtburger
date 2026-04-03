@@ -43,16 +43,16 @@ impl ClientSimulationSystem {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn track_actor(&mut self, actor_id: Guid) {
-        let body_id = SpatialBodyId::Entity(actor_id);
-        if actor_id != Guid::NULL && !self.tracked_body_ids.contains(&body_id) {
+    pub(super) fn track_body(&mut self, body_id: SpatialBodyId) {
+        if body_id.authoritative_guid() != Some(Guid::NULL)
+            && !self.tracked_body_ids.contains(&body_id)
+        {
             self.tracked_body_ids.push(body_id);
         }
     }
 
-    pub(super) fn untrack_actor(&mut self, actor_id: Guid) {
-        self.tracked_body_ids
-            .retain(|tracked| *tracked != SpatialBodyId::Entity(actor_id));
+    pub(super) fn untrack_body(&mut self, body_id: SpatialBodyId) {
+        self.tracked_body_ids.retain(|tracked| *tracked != body_id);
     }
 
     pub(super) fn tick(

@@ -5,7 +5,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectExt as _,
     WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{
     MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
 };
@@ -19,6 +19,7 @@ use crate::spatial::{BasicSpatialPhysics, SpatialPhysics, SpatialScene};
 use crate::spell::{SpellCatalog, SpellInfo};
 use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
+use crate::state::self_movement::SelfMovementCapabilities;
 use crate::state::trade::TradeState;
 use crate::stats;
 use crate::vendor::VendorState;
@@ -52,12 +53,14 @@ pub struct WorldState {
     pub xp_table: XpTable,
     pub skill_table: Arc<SkillTable>,
     pub spell_catalog: Arc<SpellCatalog>,
+    pub motion_kinematics: Arc<MotionKinematics>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
+    pub(crate) self_movement_capabilities_override: Option<SelfMovementCapabilities>,
 }
 
 impl WorldState {
@@ -207,6 +210,13 @@ impl WorldState {
         let spell_table = SpellTable::read(&mut std::io::Cursor::new(spell_table_data))
             .context("failed to parse required spell table")?;
 
+        let motion_kinematics_data = resources
+            .get_file_for::<MotionKinematics>()
+            .context("missing required motion kinematics table from mounted resources")?;
+        let motion_kinematics =
+            MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_data))
+                .context("failed to parse required motion kinematics table")?;
+
         Ok(Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
@@ -215,12 +225,14 @@ impl WorldState {
             xp_table,
             skill_table: Arc::new(skill_table),
             spell_catalog: Arc::new(spell_table.into()),
+            motion_kinematics: Arc::new(motion_kinematics),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
             entity_lifecycle: EntityLifecycleStore::default(),
+            self_movement_capabilities_override: None,
         })
     }
 
@@ -239,22 +251,36 @@ impl WorldState {
             xp_table: XpTable::default(),
             skill_table: Arc::new(SkillTable::default()),
             spell_catalog: Arc::new(SpellCatalog::default()),
+            motion_kinematics: Arc::new(MotionKinematics::default()),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
             entity_lifecycle: EntityLifecycleStore::default(),
+            self_movement_capabilities_override: None,
         }
+    }
+
+    pub fn with_provider_for_namespace(
+        namespace: &str,
+        provider: Arc<dyn ResourceProvider>,
+    ) -> Result<Self> {
+        Self::new(Arc::new(ScopedResourceResolver::from_mounted([
+            MountedResourceProvider::with_namespace(namespace, provider)?,
+        ])))
     }
 
     pub fn with_provider(
         scope: ResourceScope,
         provider: Arc<dyn ResourceProvider>,
     ) -> Result<Self> {
-        Self::new(Arc::new(ScopedResourceResolver::from_mounted([
-            MountedResourceProvider::new(scope, provider),
-        ])))
+        Self::with_provider_for_namespace(scope.namespace(), provider)
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_motion_kinematics(&mut self, motion_kinematics: MotionKinematics) {
+        self.motion_kinematics = Arc::new(motion_kinematics);
     }
 
     pub fn current_server_time(&self) -> f64 {

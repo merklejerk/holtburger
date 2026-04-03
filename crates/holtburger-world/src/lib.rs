@@ -35,3 +35,8 @@ pub use spatial::{
     SpatialEvent, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState,
     SpatialScene, SpatialSolveBatch, SpatialSolveRequest, advance_actor_kinematics,
 };
+pub use state::{
+    PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
+    RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
+    SelfMovementKinematics, SelfMovementKinematicsError,
+};

@@ -1,6 +1,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use holtburger_dat::{DatDatabase, DatFileType, HbaReader, HbaWriter, ResourceProvider};
+use holtburger_dat::archive::HbaEntry;
+use holtburger_dat::{
+    DatDatabase, DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
+    ResourceProvider,
+};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -44,20 +49,27 @@ impl Provider {
         }
     }
 
-    fn get_file(&self, id: u32) -> Result<Vec<u8>> {
+    fn get_file_in_namespace(&self, namespace: Option<&str>, id: u32) -> Result<Vec<u8>> {
         match self {
             Self::Dat(db) => Ok(db.get_file(id)?),
-            Self::Hba(hba) => Ok(hba.get_file(id)?),
+            Self::Hba(hba) => match namespace {
+                Some(namespace) => Ok(hba.get_file_in_namespace(namespace, id)?),
+                None => Ok(hba.get_file(id)?),
+            },
         }
     }
 
-    fn list_ids(&self) -> Vec<u32> {
-        let mut ids = match self {
-            Self::Dat(db) => db.files.keys().copied().collect::<Vec<_>>(),
-            Self::Hba(hba) => hba.entries().filter_map(|e| e.ok().map(|e| e.id)).collect(),
-        };
-        ids.sort();
-        ids
+    fn get_hba_entry(&self, namespace: Option<&str>, id: u32) -> Result<Option<HbaEntry>> {
+        match self {
+            Self::Dat(_) => Ok(None),
+            Self::Hba(hba) => {
+                let entry = match namespace {
+                    Some(namespace) => hba.find_entry_in_namespace(namespace, id)?,
+                    None => hba.find_entry(id)?,
+                };
+                Ok(Some(entry))
+            }
+        }
     }
 
     fn kind_name(&self) -> &'static str {
@@ -73,63 +85,25 @@ impl Provider {
             Self::Hba(hba) => hba.header.entry_count as usize,
         }
     }
+}
 
-    fn print_info(&self, id: u32) {
-        match self {
-            Self::Dat(db) => {
-                if let Some(entry) = db.files.get(&id) {
-                    println!("File ID: {:08X}", entry.id);
-                    println!("Type:    {}", entry.file_type());
-                    println!("Size:    {}", entry.size);
-                    println!("Offset:  {:08X}", entry.offset);
-                    println!("Flags:   {:08X}", entry.bit_flags);
-                } else {
-                    println!("File ID {:08X} not found.", id);
-                }
-            }
-            Self::Hba(hba) => {
-                if let Ok(entry) = hba.find_entry(id) {
-                    println!("File ID: {:08X}", entry.id);
-                    println!("Type:    {}", DatFileType::from_id(entry.id));
-                    println!("Size:    {}", entry.size);
-                    println!("Offset:  {:08X}", entry.offset);
-                    println!("Flags:   {:02X}", entry.flags);
-                    println!("Pruned:  {}", entry.is_pruned());
-                    println!("Compressed: {}", entry.is_compressed());
-                } else {
-                    println!("File ID {:08X} not found.", id);
-                }
-            }
-        }
+fn format_type_label(type_id: u32) -> String {
+    let file_type = DatFileType::from_type_id(type_id);
+    if file_type == DatFileType::Unknown {
+        format!("Unknown (0x{:08X})", type_id)
+    } else {
+        format!("{} (0x{:08X})", file_type, type_id)
     }
+}
 
-    fn print_list_entry(&self, id: u32) {
-        match self {
-            Self::Dat(db) => {
-                let entry = &db.files[&id];
-                println!(
-                    "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:08X}",
-                    id,
-                    entry.file_type().to_string(),
-                    entry.size,
-                    entry.offset,
-                    entry.bit_flags
-                );
-            }
-            Self::Hba(hba) => {
-                if let Ok(entry) = hba.find_entry(id) {
-                    println!(
-                        "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:02X}",
-                        id,
-                        DatFileType::from_id(id).to_string(),
-                        entry.size,
-                        entry.offset,
-                        entry.flags
-                    );
-                }
-            }
-        }
-    }
+fn sanitize_namespace_for_filename(namespace: &str) -> String {
+    namespace
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' => '_',
+            other => other,
+        })
+        .collect()
 }
 
 fn parse_id_auto(raw: &str) -> Result<u32> {
@@ -166,6 +140,9 @@ enum Commands {
         path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
+        /// Namespace label for multi-namespace HBA archives
+        #[arg(long)]
+        namespace: Option<String>,
     },
     /// Export a file to disk
     Export {
@@ -173,6 +150,9 @@ enum Commands {
         path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
+        /// Namespace label for multi-namespace HBA archives
+        #[arg(long)]
+        namespace: Option<String>,
         #[arg(short, long, value_name = "OUT")]
         output: Option<PathBuf>,
     },
@@ -182,6 +162,9 @@ enum Commands {
         path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
+        /// Namespace label for multi-namespace HBA archives
+        #[arg(long)]
+        namespace: Option<String>,
         #[arg(short, long, value_name = "OUT")]
         output: Option<PathBuf>,
     },
@@ -191,6 +174,9 @@ enum Commands {
         path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
+        /// Namespace label for multi-namespace HBA archives
+        #[arg(long)]
+        namespace: Option<String>,
     },
     /// Scan table records for a WCID-based Weenie entry
     WeenieFind {
@@ -205,6 +191,9 @@ enum Commands {
         path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
+        /// Namespace label for multi-namespace HBA archives
+        #[arg(long)]
+        namespace: Option<String>,
     },
     /// Pack a directory into an HBA archive
     HbaPack {
@@ -221,6 +210,7 @@ enum Commands {
 fn pack_hba(input: &Path, output: &Path, compress: bool) -> Result<()> {
     let mut writer = HbaWriter::new();
     writer.set_compression(compress);
+    let namespace = infer_single_dataset_namespace(output);
 
     println!("Packing files from {:?} into {:?}", input, output);
 
@@ -240,7 +230,7 @@ fn pack_hba(input: &Path, output: &Path, compress: bool) -> Result<()> {
                     .with_context(|| format!("Invalid hex Type ID in filename: {}", filename))?;
 
                 let data = std::fs::read(&path)?;
-                writer.add(id, type_id, data)?;
+                writer.add(namespace, id, type_id, data)?;
                 count += 1;
             } else {
                 println!(
@@ -254,6 +244,20 @@ fn pack_hba(input: &Path, output: &Path, compress: bool) -> Result<()> {
     writer.write(output).context("Failed to write HBA file")?;
     println!("Successfully packed {} files into {:?}", count, output);
     Ok(())
+}
+
+fn infer_single_dataset_namespace(path: &Path) -> &'static str {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if stem.contains("cell") {
+        EOR_CELL_NAMESPACE
+    } else {
+        EOR_PORTAL_NAMESPACE
+    }
 }
 
 fn main() -> Result<()> {
@@ -281,41 +285,134 @@ fn main() -> Result<()> {
                     println!("Version:     {}", hba.header.version);
                     println!("Index Offs:  0x{:08X}", hba.header.index_offset);
                     println!("Meta Size:   {}", hba.header.metadata_size);
-                    println!("Profile:     0x{:02X}", hba.header.profile);
+                    let mut counts = BTreeMap::new();
+                    for entry in hba.entries() {
+                        let entry = entry?;
+                        let namespace = entry.namespace_id()?.to_string();
+                        *counts.entry(namespace).or_insert(0usize) += 1;
+                    }
+                    println!("Namespaces:  {}", counts.len());
+                    for (namespace, count) in counts {
+                        println!("  {} -> {} entries", namespace, count);
+                    }
                 }
-                Provider::Dat(_db) => {
-                    println!("Note: Detailed DAT meta not yet implemented.");
+                Provider::Dat(db) => {
+                    println!("Magic:       0x{:08X}", db.header.magic);
+                    println!("Block Size:  {}", db.header.block_size);
+                    println!("Dataset:     {}", db.header.dataset);
+                    match db.retail_namespace_hint() {
+                        Some(namespace) => println!("Namespace:   {}", namespace),
+                        None => println!("Namespace:   <unknown retail dataset>"),
+                    }
                 }
             }
             Ok(())
         }
         Commands::List { path } => {
             let provider = Provider::open(&path)?;
-            let ids = provider.list_ids();
-            for id in ids {
-                provider.print_list_entry(id);
+            match &provider {
+                Provider::Dat(db) => {
+                    let mut ids = db.files.keys().copied().collect::<Vec<_>>();
+                    ids.sort();
+                    for id in ids {
+                        let entry = &db.files[&id];
+                        println!(
+                            "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:08X}",
+                            id,
+                            entry.file_type().to_string(),
+                            entry.size,
+                            entry.offset,
+                            entry.bit_flags
+                        );
+                    }
+                }
+                Provider::Hba(hba) => {
+                    for entry in hba.entries() {
+                        let entry = entry?;
+                        let namespace = entry.namespace_id()?;
+                        println!(
+                            "{}:{:08X} - {:<28} - Size: {:<10} - Offset: {:08X} - Flags: {:02X}",
+                            namespace,
+                            entry.file_id,
+                            format_type_label(entry.type_id),
+                            entry.size,
+                            entry.offset,
+                            entry.flags
+                        );
+                    }
+                }
             }
             Ok(())
         }
-        Commands::Info { path, id } => {
+        Commands::Info {
+            path,
+            id,
+            namespace,
+        } => {
             let provider = Provider::open(&path)?;
             let id_val = parse_id_auto(&id)?;
-            provider.print_info(id_val);
+            match &provider {
+                Provider::Dat(db) => {
+                    if let Some(entry) = db.files.get(&id_val) {
+                        println!("File ID: {:08X}", entry.id);
+                        println!("Type:    {}", entry.file_type());
+                        println!("Size:    {}", entry.size);
+                        println!("Offset:  {:08X}", entry.offset);
+                        println!("Flags:   {:08X}", entry.bit_flags);
+                    } else {
+                        println!("File ID {:08X} not found.", id_val);
+                    }
+                }
+                Provider::Hba(_) => {
+                    let entry = provider
+                        .get_hba_entry(namespace.as_deref(), id_val)?
+                        .expect("HBA provider should return an entry or an error");
+                    println!("Namespace: {}", entry.namespace_id()?);
+                    println!("File ID:   {:08X}", entry.file_id);
+                    println!("Type:      {}", format_type_label(entry.type_id));
+                    println!("Size:      {}", entry.size);
+                    println!("Offset:    {:08X}", entry.offset);
+                    println!("Flags:     {:02X}", entry.flags);
+                    println!("Pruned:    {}", entry.is_pruned());
+                    println!("Compressed:{}", entry.is_compressed());
+                }
+            }
             Ok(())
         }
-        Commands::Export { path, id, output } => {
+        Commands::Export {
+            path,
+            id,
+            namespace,
+            output,
+        } => {
             let provider = Provider::open(&path)?;
             let id_val = parse_id_auto(&id)?;
-            let data = provider.get_file(id_val)?;
-            let out_path = output.unwrap_or_else(|| PathBuf::from(format!("{:08X}.bin", id_val)));
+            let data = provider.get_file_in_namespace(namespace.as_deref(), id_val)?;
+            let out_path = output.unwrap_or_else(|| {
+                match provider.get_hba_entry(namespace.as_deref(), id_val) {
+                    Ok(Some(entry)) => PathBuf::from(format!(
+                        "{}_{:08X}.bin",
+                        sanitize_namespace_for_filename(
+                            entry.namespace_id().expect("valid namespace").as_str()
+                        ),
+                        id_val
+                    )),
+                    _ => PathBuf::from(format!("{:08X}.bin", id_val)),
+                }
+            });
             std::fs::write(&out_path, data)?;
             println!("Exported {:08X} to {:?}", id_val, out_path);
             Ok(())
         }
-        Commands::Extract { path, id, output } => {
+        Commands::Extract {
+            path,
+            id,
+            namespace,
+            output,
+        } => {
             let provider = Provider::open(&path)?;
             let id_val = parse_id_auto(&id)?;
-            let data = provider.get_file(id_val)?;
+            let data = provider.get_file_in_namespace(namespace.as_deref(), id_val)?;
 
             match id_val >> 24 {
                 0x06 => {
@@ -381,7 +478,11 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Commands::Weenie { path, id } => {
+        Commands::Weenie {
+            path,
+            id,
+            namespace,
+        } => {
             let provider = Provider::open(&path)?;
             let parsed = parse_id_auto(&id)?;
             let direct_ids = vec![parsed];
@@ -389,7 +490,7 @@ fn main() -> Result<()> {
             let mut loaded = None;
             for file_id in &direct_ids {
                 if let Some(weenie) = provider
-                    .get_file(*file_id)
+                    .get_file_in_namespace(namespace.as_deref(), *file_id)
                     .ok()
                     .and_then(|data| holtburger_dat::weenie::Weenie::unpack(&data).ok())
                 {
@@ -420,21 +521,34 @@ fn main() -> Result<()> {
         Commands::WeenieFind { path, wcid } => {
             let provider = Provider::open(&path)?;
             let target_wcid = parse_id_auto(&wcid)?;
-            let candidate_ids: Vec<u32> = provider
-                .list_ids()
-                .into_iter()
-                .filter(|id| (*id >> 24) == 0x0E)
-                .collect();
+            let candidate_entries: Vec<(Option<String>, u32)> = match &provider {
+                Provider::Dat(db) => db
+                    .files
+                    .keys()
+                    .copied()
+                    .filter(|id| (*id >> 24) == 0x0E)
+                    .map(|file_id| (None, file_id))
+                    .collect(),
+                Provider::Hba(hba) => hba
+                    .entries()
+                    .filter_map(|entry| match entry {
+                        Ok(entry) if entry.type_id == DatFileType::Table as u32 => {
+                            Some((Some(entry.namespace_id().ok()?.to_string()), entry.file_id))
+                        }
+                        _ => None,
+                    })
+                    .collect(),
+            };
 
             println!(
                 "Scanning {} table files (0x0E prefix) for WCID {}...",
-                candidate_ids.len(),
+                candidate_entries.len(),
                 target_wcid
             );
 
             let mut hits = 0usize;
-            for file_id in candidate_ids {
-                let Ok(data) = provider.get_file(file_id) else {
+            for (namespace, file_id) in candidate_entries {
+                let Ok(data) = provider.get_file_in_namespace(namespace.as_deref(), file_id) else {
                     continue;
                 };
 
@@ -444,7 +558,10 @@ fn main() -> Result<()> {
 
                 if let Some(weenie) = table.entries.get(&target_wcid) {
                     hits += 1;
-                    println!("Hit in table {:08X}", file_id);
+                    match namespace {
+                        Some(namespace) => println!("Hit in table {}:{:08X}", namespace, file_id),
+                        None => println!("Hit in table {:08X}", file_id),
+                    }
                     println!("  Entry WCID: {:08X}", weenie.wcid);
                     println!("  WeenieType: {}", weenie.weenie_type);
                     if let Some(name) = weenie.name() {
@@ -461,7 +578,11 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Commands::Landblock { path, id } => {
+        Commands::Landblock {
+            path,
+            id,
+            namespace,
+        } => {
             let provider = Provider::open(&path)?;
             let mut id_val = parse_id_auto(&id)?;
 
@@ -470,7 +591,7 @@ fn main() -> Result<()> {
                 id_val |= 0xFFFF;
             }
 
-            let terrain_data = provider.get_file(id_val)?;
+            let terrain_data = provider.get_file_in_namespace(namespace.as_deref(), id_val)?;
             let lb = holtburger_dat::landblock::CellLandblock::unpack(&terrain_data)?;
             println!("Landblock ID:   {:08X}", lb.id);
             println!("Has Objects:     {}", lb.has_objects != 0);
@@ -486,7 +607,7 @@ fn main() -> Result<()> {
             }
 
             let info_id = (id_val & 0xFFFF0000) | 0xFFFE;
-            if let Ok(info_data) = provider.get_file(info_id) {
+            if let Ok(info_data) = provider.get_file_in_namespace(namespace.as_deref(), info_id) {
                 let info = holtburger_dat::landblock::LandblockInfo::unpack(&info_data)?;
                 println!("\nLandblock Info ({:08X}):", info_id);
                 println!("Objects:   {}", info.objects.len());

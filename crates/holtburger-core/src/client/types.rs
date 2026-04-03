@@ -16,6 +16,7 @@ use holtburger_protocol::messages::{
     TurbineChatTypeId, ViewContentsEventItem,
 };
 use holtburger_world::FellowshipActivity;
+use holtburger_world::SelfMovementKinematics;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::{FellowshipState, TradeState};
@@ -380,6 +381,9 @@ pub enum ClientViewEvent {
     },
     PlayerGroundedUpdated {
         grounded: bool,
+    },
+    SelfMovementKinematicsUpdated {
+        kinematics: Option<SelfMovementKinematics>,
     },
     ForcedReposition {
         guid: Guid,

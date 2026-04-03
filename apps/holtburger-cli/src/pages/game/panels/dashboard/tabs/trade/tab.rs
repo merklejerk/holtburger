@@ -394,7 +394,7 @@ mod tests {
         };
 
         let result = tab.apply_filter_input("acid".to_string(), &data, &view);
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(tab.visible_vendor_item_indices(&view), vec![0]);
         assert_eq!(tab.item_count(&data, &view), 1);
     }
@@ -451,7 +451,7 @@ mod tests {
 
         let result = tab.handle_footer_input(KeyEvent::from(KeyCode::Esc), &data, &view);
 
-        assert!(result.is_some_and(|update| update.needs_redraw));
+        assert!(result.is_some_and(|update| update.redraw_requested()));
         assert!(tab.active_filter.is_none());
         assert!(tab.footer_header().is_none());
     }

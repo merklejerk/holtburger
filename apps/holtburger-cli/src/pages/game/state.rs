@@ -41,7 +41,7 @@ use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
-    Interaction, UpdateResult,
+    Interaction, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -187,7 +187,7 @@ impl GameState {
                     ClientViewEvent::CombatFeedback(feedback),
                     self.data.character_name.as_deref(),
                 );
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::PlayerEnchantmentsUpdated { .. }
             | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
@@ -200,10 +200,10 @@ impl GameState {
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
                 self.sync_weapon_swap_controller(Instant::now(), &mut result);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::BusyOperationFinished { .. } => {
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
                 let entity_ref = entity.as_ref();
@@ -218,7 +218,7 @@ impl GameState {
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.refresh_entity_context_if_visible(entity_ref.guid);
                 if self.update_inventory_and_equipment(entity_ref) {
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 self.sync_weapon_swap_controller(now, &mut result);
             }
@@ -229,7 +229,7 @@ impl GameState {
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.refresh_entity_context_if_visible(entity_ref.guid);
                 if self.update_inventory_and_equipment(entity_ref) {
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 self.sync_weapon_swap_controller(now, &mut result);
             }
@@ -244,7 +244,7 @@ impl GameState {
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
                     self.refresh_entity_context_if_visible(guid);
                     if self.update_inventory_and_equipment(&entity) {
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                     self.sync_weapon_swap_controller(now, &mut result);
                 }
@@ -258,7 +258,7 @@ impl GameState {
                     }
                 }
                 self.refresh_entity_context_if_visible(guid);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Motion);
             }
             ClientViewEvent::EntityKinematicsUpdated {
                 guid,
@@ -269,14 +269,14 @@ impl GameState {
                     entity.velocity = velocity;
                     entity.omega = omega;
                     self.refresh_entity_context_if_visible(guid);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Motion);
                 }
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.motion_snapshot = snapshot;
                     self.refresh_entity_context_if_visible(guid);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Motion);
                 }
             }
             ClientViewEvent::PlayerGroundedUpdated { grounded } => {
@@ -287,23 +287,23 @@ impl GameState {
             }
             ClientViewEvent::RuntimeBodySnapshot { .. } => {
                 self.refresh_context_buffer();
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::RuntimeBodyUpserted { body } => {
                 if let Some(guid) = body.body_id.authoritative_guid() {
                     self.refresh_entity_context_if_visible(guid);
                 }
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Motion);
             }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 if let Some(guid) = body_id.authoritative_guid() {
                     self.refresh_entity_context_if_visible(guid);
                 }
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::RuntimeBodiesReset { .. } => {
                 self.refresh_context_buffer();
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::ForcedReposition { guid, pos, .. } => {
                 let is_player_move = Some(guid) == self.data.player_guid;
@@ -314,7 +314,7 @@ impl GameState {
                     }
                 }
                 self.refresh_entity_context_if_visible(guid);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::TeleportStarted { .. } => {}
             ClientViewEvent::EntityDespawned { guid } => {
@@ -344,7 +344,7 @@ impl GameState {
                 {
                     *existing = *item.clone();
                     self.refresh_vendor_item_context_if_visible(item.guid);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             ClientViewEvent::FellowshipStateUpdated { fellowship } => {
@@ -359,7 +359,7 @@ impl GameState {
                         action: AppUiAction::SetDashboardActiveTab(DashboardTab::Party),
                     });
                 }
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
@@ -380,11 +380,11 @@ impl GameState {
             ClientViewEvent::EntityIdentified { entity } => {
                 let entity_ref = entity.as_ref();
                 if self.update_inventory_and_equipment(entity_ref) {
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 self.handle_entity_identified(entity_ref);
                 self.sync_weapon_swap_controller(now, &mut result);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::NoClipUpdated { .. } => {
                 result.merge(self.handle_navigation_event(event));
@@ -437,7 +437,7 @@ impl GameState {
                     && !session.queued_items.contains(&guid)
                 {
                     session.queued_items.push(guid);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             AppAction::UnqueueSalvageItem { guid } => {
@@ -450,7 +450,7 @@ impl GameState {
                         self.clear_active_interaction(&mut result);
                         self.view.salvaging = None;
                     }
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             AppAction::SalvageItems {
@@ -465,7 +465,7 @@ impl GameState {
                 }
                 self.clear_active_interaction(&mut result);
                 self.view.salvaging = None;
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::Approach { .. } | AppAction::Follow { .. } => {
                 self.apply_navigation_input(
@@ -660,12 +660,12 @@ impl GameState {
             AppAction::CycleCombatProfileLevel => {
                 self.data.combat_controls.cycle_profile_level();
                 self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::CycleCombatAttackHeight => {
                 self.data.combat_controls.cycle_attack_height();
                 self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::SetCombatMode { mode } => match self.try_enter_combat_mode(mode) {
                 EnterCombatModeResult::Failed(res) => {
@@ -750,7 +750,7 @@ impl GameState {
             AppAction::ChangeContextView { view } => {
                 self.view.context_view = view;
                 self.view.context_scroll_offset = 0;
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
                 self.refresh_context_buffer();
             }
             AppAction::BeginInteraction { interaction } => {
@@ -767,7 +767,7 @@ impl GameState {
                     }
                     self.set_active_interaction(Some(interaction), &mut result);
                 }
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::CancelInteraction => {
                 if let Some(input) = navigation_input {
@@ -776,11 +776,11 @@ impl GameState {
                     self.clear_active_interaction(&mut result);
                 }
                 self.view.salvaging = None;
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::ClearVendor => {
                 self.view.vendor = None;
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::ViewDetails { view } => {
                 return self.handle_action(AppAction::ChangeContextView { view });
@@ -822,7 +822,7 @@ impl GameState {
             expires_at > 0.0
         });
         if self.data.player_enchantments.len() != old_count {
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
 
         // Update enchantment timers locally
@@ -1182,7 +1182,7 @@ impl GameState {
         match effect {
             CombatAutomationEffect::TurnTo { heading } => {
                 self.data.combat_runtime.queue_attack();
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
                 result
                     .commands
                     .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
@@ -1191,7 +1191,7 @@ impl GameState {
             }
             CombatAutomationEffect::Attack(request) => {
                 self.data.combat_runtime.queue_attack();
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
                 match request {
                     TargetedAttackRequest::Melee {
                         target,
@@ -1267,7 +1267,7 @@ impl GameState {
             NavigationInteractionChange::Unchanged => {}
             NavigationInteractionChange::Set(next_interaction) => {
                 self.set_active_interaction(next_interaction, result);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
         }
     }
@@ -1335,7 +1335,7 @@ impl GameState {
             Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
         ) {
             self.view.active_interaction = None;
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
 
         if matches!(
@@ -1351,7 +1351,7 @@ impl GameState {
                 self.runtime.combat_automation = None;
             }
             self.view.active_interaction = None;
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
     }
 
@@ -1587,7 +1587,7 @@ impl GameState {
             && let Some(entity) = removed_entity.as_ref()
         {
             self.log_inventory_removal(entity);
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
         self.data.update_inventory_recursive(guid, false);
         self.data.entities.remove(&guid);
@@ -1910,7 +1910,7 @@ mod tests {
             vendor_item_named(item_guid, 1, "New Name"),
         )));
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(context_buffer_contains(state.context_buffer(), "NEW NAME"));
         assert!(!context_buffer_contains(state.context_buffer(), "OLD NAME"));
     }
@@ -1978,8 +1978,8 @@ mod tests {
             entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
         });
 
-        assert!(!status.needs_redraw);
-        assert!(!result.needs_redraw);
+        assert!(!status.redraw_requested());
+        assert!(!result.redraw_requested());
         assert!(state.chat.messages.is_empty());
         assert!(matches!(
             state.runtime.inventory_notifications,
@@ -2013,7 +2013,7 @@ mod tests {
             entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.chat.messages.len(), 1);
         assert_eq!(state.chat.messages[0].text, "Added to inventory: Pyreal");
     }
@@ -2049,7 +2049,7 @@ mod tests {
             )),
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.chat.messages.len(), 1);
         assert_eq!(
             state.chat.messages[0].text,
@@ -2084,7 +2084,7 @@ mod tests {
             )),
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.chat.messages.len(), 1);
         assert_eq!(
             state.chat.messages[0].text,
@@ -2114,7 +2114,7 @@ mod tests {
             entity: Box::new(inventory_item_entity(item_guid, "Pyreal", pack_guid)),
         });
 
-        assert!(!result.needs_redraw);
+        assert!(!result.redraw_requested());
         assert!(state.chat.messages.is_empty());
     }
 
@@ -2137,7 +2137,7 @@ mod tests {
             entity: Box::new(inventory_item_entity(initial_item_guid, "Apple", pack_guid)),
         });
 
-        assert!(!initial.needs_redraw);
+        assert!(!initial.redraw_requested());
         assert!(state.chat.messages.is_empty());
 
         state.runtime.inventory_notifications =
@@ -2149,7 +2149,7 @@ mod tests {
             entity: Box::new(inventory_item_entity(later_item_guid, "Pear", pack_guid)),
         });
 
-        assert!(later.needs_redraw);
+        assert!(later.redraw_requested());
         assert_eq!(state.chat.messages.len(), 1);
         assert_eq!(state.chat.messages[0].text, "Added to inventory: Pear");
     }
@@ -2174,7 +2174,7 @@ mod tests {
 
         let result = state.handle_view_event(ClientViewEvent::EntityDespawned { guid: item_guid });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.chat.messages.len(), 1);
         assert_eq!(
             state.chat.messages[0].text,
@@ -2302,7 +2302,7 @@ mod tests {
             mode: CombatMode::Melee,
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.data.combat_mode, CombatMode::Melee);
     }
 
@@ -2324,7 +2324,7 @@ mod tests {
             pos: moved_pos,
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.data.player_pos, Some(moved_pos));
     }
 
@@ -2482,7 +2482,7 @@ mod tests {
             omega,
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         let entity = state
             .data
             .entities
@@ -2501,7 +2501,7 @@ mod tests {
             CombatFeedback::AttackCommenced,
         ));
 
-        assert!(commenced.needs_redraw);
+        assert!(commenced.redraw_requested());
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(state.data.combat_runtime.attack_sequence_active);
 
@@ -2511,7 +2511,7 @@ mod tests {
             },
         ));
 
-        assert!(done.needs_redraw);
+        assert!(done.redraw_requested());
         assert!(state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
 
@@ -2521,7 +2521,7 @@ mod tests {
             },
         ));
 
-        assert!(cancelled.needs_redraw);
+        assert!(cancelled.redraw_requested());
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
     }
@@ -3382,7 +3382,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(event_result.needs_redraw);
+        assert!(event_result.redraw_requested());
 
         assert_eq!(
             state
@@ -3448,7 +3448,7 @@ mod tests {
             },
         });
 
-        assert!(in_range_event.needs_redraw);
+        assert!(in_range_event.redraw_requested());
 
         let in_range_tick = state.handle_tick(0.016);
 
@@ -3467,7 +3467,7 @@ mod tests {
             },
         });
 
-        assert!(slipped_event.needs_redraw);
+        assert!(slipped_event.redraw_requested());
 
         let slipped_tick = state.handle_tick(0.016);
 
@@ -3716,7 +3716,7 @@ mod tests {
             },
         });
 
-        assert!(event_result.needs_redraw);
+        assert!(event_result.redraw_requested());
         assert!(has_active_approach(&state));
 
         let tick_result = state.handle_tick(0.016);
@@ -3762,7 +3762,7 @@ mod tests {
             },
         });
 
-        assert!(moved.needs_redraw);
+        assert!(moved.redraw_requested());
         assert!(has_active_approach(&state));
 
         let _ = state.handle_tick(0.016);
@@ -3817,7 +3817,7 @@ mod tests {
             },
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(matches!(
             state.data.player_options,
             Some(holtburger_core::PlayerCharacterOptions {
@@ -3859,7 +3859,7 @@ mod tests {
             fellowship: Some(fellowship.clone()),
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(result.actions.is_empty());
         assert_eq!(state.data.party, Some(fellowship));
     }
@@ -3912,7 +3912,7 @@ mod tests {
             fellowship: Some(fellowship.clone()),
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(result.actions.iter().any(|action| {
             matches!(
                 action,
@@ -3937,7 +3937,7 @@ mod tests {
             }),
         });
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(matches!(
             state.view.active_confirmation,
             Some(ActiveCharacterConfirmation {

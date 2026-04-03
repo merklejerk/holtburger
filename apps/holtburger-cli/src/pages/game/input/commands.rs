@@ -1,6 +1,6 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::types::ChatMessageKind;
+use crate::types::{ChatMessageKind, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
@@ -332,7 +332,7 @@ impl GameState {
                     );
                 }
                 self.finish_input_command_submission(command);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ["/options", "get", raw_name] => {
                 let Some(option) = CuratedCharacterOption::parse(raw_name) else {
@@ -346,7 +346,7 @@ impl GameState {
 
                 self.log_option_state(option, enabled);
                 self.finish_input_command_submission(command);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ["/options", "set", raw_name, raw_value] => {
                 let Some(option) = CuratedCharacterOption::parse(raw_name) else {
@@ -374,7 +374,7 @@ impl GameState {
                     ),
                 );
                 self.finish_input_command_submission(command);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             ["/options", "toggle", raw_name] => {
                 let Some(option) = CuratedCharacterOption::parse(raw_name) else {
@@ -399,11 +399,11 @@ impl GameState {
                     ),
                 );
                 self.finish_input_command_submission(command);
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             _ => {
                 self.log_options_usage();
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
         }
 
@@ -1067,7 +1067,7 @@ mod tests {
             Some(ClientCommand::Talk(text)) if text == "/wave hello"
         ));
         assert!(result.actions.is_empty());
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
         assert!(state.chat_input.input.is_empty());
         assert!(

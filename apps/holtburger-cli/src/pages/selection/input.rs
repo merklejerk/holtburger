@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
 
 use crate::pages::selection::SelectionState;
-use crate::types::UpdateResult;
+use crate::types::{RedrawPriority, UpdateResult};
 
 impl SelectionState {
     pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
@@ -11,7 +11,7 @@ impl SelectionState {
             KeyCode::Up => {
                 if self.selected_character_index > 0 {
                     self.selected_character_index -= 1;
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             KeyCode::Down => {
@@ -19,7 +19,7 @@ impl SelectionState {
                     && self.selected_character_index + 1 < self.characters.len()
                 {
                     self.selected_character_index += 1;
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             KeyCode::Enter => {
@@ -39,7 +39,7 @@ impl SelectionState {
                         result
                             .commands
                             .push(ClientCommand::SelectCharacter(character.guid));
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 }
             }

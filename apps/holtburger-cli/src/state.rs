@@ -2,12 +2,14 @@ use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
 use holtburger_common::Guid;
+use holtburger_content::ContentRepository;
 use holtburger_core::ClientState;
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
 use crate::types::{ChatMessageKind, Page};
 
 use crate::pages::game::GameState;
+use std::sync::Arc;
 
 pub struct NetStats {
     pub bytes_in: u64,
@@ -39,6 +41,7 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub server_time: Option<(f64, Instant)>,
+    pub content: Option<Arc<ContentRepository>>,
     pub verbosity: u8,
     pub quit_on_disconnect: bool,
     pub disconnect_reason: Option<String>,

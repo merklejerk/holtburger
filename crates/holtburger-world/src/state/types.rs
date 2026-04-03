@@ -1,18 +1,12 @@
-use anyhow::{Context, Result};
-use binrw::BinRead;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectExt as _,
     WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
-use holtburger_dat::{
-    MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
-};
+use holtburger_dat::file_type::{MotionKinematics, SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use std::sync::Arc;
 
-use crate::WorldEvent;
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::{BasicSpatialPhysics, SpatialPhysics, SpatialScene};
@@ -23,6 +17,7 @@ use crate::state::self_movement::SelfMovementCapabilities;
 use crate::state::trade::TradeState;
 use crate::stats;
 use crate::vendor::VendorState;
+use crate::{WorldBootstrap, WorldEvent};
 
 pub struct ServerTimeSync {
     pub server_time: f64,
@@ -49,8 +44,7 @@ pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
     pub server_time: Option<ServerTimeSync>,
-    pub resources: Option<Arc<ScopedResourceResolver>>,
-    pub xp_table: XpTable,
+    pub xp_table: Arc<XpTable>,
     pub skill_table: Arc<SkillTable>,
     pub spell_catalog: Arc<SpellCatalog>,
     pub motion_kinematics: Arc<MotionKinematics>,
@@ -184,74 +178,22 @@ impl WorldState {
         crate::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
     }
 
-    pub fn new(resources: Arc<ScopedResourceResolver>) -> Result<Self> {
-        Self::new_with_spatial_physics(resources, Arc::new(BasicSpatialPhysics))
+    pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
+        Self::new_with_spatial_physics(bootstrap, Arc::new(BasicSpatialPhysics))
     }
 
     pub fn new_with_spatial_physics(
-        resources: Arc<ScopedResourceResolver>,
+        bootstrap: Arc<WorldBootstrap>,
         spatial_physics: Arc<dyn SpatialPhysics>,
-    ) -> Result<Self> {
-        let skill_table_data = resources
-            .get_file_for::<SkillTable>()
-            .context("missing required skill table from mounted resources")?;
-        let skill_table = SkillTable::read(&mut std::io::Cursor::new(skill_table_data))
-            .context("failed to parse required skill table")?;
-
-        let xp_table_data = resources
-            .get_file_for::<XpTable>()
-            .context("missing required XP table from mounted resources")?;
-        let xp_table = XpTable::read(&mut std::io::Cursor::new(xp_table_data))
-            .context("failed to parse required XP table")?;
-
-        let spell_table_data = resources
-            .get_file_for::<SpellTable>()
-            .context("missing required spell table from mounted resources")?;
-        let spell_table = SpellTable::read(&mut std::io::Cursor::new(spell_table_data))
-            .context("failed to parse required spell table")?;
-
-        let motion_kinematics_data = resources
-            .get_file_for::<MotionKinematics>()
-            .context("missing required motion kinematics table from mounted resources")?;
-        let motion_kinematics =
-            MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_data))
-                .context("failed to parse required motion kinematics table")?;
-
-        Ok(Self {
-            entities: EntityManager::new(),
-            player: PlayerState::new(),
-            server_time: None,
-            resources: Some(resources),
-            xp_table,
-            skill_table: Arc::new(skill_table),
-            spell_catalog: Arc::new(spell_table.into()),
-            motion_kinematics: Arc::new(motion_kinematics),
-            scene: SpatialScene::new_with_physics(spatial_physics),
-            vendor: None,
-            fellowship: None,
-            trade: None,
-            open_containers: std::collections::HashSet::new(),
-            entity_lifecycle: EntityLifecycleStore::default(),
-            self_movement_capabilities_override: None,
-        })
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn synthetic() -> Self {
-        Self::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics))
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn synthetic_with_spatial_physics(spatial_physics: Arc<dyn SpatialPhysics>) -> Self {
+    ) -> Self {
         Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
             server_time: None,
-            resources: None,
-            xp_table: XpTable::default(),
-            skill_table: Arc::new(SkillTable::default()),
-            spell_catalog: Arc::new(SpellCatalog::default()),
-            motion_kinematics: Arc::new(MotionKinematics::default()),
+            xp_table: Arc::clone(&bootstrap.xp_table),
+            skill_table: Arc::clone(&bootstrap.skill_table),
+            spell_catalog: bootstrap.spell_catalog(),
+            motion_kinematics: Arc::clone(&bootstrap.motion_kinematics),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,
             fellowship: None,
@@ -262,20 +204,14 @@ impl WorldState {
         }
     }
 
-    pub fn with_provider_for_namespace(
-        namespace: &str,
-        provider: Arc<dyn ResourceProvider>,
-    ) -> Result<Self> {
-        Self::new(Arc::new(ScopedResourceResolver::from_mounted([
-            MountedResourceProvider::with_namespace(namespace, provider)?,
-        ])))
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn synthetic() -> Self {
+        Self::synthetic_with_spatial_physics(Arc::new(BasicSpatialPhysics))
     }
 
-    pub fn with_provider(
-        scope: ResourceScope,
-        provider: Arc<dyn ResourceProvider>,
-    ) -> Result<Self> {
-        Self::with_provider_for_namespace(scope.namespace(), provider)
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn synthetic_with_spatial_physics(spatial_physics: Arc<dyn SpatialPhysics>) -> Self {
+        Self::new_with_spatial_physics(Arc::new(WorldBootstrap::synthetic()), spatial_physics)
     }
 
     #[cfg(any(test, feature = "test-support"))]

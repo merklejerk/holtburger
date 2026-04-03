@@ -8,6 +8,7 @@ repository.workspace = true
 default-run = "tui"
 
 [dependencies]
+holtburger-content = { workspace = true }
 holtburger-core = { workspace = true }
 holtburger-common = { workspace = true }
 holtburger-dat = { workspace = true }

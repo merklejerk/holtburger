@@ -6,4 +6,4 @@ pub use client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, BusyOperationResult, ClientCommand,
     ClientState, ClientViewEvent, ErrorReason, PlayerCharacterOptions, RetryState, WireEvent,
 };
-pub use client::{Client, ClientBuilder};
+pub use client::{ClientRuntime, ClientRuntimeBuilder};

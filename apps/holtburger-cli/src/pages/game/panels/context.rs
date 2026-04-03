@@ -69,12 +69,14 @@ pub fn render_context_pane(
 pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
     match view.context_view {
         ContextView::Assess(target) => {
+            let spell_catalog = data.spell_catalog();
             if let Some(object) = resolve_inspectable_target(data, view, target) {
-                return assess::get_assess_info(data, &object, data.spell_catalog.as_deref());
+                return assess::get_assess_info(data, &object, spell_catalog.as_deref());
             }
             vec![]
         }
         ContextView::Debug(target) => {
+            let spell_catalog = data.spell_catalog();
             let player_guid = data.player_guid;
             let player_info = match target {
                 InspectTarget::Entity(guid) if Some(guid) == player_guid => {
@@ -110,23 +112,27 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
                                 }
                             })
                     },
-                    data.spell_catalog.as_deref(),
+                    spell_catalog.as_deref(),
                     player_info,
                 );
             }
             vec![]
         }
         ContextView::Spell(spell_id) => {
-            debug::get_spell_details_info(spell_id, data.spell_catalog.as_deref())
+            let spell_catalog = data.spell_catalog();
+            debug::get_spell_details_info(spell_id, spell_catalog.as_deref())
         }
         ContextView::Enchantment(enchant) => {
-            debug::get_enchantment_details_info(&enchant, data.spell_catalog.as_deref())
+            let spell_catalog = data.spell_catalog();
+            debug::get_enchantment_details_info(&enchant, spell_catalog.as_deref())
         }
         ContextView::DebugSpell(spell_id) => {
-            debug::get_spell_debug_info(spell_id, data.spell_catalog.as_deref())
+            let spell_catalog = data.spell_catalog();
+            debug::get_spell_debug_info(spell_id, spell_catalog.as_deref())
         }
         ContextView::DebugEnchantment(enchant) => {
-            debug::get_enchantment_debug_info(&enchant, data.spell_catalog.as_deref())
+            let spell_catalog = data.spell_catalog();
+            debug::get_enchantment_debug_info(&enchant, spell_catalog.as_deref())
         }
         _ => vec![],
     }

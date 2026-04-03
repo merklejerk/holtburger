@@ -24,7 +24,7 @@ Introduce a dedicated content pipeline layer that owns archive mounting, world-b
 Today runtime bootstrap is still too disk-shaped:
 
 - `holtburger-core`'s client builder discovers HBA files from a path, mounts namespaces, validates required assets, and constructs `WorldState`.
-- `holtburger-world` still bootstraps from a broad `ScopedResourceResolver` even though it only needs a narrow subset of parsed startup assets.
+- `holtburger-world` still bootstraps from a broad resource lookup layer even though it only needs a narrow subset of parsed startup assets.
 - Frontends do not yet have a first-class content service for static reference data or future heavy assets.
 
 That creates two architectural problems:
@@ -91,38 +91,24 @@ pub mod repository;
 ```rust
 // crates/holtburger-content/src/repository.rs
 use anyhow::Result;
-use holtburger_dat::{MountedResourceProvider, ResourceKey};
-use std::path::PathBuf;
+use holtburger_dat::ResourceSource;
 use std::sync::Arc;
 
 pub struct ContentRepository {
-    inner: Arc<ContentRepositoryInner>,
+    mounts: Vec<Arc<dyn ResourceSource>>,
 }
 
 impl ContentRepository {
-    pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self>;
-    pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self>;
-    pub fn from_mounts(mounts: Vec<MountedResourceProvider>) -> Result<Self>;
+    pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self;
 
-    pub fn world_bootstrap(&self) -> Result<holtburger_world::WorldBootstrap>;
-    pub fn spell_catalog(&self) -> Result<Arc<holtburger_world::SpellCatalog>>;
-    // TODO: If this is introduced in the first implementation, add the same note in code:
-    // keep it out of the initial consumer path unless a concrete frontend/tool need appears.
-    // This is a future seam, not part of the initial bootstrap inversion slice.
-    pub fn resource_view(&self) -> Arc<dyn ContentResourceView>;
-}
-
-pub trait ContentResourceView: Send + Sync {
-    fn get_file(&self, key: ResourceKey<'_>) -> holtburger_dat::Result<Vec<u8>>;
-    fn exists(&self, key: ResourceKey<'_>) -> bool;
-    fn get_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata>;
+    pub fn world_bootstrap(&self) -> Result<Arc<holtburger_world::WorldBootstrap>>;
 }
 ```
 
 Important boundary:
-- HBA path and mount resolution belong here, not in `holtburger-core`.
+- Phase 1 ships `from_mounts(...)`; Phase 2 adds HBA path and directory constructors and moves all mount discovery into this crate.
 - `WorldBootstrap` is the only runtime dependency product from this crate in the initial design.
-- Optional reference-data helpers such as `spell_catalog()` also belong here, but they are not part of the core runtime bootstrap contract.
+- Optional reference-data helpers such as `spell_catalog()` still belong here, but they are intentionally deferred until Phase 3.
 
 ### World Bootstrap Contract
 
@@ -183,14 +169,17 @@ Migration note:
 
 ```rust
 impl WorldState {
-    pub fn new_with_bootstrap(
+    pub fn new_with_spatial_physics(
         bootstrap: Arc<WorldBootstrap>,
         spatial_physics: Arc<dyn SpatialPhysics>,
-    ) -> anyhow::Result<Self>;
+    ) -> Self;
 }
 ```
 
 This keeps parsed bootstrap state in a semantically named type instead of smuggling it through a broad resolver. `holtburger-content` should produce this type, not define a parallel copy of it.
+
+Phase 1 implementation note:
+- This constructor is intentionally infallible because all fallible parsing now lives in `holtburger-content`.
 
 ### Frontend Query Surface For A Future 3D Client
 
@@ -210,8 +199,9 @@ This is intentionally thin. A future 3D frontend can build higher-level caches a
 
 #### Deliverables
 - Add the new content-facing crate with the core repository type plus bootstrap-construction helpers that produce `holtburger_world::WorldBootstrap`.
-- Introduce `WorldBootstrap` and switch `holtburger-world` to consume it instead of `ScopedResourceResolver` for startup.
-- Keep `ScopedResourceResolver` internal to the content crate's bootstrap-building implementation.
+- Introduce `WorldBootstrap` and switch `holtburger-world` to consume it instead of a broad resolver for startup.
+- Keep archive lookup details below the content/runtime boundary.
+- Remove `WorldState.resources` rather than preserving it as a post-bootstrap back door.
 
 #### Files To Touch
 - new files under [crates/holtburger-content/src](/home/cluracan/code/holtburger/crates/holtburger-content/src)
@@ -223,6 +213,7 @@ This is intentionally thin. A future 3D frontend can build higher-level caches a
 - Runtime bootstrap no longer requires `WorldState` callers to pass a broad resource resolver.
 - The bootstrap contract is a named parsed-data struct, not raw bytes and not path-based state.
 - Existing skill/spell/xp/motion bootstrap behavior remains intact.
+- `WorldState.resources` and provider-backed world constructors are gone.
 
 ### Phase 2: Move HBA Discovery And Mount Policy Out Of Core
 
@@ -242,10 +233,61 @@ This is intentionally thin. A future 3D frontend can build higher-level caches a
 - `holtburger-core` no longer exposes disk-path asset-loading APIs.
 - CLI/harness startup still works by constructing `WorldBootstrap` externally.
 - Runtime tests can inject `WorldBootstrap` directly without mounting on-disk archives.
+- HBA discovery and missing-required-asset validation live in `holtburger-content`, not in `holtburger-core`.
 
 #### Dry-Run Adjustment
 - `ClientBuilder` currently mixes two distinct seams: content discovery/mounting and network session startup. This phase is still practical, but it should keep the session half stable while only extracting the content-loading half.
 - Builder fixture tests in [crates/holtburger-core/src/client/builder.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/builder.rs) currently validate HBA discovery and namespace mounting through `dats_path(...)`. Those tests should move with the content-loading code into `holtburger-content`, not be deleted.
+
+### Phase 2.5: Replace Namespace-Mounted Resolver With Namespace-Aware Sources
+
+#### Why This Exists
+- After Phase 2, `holtburger-core` is cleanly inverted, but `holtburger-dat` and `holtburger-content` still model lookup through namespace-at-mount projection instead of source-oriented lookup.
+- That shape still assumes a source is effectively single-namespace and the namespace lives at the mount edge instead of in the lookup contract.
+- Now that HBA archives are expected to contain mixed namespaces, that abstraction is backwards: the physical source can serve many namespaces, while overlay/precedence should live in the repository layer.
+
+#### Deliverables
+- Replace the remaining mount-time namespace binding model with a namespace-aware source trait keyed by `ResourceKey`.
+- Replace `MountedResourceProvider` with a source mount type that represents source precedence, not a fake single-namespace projection.
+- Replace `ScopedResourceResolver` with `LayeredResourceResolver`, which queries mounted sources by full `ResourceKey`.
+- Keep `holtburger-dat` free of legacy portal/cell-specific convenience shapes; namespace-aware lookup should be the only runtime-facing model.
+- Update `holtburger-content` to build bootstrap and validation on the new layered resolver without wrapping the same archive once per namespace.
+
+#### Proposed Direction
+
+```rust
+// crates/holtburger-dat/src/lib.rs
+pub trait ResourceSource: Send + Sync {
+    fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>>;
+    fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata>;
+    fn has_namespace(&self, namespace: &str) -> bool;
+}
+
+pub struct LayeredResourceResolver {
+    sources: Vec<Arc<dyn ResourceSource>>,
+}
+```
+
+Design constraint:
+- Namespace belongs in `ResourceKey` and lookup calls.
+- Mounts should express layer ordering and override policy only.
+- A mixed-namespace HBA should be mountable exactly once.
+
+#### Files To Touch
+- [crates/holtburger-dat/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/lib.rs)
+- [crates/holtburger-content/src/bootstrap.rs](/home/cluracan/code/holtburger/crates/holtburger-content/src/bootstrap.rs)
+- [crates/holtburger-content/src/repository.rs](/home/cluracan/code/holtburger/crates/holtburger-content/src/repository.rs)
+- [apps/holtburger-tools/src/dat2hba.rs](/home/cluracan/code/holtburger/apps/holtburger-tools/src/dat2hba.rs) if any helper APIs there still assume namespace-at-mount
+
+#### Acceptance Criteria
+- No runtime library code depends on `MountedResourceProvider` or `ScopedResourceResolver`.
+- No runtime library code needs to mount the same archive once per namespace.
+- Namespace-aware lookup is driven by `ResourceKey`, not by portal/cell-style scope helpers or per-namespace provider wrappers.
+- `holtburger-content` bootstrap/validation behavior is unchanged from the caller's perspective.
+
+#### Dry-Run Adjustment
+- This phase should stay below the content/runtime boundary and must not get entangled with Phase 3's spell-reference delivery work.
+- If the new dat-layer trait names or exact structs want to differ from the sketch above, that is fine; the important thing is the ownership model, not the spelling.
 
 ### Phase 3: Add Reference-Data And Frontend Query Surfaces
 
@@ -291,13 +333,19 @@ Mitigation:
 
 ### Risk: `WorldState.resources` lingers as a back door after bootstrap inversion
 Mitigation:
-- Dry run shows very little non-bootstrap usage, but `WorldState` still stores `resources` today and at least one test mutates it directly.
-- Phase 1 should explicitly decide whether `resources` is removed entirely, replaced with a narrower optional hook for the few remaining tests, or retained only under test support.
+- Phase 1 removes `WorldState.resources` entirely.
+- World/runtime tests should construct `WorldBootstrap` directly or go through `holtburger-content`, depending on what seam they are validating.
 
 ### Risk: The content API becomes a god object
 Mitigation:
 - Do not introduce a runtime snapshot object in the initial design.
 - Keep the runtime contract limited to `WorldBootstrap`.
+
+### Risk: Namespace-aware sources stay bolted onto a fake single-namespace mount model
+Mitigation:
+- Do not keep `MountedResourceProvider`/`ScopedResourceResolver` around once the mixed-namespace source model lands.
+- Make the dat/content layers resolve by `ResourceKey` against mounted sources directly.
+- Treat per-namespace source wrapping as obsolete infrastructure, not as a compatibility layer to preserve.
 
 ### Risk: We over-design for dynamic patching before the basic seam lands
 Mitigation:
@@ -326,12 +374,13 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Add `holtburger-content` with repository and bootstrap modules.
-- [ ] Phase 1: Add `WorldBootstrap` and move `WorldState` startup to it.
-- [ ] Phase 2: Rename `Client` to `ClientRuntime`.
-- [ ] Phase 2: Replace `dats_path` startup with `WorldBootstrap` injection.
-- [ ] Phase 2: Move HBA discovery into `ContentRepository` constructors.
-- [ ] Phase 3: Add spell-catalog query access outside the core runtime bootstrap path.
+- [x] Phase 1: Add `holtburger-content` with repository and bootstrap modules.
+- [x] Phase 1: Add `WorldBootstrap` and move `WorldState` startup to it.
+- [x] Phase 2: Rename `Client` to `ClientRuntime`.
+- [x] Phase 2: Replace `dats_path` startup with `WorldBootstrap` injection.
+- [x] Phase 2: Move HBA discovery into `ContentRepository` constructors.
+- [x] Phase 2.5: Replace namespace-mounted providers with namespace-aware source layers.
+- [x] Phase 3: Add spell-catalog query access outside the core runtime bootstrap path.
 
 ### Decisions Log
 - 2026-04-03: Prefer a narrow bootstrap boundary over an explicit staged-runtime split.
@@ -339,18 +388,42 @@ Mitigation:
 - 2026-04-03: Keep runtime bootstrap narrow and parsed; do not pass disk-shaped providers into core by default.
 - 2026-04-03: Punt dynamic patch and invalidation policy until the asset-pipeline inversion seam is landed.
 - 2026-04-03: Keep `SpellCatalog` in `holtburger-world` for now; revisit only if runtime-needed spell semantics and frontend reference data need to split later.
-- 2026-04-03: Support `ContentRepository::from_mounts(...)` in the first implementation so tests, harnesses, and non-disk inputs are first-class alongside HBA path helpers.
+- 2026-04-03: Ship `ContentRepository::from_mounts(...)` first and leave HBA path/directory constructors for Phase 2 with the rest of the mount-policy move.
 - 2026-04-03: Defer `ContentResourceView` from the first implementation unless a concrete frontend/tool consumer appears.
 - 2026-04-03: Do not preserve old bootstrap seams or test helpers for backwards compatibility alone; prefer the cleaner design and move tests to the new seam.
+- 2026-04-03: Make `WorldState` bootstrap construction infallible because all fallible parsing now happens in `holtburger-content`.
+- 2026-04-03: Remove `WorldState.resources` outright instead of retaining a bootstrap-era test seam.
+- 2026-04-03: Keep `holtburger-core` independent of `holtburger-content`; the frontend or tool should assemble `WorldBootstrap` and pass it into the runtime builder.
+- 2026-04-03: Keep required-asset validation errors in `holtburger-content` so path/namespace/file-id context stays attached to content-loading failures after the inversion.
+- 2026-04-03: Do not preserve the namespace-at-mount model in runtime libraries now that mixed-namespace HBA sources are the expected shape.
+- 2026-04-03: Phase 2.5 should replace `MountedResourceProvider` and `ScopedResourceResolver` rather than layering more API on top of them.
+- 2026-04-03: Keep `ResourceProvider` as a lower-level single-dataset convenience for DAT/tooling seams, but make `ResourceSource` plus `LayeredResourceResolver` the runtime/content lookup path.
+- 2026-04-03: Mount each HBA archive exactly once in `ContentRepository`; layer ordering now lives in repository source order instead of namespace-specific mount deduplication.
+- 2026-04-03: Drop `MountedResourceSource`; plain `Arc<dyn ResourceSource>` already expresses the only real invariant, and wrapper types should wait until there is actual per-layer metadata to carry.
+- 2026-04-03: Keep `RequestInitialViewState` for semantic runtime bootstrap only; static spell metadata now belongs to `ContentRepository::spell_catalog()` instead of `ClientViewEvent` delivery.
+- 2026-04-03: Seed frontend spell lookup state from bootstrap content ownership in the frontend layer rather than from pushed core runtime events.
+- 2026-04-03: Post-refactor cleanup should prune leftover body-ID and bootstrap wrapper shims when the underlying abstraction is already explicit.
 
 ### Verification Log
 - 2026-04-03: Reviewed current core builder/resource bootstrap flow in [crates/holtburger-core/src/client/builder.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/builder.rs) and [crates/holtburger-world/src/state/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/types.rs).
 - 2026-04-03: Cross-checked static-reference-data concerns against [docs/reference_data_and_asset_delivery.md](/home/cluracan/code/holtburger/docs/reference_data_and_asset_delivery.md).
 - 2026-04-03: Dry run found that builder fixture tests in [crates/holtburger-core/src/client/builder.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/builder.rs) need to migrate with content discovery rather than being treated as incidental startup tests.
 - 2026-04-03: Dry run found that `RequestInitialViewState` currently bootstraps spell catalog, fellowship state, and runtime body snapshots, so Phase 3 must narrow that flow instead of deleting it wholesale.
-- 2026-04-03: Dry run found that `WorldState.resources` has minimal runtime use but still exists as mutable state and a direct test seam in [crates/holtburger-world/src/state/tests.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/tests.rs).
+- 2026-04-03: Implemented Phase 1 in [crates/holtburger-content/src](/home/cluracan/code/holtburger/crates/holtburger-content/src), [crates/holtburger-world/src/bootstrap.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/bootstrap.rs), and [crates/holtburger-world/src/state/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/state/types.rs).
+- 2026-04-03: Confirmed Phase 1 with `cargo test -p holtburger-content -p holtburger-world -p holtburger-core`.
+- 2026-04-03: Implemented Phase 2 in [crates/holtburger-content/src/repository.rs](/home/cluracan/code/holtburger/crates/holtburger-content/src/repository.rs), [crates/holtburger-core/src/client/builder.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/builder.rs), [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), [apps/holtburger-cli/src/bin/tui.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/bin/tui.rs), and [crates/holtburger-debug-harness/src/bin/extractor.rs](/home/cluracan/code/holtburger/crates/holtburger-debug-harness/src/bin/extractor.rs).
+- 2026-04-03: Confirmed Phase 2 with `cargo test -p holtburger-content -p holtburger-core -p holtburger-world` and `cargo check -p holtburger-cli -p holtburger-debug-harness`.
+- 2026-04-03: Post-Phase-2 review found that `MountedResourceProvider` and `ScopedResourceResolver` still encode namespace at the mount layer, which is the wrong abstraction for mixed-namespace HBA sources and should be addressed before Phase 3.
+- 2026-04-03: Implemented Phase 2.5 in [crates/holtburger-dat/src/lib.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/lib.rs), [crates/holtburger-dat/src/archive.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/archive.rs), [crates/holtburger-content/src/bootstrap.rs](/home/cluracan/code/holtburger/crates/holtburger-content/src/bootstrap.rs), and [crates/holtburger-content/src/repository.rs](/home/cluracan/code/holtburger/crates/holtburger-content/src/repository.rs).
+- 2026-04-03: Confirmed Phase 2.5 with `cargo test -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-world` and `cargo check -p holtburger-cli -p holtburger-debug-harness`.
+- 2026-04-03: Implemented Phase 3 in [crates/holtburger-content/src/repository.rs](/home/cluracan/code/holtburger/crates/holtburger-content/src/repository.rs), [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), [crates/holtburger-core/src/client/runtime.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/runtime.rs), [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs), [apps/holtburger-cli/src/bin/tui.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/bin/tui.rs), [apps/holtburger-cli/src/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/state.rs), [apps/holtburger-cli/src/update/app_action.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/update/app_action.rs), [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), and [docs/reference_data_and_asset_delivery.md](/home/cluracan/code/holtburger/docs/reference_data_and_asset_delivery.md).
+- 2026-04-03: Confirmed Phase 3 with `cargo fmt && cargo test -p holtburger-content -p holtburger-core -p holtburger-world -p holtburger-cli && cargo check -p holtburger-debug-harness`.
+- 2026-04-03: Pruned remaining post-refactor shims by making `ClientSimulationSystem` track `SpatialBodyId` directly, inlining the one-call `emit_initial_view_state()` wrapper into command handling, and updating stale spell-bootstrap wording in [docs/reference_data_and_asset_delivery.md](/home/cluracan/code/holtburger/docs/reference_data_and_asset_delivery.md).
+- 2026-04-03: Confirmed post-refactor cleanup with `cargo test -p holtburger-core -p holtburger-cli && cargo check -p holtburger-debug-harness`.
 
 ### Resolved Questions
 - `SpellCatalog` stays in `holtburger-world` for the initial implementation because shared runtime/world code still uses spell metadata for behavior and semantic projection.
-- The first `ContentRepository` implementation should support both HBA-backed constructors and `from_mounts(...)` so tests and harnesses are not forced through disk-shaped setup.
+- `ContentRepository` now exposes `from_mounts(...)`, `from_hba_path(...)`, and `from_hba_dir(...)`; runtime code consumes only the resulting `WorldBootstrap`.
+- The dat/content lookup seam is now source-oriented and `ResourceKey`-oriented; mixed-namespace HBA archives mount once and layered precedence lives in repository source order.
+- `ContentRepository::spell_catalog()` is now the frontend-facing spell reference-data seam; `RequestInitialViewState` remains only for runtime state that is actually projected from core.
 - `ContentResourceView` is a deferred future seam and should stay out of the initial implementation unless a concrete consumer appears.

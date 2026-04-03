@@ -1,4 +1,5 @@
 use super::*;
+use binrw::BinRead;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -7,7 +8,7 @@ use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
 use crate::{
     ContactState, RuntimeBodyResetCause, SolvedActorKinematics, SolvedBodyKinematics,
-    SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
+    SpatialBodyEvent, SpatialBodyId, SpatialSampleMode, WorldBootstrap,
 };
 
 use crate::stats::{Skill, SkillType, TrainingLevel};
@@ -23,7 +24,6 @@ use holtburger_dat::file_type::{
 };
 use holtburger_dat::{
     DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
-    MountedResourceProvider, ResourceProvider, ScopedResourceResolver,
 };
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
@@ -101,20 +101,6 @@ fn write_micro_portal_hba(path: &Path) -> bool {
     true
 }
 
-fn mounted_namespace_provider(
-    namespace: &str,
-    provider: Arc<dyn ResourceProvider>,
-) -> MountedResourceProvider {
-    MountedResourceProvider::with_namespace(namespace, provider)
-        .expect("test namespace mount should be valid")
-}
-
-fn portal_resources(provider: Arc<dyn ResourceProvider>) -> Arc<ScopedResourceResolver> {
-    Arc::new(ScopedResourceResolver::from_mounted([
-        mounted_namespace_provider(EOR_PORTAL_NAMESPACE, provider),
-    ]))
-}
-
 fn motion_kinematics_asset_with_table(
     motion_table_id: u32,
     default_style: u32,
@@ -183,21 +169,6 @@ fn test_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
         Some(Vector3::new(0.0, 0.0, -1.5)),
         Some(Vector3::new(0.0, 0.0, 1.5)),
     )
-}
-
-struct NamespacedArchiveProvider {
-    namespace: &'static str,
-    archive: Arc<HbaReader>,
-}
-
-impl ResourceProvider for NamespacedArchiveProvider {
-    fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
-        self.archive.get_file_in_namespace(self.namespace, id)
-    }
-
-    fn get_metadata(&self, id: u32) -> Option<holtburger_dat::FileMetadata> {
-        self.archive.get_metadata_in_namespace(self.namespace, id)
-    }
 }
 
 fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
@@ -984,26 +955,6 @@ fn test_empty_world_uses_synthetic_reference_data() {
 }
 
 #[test]
-fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
-    struct MockFailedProvider;
-    impl holtburger_dat::ResourceProvider for MockFailedProvider {
-        fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
-            Err(holtburger_dat::error::DatError::NotFound(id))
-        }
-        fn get_metadata(&self, _id: u32) -> Option<holtburger_dat::FileMetadata> {
-            None
-        }
-    }
-
-    let error =
-        WorldState::with_provider_for_namespace(EOR_PORTAL_NAMESPACE, Arc::new(MockFailedProvider))
-            .err()
-            .expect("strict constructor should fail when required tables are unavailable");
-
-    assert!(error.to_string().contains("skill table"));
-}
-
-#[test]
 fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let dir = tempdir().expect("tempdir should be created");
     let portal_path = dir.path().join("bundle.hba");
@@ -1011,24 +962,38 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         return;
     }
 
-    let archive = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"));
-    let mut state = WorldState::new(Arc::new(ScopedResourceResolver::from_mounted([
-        mounted_namespace_provider(
-            EOR_PORTAL_NAMESPACE,
-            Arc::new(NamespacedArchiveProvider {
-                namespace: EOR_PORTAL_NAMESPACE,
-                archive: Arc::clone(&archive),
-            }),
-        ),
-        mounted_namespace_provider(
-            HOLTBURGER_CORE_NAMESPACE,
-            Arc::new(NamespacedArchiveProvider {
-                namespace: HOLTBURGER_CORE_NAMESPACE,
-                archive,
-            }),
-        ),
-    ])))
-    .expect("provider-backed world should load required tables");
+    let archive = HbaReader::open(&portal_path).expect("micro portal.hba should open");
+    let skill_table = SkillTable::read(&mut std::io::Cursor::new(
+        archive
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, SkillTable::FILE_ID)
+            .expect("micro bundle should contain skill table"),
+    ))
+    .expect("skill table should parse");
+    let spell_table = SpellTable::read(&mut std::io::Cursor::new(
+        archive
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, SpellTable::FILE_ID)
+            .expect("micro bundle should contain spell table"),
+    ))
+    .expect("spell table should parse");
+    let xp_table = XpTable::read(&mut std::io::Cursor::new(
+        archive
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, XpTable::FILE_ID)
+            .expect("micro bundle should contain XP table"),
+    ))
+    .expect("XP table should parse");
+    let motion_kinematics = MotionKinematics::read(&mut std::io::Cursor::new(
+        archive
+            .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
+            .expect("micro bundle should contain motion kinematics"),
+    ))
+    .expect("motion kinematics should parse");
+
+    let mut state = WorldState::new(Arc::new(WorldBootstrap::new(
+        skill_table,
+        spell_table,
+        xp_table,
+        motion_kinematics,
+    )));
 
     assert!(!state.skill_table.skill_base_hash.is_empty());
     assert!(!state.xp_table.character_level_xp_list.is_empty());
@@ -1226,20 +1191,7 @@ fn test_tick_does_not_integrate_player_velocity() {
 }
 
 #[test]
-fn test_tick_does_not_fetch_portal_geometry() {
-    struct PanicProvider;
-
-    impl holtburger_dat::ResourceProvider for PanicProvider {
-        fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
-            panic!("tick should not fetch portal resource 0x{id:08X}");
-        }
-
-        fn get_metadata(&self, _id: u32) -> Option<holtburger_dat::FileMetadata> {
-            panic!("tick should not query portal metadata");
-        }
-    }
-
-    let resources = portal_resources(Arc::new(PanicProvider));
+fn test_tick_does_not_require_runtime_resource_access() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000125);
     let player_pos = WorldPosition {
@@ -1248,7 +1200,6 @@ fn test_tick_does_not_fetch_portal_geometry() {
         rotation: holtburger_common::math::Quaternion::identity(),
     };
 
-    state.resources = Some(resources);
     state.player.guid = player_guid;
     state.player.position = player_pos;
 

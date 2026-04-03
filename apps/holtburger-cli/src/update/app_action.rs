@@ -1,6 +1,6 @@
 use crate::pages::game::GameState;
 use crate::state::AppState;
-use crate::types::{AppAction, Page, UpdateResult};
+use crate::types::{AppAction, Page, RedrawPriority, UpdateResult};
 
 impl AppState {
     pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
@@ -14,7 +14,7 @@ impl AppState {
                     message: text,
                 } => {
                     self.log(kind, text);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 AppAction::SendCommands { commands: cmds } => {
                     result.commands.extend(cmds);
@@ -31,7 +31,7 @@ impl AppState {
                     );
                     game.data.content = self.content.clone();
                     self.page = Page::Game(Box::new(game));
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 AppAction::Sequence { actions } => {
                     for sub in actions {

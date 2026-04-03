@@ -296,11 +296,25 @@ pub enum AppEvent {
     ReceivedViewEvent(ClientViewEvent),
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RedrawPriority {
+    #[default]
+    None,
+    Motion,
+    Immediate,
+}
+
+impl RedrawPriority {
+    pub fn requested(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct UpdateResult {
     pub commands: Vec<ClientCommand>,
     pub actions: Vec<AppAction>,
-    pub needs_redraw: bool,
+    pub redraw_priority: RedrawPriority,
 }
 
 impl UpdateResult {
@@ -308,8 +322,17 @@ impl UpdateResult {
         Self::default()
     }
 
-    pub fn with_redraw(mut self, needs_redraw: bool) -> Self {
-        self.needs_redraw = needs_redraw;
+    pub fn with_redraw(mut self, requested: bool) -> Self {
+        self.request_redraw(if requested {
+            RedrawPriority::Immediate
+        } else {
+            RedrawPriority::None
+        });
+        self
+    }
+
+    pub fn with_redraw_priority(mut self, priority: RedrawPriority) -> Self {
+        self.request_redraw(priority);
         self
     }
 
@@ -322,7 +345,15 @@ impl UpdateResult {
         Self {
             commands: Vec::new(),
             actions: Vec::new(),
-            needs_redraw: true,
+            redraw_priority: RedrawPriority::Immediate,
+        }
+    }
+
+    pub fn motion_redraw() -> Self {
+        Self {
+            commands: Vec::new(),
+            actions: Vec::new(),
+            redraw_priority: RedrawPriority::Motion,
         }
     }
 
@@ -330,14 +361,27 @@ impl UpdateResult {
         Self {
             commands,
             actions: Vec::new(),
-            needs_redraw: false,
+            redraw_priority: RedrawPriority::None,
         }
     }
 
+    pub fn request_redraw(&mut self, priority: RedrawPriority) {
+        self.redraw_priority = std::cmp::max(self.redraw_priority, priority);
+    }
+
+    pub fn effective_redraw_priority(&self) -> RedrawPriority {
+        self.redraw_priority
+    }
+
+    pub fn redraw_requested(&self) -> bool {
+        self.redraw_priority.requested()
+    }
+
     pub fn merge(&mut self, other: UpdateResult) {
+        let other_redraw = other.effective_redraw_priority();
         self.commands.extend(other.commands);
         self.actions.extend(other.actions);
-        self.needs_redraw |= other.needs_redraw;
+        self.request_redraw(other_redraw);
     }
 }
 

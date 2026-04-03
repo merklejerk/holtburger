@@ -1,5 +1,5 @@
 use crate::utils::{align_boundary, read_pstring};
-use crate::{ResourceScope, ScopedResource};
+use crate::{EOR_PORTAL_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::{BinRead, BinResult};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
@@ -26,9 +26,9 @@ impl Default for SkillTable {
     }
 }
 
-impl ScopedResource for SkillTable {
-    const FILE_ID: u32 = Self::FILE_ID;
-    const RESOURCE_SCOPE: ResourceScope = ResourceScope::Portal;
+impl StaticResourceKey for SkillTable {
+    const RESOURCE_KEY: ResourceKey<'static> =
+        ResourceKey::new(EOR_PORTAL_NAMESPACE, Self::FILE_ID);
 }
 
 #[derive(BinRead, Debug, Clone)]

@@ -55,3 +55,66 @@ impl Animation {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::{Quaternion, Vector3};
+    use std::io::Cursor;
+
+    #[test]
+    fn animation_reads_pos_frames_and_empty_part_frames() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x0300_1234u32.to_le_bytes());
+        bytes.extend_from_slice(&AnimationFlags::POS_FRAMES.bits().to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&2.0f32.to_le_bytes());
+        bytes.extend_from_slice(&3.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        let animation = Animation::read(&mut Cursor::new(bytes)).expect("animation should parse");
+
+        assert_eq!(animation.id, 0x0300_1234);
+        assert_eq!(animation.num_parts, 1);
+        assert_eq!(animation.num_frames, 1);
+        assert_eq!(animation.part_frames.len(), 1);
+        assert_eq!(animation.part_frames[0].frames.len(), 1);
+        assert!(animation.part_frames[0].hooks.is_empty());
+        assert_eq!(
+            animation.pos_frames,
+            vec![Frame {
+                origin: Vector3::new(1.0, 2.0, 3.0),
+                orientation: Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            }]
+        );
+        assert_eq!(
+            animation.part_frames[0].frames[0].orientation,
+            Quaternion {
+                w: 1.0,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }
+        );
+    }
+}

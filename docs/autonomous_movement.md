@@ -463,6 +463,26 @@ For holtburger this means:
 
 If these are conflated, navigation becomes too coarse and starts issuing one-second movement pulses, which produces the same visible "snap every second" failure mode we saw during investigation.
 
+#### Holtburger observer-projection contract
+
+For holtburger's shared runtime, observer reconstruction should split responsibilities like this:
+
+- authoritative pose comes from `UpdatePosition` / `EntityMoved`
+- sticky locomotion intent comes from `UpdateMotion` / `EntityMotionUpdated`
+- retained velocity and angular velocity come from `VectorUpdate` / `EntityKinematicsUpdated`
+- grounded command kinematics come from the required `holtburger/core:MotionKinematics` asset emitted by `dat2hba`
+
+That last point matters. ACE often does not send a usable grounded meters-per-second value for ordinary locomotion, and observer-facing `UpdatePosition` anchors may omit velocity entirely. So a client that wants stable remote grounded simulation cannot rely on packet velocity alone.
+
+The runtime rule should be:
+
+1. Use authoritative position updates as the correction baseline.
+2. Use sticky interpreted motion state plus resolved motion-table command kinematics for grounded forward, sidestep, backpedal, and turn simulation.
+3. Use retained server velocity and omega for bounded dead reckoning when the actor is airborne, server-controlled, or lacks a resolvable grounded command path.
+4. Suspend or snap projection instead of guessing when teleport, force-position, despawn, landblock change, or missing required kinematics invalidate the prior simulation state.
+
+The derived `MotionKinematics` asset is the canonical source for step 2. Runtime consumers should not reopen raw motion tables, setup models, or animation payloads just to recover grounded movement rates.
+
 #### Quick lifecycle table
 
 | Property | Comes from | Persists between packets? | Needs explicit clear/change? | Notes |

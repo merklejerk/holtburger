@@ -84,39 +84,20 @@ World should not own projected or render-time positions.
 
 ### Proposed World Data Shape
 
-The current `EntityMotionSnapshot` is too narrow for projection because it drops speeds and motion directives.
+The current `EntityMotionSnapshot` is already the right compact retained shape for initial projection work: it carries interpreted forward, sidestep, and turn commands, ordered speed values, and explicit turn directives without forcing consumers to keep raw protocol payloads alive.
 
-Recommended replacement or expansion:
+Current retained shape:
 
 ```rust
-pub struct EntityMotionState {
+pub struct EntityMotionSnapshot {
     pub current_style: Option<MotionStance>,
-    pub forward: Option<AxisMotionState>,
-    pub sidestep: Option<AxisMotionState>,
-    pub turn: Option<TurnMotionState>,
-    pub directive: Option<MotionDirective>,
-}
-
-pub struct AxisMotionState {
-    pub command: InterpretedMotionCommand,
-    pub speed: Option<f32>,
-}
-
-pub struct TurnMotionState {
-    pub command: InterpretedMotionCommand,
-    pub speed: Option<f32>,
-}
-
-pub enum MotionDirective {
-    TurnToHeading {
-        desired_heading: f32,
-        speed: f32,
-    },
-    TurnToObject {
-        target: Guid,
-        desired_heading: Option<f32>,
-        speed: f32,
-    },
+    pub forward_command: Option<InterpretedMotionCommand>,
+    pub sidestep_command: Option<InterpretedMotionCommand>,
+    pub turn_command: Option<InterpretedMotionCommand>,
+    pub forward_speed: Option<OrderedMotionSpeed>,
+    pub sidestep_speed: Option<OrderedMotionSpeed>,
+    pub turn_speed: Option<OrderedMotionSpeed>,
+    pub directive: Option<EntityMotionDirective>,
 }
 ```
 
@@ -124,6 +105,28 @@ Notes:
 - this is still authoritative observed state, not a render system
 - `MoveToPosition` and `MoveToObject` can be added later if we prove they materially improve observer projection fidelity
 - the initial minimum bar is support for continuous turn motion and directional locomotion from `UpdateMotion`, plus velocity/omega from `VectorUpdate`
+
+### Grounded Kinematics Source
+
+Grounded observer projection should not read raw motion tables, setup models, or animation payloads at runtime.
+
+The canonical grounded locomotion source is the required `holtburger/core:MotionKinematics` asset emitted by `dat2hba`.
+
+That asset is keyed by:
+- motion table id
+- default stance / style
+- full motion-table cycle key (`stance + command`)
+
+This is sufficient for the current and near-term projection work because:
+- the asset already covers full motion-table cycle coverage rather than a self-only subset
+- world retains the interpreted motion command, speeds, and turn directives needed to decide which cycle is active
+- setup-model fallback is already embedded in the same asset, so projection code does not need a second runtime lookup seam just to resolve a motion table
+
+For projection consumers, the contract is:
+- authoritative pose comes from retained world position / `EntityMoved`
+- sticky motion intent comes from `EntityMotionUpdated`
+- retained velocity and omega come from `EntityKinematicsUpdated`
+- grounded command-rate lookup comes from `MotionKinematics`
 
 ## Layer 2: Core-Owned Shared Projection System
 
@@ -264,7 +267,7 @@ impl EntityProjectionSystem {
 
 ## Recommended View Event Inputs
 
-The projection system should initially respond to these existing or newly added client-view events:
+The projection system should initially respond to these existing client-view events:
 - `EntitySpawned`
 - `EntityReplaced`
 - `EntityMoved`
@@ -463,12 +466,15 @@ When a hard correction arrives:
 
 ### Vector Updates
 - `EntityKinematicsUpdated` updates retained velocity and angular velocity.
-- If no stronger motion directive is active, projection may advance `projected_pose` from these values.
+- Use retained server velocity and omega for bounded dead reckoning when no stronger grounded motion-state path is available.
+- This is the preferred path for airborne actors, server-controlled movement, or any case where the current grounded command cannot be resolved cleanly through `MotionKinematics`.
 
 ### Interpreted Motion Updates
 - Interpreted locomotion commands should be treated as sticky until changed or cleared.
 - Turn command plus turn speed implies continuous turning over time.
 - Forward or sidestep commands may drive projected motion when no fresher authoritative correction supersedes them.
+- For grounded actors, projection should resolve the active command against the required `holtburger/core:MotionKinematics` asset rather than guessing speeds from packet fields alone.
+- If a grounded command cannot be resolved through the asset, projection should fall back conservatively to retained velocity when available or suspend the unsupported command path instead of inventing kinematics.
 
 ### Turn-To Updates
 - `TurnToHeading` and `TurnToObject` should be treated as over-time turn directives, not as immediate heading snaps.
@@ -480,6 +486,11 @@ Projection must hard-reset or suspend when it sees server-owned movement epoch c
 - teleport sequence changes
 - force-position sequence changes
 - world-presence clears and despawns
+
+Projection should also suspend grounded command simulation when:
+- the actor's motion-table source cannot be resolved
+- the required `MotionKinematics` cycle data for the active command is absent
+- a landblock change or hard correction invalidates the current grounded movement assumption
 
 This mirrors the same boundary the movement docs already establish for self movement.
 

@@ -25,6 +25,7 @@ pub const DAT_MAGIC: u32 = 0x0000_5442;
 pub const RESOURCE_NAMESPACE_LEN: usize = 32;
 pub const EOR_PORTAL_NAMESPACE: &str = "eor/portal";
 pub const EOR_CELL_NAMESPACE: &str = "eor/cell";
+pub const HOLTBURGER_CORE_NAMESPACE: &str = "holtburger/core";
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {

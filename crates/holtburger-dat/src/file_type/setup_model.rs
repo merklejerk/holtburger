@@ -1,5 +1,4 @@
 use crate::graphics::Frame;
-use crate::utils::{read_compressed_u32, write_compressed_u32};
 use binrw::{
     BinRead, BinResult, BinWrite,
     io::{Read, Seek, Write},
@@ -47,34 +46,34 @@ impl AnimationHook {
         let hook_type = u32::read_le(reader)?;
         let direction = i32::read_le(reader)?;
 
-        let payload_size = match hook_type {
-            0 => 0,   // NoOp
-            1 => 4,   // Sound (Id)
-            2 => 4,   // SoundTable (SoundType)
-            3 => 28,  // Attack (AttackCone)
-            4 => 0,   // AnimationDone (MotionTable command)
-            5 => 6,   // ReplaceObject (PartIndex: u16, PartID: u32)
-            6 => 4,   // Ethereal (Ethereal: i32)
-            7 => 16,  // TransparentPart (Part, Start, End, Time)
-            8 => 12,  // Luminous (Start, End, Time)
-            9 => 16,  // LuminousPart (Part, Start, End, Time)
-            10 => 12, // Diffuse (Start, End, Time)
-            11 => 16, // DiffusePart (Part, Start, End, Time)
-            12 => 8,  // Scale (End, Time)
-            13 => 40, // CreateParticle (EmitterInfoId, PartIndex, Offset: Frame, EmitterId)
-            14 => 4,  // DestroyParticle (EmitterId)
-            15 => 4,  // StopParticle (EmitterId)
-            16 => 4,  // NoDraw (NoDraw: u32)
-            17 => 0,  // DefaultScript
-            18 => 4,  // DefaultScriptPart (PartIndex)
-            19 => 8,  // CallPES (PES: u32, Pause: f32)
-            20 => 12, // Transparent (Start, End, Time)
-            21 => 16, // SoundTweaked (SoundID, Priority, Probability, Volume)
-            22 => 12, // SetOmega (Axis: Vector3)
-            23 => 8,  // TextureVelocity (USpeed, VSpeed)
-            24 => 12, // TextureVelocityPart (PartIndex, USpeed, VSpeed)
-            25 => 4,  // SetLight (LightsOn: i32)
-            26 => 40, // CreateBlockingParticle (Inherits from CreateParticle)
+        let data = match hook_type {
+            0 => Vec::new(),                      // NoOp
+            1 => read_exact_payload(reader, 4)?,  // Sound (Id)
+            2 => read_exact_payload(reader, 4)?,  // SoundTable (SoundType)
+            3 => read_exact_payload(reader, 28)?, // Attack (AttackCone)
+            4 => Vec::new(),                      // AnimationDone
+            5 => read_replace_object_payload(reader)?,
+            6 => read_exact_payload(reader, 4)?, // Ethereal (Ethereal: i32)
+            7 => read_exact_payload(reader, 16)?, // TransparentPart
+            8 => read_exact_payload(reader, 12)?, // Luminous
+            9 => read_exact_payload(reader, 16)?, // LuminousPart
+            10 => read_exact_payload(reader, 12)?, // Diffuse
+            11 => read_exact_payload(reader, 16)?, // DiffusePart
+            12 => read_exact_payload(reader, 8)?, // Scale
+            13 => read_exact_payload(reader, 40)?, // CreateParticle
+            14 => read_exact_payload(reader, 4)?, // DestroyParticle
+            15 => read_exact_payload(reader, 4)?, // StopParticle
+            16 => read_exact_payload(reader, 4)?, // NoDraw
+            17 => Vec::new(),                    // DefaultScript
+            18 => read_exact_payload(reader, 4)?, // DefaultScriptPart
+            19 => read_exact_payload(reader, 8)?, // CallPES
+            20 => read_exact_payload(reader, 12)?, // Transparent
+            21 => read_exact_payload(reader, 16)?, // SoundTweaked
+            22 => read_exact_payload(reader, 12)?, // SetOmega
+            23 => read_exact_payload(reader, 8)?, // TextureVelocity
+            24 => read_exact_payload(reader, 12)?, // TextureVelocityPart
+            25 => read_exact_payload(reader, 4)?, // SetLight
+            26 => read_exact_payload(reader, 40)?, // CreateBlockingParticle
             _ => {
                 return Err(binrw::Error::Custom {
                     pos: reader.stream_position()?,
@@ -85,11 +84,6 @@ impl AnimationHook {
                 });
             }
         };
-
-        let mut data = vec![0u8; payload_size];
-        if payload_size > 0 {
-            reader.read_exact(&mut data)?;
-        }
 
         Ok(Self {
             hook_type,
@@ -104,6 +98,32 @@ impl AnimationHook {
         writer.write_all(&self.data)?;
         Ok(())
     }
+}
+
+fn read_exact_payload<R: Read + Seek>(reader: &mut R, payload_size: usize) -> BinResult<Vec<u8>> {
+    let mut data = vec![0u8; payload_size];
+    if payload_size > 0 {
+        reader.read_exact(&mut data)?;
+    }
+    Ok(data)
+}
+
+fn read_replace_object_payload<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<u8>> {
+    let mut data = Vec::with_capacity(6);
+
+    let part_index = u16::read_le(reader)?;
+    data.extend_from_slice(&part_index.to_le_bytes());
+
+    // ACE reads the replacement part as ReadAsDataIDOfKnownType(0x01000000),
+    // which is stored as either a 2-byte or 4-byte packed suffix.
+    let upper = u16::read_le(reader)?;
+    data.extend_from_slice(&upper.to_le_bytes());
+    if (upper & 0x8000) != 0 {
+        let lower = u16::read_le(reader)?;
+        data.extend_from_slice(&lower.to_le_bytes());
+    }
+
+    Ok(data)
 }
 
 #[derive(Debug, Clone)]
@@ -235,22 +255,30 @@ impl SetupModel {
         }
 
         // PlacementFrames (Dict)
-        let num_placements = u32::read_le(reader)?;
-        let mut placement_frames = HashMap::new();
-        for _ in 0..num_placements {
+        let num_placements = i32::read_le(reader)?;
+        if num_placements < 0 {
+            return Err(binrw::Error::Custom {
+                pos: reader.stream_position()?,
+                err: Box::new(format!(
+                    "SetupModel 0x{id:08X} declared negative placement count {num_placements}"
+                )),
+            });
+        }
+        let mut placement_frames = HashMap::with_capacity(num_placements as usize);
+        for _ in 0..num_placements as usize {
             let key = i32::read_le(reader)?;
             placement_frames.insert(key, PlacementType::read(reader, num_parts)?);
         }
 
-        // CylSpheres (SmartArray)
-        let num_cyl = read_compressed_u32(reader)?;
+        // CylSpheres (ACE uses a standard u32 count here, not a compressed array count)
+        let num_cyl = u32::read_le(reader)?;
         let mut cyl_spheres = Vec::with_capacity(num_cyl as usize);
         for _ in 0..num_cyl {
             cyl_spheres.push(CylSphere::read_le(reader)?);
         }
 
-        // Spheres (SmartArray)
-        let num_sph = read_compressed_u32(reader)?;
+        // Spheres (ACE uses a standard u32 count here, not a compressed array count)
+        let num_sph = u32::read_le(reader)?;
         let mut spheres = Vec::with_capacity(num_sph as usize);
         for _ in 0..num_sph {
             spheres.push(Sphere::read_le(reader)?);
@@ -272,32 +300,11 @@ impl SetupModel {
             lights.insert(key, LightInfo::read_le(reader)?);
         }
 
-        // Optional trailers
-        let mut default_animation = None;
-        let mut default_script = None;
-        let mut default_motion_table = None;
-        let mut default_sound_table = None;
-        let mut default_script_table = None;
-
-        let current_pos = reader.stream_position()?;
-        let end_pos = reader.seek(std::io::SeekFrom::End(0))?;
-        reader.seek(std::io::SeekFrom::Start(current_pos))?;
-
-        if current_pos + 4 <= end_pos {
-            default_animation = Self::decode_optional_resource_id(u32::read_le(reader)?);
-        }
-        if current_pos + 8 <= end_pos {
-            default_script = Self::decode_optional_resource_id(u32::read_le(reader)?);
-        }
-        if current_pos + 12 <= end_pos {
-            default_motion_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
-        }
-        if current_pos + 16 <= end_pos {
-            default_sound_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
-        }
-        if current_pos + 20 <= end_pos {
-            default_script_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
-        }
+        let default_animation = Self::decode_optional_resource_id(u32::read_le(reader)?);
+        let default_script = Self::decode_optional_resource_id(u32::read_le(reader)?);
+        let default_motion_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
+        let default_sound_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
+        let default_script_table = Self::decode_optional_resource_id(u32::read_le(reader)?);
 
         Ok(SetupModel {
             id,
@@ -362,7 +369,7 @@ impl SetupModel {
             self.connection_points.get(&k).unwrap().write_le(writer)?;
         }
 
-        (self.placement_frames.len() as u32).write_le(writer)?;
+        (self.placement_frames.len() as i32).write_le(writer)?;
         let mut place_keys: Vec<_> = self.placement_frames.keys().collect();
         place_keys.sort();
         for &k in place_keys {
@@ -370,12 +377,12 @@ impl SetupModel {
             self.placement_frames.get(&k).unwrap().write(writer)?;
         }
 
-        write_compressed_u32(writer, self.cyl_spheres.len() as u32)?;
+        (self.cyl_spheres.len() as u32).write_le(writer)?;
         for cyl in &self.cyl_spheres {
             cyl.write_le(writer)?;
         }
 
-        write_compressed_u32(writer, self.spheres.len() as u32)?;
+        (self.spheres.len() as u32).write_le(writer)?;
         for sph in &self.spheres {
             sph.write_le(writer)?;
         }
@@ -403,12 +410,8 @@ impl SetupModel {
             self.default_sound_table,
             self.default_script_table,
         ];
-        let last_present = trailer.iter().rposition(Option::is_some);
-
-        if let Some(last_present) = last_present {
-            for value in trailer.iter().take(last_present + 1) {
-                value.unwrap_or(0).write_le(writer)?;
-            }
+        for value in trailer {
+            value.unwrap_or(0).write_le(writer)?;
         }
 
         Ok(())
@@ -528,5 +531,38 @@ mod tests {
         assert_eq!(unpacked.default_motion_table, None);
         assert_eq!(unpacked.default_sound_table, None);
         assert_eq!(unpacked.default_script_table, Some(0x0E00_0123));
+    }
+
+    #[test]
+    fn animation_hook_replace_object_reads_compact_known_type_payload_without_desync() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&5u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&7u16.to_le_bytes());
+        bytes.extend_from_slice(&0x1234u16.to_le_bytes());
+
+        let hook = AnimationHook::read(&mut Cursor::new(bytes))
+            .expect("replace-object hook with compact part id should parse");
+
+        assert_eq!(hook.hook_type, 5);
+        assert_eq!(hook.direction, 0);
+        assert_eq!(hook.data, vec![0x07, 0x00, 0x34, 0x12]);
+    }
+
+    #[test]
+    fn animation_hook_replace_object_reads_extended_known_type_payload_without_desync() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&5u32.to_le_bytes());
+        bytes.extend_from_slice(&1i32.to_le_bytes());
+        bytes.extend_from_slice(&9u16.to_le_bytes());
+        bytes.extend_from_slice(&0x8001u16.to_le_bytes());
+        bytes.extend_from_slice(&0x2345u16.to_le_bytes());
+
+        let hook = AnimationHook::read(&mut Cursor::new(bytes))
+            .expect("replace-object hook with extended part id should parse");
+
+        assert_eq!(hook.hook_type, 5);
+        assert_eq!(hook.direction, 1);
+        assert_eq!(hook.data, vec![0x09, 0x00, 0x01, 0x80, 0x45, 0x23]);
     }
 }

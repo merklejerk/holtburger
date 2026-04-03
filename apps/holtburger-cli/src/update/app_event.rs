@@ -1,6 +1,6 @@
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
 use crate::state::AppState;
-use crate::types::{AppEvent, UpdateResult};
+use crate::types::{AppEvent, RedrawPriority, UpdateResult};
 
 impl AppState {
     pub fn handle_app_event(&mut self, action: AppEvent) -> UpdateResult {
@@ -8,12 +8,12 @@ impl AppState {
             AppEvent::Tick(elapsed) => self.update_tick(elapsed),
             AppEvent::KeyPress(key) => {
                 let mut res = self.handle_key_press(key);
-                res.needs_redraw = true; // Input always redraws
+                res.request_redraw(RedrawPriority::Immediate); // Input always redraws
                 res
             }
             AppEvent::Mouse(mouse) => {
                 let mut res = self.handle_mouse_event(mouse);
-                res.needs_redraw = true;
+                res.request_redraw(RedrawPriority::Immediate);
                 res
             }
             AppEvent::ReceivedViewEvent(event) => {
@@ -22,7 +22,9 @@ impl AppState {
 
                 // Global routing must happen first for character lists/login
                 let mut res = self.handle_client_view_event(event);
-                res.needs_redraw = should_redraw;
+                if should_redraw && !res.redraw_requested() {
+                    res.request_redraw(RedrawPriority::Immediate);
+                }
                 res
             }
         };
@@ -60,7 +62,7 @@ impl AppState {
             }
 
             self.net_stats.last_update = Some(now);
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
 
         // Delegate Page/GameState tick logic

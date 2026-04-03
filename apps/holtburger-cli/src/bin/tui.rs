@@ -10,7 +10,7 @@ use holtburger_cli::pages;
 use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
-use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
+use holtburger_cli::types::{AppEvent, ChatMessageKind, Page, RedrawPriority, UpdateResult};
 use holtburger_content::ContentRepository;
 use holtburger_core::{
     ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState, ClientViewEvent, ErrorReason,
@@ -239,6 +239,41 @@ fn format_boot_account_message(reason: &str) -> String {
 
 fn clear_captured_logs(local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>) {
     while local_log_rx.try_recv().is_ok() {}
+}
+
+#[derive(Default)]
+struct PendingRedraw {
+    immediate: bool,
+    motion: bool,
+}
+
+impl PendingRedraw {
+    fn request(&mut self, priority: RedrawPriority) {
+        match priority {
+            RedrawPriority::None => {}
+            RedrawPriority::Motion => self.motion = true,
+            RedrawPriority::Immediate => self.immediate = true,
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.immediate || self.motion
+    }
+
+    fn priority(&self) -> RedrawPriority {
+        if self.immediate {
+            RedrawPriority::Immediate
+        } else if self.motion {
+            RedrawPriority::Motion
+        } else {
+            RedrawPriority::None
+        }
+    }
+
+    fn clear(&mut self) {
+        self.immediate = false;
+        self.motion = false;
+    }
 }
 
 fn apply_capture_path(client: &mut ClientRuntime, capture: Option<&String>) {
@@ -617,15 +652,20 @@ async fn run() -> Result<()> {
 
     let mut last_tick = Instant::now();
     let tick_rate = std::time::Duration::from_millis(100);
-    let frame_rate = std::time::Duration::from_millis(16); // ~60 FPS
+    let immediate_frame_rate = std::time::Duration::from_millis(1000 / 24);
+    let motion_frame_rate = std::time::Duration::from_millis(1000);
+    let event_poll_interval = std::time::Duration::from_millis(10);
     let mut last_draw = Instant::now();
-    let mut needs_redraw = true;
+    let mut pending_redraw = PendingRedraw {
+        immediate: true,
+        motion: false,
+    };
 
-    let update_state = |res: holtburger_cli::types::UpdateResult,
-                        needs_redraw: &mut bool,
+    let update_state = |res: UpdateResult,
+                        pending_redraw: &mut PendingRedraw,
                         server_cmd_tx: &mpsc::UnboundedSender<ClientCommand>,
                         should_quit: &mut bool| {
-        *needs_redraw |= res.needs_redraw;
+        pending_redraw.request(res.effective_redraw_priority());
         for cmd in res.commands {
             if let ClientCommand::Quit = cmd {
                 *should_quit = true;
@@ -637,7 +677,7 @@ async fn run() -> Result<()> {
     for event in initial_events {
         let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
         let mut should_quit = false;
-        update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+        update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
         if should_quit {
             break;
         }
@@ -673,7 +713,7 @@ async fn run() -> Result<()> {
                         ChatMessageKind::Error,
                         app_state.current_disconnect_chat_message(),
                     );
-                    needs_redraw = true;
+                    pending_redraw.request(RedrawPriority::Immediate);
                 }
             }
         }
@@ -684,7 +724,7 @@ async fn run() -> Result<()> {
                 kind: log.kind,
                 message: log.text,
             });
-            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+            update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
         }
 
         // 2. Process Network Events (Drain batch)
@@ -692,7 +732,7 @@ async fn run() -> Result<()> {
             match server_event_rx.try_recv() {
                 Ok(event) => {
                     let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
-                    update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                    update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
@@ -702,7 +742,7 @@ async fn run() -> Result<()> {
                             cause: RuntimeBodyResetCause::Resync,
                         },
                     ));
-                    update_state(reset, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                    update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
                     break;
                 }
@@ -713,12 +753,10 @@ async fn run() -> Result<()> {
             }
         }
 
-        // 3. Poll Input (Short timeout, drain batch)
-        let poll_timeout = if needs_redraw {
-            frame_rate.saturating_sub(last_draw.elapsed())
-        } else {
-            std::time::Duration::from_millis(10)
-        };
+        // 3. Poll Input
+        // Keep frontend-owned state updates responsive regardless of draw throttling.
+        // Only the actual draw call is rate-limited.
+        let poll_timeout = event_poll_interval.min(tick_rate.saturating_sub(last_tick.elapsed()));
 
         if event::poll(poll_timeout)? {
             while event::poll(std::time::Duration::from_millis(0))? {
@@ -729,11 +767,11 @@ async fn run() -> Result<()> {
                         }
 
                         let res = app_state.handle_app_event(AppEvent::KeyPress(key));
-                        update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                        update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     }
                     Event::Mouse(mouse) => {
                         let res = app_state.handle_app_event(AppEvent::Mouse(mouse));
-                        update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+                        update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     }
                     _ => {}
                 }
@@ -747,7 +785,7 @@ async fn run() -> Result<()> {
         let elapsed = last_tick.elapsed().as_secs_f64();
         if last_tick.elapsed() >= tick_rate {
             let res = app_state.handle_app_event(AppEvent::Tick(elapsed));
-            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+            update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
             should_quit |= app_state.has_pending_exit();
             last_tick = Instant::now();
         }
@@ -757,14 +795,19 @@ async fn run() -> Result<()> {
         }
 
         // 4. Draw (If needed and frame budget allows)
-        if needs_redraw {
+        if pending_redraw.any() {
             let now = Instant::now();
+            let frame_rate = match pending_redraw.priority() {
+                RedrawPriority::Immediate => immediate_frame_rate,
+                RedrawPriority::Motion => motion_frame_rate,
+                RedrawPriority::None => event_poll_interval,
+            };
             if now.duration_since(last_draw) >= frame_rate {
                 let size = terminal.size()?;
                 app_state.page.update_layout(size.into());
                 terminal.draw(|f| pages::render_app(f, &mut app_state))?;
                 last_draw = now;
-                needs_redraw = false;
+                pending_redraw.clear();
             }
         }
     }

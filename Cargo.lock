@@ -942,6 +942,7 @@ dependencies = [
  "env_logger",
  "futures",
  "holtburger-common",
+ "holtburger-content",
  "holtburger-core",
  "holtburger-dat",
  "holtburger-protocol",
@@ -968,6 +969,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "holtburger-content"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "binrw",
+ "holtburger-dat",
+ "holtburger-world",
+ "log",
+ "tempfile",
+]
+
+[[package]]
 name = "holtburger-core"
 version = "0.1.0"
 dependencies = [
@@ -980,7 +993,6 @@ dependencies = [
  "glam",
  "hex",
  "holtburger-common",
- "holtburger-dat",
  "holtburger-protocol",
  "holtburger-session",
  "holtburger-world",
@@ -1022,6 +1034,7 @@ dependencies = [
  "clap",
  "env_logger",
  "hex",
+ "holtburger-content",
  "holtburger-core",
  "log",
  "tokio",

@@ -1,0 +1,17 @@
+[package]
+name = "holtburger-content"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+holtburger-dat.workspace = true
+holtburger-world.workspace = true
+anyhow.workspace = true
+binrw.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

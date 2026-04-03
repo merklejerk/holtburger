@@ -11,7 +11,10 @@ use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
-use holtburger_core::{ClientBuilder, ClientCommand, ClientState, ClientViewEvent, ErrorReason};
+use holtburger_content::ContentRepository;
+use holtburger_core::{
+    ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState, ClientViewEvent, ErrorReason,
+};
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
@@ -31,6 +34,7 @@ struct BootstrappedClient {
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     initial_events: Vec<ClientViewEvent>,
+    content: Arc<ContentRepository>,
 }
 
 enum BootstrapOutcome {
@@ -237,7 +241,7 @@ fn clear_captured_logs(local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>) 
     while local_log_rx.try_recv().is_ok() {}
 }
 
-fn apply_capture_path(client: &mut holtburger_core::Client, capture: Option<&String>) {
+fn apply_capture_path(client: &mut ClientRuntime, capture: Option<&String>) {
     let Some(mut capture_path) = capture.cloned() else {
         return;
     };
@@ -324,6 +328,7 @@ fn finalize_bootstrap_outcome(
     server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
+    content: Arc<ContentRepository>,
 ) -> BootstrapOutcome {
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
@@ -332,6 +337,7 @@ fn finalize_bootstrap_outcome(
                 server_event_rx,
                 client_task_handle,
                 initial_events,
+                content,
             })
         }
         BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
@@ -345,9 +351,16 @@ async fn bootstrap_once(
     port: u16,
     dats_path: &std::path::Path,
 ) -> Result<BootstrapOutcome> {
-    let mut client = ClientBuilder::new(args.account.clone())
+    let content = Arc::new(if dats_path.is_dir() {
+        ContentRepository::from_hba_dir(dats_path)?
+    } else {
+        ContentRepository::from_hba_path(dats_path)?
+    });
+    let world_bootstrap = content.world_bootstrap()?;
+
+    let mut client = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
-        .dats_path(dats_path.to_path_buf())
+        .world_bootstrap(world_bootstrap)
         .spatial_physics(Arc::new(BasicSpatialPhysics))
         .connect()
         .await?;
@@ -386,6 +399,7 @@ async fn bootstrap_once(
                             server_cmd_tx,
                             server_event_rx,
                             client_task_handle,
+                            Arc::clone(&content),
                         ));
                     }
                 }
@@ -413,6 +427,7 @@ async fn bootstrap_once(
                                 server_cmd_tx,
                                 server_event_rx,
                                 client_task_handle,
+                                Arc::clone(&content),
                             ));
                         }
                     }
@@ -559,6 +574,7 @@ async fn run() -> Result<()> {
         mut server_event_rx,
         client_task_handle,
         initial_events,
+        content,
     } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
@@ -584,6 +600,7 @@ async fn run() -> Result<()> {
         net_stats: NetStats::default(),
         world_name: String::new(),
         server_time: None,
+        content: Some(content),
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,

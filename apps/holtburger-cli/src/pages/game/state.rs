@@ -205,9 +205,6 @@ impl GameState {
             ClientViewEvent::BusyOperationFinished { .. } => {
                 result.needs_redraw = true;
             }
-            ClientViewEvent::SpellCatalogLoaded { .. } => {
-                self.handle_reference_data_event(event);
-            }
             ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
                 let entity_ref = entity.as_ref();
                 self.data
@@ -965,12 +962,6 @@ impl GameState {
             CombatMode::NonCombat
         } else {
             self.data.get_suggested_combat_mode()
-        }
-    }
-
-    pub(crate) fn handle_reference_data_event(&mut self, event: ClientViewEvent) {
-        if let ClientViewEvent::SpellCatalogLoaded { catalog } = event {
-            self.data.spell_catalog = Some(catalog);
         }
     }
 

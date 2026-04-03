@@ -1,9 +1,10 @@
 use super::*;
 use anyhow::Result;
+use holtburger_world::SpatialBodyId;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-impl Client {
+impl ClientRuntime {
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
         let Some(pending) = self.active_busy_operation.as_ref() else {
             return;
@@ -28,12 +29,6 @@ impl Client {
             .send(ClientViewEvent::RuntimeBodySnapshot { bodies });
     }
 
-    pub(super) fn emit_initial_reference_data(&self) {
-        self.emit_spell_catalog_loaded();
-        self.emit_fellowship_state_updated();
-        self.emit_runtime_body_snapshot();
-    }
-
     pub(super) fn sync_server_time(&mut self, server_time: f64, local_time: Instant) {
         let world_events = self.world.set_server_time_sync(server_time, local_time);
         for event in world_events {
@@ -52,7 +47,8 @@ impl Client {
                     && (entity.velocity.length_squared() > EPSILON
                         || entity.omega.length_squared() > EPSILON)
                 {
-                    self.simulation.track_actor(entity.guid);
+                    self.simulation
+                        .track_body(SpatialBodyId::Entity(entity.guid));
                 }
             }
             WorldEvent::EntityVectorUpdated {
@@ -65,13 +61,13 @@ impl Client {
                 }
 
                 if velocity.length_squared() > EPSILON || omega.length_squared() > EPSILON {
-                    self.simulation.track_actor(*guid);
+                    self.simulation.track_body(SpatialBodyId::Entity(*guid));
                 } else {
-                    self.simulation.untrack_actor(*guid);
+                    self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
                 }
             }
             WorldEvent::EntityDespawned(guid) => {
-                self.simulation.untrack_actor(*guid);
+                self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
             }
             WorldEvent::RuntimeBodyChanged { body_id } => {
                 let Some(guid) = body_id.authoritative_guid() else {
@@ -88,14 +84,14 @@ impl Client {
 
                 if body.velocity.length_squared() > EPSILON || body.omega.length_squared() > EPSILON
                 {
-                    self.simulation.track_actor(guid);
+                    self.simulation.track_body(*body_id);
                 } else {
-                    self.simulation.untrack_actor(guid);
+                    self.simulation.untrack_body(*body_id);
                 }
             }
             WorldEvent::RuntimeBodyRemoved { body_id } => {
-                if let Some(guid) = body_id.authoritative_guid() {
-                    self.simulation.untrack_actor(guid);
+                if body_id.authoritative_guid().is_some() {
+                    self.simulation.untrack_body(*body_id);
                 }
             }
             WorldEvent::RuntimeBodiesReset { .. } => {}

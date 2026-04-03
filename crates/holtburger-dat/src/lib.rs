@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::path::Path;
+use std::sync::Arc;
 
 pub const DAT_HEADER_OFFSET: u64 = 0x140;
 pub const DIRECTORY_NODE_SIZE: usize = 1716;
@@ -134,6 +135,18 @@ pub trait StaticResourceKey {
     const RESOURCE_KEY: ResourceKey<'static>;
 }
 
+pub trait ResourceSource: Send + Sync {
+    fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>>;
+
+    fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata>;
+
+    fn has_namespace(&self, namespace: &str) -> bool;
+
+    fn exists_by_key(&self, key: ResourceKey<'_>) -> bool {
+        self.get_metadata_by_key(key).is_some()
+    }
+}
+
 pub trait ResourceProvider: Send + Sync {
     /// Retrieves the raw bytes of a file by its Asheron's Call ID.
     fn get_file(&self, id: u32) -> Result<Vec<u8>>;
@@ -144,67 +157,6 @@ pub trait ResourceProvider: Send + Sync {
     /// Returns true if the file exists in this provider.
     fn exists(&self, id: u32) -> bool {
         self.get_metadata(id).is_some()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResourceScope {
-    Portal,
-    Cell,
-}
-
-impl ResourceScope {
-    pub const fn namespace(self) -> &'static str {
-        match self {
-            Self::Portal => EOR_PORTAL_NAMESPACE,
-            Self::Cell => EOR_CELL_NAMESPACE,
-        }
-    }
-
-    pub fn from_namespace(namespace: &str) -> Option<Self> {
-        match namespace {
-            EOR_PORTAL_NAMESPACE => Some(Self::Portal),
-            EOR_CELL_NAMESPACE => Some(Self::Cell),
-            _ => None,
-        }
-    }
-
-    pub fn namespace_id(self) -> ResourceNamespace {
-        ResourceNamespace::new(self.namespace())
-            .expect("built-in resource scopes should always map to valid namespaces")
-    }
-}
-
-#[derive(Clone)]
-pub struct MountedResourceProvider {
-    pub namespace: ResourceNamespace,
-    pub provider: std::sync::Arc<dyn ResourceProvider>,
-}
-
-impl MountedResourceProvider {
-    pub fn new(scope: ResourceScope, provider: std::sync::Arc<dyn ResourceProvider>) -> Self {
-        Self {
-            namespace: scope.namespace_id(),
-            provider,
-        }
-    }
-
-    pub fn with_namespace(
-        namespace: &str,
-        provider: std::sync::Arc<dyn ResourceProvider>,
-    ) -> Result<Self> {
-        Ok(Self {
-            namespace: ResourceNamespace::new(namespace)?,
-            provider,
-        })
-    }
-
-    pub fn matches_scope(&self, scope: ResourceScope) -> bool {
-        self.namespace.as_str() == scope.namespace()
-    }
-
-    pub fn scope(&self) -> Option<ResourceScope> {
-        ResourceScope::from_namespace(self.namespace.as_str())
     }
 }
 
@@ -405,31 +357,51 @@ impl ResourceProvider for DatDatabase {
     }
 }
 
+impl ResourceSource for DatDatabase {
+    fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>> {
+        if !self.has_namespace(key.namespace) {
+            return Err(DatError::NotFound(key.file_id));
+        }
+
+        self.get_file(key.file_id)
+    }
+
+    fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
+        self.has_namespace(key.namespace)
+            .then(|| self.get_metadata(key.file_id))
+            .flatten()
+    }
+
+    fn has_namespace(&self, namespace: &str) -> bool {
+        self.retail_namespace_hint() == Some(namespace)
+    }
+}
+
 /// Helper to open a resource provider from a path, automatically handling .hba vs .dat extensions.
 ///
 /// If the path has no extension, it will probe for `.hba` first (optimized) then `.dat`.
-pub fn open_provider<P: AsRef<Path>>(path: P) -> Result<std::sync::Arc<dyn ResourceProvider>> {
+pub fn open_provider<P: AsRef<Path>>(path: P) -> Result<Arc<dyn ResourceProvider>> {
     let path = path.as_ref();
 
     // If it has an extension, just open it directly
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         let ext = ext.to_lowercase();
         if ext == "hba" {
-            return Ok(std::sync::Arc::new(archive::HbaReader::open(path)?));
+            return Ok(Arc::new(archive::HbaReader::open(path)?));
         } else if ext == "dat" {
-            return Ok(std::sync::Arc::new(DatDatabase::new(path)?));
+            return Ok(Arc::new(DatDatabase::new(path)?));
         }
     }
 
     // Otherwise, probe
     let hba = path.with_extension("hba");
     if hba.exists() {
-        return Ok(std::sync::Arc::new(archive::HbaReader::open(&hba)?));
+        return Ok(Arc::new(archive::HbaReader::open(&hba)?));
     }
 
     let dat = path.with_extension("dat");
     if dat.exists() {
-        return Ok(std::sync::Arc::new(DatDatabase::new(&dat)?));
+        return Ok(Arc::new(DatDatabase::new(&dat)?));
     }
 
     Err(DatError::PathError {
@@ -442,97 +414,64 @@ pub fn open_provider<P: AsRef<Path>>(path: P) -> Result<std::sync::Arc<dyn Resou
 }
 
 #[derive(Default, Clone)]
-pub struct ScopedResourceResolver {
-    providers: Vec<MountedResourceProvider>,
+pub struct LayeredResourceResolver {
+    sources: Vec<Arc<dyn ResourceSource>>,
 }
 
-impl ScopedResourceResolver {
+impl LayeredResourceResolver {
     pub fn new() -> Self {
         Self {
-            providers: Vec::new(),
+            sources: Vec::new(),
         }
     }
 
-    pub fn from_mounted<I>(providers: I) -> Self
+    pub fn from_sources<I>(sources: I) -> Self
     where
-        I: IntoIterator<Item = MountedResourceProvider>,
+        I: IntoIterator<Item = Arc<dyn ResourceSource>>,
     {
         Self {
-            providers: providers.into_iter().collect(),
+            sources: sources.into_iter().collect(),
         }
     }
 
-    pub fn add_provider(
-        &mut self,
-        scope: ResourceScope,
-        provider: std::sync::Arc<dyn ResourceProvider>,
-    ) {
-        self.providers
-            .push(MountedResourceProvider::new(scope, provider));
-    }
-
-    pub fn add_provider_for_namespace(
-        &mut self,
-        namespace: &str,
-        provider: std::sync::Arc<dyn ResourceProvider>,
-    ) -> Result<()> {
-        self.providers.push(MountedResourceProvider::with_namespace(
-            namespace, provider,
-        )?);
-        Ok(())
+    pub fn add_source(&mut self, source: Arc<dyn ResourceSource>) {
+        self.sources.push(source);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.providers.is_empty()
+        self.sources.is_empty()
     }
 
     pub fn has_namespace(&self, namespace: &str) -> bool {
-        let Ok(namespace_id) = ResourceNamespace::new(namespace) else {
-            return false;
-        };
-
-        self.providers
+        self.sources
             .iter()
-            .any(|provider| provider.namespace == namespace_id)
-    }
-
-    pub fn has_scope(&self, scope: ResourceScope) -> bool {
-        self.has_namespace(scope.namespace())
+            .any(|source| source.has_namespace(namespace))
     }
 
     pub fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>> {
-        self.get_file_in_namespace(key.namespace, key.file_id)
-    }
+        let mut first_pruned_source = None;
 
-    pub fn get_file_in_namespace(&self, namespace: &str, id: u32) -> Result<Vec<u8>> {
-        let namespace_id = ResourceNamespace::new(namespace)?;
-        let mut first_pruned_provider = None;
-
-        for mounted in self
-            .providers
-            .iter()
-            .filter(|provider| provider.namespace == namespace_id)
-        {
-            if let Some(meta) = mounted.provider.get_metadata(id) {
+        for source in &self.sources {
+            if let Some(meta) = source.get_metadata_by_key(key) {
                 if !meta.is_pruned {
-                    return mounted.provider.get_file(id);
+                    return source.get_file_by_key(key);
                 }
 
-                if first_pruned_provider.is_none() {
-                    first_pruned_provider = Some(&mounted.provider);
+                if first_pruned_source.is_none() {
+                    first_pruned_source = Some(Arc::clone(source));
                 }
             }
         }
 
-        if let Some(provider) = first_pruned_provider {
-            return provider.get_file(id);
+        if let Some(source) = first_pruned_source {
+            return source.get_file_by_key(key);
         }
 
-        Err(DatError::NotFound(id))
+        Err(DatError::NotFound(key.file_id))
     }
 
-    pub fn get_file(&self, scope: ResourceScope, id: u32) -> Result<Vec<u8>> {
-        self.get_file_in_namespace(scope.namespace(), id)
+    pub fn get_file_in_namespace(&self, namespace: &str, id: u32) -> Result<Vec<u8>> {
+        self.get_file_by_key(ResourceKey::new(namespace, id))
     }
 
     pub fn get_file_for<T: StaticResourceKey>(&self) -> Result<Vec<u8>> {
@@ -540,22 +479,14 @@ impl ScopedResourceResolver {
     }
 
     pub fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
-        self.get_metadata_in_namespace(key.namespace, key.file_id)
-    }
-
-    pub fn get_metadata_in_namespace(&self, namespace: &str, id: u32) -> Option<FileMetadata> {
-        let namespace_id = ResourceNamespace::new(namespace).ok()?;
         let mut first_pruned = None;
 
-        for mounted in self
-            .providers
-            .iter()
-            .filter(|provider| provider.namespace == namespace_id)
-        {
-            if let Some(meta) = mounted.provider.get_metadata(id) {
+        for source in &self.sources {
+            if let Some(meta) = source.get_metadata_by_key(key) {
                 if !meta.is_pruned {
                     return Some(meta);
                 }
+
                 if first_pruned.is_none() {
                     first_pruned = Some(meta);
                 }
@@ -565,16 +496,12 @@ impl ScopedResourceResolver {
         first_pruned
     }
 
-    pub fn get_metadata(&self, scope: ResourceScope, id: u32) -> Option<FileMetadata> {
-        self.get_metadata_in_namespace(scope.namespace(), id)
+    pub fn get_metadata_in_namespace(&self, namespace: &str, id: u32) -> Option<FileMetadata> {
+        self.get_metadata_by_key(ResourceKey::new(namespace, id))
     }
 
     pub fn get_metadata_for<T: StaticResourceKey>(&self) -> Option<FileMetadata> {
         self.get_metadata_by_key(T::RESOURCE_KEY)
-    }
-
-    pub fn exists(&self, scope: ResourceScope, id: u32) -> bool {
-        self.get_metadata(scope, id).is_some()
     }
 
     pub fn exists_in_namespace(&self, namespace: &str, id: u32) -> bool {
@@ -591,50 +518,64 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
-    struct MockProvider {
-        files: HashMap<u32, Vec<u8>>,
-        pruned_ids: Vec<u32>,
+    struct MockSource {
+        files: HashMap<(String, u32), Vec<u8>>,
+        pruned_keys: Vec<(String, u32)>,
     }
 
-    impl ResourceProvider for MockProvider {
-        fn get_file(&self, id: u32) -> Result<Vec<u8>> {
-            self.files.get(&id).cloned().ok_or(DatError::NotFound(id))
+    impl ResourceSource for MockSource {
+        fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .cloned()
+                .ok_or(DatError::NotFound(key.file_id))
         }
 
-        fn get_metadata(&self, id: u32) -> Option<FileMetadata> {
-            self.files.get(&id).map(|data| FileMetadata {
-                id,
-                size: data.len() as u32,
-                is_pruned: self.pruned_ids.contains(&id),
-            })
+        fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .map(|data| FileMetadata {
+                    id: key.file_id,
+                    size: data.len() as u32,
+                    is_pruned: self
+                        .pruned_keys
+                        .contains(&(key.namespace.to_string(), key.file_id)),
+                })
+        }
+
+        fn has_namespace(&self, namespace: &str) -> bool {
+            self.files
+                .keys()
+                .any(|(candidate, _)| candidate == namespace)
         }
     }
 
     #[test]
-    fn test_scoped_resource_resolver_keeps_portal_and_cell_separate() {
-        let mut portal = MockProvider {
+    fn test_layered_resource_resolver_keeps_portal_and_cell_separate() {
+        let mut source = MockSource {
             files: HashMap::new(),
-            pruned_ids: vec![],
+            pruned_keys: vec![],
         };
-        portal.files.insert(0x1234, vec![0xAA]);
+        source
+            .files
+            .insert((EOR_PORTAL_NAMESPACE.to_string(), 0x1234), vec![0xAA]);
+        source
+            .files
+            .insert((EOR_CELL_NAMESPACE.to_string(), 0x1234), vec![0xBB]);
 
-        let mut cell = MockProvider {
-            files: HashMap::new(),
-            pruned_ids: vec![],
-        };
-        cell.files.insert(0x1234, vec![0xBB]);
-
-        let resolver = ScopedResourceResolver::from_mounted([
-            MountedResourceProvider::new(ResourceScope::Portal, Arc::new(portal)),
-            MountedResourceProvider::new(ResourceScope::Cell, Arc::new(cell)),
-        ]);
+        let resolver =
+            LayeredResourceResolver::from_sources([Arc::new(source) as Arc<dyn ResourceSource>]);
 
         assert_eq!(
-            resolver.get_file(ResourceScope::Portal, 0x1234).unwrap(),
+            resolver
+                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, 0x1234)
+                .unwrap(),
             vec![0xAA]
         );
         assert_eq!(
-            resolver.get_file(ResourceScope::Cell, 0x1234).unwrap(),
+            resolver
+                .get_file_in_namespace(EOR_CELL_NAMESPACE, 0x1234)
+                .unwrap(),
             vec![0xBB]
         );
         assert_eq!(
@@ -646,50 +587,57 @@ mod tests {
     }
 
     #[test]
-    fn test_scoped_resource_resolver_prefers_unpruned_within_scope() {
-        let mut pruned = MockProvider {
+    fn test_layered_resource_resolver_prefers_unpruned_entries_from_later_sources() {
+        let mut pruned = MockSource {
             files: HashMap::new(),
-            pruned_ids: vec![0x4321],
+            pruned_keys: vec![(EOR_PORTAL_NAMESPACE.to_string(), 0x4321)],
         };
-        pruned.files.insert(0x4321, vec![0x01]);
+        pruned
+            .files
+            .insert((EOR_PORTAL_NAMESPACE.to_string(), 0x4321), vec![0x01]);
 
-        let mut full = MockProvider {
+        let mut full = MockSource {
             files: HashMap::new(),
-            pruned_ids: vec![],
+            pruned_keys: vec![],
         };
-        full.files.insert(0x4321, vec![0x02]);
+        full.files
+            .insert((EOR_PORTAL_NAMESPACE.to_string(), 0x4321), vec![0x02]);
 
-        let resolver = ScopedResourceResolver::from_mounted([
-            MountedResourceProvider::new(ResourceScope::Portal, Arc::new(pruned)),
-            MountedResourceProvider::new(ResourceScope::Portal, Arc::new(full)),
+        let resolver = LayeredResourceResolver::from_sources([
+            Arc::new(pruned) as Arc<dyn ResourceSource>,
+            Arc::new(full) as Arc<dyn ResourceSource>,
         ]);
 
         assert_eq!(
-            resolver.get_file(ResourceScope::Portal, 0x4321).unwrap(),
+            resolver
+                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, 0x4321)
+                .unwrap(),
             vec![0x02]
         );
     }
 
     #[test]
-    fn test_scoped_resource_resolver_falls_back_to_pruned_within_scope() {
-        let mut pruned = MockProvider {
+    fn test_layered_resource_resolver_falls_back_to_pruned_entries() {
+        let mut pruned = MockSource {
             files: HashMap::new(),
-            pruned_ids: vec![0x2222],
+            pruned_keys: vec![(EOR_PORTAL_NAMESPACE.to_string(), 0x2222)],
         };
-        pruned.files.insert(0x2222, vec![1, 2, 3]);
+        pruned
+            .files
+            .insert((EOR_PORTAL_NAMESPACE.to_string(), 0x2222), vec![1, 2, 3]);
 
-        let resolver = ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
-            ResourceScope::Portal,
-            Arc::new(pruned),
-        )]);
+        let resolver =
+            LayeredResourceResolver::from_sources([Arc::new(pruned) as Arc<dyn ResourceSource>]);
 
         assert_eq!(
-            resolver.get_file(ResourceScope::Portal, 0x2222).unwrap(),
+            resolver
+                .get_file_in_namespace(EOR_PORTAL_NAMESPACE, 0x2222)
+                .unwrap(),
             vec![1, 2, 3]
         );
         assert!(
             resolver
-                .get_metadata(ResourceScope::Portal, 0x2222)
+                .get_metadata_in_namespace(EOR_PORTAL_NAMESPACE, 0x2222)
                 .unwrap()
                 .is_pruned
         );
@@ -709,19 +657,17 @@ mod tests {
     }
 
     #[test]
-    fn test_scoped_resource_resolver_supports_explicit_namespace_mounts() {
-        let mut provider = MockProvider {
+    fn test_layered_resource_resolver_supports_explicit_namespaces() {
+        let mut source = MockSource {
             files: HashMap::new(),
-            pruned_ids: vec![],
+            pruned_keys: vec![],
         };
-        provider.files.insert(0xDEAD, vec![0xCC]);
+        source
+            .files
+            .insert(("derived/test".to_string(), 0xDEAD), vec![0xCC]);
 
         let resolver =
-            ScopedResourceResolver::from_mounted([MountedResourceProvider::with_namespace(
-                "derived/test",
-                Arc::new(provider),
-            )
-            .expect("custom namespace mount should be valid")]);
+            LayeredResourceResolver::from_sources([Arc::new(source) as Arc<dyn ResourceSource>]);
 
         assert!(resolver.has_namespace("derived/test"));
         assert_eq!(

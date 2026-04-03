@@ -46,7 +46,6 @@ fn get_list_items(tab: &SpellsTab, data: &GameData) -> Vec<ListItem<'static>> {
         .map(|(i, &spell_id)| {
             let name = data
                 .spell_name(spell_id)
-                .map(str::to_string)
                 .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));
 
             let is_selected = i == tab.selected_index;
@@ -63,11 +62,7 @@ fn get_list_items(tab: &SpellsTab, data: &GameData) -> Vec<ListItem<'static>> {
                 Span::styled(format!("{:<30}", name), name_style),
                 Span::raw(" "),
                 Span::styled(
-                    if let Some(info) = data
-                        .spell_catalog
-                        .as_ref()
-                        .and_then(|catalog| catalog.get(spell_id))
-                    {
+                    if let Some(info) = data.spell_info(spell_id) {
                         format!("Power: {}", info.power)
                     } else {
                         "".to_string()

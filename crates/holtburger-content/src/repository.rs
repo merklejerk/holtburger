@@ -1,7 +1,8 @@
+use crate::bootstrap;
 use anyhow::{Context, Result, anyhow};
 use binrw::BinRead;
-use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
-use holtburger_dat::{EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, ResourceSource};
+use holtburger_dat::file_type::SpellTable;
+use holtburger_dat::{HbaReader, ResourceSource};
 use holtburger_world::WorldBootstrap;
 use holtburger_world::spell::SpellCatalog;
 use std::ffi::OsStr;
@@ -87,32 +88,10 @@ impl ContentRepository {
     }
 
     pub fn world_bootstrap(&self) -> Result<Arc<WorldBootstrap>> {
-        let skill_table = SkillTable::read(&mut Cursor::new(
-            self.required_asset_bytes(REQUIRED_SKILL_TABLE)?,
-        ))
-        .context("failed to parse required skill table")?;
-
-        let xp_table = XpTable::read(&mut Cursor::new(
-            self.required_asset_bytes(REQUIRED_XP_TABLE)?,
-        ))
-        .context("failed to parse required XP table")?;
-
-        let spell_table = SpellTable::read(&mut Cursor::new(
-            self.required_asset_bytes(REQUIRED_SPELL_TABLE)?,
-        ))
-        .context("failed to parse required spell table")?;
-
-        let motion_kinematics = MotionKinematics::read(&mut Cursor::new(
-            self.required_asset_bytes(REQUIRED_MOTION_KINEMATICS)?,
-        ))
-        .context("failed to parse required motion kinematics table")?;
-
-        Ok(Arc::new(WorldBootstrap::new(
-            skill_table,
-            spell_table,
-            xp_table,
-            motion_kinematics,
-        )))
+        bootstrap::world_bootstrap_from_mounts_with_source(
+            self.mounts.clone(),
+            self.source_description.as_deref(),
+        )
     }
 
     pub fn spell_catalog(&self) -> Result<Arc<SpellCatalog>> {
@@ -120,99 +99,18 @@ impl ContentRepository {
             return Ok(Arc::clone(catalog));
         }
 
-        let spell_table = SpellTable::read(&mut Cursor::new(
-            self.required_asset_bytes(REQUIRED_SPELL_TABLE)?,
-        ))
+        let spell_table = SpellTable::read(&mut Cursor::new(bootstrap::required_asset_bytes::<
+            SpellTable,
+        >(
+            &holtburger_dat::LayeredResourceResolver::from_sources(self.mounts.clone()),
+            self.source_description.as_deref(),
+            "spell table",
+        )?))
         .context("failed to parse required spell table")?;
 
         let catalog = Arc::new(spell_table.into());
         let _ = self.spell_catalog_cache.set(Arc::clone(&catalog));
         Ok(catalog)
-    }
-
-    fn required_asset_bytes(&self, asset: RequiredResourceAsset) -> Result<Vec<u8>> {
-        for mount in &self.mounts {
-            if let Some(metadata) = mount.get_metadata_by_key(asset.resource_key()) {
-                if metadata.is_pruned {
-                    continue;
-                }
-
-                return mount
-                    .get_file_by_key(asset.resource_key())
-                    .map_err(anyhow::Error::from);
-            }
-        }
-
-        for mount in &self.mounts {
-            if mount.get_metadata_by_key(asset.resource_key()).is_some() {
-                return mount
-                    .get_file_by_key(asset.resource_key())
-                    .map_err(anyhow::Error::from);
-            }
-        }
-
-        Err(missing_resource_asset_error(
-            asset,
-            self.source_description.as_deref(),
-        ))
-    }
-}
-
-#[derive(Clone, Copy)]
-struct RequiredResourceAsset {
-    namespace: &'static str,
-    id: u32,
-    name: &'static str,
-}
-
-impl RequiredResourceAsset {
-    fn resource_key(&self) -> holtburger_dat::ResourceKey<'static> {
-        holtburger_dat::ResourceKey::new(self.namespace, self.id)
-    }
-}
-
-const REQUIRED_SKILL_TABLE: RequiredResourceAsset = RequiredResourceAsset {
-    namespace: EOR_PORTAL_NAMESPACE,
-    id: SkillTable::FILE_ID,
-    name: "skill table",
-};
-
-const REQUIRED_SPELL_TABLE: RequiredResourceAsset = RequiredResourceAsset {
-    namespace: EOR_PORTAL_NAMESPACE,
-    id: SpellTable::FILE_ID,
-    name: "spell table",
-};
-
-const REQUIRED_XP_TABLE: RequiredResourceAsset = RequiredResourceAsset {
-    namespace: EOR_PORTAL_NAMESPACE,
-    id: XpTable::FILE_ID,
-    name: "XP table",
-};
-
-const REQUIRED_MOTION_KINEMATICS: RequiredResourceAsset = RequiredResourceAsset {
-    namespace: HOLTBURGER_CORE_NAMESPACE,
-    id: MotionKinematics::FILE_ID,
-    name: "motion kinematics table",
-};
-
-fn missing_resource_asset_error(
-    asset: RequiredResourceAsset,
-    source_description: Option<&str>,
-) -> anyhow::Error {
-    match source_description {
-        Some(source) => anyhow!(
-            "Missing required asset {}:0x{:08X} ({}) while loading client data from {}.",
-            asset.namespace,
-            asset.id,
-            asset.name,
-            source
-        ),
-        None => anyhow!(
-            "Missing required asset {}:0x{:08X} ({}) in the mounted resource namespaces.",
-            asset.namespace,
-            asset.id,
-            asset.name,
-        ),
     }
 }
 

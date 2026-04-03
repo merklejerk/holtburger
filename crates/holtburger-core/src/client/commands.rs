@@ -1294,7 +1294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_initial_view_state_does_not_project_spell_catalog() {
+    async fn request_initial_view_state_does_not_emit_reference_data_events() {
         let mut client = build_test_client();
         client.world.spell_catalog = Arc::new(SpellCatalog::default());
         let mut events = client.subscribe_client_view_events();
@@ -1304,15 +1304,15 @@ mod tests {
             .await
             .unwrap();
 
-        let mut saw_catalog = false;
+        let mut saw_reference_data_event = false;
         while let Ok(event) = events.try_recv() {
             if matches!(event, ClientViewEvent::PlayerSpellsUpdated { .. }) {
-                saw_catalog = true;
+                saw_reference_data_event = true;
                 break;
             }
         }
 
-        assert!(!saw_catalog);
+        assert!(!saw_reference_data_event);
     }
 
     #[tokio::test]

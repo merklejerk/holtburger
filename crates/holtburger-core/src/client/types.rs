@@ -18,7 +18,6 @@ use holtburger_protocol::messages::{
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
-use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
@@ -313,9 +312,6 @@ pub enum ClientViewEvent {
     },
     PlayerVitalsUpdated {
         vitals: HashMap<VitalType, Vital>,
-    },
-    SpellCatalogLoaded {
-        catalog: Arc<SpellCatalog>,
     },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,

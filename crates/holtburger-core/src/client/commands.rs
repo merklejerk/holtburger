@@ -1,5 +1,5 @@
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
-use crate::client::{Client, ClientState};
+use crate::client::{ClientRuntime, ClientState};
 use anyhow::Result;
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
@@ -46,7 +46,7 @@ fn normalize_spell_cast(
         None => NormalizedSpellCast::Untargeted { spell_id },
     }
 }
-impl Client {
+impl ClientRuntime {
     fn resolve_player_guid_by_name(&self, name: &str) -> Option<Guid> {
         if self.world.player.name().eq_ignore_ascii_case(name) {
             return Some(self.world.player.guid);
@@ -763,7 +763,8 @@ impl Client {
             }
             ClientCommand::RequestInitialViewState => {
                 log::info!(">>> Client requested initial view state snapshot");
-                self.emit_initial_reference_data();
+                self.emit_fellowship_state_updated();
+                self.emit_runtime_body_snapshot();
                 Ok(())
             }
             ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
@@ -1136,7 +1137,7 @@ mod tests {
     use crate::client::types::{
         ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent, WireEvent,
     };
-    use crate::client::{Client, ClientState};
+    use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
@@ -1147,7 +1148,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    fn build_test_client() -> Client {
+    fn build_test_client() -> ClientRuntime {
         builder::build_test_client(ClientState::InWorld)
     }
 
@@ -1293,7 +1294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_initial_view_state_projects_cached_spell_catalog() {
+    async fn request_initial_view_state_does_not_project_spell_catalog() {
         let mut client = build_test_client();
         client.world.spell_catalog = Arc::new(SpellCatalog::default());
         let mut events = client.subscribe_client_view_events();
@@ -1305,13 +1306,13 @@ mod tests {
 
         let mut saw_catalog = false;
         while let Ok(event) = events.try_recv() {
-            if matches!(event, ClientViewEvent::SpellCatalogLoaded { .. }) {
+            if matches!(event, ClientViewEvent::PlayerSpellsUpdated { .. }) {
                 saw_catalog = true;
                 break;
             }
         }
 
-        assert!(saw_catalog);
+        assert!(!saw_catalog);
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@ use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
-use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
+use crate::types::{FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
 
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
@@ -29,7 +29,7 @@ impl GameState {
                 {
                     self.chat.scroll_offset = self.chat.scroll_offset.saturating_add(SCROLL_STEP);
 
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
                     && mouse.column >= main_chunks[2].x
@@ -38,7 +38,7 @@ impl GameState {
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_sub(SCROLL_STEP);
 
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 } else if mouse.row >= main_chunks[0].y
                     && mouse.row < main_chunks[0].y + main_chunks[0].height
                     && mouse.column >= main_chunks[0].x
@@ -51,7 +51,7 @@ impl GameState {
                         data,
                         view,
                     );
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             crossterm::event::MouseEventKind::ScrollDown => {
@@ -61,7 +61,7 @@ impl GameState {
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
                     self.chat.scroll_offset = self.chat.scroll_offset.saturating_sub(SCROLL_STEP);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
                     && mouse.column >= main_chunks[2].x
@@ -69,7 +69,7 @@ impl GameState {
                 {
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_add(SCROLL_STEP);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 } else if mouse.row >= main_chunks[0].y
                     && mouse.row < main_chunks[0].y + main_chunks[0].height
                     && mouse.column >= main_chunks[0].x
@@ -82,7 +82,7 @@ impl GameState {
                         data,
                         view,
                     );
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             _ => {}
@@ -146,7 +146,7 @@ impl GameState {
                     active,
                     delta,
                 );
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             KeyCode::Esc => {
                 if self.view.focused_pane == FocusedPane::Input {
@@ -155,7 +155,7 @@ impl GameState {
                     self.clear_active_interaction(&mut result);
                     self.view.salvaging = None;
                 }
-                result.needs_redraw = true;
+                result.request_redraw(RedrawPriority::Immediate);
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
@@ -174,31 +174,31 @@ impl GameState {
                         result
                             .commands
                             .push(ClientCommand::Emote(emote.to_string()));
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                         return result;
                     }
                     self.chat_input.input_history.push(command.clone());
                     self.chat_input.history_index = None;
                     self.view.focused_pane = self.view.previous_focused_pane;
                     result.commands.push(ClientCommand::Talk(command));
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 } else {
                     self.view.previous_focused_pane = self.view.focused_pane;
                     self.view.focused_pane = FocusedPane::Input;
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             KeyCode::Backspace | KeyCode::Delete => {
                 if self.view.focused_pane == FocusedPane::Input
                     && self.chat_input.input.apply_key(key)
                 {
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             KeyCode::Left | KeyCode::Right => {
                 if self.view.focused_pane == FocusedPane::Input {
                     if self.chat_input.input.apply_key(key) {
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 } else {
                     let delta = if key.code == KeyCode::Right {
@@ -216,7 +216,7 @@ impl GameState {
                         .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
                             heading: new_heading,
                         }));
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
             }
             KeyCode::Up => match self.view.focused_pane {
@@ -231,19 +231,19 @@ impl GameState {
                         self.chat_input
                             .input
                             .set_text(&self.chat_input.input_history[idx]);
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 }
                 FocusedPane::Chat => {
                     self.chat.scroll_offset = self.chat.scroll_offset.saturating_add(1);
 
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_sub(1);
 
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
             },
@@ -260,17 +260,17 @@ impl GameState {
                             self.chat_input.history_index = None;
                             self.chat_input.input.clear();
                         }
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 }
                 FocusedPane::Chat => {
                     self.chat.scroll_offset = self.chat.scroll_offset.saturating_sub(1);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_add(1);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
             },
@@ -279,14 +279,14 @@ impl GameState {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
                     self.chat.scroll_offset = self.chat.scroll_offset.saturating_add(step);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
                     let h = main_chunks[2].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_sub(step);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
             },
@@ -295,27 +295,27 @@ impl GameState {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
                     self.chat.scroll_offset = self.chat.scroll_offset.saturating_sub(step);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
                     let h = main_chunks[2].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_add(step);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
             },
             KeyCode::Char(c) => {
                 if self.view.focused_pane == FocusedPane::Input {
                     if self.chat_input.input.apply_key(key) {
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 } else if c == '`' {
                     result.actions.push(crate::types::AppAction::SetCombatMode {
                         mode: self.toggled_combat_mode(),
                     });
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
                     match c.to_ascii_lowercase() {
                         'r' if matches!(
@@ -326,7 +326,7 @@ impl GameState {
                             result
                                 .actions
                                 .push(crate::types::AppAction::CycleCombatProfileLevel);
-                            result.needs_redraw = true;
+                            result.request_redraw(RedrawPriority::Immediate);
                         }
                         'h' if matches!(
                             self.data.combat_mode,
@@ -336,7 +336,7 @@ impl GameState {
                             result
                                 .actions
                                 .push(crate::types::AppAction::CycleCombatAttackHeight);
-                            result.needs_redraw = true;
+                            result.request_redraw(RedrawPriority::Immediate);
                         }
                         _ => {}
                     }
@@ -345,33 +345,33 @@ impl GameState {
             KeyCode::Home => match self.view.focused_pane {
                 FocusedPane::Input => {
                     if self.chat_input.input.apply_key(key) {
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 }
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     self.chat.scroll_offset = self.chat.total_lines.saturating_sub(h);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
                     self.view.context_scroll_offset = 0;
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
             },
             KeyCode::End => match self.view.focused_pane {
                 FocusedPane::Input => {
                     if self.chat_input.input.apply_key(key) {
-                        result.needs_redraw = true;
+                        result.request_redraw(RedrawPriority::Immediate);
                     }
                 }
                 FocusedPane::Chat => {
                     self.chat.scroll_offset = 0;
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
                     self.view.context_scroll_offset = self.context_buffer_len().saturating_sub(1);
-                    result.needs_redraw = true;
+                    result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
             },
@@ -398,7 +398,7 @@ impl GameState {
                 self.mark_fellowship_invite_accepted();
             }
             self.view.active_confirmation = None;
-            result.needs_redraw = true;
+            result.request_redraw(RedrawPriority::Immediate);
         }
 
         Some(result)
@@ -467,7 +467,7 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
 
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::DriveSelf(
@@ -575,7 +575,7 @@ mod tests {
             )
         }));
         assert!(result.actions.is_empty());
-        assert!(result.needs_redraw);
+        assert!(result.redraw_requested());
         assert!(state.view.active_confirmation.is_none());
         assert_eq!(state.chat_input.input.text(), "/options list");
     }
@@ -653,7 +653,7 @@ mod tests {
 
         assert!(result.commands.is_empty());
         assert!(result.actions.is_empty());
-        assert!(!result.needs_redraw);
+        assert!(!result.redraw_requested());
         assert_eq!(state.chat_input.input.text(), "hello");
         assert!(state.view.active_confirmation.is_some());
     }

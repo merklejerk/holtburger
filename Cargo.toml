@@ -79,3 +79,10 @@ install-updater = false
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+debug-assertions = false
+incremental = false

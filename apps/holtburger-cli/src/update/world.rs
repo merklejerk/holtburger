@@ -263,6 +263,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
+            content: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

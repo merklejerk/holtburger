@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use holtburger_core::{ClientBuilder, ClientCommand, WireEvent};
+use holtburger_content::ContentRepository;
+use holtburger_core::{ClientCommand, ClientRuntimeBuilder, WireEvent};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -57,9 +58,16 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    let mut client = ClientBuilder::new(args.account.clone())
+    let content = if dats_path.is_dir() {
+        ContentRepository::from_hba_dir(&dats_path)?
+    } else {
+        ContentRepository::from_hba_path(&dats_path)?
+    };
+    let world_bootstrap = content.world_bootstrap()?;
+
+    let mut client = ClientRuntimeBuilder::new(args.account.clone())
         .server(args.server.clone(), args.port)
-        .dats_path(dats_path)
+        .world_bootstrap(world_bootstrap)
         .connect()
         .await?;
 

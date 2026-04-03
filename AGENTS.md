@@ -1,8 +1,8 @@
 The ultimate goal of this project is to develop a third-party client for Asheron's Call.
-- As part of this goal we will also need to reverse engineer and document the Asheron's Call protocol and file formats. These docs should be detailed to allow others to implement their own clients or tools from scratch. Be aware that docs will often fall behind our implementation. The ultimate source of truth is the ACE Server code.
-- Included in this repository are submodules for the [ACE Server](ACE/) and the [AC DAT viewer](ACViewer/), which we should use as ground truth references. Never guess. Guessing is dangerous! If you find yourself guessing, STOP and search for a basis in the references. Most likely everything you need to know can be proven by the server or dat viewer code. You are allowed to modify the code in there (like add tracing/logs) and create tests to validate your understanding.
+- We also need to reverse engineer and document the Asheron's Call protocol and file formats. Those docs should be detailed enough for others to implement their own clients or tools from scratch, but expect docs to lag code. The ultimate source of truth is the ACE Server code.
+- Included in this repository are submodules for the [ACE Server](ACE/) and the [AC DAT viewer](ACViewer/), which we should use as ground truth references. Do not guess. If you find yourself guessing, stop and prove the answer from those references. You may modify them for diagnostics and create tests to validate your understanding.
 - DO NOT RUN THE TUI CLIENT for diagnostics/testing. It is interactive so will just hang. That's for me to use. You can just write your own bespoke client in the [harness](crates/holtburger-debug-harness/) if you need live data.
-- Temporary planning docs can go into the [plan folder](docs/plans/). Note that old are retained for posterity and may no longer represent the code.
+- Temporary planning docs can go into the [plan folder](docs/plans/). Old plans are retained for posterity and may no longer represent the code.
 
 ## Architectural Direction
 
@@ -10,6 +10,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - The real target is a traditional 3D client that can replace the closed-source retail client. Judge shared APIs and abstractions against that future client, not just today's TUI.
 - Do not let the TUI's lower-fidelity needs push shared crates toward narrow models that will block richer rendering, motion, visibility, animation, or interaction later.
 - Shared crates should contain behavior, data, and APIs that are plausibly common to both the TUI and a future 3D client. Frontend-specific UX or control policy should stay in the frontend.
+- Don't sacrifice cleaner design for backwards compatibility, especially for tests.
 
 ## Crate Boundaries
 
@@ -17,6 +18,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - `holtburger-protocol`: wire-level protocol types and deterministic serialization only.
 - `holtburger-session`: transport, sequencing, fragmentation, crypto, and socket concerns only.
 - `holtburger-dat`: static client data access and decoding only.
+- `holtburger-content`: runtime content discovery, parsed bootstrap assembly, and frontend-owned static reference-data queries.
 - `holtburger-world`: authoritative world state, hydration, retention/spatial rules, and shared world-derived semantics.
 - `holtburger-core`: orchestration plus reusable client behaviors, commands, and controllers that are likely useful across multiple clients.
 - `holtburger-cli`: TUI-only rendering, input mapping, local view state, layout, and UX/control policy.
@@ -26,6 +28,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 
 - Before adding code to a shared crate, ask whether it is likely to be shared by both the TUI and a future 3D client.
 - Distinguish authoritative game understanding from frontend presentation. Shared semantics belong in `world` or `core`; presentation and UX belong in the frontend.
+- Keep runtime content discovery and static reference-data queries in `holtburger-content`; `core` should consume parsed bootstrap data rather than disk paths or archive policy.
 - Do not move code into a lower-level crate just because there is only one caller today.
 - Do not leave logic in the TUI just because the TUI is the only current consumer if that logic represents authoritative world semantics or reusable client behavior.
 - Prefer extensible, lossless shared representations. A frontend can ignore detail it does not need; adding missing shared detail later is harder.

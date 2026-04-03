@@ -23,12 +23,13 @@ impl AppState {
                     self.display_client_info();
                 }
                 AppAction::TransitionToGame { guid, name } => {
-                    let game = GameState::with_chat_log(
+                    let mut game = GameState::with_chat_log(
                         guid,
                         name,
                         self.world_name.clone(),
                         self.chat_log.take(),
                     );
+                    game.data.content = self.content.clone();
                     self.page = Page::Game(Box::new(game));
                     result.needs_redraw = true;
                 }
@@ -94,6 +95,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
+            content: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

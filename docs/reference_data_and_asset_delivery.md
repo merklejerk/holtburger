@@ -65,18 +65,17 @@ This is the right shape. The TUI wants the semantics, not the raw backing tables
 
 Spell data are different today.
 
-- `holtburger-world` loads `SpellTable` from mounted portal data.
-- `holtburger-world` converts that into `SpellCatalog`.
-- `holtburger-core` emits `ClientViewEvent::SpellCatalogLoaded`.
-- `holtburger-cli` stores that catalog in local UI state and uses it directly for:
+- `holtburger-content` loads `SpellTable` from mounted portal data.
+- `holtburger-content` exposes that data as `SpellCatalog` for frontend lookup.
+- `holtburger-cli` stores that catalog in local UI state during bootstrap and uses it directly for:
   - context panels
   - spell detail rendering
   - spell and enchantment debug output
   - other direct spell lookups where raw spell metadata is useful
 
-The recent bootstrap change moved that initial spell-catalog delivery behind `ClientCommand::RequestInitialViewState` so the TUI no longer calls a direct `Client` method to trigger the event.
+`ClientCommand::RequestInitialViewState` now stays focused on semantic runtime bootstrap such as fellowship and runtime-body snapshots.
 
-That was a layering improvement, but it did **not** answer the larger question of whether spell metadata really belongs in the same category as semantic view snapshots.
+That resolved the immediate layering problem, but it did **not** answer the larger question of whether spell metadata really belongs in the same category as semantic view snapshots.
 
 ## Architectural Distinction
 
@@ -217,16 +216,16 @@ The important part is not the exact API shape. The important part is recognizing
 
 ## Current Tactical Decision
 
-For the TUI today, `ClientCommand::RequestInitialViewState` returning `SpellCatalogLoaded` is acceptable.
+For the TUI today, spell reference data should come from `holtburger-content`, while `ClientCommand::RequestInitialViewState` stays focused on semantic runtime bootstrap.
 
 Reasons:
 
-- it avoids direct frontend pokes into `Client`
-- it keeps the bootstrap command-driven
-- it fits the TUI's immediate need for spell lookups
-- it is simple and already validated by tests
+- it keeps spell metadata in the static-reference-data category instead of pretending it is live view state
+- it keeps the bootstrap command-driven for actual runtime state such as fellowship and runtime-body snapshots
+- it gives the TUI direct spell lookup data without making it parse DAT/HBA files itself
+- it matches the future direction better than a pushed `SpellCatalogLoaded` event
 
-But this should be treated as a tactical bridge, not as a statement that all static client data should eventually move through `ClientViewEvent`.
+This should still be treated as a narrow spell-reference-data seam, not as a statement that all static client data should eventually move through `holtburger-content` in the same way.
 
 ## Long-Term Direction
 
@@ -332,10 +331,10 @@ It is a framing document intended to preserve the distinction between semantic s
 
 For now:
 
-- keep `RequestInitialViewState` for frontend bootstrap snapshots
+- keep `RequestInitialViewState` for semantic frontend bootstrap snapshots
 - do not expose raw XP or skill tables to the frontend
-- treat `SpellCatalogLoaded` as a tactical compromise for the TUI
-- avoid building new shared APIs that assume event-based spell-catalog delivery is the permanent model
+- let frontends query spell metadata from `holtburger-content` instead of via `ClientViewEvent`
+- avoid building new shared APIs that assume event-based reference-data delivery is the permanent model
 - revisit spell metadata once the broader reference-data and future 3D client needs are clearer
 
 That preserves momentum today without accidentally locking the project into the wrong abstraction tomorrow.

@@ -17,7 +17,7 @@ pub mod runtime_body_view_cache;
 mod simulation;
 pub mod types;
 use auth::AuthState;
-pub use builder::ClientBuilder;
+pub use builder::ClientRuntimeBuilder;
 use movement::MovementSystem;
 use simulation::ClientSimulationSystem;
 use types::*;
@@ -33,7 +33,7 @@ struct PendingBusyOperation {
     pending_error: Option<(WeenieError, Option<String>)>,
 }
 
-pub struct Client {
+pub struct ClientRuntime {
     pub session: Session,
     pub world: WorldState,
     active_confirmation: Option<ActiveCharacterConfirmation>,
@@ -50,7 +50,7 @@ pub struct Client {
     turbine_chat: TurbineChatState,
 }
 
-impl Client {
+impl ClientRuntime {
     fn player_character_options(&self) -> PlayerCharacterOptions {
         PlayerCharacterOptions {
             options1: self.world.player.options1,
@@ -170,14 +170,6 @@ impl Client {
                 parameter,
             },
         );
-    }
-
-    fn emit_spell_catalog_loaded(&self) {
-        let _ = self
-            .client_view_event_tx
-            .send(ClientViewEvent::SpellCatalogLoaded {
-                catalog: self.world.spell_catalog.clone(),
-            });
     }
 
     fn emit_fellowship_state_updated(&self) {
@@ -421,7 +413,6 @@ impl Client {
                     });
             }
             WorldEvent::PlayerInfo(data) => {
-                self.emit_spell_catalog_loaded();
                 self.emit_player_options_updated();
                 let _ =
                     self.client_view_event_tx
@@ -702,7 +693,9 @@ mod tests {
         }
     }
 
-    fn seed_test_self_movement_capabilities(client: &mut Client) -> SelfMovementCapabilities {
+    fn seed_test_self_movement_capabilities(
+        client: &mut ClientRuntime,
+    ) -> SelfMovementCapabilities {
         let capabilities = test_self_movement_capabilities(2.25, 1.0, 2.0, 1.5);
         client
             .world
@@ -1136,7 +1129,9 @@ mod tests {
             .expect("tracked remote entity should exist");
         remote.velocity = holtburger_common::Vector3::new(1.0, 0.0, 0.0);
 
-        client.simulation.track_actor(remote_guid);
+        client
+            .simulation
+            .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
                 movement_types::MotionState::builder()
@@ -1281,7 +1276,9 @@ mod tests {
         client.world.remove_entity(remote_guid);
         client.world.add_entity(remote);
 
-        client.simulation.track_actor(remote_guid);
+        client
+            .simulation
+            .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
                 movement_types::MotionState::builder()

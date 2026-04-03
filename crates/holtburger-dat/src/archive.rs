@@ -6,7 +6,9 @@
 
 use crate::error::{DatError, Result};
 use crate::utils::FileExtPolyfill;
-use crate::{RESOURCE_NAMESPACE_LEN, ResourceNamespace, ResourceProvider};
+use crate::{
+    RESOURCE_NAMESPACE_LEN, ResourceKey, ResourceNamespace, ResourceProvider, ResourceSource,
+};
 use binrw::{BinRead, BinWrite, io::Cursor};
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -170,6 +172,14 @@ impl HbaReader {
 
     pub fn default_namespace(&self) -> Option<ResourceNamespace> {
         (self.namespace_spans.len() == 1).then_some(self.namespace_spans[0].namespace)
+    }
+
+    pub fn has_namespace(&self, namespace: &str) -> bool {
+        let Ok(namespace_id) = ResourceNamespace::new(namespace) else {
+            return false;
+        };
+
+        self.lookup_namespace_span(namespace_id).is_some()
     }
 
     pub fn find_entry_in_namespace(&self, namespace: &str, file_id: u32) -> Result<HbaEntry> {
@@ -414,6 +424,20 @@ impl ResourceProvider for HbaReader {
                 size: entry.size,
                 is_pruned: entry.is_pruned(),
             })
+    }
+}
+
+impl ResourceSource for HbaReader {
+    fn get_file_by_key(&self, key: ResourceKey<'_>) -> Result<Vec<u8>> {
+        self.get_file_in_namespace(key.namespace, key.file_id)
+    }
+
+    fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<crate::FileMetadata> {
+        self.get_metadata_in_namespace(key.namespace, key.file_id)
+    }
+
+    fn has_namespace(&self, namespace: &str) -> bool {
+        HbaReader::has_namespace(self, namespace)
     }
 }
 

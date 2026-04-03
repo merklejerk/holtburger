@@ -1,12 +1,18 @@
+pub mod animation;
 pub mod env_cell;
 pub mod gfx_obj;
+pub mod motion_kinematics;
+pub mod motion_table;
 pub mod setup_model;
 pub mod skill_table;
 pub mod spell_table;
 pub mod xp_table;
 
+pub use animation::Animation;
 pub use env_cell::EnvCell;
 pub use gfx_obj::GfxObj;
+pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
+pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
 pub use setup_model::SetupModel;
 pub use skill_table::SkillTable;
 pub use spell_table::SpellTable;
@@ -14,6 +20,9 @@ pub use xp_table::XpTable;
 
 use std::fmt;
 
+pub const MOTION_KINEMATICS_TYPE_ID: u32 = 0xFFFF_FF01;
+
+#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DatFileType {
     // Portal Range (Top Byte)
@@ -36,6 +45,8 @@ pub enum DatFileType {
     PhysicsScriptTable = 0x34,
     LanguageString = 0x31,
     Font = 0x40,
+    Custom = 0xFFFF_FF00,
+    MotionKinematics = MOTION_KINEMATICS_TYPE_ID,
 
     // Cell Range (Suffix)
     Landblock = 0xFE, // XXYYFFFF (using FE as internal marker for simplicity or specific logic)
@@ -111,6 +122,37 @@ impl DatFileType {
             }
         }
     }
+
+    pub fn from_type_id(type_id: u32) -> Self {
+        match type_id {
+            0x01 => DatFileType::Model,
+            0x02 => DatFileType::SetupModel,
+            0x03 => DatFileType::Animation,
+            0x04 => DatFileType::Palette,
+            0x05 => DatFileType::SurfaceTexture,
+            0x06 => DatFileType::Texture,
+            0x08 => DatFileType::Surface,
+            0x09 => DatFileType::MotionTable,
+            0x0A => DatFileType::Audio,
+            0x0D => DatFileType::EnvCell,
+            0x0E => DatFileType::Table,
+            0x10 => DatFileType::Clothing,
+            0x12 => DatFileType::Scene,
+            0x13 => DatFileType::Region,
+            0x30 => DatFileType::CombatManeuverTable,
+            0x31 => DatFileType::LanguageString,
+            0x33 => DatFileType::PhysicsScript,
+            0x34 => DatFileType::PhysicsScriptTable,
+            0x40 => DatFileType::Font,
+            0xFD => DatFileType::IndoorCell,
+            0xFE => DatFileType::Landblock,
+            0xFE01 => DatFileType::Iteration,
+            0xFF => DatFileType::LandblockInfo,
+            0xFFFF_FF00 => DatFileType::Custom,
+            MOTION_KINEMATICS_TYPE_ID => DatFileType::MotionKinematics,
+            _ => DatFileType::Unknown,
+        }
+    }
 }
 
 impl fmt::Display for DatFileType {
@@ -135,6 +177,8 @@ impl fmt::Display for DatFileType {
             DatFileType::PhysicsScriptTable => "PhysicsScriptTable",
             DatFileType::LanguageString => "LanguageString",
             DatFileType::Font => "Font",
+            DatFileType::Custom => "Custom",
+            DatFileType::MotionKinematics => "MotionKinematics",
             DatFileType::Landblock => "Landblock (Terrain)",
             DatFileType::LandblockInfo => "LandblockInfo (Static)",
             DatFileType::IndoorCell => "IndoorCell",
@@ -171,6 +215,14 @@ mod tests {
 
         // Edge case: ensure 0xFFFF0001 is NOT an IndoorCell
         assert_ne!(DatFileType::from_id(0xFFFF0001), DatFileType::IndoorCell);
+
+        assert_eq!(DatFileType::from_type_id(0x0E), DatFileType::Table);
+        assert_eq!(DatFileType::from_type_id(0xFFFF_FF00), DatFileType::Custom);
+        assert_eq!(
+            DatFileType::from_type_id(MOTION_KINEMATICS_TYPE_ID),
+            DatFileType::MotionKinematics
+        );
+        assert_eq!(DatFileType::from_type_id(0xDEADBEEF), DatFileType::Unknown);
     }
 
     #[test]

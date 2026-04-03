@@ -1,4 +1,6 @@
-use holtburger_dat::{DatDatabase, DatFileType, HbaReader, HbaWriter, ResourceProvider};
+use holtburger_dat::{
+    DatDatabase, DatFileType, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter, ResourceProvider,
+};
 use tempfile::NamedTempFile;
 mod common;
 use common::get_portal_dat_path;
@@ -25,7 +27,7 @@ fn test_hba_parity_with_retail_portal() {
         if DatFileType::from_id(id).is_essential() {
             let data = dat_db.get_file(id).expect("Failed to read from DAT");
             writer
-                .add(id, id >> 24, data)
+                .add(EOR_PORTAL_NAMESPACE, id, id >> 24, data)
                 .expect("Failed to add to writer");
             kept_ids.push(id);
         }

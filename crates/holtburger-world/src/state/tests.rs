@@ -10,16 +10,20 @@ use crate::{
     SpatialBodyEvent, SpatialBodyId, SpatialSampleMode,
 };
 
+use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PhysicsState, PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
     WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
-use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::file_type::{
+    MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable, SkillTable,
+    SpellTable, XpTable,
+};
 use holtburger_dat::{
-    DatFileType, HbaReader, HbaWriter, MountedResourceProvider, ResourceProvider, ResourceScope,
-    ScopedResourceResolver,
+    DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
+    MountedResourceProvider, ResourceProvider, ScopedResourceResolver,
 };
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::movement::{
@@ -33,33 +37,62 @@ use holtburger_protocol::messages::{
 use holtburger_protocol::traits::ProtocolPack;
 use tempfile::tempdir;
 
-fn repo_portal_hba_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
+fn repo_assets_hba_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
+}
+
+fn test_motion_kinematics_bytes() -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    MotionKinematics::new()
+        .write(&mut bytes)
+        .expect("test motion kinematics asset should write");
+    bytes.into_inner()
 }
 
 fn write_micro_portal_hba(path: &Path) -> bool {
-    let source_path = repo_portal_hba_path();
+    let source_path = repo_assets_hba_path();
     if !source_path.is_file() {
         eprintln!(
-            "skipping portal fixture test; missing repo-local {}",
+            "skipping assets fixture test; missing repo-local {}",
             source_path.display()
         );
         return false;
     }
 
-    let source = HbaReader::open(&source_path).expect("repo portal.hba should open for tests");
+    let source = match HbaReader::open(&source_path) {
+        Ok(source) => source,
+        Err(error) => panic!(
+            "repo-local {} must be a valid HBA v2 fixture for this test: {}",
+            source_path.display(),
+            error
+        ),
+    };
 
     let mut writer = HbaWriter::new();
     writer.set_compression(false);
 
     for id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
         let data = source
-            .get_file(id)
-            .unwrap_or_else(|_| panic!("repo portal.hba should contain 0x{id:08X}"));
+            .get_file_in_namespace(EOR_PORTAL_NAMESPACE, id)
+            .unwrap_or_else(|_| panic!("repo assets.hba should contain eor/portal:0x{id:08X}"));
         writer
-            .add(id, DatFileType::from_id(id) as u32, data)
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                id,
+                DatFileType::from_id(id) as u32,
+                data,
+            )
             .expect("micro table should be added to test HBA");
     }
+
+    writer
+        .add(
+            HOLTBURGER_CORE_NAMESPACE,
+            MotionKinematics::FILE_ID,
+            DatFileType::MotionKinematics as u32,
+            test_motion_kinematics_bytes(),
+        )
+        .expect("motion kinematics table should be added to test HBA");
 
     writer
         .write(path)
@@ -68,32 +101,426 @@ fn write_micro_portal_hba(path: &Path) -> bool {
     true
 }
 
+fn mounted_namespace_provider(
+    namespace: &str,
+    provider: Arc<dyn ResourceProvider>,
+) -> MountedResourceProvider {
+    MountedResourceProvider::with_namespace(namespace, provider)
+        .expect("test namespace mount should be valid")
+}
+
+fn portal_resources(provider: Arc<dyn ResourceProvider>) -> Arc<ScopedResourceResolver> {
+    Arc::new(ScopedResourceResolver::from_mounted([
+        mounted_namespace_provider(EOR_PORTAL_NAMESPACE, provider),
+    ]))
+}
+
+fn motion_kinematics_asset_with_table(
+    motion_table_id: u32,
+    default_style: u32,
+    walk_velocity: Option<Vector3>,
+    run_velocity: Option<Vector3>,
+    turn_left_omega: Option<Vector3>,
+    turn_right_omega: Option<Vector3>,
+) -> MotionKinematics {
+    let mut asset = MotionKinematics::new();
+    let mut table = MotionKinematicsTable::new(motion_table_id, default_style);
+
+    if let Some(velocity) = walk_velocity {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::WALK_FORWARD_COMMAND,
+            MotionCommandKinematics {
+                velocity: Some(velocity),
+                omega: None,
+            },
+        );
+    }
+
+    if let Some(velocity) = run_velocity {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::RUN_FORWARD_COMMAND,
+            MotionCommandKinematics {
+                velocity: Some(velocity),
+                omega: None,
+            },
+        );
+    }
+
+    if let Some(omega) = turn_left_omega {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::TURN_LEFT_COMMAND,
+            MotionCommandKinematics {
+                velocity: None,
+                omega: Some(omega),
+            },
+        );
+    }
+
+    if let Some(omega) = turn_right_omega {
+        table.insert_cycle_kinematics(
+            default_style,
+            MotionTable::TURN_RIGHT_COMMAND,
+            MotionCommandKinematics {
+                velocity: None,
+                omega: Some(omega),
+            },
+        );
+    }
+
+    asset.motion_tables.insert(motion_table_id, table);
+    asset
+}
+
+fn test_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
+    motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+    )
+}
+
+struct NamespacedArchiveProvider {
+    namespace: &'static str,
+    archive: Arc<HbaReader>,
+}
+
+impl ResourceProvider for NamespacedArchiveProvider {
+    fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
+        self.archive.get_file_in_namespace(self.namespace, id)
+    }
+
+    fn get_metadata(&self, id: u32) -> Option<holtburger_dat::FileMetadata> {
+        self.archive.get_metadata_in_namespace(self.namespace, id)
+    }
+}
+
+fn seed_player_run_skill(world: &mut WorldState, run_skill: u32) {
+    world.player.skills.insert(
+        SkillType::Run,
+        Skill {
+            skill_type: SkillType::Run,
+            ranks: 0,
+            init: run_skill,
+            spent_xp: 0,
+            next_rank_xp: None,
+            base: run_skill,
+            current: run_skill,
+            training: TrainingLevel::Trained,
+            trained_cost: 0,
+            specialized_cost: 0,
+        },
+    );
+}
+
 #[test]
-fn test_player_mirror_invariant_on_set_position() {
+fn resolve_player_motion_table_profile_prefers_direct_motion_table_property() {
+    let motion_table_id = 0x0900_0020;
+
     let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000123);
+    let player_guid = Guid(0x5000_0001);
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
     state.player.guid = player_guid;
 
-    let initial_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(0.0, 0.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::Setup,
+        Guid(0x0200_0010),
+    );
+    state.entities.insert(player);
+
+    let resolved = state
+        .resolve_player_motion_table_profile()
+        .expect("direct motion table should resolve");
+
+    assert_eq!(
+        resolved.source,
+        PlayerMotionTableSource::DirectProperty { motion_table_id }
+    );
+    assert_eq!(
+        resolved
+            .movement_profile
+            .run_forward
+            .and_then(|entry| entry.velocity),
+        Some(Vector3::new(2.5, 0.0, 0.0))
+    );
+}
+
+#[test]
+fn resolve_player_motion_table_profile_falls_back_to_setup_model_default() {
+    let motion_table_id = 0x0900_0020;
+    let setup_model_id = 0x0200_0010;
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0002);
+    let mut motion_kinematics = test_motion_kinematics_asset(motion_table_id);
+    motion_kinematics
+        .setup_model_defaults
+        .insert(setup_model_id, motion_table_id);
+    state.set_motion_kinematics(motion_kinematics);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::Setup,
+        Guid(setup_model_id),
+    );
+    state.entities.insert(player);
+
+    let resolved = state
+        .resolve_player_motion_table_profile()
+        .expect("setup-model fallback should resolve");
+
+    assert_eq!(
+        resolved.source,
+        PlayerMotionTableSource::SetupModelDefault {
+            setup_model_id,
+            motion_table_id,
+        }
+    );
+    assert_eq!(
+        resolved
+            .movement_profile
+            .turn_right
+            .and_then(|entry| entry.omega),
+        Some(Vector3::new(0.0, 0.0, 1.5))
+    );
+}
+
+#[test]
+fn resolve_player_motion_table_profile_reads_run_speed_from_required_motion_kinematics_asset() {
+    let motion_table_id = 0x0900_0023;
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0004);
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let resolved = state
+        .resolve_player_motion_table_profile()
+        .expect("run speed should derive from animation position frames");
+
+    assert_eq!(resolved.movement_profile.motion_table_id, motion_table_id);
+    assert_eq!(
+        resolved
+            .movement_profile
+            .run_forward
+            .and_then(|entry| entry.velocity),
+        Some(Vector3::new(2.5, 0.0, 0.0))
+    );
+}
+
+#[test]
+fn resolve_player_motion_table_profile_reports_missing_setup_default_motion_table() {
+    let setup_model_id = 0x0200_0011;
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0003);
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::Setup,
+        Guid(setup_model_id),
+    );
+    state.entities.insert(player);
+
+    let error = state
+        .resolve_player_motion_table_profile()
+        .expect_err("missing setup default motion table should be explicit");
+
+    assert!(matches!(
+        error,
+        PlayerMotionTableLookupError::SetupModelMissingDefaultMotionTable { setup_model_id: id }
+            if id == setup_model_id
+    ));
+}
+
+#[test]
+fn resolve_self_movement_capabilities_combines_run_rate_and_motion_table_kinematics() {
+    let motion_table_id = 0x0900_0020;
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0100);
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let capabilities = state
+        .resolve_self_movement_capabilities()
+        .expect("self-movement capabilities should resolve");
+
+    assert_eq!(capabilities.motion_table_id(), motion_table_id);
+    assert_eq!(capabilities.run_rate_scalar, 4.5);
+    assert_eq!(capabilities.base_walk_forward_speed(), 1.0);
+    assert_eq!(capabilities.base_run_forward_speed(), 2.5);
+    assert_eq!(capabilities.resolved_manual_run_speed(), 11.25);
+    assert_eq!(capabilities.resolved_autonomous_run_speed(1.0), 11.25);
+    assert_eq!(capabilities.resolved_autonomous_run_speed(1.5), 16.875);
+    assert_eq!(capabilities.base_turn_left_speed_rad_per_sec(), 1.5);
+    assert_eq!(capabilities.base_turn_right_speed_rad_per_sec(), 1.5);
+    assert_eq!(
+        capabilities.resolved_manual_run_velocity(),
+        Vector3::new(11.25, 0.0, 0.0)
+    );
+}
+
+#[test]
+fn resolve_self_movement_capabilities_prefers_synthetic_override() {
+    let mut state = WorldState::synthetic();
+    let override_capabilities = SelfMovementCapabilities {
+        kinematics: crate::state::SelfMovementKinematics {
+            source: PlayerMotionTableSource::DirectProperty {
+                motion_table_id: 0x0900_00AA,
+            },
+            motion_table_id: 0x0900_00AA,
+            stance: MotionStance::NonCombat as u32,
+            base_walk_forward_velocity: Vector3::new(0.75, 0.0, 0.0),
+            base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
+            base_turn_left_omega: Vector3::new(0.0, 0.0, -1.25),
+            base_turn_right_omega: Vector3::new(0.0, 0.0, 1.25),
+        },
+        run_rate_scalar: 3.25,
     };
+    state.set_self_movement_capabilities_override(override_capabilities.clone());
 
-    // Register player as an entity too
-    let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
-    state.entities.insert(player_entity);
+    let resolved = state
+        .resolve_self_movement_capabilities()
+        .expect("synthetic override should bypass resource lookup");
 
-    let new_pos = WorldPosition {
-        landblock_id: Guid(0x12340000),
-        coords: Vector3::new(10.0, 20.0, 30.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
+    assert_eq!(resolved, override_capabilities);
+}
 
-    state.set_player_position(new_pos);
+#[test]
+fn resolve_self_movement_capabilities_reports_missing_required_kinematics() {
+    let motion_table_id = 0x0900_0021;
 
-    assert_eq!(state.player.position, new_pos);
-    assert_eq!(state.entities.get(player_guid).unwrap().position, new_pos);
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0101);
+    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        None,
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+    ));
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let error = state
+        .resolve_self_movement_capabilities()
+        .expect_err("missing run velocity should be explicit");
+
+    assert!(matches!(
+        error,
+        SelfMovementCapabilitiesError::Kinematics(
+            crate::state::SelfMovementKinematicsError::MissingRequiredKinematics {
+                motion_table_id: id,
+                kind: RequiredSelfMovementKinematics::RunForwardVelocity,
+                ..
+            }
+        ) if id == motion_table_id
+    ));
+}
+
+#[test]
+fn resolve_self_movement_capabilities_falls_back_when_walk_velocity_is_missing() {
+    let motion_table_id = 0x0900_0022;
+
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0102);
+    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        None,
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+        Some(Vector3::new(0.0, 0.0, 1.5)),
+    ));
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let capabilities = state
+        .resolve_self_movement_capabilities()
+        .expect("missing walk velocity should fall back to run-forward data");
+
+    assert_eq!(capabilities.base_walk_forward_speed(), 2.5);
+    assert_eq!(capabilities.base_run_forward_speed(), 2.5);
+}
+
+#[test]
+fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() {
+    let motion_table_id: u32 = 0x0900_0024;
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0103);
+    state.set_motion_kinematics(motion_kinematics_asset_with_table(
+        motion_table_id,
+        MotionStance::NonCombat as u32,
+        Some(Vector3::new(1.0, 0.0, 0.0)),
+        Some(Vector3::new(2.5, 0.0, 0.0)),
+        None,
+        Some(Vector3::new(0.0, 0.0, -1.5)),
+    ));
+    state.player.guid = player_guid;
+    seed_player_run_skill(&mut state, 800);
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    state.entities.insert(player);
+
+    let capabilities = state
+        .resolve_self_movement_capabilities()
+        .expect("single-turn motion tables should still resolve turn capabilities");
+
+    assert_eq!(
+        capabilities.kinematics().base_turn_right_omega,
+        Vector3::new(0.0, 0.0, -1.5)
+    );
+    assert_eq!(
+        capabilities.kinematics().base_turn_left_omega,
+        Vector3::new(0.0, 0.0, 1.5)
+    );
 }
 
 #[test]
@@ -568,9 +995,10 @@ fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
         }
     }
 
-    let error = WorldState::with_provider(ResourceScope::Portal, Arc::new(MockFailedProvider))
-        .err()
-        .expect("strict constructor should fail when required tables are unavailable");
+    let error =
+        WorldState::with_provider_for_namespace(EOR_PORTAL_NAMESPACE, Arc::new(MockFailedProvider))
+            .err()
+            .expect("strict constructor should fail when required tables are unavailable");
 
     assert!(error.to_string().contains("skill table"));
 }
@@ -578,16 +1006,29 @@ fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
 #[test]
 fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let dir = tempdir().expect("tempdir should be created");
-    let portal_path = dir.path().join("portal.hba");
+    let portal_path = dir.path().join("bundle.hba");
     if !write_micro_portal_hba(&portal_path) {
         return;
     }
 
-    let provider = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"))
-        as Arc<dyn ResourceProvider>;
-
-    let mut state = WorldState::with_provider(ResourceScope::Portal, provider)
-        .expect("provider-backed world should load required tables");
+    let archive = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"));
+    let mut state = WorldState::new(Arc::new(ScopedResourceResolver::from_mounted([
+        mounted_namespace_provider(
+            EOR_PORTAL_NAMESPACE,
+            Arc::new(NamespacedArchiveProvider {
+                namespace: EOR_PORTAL_NAMESPACE,
+                archive: Arc::clone(&archive),
+            }),
+        ),
+        mounted_namespace_provider(
+            HOLTBURGER_CORE_NAMESPACE,
+            Arc::new(NamespacedArchiveProvider {
+                namespace: HOLTBURGER_CORE_NAMESPACE,
+                archive,
+            }),
+        ),
+    ])))
+    .expect("provider-backed world should load required tables");
 
     assert!(!state.skill_table.skill_base_hash.is_empty());
     assert!(!state.xp_table.character_level_xp_list.is_empty());
@@ -687,6 +1128,73 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 }
 
 #[test]
+fn repo_portal_bundle_supports_default_player_motion_table_profile() {
+    let portal_path = repo_assets_hba_path();
+    if !portal_path.is_file() {
+        eprintln!(
+            "skipping motion-table integration probe; missing repo-local {}",
+            portal_path.display()
+        );
+        return;
+    }
+
+    let provider = match HbaReader::open(&portal_path) {
+        Ok(provider) => Arc::new(provider),
+        Err(error) => {
+            eprintln!(
+                "skipping motion-table integration probe; repo-local {} is not an HBA v2 fixture yet: {}",
+                portal_path.display(),
+                error
+            );
+            return;
+        }
+    };
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0200);
+    let motion_kinematics_bytes = match provider
+        .get_file_in_namespace(HOLTBURGER_CORE_NAMESPACE, MotionKinematics::FILE_ID)
+    {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            eprintln!(
+                "skipping motion-table integration probe; repo-local {} does not yet contain holtburger/core motion kinematics",
+                portal_path.display()
+            );
+            return;
+        }
+    };
+    state.set_motion_kinematics(
+        MotionKinematics::read(&mut std::io::Cursor::new(motion_kinematics_bytes))
+            .expect("repo motion kinematics asset should parse"),
+    );
+    state.player.guid = player_guid;
+
+    let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+    player.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(0x0900_0001),
+    );
+    state.entities.insert(player);
+
+    let resolved = state.resolve_player_motion_table_profile();
+    match resolved {
+        Ok(profile) => {
+            eprintln!(
+                "resolved repo motion-table profile: run={:?} walk={:?} turn_right={:?}",
+                profile.movement_profile.run_forward,
+                profile.movement_profile.walk_forward,
+                profile.movement_profile.turn_right,
+            );
+        }
+        Err(error) => {
+            panic!(
+                "repo assets bundle failed to resolve eor/portal motion table 0x09000001: {error}"
+            )
+        }
+    }
+}
+
+#[test]
 fn test_tick_does_not_integrate_player_velocity() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000124);
@@ -731,9 +1239,7 @@ fn test_tick_does_not_fetch_portal_geometry() {
         }
     }
 
-    let resources = Arc::new(ScopedResourceResolver::from_mounted([
-        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(PanicProvider)),
-    ]));
+    let resources = portal_resources(Arc::new(PanicProvider));
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000125);
     let player_pos = WorldPosition {

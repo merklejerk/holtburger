@@ -67,7 +67,7 @@ jobs:
           cp target/release/tui$EXT staging/holtburger-cli$EXT
           cp target/release/dat2hba$EXT staging/dat2hba$EXT
           cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
-          cp dats/portal.hba staging/dats/portal.hba
+          cp dats/assets.hba staging/dats/assets.hba
           ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             7z a "$ARCHIVE_NAME.zip" ./staging/*
@@ -137,7 +137,7 @@ jobs:
           name: micro-hba-assets
           path: |
             micro-hba.zip
-            dats/portal.hba
+            dats/assets.hba
 
   publish:
     name: Publish Nightly Release

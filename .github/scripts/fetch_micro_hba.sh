@@ -13,7 +13,7 @@ fi
 mkdir -p dats
 curl -L "${HBA_MICRO_LATEST_URL}" -o "${archive_name}"
 unzip -o "${archive_name}" -d dats
-test -f dats/portal.hba
+test -f dats/assets.hba
 
 if [[ "${keep_archive}" != "1" ]]; then
   rm -f "${archive_name}"

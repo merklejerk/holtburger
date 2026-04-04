@@ -32,10 +32,10 @@ pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEven
 pub use spatial::{
     AuthoritativeBodySync, BasicSpatialPhysics, ContactState, LocalDriveControl, LocalDriveGait,
     NoopSpatialPhysics, RuntimeBodyResetCause, RuntimeSpatialBodyView,
-    SelfPlayerDriveProjectionState, SolveActorInput, SolveBodyInput, SolvedActorKinematics,
-    SolvedBodyKinematics, SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample,
-    SpatialEvent, SpatialPhysics, SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState,
-    SpatialScene, SpatialSolveBatch, SpatialSolveRequest, advance_actor_kinematics,
+    SelfPlayerDriveProjectionState, SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics,
+    SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialPhysics,
+    SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
+    SpatialSolveBatch, SpatialSolveRequest, advance_body_kinematics,
 };
 pub use state::{
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,

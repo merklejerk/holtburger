@@ -1,6 +1,7 @@
 use super::{
-    ContactState, LocalDriveControl, SelfPlayerDriveProjectionState, SolveActorInput,
-    SolvedActorKinematics, SpatialSampleMode, SpatialScene, SpatialSolveBatch, SpatialSolveRequest,
+    ContactState, LocalDriveControl, SelfPlayerDriveProjectionState, SolveBodyInput,
+    SolveProjectionBasis, SolvedBodyKinematics, SpatialSampleMode, SpatialScene, SpatialSolveBatch,
+    SpatialSolveRequest,
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Quaternion, Vector3};
@@ -9,6 +10,23 @@ use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
 const EPSILON: f32 = 1e-4;
+
+fn velocity_kinematics_for_input(input: &SolveBodyInput) -> (Vector3, Vector3) {
+    input
+        .basis
+        .and_then(SolveProjectionBasis::velocity_components)
+        .unwrap_or((Vector3::zero(), Vector3::zero()))
+}
+
+fn grounded_kinematics_for_input(input: &SolveBodyInput) -> Option<(Vector3, Vector3)> {
+    match input.basis {
+        Some(SolveProjectionBasis::GroundedMotion {
+            desired_local_velocity,
+            desired_local_omega,
+        }) => Some((desired_local_velocity, desired_local_omega)),
+        _ => None,
+    }
+}
 
 pub(super) fn sample_mode_for_projection_state(
     projection_state: Option<SelfPlayerDriveProjectionState>,
@@ -73,41 +91,47 @@ fn derive_self_player_projection_state(
 }
 
 fn solve_self_player_local_drive(
-    input: &SolveActorInput,
+    input: &SolveBodyInput,
     control: &LocalDriveControl,
     dt: Duration,
     scene: &SpatialScene,
-) -> SolvedActorKinematics {
+) -> SolvedBodyKinematics {
     let projection_state = derive_self_player_projection_state(scene, control);
     let dt_secs = dt.as_secs_f32().max(0.0);
+    let (velocity, omega) = velocity_kinematics_for_input(input);
     let current_contact = scene
         .body(control.body_id)
         .map(|body| body.contact)
         .unwrap_or(ContactState::Unknown);
+    let resolved_contact = if input.contact == ContactState::Unknown {
+        current_contact
+    } else {
+        input.contact
+    };
 
     if dt_secs <= f32::EPSILON {
-        return SolvedActorKinematics {
-            actor_id: input.actor_id,
+        return SolvedBodyKinematics {
+            body_id: input.body_id,
             pose: input.pose,
-            velocity: input.velocity,
-            omega: input.omega,
-            contact: current_contact,
+            velocity,
+            omega,
+            contact: resolved_contact,
             projection_state: Some(projection_state),
         };
     }
 
     match projection_state {
-        SelfPlayerDriveProjectionState::AuthorityFrozen => SolvedActorKinematics {
-            actor_id: input.actor_id,
+        SelfPlayerDriveProjectionState::AuthorityFrozen => SolvedBodyKinematics {
+            body_id: input.body_id,
             pose: input.pose,
             velocity: Vector3::zero(),
             omega: Vector3::zero(),
-            contact: current_contact,
+            contact: resolved_contact,
             projection_state: Some(projection_state),
         },
         SelfPlayerDriveProjectionState::LocalAirborne => {
-            let mut solved = advance_actor_kinematics(input, dt);
-            solved.contact = current_contact;
+            let mut solved = advance_body_kinematics(input, dt);
+            solved.contact = resolved_contact;
             solved.projection_state = Some(projection_state);
             solved
         }
@@ -124,8 +148,8 @@ fn solve_self_player_local_drive(
             );
             next_pose.rotation = Quaternion::from_heading(desired_heading);
 
-            SolvedActorKinematics {
-                actor_id: input.actor_id,
+            SolvedBodyKinematics {
+                body_id: input.body_id,
                 pose: next_pose,
                 velocity: desired_velocity,
                 omega: Vector3::new(
@@ -136,7 +160,7 @@ fn solve_self_player_local_drive(
                 contact: if control.force_grounded {
                     ContactState::Grounded
                 } else {
-                    current_contact
+                    resolved_contact
                 },
                 projection_state: Some(projection_state),
             }
@@ -184,6 +208,50 @@ fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
         delta -= TAU;
     }
     delta
+}
+
+fn world_velocity_from_local_basis(local_velocity: Vector3, heading: f32) -> Vector3 {
+    let forward = Vector3::new(-heading.cos(), heading.sin(), 0.0);
+    let right = Vector3::new(heading.sin(), heading.cos(), 0.0);
+
+    (forward * local_velocity.x)
+        + (right * local_velocity.y)
+        + Vector3::new(0.0, 0.0, local_velocity.z)
+}
+
+fn advance_grounded_actor_kinematics(
+    input: &SolveBodyInput,
+    desired_local_velocity: Vector3,
+    desired_local_omega: Vector3,
+    dt: Duration,
+) -> SolvedBodyKinematics {
+    let dt_secs = dt.as_secs_f32().max(0.0);
+    let current_heading = input.pose.rotation.to_heading();
+    let world_velocity = world_velocity_from_local_basis(desired_local_velocity, current_heading);
+
+    if dt_secs <= f32::EPSILON {
+        return SolvedBodyKinematics {
+            body_id: input.body_id,
+            pose: input.pose,
+            velocity: world_velocity,
+            omega: desired_local_omega,
+            contact: input.contact,
+            projection_state: None,
+        };
+    }
+
+    let next_heading = normalize_heading(current_heading + (desired_local_omega.z * dt_secs));
+    let mut next_pose = project_pose_by_velocity(input.pose, world_velocity, dt_secs, None);
+    next_pose.rotation = Quaternion::from_heading(next_heading);
+
+    SolvedBodyKinematics {
+        body_id: input.body_id,
+        pose: next_pose,
+        velocity: world_velocity,
+        omega: desired_local_omega,
+        contact: input.contact,
+        projection_state: None,
+    }
 }
 
 pub(crate) fn project_pose_by_velocity(
@@ -236,33 +304,34 @@ pub(crate) fn project_pose_by_velocity(
     }
 }
 
-pub fn advance_actor_kinematics(input: &SolveActorInput, dt: Duration) -> SolvedActorKinematics {
+pub fn advance_body_kinematics(input: &SolveBodyInput, dt: Duration) -> SolvedBodyKinematics {
+    let (velocity, omega) = velocity_kinematics_for_input(input);
     let dt_secs = dt.as_secs_f32().max(0.0);
     if dt_secs <= f32::EPSILON {
-        return SolvedActorKinematics {
-            actor_id: input.actor_id,
+        return SolvedBodyKinematics {
+            body_id: input.body_id,
             pose: input.pose,
-            velocity: input.velocity,
-            omega: input.omega,
-            contact: ContactState::Unknown,
+            velocity,
+            omega,
+            contact: input.contact,
             projection_state: None,
         };
     }
 
-    let turn_step = input.omega.z * dt_secs;
+    let turn_step = omega.z * dt_secs;
     let next_heading = normalize_heading(input.pose.rotation.to_heading() + turn_step);
-    let next_velocity = rotate_planar_velocity(input.velocity, turn_step);
+    let next_velocity = rotate_planar_velocity(velocity, turn_step);
 
     let mut next_pose = input.pose;
     next_pose.rotation = Quaternion::from_heading(next_heading);
     next_pose.coords = next_pose.coords + (next_velocity * dt_secs);
 
-    SolvedActorKinematics {
-        actor_id: input.actor_id,
+    SolvedBodyKinematics {
+        body_id: input.body_id,
         pose: next_pose,
         velocity: next_velocity,
-        omega: input.omega,
-        contact: ContactState::Unknown,
+        omega,
+        contact: input.contact,
         projection_state: None,
     }
 }
@@ -276,19 +345,28 @@ pub struct BasicSpatialPhysics;
 
 impl SpatialPhysics for BasicSpatialPhysics {
     fn solve(&self, request: &SpatialSolveRequest, scene: &mut SpatialScene) -> SpatialSolveBatch {
-        let local_drive_guid = request
-            .local_drive
-            .and_then(|control| control.body_id.authoritative_guid());
         let solved = request
-            .actors
+            .bodies
             .iter()
-            .map(|actor| {
-                if Some(actor.actor_id) == local_drive_guid
+            .map(|body| {
+                if request
+                    .local_drive
+                    .as_ref()
+                    .is_some_and(|control| control.body_id == body.body_id)
                     && let Some(control) = request.local_drive.as_ref()
                 {
-                    solve_self_player_local_drive(actor, control, request.dt, scene)
+                    solve_self_player_local_drive(body, control, request.dt, scene)
+                } else if let Some((desired_local_velocity, desired_local_omega)) =
+                    grounded_kinematics_for_input(body)
+                {
+                    advance_grounded_actor_kinematics(
+                        body,
+                        desired_local_velocity,
+                        desired_local_omega,
+                        request.dt,
+                    )
                 } else {
-                    advance_actor_kinematics(actor, request.dt)
+                    advance_body_kinematics(body, request.dt)
                 }
             })
             .collect();

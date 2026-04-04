@@ -24,7 +24,7 @@ This is intentionally a frontend or tool owned seam. `holtburger-core` should no
 The crate deliberately exports a small API:
 
 - `ContentRepository`
-- asset-derived content models such as `CharacterGenReference`
+- asset-derived content models such as `CharacterGenCatalog`
 
 That small surface is intentional. The crate should stay focused on content mounting and asset access rather than becoming a generic dumping ground for runtime bootstrap helpers or frontend policy.
 

@@ -234,16 +234,6 @@ impl SelectionState {
                             crate::types::AppUiAction::RaiseSelectedCharacterCreationSkill.into(),
                         );
                     }
-                    KeyCode::Char('r') | KeyCode::Char('R') => {
-                        result.actions.push(
-                            crate::types::AppUiAction::RaiseSelectedCharacterCreationSkill.into(),
-                        );
-                    }
-                    KeyCode::Char('l') | KeyCode::Char('L') => {
-                        result.actions.push(
-                            crate::types::AppUiAction::LowerSelectedCharacterCreationSkill.into(),
-                        );
-                    }
                     _ => {}
                 },
                 CharacterCreationFocus::Submit => {}

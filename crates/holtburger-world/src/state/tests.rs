@@ -7,7 +7,7 @@ use std::time::Instant;
 use crate::entity::Entity;
 use crate::state::liveness::EntityUpsertKind;
 use crate::{
-    ContactState, RuntimeBodyResetCause, SolvedActorKinematics, SolvedBodyKinematics,
+    ContactState, RuntimeBodyResetCause, SolveProjectionBasis, SolvedBodyKinematics,
     SpatialBodyEvent, SpatialBodyId, SpatialSampleMode, WorldBootstrap,
 };
 
@@ -495,6 +495,116 @@ fn resolve_self_movement_capabilities_derives_left_turn_from_right_turn_omega() 
 }
 
 #[test]
+fn resolve_body_projection_input_uses_grounded_motion_snapshot_without_vector_update() {
+    let motion_table_id = 0x0900_0040;
+    let guid = Guid(0x7000_0100);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(10.0, 20.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let mut state = WorldState::synthetic();
+    state.set_motion_kinematics(test_motion_kinematics_asset(motion_table_id));
+
+    let mut entity = Entity::new(guid, "Remote".to_string(), pose);
+    entity.properties.set_did_prop(
+        holtburger_common::properties::PropertyDataId::MotionTable,
+        Guid(motion_table_id),
+    );
+    entity.motion_snapshot = Some(crate::entity::EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+        sidestep_command: None,
+        turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+        forward_speed: crate::entity::OrderedMotionSpeed::from_f32(3.5),
+        sidestep_speed: None,
+        turn_speed: crate::entity::OrderedMotionSpeed::from_f32(0.75),
+        directive: None,
+    });
+    state.entities.insert(entity);
+
+    state.scene.reconcile_authoritative_body(
+        SpatialBodyId::Entity(guid),
+        pose,
+        Vector3::zero(),
+        Vector3::zero(),
+        crate::AuthoritativeBodySync::Snapshot,
+        Instant::now(),
+    );
+    assert!(
+        state
+            .scene
+            .apply_runtime_body_contact(SpatialBodyId::Entity(guid), ContactState::Grounded)
+    );
+
+    let input = state
+        .resolve_body_projection_input(SpatialBodyId::Entity(guid))
+        .expect("guid-backed remote body should resolve projection input");
+
+    assert_eq!(input.contact, ContactState::Grounded);
+    assert!(matches!(
+        input.basis,
+        Some(SolveProjectionBasis::GroundedMotion {
+            desired_local_velocity,
+            desired_local_omega,
+        }) if desired_local_velocity == Vector3::new(3.5, 0.0, 0.0)
+            && desired_local_omega == Vector3::new(0.0, 0.0, 0.75)
+    ));
+}
+
+#[test]
+fn resolve_body_projection_input_falls_back_to_velocity_for_airborne_body() {
+    let guid = Guid(0x7000_0101);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1234_0000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let mut state = WorldState::synthetic();
+    let mut entity = Entity::new(guid, "Remote".to_string(), pose);
+    entity.velocity = Vector3::new(0.0, 0.0, 4.0);
+    entity.omega = Vector3::new(0.0, 0.0, 0.5);
+    entity.motion_snapshot = Some(crate::entity::EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+        sidestep_command: None,
+        turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+        forward_speed: None,
+        sidestep_speed: None,
+        turn_speed: None,
+        directive: None,
+    });
+    state.entities.insert(entity);
+
+    state.scene.reconcile_authoritative_body(
+        SpatialBodyId::Entity(guid),
+        pose,
+        Vector3::new(0.0, 0.0, 4.0),
+        Vector3::new(0.0, 0.0, 0.5),
+        crate::AuthoritativeBodySync::Snapshot,
+        Instant::now(),
+    );
+    assert!(
+        state
+            .scene
+            .apply_runtime_body_contact(SpatialBodyId::Entity(guid), ContactState::Airborne)
+    );
+
+    let input = state
+        .resolve_body_projection_input(SpatialBodyId::Entity(guid))
+        .expect("airborne guid-backed body should resolve projection input");
+
+    assert!(matches!(
+        input.basis,
+        Some(SolveProjectionBasis::Velocity { velocity, omega })
+            if velocity == Vector3::new(0.0, 0.0, 4.0)
+                && omega == Vector3::new(0.0, 0.0, 0.5)
+    ));
+}
+
+#[test]
 fn test_player_mirror_invariant_on_set_vector() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
@@ -656,14 +766,19 @@ fn local_forced_reposition_uses_single_reset_reconcile_path() {
         .entities
         .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
 
-    let events = state.apply_spatial_event(&crate::SpatialEvent::ForcedReposition {
-        actor_id: player_guid,
+    let events = state.apply_spatial_body_event(&crate::SpatialBodyEvent::ForcedReposition {
+        body_id: SpatialBodyId::LocalPlayer(player_guid),
         pose: forced_pos,
     });
 
-    assert_eq!(state.player.position, forced_pos);
+    assert_eq!(state.player.position, start_pos);
+    assert_eq!(state.entities.get(player_guid).unwrap().position, start_pos);
     assert_eq!(
-        state.entities.get(player_guid).unwrap().position,
+        state
+            .scene
+            .body(SpatialBodyId::LocalPlayer(player_guid))
+            .expect("local player runtime body should exist after forced reposition")
+            .pose,
         forced_pos
     );
     assert_eq!(
@@ -732,7 +847,7 @@ fn test_set_player_position_sanitizes_nan_rotation() {
 }
 
 #[test]
-fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
+fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let start_pos = WorldPosition {
@@ -747,8 +862,8 @@ fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
         .entities
         .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
 
-    let solved = SolvedActorKinematics {
-        actor_id: player_guid,
+    let solved = SolvedBodyKinematics {
+        body_id: SpatialBodyId::LocalPlayer(player_guid),
         pose: WorldPosition {
             landblock_id: Guid(0x12340000),
             coords: Vector3::new(10.0, 20.0, 30.0),
@@ -760,26 +875,29 @@ fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
         projection_state: None,
     };
 
-    let events = state.apply_solved_actor_kinematics(&solved);
+    let events = state.apply_solved_body_kinematics(&solved);
 
-    assert_eq!(state.player.position, solved.pose);
+    assert_eq!(state.player.position, start_pos);
     let entity = state
         .entities
         .get(player_guid)
         .expect("player entity should stay mirrored");
-    assert_eq!(entity.position, solved.pose);
-    assert_eq!(entity.velocity, solved.velocity);
-    assert_eq!(entity.omega, solved.omega);
+    assert_eq!(entity.position, start_pos);
+    assert_eq!(entity.velocity, Vector3::zero());
+    assert_eq!(entity.omega, Vector3::zero());
+    let runtime_body = state
+        .scene
+        .body(SpatialBodyId::LocalPlayer(player_guid))
+        .expect("local player runtime body should exist");
+    assert_eq!(runtime_body.pose, solved.pose);
+    assert_eq!(runtime_body.velocity, solved.velocity);
+    assert_eq!(runtime_body.omega, solved.omega);
     assert_eq!(state.player.server_grounded, Some(true));
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityMoved { guid, pos }
-        if *guid == player_guid && *pos == solved.pose
-    )));
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::EntityVectorUpdated { guid, velocity, omega }
-        if *guid == player_guid && *velocity == solved.velocity && *omega == solved.omega
+        WorldEvent::RuntimeBodyChanged {
+            body_id: SpatialBodyId::LocalPlayer(guid)
+        } if *guid == player_guid
     )));
     assert!(
         events
@@ -789,7 +907,7 @@ fn apply_solved_actor_kinematics_updates_player_mirrors_and_grounded_state() {
 }
 
 #[test]
-fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_unknown() {
+fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unknown() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let start_pos = WorldPosition::default();
@@ -801,8 +919,8 @@ fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_un
         .entities
         .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
 
-    let solved = SolvedActorKinematics {
-        actor_id: player_guid,
+    let solved = SolvedBodyKinematics {
+        body_id: SpatialBodyId::LocalPlayer(player_guid),
         pose: WorldPosition {
             coords: Vector3::new(1.0, 2.0, 3.0),
             ..start_pos
@@ -813,7 +931,7 @@ fn apply_solved_actor_kinematics_preserves_player_grounded_cache_when_contact_un
         projection_state: None,
     };
 
-    let events = state.apply_solved_actor_kinematics(&solved);
+    let events = state.apply_solved_body_kinematics(&solved);
 
     assert_eq!(state.player.server_grounded, Some(true));
     assert!(

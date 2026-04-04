@@ -156,6 +156,9 @@ pub enum PlayerDriveIntent {
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
+    ArriveAtPose {
+        pose: WorldPosition,
+    },
     SnapFacing {
         heading: f32,
     },

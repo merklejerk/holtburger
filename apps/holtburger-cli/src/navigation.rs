@@ -40,6 +40,18 @@ impl NavigationSyncInput {
     fn projected_target_position(&self) -> Option<WorldPosition> {
         self.target_sample().map(|target| target.projected_pose)
     }
+
+    fn arrival_pose(&self) -> Option<WorldPosition> {
+        let mut arrival_pose = self.player_position?;
+        let target_pose = self.projected_target_position()?;
+
+        arrival_pose.coords.z = target_pose.coords.z;
+        if target_pose.is_indoors() {
+            arrival_pose.landblock_id = target_pose.landblock_id;
+        }
+
+        Some(arrival_pose)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -269,7 +281,7 @@ impl TuiNavigation {
         let mode_before = self.navigation_mode();
         let sync_input = self.sync_input(tick.now, tick.snapshot);
 
-        match self.active {
+        let arrival_command = match self.active {
             ActiveNavigation::Approach { .. } => self.sync_approach(&sync_input),
             ActiveNavigation::Follow { .. } => self.sync_follow(&sync_input),
             ActiveNavigation::Idle | ActiveNavigation::StickyMelee { .. } => {
@@ -279,10 +291,12 @@ impl TuiNavigation {
                     attack_sequence_active,
                     &sync_input,
                 );
+                None
             }
-        }
+        };
 
-        let drive_command = self.emit_drive_or_stop(&sync_input, tick.dt);
+        let drive_command =
+            arrival_command.or_else(|| self.emit_drive_or_stop(&sync_input, tick.dt));
 
         NavigationUpdate {
             drive_command,
@@ -466,13 +480,13 @@ impl TuiNavigation {
         })
     }
 
-    fn sync_approach(&mut self, input: &NavigationSyncInput) {
+    fn sync_approach(&mut self, input: &NavigationSyncInput) -> Option<PlayerDriveIntent> {
         let ActiveNavigation::Approach {
             target_guid,
             arrival_distance,
         } = self.active
         else {
-            return;
+            return None;
         };
 
         let Some(distance) = self.distance_to_target(input) else {
@@ -481,22 +495,29 @@ impl TuiNavigation {
                 target_guid.0
             );
             self.active = ActiveNavigation::Idle;
-            return;
+            return None;
         };
 
         if distance <= effective_arrival_distance(arrival_distance, input.target_use_radius()) {
             self.active = ActiveNavigation::Idle;
+            if self.drive_active {
+                self.clear_drive_active();
+                return Some(self.arrival_drive_command(input));
+            }
         }
+
+        None
     }
 
-    fn sync_follow(&mut self, input: &NavigationSyncInput) {
+    fn sync_follow(&mut self, input: &NavigationSyncInput) -> Option<PlayerDriveIntent> {
         let ActiveNavigation::Follow {
             target_guid,
             arrival_distance,
+            pursuing: was_pursuing,
             ..
         } = self.active
         else {
-            return;
+            return None;
         };
 
         let pursuing = self.distance_to_target(input).is_some_and(|distance| {
@@ -508,6 +529,13 @@ impl TuiNavigation {
             arrival_distance,
             pursuing,
         };
+
+        if !pursuing && was_pursuing && self.drive_active {
+            self.clear_drive_active();
+            return Some(self.arrival_drive_command(input));
+        }
+
+        None
     }
 
     fn sync_sticky_melee(
@@ -589,6 +617,14 @@ impl TuiNavigation {
         Some(PlayerDriveIntent::Stop)
     }
 
+    fn arrival_drive_command(&self, input: &NavigationSyncInput) -> PlayerDriveIntent {
+        input
+            .arrival_pose()
+            .map_or(PlayerDriveIntent::Stop, |pose| {
+                PlayerDriveIntent::ArriveAtPose { pose }
+            })
+    }
+
     fn clear_finished_interaction(
         &self,
         mode_before: Option<NavigationMode>,
@@ -613,7 +649,16 @@ impl TuiNavigation {
             input.projected_target_position(),
         )?;
 
-        Some(player_position.distance_to(&target_position))
+        let player_global = player_position.global_coords();
+        let target_global = target_position.global_coords();
+        Some(
+            Vector3::new(
+                target_global.x - player_global.x,
+                target_global.y - player_global.y,
+                0.0,
+            )
+            .length(),
+        )
     }
 
     fn automation_target_position_with_limit(
@@ -836,10 +881,11 @@ mod tests {
     }
 
     #[test]
-    fn tick_emits_stop_edge_when_drive_goes_idle() {
+    fn tick_emits_arrival_pose_when_drive_goes_idle() {
         let now = Instant::now();
         let player_position = world_position(0.0, 0.0, 0.0);
-        let target_position = world_position(0.2, 0.0, 0.0);
+        let far_target_position = world_position(6.0, 0.0, 4.5);
+        let arrived_target_position = world_position(0.2, 0.0, 4.5);
         let target_guid = Guid(0x5000_0004);
         let mut navigation = TuiNavigation {
             drive_active: true,
@@ -852,7 +898,7 @@ mod tests {
             &sync_input(
                 now,
                 Some(player_position),
-                Some(target_sample(target_guid, target_position)),
+                Some(target_sample(target_guid, far_target_position)),
                 Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
                 Some(4.5),
             ),
@@ -863,14 +909,81 @@ mod tests {
             dt: Duration::from_secs_f32(0.1),
             snapshot: snapshot(
                 Some(player_position),
-                Some(target_sample(target_guid, target_position)),
+                Some(target_sample(target_guid, arrived_target_position)),
                 Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
                 Some(4.5),
             ),
         });
 
-        assert_eq!(update.drive_command, Some(PlayerDriveIntent::Stop));
+        assert_eq!(
+            update.drive_command,
+            Some(PlayerDriveIntent::ArriveAtPose {
+                pose: world_position(0.0, 0.0, 4.5),
+            })
+        );
         assert!(!navigation.drive_active);
+    }
+
+    #[test]
+    fn follow_arrival_emits_single_arrival_pose() {
+        let now = Instant::now();
+        let player_position = world_position(0.0, 0.0, 1.0);
+        let far_target_position = world_position(6.0, 0.0, 7.0);
+        let near_target_position = world_position(0.05, 0.0, 7.0);
+        let target_guid = Guid(0x5000_0009);
+        let mut navigation = TuiNavigation {
+            drive_active: true,
+            last_drive_block_reason: None,
+            ..Default::default()
+        };
+
+        navigation.active = ActiveNavigation::Follow {
+            target_guid,
+            arrival_distance: 0.1,
+            pursuing: true,
+        };
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.1),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample(target_guid, near_target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert_eq!(
+            update.drive_command,
+            Some(PlayerDriveIntent::ArriveAtPose {
+                pose: world_position(0.0, 0.0, 7.0),
+            })
+        );
+        assert!(matches!(
+            navigation.active,
+            ActiveNavigation::Follow {
+                target_guid: guid,
+                pursuing: false,
+                ..
+            } if guid == target_guid
+        ));
+
+        let next_update = navigation.tick(NavigationTick {
+            now: now + Duration::from_millis(100),
+            dt: Duration::from_secs_f32(0.1),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample(target_guid, far_target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert!(matches!(
+            next_update.drive_command,
+            Some(PlayerDriveIntent::Autonomous(_))
+        ));
     }
 
     #[test]

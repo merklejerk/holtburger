@@ -664,9 +664,14 @@ impl ClientRuntime {
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Guid, Quaternion, Vector3};
+    use holtburger_dat::file_type::{
+        MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable,
+    };
+    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::FellowshipActivity;
-    use holtburger_world::entity::Entity;
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot, OrderedMotionSpeed};
     use holtburger_world::{
         PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
     };
@@ -701,6 +706,31 @@ mod tests {
             .world
             .set_self_movement_capabilities_override(capabilities.clone());
         capabilities
+    }
+
+    fn test_remote_motion_kinematics_asset(motion_table_id: u32) -> MotionKinematics {
+        let mut asset = MotionKinematics::new();
+        let mut table = MotionKinematicsTable::new(motion_table_id, MotionStance::NonCombat as u32);
+
+        table.insert_cycle_kinematics(
+            MotionStance::NonCombat as u32,
+            MotionTable::RUN_FORWARD_COMMAND,
+            MotionCommandKinematics {
+                velocity: Some(Vector3::new(2.5, 0.0, 0.0)),
+                omega: None,
+            },
+        );
+        table.insert_cycle_kinematics(
+            MotionStance::NonCombat as u32,
+            MotionTable::TURN_RIGHT_COMMAND,
+            MotionCommandKinematics {
+                velocity: None,
+                omega: Some(Vector3::new(0.0, 0.0, 1.25)),
+            },
+        );
+
+        asset.motion_tables.insert(motion_table_id, table);
+        asset
     }
 
     #[test]
@@ -965,12 +995,18 @@ mod tests {
             )
             .expect("idle local player should still be submitted to physics");
 
-        assert_eq!(request.actors.len(), 1);
-        let actor = request.actors[0];
-        assert_eq!(actor.actor_id, guid);
-        assert_eq!(actor.pose, client.world.player.position);
-        assert_eq!(actor.velocity, Vector3::zero());
-        assert_eq!(actor.omega, Vector3::zero());
+        assert_eq!(request.bodies.len(), 1);
+        let body = request.bodies[0];
+        assert_eq!(
+            body.body_id,
+            holtburger_world::SpatialBodyId::LocalPlayer(guid)
+        );
+        assert_eq!(body.pose, client.world.player.position);
+        assert!(matches!(
+            body.basis,
+            Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
+                if velocity == Vector3::zero() && omega == Vector3::zero()
+        ));
         assert_eq!(request.local_drive, None);
     }
 
@@ -1081,19 +1117,26 @@ mod tests {
             )
             .expect("movement-backed local intent should produce a solve request");
 
-        assert_eq!(request.actors.len(), 1);
-        let actor = request.actors[0];
-        assert_eq!(actor.actor_id, guid);
+        assert_eq!(request.bodies.len(), 1);
+        let body = request.bodies[0];
         assert_eq!(
-            actor.pose,
+            body.body_id,
+            holtburger_world::SpatialBodyId::LocalPlayer(guid)
+        );
+        assert_eq!(
+            body.pose,
             client
                 .world
                 .local_player_runtime_pose()
                 .expect("local player runtime pose should be readable")
         );
-        assert!(actor.velocity.x.abs() < 1e-5);
-        assert!((actor.velocity.y - 4.5).abs() < 1e-5);
-        assert_eq!(actor.omega, Vector3::zero());
+        assert!(matches!(
+            body.basis,
+            Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
+                if velocity.x.abs() < 1e-5
+                    && (velocity.y - 4.5).abs() < 1e-5
+                    && omega == Vector3::zero()
+        ));
     }
 
     #[tokio::test]
@@ -1158,19 +1201,92 @@ mod tests {
             )
             .expect("tracked nearby actor should join the solve set");
 
-        assert_eq!(request.actors.len(), 2);
+        assert_eq!(request.bodies.len(), 2);
         assert!(
             request
-                .actors
+                .bodies
                 .iter()
-                .any(|actor| actor.actor_id == player_guid)
+                .any(|body| body.body_id
+                    == holtburger_world::SpatialBodyId::LocalPlayer(player_guid))
         );
         assert!(
             request
-                .actors
+                .bodies
                 .iter()
-                .any(|actor| actor.actor_id == remote_guid)
+                .any(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
         );
+    }
+
+    #[test]
+    fn simulation_build_request_includes_tracked_grounded_actor_without_vector_update() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_1304);
+        let remote_guid = Guid(0x0102_1305);
+        let motion_table_id = 0x0900_0040;
+
+        client
+            .world
+            .set_motion_kinematics(test_remote_motion_kinematics_asset(motion_table_id));
+        client.world.player.guid = player_guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+
+        let mut remote = Entity::new(
+            remote_guid,
+            "Remote".to_string(),
+            WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::new(8.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+        remote.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+            sidestep_command: None,
+            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+            forward_speed: OrderedMotionSpeed::from_f32(3.5),
+            sidestep_speed: None,
+            turn_speed: OrderedMotionSpeed::from_f32(0.75),
+            directive: None,
+        });
+        client.world.add_entity(remote);
+
+        client
+            .simulation
+            .track_body(holtburger_world::SpatialBodyId::Entity(remote_guid));
+
+        let request = client
+            .simulation
+            .build_solve_request(
+                Instant::now(),
+                Duration::from_millis(PHYSICS_TICK_MS),
+                &client.world,
+                &client.movement,
+            )
+            .expect("tracked grounded remote should join the solve set");
+
+        let remote_body = request
+            .bodies
+            .iter()
+            .find(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
+            .expect("tracked grounded remote should be present");
+
+        assert!(matches!(
+            remote_body.basis,
+            Some(holtburger_world::SolveProjectionBasis::GroundedMotion {
+                desired_local_velocity,
+                desired_local_omega,
+            }) if desired_local_velocity == Vector3::new(3.5, 0.0, 0.0)
+                && desired_local_omega == Vector3::new(0.0, 0.0, 0.75)
+        ));
     }
 
     #[tokio::test]
@@ -1381,9 +1497,70 @@ mod tests {
         assert!(
             request
                 .expect("tracked remote mover should produce a solve request")
-                .actors
+                .bodies
                 .iter()
-                .any(|actor| actor.actor_id == remote_guid)
+                .any(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
+        );
+    }
+
+    #[test]
+    fn runtime_world_event_tracking_registers_grounded_projectable_remote() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let player_guid = Guid(0x0102_2304);
+        let remote_guid = Guid(0x0102_2305);
+        let motion_table_id = 0x0900_0050;
+
+        client
+            .world
+            .set_motion_kinematics(test_remote_motion_kinematics_asset(motion_table_id));
+        client.world.player.guid = player_guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        client.world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            client.world.player.position,
+        ));
+
+        let mut remote = Entity::new(
+            remote_guid,
+            "Remote".to_string(),
+            WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::new(12.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        remote
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(motion_table_id));
+        remote.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+            sidestep_command: None,
+            turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+            forward_speed: OrderedMotionSpeed::from_f32(3.5),
+            sidestep_speed: None,
+            turn_speed: OrderedMotionSpeed::from_f32(0.75),
+            directive: None,
+        });
+        client.world.add_entity(remote.clone());
+
+        client.observe_runtime_world_event(&WorldEvent::EntityReplaced(Box::new(remote)));
+
+        let request = client.simulation.build_solve_request(
+            Instant::now(),
+            Duration::from_millis(PHYSICS_TICK_MS),
+            &client.world,
+            &client.movement,
+        );
+
+        assert!(request.is_some());
+        assert!(
+            request
+                .expect("tracked grounded remote should produce a solve request")
+                .bodies
+                .iter()
+                .any(|body| body.body_id == holtburger_world::SpatialBodyId::Entity(remote_guid))
         );
     }
 }

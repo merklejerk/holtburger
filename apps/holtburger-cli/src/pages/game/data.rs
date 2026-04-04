@@ -6,7 +6,6 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_content::ContentRepository;
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
@@ -289,8 +288,8 @@ pub struct GameData {
     pub runtime_body_cache: RuntimeBodyViewCache,
     /// Projected shared self-movement kinematics from core/world.
     pub self_movement_kinematics: Option<SelfMovementKinematics>,
-    /// Frontend-owned static content/query surface.
-    pub content: Option<Arc<ContentRepository>>,
+    /// Frontend-owned spell metadata lookup cache.
+    pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
     /// Server name (e.g. "Morningthaw").
@@ -337,7 +336,7 @@ impl Default for GameData {
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),
             self_movement_kinematics: None,
-            content: None,
+            spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
@@ -386,9 +385,7 @@ impl GameData {
     }
 
     pub fn spell_catalog(&self) -> Option<Arc<SpellCatalog>> {
-        self.content
-            .as_ref()
-            .and_then(|content| content.spell_catalog().ok())
+        self.spell_catalog.clone()
     }
 
     pub fn spell_info(&self, spell_id: u32) -> Option<SpellInfo> {

@@ -995,6 +995,7 @@ dependencies = [
  "hex",
  "holtburger-common",
  "holtburger-content",
+ "holtburger-dat",
  "holtburger-protocol",
  "holtburger-session",
  "holtburger-world",

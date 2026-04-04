@@ -264,6 +264,7 @@ mod tests {
             world_name: "World".to_string(),
             server_time: None,
             content: None,
+            spell_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

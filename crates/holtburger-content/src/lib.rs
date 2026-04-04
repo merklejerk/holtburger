@@ -1,4 +1,3 @@
-pub mod bootstrap;
 pub mod character_gen;
 pub mod repository;
 

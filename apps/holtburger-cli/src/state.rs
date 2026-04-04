@@ -109,7 +109,7 @@ impl AppState {
 
         let state_str = match &self.client_state {
             ClientState::Connected => "Connected",
-            ClientState::CharacterSelection(_) => "Character Selection",
+            ClientState::CharacterSelection(_) => "Character Dashboard",
             ClientState::EnteringWorld => "Entering World",
             ClientState::InWorld => "In World",
             ClientState::Disconnected => "Disconnected",

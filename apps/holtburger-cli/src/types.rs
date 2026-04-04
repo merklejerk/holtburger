@@ -23,6 +23,10 @@ pub enum AppUiAction {
     SetDashboardActiveTab(DashboardTab),
     InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
     BeginTabFilterInput { tab: DashboardTab },
+    OpenCharacterCreationScreen,
+    OpenCharacterDashboard,
+    OpenDeleteCharacterConfirmation,
+    CancelDeleteCharacterConfirmation,
 }
 
 #[derive(Debug, Clone)]
@@ -446,6 +450,10 @@ pub enum AppAction {
     TransitionToGame {
         guid: Guid,
         name: String,
+    },
+    EnterSelectedCharacter,
+    DeleteCharacterAtSlot {
+        slot: u32,
     },
     Assess {
         target: InspectTarget,

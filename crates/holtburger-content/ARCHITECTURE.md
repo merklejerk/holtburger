@@ -19,7 +19,7 @@ It owns:
 - mounting mixed-namespace HBA sources
 - repository-scoped required-asset error reporting
 - parsing runtime bootstrap assets into `WorldBootstrap`
-- serving static reference data such as `SpellCatalog`
+- serving static reference data such as `SpellCatalog` and `CharGen`
 
 This is intentionally a frontend or tool owned seam. `holtburger-core` should not know how archives were discovered or mounted.
 
@@ -83,9 +83,9 @@ sequenceDiagram
 
 ## Static Reference Data
 
-`SpellCatalog` is currently the main reference-data query served from this crate.
+`SpellCatalog` and `CharGen` are the current reference-data queries served from this crate.
 
-That is not because spell data are uniquely special in principle. It is because the current TUI performs direct inspect-style spell metadata lookups, while XP and skill tables remain internal gameplay inputs interpreted by `holtburger-world`.
+That is not because those datasets are uniquely special in principle. It is because the current client has direct lookup-style needs for spell metadata and character-creation definitions, while XP and skill tables remain internal gameplay inputs interpreted by `holtburger-world`.
 
 The intended pattern is:
 

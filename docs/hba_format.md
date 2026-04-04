@@ -111,7 +111,7 @@ cargo run -p holtburger-tools --bin dat2hba -- \
 
 That produces a single namespaced bundle suitable for the current runtime/bootstrap flow.
 
-Use `--profile micro` for the release-oriented minimal bundle. The current micro profile contains the three required portal tables plus the synthetic `holtburger/core:MotionKinematics` asset and no longer retains raw motion tables or animations solely for movement timing.
+Use `--profile micro` for the release-oriented minimal bundle. The current micro profile contains the three required runtime portal tables, the raw `0x0E000002` character-generation table for HBA-only chargen reference data, and the synthetic `holtburger/core:MotionKinematics` asset. It no longer retains raw motion tables or animations solely for movement timing.
 
 ## 9. Benchmarking
 The primary archive benchmark lives in `crates/holtburger-dat/benches/provider_bench.rs` and measures both provider reads and synthetic multi-namespace HBA operations.

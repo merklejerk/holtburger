@@ -81,6 +81,34 @@ pub fn read_obfuscated_string<R: Read + Seek>(reader: &mut R) -> binrw::BinResul
     Ok(res.into_owned())
 }
 
+pub fn read_dotnet_string<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<String> {
+    let mut length = 0usize;
+    let mut shift = 0usize;
+
+    loop {
+        let byte = u8::read(reader)?;
+        length |= ((byte & 0x7F) as usize) << shift;
+
+        if (byte & 0x80) == 0 {
+            break;
+        }
+
+        shift += 7;
+        if shift >= 35 {
+            return Err(binrw::Error::AssertFail {
+                pos: reader.stream_position().unwrap_or(0),
+                message: "invalid .NET BinaryReader string length".to_string(),
+            });
+        }
+    }
+
+    let mut buffer = vec![0u8; length];
+    reader.read_exact(&mut buffer)?;
+
+    let (res, _, _) = encoding_rs::WINDOWS_1252.decode(&buffer);
+    Ok(res.into_owned())
+}
+
 pub fn align_boundary<R: Read + Seek>(reader: &mut R, boundary: u32) -> binrw::BinResult<()> {
     let pos = reader.stream_position()?;
     let delta = pos % boundary as u64;
@@ -249,5 +277,15 @@ mod tests {
         ];
         let decompressed = decompress_lrs(&input);
         assert_eq!(decompressed, b"ABCABC");
+    }
+
+    #[test]
+    fn test_read_dotnet_string() {
+        let bytes = [0x05, b'H', b'e', b'l', b'l', b'o'];
+        let mut reader = Cursor::new(bytes);
+
+        let value = read_dotnet_string(&mut reader).unwrap();
+
+        assert_eq!(value, "Hello");
     }
 }

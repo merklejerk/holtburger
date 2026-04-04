@@ -1,7 +1,7 @@
 use crate::bootstrap;
 use anyhow::{Context, Result, anyhow};
 use binrw::BinRead;
-use holtburger_dat::file_type::SpellTable;
+use holtburger_dat::file_type::{CharGen, SpellTable};
 use holtburger_dat::{HbaReader, ResourceSource};
 use holtburger_world::WorldBootstrap;
 use holtburger_world::spell::SpellCatalog;
@@ -15,6 +15,7 @@ pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
     source_description: Option<String>,
     spell_catalog_cache: OnceLock<Arc<SpellCatalog>>,
+    char_gen_cache: OnceLock<Arc<CharGen>>,
 }
 
 impl std::fmt::Debug for ContentRepository {
@@ -26,6 +27,7 @@ impl std::fmt::Debug for ContentRepository {
                 "spell_catalog_cached",
                 &self.spell_catalog_cache.get().is_some(),
             )
+            .field("char_gen_cached", &self.char_gen_cache.get().is_some())
             .finish()
     }
 }
@@ -41,6 +43,7 @@ impl ContentRepository {
                 mounts,
                 source_description: Some(path.display().to_string()),
                 spell_catalog_cache: OnceLock::new(),
+                char_gen_cache: OnceLock::new(),
             });
         }
 
@@ -51,6 +54,7 @@ impl ContentRepository {
                 mounts,
                 source_description: Some(hba_path.display().to_string()),
                 spell_catalog_cache: OnceLock::new(),
+                char_gen_cache: OnceLock::new(),
             });
         }
 
@@ -76,6 +80,7 @@ impl ContentRepository {
             mounts,
             source_description: Some(path.display().to_string()),
             spell_catalog_cache: OnceLock::new(),
+            char_gen_cache: OnceLock::new(),
         })
     }
 
@@ -84,6 +89,7 @@ impl ContentRepository {
             mounts,
             source_description: None,
             spell_catalog_cache: OnceLock::new(),
+            char_gen_cache: OnceLock::new(),
         }
     }
 
@@ -111,6 +117,25 @@ impl ContentRepository {
         let catalog = Arc::new(spell_table.into());
         let _ = self.spell_catalog_cache.set(Arc::clone(&catalog));
         Ok(catalog)
+    }
+
+    pub fn char_gen(&self) -> Result<Arc<CharGen>> {
+        if let Some(char_gen) = self.char_gen_cache.get() {
+            return Ok(Arc::clone(char_gen));
+        }
+
+        let char_gen = CharGen::read(&mut Cursor::new(
+            bootstrap::required_asset_bytes::<CharGen>(
+                &holtburger_dat::LayeredResourceResolver::from_sources(self.mounts.clone()),
+                self.source_description.as_deref(),
+                "character generator table",
+            )?,
+        ))
+        .context("failed to parse required character generator table")?;
+
+        let char_gen = Arc::new(char_gen);
+        let _ = self.char_gen_cache.set(Arc::clone(&char_gen));
+        Ok(char_gen)
     }
 }
 
@@ -210,7 +235,7 @@ fn mount_archive_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
+    use holtburger_dat::file_type::{CharGen, MotionKinematics, SkillTable, SpellTable, XpTable};
     use holtburger_dat::{
         DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
         HbaWriter, LayeredResourceResolver,
@@ -330,6 +355,32 @@ mod tests {
             .expect("spell catalog should resolve from content repository");
 
         assert!(!catalog.spells.is_empty());
+    }
+
+    #[test]
+    fn char_gen_loads_reference_data_from_repository() {
+        let dir = tempdir().expect("tempdir should be created");
+        if !write_hba(
+            &dir.path().join("bundle.hba"),
+            &[
+                CharGen::FILE_ID,
+                SkillTable::FILE_ID,
+                SpellTable::FILE_ID,
+                XpTable::FILE_ID,
+            ],
+            false,
+        ) {
+            return;
+        }
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let char_gen = repository
+            .char_gen()
+            .expect("char gen should resolve from content repository");
+
+        assert!(!char_gen.starter_areas.is_empty());
+        assert!(!char_gen.heritage_groups.is_empty());
     }
 
     #[test]

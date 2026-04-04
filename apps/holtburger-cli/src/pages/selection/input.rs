@@ -1,5 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 
+use crate::pages::selection::creation::CharacterCreationFocus;
 use crate::pages::selection::SelectionState;
 use crate::types::{RedrawPriority, UpdateResult};
 
@@ -9,16 +10,11 @@ impl SelectionState {
             return result;
         }
 
-        let mut result = UpdateResult::new();
         if matches!(self.screen, super::state::CharacterScreen::Creation) {
-            match key.code {
-                KeyCode::Esc => {
-                    return result.with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
-                }
-                _ => return result,
-            }
+            return self.handle_creation_input(key);
         }
 
+        let mut result = UpdateResult::new();
         match key.code {
             KeyCode::Up => {
                 if self.selected_character_index > 0 {
@@ -128,18 +124,159 @@ impl SelectionState {
         Some(result)
     }
 
+    fn handle_creation_input(&mut self, key: KeyEvent) -> UpdateResult {
+        let mut result = UpdateResult::new();
+        let Some(creation) = self.creation.ready_mut() else {
+            if key.code == KeyCode::Esc {
+                return result.with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
+            }
+            return result;
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                return result.with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
+            }
+            KeyCode::Tab => {
+                creation.move_focus(1);
+                result.request_redraw(RedrawPriority::Immediate);
+            }
+            KeyCode::BackTab => {
+                creation.move_focus(-1);
+                result.request_redraw(RedrawPriority::Immediate);
+            }
+            KeyCode::Enter => match creation.focus {
+                CharacterCreationFocus::Submit => {
+                    result.actions.push(crate::types::AppAction::SubmitCharacterCreation);
+                }
+                CharacterCreationFocus::Skills => {
+                    result.actions.push(
+                        crate::types::AppUiAction::RaiseSelectedCharacterCreationSkill.into(),
+                    );
+                }
+                _ => {}
+            },
+            _ => match creation.focus {
+                CharacterCreationFocus::Name => {
+                    if creation.name_input.apply_key(key) {
+                        creation.clear_feedback();
+                        result.request_redraw(RedrawPriority::Immediate);
+                    }
+                }
+                CharacterCreationFocus::StarterTown => {
+                    if cycle_selector_key(key, |delta| creation.cycle_start_area(delta)) {
+                        result.request_redraw(RedrawPriority::Immediate);
+                    }
+                }
+                CharacterCreationFocus::Heritage => {
+                    if cycle_selector_key(key, |delta| creation.cycle_heritage(delta)) {
+                        result.request_redraw(RedrawPriority::Immediate);
+                    }
+                }
+                CharacterCreationFocus::Gender => {
+                    if cycle_selector_key(key, |delta| creation.cycle_gender(delta)) {
+                        result.request_redraw(RedrawPriority::Immediate);
+                    }
+                }
+                CharacterCreationFocus::Attributes => match key.code {
+                    KeyCode::Up => {
+                        if creation.move_attribute_selection(-1) {
+                            result.request_redraw(RedrawPriority::Immediate);
+                        }
+                    }
+                    KeyCode::Down => {
+                        if creation.move_attribute_selection(1) {
+                            result.request_redraw(RedrawPriority::Immediate);
+                        }
+                    }
+                    KeyCode::Left => {
+                        let changed = if key.modifiers.contains(KeyModifiers::CONTROL) {
+                            creation.minimize_selected_attribute()
+                        } else {
+                            creation.adjust_selected_attribute(-1)
+                        };
+
+                        if changed {
+                            result.request_redraw(RedrawPriority::Immediate);
+                        }
+                    }
+                    KeyCode::Right => {
+                        let changed = if key.modifiers.contains(KeyModifiers::CONTROL) {
+                            creation.maximize_selected_attribute()
+                        } else {
+                            creation.adjust_selected_attribute(1)
+                        };
+
+                        if changed {
+                            result.request_redraw(RedrawPriority::Immediate);
+                        }
+                    }
+                    _ => {}
+                },
+                CharacterCreationFocus::Skills => match key.code {
+                    KeyCode::Up => {
+                        if creation.move_skill_selection(-1) {
+                            result.request_redraw(RedrawPriority::Immediate);
+                        }
+                    }
+                    KeyCode::Down => {
+                        if creation.move_skill_selection(1) {
+                            result.request_redraw(RedrawPriority::Immediate);
+                        }
+                    }
+                    KeyCode::Left => {
+                        result.actions.push(
+                            crate::types::AppUiAction::LowerSelectedCharacterCreationSkill.into(),
+                        );
+                    }
+                    KeyCode::Right => {
+                        result.actions.push(
+                            crate::types::AppUiAction::RaiseSelectedCharacterCreationSkill.into(),
+                        );
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        result.actions.push(
+                            crate::types::AppUiAction::RaiseSelectedCharacterCreationSkill.into(),
+                        );
+                    }
+                    KeyCode::Char('l') | KeyCode::Char('L') => {
+                        result.actions.push(
+                            crate::types::AppUiAction::LowerSelectedCharacterCreationSkill.into(),
+                        );
+                    }
+                    _ => {}
+                },
+                CharacterCreationFocus::Submit => {}
+            },
+        }
+
+        result
+    }
+
     pub fn handle_mouse(&mut self, _mouse: MouseEvent) -> UpdateResult {
         UpdateResult::new()
+    }
+}
+
+fn cycle_selector_key(key: KeyEvent, mut apply: impl FnMut(i32) -> bool) -> bool {
+    match key.code {
+        KeyCode::Left | KeyCode::Up => apply(-1),
+        KeyCode::Right | KeyCode::Down => apply(1),
+        _ => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pages::selection::creation::{CharacterCreationFormState, CharacterCreationState};
     use crate::pages::selection::state::{CharacterDashboardEntry, CharacterScreen, DeleteCharacterConfirmation};
     use crossterm::event::KeyModifiers;
+    use holtburger_content::{CharacterGenCatalog, character_gen::CharacterGenHeritageGroup};
     use holtburger_common::Guid;
     use holtburger_protocol::messages::CharacterEntry;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     fn test_state() -> SelectionState {
         SelectionState {
@@ -154,11 +291,50 @@ mod tests {
             selected_character_index: 0,
             character_preference: None,
             screen: CharacterScreen::Dashboard,
+            creation: crate::pages::selection::creation::CharacterCreationState::default(),
+            pending_create: None,
             delete_confirmation: Some(DeleteCharacterConfirmation::new(
                 4,
                 "Sho Girl".to_string(),
             )),
         }
+    }
+
+    fn ready_creation_state() -> CharacterCreationState {
+        CharacterCreationState::Ready(CharacterCreationFormState {
+            catalog: Arc::new(CharacterGenCatalog {
+                starter_areas: Vec::new(),
+                heritage_groups: BTreeMap::from([(
+                    0,
+                    CharacterGenHeritageGroup {
+                        heritage_id: 0,
+                        name: "Test".to_string(),
+                        icon_image: 0,
+                        setup_id: 0,
+                        environment_setup_id: 0,
+                        attribute_credits: 66,
+                        skill_credits: 0,
+                        primary_start_area_ids: Vec::new(),
+                        secondary_start_area_ids: Vec::new(),
+                        skill_overrides: BTreeMap::new(),
+                        templates: Vec::new(),
+                        genders: BTreeMap::new(),
+                    },
+                )]),
+                skill_definitions: BTreeMap::new(),
+                expected_skill_slots: 0,
+            }),
+            focus: CharacterCreationFocus::Attributes,
+            name_input: crate::components::text_input::SingleLineTextInput::default(),
+            heritage_id: 0,
+            gender_id: 0,
+            start_area_id: 0,
+            attribute_values: [holtburger_core::character_gen::CHARACTER_GEN_MIN_ATTRIBUTE; 6],
+            selected_attribute_index: 0,
+            skill_advancement_classes: Vec::new(),
+            selected_skill_id: None,
+            feedback: None,
+        })
     }
 
     #[test]
@@ -198,5 +374,49 @@ mod tests {
             .as_ref()
             .and_then(|confirmation| confirmation.error_message.as_ref())
             .is_some());
+    }
+
+    #[test]
+    fn attributes_ctrl_right_maxes_selected_attribute() {
+        let mut state = test_state();
+        state.screen = CharacterScreen::Creation;
+        state.creation = ready_creation_state();
+        state.delete_confirmation = None;
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+
+        assert!(result.redraw_requested());
+        assert_eq!(
+            state
+                .creation
+                .ready()
+                .expect("creation should be ready")
+                .attribute_values[0],
+            16
+        );
+    }
+
+    #[test]
+    fn attributes_ctrl_left_minimizes_selected_attribute() {
+        let mut state = test_state();
+        state.screen = CharacterScreen::Creation;
+        let mut creation = ready_creation_state();
+        if let CharacterCreationState::Ready(form) = &mut creation {
+            form.attribute_values[0] = 16;
+        }
+        state.creation = creation;
+        state.delete_confirmation = None;
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+
+        assert!(result.redraw_requested());
+        assert_eq!(
+            state
+                .creation
+                .ready()
+                .expect("creation should be ready")
+                .attribute_values[0],
+            holtburger_core::character_gen::CHARACTER_GEN_MIN_ATTRIBUTE
+        );
     }
 }

@@ -49,10 +49,11 @@ impl AuthState {
 
     pub(super) async fn create_character(
         &mut self,
-        request: CharacterCreateRequestData,
+        mut request: CharacterCreateRequestData,
         session: &mut Session,
     ) -> Result<()> {
         self.pending_character_operation = Some(CharacterManagementOperation::Create);
+        request.account_name = self.account_name.clone();
         session
             .send_message(&GameMessage::CharacterCreate(Box::new(request)))
             .await

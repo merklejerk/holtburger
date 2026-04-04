@@ -1,3 +1,4 @@
+use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::types::{ChatMessageKind, Page, UpdateResult};
@@ -68,6 +69,8 @@ impl AppState {
                     selected_character_index: 0,
                     character_preference: self.character_preference.take(),
                     screen: Default::default(),
+                    creation: CharacterCreationState::from_repository(self.content.as_ref()),
+                    pending_create: None,
                     delete_confirmation: None,
                 });
             }
@@ -176,6 +179,8 @@ impl AppState {
             ClientViewEvent::CharacterList(_)
                 | ClientViewEvent::PlayerEntered { .. }
                 | ClientViewEvent::WorldNameUpdated(_)
+                | ClientViewEvent::CharacterManagementResponse { .. }
+                | ClientViewEvent::CharacterDeleteResponse
                 | ClientViewEvent::StatusUpdate { .. }
                 | ClientViewEvent::ErrorRaised { .. }
                 | ClientViewEvent::LogMessage(_)

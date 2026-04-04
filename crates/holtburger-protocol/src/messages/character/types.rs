@@ -234,6 +234,7 @@ impl ProtocolPack for CharacterCreateAppearanceData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterCreateRequestData {
+    pub account_name: String,
     pub unknown_constant: u32,
     pub heritage: u32,
     pub gender: u32,
@@ -256,6 +257,7 @@ pub struct CharacterCreateRequestData {
 
 impl ProtocolUnpack for CharacterCreateRequestData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let account_name = read_string16(data, offset)?;
         if *offset + 56 > data.len() {
             return None;
         }
@@ -308,6 +310,7 @@ impl ProtocolUnpack for CharacterCreateRequestData {
         *offset += 12;
 
         Some(Self {
+            account_name,
             unknown_constant,
             heritage,
             gender,
@@ -332,6 +335,7 @@ impl ProtocolUnpack for CharacterCreateRequestData {
 
 impl ProtocolPack for CharacterCreateRequestData {
     fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.account_name);
         buf.write_u32::<LittleEndian>(self.unknown_constant)
             .unwrap();
         buf.write_u32::<LittleEndian>(self.heritage).unwrap();
@@ -577,8 +581,9 @@ mod tests {
             other => panic!("Expected CharacterCreate, got {other:?}"),
         };
 
+        assert_eq!(payload.account_name, "fixture-account");
         assert_eq!(payload.unknown_constant, 1);
-        assert_eq!(payload.heritage, 6);
+        assert_eq!(payload.heritage, 2);
         assert_eq!(payload.gender, 1);
         assert_eq!(payload.template_option, 0);
         assert_eq!(payload.name, "Delulu Dev");

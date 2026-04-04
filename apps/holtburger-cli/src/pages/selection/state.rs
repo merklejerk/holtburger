@@ -1,6 +1,10 @@
+use holtburger_core::client::types::CharacterManagementOperation;
 use holtburger_core::{ClientCommand, ClientState, ClientViewEvent};
-use holtburger_protocol::messages::CharacterEntry;
+use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry};
 
+use crate::pages::selection::creation::{
+    CharacterCreationState, format_creation_errors,
+};
 use crate::components::text_input::SingleLineTextInput;
 use crate::types::{AppAction, AppUiAction, ChatMessageKind, UpdateResult, Verb};
 
@@ -23,6 +27,12 @@ pub struct DeleteCharacterConfirmation {
     pub character_name: String,
     pub input: SingleLineTextInput,
     pub error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingCharacterCreation {
+    pub slot: u32,
+    pub name: String,
 }
 
 impl DeleteCharacterConfirmation {
@@ -49,6 +59,8 @@ pub struct SelectionState {
     /// Automated character dashboard preference via CLI argument.
     pub character_preference: Option<String>,
     pub screen: CharacterScreen,
+    pub creation: CharacterCreationState,
+    pub pending_create: Option<PendingCharacterCreation>,
     pub delete_confirmation: Option<DeleteCharacterConfirmation>,
 }
 
@@ -77,12 +89,37 @@ impl SelectionState {
     }
 
     pub fn creation_verbs(&self) -> Vec<Verb> {
-        vec![Verb::new(AppUiAction::OpenCharacterDashboard, '\x1b', "Back")]
+        self.creation
+            .ready()
+            .map(|creation| creation.verbs())
+            .unwrap_or_else(|| vec![Verb::new(AppUiAction::OpenCharacterDashboard, '\x1b', "Back")])
+    }
+
+    pub fn dashboard_footer_hint(&self) -> String {
+        let mut segments = vec![
+            "[1-9] Quick Select".to_string(),
+            "[UP/DOWN] Move".to_string(),
+        ];
+        segments.extend(
+            self.dashboard_verbs()
+                .iter()
+                .map(Verb::display_label)
+                .collect::<Vec<_>>(),
+        );
+        segments.join("  ")
+    }
+
+    pub fn creation_footer_hint(&self) -> String {
+        self.creation
+            .ready()
+            .map(|creation| creation.footer_hint())
+            .unwrap_or_else(|| "[ESC] Back".to_string())
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         match event {
             ClientViewEvent::CharacterList(_) => {
+                self.pending_create = None;
                 if self.selected_character_index >= self.characters.len() {
                     self.selected_character_index = self.characters.len().saturating_sub(1);
                 }
@@ -123,6 +160,10 @@ impl SelectionState {
                     }
                 }
             }
+            ClientViewEvent::CharacterManagementResponse {
+                operation: Some(CharacterManagementOperation::Create),
+                response,
+            } => return self.handle_create_response(response),
             ClientViewEvent::StatusUpdate {
                 state: ClientState::EnteringWorld,
             } => {
@@ -145,6 +186,32 @@ impl SelectionState {
                 Some(UpdateResult::commands(vec![ClientCommand::SelectCharacter(
                     character.character.guid,
                 )]))
+            }
+            AppAction::SubmitCharacterCreation => {
+                let creation = self.creation.ready_mut()?;
+                match creation.build_request(self.characters.iter().map(|character| character.slot)) {
+                    Ok(request) => {
+                        self.pending_create = Some(PendingCharacterCreation {
+                            slot: request.character_slot,
+                            name: request.name.clone(),
+                        });
+                        creation.set_feedback(
+                            "Submitting character creation request...",
+                            false,
+                        );
+
+                        let mut result = UpdateResult::new();
+                        result
+                            .commands
+                            .push(ClientCommand::CreateCharacter(Box::new(request)));
+                        result.request_redraw(crate::types::RedrawPriority::Immediate);
+                        Some(result)
+                    }
+                    Err(errors) => {
+                        creation.set_feedback(format_creation_errors(&errors), true);
+                        Some(UpdateResult::redraw())
+                    }
+                }
             }
             AppAction::DeleteCharacterAtSlot { slot } => {
                 self.delete_confirmation = None;
@@ -178,6 +245,27 @@ impl SelectionState {
                 action: AppUiAction::CancelDeleteCharacterConfirmation,
             } => {
                 if self.delete_confirmation.take().is_some() {
+                    Some(UpdateResult::redraw())
+                } else {
+                    None
+                }
+            }
+            AppAction::UiAction {
+                action: AppUiAction::RaiseSelectedCharacterCreationSkill,
+            } => {
+                let creation = self.creation.ready_mut()?;
+                let changed = creation.raise_selected_skill();
+                if changed || creation.feedback.is_some() {
+                    Some(UpdateResult::redraw())
+                } else {
+                    None
+                }
+            }
+            AppAction::UiAction {
+                action: AppUiAction::LowerSelectedCharacterCreationSkill,
+            } => {
+                let creation = self.creation.ready_mut()?;
+                if creation.lower_selected_skill() {
                     Some(UpdateResult::redraw())
                 } else {
                     None
@@ -217,6 +305,8 @@ mod tests {
             selected_character_index: 0,
             character_preference: None,
             screen: CharacterScreen::Dashboard,
+            creation: CharacterCreationState::default(),
+            pending_create: None,
             delete_confirmation: None,
         }
     }
@@ -289,5 +379,95 @@ mod tests {
             normalize_character_name("  Sho   Girl  "),
             normalize_character_name("sho girl")
         );
+    }
+
+    #[test]
+    fn create_response_appends_character_locally_and_selects_it() {
+        let mut state = test_state();
+        state.pending_create = Some(PendingCharacterCreation {
+            slot: 2,
+            name: "Zappy".to_string(),
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::CharacterManagementResponse {
+            operation: Some(CharacterManagementOperation::Create),
+            response: CharacterCreateResponseData {
+                response: holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
+                guid: Some(Guid(0x5000_0009)),
+                name: Some("Zappy".to_string()),
+                seconds_disabled: Some(0),
+            },
+        });
+
+        assert!(result.redraw_requested());
+        assert_eq!(state.screen, CharacterScreen::Dashboard);
+        assert_eq!(state.pending_create, None);
+        assert!(state
+            .characters
+            .iter()
+            .any(|entry| entry.slot == 2 && entry.character.name == "Zappy"));
+        assert_eq!(
+            state.selected_character().map(|entry| entry.character.name.as_str()),
+            Some("Zappy")
+        );
+    }
+}
+
+impl SelectionState {
+    fn handle_create_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
+        match response.response {
+            holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
+                let pending = self.pending_create.take();
+                if let Some((guid, slot)) = response.guid.zip(pending.as_ref().map(|pending| pending.slot)) {
+                    let name = response
+                        .name
+                        .clone()
+                        .or_else(|| pending.as_ref().map(|pending| pending.name.clone()))
+                        .unwrap_or_else(|| "New Character".to_string());
+                    self.characters.push(CharacterDashboardEntry {
+                        slot,
+                        character: CharacterEntry {
+                            guid,
+                            name: name.clone(),
+                            delete_time: 0,
+                        },
+                    });
+                    self.characters.sort_by(|left, right| {
+                        left.character
+                            .name
+                            .to_lowercase()
+                            .cmp(&right.character.name.to_lowercase())
+                    });
+                    if let Some(index) = self
+                        .characters
+                        .iter()
+                        .position(|entry| entry.character.guid == guid)
+                    {
+                        self.selected_character_index = index;
+                    }
+                    self.screen = CharacterScreen::Dashboard;
+                    if let Some(creation) = self.creation.ready_mut() {
+                        creation.set_feedback(format!("Character '{}' created.", name), false);
+                    }
+                } else if let Some(creation) = self.creation.ready_mut() {
+                    creation.set_feedback(
+                        "Character created, but the response was missing append metadata."
+                            .to_string(),
+                        false,
+                    );
+                }
+            }
+            other => {
+                self.pending_create = None;
+                if let Some(creation) = self.creation.ready_mut() {
+                    creation.set_feedback(
+                        format!("Character creation rejected by server: {:?}.", other),
+                        true,
+                    );
+                }
+            }
+        }
+
+        UpdateResult::redraw()
     }
 }

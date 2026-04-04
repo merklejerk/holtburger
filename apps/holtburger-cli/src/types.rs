@@ -27,6 +27,8 @@ pub enum AppUiAction {
     OpenCharacterDashboard,
     OpenDeleteCharacterConfirmation,
     CancelDeleteCharacterConfirmation,
+    RaiseSelectedCharacterCreationSkill,
+    LowerSelectedCharacterCreationSkill,
 }
 
 #[derive(Debug, Clone)]
@@ -452,6 +454,7 @@ pub enum AppAction {
         name: String,
     },
     EnterSelectedCharacter,
+    SubmitCharacterCreation,
     DeleteCharacterAtSlot {
         slot: u32,
     },

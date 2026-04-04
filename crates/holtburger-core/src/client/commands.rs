@@ -1601,6 +1601,7 @@ mod tests {
         client
             .handle_command(ClientCommand::CreateCharacter(Box::new(
                 CharacterCreateRequestData {
+                    account_name: String::new(),
                     unknown_constant: 1,
                     heritage: 6,
                     gender: 1,

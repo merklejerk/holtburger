@@ -109,6 +109,7 @@ impl CharacterGenBuilder {
         self.validate(&build)?;
 
         Ok(CharacterCreateRequestData {
+            account_name: String::new(),
             unknown_constant: self.policy.unknown_constant,
             heritage: build.heritage,
             gender: build.gender,
@@ -228,6 +229,12 @@ impl CharacterGenBuilder {
             errors.push(CharacterGenValidationError::AttributeBudgetExceeded {
                 total,
                 budget: attribute_budget,
+            });
+        } else if total < attribute_budget {
+            errors.push(CharacterGenValidationError::AttributeBudgetIncomplete {
+                total,
+                budget: attribute_budget,
+                remaining: attribute_budget - total,
             });
         }
     }
@@ -464,6 +471,12 @@ pub enum CharacterGenValidationError {
     },
     #[error("attribute total {total} exceeds budget {budget}")]
     AttributeBudgetExceeded { total: u32, budget: u32 },
+    #[error("attribute total {total} leaves {remaining} of {budget} points unallocated")]
+    AttributeBudgetIncomplete {
+        total: u32,
+        budget: u32,
+        remaining: u32,
+    },
     #[error("expected {expected} skill slots but got {actual}")]
     SkillSlotCountMismatch { expected: usize, actual: usize },
     #[error("unknown skill {skill_id}")]
@@ -720,6 +733,23 @@ mod tests {
         assert!(errors.iter().any(|error| matches!(
             error,
             CharacterGenValidationError::AttributeBudgetExceeded { .. }
+        )));
+    }
+
+    #[test]
+    fn validate_rejects_unspent_attribute_budget() {
+        let builder = CharacterGenBuilder::new(test_catalog());
+        let mut build = test_build();
+        build.self_ability = 5;
+
+        let errors = builder.validate(&build).expect_err("build should fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            CharacterGenValidationError::AttributeBudgetIncomplete {
+                total: 325,
+                budget: 330,
+                remaining: 5,
+            }
         )));
     }
 

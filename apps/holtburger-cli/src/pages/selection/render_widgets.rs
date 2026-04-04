@@ -1,17 +1,20 @@
 use crate::components::modal::{ModalPalette, fit_modal_area};
+use crate::pages::selection::creation::{
+    CharacterCreationFocus, CharacterCreationSkillRow, CharacterCreationState,
+};
 use crate::pages::selection::SelectionState;
 use crate::pages::selection::state::CharacterScreen;
-use crate::theme::{list_item_style, pane_block, pane_title_style};
+use crate::theme::{ERROR_FG, SUMMARY_FG, list_item_style, pane_block, pane_title_style};
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
 pub fn render_character_selection(f: &mut Frame, state: &SelectionState, area: Rect) {
     match state.screen {
         CharacterScreen::Dashboard => render_character_dashboard(f, state, area),
-        CharacterScreen::Creation => render_character_creation_placeholder(f, state, area),
+        CharacterScreen::Creation => render_character_creation(f, state, area),
     }
 
     if let Some(confirmation) = state.delete_confirmation.as_ref() {
@@ -22,12 +25,8 @@ pub fn render_character_selection(f: &mut Frame, state: &SelectionState, area: R
 fn render_character_dashboard(f: &mut Frame, state: &SelectionState, area: Rect) {
     let block = pane_block(true)
         .title(Line::from(" Character Dashboard ").style(pane_title_style(true)))
-        .title_bottom(Line::from(" [1-9] Quick Select  [UP/DOWN] Move "));
+        .title_bottom(Line::from(format!(" {} ", state.dashboard_footer_hint())));
     let inner = block.inner(area);
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
-        .split(inner);
 
     f.render_widget(block, area);
 
@@ -45,7 +44,7 @@ fn render_character_dashboard(f: &mut Frame, state: &SelectionState, area: Rect)
                 Constraint::Length(2),
                 Constraint::Percentage(40),
             ])
-            .split(chunks[0]);
+            .split(inner);
 
         f.render_widget(empty, centered[1]);
     } else {
@@ -67,54 +66,233 @@ fn render_character_dashboard(f: &mut Frame, state: &SelectionState, area: Rect)
             .highlight_symbol("» ");
         let mut list_state = ListState::default();
         list_state.select(Some(state.selected_character_index));
-        f.render_stateful_widget(list, chunks[0], &mut list_state);
+        f.render_stateful_widget(list, inner, &mut list_state);
     }
-
-    f.render_widget(render_verb_bar(&state.dashboard_verbs()), chunks[1]);
 }
 
-fn render_character_creation_placeholder(f: &mut Frame, state: &SelectionState, area: Rect) {
+fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) {
     let block = pane_block(true)
-        .title(Line::from(" Character Creation ").style(pane_title_style(true)));
+        .title(Line::from(" Character Creation ").style(pane_title_style(true)))
+        .title_bottom(Line::from(format!(" {} ", state.creation_footer_hint())));
     let inner = block.inner(area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
         .split(inner);
 
     f.render_widget(block, area);
 
-    let text = Paragraph::new(vec![
-        Line::from("Character creation is not wired up yet."),
-        Line::from("This screen exists so the dashboard flow and actions are in place."),
-    ])
-    .alignment(Alignment::Center);
+    match &state.creation {
+        CharacterCreationState::Unavailable { message } => {
+            let text = Paragraph::new(vec![
+                Line::from("Character creation is currently unavailable."),
+                Line::from(""),
+                Line::from(message.as_str()),
+            ])
+            .alignment(Alignment::Center);
 
-    let centered = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(40),
-            Constraint::Length(2),
-            Constraint::Percentage(40),
-        ])
-        .split(chunks[0]);
+            let centered = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Percentage(35),
+                    Constraint::Length(3),
+                    Constraint::Percentage(35),
+                ])
+                .split(chunks[0]);
 
-    f.render_widget(text, centered[1]);
-    f.render_widget(render_verb_bar(&state.creation_verbs()), chunks[1]);
-}
-
-fn render_verb_bar(verbs: &[crate::types::Verb]) -> Paragraph<'static> {
-    let mut spans = Vec::new();
-    for (index, verb) in verbs.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::raw("   "));
+            f.render_widget(text, centered[1]);
         }
-        spans.push(Span::raw(verb.display_label()));
+        CharacterCreationState::Ready(form) => {
+            let body = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(42), Constraint::Percentage(58)])
+                .split(chunks[0]);
+
+            let left = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(8),
+                ])
+                .split(body[0]);
+
+            let right = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(10), Constraint::Length(3)])
+                .split(body[1]);
+
+            let name_widget = form.name_input.rendered_with_block(
+                pane_block(form.focus == CharacterCreationFocus::Name)
+                    .title(Line::from(" Name ").style(pane_title_style(
+                        form.focus == CharacterCreationFocus::Name,
+                    ))),
+                Style::default(),
+                form.focus == CharacterCreationFocus::Name,
+            );
+            f.render_widget(&name_widget, left[0]);
+
+            f.render_widget(
+                render_picker_control(
+                    "Starter Town",
+                    form.start_area_name(),
+                    form.focus == CharacterCreationFocus::StarterTown,
+                ),
+                left[1],
+            );
+            f.render_widget(
+                render_picker_control(
+                    "Heritage",
+                    form.heritage_name(),
+                    form.focus == CharacterCreationFocus::Heritage,
+                ),
+                left[2],
+            );
+            f.render_widget(
+                render_picker_control(
+                    "Gender",
+                    form.gender_name(),
+                    form.focus == CharacterCreationFocus::Gender,
+                ),
+                left[3],
+            );
+
+            let attribute_items = form
+                .attribute_rows()
+                .into_iter()
+                .enumerate()
+                .map(|(index, (label, value))| {
+                    ListItem::new(Line::from(vec![
+                        Span::raw(format!("{label:<13}")),
+                        Span::raw(format!("{value:>3}")),
+                    ]))
+                    .style(list_item_style(
+                        form.focus == CharacterCreationFocus::Attributes
+                            && index == form.selected_attribute_index,
+                    ))
+                })
+                .collect::<Vec<_>>();
+            let attributes_block = pane_block(form.focus == CharacterCreationFocus::Attributes)
+                .title(
+                    Line::from(format!(
+                        " Attributes  {} remaining ",
+                        form.remaining_attribute_points()
+                    ))
+                    .style(pane_title_style(form.focus == CharacterCreationFocus::Attributes)),
+                );
+            let mut attributes_state = ListState::default();
+            attributes_state.select(Some(form.selected_attribute_index));
+            f.render_stateful_widget(
+                List::new(attribute_items).block(attributes_block),
+                left[4],
+                &mut attributes_state,
+            );
+
+            let skill_rows = form.skill_display_rows();
+            let skill_items = skill_rows
+                .iter()
+                .map(|row| match row {
+                    CharacterCreationSkillRow::Header(label) => ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!("{label}"),
+                            Style::default().add_modifier(Modifier::BOLD).fg(SUMMARY_FG),
+                        ),
+                    ])),
+                    CharacterCreationSkillRow::Skill {
+                        label,
+                        selected,
+                        advancement,
+                        ..
+                    } => ListItem::new(Line::from(vec![
+                        Span::raw(format!("{label:<24}")),
+                        Span::styled(
+                            match advancement {
+                                holtburger_protocol::messages::SkillAdvancementClass::Specialized => {
+                                    "Spec"
+                                }
+                                holtburger_protocol::messages::SkillAdvancementClass::Trained => {
+                                    "Train"
+                                }
+                                holtburger_protocol::messages::SkillAdvancementClass::Untrained
+                                | holtburger_protocol::messages::SkillAdvancementClass::Inactive => {
+                                    "Untrain"
+                                }
+                            },
+                            Style::default().fg(if *selected {
+                                Color::Black
+                            } else {
+                                Color::Gray
+                            }),
+                        ),
+                    ]))
+                    .style(list_item_style(
+                        form.focus == CharacterCreationFocus::Skills && *selected,
+                    )),
+                })
+                .collect::<Vec<_>>();
+            let mut skill_state = ListState::default();
+            skill_state.select(form.selected_skill_display_index());
+            f.render_stateful_widget(
+                List::new(skill_items).block(
+                    pane_block(form.focus == CharacterCreationFocus::Skills).title(
+                        Line::from(format!(
+                            " Skills  {} points remaining ",
+                            form.remaining_skill_points()
+                        ))
+                        .style(pane_title_style(form.focus == CharacterCreationFocus::Skills)),
+                    ),
+                ),
+                right[0],
+                &mut skill_state,
+            );
+
+            let button_style = if form.focus == CharacterCreationFocus::Submit {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().add_modifier(Modifier::BOLD)
+            };
+            f.render_widget(
+                Paragraph::new(Line::from("[ Enter ] Create Character"))
+                    .style(button_style)
+                    .alignment(Alignment::Center)
+                    .block(
+                        pane_block(form.focus == CharacterCreationFocus::Submit)
+                            .title(Line::from(" Submit ").style(pane_title_style(
+                                form.focus == CharacterCreationFocus::Submit,
+                            ))),
+                    ),
+                right[1],
+            );
+
+            if let Some(feedback) = form.feedback.as_ref() {
+                f.render_widget(
+                    Paragraph::new(feedback.message.as_str())
+                        .alignment(Alignment::Center)
+                        .style(Style::default().fg(if feedback.is_error {
+                            ERROR_FG
+                        } else {
+                            SUMMARY_FG
+                        })),
+                    chunks[1],
+                );
+            }
+        }
     }
 
-    Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::TOP))
+}
+
+fn render_picker_control(title: &str, value: &str, focused: bool) -> Paragraph<'static> {
+    Paragraph::new(Line::from(vec![Span::raw(format!("< {} >", value))]))
         .alignment(Alignment::Center)
+        .block(
+            pane_block(focused)
+                .title(Line::from(format!(" {title} ")).style(pane_title_style(focused))),
+        )
 }
 
 fn render_delete_confirmation_modal(

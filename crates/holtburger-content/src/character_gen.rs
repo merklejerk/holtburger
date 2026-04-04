@@ -8,14 +8,14 @@ use holtburger_dat::graphics::Frame;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
-pub struct CharacterGenReference {
+pub struct CharacterGenCatalog {
     pub starter_areas: Vec<CharacterGenStarterArea>,
     pub heritage_groups: BTreeMap<u32, CharacterGenHeritageGroup>,
     pub skill_definitions: BTreeMap<u32, CharacterGenSkillDefinition>,
     pub expected_skill_slots: usize,
 }
 
-impl CharacterGenReference {
+impl CharacterGenCatalog {
     pub fn from_assets(char_gen: &CharGen, skill_table: &SkillTable) -> Self {
         let starter_areas = char_gen
             .starter_areas
@@ -164,7 +164,7 @@ pub struct CharacterGenHeritageGroup {
     pub secondary_start_area_ids: Vec<i32>,
     pub skill_overrides: BTreeMap<u32, CharacterGenSkillOverride>,
     pub templates: Vec<CharacterGenTemplate>,
-    pub genders: BTreeMap<u32, CharacterGenGenderReference>,
+    pub genders: BTreeMap<u32, CharacterGenGenderDefinition>,
 }
 
 impl CharacterGenHeritageGroup {
@@ -207,7 +207,7 @@ impl CharacterGenHeritageGroup {
                     u32::try_from(*gender_id).ok().map(|gender_id| {
                         (
                             gender_id,
-                            CharacterGenGenderReference::from_asset(gender_id, gender),
+                            CharacterGenGenderDefinition::from_asset(gender_id, gender),
                         )
                     })
                 })
@@ -288,7 +288,7 @@ impl CharacterGenTemplate {
 }
 
 #[derive(Debug, Clone)]
-pub struct CharacterGenGenderReference {
+pub struct CharacterGenGenderDefinition {
     pub gender_id: u32,
     pub name: String,
     pub scale: u32,
@@ -303,7 +303,7 @@ pub struct CharacterGenGenderReference {
     pub appearance: CharacterGenAppearanceOptions,
 }
 
-impl CharacterGenGenderReference {
+impl CharacterGenGenderDefinition {
     fn from_asset(gender_id: u32, gender: &CharacterGenGender) -> Self {
         Self {
             gender_id,

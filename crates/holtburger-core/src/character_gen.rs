@@ -1,4 +1,4 @@
-use holtburger_content::CharacterGenReference;
+use holtburger_content::CharacterGenCatalog;
 use holtburger_protocol::messages::{
     CharacterCreateAppearanceData, CharacterCreateRequestData, SkillAdvancementClass,
 };
@@ -69,21 +69,21 @@ impl Default for CharacterGenPolicy {
 
 #[derive(Debug, Clone)]
 pub struct CharacterGenBuilder {
-    reference: Arc<CharacterGenReference>,
+    catalog: Arc<CharacterGenCatalog>,
     policy: CharacterGenPolicy,
 }
 
 impl CharacterGenBuilder {
-    pub fn new(reference: Arc<CharacterGenReference>) -> Self {
-        Self::with_policy(reference, CharacterGenPolicy::default())
+    pub fn new(catalog: Arc<CharacterGenCatalog>) -> Self {
+        Self::with_policy(catalog, CharacterGenPolicy::default())
     }
 
-    pub fn with_policy(reference: Arc<CharacterGenReference>, policy: CharacterGenPolicy) -> Self {
-        Self { reference, policy }
+    pub fn with_policy(catalog: Arc<CharacterGenCatalog>, policy: CharacterGenPolicy) -> Self {
+        Self { catalog, policy }
     }
 
-    pub fn reference(&self) -> &CharacterGenReference {
-        self.reference.as_ref()
+    pub fn catalog(&self) -> &CharacterGenCatalog {
+        self.catalog.as_ref()
     }
 
     pub fn policy(&self) -> &CharacterGenPolicy {
@@ -151,7 +151,7 @@ impl CharacterGenBuilder {
             });
         }
 
-        let Some(heritage) = self.reference.heritage_group(build.heritage) else {
+        let Some(heritage) = self.catalog.heritage_group(build.heritage) else {
             errors.push(CharacterGenValidationError::UnknownHeritage {
                 heritage_id: build.heritage,
             });
@@ -173,13 +173,13 @@ impl CharacterGenBuilder {
             });
         }
 
-        if self.reference.starter_area(build.start_area).is_none() {
+        if self.catalog.starter_area(build.start_area).is_none() {
             errors.push(CharacterGenValidationError::InvalidStartArea {
                 start_area_id: build.start_area,
             });
         } else if self.policy.enforce_heritage_start_area_membership {
             let allowed = self
-                .reference
+                .catalog
                 .allowed_start_area_ids_for_heritage(build.heritage)
                 .unwrap_or_default();
             if !allowed.contains(&build.start_area) {
@@ -238,9 +238,9 @@ impl CharacterGenBuilder {
         heritage: &holtburger_content::character_gen::CharacterGenHeritageGroup,
         errors: &mut Vec<CharacterGenValidationError>,
     ) {
-        if build.skill_advancement_classes.len() != self.reference.expected_skill_slots {
+        if build.skill_advancement_classes.len() != self.catalog.expected_skill_slots {
             errors.push(CharacterGenValidationError::SkillSlotCountMismatch {
-                expected: self.reference.expected_skill_slots,
+                expected: self.catalog.expected_skill_slots,
                 actual: build.skill_advancement_classes.len(),
             });
             return;
@@ -254,7 +254,7 @@ impl CharacterGenBuilder {
             }
 
             let skill_id = skill_id as u32;
-            let Some(skill_definition) = self.reference.skill_definition(skill_id) else {
+            let Some(skill_definition) = self.catalog.skill_definition(skill_id) else {
                 errors.push(CharacterGenValidationError::UnknownSkill { skill_id });
                 continue;
             };
@@ -267,7 +267,7 @@ impl CharacterGenBuilder {
             }
 
             let Some(costs) = self
-                .reference
+                .catalog
                 .skill_costs_for_heritage(build.heritage, skill_id)
             else {
                 errors.push(CharacterGenValidationError::UnknownSkill { skill_id });
@@ -296,7 +296,7 @@ impl CharacterGenBuilder {
     fn validate_appearance(
         &self,
         build: &CharacterGenBuild,
-        gender: &holtburger_content::character_gen::CharacterGenGenderReference,
+        gender: &holtburger_content::character_gen::CharacterGenGenderDefinition,
         errors: &mut Vec<CharacterGenValidationError>,
     ) {
         let appearance = &gender.appearance;
@@ -488,14 +488,14 @@ pub enum CharacterGenValidationError {
 mod tests {
     use super::*;
     use holtburger_content::character_gen::{
-        CharacterGenAppearanceOptions, CharacterGenGenderReference, CharacterGenHeritageGroup,
-        CharacterGenReference, CharacterGenSkillDefinition, CharacterGenStarterArea,
+        CharacterGenAppearanceOptions, CharacterGenCatalog, CharacterGenGenderDefinition,
+        CharacterGenHeritageGroup, CharacterGenSkillDefinition, CharacterGenStarterArea,
         CharacterGenStarterLocation, CharacterGenTemplate,
     };
     use std::collections::BTreeMap;
 
-    fn test_reference() -> Arc<CharacterGenReference> {
-        Arc::new(CharacterGenReference {
+    fn test_catalog() -> Arc<CharacterGenCatalog> {
+        Arc::new(CharacterGenCatalog {
             starter_areas: vec![CharacterGenStarterArea {
                 start_area_id: 0,
                 name: "Holtburg".to_string(),
@@ -541,7 +541,7 @@ mod tests {
                     }],
                     genders: BTreeMap::from([(
                         1,
-                        CharacterGenGenderReference {
+                        CharacterGenGenderDefinition {
                             gender_id: 1,
                             name: "Male".to_string(),
                             scale: 100,
@@ -700,7 +700,7 @@ mod tests {
 
     #[test]
     fn build_request_uses_policy_defaults() {
-        let builder = CharacterGenBuilder::new(test_reference());
+        let builder = CharacterGenBuilder::new(test_catalog());
         let request = builder
             .build_request(test_build())
             .expect("build should validate");
@@ -712,7 +712,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_attribute_budget_overrun() {
-        let builder = CharacterGenBuilder::new(test_reference());
+        let builder = CharacterGenBuilder::new(test_catalog());
         let mut build = test_build();
         build.focus_ability = 50;
 
@@ -725,7 +725,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_skill_budget_overrun() {
-        let builder = CharacterGenBuilder::new(test_reference());
+        let builder = CharacterGenBuilder::new(test_catalog());
         let mut build = test_build();
         build.skill_advancement_classes[3] = SkillAdvancementClass::Specialized;
 
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn validate_rejects_non_chargen_skill() {
-        let builder = CharacterGenBuilder::new(test_reference());
+        let builder = CharacterGenBuilder::new(test_catalog());
         let mut build = test_build();
         build.skill_advancement_classes[2] = SkillAdvancementClass::Trained;
 

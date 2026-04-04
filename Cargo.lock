@@ -974,6 +974,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "binrw",
+ "holtburger-common",
  "holtburger-dat",
  "holtburger-world",
  "log",

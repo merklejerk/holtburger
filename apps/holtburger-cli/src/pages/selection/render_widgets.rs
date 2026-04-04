@@ -1,4 +1,5 @@
 use crate::components::modal::{ModalPalette, fit_modal_area};
+use crate::pages::selection::render::{advancement_group_label, skill_raise_cost_label};
 use crate::pages::selection::creation::{
     CharacterCreationFocus, CharacterCreationSkillRow, CharacterCreationState,
 };
@@ -194,13 +195,14 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
             let skill_items = skill_rows
                 .iter()
                 .map(|row| match row {
-                    CharacterCreationSkillRow::Header(label) => ListItem::new(Line::from(vec![
+                    CharacterCreationSkillRow::Header(advancement) => ListItem::new(Line::from(vec![
                         Span::styled(
-                            format!("{label}"),
+                            advancement_group_label(*advancement),
                             Style::default().add_modifier(Modifier::BOLD).fg(SUMMARY_FG),
                         ),
                     ])),
                     CharacterCreationSkillRow::Skill {
+                        skill_id,
                         label,
                         selected,
                         advancement,
@@ -208,18 +210,11 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                     } => ListItem::new(Line::from(vec![
                         Span::raw(format!("{label:<24}")),
                         Span::styled(
-                            match advancement {
-                                holtburger_protocol::messages::SkillAdvancementClass::Specialized => {
-                                    "Spec"
-                                }
-                                holtburger_protocol::messages::SkillAdvancementClass::Trained => {
-                                    "Train"
-                                }
-                                holtburger_protocol::messages::SkillAdvancementClass::Untrained
-                                | holtburger_protocol::messages::SkillAdvancementClass::Inactive => {
-                                    "Untrain"
-                                }
-                            },
+                            skill_raise_cost_label(
+                                *advancement,
+                                form.catalog
+                                    .skill_costs_for_heritage(form.heritage_id, *skill_id),
+                            ),
                             Style::default().fg(if *selected {
                                 Color::Black
                             } else {

@@ -307,7 +307,12 @@ impl CharacterCreationFormState {
             .catalog
             .skill_definitions
             .values()
-            .filter(|definition| definition.chargen_use)
+            .filter(|definition| {
+                definition.chargen_use
+                    && definition
+                        .skill_type
+                        .is_some_and(|skill_type| skill_type.is_eor())
+            })
             .map(|definition| definition.skill_id)
             .collect::<Vec<_>>();
 
@@ -352,10 +357,9 @@ impl CharacterCreationFormState {
 
         for skill_id in self.skill_ids_for_display() {
             let advancement = self.skill_advancement_classes[skill_id as usize];
-            let group = advancement_group_label(advancement);
-            if previous_group != Some(group) {
-                rows.push(CharacterCreationSkillRow::Header(group));
-                previous_group = Some(group);
+            if previous_group != Some(advancement) {
+                rows.push(CharacterCreationSkillRow::Header(advancement));
+                previous_group = Some(advancement);
             }
 
             let definition = self
@@ -521,7 +525,10 @@ impl CharacterCreationFormState {
                 SkillAdvancementClass::Trained
             }
             SkillAdvancementClass::Trained => SkillAdvancementClass::Specialized,
-            SkillAdvancementClass::Specialized => return false,
+            SkillAdvancementClass::Specialized => {
+                self.set_feedback("That skill is already specialized.", true);
+                return false;
+            }
         };
 
         let delta_cost = self.skill_delta_cost(skill_id, current, next);
@@ -544,7 +551,10 @@ impl CharacterCreationFormState {
         let next = match current {
             SkillAdvancementClass::Specialized => SkillAdvancementClass::Trained,
             SkillAdvancementClass::Trained => SkillAdvancementClass::Untrained,
-            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => return false,
+            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => {
+                self.set_feedback("That skill is already untrained.", true);
+                return false;
+            }
         };
 
         self.skill_advancement_classes[skill_id as usize] = next;
@@ -674,7 +684,7 @@ impl CharacterCreationFormState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CharacterCreationSkillRow {
-    Header(&'static str),
+    Header(SkillAdvancementClass),
     Skill {
         skill_id: u32,
         label: String,
@@ -689,14 +699,6 @@ fn advancement_rank(advancement: SkillAdvancementClass) -> u8 {
         SkillAdvancementClass::Trained => 1,
         SkillAdvancementClass::Untrained => 2,
         SkillAdvancementClass::Inactive => 3,
-    }
-}
-
-fn advancement_group_label(advancement: SkillAdvancementClass) -> &'static str {
-    match advancement {
-        SkillAdvancementClass::Specialized => "Specialized",
-        SkillAdvancementClass::Trained => "Trained",
-        SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => "Untrained",
     }
 }
 
@@ -860,6 +862,18 @@ mod tests {
             )]),
             skill_definitions: BTreeMap::from([
                 (
+                    SkillType::Axe as u32,
+                    CharacterGenSkillDefinition {
+                        skill_id: SkillType::Axe as u32,
+                        skill_type: Some(SkillType::Axe),
+                        name: "Axe".to_string(),
+                        description: String::new(),
+                        chargen_use: true,
+                        trained_cost: 2,
+                        specialized_cost: 4,
+                    },
+                ),
+                (
                     SkillType::Run as u32,
                     CharacterGenSkillDefinition {
                         skill_id: SkillType::Run as u32,
@@ -918,6 +932,17 @@ mod tests {
     }
 
     #[test]
+    fn skill_ids_for_display_filters_to_end_of_retail_skills() {
+        let form = CharacterCreationFormState::new(test_catalog());
+
+        let skill_ids = form.skill_ids_for_display();
+
+        assert!(skill_ids.contains(&(SkillType::Run as u32)));
+        assert!(skill_ids.contains(&(SkillType::Jump as u32)));
+        assert!(!skill_ids.contains(&(SkillType::Axe as u32)));
+    }
+
+    #[test]
     fn maximize_selected_attribute_uses_all_remaining_points_up_to_cap() {
         let mut form = CharacterCreationFormState::new(test_catalog());
         form.attribute_values[0] = CHARACTER_GEN_MIN_ATTRIBUTE;
@@ -933,5 +958,30 @@ mod tests {
 
         assert!(form.minimize_selected_attribute());
         assert_eq!(form.attribute_values[0], CHARACTER_GEN_MIN_ATTRIBUTE);
+    }
+
+    #[test]
+    fn raise_selected_skill_is_blocked_at_specialized() {
+        let mut form = CharacterCreationFormState::new(test_catalog());
+        form.selected_skill_id = Some(SkillType::Run as u32);
+        form.skill_advancement_classes[SkillType::Run as usize] = SkillAdvancementClass::Specialized;
+
+        assert!(!form.raise_selected_skill());
+        assert_eq!(
+            form.feedback.as_ref().map(|feedback| feedback.message.as_str()),
+            Some("That skill is already specialized.")
+        );
+    }
+
+    #[test]
+    fn lower_selected_skill_is_blocked_at_untrained() {
+        let mut form = CharacterCreationFormState::new(test_catalog());
+        form.selected_skill_id = Some(SkillType::Run as u32);
+
+        assert!(!form.lower_selected_skill());
+        assert_eq!(
+            form.feedback.as_ref().map(|feedback| feedback.message.as_str()),
+            Some("That skill is already untrained.")
+        );
     }
 }

@@ -482,8 +482,13 @@ fn current_local_solve_body_input_uses_shared_resolved_manual_run_speed() {
         .current_local_solve_body_input(&world)
         .expect("active manual drive should produce local solve input");
     assert_eq!(body.body_id, SpatialBodyId::LocalPlayer(player_guid));
-    assert!(body.velocity.x.abs() < 1e-5);
-    assert!((body.velocity.y - expected_local_run_speed).abs() < 1e-5);
+    assert!(matches!(
+        body.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
+            if velocity.x.abs() < 1e-5
+                && (velocity.y - expected_local_run_speed).abs() < 1e-5
+                && omega == Vector3::zero()
+    ));
 }
 
 #[test]
@@ -512,8 +517,12 @@ fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
     let body = movement
         .current_local_solve_body_input(&world)
         .expect("turn-in-place manual drive should produce local solve input");
-    assert!(body.velocity.length_squared() <= 1e-6);
-    assert_eq!(body.omega, capabilities.kinematics().base_turn_left_omega);
+    assert!(matches!(
+        body.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
+            if velocity.length_squared() <= 1e-6
+                && omega == capabilities.kinematics().base_turn_left_omega
+    ));
 }
 
 #[test]
@@ -823,8 +832,11 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     let player = movement
         .current_local_solve_body_input(&world)
         .expect("held run input should produce local solve input");
-    assert!(player.velocity.x.abs() < 1e-5);
-    assert!((player.velocity.y - 4.5).abs() < 1e-5);
+    assert!(matches!(
+        player.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, .. })
+            if velocity.x.abs() < 1e-5 && (velocity.y - 4.5).abs() < 1e-5
+    ));
     assert_eq!(session.packet_sequence, 2);
 
     movement
@@ -835,8 +847,11 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     let player = movement
         .current_local_solve_body_input(&world)
         .expect("steady held run should keep solve input active");
-    assert!(player.velocity.x.abs() < 1e-5);
-    assert!((player.velocity.y - 4.5).abs() < 1e-5);
+    assert!(matches!(
+        player.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, .. })
+            if velocity.x.abs() < 1e-5 && (velocity.y - 4.5).abs() < 1e-5
+    ));
     assert_eq!(session.packet_sequence, 2);
 }
 

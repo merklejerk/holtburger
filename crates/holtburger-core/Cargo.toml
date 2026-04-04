@@ -30,4 +30,5 @@ smallvec.workspace = true
 [dev-dependencies]
 hex.workspace = true
 tempfile.workspace = true
+holtburger-dat.workspace = true
 holtburger-world = { workspace = true, features = ["test-support"] }

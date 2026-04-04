@@ -447,12 +447,16 @@ impl MovementSystem {
             _ => (Vector3::zero(), Vector3::zero()),
         };
 
-        Some(SolveBodyInput {
+        Some(SolveBodyInput::velocity(
             body_id,
             pose,
+            world
+                .runtime_body_view(body_id)
+                .map(|body| body.contact)
+                .unwrap_or(holtburger_world::ContactState::Unknown),
             velocity,
             omega,
-        })
+        ))
     }
 
     pub(crate) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {

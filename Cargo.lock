@@ -993,6 +993,7 @@ dependencies = [
  "glam",
  "hex",
  "holtburger-common",
+ "holtburger-dat",
  "holtburger-protocol",
  "holtburger-session",
  "holtburger-world",

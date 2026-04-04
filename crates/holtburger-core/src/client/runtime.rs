@@ -5,6 +5,22 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl ClientRuntime {
+    fn sync_remote_body_tracking(&mut self, body_id: SpatialBodyId) {
+        let Some(guid) = body_id.authoritative_guid() else {
+            return;
+        };
+
+        if guid == self.world.player.guid {
+            return;
+        }
+
+        if self.world.body_has_simulatable_projection_basis(body_id) {
+            self.simulation.track_body(body_id);
+        } else {
+            self.simulation.untrack_body(body_id);
+        }
+    }
+
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
         let Some(pending) = self.active_busy_operation.as_ref() else {
             return;
@@ -37,57 +53,24 @@ impl ClientRuntime {
     }
 
     pub(super) fn observe_runtime_world_event(&mut self, event: &WorldEvent) {
-        const EPSILON: f32 = 1e-6;
-
         match event {
             WorldEvent::EntitySpawned(entity)
             | WorldEvent::EntityReplaced(entity)
             | WorldEvent::EntityIdentified(entity) => {
-                if entity.guid != self.world.player.guid
-                    && (entity.velocity.length_squared() > EPSILON
-                        || entity.omega.length_squared() > EPSILON)
-                {
-                    self.simulation
-                        .track_body(SpatialBodyId::Entity(entity.guid));
+                if let Some(body_id) = self.world.runtime_body_id_for_guid(entity.guid) {
+                    self.sync_remote_body_tracking(body_id);
                 }
             }
-            WorldEvent::EntityVectorUpdated {
-                guid,
-                velocity,
-                omega,
-            } => {
-                if *guid == self.world.player.guid {
-                    return;
-                }
-
-                if velocity.length_squared() > EPSILON || omega.length_squared() > EPSILON {
-                    self.simulation.track_body(SpatialBodyId::Entity(*guid));
-                } else {
-                    self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
+            WorldEvent::EntityVectorUpdated { guid, .. } => {
+                if let Some(body_id) = self.world.runtime_body_id_for_guid(*guid) {
+                    self.sync_remote_body_tracking(body_id);
                 }
             }
             WorldEvent::EntityDespawned(guid) => {
                 self.simulation.untrack_body(SpatialBodyId::Entity(*guid));
             }
             WorldEvent::RuntimeBodyChanged { body_id } => {
-                let Some(guid) = body_id.authoritative_guid() else {
-                    return;
-                };
-
-                if guid == self.world.player.guid {
-                    return;
-                }
-
-                let Some(body) = self.world.runtime_body_view(*body_id) else {
-                    return;
-                };
-
-                if body.velocity.length_squared() > EPSILON || body.omega.length_squared() > EPSILON
-                {
-                    self.simulation.track_body(*body_id);
-                } else {
-                    self.simulation.untrack_body(*body_id);
-                }
+                self.sync_remote_body_tracking(*body_id);
             }
             WorldEvent::RuntimeBodyRemoved { body_id } => {
                 if body_id.authoritative_guid().is_some() {

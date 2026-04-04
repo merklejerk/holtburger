@@ -9,7 +9,6 @@ use holtburger_world::{
     ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialBodyId, SpatialSolveBatch,
     SpatialSolveRequest, WorldEvent, WorldState,
 };
-use smallvec::SmallVec;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -33,7 +32,7 @@ fn calculate_arrival_position(
 
 #[derive(Debug, Default)]
 pub(super) struct ClientSimulationSystem {
-    tracked_body_ids: SmallVec<[SpatialBodyId; 4]>,
+    tracked_body_ids: Vec<SpatialBodyId>,
 }
 
 impl ClientSimulationSystem {
@@ -92,7 +91,7 @@ impl ClientSimulationSystem {
                 .scene
                 .get_entities_in_range(&pose, ACTIVE_SOLVE_RADIUS_M)
         });
-        let mut bodies = SmallVec::<[SolveBodyInput; 1]>::new();
+        let mut bodies = Vec::<SolveBodyInput>::new();
 
         if let Some(body) = local_body {
             bodies.push(body);
@@ -349,8 +348,8 @@ mod tests {
         let events = simulation.apply_solve_batch(
             &mut world,
             SpatialSolveBatch {
-                solved: SmallVec::new(),
-                events: SmallVec::from_vec(vec![
+                solved: Vec::new(),
+                events: vec![
                     SpatialBodyEvent::ContactChanged {
                         body_id: SpatialBodyId::LocalPlayer(player_guid),
                         contact: ContactState::Grounded,
@@ -359,7 +358,7 @@ mod tests {
                         body_id: SpatialBodyId::Entity(remote_guid),
                         pose: remote_pose,
                     },
-                ]),
+                ],
             },
         );
 

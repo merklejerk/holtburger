@@ -1,7 +1,6 @@
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
-use smallvec::SmallVec;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -220,13 +219,6 @@ impl SolveProjectionBasis {
     pub const fn velocity(velocity: Vector3, omega: Vector3) -> Self {
         Self::Velocity { velocity, omega }
     }
-
-    pub const fn velocity_components(self) -> Option<(Vector3, Vector3)> {
-        match self {
-            Self::Velocity { velocity, omega } => Some((velocity, omega)),
-            Self::GroundedMotion { .. } => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -295,12 +287,12 @@ pub struct LocalDriveControl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveRequest {
     pub dt: Duration,
-    pub bodies: SmallVec<[SolveBodyInput; 1]>,
+    pub bodies: Vec<SolveBodyInput>,
     pub local_drive: Option<LocalDriveControl>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveBatch {
-    pub solved: SmallVec<[SolvedBodyKinematics; 1]>,
-    pub events: SmallVec<[SpatialBodyEvent; 4]>,
+    pub solved: Vec<SolvedBodyKinematics>,
+    pub events: Vec<SpatialBodyEvent>,
 }

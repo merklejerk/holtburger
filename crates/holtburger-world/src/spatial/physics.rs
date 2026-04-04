@@ -5,17 +5,18 @@ use super::{
 };
 use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Quaternion, Vector3};
-use smallvec::SmallVec;
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
 
 const EPSILON: f32 = 1e-4;
 
 fn velocity_kinematics_for_input(input: &SolveBodyInput) -> (Vector3, Vector3) {
-    input
-        .basis
-        .and_then(SolveProjectionBasis::velocity_components)
-        .unwrap_or((Vector3::zero(), Vector3::zero()))
+    match input.basis {
+        Some(SolveProjectionBasis::Velocity { velocity, omega }) => (velocity, omega),
+        Some(SolveProjectionBasis::GroundedMotion { .. }) | None => {
+            (Vector3::zero(), Vector3::zero())
+        }
+    }
 }
 
 fn grounded_kinematics_for_input(input: &SolveBodyInput) -> Option<(Vector3, Vector3)> {
@@ -219,7 +220,7 @@ fn world_velocity_from_local_basis(local_velocity: Vector3, heading: f32) -> Vec
         + Vector3::new(0.0, 0.0, local_velocity.z)
 }
 
-fn advance_grounded_actor_kinematics(
+fn advance_grounded_body_kinematics(
     input: &SolveBodyInput,
     desired_local_velocity: Vector3,
     desired_local_omega: Vector3,
@@ -359,7 +360,7 @@ impl SpatialPhysics for BasicSpatialPhysics {
                 } else if let Some((desired_local_velocity, desired_local_omega)) =
                     grounded_kinematics_for_input(body)
                 {
-                    advance_grounded_actor_kinematics(
+                    advance_grounded_body_kinematics(
                         body,
                         desired_local_velocity,
                         desired_local_omega,
@@ -373,7 +374,7 @@ impl SpatialPhysics for BasicSpatialPhysics {
 
         SpatialSolveBatch {
             solved,
-            events: SmallVec::new(),
+            events: Vec::new(),
         }
     }
 }
@@ -388,8 +389,8 @@ impl SpatialPhysics for NoopSpatialPhysics {
         _scene: &mut SpatialScene,
     ) -> SpatialSolveBatch {
         SpatialSolveBatch {
-            solved: SmallVec::new(),
-            events: SmallVec::new(),
+            solved: Vec::new(),
+            events: Vec::new(),
         }
     }
 }

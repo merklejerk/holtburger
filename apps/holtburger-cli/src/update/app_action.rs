@@ -29,7 +29,7 @@ impl AppState {
                         self.world_name.clone(),
                         self.chat_log.take(),
                     );
-                    game.data.content = self.content.clone();
+                    game.data.spell_catalog = self.spell_catalog.clone();
                     self.page = Page::Game(Box::new(game));
                     result.request_redraw(RedrawPriority::Immediate);
                 }
@@ -96,6 +96,7 @@ mod tests {
             world_name: "World".to_string(),
             server_time: None,
             content: None,
+            spell_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

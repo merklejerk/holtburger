@@ -1,24 +1,15 @@
-use crate::bootstrap;
-use crate::character_gen::CharacterGenReference;
 use anyhow::{Context, Result, anyhow};
-use binrw::BinRead;
-use holtburger_dat::file_type::{CharGen, SkillTable, SpellTable};
-use holtburger_dat::{HbaReader, ResourceSource};
-use holtburger_world::WorldBootstrap;
-use holtburger_world::spell::SpellCatalog;
+use binrw::{BinRead, Endian};
+use holtburger_dat::{HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
     source_description: Option<String>,
-    skill_table_cache: OnceLock<Arc<SkillTable>>,
-    spell_catalog_cache: OnceLock<Arc<SpellCatalog>>,
-    char_gen_cache: OnceLock<Arc<CharGen>>,
-    character_gen_reference_cache: OnceLock<Arc<CharacterGenReference>>,
 }
 
 impl std::fmt::Debug for ContentRepository {
@@ -26,19 +17,6 @@ impl std::fmt::Debug for ContentRepository {
         f.debug_struct("ContentRepository")
             .field("mount_count", &self.mounts.len())
             .field("source_description", &self.source_description)
-            .field(
-                "skill_table_cached",
-                &self.skill_table_cache.get().is_some(),
-            )
-            .field(
-                "spell_catalog_cached",
-                &self.spell_catalog_cache.get().is_some(),
-            )
-            .field("char_gen_cached", &self.char_gen_cache.get().is_some())
-            .field(
-                "character_gen_reference_cached",
-                &self.character_gen_reference_cache.get().is_some(),
-            )
             .finish()
     }
 }
@@ -53,10 +31,6 @@ impl ContentRepository {
             return Ok(Self {
                 mounts,
                 source_description: Some(path.display().to_string()),
-                skill_table_cache: OnceLock::new(),
-                spell_catalog_cache: OnceLock::new(),
-                char_gen_cache: OnceLock::new(),
-                character_gen_reference_cache: OnceLock::new(),
             });
         }
 
@@ -66,10 +40,6 @@ impl ContentRepository {
             return Ok(Self {
                 mounts,
                 source_description: Some(hba_path.display().to_string()),
-                skill_table_cache: OnceLock::new(),
-                spell_catalog_cache: OnceLock::new(),
-                char_gen_cache: OnceLock::new(),
-                character_gen_reference_cache: OnceLock::new(),
             });
         }
 
@@ -94,10 +64,6 @@ impl ContentRepository {
         Ok(Self {
             mounts,
             source_description: Some(path.display().to_string()),
-            skill_table_cache: OnceLock::new(),
-            spell_catalog_cache: OnceLock::new(),
-            char_gen_cache: OnceLock::new(),
-            character_gen_reference_cache: OnceLock::new(),
         })
     }
 
@@ -105,90 +71,73 @@ impl ContentRepository {
         Self {
             mounts,
             source_description: None,
-            skill_table_cache: OnceLock::new(),
-            spell_catalog_cache: OnceLock::new(),
-            char_gen_cache: OnceLock::new(),
-            character_gen_reference_cache: OnceLock::new(),
         }
     }
 
-    pub fn world_bootstrap(&self) -> Result<Arc<WorldBootstrap>> {
-        bootstrap::world_bootstrap_from_mounts_with_source(
-            self.mounts.clone(),
-            self.source_description.as_deref(),
-        )
+    pub fn read_asset<T>(&self, asset_name: &'static str) -> Result<T>
+    where
+        T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
+    {
+        let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
+        read_asset_from_resources(&resources, self.source_description.as_deref(), asset_name)
+    }
+}
+
+fn read_asset_from_resources<T>(
+    resources: &LayeredResourceResolver,
+    source_description: Option<&str>,
+    asset_name: &'static str,
+) -> Result<T>
+where
+    T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
+{
+    let bytes = read_asset_bytes::<T>(resources, source_description, asset_name)?;
+    T::read_options(&mut Cursor::new(bytes), Endian::Little, ())
+        .with_context(|| format!("failed to parse {asset_name}"))
+}
+
+fn read_asset_bytes<T>(
+    resources: &LayeredResourceResolver,
+    source_description: Option<&str>,
+    asset_name: &'static str,
+) -> Result<Vec<u8>>
+where
+    T: StaticResourceKey,
+{
+    let key = T::RESOURCE_KEY;
+
+    if let Some(metadata) = resources.get_metadata_by_key(key)
+        && !metadata.is_pruned
+    {
+        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
     }
 
-    pub fn spell_catalog(&self) -> Result<Arc<SpellCatalog>> {
-        if let Some(catalog) = self.spell_catalog_cache.get() {
-            return Ok(Arc::clone(catalog));
-        }
-
-        let spell_table = SpellTable::read(&mut Cursor::new(bootstrap::required_asset_bytes::<
-            SpellTable,
-        >(
-            &holtburger_dat::LayeredResourceResolver::from_sources(self.mounts.clone()),
-            self.source_description.as_deref(),
-            "spell table",
-        )?))
-        .context("failed to parse required spell table")?;
-
-        let catalog = Arc::new(spell_table.into());
-        let _ = self.spell_catalog_cache.set(Arc::clone(&catalog));
-        Ok(catalog)
+    if resources.get_metadata_by_key(key).is_some() {
+        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
     }
 
-    fn skill_table(&self) -> Result<Arc<SkillTable>> {
-        if let Some(skill_table) = self.skill_table_cache.get() {
-            return Ok(Arc::clone(skill_table));
-        }
+    Err(missing_asset_error(key, asset_name, source_description))
+}
 
-        let skill_table = SkillTable::read(&mut Cursor::new(bootstrap::required_asset_bytes::<
-            SkillTable,
-        >(
-            &holtburger_dat::LayeredResourceResolver::from_sources(self.mounts.clone()),
-            self.source_description.as_deref(),
-            "skill table",
-        )?))
-        .context("failed to parse required skill table")?;
-
-        let skill_table = Arc::new(skill_table);
-        let _ = self.skill_table_cache.set(Arc::clone(&skill_table));
-        Ok(skill_table)
-    }
-
-    pub fn char_gen(&self) -> Result<Arc<CharGen>> {
-        if let Some(char_gen) = self.char_gen_cache.get() {
-            return Ok(Arc::clone(char_gen));
-        }
-
-        let char_gen = CharGen::read(&mut Cursor::new(
-            bootstrap::required_asset_bytes::<CharGen>(
-                &holtburger_dat::LayeredResourceResolver::from_sources(self.mounts.clone()),
-                self.source_description.as_deref(),
-                "character generator table",
-            )?,
-        ))
-        .context("failed to parse required character generator table")?;
-
-        let char_gen = Arc::new(char_gen);
-        let _ = self.char_gen_cache.set(Arc::clone(&char_gen));
-        Ok(char_gen)
-    }
-
-    pub fn character_gen_reference(&self) -> Result<Arc<CharacterGenReference>> {
-        if let Some(reference) = self.character_gen_reference_cache.get() {
-            return Ok(Arc::clone(reference));
-        }
-
-        let reference = Arc::new(CharacterGenReference::from_assets(
-            self.char_gen()?.as_ref(),
-            self.skill_table()?.as_ref(),
-        ));
-        let _ = self
-            .character_gen_reference_cache
-            .set(Arc::clone(&reference));
-        Ok(reference)
+fn missing_asset_error(
+    key: ResourceKey<'static>,
+    asset_name: &'static str,
+    source_description: Option<&str>,
+) -> anyhow::Error {
+    match source_description {
+        Some(source) => anyhow!(
+            "Missing asset {}:0x{:08X} ({}) while reading client data from {}.",
+            key.namespace,
+            key.file_id,
+            asset_name,
+            source
+        ),
+        None => anyhow!(
+            "Missing asset {}:0x{:08X} ({}) in the mounted resource namespaces.",
+            key.namespace,
+            key.file_id,
+            asset_name,
+        ),
     }
 }
 
@@ -369,49 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn from_hba_dir_loads_required_bootstrap_content() {
-        let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
-            &dir.path().join("bundle.hba"),
-            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
-            false,
-        ) {
-            return;
-        }
-
-        let repository =
-            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
-        let bootstrap = repository
-            .world_bootstrap()
-            .expect("world bootstrap should resolve");
-
-        assert!(!bootstrap.skill_table.skill_base_hash.is_empty());
-        assert!(!bootstrap.xp_table.character_level_xp_list.is_empty());
-        assert!(!bootstrap.spell_catalog().spells.is_empty());
-    }
-
-    #[test]
-    fn spell_catalog_loads_reference_data_from_repository() {
-        let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
-            &dir.path().join("bundle.hba"),
-            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
-            false,
-        ) {
-            return;
-        }
-
-        let repository =
-            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
-        let catalog = repository
-            .spell_catalog()
-            .expect("spell catalog should resolve from content repository");
-
-        assert!(!catalog.spells.is_empty());
-    }
-
-    #[test]
-    fn char_gen_loads_reference_data_from_repository() {
+    fn read_asset_loads_char_gen_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
             &dir.path().join("bundle.hba"),
@@ -429,7 +336,7 @@ mod tests {
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
         let char_gen = repository
-            .char_gen()
+            .read_asset::<CharGen>("character generator table")
             .expect("char gen should resolve from content repository");
 
         assert!(!char_gen.starter_areas.is_empty());
@@ -437,12 +344,11 @@ mod tests {
     }
 
     #[test]
-    fn character_gen_reference_loads_reference_data_from_repository() {
+    fn read_asset_loads_motion_kinematics_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
             &dir.path().join("bundle.hba"),
             &[
-                CharGen::FILE_ID,
                 SkillTable::FILE_ID,
                 SpellTable::FILE_ID,
                 XpTable::FILE_ID,
@@ -454,13 +360,11 @@ mod tests {
 
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
-        let reference = repository
-            .character_gen_reference()
-            .expect("character gen reference should resolve from content repository");
+        let motion_kinematics = repository
+            .read_asset::<MotionKinematics>("motion kinematics table")
+            .expect("motion kinematics should resolve from content repository");
 
-        assert!(!reference.starter_areas.is_empty());
-        assert!(!reference.heritage_groups.is_empty());
-        assert!(reference.expected_skill_slots >= 55);
+        assert_eq!(motion_kinematics.id, MotionKinematics::FILE_ID);
     }
 
     #[test]
@@ -484,28 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn world_bootstrap_fails_when_required_skill_table_is_missing() {
-        let dir = tempdir().expect("tempdir should be created");
-        if !write_hba(
-            &dir.path().join("bundle.hba"),
-            &[SpellTable::FILE_ID, XpTable::FILE_ID],
-            false,
-        ) {
-            return;
-        }
-
-        let repository =
-            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
-        let error = repository
-            .world_bootstrap()
-            .expect_err("world bootstrap should fail when skill table is missing");
-
-        assert!(error.to_string().contains("skill table"));
-        assert!(error.to_string().contains("0x0E000004"));
-    }
-
-    #[test]
-    fn spell_catalog_fails_when_spell_table_is_missing() {
+    fn read_asset_fails_when_spell_table_is_missing() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
             &dir.path().join("bundle.hba"),
@@ -518,23 +401,10 @@ mod tests {
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
         let error = repository
-            .spell_catalog()
-            .expect_err("spell catalog should fail when spell table is missing");
+            .read_asset::<SpellTable>("spell table")
+            .expect_err("spell table load should fail when the asset is missing");
 
         assert!(error.to_string().contains("spell table"));
     }
 
-    #[test]
-    fn world_bootstrap_fails_when_no_portal_dataset_is_mounted() {
-        let dir = tempdir().expect("tempdir should be created");
-
-        let repository =
-            ContentRepository::from_hba_dir(dir.path()).expect("empty directory should still load");
-        let error = repository
-            .world_bootstrap()
-            .expect_err("world bootstrap should fail when portal content is missing");
-
-        assert!(error.to_string().contains("skill table"));
-        assert!(error.to_string().contains(EOR_PORTAL_NAMESPACE));
-    }
 }

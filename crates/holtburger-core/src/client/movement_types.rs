@@ -156,6 +156,9 @@ pub enum PlayerDriveIntent {
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
+    ArriveAtPose {
+        pose: WorldPosition,
+    },
     SnapFacing {
         heading: f32,
     },
@@ -266,6 +269,20 @@ mod tests {
         let command = PlayerDriveIntent::SnapFacing { heading: 1.0 };
 
         assert_eq!(command, PlayerDriveIntent::SnapFacing { heading: 1.0 });
+    }
+
+    #[test]
+    fn arrive_at_pose_intent_preserves_pose() {
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1234_0100),
+            coords: Vector3::new(4.0, 5.0, 6.0),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(
+            PlayerDriveIntent::ArriveAtPose { pose },
+            PlayerDriveIntent::ArriveAtPose { pose }
+        );
     }
 
     #[test]

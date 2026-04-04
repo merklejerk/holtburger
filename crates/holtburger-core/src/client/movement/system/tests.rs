@@ -1076,6 +1076,64 @@ async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
 }
 
 #[tokio::test]
+async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(0.0),
+    };
+    let arrival_pose = WorldPosition {
+        landblock_id: Guid(0x1000_0100),
+        coords: Vector3::new(12.0, -4.0, 7.25),
+        rotation: Quaternion::from_heading(0.0),
+    };
+
+    world.player.guid = guid;
+    world.player.position = position;
+    world
+        .entities
+        .insert(Entity::new(guid, "Player".to_string(), position));
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        start,
+    );
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("autonomous drive should emit a motion pulse");
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ArriveAtPose { pose: arrival_pose },
+        start + Duration::from_millis(30),
+    );
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("arrival pose should sync and stop motion");
+
+    let body = world
+        .scene
+        .body(SpatialBodyId::LocalPlayer(guid))
+        .expect("local player runtime body should exist");
+    assert_eq!(body.pose, arrival_pose);
+    assert_eq!(session.packet_sequence, 4);
+    assert!(!movement.should_send_stop_pulse());
+}
+
+#[tokio::test]
 async fn movement_heartbeat_arms_then_sends_for_stationary_player_with_valid_pose() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);

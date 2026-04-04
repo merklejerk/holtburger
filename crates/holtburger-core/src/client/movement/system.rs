@@ -120,6 +120,7 @@ impl MovementSequenceDiagnostics {
 pub(crate) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
     queued_drive_commands: Vec<QueuedDriveCommand>,
+    pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
     pending_snap_facing: Option<f32>,
     active_drive: Option<ActiveDriveState>,
     server_motion_active: bool,
@@ -135,6 +136,9 @@ enum QueuedDriveCommand {
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
+    ArriveAtPose {
+        pose: holtburger_common::position::WorldPosition,
+    },
     SnapFacing {
         heading: f32,
     },
@@ -187,6 +191,7 @@ impl MovementSystem {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
             queued_drive_commands: Vec::new(),
+            pending_arrival_pose: None,
             pending_snap_facing: None,
             active_drive: None,
             server_motion_active: false,
@@ -212,6 +217,7 @@ impl MovementSystem {
                 QueuedDriveCommand::ManualPulse { state, duration }
             }
             PlayerDriveIntent::Autonomous(intent) => QueuedDriveCommand::Autonomous(intent),
+            PlayerDriveIntent::ArriveAtPose { pose } => QueuedDriveCommand::ArriveAtPose { pose },
             PlayerDriveIntent::SnapFacing { heading } => QueuedDriveCommand::SnapFacing { heading },
             PlayerDriveIntent::Stop => QueuedDriveCommand::Stop,
         };
@@ -230,10 +236,15 @@ impl MovementSystem {
             QueuedDriveCommand::Autonomous(intent) => {
                 self.active_drive = Some(ActiveDriveState::autonomous(intent));
             }
+            QueuedDriveCommand::ArriveAtPose { pose } => {
+                self.pending_arrival_pose = Some(pose);
+                self.active_drive = None;
+            }
             QueuedDriveCommand::SnapFacing { heading } => {
                 self.pending_snap_facing = Some(heading);
             }
             QueuedDriveCommand::Stop => {
+                self.pending_arrival_pose = None;
                 self.pending_snap_facing = None;
                 self.active_drive = None;
             }
@@ -339,6 +350,18 @@ impl MovementSystem {
         }
 
         let mut events = Vec::new();
+        if let Some(pose) = self.pending_arrival_pose.take() {
+            events.extend(
+                self.execute_arrival_pose(
+                    now,
+                    pose,
+                    world,
+                    session,
+                    MovementPacketMetadata::default(),
+                )
+                .await?,
+            );
+        }
         if let Some(heading) = self.pending_snap_facing.take() {
             events.extend(
                 self.execute_snap_facing(
@@ -590,6 +613,26 @@ impl MovementSystem {
 
         self.send_autonomous_position_sync(now, world, session, metadata)
             .await?;
+
+        Ok(world_events)
+    }
+
+    async fn execute_arrival_pose(
+        &mut self,
+        now: Instant,
+        pose: holtburger_common::position::WorldPosition,
+        world: &mut WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<Vec<WorldEvent>> {
+        log::info!("movement: applying arrival pose {:?}", pose);
+
+        let world_events = world.set_local_player_runtime_pose(pose);
+        self.send_autonomous_position_sync(now, world, session, metadata)
+            .await?;
+
+        Self::send_stop_pulse(world, session, metadata).await?;
+        self.note_server_motion_cleared();
 
         Ok(world_events)
     }

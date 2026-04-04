@@ -25,9 +25,9 @@ bitflags.workspace = true
 async-trait.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
-smallvec.workspace = true
 
 [dev-dependencies]
 hex.workspace = true
 tempfile.workspace = true
+holtburger-dat.workspace = true
 holtburger-world = { workspace = true, features = ["test-support"] }

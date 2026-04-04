@@ -1,5 +1,6 @@
 pub mod fellowship;
 pub mod liveness;
+pub mod motion_resolution;
 pub mod mutations;
 pub mod self_movement;
 #[cfg(test)]
@@ -11,8 +12,10 @@ pub use fellowship::{
     FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
     FellowshipMemberState, FellowshipState,
 };
-pub use self_movement::{
+pub use motion_resolution::{
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,
+};
+pub use self_movement::{
     RequiredSelfMovementKinematics, SelfMovementCapabilities, SelfMovementCapabilitiesError,
     SelfMovementKinematics, SelfMovementKinematicsError,
 };

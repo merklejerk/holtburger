@@ -76,7 +76,10 @@ impl SelectionState {
             "New",
         )];
 
-        if self.selected_character().is_some() {
+        if self
+            .selected_character()
+            .is_some_and(|character| character.character.delete_time == 0)
+        {
             verbs.push(Verb::new(
                 AppUiAction::OpenDeleteCharacterConfirmation,
                 'd',
@@ -198,6 +201,10 @@ impl SelectionState {
         match action {
             AppAction::EnterSelectedCharacter => {
                 let character = self.selected_character()?;
+                if character.character.delete_time != 0 {
+                    return None;
+                }
+
                 Some(UpdateResult::commands(vec![ClientCommand::SelectCharacter(
                     character.character.guid,
                 )]))
@@ -280,7 +287,8 @@ impl SelectionState {
                 action: AppUiAction::LowerSelectedCharacterCreationSkill,
             } => {
                 let creation = self.creation.ready_mut()?;
-                if creation.lower_selected_skill() {
+                let changed = creation.lower_selected_skill();
+                if changed || creation.feedback.is_some() {
                     Some(UpdateResult::redraw())
                 } else {
                     None
@@ -358,6 +366,14 @@ mod tests {
             result.commands.as_slice(),
             [ClientCommand::SelectCharacter(Guid(0x5000_0001))]
         ));
+    }
+
+    #[test]
+    fn enter_selected_character_is_blocked_for_pending_delete_character() {
+        let mut state = test_state();
+        state.characters[0].character.delete_time = 123;
+
+        assert!(state.handle_action(AppAction::EnterSelectedCharacter).is_none());
     }
 
     #[test]

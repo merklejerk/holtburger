@@ -174,10 +174,6 @@ impl CharacterCreationFormState {
 
     pub fn verbs(&self) -> Vec<Verb> {
         let mut verbs = vec![Verb::new(AppUiAction::OpenCharacterDashboard, '\x1b', "Back")];
-        if self.focus == CharacterCreationFocus::Skills {
-            verbs.push(Verb::new(AppUiAction::RaiseSelectedCharacterCreationSkill, 'r', "Raise"));
-            verbs.push(Verb::new(AppUiAction::LowerSelectedCharacterCreationSkill, 'l', "Lower"));
-        }
         if self.focus == CharacterCreationFocus::Submit {
             verbs.push(Verb::new(AppAction::SubmitCharacterCreation, '\r', "Create"));
         }
@@ -201,8 +197,6 @@ impl CharacterCreationFormState {
             CharacterCreationFocus::Skills => {
                 segments.push("[UP/DOWN] Select Skill");
                 segments.push("[LEFT/RIGHT] Raise/Lower");
-                segments.push("[R] Raise");
-                segments.push("[L] Lower");
             }
             CharacterCreationFocus::Submit => {
                 segments.push("[ENTER] Create");

@@ -85,6 +85,17 @@ impl SelectionState {
             verbs.push(Verb::new(AppAction::EnterSelectedCharacter, '\r', "World"));
         }
 
+        if self
+            .selected_character()
+            .is_some_and(|character| character.character.delete_time != 0)
+        {
+            verbs.push(Verb::new(
+                AppUiAction::RestoreSelectedCharacter,
+                'r',
+                "Restore",
+            ));
+        }
+
         verbs
     }
 
@@ -164,6 +175,10 @@ impl SelectionState {
                 operation: Some(CharacterManagementOperation::Create),
                 response,
             } => return self.handle_create_response(response),
+            ClientViewEvent::CharacterManagementResponse {
+                operation: Some(CharacterManagementOperation::Restore),
+                response,
+            } => return self.handle_restore_response(response),
             ClientViewEvent::StatusUpdate {
                 state: ClientState::EnteringWorld,
             } => {
@@ -271,6 +286,18 @@ impl SelectionState {
                     None
                 }
             }
+            AppAction::UiAction {
+                action: AppUiAction::RestoreSelectedCharacter,
+            } => {
+                let character = self.selected_character()?;
+                if character.character.delete_time == 0 {
+                    return None;
+                }
+
+                Some(UpdateResult::commands(vec![ClientCommand::RestoreCharacter(
+                    character.character.guid,
+                )]))
+            }
             _ => None,
         }
     }
@@ -282,7 +309,7 @@ impl SelectionState {
 
 fn normalize_character_name(name: &str) -> String {
     name.chars()
-        .filter(|character| !character.is_whitespace())
+    .filter(|character| character.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
 }
@@ -374,9 +401,47 @@ mod tests {
     }
 
     #[test]
+    fn dashboard_verbs_show_restore_for_pending_delete_character() {
+        let mut state = test_state();
+        state.characters[0].character.delete_time = 123;
+
+        let verbs = state.dashboard_verbs();
+
+        assert!(verbs.iter().any(|verb| matches!(
+            verb.action,
+            AppAction::UiAction {
+                action: AppUiAction::RestoreSelectedCharacter,
+            }
+        )));
+    }
+
+    #[test]
+    fn restore_selected_character_uses_guid() {
+        let mut state = test_state();
+        state.characters[0].character.delete_time = 123;
+
+        let result = state
+            .handle_action(AppUiAction::RestoreSelectedCharacter.into())
+            .expect("restore action should produce a result");
+
+        assert!(matches!(
+            result.commands.as_slice(),
+            [ClientCommand::RestoreCharacter(Guid(0x5000_0001))]
+        ));
+    }
+
+    #[test]
     fn normalize_character_name_ignores_case_and_whitespace() {
         assert_eq!(
             normalize_character_name("  Sho   Girl  "),
+            normalize_character_name("sho girl")
+        );
+    }
+
+    #[test]
+    fn normalize_character_name_ignores_non_alphanumeric_characters() {
+        assert_eq!(
+            normalize_character_name("Sho-Girl!"),
             normalize_character_name("sho girl")
         );
     }
@@ -410,6 +475,26 @@ mod tests {
             state.selected_character().map(|entry| entry.character.name.as_str()),
             Some("Zappy")
         );
+    }
+
+    #[test]
+    fn restore_response_clears_pending_delete_marker() {
+        let mut state = test_state();
+        state.characters[0].character.delete_time = 123;
+
+        let result = state.handle_view_event(ClientViewEvent::CharacterManagementResponse {
+            operation: Some(CharacterManagementOperation::Restore),
+            response: CharacterCreateResponseData {
+                response: holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
+                guid: Some(Guid(0x5000_0001)),
+                name: Some("Sho Girl".to_string()),
+                seconds_disabled: Some(0),
+            },
+        });
+
+        assert!(result.redraw_requested());
+        assert_eq!(state.characters[0].character.delete_time, 0);
+        assert_eq!(state.characters[0].character.name, "Sho Girl");
     }
 }
 
@@ -469,5 +554,42 @@ impl SelectionState {
         }
 
         UpdateResult::redraw()
+    }
+
+    fn handle_restore_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
+        self.pending_create = None;
+
+        match response.response {
+            holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
+                if let Some(guid) = response.guid {
+                    if let Some(entry) = self
+                        .characters
+                        .iter_mut()
+                        .find(|entry| entry.character.guid == guid)
+                    {
+                        entry.character.delete_time = 0;
+                        if let Some(name) = response.name {
+                            entry.character.name = name;
+                        }
+                        if self.selected_character_index >= self.characters.len() {
+                            self.selected_character_index = self.characters.len().saturating_sub(1);
+                        }
+                        return UpdateResult::redraw();
+                    }
+                }
+
+                UpdateResult::redraw()
+            }
+            other => {
+                if let Some(creation) = self.creation.ready_mut() {
+                    creation.set_feedback(
+                        format!("Character restore rejected by server: {:?}.", other),
+                        true,
+                    );
+                }
+
+                UpdateResult::redraw()
+            }
+        }
     }
 }

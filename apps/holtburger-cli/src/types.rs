@@ -27,6 +27,7 @@ pub enum AppUiAction {
     OpenCharacterDashboard,
     OpenDeleteCharacterConfirmation,
     CancelDeleteCharacterConfirmation,
+    RestoreSelectedCharacter,
     RaiseSelectedCharacterCreationSkill,
     LowerSelectedCharacterCreationSkill,
 }

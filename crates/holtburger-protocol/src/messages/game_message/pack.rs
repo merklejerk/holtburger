@@ -15,6 +15,30 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::CharacterCreate(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterCreate as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::CharacterCreateResponse(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterCreateResponse as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::CharacterDeleteRequest(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterDelete as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::CharacterDeleteResponse => {
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterDelete as u32)
+                    .unwrap();
+            }
+            GameMessage::CharacterRestoreRequest(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterRestore as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameMessage::CharacterEnterWorldRequest(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::CharacterEnterWorldRequest as u32)
                     .unwrap();

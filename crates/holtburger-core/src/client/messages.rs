@@ -134,6 +134,7 @@ impl ClientRuntime {
                 if !data.use_turbine_chat {
                     self.turbine_chat.channels = None;
                 }
+                self.auth.pending_character_operation = None;
 
                 log::info!("Character List for account: {}", data.account_name);
                 for (i, c) in self.auth.characters.iter().enumerate() {
@@ -143,6 +144,19 @@ impl ClientRuntime {
                 self.state = ClientState::CharacterSelection(self.auth.characters.clone());
                 self.send_status_event();
                 self.emit_wire_event(WireEvent::CharacterList(self.auth.characters.clone()));
+                Ok(())
+            }
+            GameMessage::CharacterCreateResponse(data) => {
+                let operation = self.auth.take_pending_character_operation();
+                self.emit_wire_event(WireEvent::CharacterManagementResponse {
+                    operation,
+                    response: (*data).clone(),
+                });
+                Ok(())
+            }
+            GameMessage::CharacterDeleteResponse => {
+                self.auth.take_pending_character_operation();
+                self.emit_wire_event(WireEvent::CharacterDeleteResponse);
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
@@ -874,6 +888,95 @@ mod tests {
 
         assert!(client.active_confirmation.is_none());
         assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[tokio::test]
+    async fn test_character_create_response_projects_pending_operation() {
+        let mut client = build_test_client();
+        let mut wire_events = client.subscribe_wire_events();
+        let mut view_events = client.subscribe_client_view_events();
+        client.auth.pending_character_operation = Some(CharacterManagementOperation::Create);
+
+        let encoded = encode_message(&GameMessage::CharacterCreateResponse(Box::new(
+            CharacterCreateResponseData {
+                response: CharacterGenerationVerificationResponse::Ok,
+                guid: Some(holtburger_common::Guid(0x5000_1234)),
+                name: Some("Bestie".to_string()),
+                seconds_disabled: Some(0),
+            },
+        )));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_wire = false;
+        while let Ok(event) = wire_events.try_recv() {
+            if matches!(
+                event,
+                WireEvent::CharacterManagementResponse {
+                    operation: Some(CharacterManagementOperation::Create),
+                    response: CharacterCreateResponseData {
+                        response: CharacterGenerationVerificationResponse::Ok,
+                        ..
+                    },
+                }
+            ) {
+                saw_wire = true;
+                break;
+            }
+        }
+        assert!(saw_wire);
+
+        let mut saw_view = false;
+        while let Ok(event) = view_events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::CharacterManagementResponse {
+                    operation: Some(CharacterManagementOperation::Create),
+                    response: CharacterCreateResponseData {
+                        response: CharacterGenerationVerificationResponse::Ok,
+                        ..
+                    },
+                }
+            ) {
+                saw_view = true;
+                break;
+            }
+        }
+        assert!(saw_view);
+    }
+
+    #[tokio::test]
+    async fn test_character_delete_response_projects_event() {
+        let mut client = build_test_client();
+        let mut wire_events = client.subscribe_wire_events();
+        let mut view_events = client.subscribe_client_view_events();
+        client.auth.pending_character_operation = Some(CharacterManagementOperation::Delete);
+
+        let encoded = encode_message(&GameMessage::CharacterDeleteResponse);
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert!(matches!(
+            wire_events.try_recv(),
+            Ok(WireEvent::RawMessage(_))
+        ));
+        let mut saw_wire = false;
+        while let Ok(event) = wire_events.try_recv() {
+            if matches!(event, WireEvent::CharacterDeleteResponse) {
+                saw_wire = true;
+                break;
+            }
+        }
+        assert!(saw_wire);
+
+        let mut saw_view = false;
+        while let Ok(event) = view_events.try_recv() {
+            if matches!(event, ClientViewEvent::CharacterDeleteResponse) {
+                saw_view = true;
+                break;
+            }
+        }
+        assert!(saw_view);
     }
 
     #[tokio::test]

@@ -1,7 +1,8 @@
 use crate::bootstrap;
+use crate::character_gen::CharacterGenReference;
 use anyhow::{Context, Result, anyhow};
 use binrw::BinRead;
-use holtburger_dat::file_type::{CharGen, SpellTable};
+use holtburger_dat::file_type::{CharGen, SkillTable, SpellTable};
 use holtburger_dat::{HbaReader, ResourceSource};
 use holtburger_world::WorldBootstrap;
 use holtburger_world::spell::SpellCatalog;
@@ -14,8 +15,10 @@ use std::sync::{Arc, OnceLock};
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
     source_description: Option<String>,
+    skill_table_cache: OnceLock<Arc<SkillTable>>,
     spell_catalog_cache: OnceLock<Arc<SpellCatalog>>,
     char_gen_cache: OnceLock<Arc<CharGen>>,
+    character_gen_reference_cache: OnceLock<Arc<CharacterGenReference>>,
 }
 
 impl std::fmt::Debug for ContentRepository {
@@ -24,10 +27,18 @@ impl std::fmt::Debug for ContentRepository {
             .field("mount_count", &self.mounts.len())
             .field("source_description", &self.source_description)
             .field(
+                "skill_table_cached",
+                &self.skill_table_cache.get().is_some(),
+            )
+            .field(
                 "spell_catalog_cached",
                 &self.spell_catalog_cache.get().is_some(),
             )
             .field("char_gen_cached", &self.char_gen_cache.get().is_some())
+            .field(
+                "character_gen_reference_cached",
+                &self.character_gen_reference_cache.get().is_some(),
+            )
             .finish()
     }
 }
@@ -42,8 +53,10 @@ impl ContentRepository {
             return Ok(Self {
                 mounts,
                 source_description: Some(path.display().to_string()),
+                skill_table_cache: OnceLock::new(),
                 spell_catalog_cache: OnceLock::new(),
                 char_gen_cache: OnceLock::new(),
+                character_gen_reference_cache: OnceLock::new(),
             });
         }
 
@@ -53,8 +66,10 @@ impl ContentRepository {
             return Ok(Self {
                 mounts,
                 source_description: Some(hba_path.display().to_string()),
+                skill_table_cache: OnceLock::new(),
                 spell_catalog_cache: OnceLock::new(),
                 char_gen_cache: OnceLock::new(),
+                character_gen_reference_cache: OnceLock::new(),
             });
         }
 
@@ -79,8 +94,10 @@ impl ContentRepository {
         Ok(Self {
             mounts,
             source_description: Some(path.display().to_string()),
+            skill_table_cache: OnceLock::new(),
             spell_catalog_cache: OnceLock::new(),
             char_gen_cache: OnceLock::new(),
+            character_gen_reference_cache: OnceLock::new(),
         })
     }
 
@@ -88,8 +105,10 @@ impl ContentRepository {
         Self {
             mounts,
             source_description: None,
+            skill_table_cache: OnceLock::new(),
             spell_catalog_cache: OnceLock::new(),
             char_gen_cache: OnceLock::new(),
+            character_gen_reference_cache: OnceLock::new(),
         }
     }
 
@@ -119,6 +138,25 @@ impl ContentRepository {
         Ok(catalog)
     }
 
+    fn skill_table(&self) -> Result<Arc<SkillTable>> {
+        if let Some(skill_table) = self.skill_table_cache.get() {
+            return Ok(Arc::clone(skill_table));
+        }
+
+        let skill_table = SkillTable::read(&mut Cursor::new(bootstrap::required_asset_bytes::<
+            SkillTable,
+        >(
+            &holtburger_dat::LayeredResourceResolver::from_sources(self.mounts.clone()),
+            self.source_description.as_deref(),
+            "skill table",
+        )?))
+        .context("failed to parse required skill table")?;
+
+        let skill_table = Arc::new(skill_table);
+        let _ = self.skill_table_cache.set(Arc::clone(&skill_table));
+        Ok(skill_table)
+    }
+
     pub fn char_gen(&self) -> Result<Arc<CharGen>> {
         if let Some(char_gen) = self.char_gen_cache.get() {
             return Ok(Arc::clone(char_gen));
@@ -136,6 +174,21 @@ impl ContentRepository {
         let char_gen = Arc::new(char_gen);
         let _ = self.char_gen_cache.set(Arc::clone(&char_gen));
         Ok(char_gen)
+    }
+
+    pub fn character_gen_reference(&self) -> Result<Arc<CharacterGenReference>> {
+        if let Some(reference) = self.character_gen_reference_cache.get() {
+            return Ok(Arc::clone(reference));
+        }
+
+        let reference = Arc::new(CharacterGenReference::from_assets(
+            self.char_gen()?.as_ref(),
+            self.skill_table()?.as_ref(),
+        ));
+        let _ = self
+            .character_gen_reference_cache
+            .set(Arc::clone(&reference));
+        Ok(reference)
     }
 }
 
@@ -381,6 +434,33 @@ mod tests {
 
         assert!(!char_gen.starter_areas.is_empty());
         assert!(!char_gen.heritage_groups.is_empty());
+    }
+
+    #[test]
+    fn character_gen_reference_loads_reference_data_from_repository() {
+        let dir = tempdir().expect("tempdir should be created");
+        if !write_hba(
+            &dir.path().join("bundle.hba"),
+            &[
+                CharGen::FILE_ID,
+                SkillTable::FILE_ID,
+                SpellTable::FILE_ID,
+                XpTable::FILE_ID,
+            ],
+            false,
+        ) {
+            return;
+        }
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let reference = repository
+            .character_gen_reference()
+            .expect("character gen reference should resolve from content repository");
+
+        assert!(!reference.starter_areas.is_empty());
+        assert!(!reference.heritage_groups.is_empty());
+        assert!(reference.expected_skill_slots >= 55);
     }
 
     #[test]

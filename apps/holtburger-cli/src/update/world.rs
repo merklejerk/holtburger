@@ -1,4 +1,4 @@
-use crate::pages::selection::SelectionState;
+use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::types::{ChatMessageKind, Page, UpdateResult};
 use holtburger_core::{
@@ -48,12 +48,27 @@ impl AppState {
                 }
             }
             ClientViewEvent::CharacterList(chars) => {
-                let mut chars = chars.clone();
-                chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                let mut chars = chars
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(slot, character)| CharacterDashboardEntry {
+                        slot: slot as u32,
+                        character,
+                    })
+                    .collect::<Vec<_>>();
+                chars.sort_by(|a, b| {
+                    a.character
+                        .name
+                        .to_lowercase()
+                        .cmp(&b.character.name.to_lowercase())
+                });
                 self.page = Page::Selection(SelectionState {
                     characters: chars,
                     selected_character_index: 0,
                     character_preference: self.character_preference.take(),
+                    screen: Default::default(),
+                    delete_confirmation: None,
                 });
             }
             ClientViewEvent::PlayerEntered { guid, name } => {

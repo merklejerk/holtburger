@@ -1,7 +1,6 @@
 use crate::entity::EntityMotionSnapshot;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
-use smallvec::SmallVec;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -205,32 +204,45 @@ impl SpatialBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SolveProjectionBasis {
+    Velocity {
+        velocity: Vector3,
+        omega: Vector3,
+    },
+    GroundedMotion {
+        desired_local_velocity: Vector3,
+        desired_local_omega: Vector3,
+    },
+}
+
+impl SolveProjectionBasis {
+    pub const fn velocity(velocity: Vector3, omega: Vector3) -> Self {
+        Self::Velocity { velocity, omega }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolveBodyInput {
     pub body_id: SpatialBodyId,
     pub pose: WorldPosition,
-    pub velocity: Vector3,
-    pub omega: Vector3,
+    pub contact: ContactState,
+    pub basis: Option<SolveProjectionBasis>,
 }
 
 impl SolveBodyInput {
-    pub fn from_actor_input(input: SolveActorInput) -> Self {
+    pub const fn velocity(
+        body_id: SpatialBodyId,
+        pose: WorldPosition,
+        contact: ContactState,
+        velocity: Vector3,
+        omega: Vector3,
+    ) -> Self {
         Self {
-            body_id: SpatialBodyId::Entity(input.actor_id),
-            pose: input.pose,
-            velocity: input.velocity,
-            omega: input.omega,
+            body_id,
+            pose,
+            contact,
+            basis: Some(SolveProjectionBasis::Velocity { velocity, omega }),
         }
-    }
-
-    pub fn into_actor_input(self) -> Option<SolveActorInput> {
-        self.body_id
-            .authoritative_guid()
-            .map(|actor_id| SolveActorInput {
-                actor_id,
-                pose: self.pose,
-                velocity: self.velocity,
-                omega: self.omega,
-            })
     }
 }
 
@@ -244,32 +256,6 @@ pub struct SolvedBodyKinematics {
     pub projection_state: Option<SelfPlayerDriveProjectionState>,
 }
 
-impl SolvedBodyKinematics {
-    pub fn from_actor_kinematics(kinematics: SolvedActorKinematics) -> Self {
-        Self {
-            body_id: SpatialBodyId::Entity(kinematics.actor_id),
-            pose: kinematics.pose,
-            velocity: kinematics.velocity,
-            omega: kinematics.omega,
-            contact: kinematics.contact,
-            projection_state: kinematics.projection_state,
-        }
-    }
-
-    pub fn into_actor_kinematics(self) -> Option<SolvedActorKinematics> {
-        self.body_id
-            .authoritative_guid()
-            .map(|actor_id| SolvedActorKinematics {
-                actor_id,
-                pose: self.pose,
-                velocity: self.velocity,
-                omega: self.omega,
-                contact: self.contact,
-                projection_state: self.projection_state,
-            })
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpatialBodyEvent {
     ContactChanged {
@@ -280,40 +266,6 @@ pub enum SpatialBodyEvent {
         body_id: SpatialBodyId,
         pose: WorldPosition,
     },
-}
-
-impl SpatialBodyEvent {
-    pub fn from_spatial_event(event: SpatialEvent) -> Self {
-        match event {
-            SpatialEvent::ContactChanged { actor_id, contact } => Self::ContactChanged {
-                body_id: SpatialBodyId::Entity(actor_id),
-                contact,
-            },
-            SpatialEvent::ForcedReposition { actor_id, pose } => Self::ForcedReposition {
-                body_id: SpatialBodyId::Entity(actor_id),
-                pose,
-            },
-        }
-    }
-
-    pub fn into_spatial_event(self) -> Option<SpatialEvent> {
-        match self {
-            Self::ContactChanged { body_id, contact } => body_id
-                .authoritative_guid()
-                .map(|actor_id| SpatialEvent::ContactChanged { actor_id, contact }),
-            Self::ForcedReposition { body_id, pose } => body_id
-                .authoritative_guid()
-                .map(|actor_id| SpatialEvent::ForcedReposition { actor_id, pose }),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SolveActorInput {
-    pub actor_id: Guid,
-    pub pose: WorldPosition,
-    pub velocity: Vector3,
-    pub omega: Vector3,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -335,34 +287,12 @@ pub struct LocalDriveControl {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveRequest {
     pub dt: Duration,
-    pub actors: SmallVec<[SolveActorInput; 1]>,
+    pub bodies: Vec<SolveBodyInput>,
     pub local_drive: Option<LocalDriveControl>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SolvedActorKinematics {
-    pub actor_id: Guid,
-    pub pose: WorldPosition,
-    pub velocity: Vector3,
-    pub omega: Vector3,
-    pub contact: ContactState,
-    pub projection_state: Option<SelfPlayerDriveProjectionState>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SpatialEvent {
-    ContactChanged {
-        actor_id: Guid,
-        contact: ContactState,
-    },
-    ForcedReposition {
-        actor_id: Guid,
-        pose: WorldPosition,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialSolveBatch {
-    pub solved: SmallVec<[SolvedActorKinematics; 1]>,
-    pub events: SmallVec<[SpatialEvent; 4]>,
+    pub solved: Vec<SolvedBodyKinematics>,
+    pub events: Vec<SpatialBodyEvent>,
 }

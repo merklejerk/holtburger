@@ -10,6 +10,7 @@ use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use thiserror::Error;
 
 const MOTION_EPSILON: f32 = 1e-4;
+const MOTION_EPSILON_SQUARED: f32 = MOTION_EPSILON * MOTION_EPSILON;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerMotionTableSource {
@@ -202,8 +203,8 @@ impl WorldState {
             grounded_local_velocity(&resolution.movement_profile, snapshot);
         let desired_local_omega = grounded_local_omega(&resolution.movement_profile, snapshot);
 
-        ((desired_local_velocity.length_squared() > MOTION_EPSILON)
-            || (desired_local_omega.length_squared() > MOTION_EPSILON))
+        ((desired_local_velocity.length_squared() > MOTION_EPSILON_SQUARED)
+            || (desired_local_omega.length_squared() > MOTION_EPSILON_SQUARED))
             .then_some(SolveProjectionBasis::GroundedMotion {
                 desired_local_velocity,
                 desired_local_omega,
@@ -282,7 +283,8 @@ fn motion_table_id_for_source(source: PlayerMotionTableSource) -> u32 {
 }
 
 fn vector_projection_basis(velocity: Vector3, omega: Vector3) -> Option<SolveProjectionBasis> {
-    ((velocity.length_squared() > MOTION_EPSILON) || (omega.length_squared() > MOTION_EPSILON))
+    ((velocity.length_squared() > MOTION_EPSILON_SQUARED)
+        || (omega.length_squared() > MOTION_EPSILON_SQUARED))
         .then_some(SolveProjectionBasis::Velocity { velocity, omega })
 }
 

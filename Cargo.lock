@@ -951,7 +951,6 @@ dependencies = [
  "log",
  "ratatui",
  "ratatui-textarea",
- "smallvec",
  "tokio",
  "unicode-width",
 ]
@@ -1000,7 +999,6 @@ dependencies = [
  "log",
  "rand 0.10.0",
  "serde",
- "smallvec",
  "strum 0.28.0",
  "strum_macros 0.28.0",
  "tempfile",
@@ -1104,7 +1102,6 @@ dependencies = [
  "holtburger-protocol",
  "log",
  "serde",
- "smallvec",
  "strum 0.28.0",
  "strum_macros 0.28.0",
  "tempfile",

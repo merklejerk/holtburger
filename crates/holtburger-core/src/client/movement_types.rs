@@ -272,20 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn arrive_at_pose_intent_preserves_pose() {
-        let pose = WorldPosition {
-            landblock_id: Guid(0x1234_0100),
-            coords: Vector3::new(4.0, 5.0, 6.0),
-            rotation: Quaternion::identity(),
-        };
-
-        assert_eq!(
-            PlayerDriveIntent::ArriveAtPose { pose },
-            PlayerDriveIntent::ArriveAtPose { pose }
-        );
-    }
-
-    #[test]
     fn stop_intent_is_distinct_from_manual_motion_intents() {
         assert_ne!(
             PlayerDriveIntent::Stop,

@@ -172,7 +172,7 @@ fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
 
     let request = SpatialSolveRequest {
         dt: Duration::from_millis(100),
-        bodies: smallvec::smallvec![SolveBodyInput::velocity(
+        bodies: vec![SolveBodyInput::velocity(
             body_id,
             pose,
             ContactState::Grounded,
@@ -215,7 +215,7 @@ fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
 
     let request = SpatialSolveRequest {
         dt: Duration::from_millis(100),
-        bodies: smallvec::smallvec![SolveBodyInput::velocity(
+        bodies: vec![SolveBodyInput::velocity(
             body_id,
             pose,
             ContactState::Grounded,
@@ -264,7 +264,7 @@ fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
 
     let request = SpatialSolveRequest {
         dt: Duration::from_secs(1),
-        bodies: smallvec::smallvec![SolveBodyInput::velocity(
+        bodies: vec![SolveBodyInput::velocity(
             body_id,
             pose,
             ContactState::Grounded,
@@ -296,7 +296,7 @@ fn basic_spatial_physics_integrates_grounded_remote_basis_using_local_motion_sem
 
     let request = SpatialSolveRequest {
         dt: Duration::from_secs(1),
-        bodies: smallvec::smallvec![SolveBodyInput {
+        bodies: vec![SolveBodyInput {
             body_id: SpatialBodyId::Entity(guid),
             pose,
             contact: ContactState::Grounded,

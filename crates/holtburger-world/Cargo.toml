@@ -22,7 +22,6 @@ strum = { workspace = true }
 strum_macros = { workspace = true }
 glam = { workspace = true }
 async-trait = { workspace = true }
-smallvec = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "macros"] }

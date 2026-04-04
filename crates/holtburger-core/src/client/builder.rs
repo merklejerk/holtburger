@@ -140,7 +140,6 @@ mod tests {
         ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialScene, SpatialSolveBatch,
         SpatialSolveRequest,
     };
-    use smallvec::smallvec;
     use std::time::Duration;
 
     #[derive(Debug, Default)]
@@ -157,10 +156,16 @@ mod tests {
                     .bodies
                     .iter()
                     .map(|body| {
-                        let (velocity, omega) = body
-                            .basis
-                            .and_then(holtburger_world::SolveProjectionBasis::velocity_components)
-                            .unwrap_or((Vector3::zero(), Vector3::zero()));
+                        let (velocity, omega) = match body.basis {
+                            Some(holtburger_world::SolveProjectionBasis::Velocity {
+                                velocity,
+                                omega,
+                            }) => (velocity, omega),
+                            Some(holtburger_world::SolveProjectionBasis::GroundedMotion {
+                                ..
+                            })
+                            | None => (Vector3::zero(), Vector3::zero()),
+                        };
 
                         SolvedBodyKinematics {
                             body_id: body.body_id,
@@ -210,7 +215,7 @@ mod tests {
 
         let request = SpatialSolveRequest {
             dt: Duration::from_millis(30),
-            bodies: smallvec![SolveBodyInput::velocity(
+            bodies: vec![SolveBodyInput::velocity(
                 holtburger_world::SpatialBodyId::Entity(Guid(0x5000_0001)),
                 Default::default(),
                 holtburger_world::ContactState::Unknown,

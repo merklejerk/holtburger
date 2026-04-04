@@ -994,6 +994,7 @@ dependencies = [
  "glam",
  "hex",
  "holtburger-common",
+ "holtburger-content",
  "holtburger-protocol",
  "holtburger-session",
  "holtburger-world",

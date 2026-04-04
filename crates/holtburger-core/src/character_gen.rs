@@ -1,0 +1,751 @@
+use holtburger_content::CharacterGenReference;
+use holtburger_protocol::messages::{
+    CharacterCreateAppearanceData, CharacterCreateRequestData, SkillAdvancementClass,
+};
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use thiserror::Error;
+
+pub const CHARACTER_GEN_UNKNOWN_CONSTANT: u32 = 1;
+pub const CHARACTER_GEN_DEFAULT_CLASS_ID: u32 = 1;
+pub const CHARACTER_GEN_MIN_ATTRIBUTE: u32 = 10;
+pub const CHARACTER_GEN_MAX_ATTRIBUTE: u32 = 100;
+
+#[derive(Debug, Clone)]
+pub struct CharacterGenBuild {
+    pub heritage: u32,
+    pub gender: u32,
+    pub appearance: CharacterCreateAppearanceData,
+    pub template_option: i32,
+    pub strength_ability: u32,
+    pub endurance_ability: u32,
+    pub coordination_ability: u32,
+    pub quickness_ability: u32,
+    pub focus_ability: u32,
+    pub self_ability: u32,
+    pub character_slot: u32,
+    pub skill_advancement_classes: Vec<SkillAdvancementClass>,
+    pub name: String,
+    pub start_area: u32,
+    pub is_admin: bool,
+    pub is_sentinel: bool,
+}
+
+impl CharacterGenBuild {
+    pub fn attribute_total(&self) -> u32 {
+        self.strength_ability
+            + self.endurance_ability
+            + self.coordination_ability
+            + self.quickness_ability
+            + self.focus_ability
+            + self.self_ability
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CharacterGenPolicy {
+    pub unknown_constant: u32,
+    pub class_id: u32,
+    pub allow_admin_flag: bool,
+    pub allow_sentinel_flag: bool,
+    pub disabled_heritages: BTreeSet<u32>,
+    pub enforce_heritage_start_area_membership: bool,
+    pub require_nonempty_name: bool,
+}
+
+impl Default for CharacterGenPolicy {
+    fn default() -> Self {
+        Self {
+            unknown_constant: CHARACTER_GEN_UNKNOWN_CONSTANT,
+            class_id: CHARACTER_GEN_DEFAULT_CLASS_ID,
+            allow_admin_flag: false,
+            allow_sentinel_flag: false,
+            disabled_heritages: BTreeSet::new(),
+            enforce_heritage_start_area_membership: false,
+            require_nonempty_name: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CharacterGenBuilder {
+    reference: Arc<CharacterGenReference>,
+    policy: CharacterGenPolicy,
+}
+
+impl CharacterGenBuilder {
+    pub fn new(reference: Arc<CharacterGenReference>) -> Self {
+        Self::with_policy(reference, CharacterGenPolicy::default())
+    }
+
+    pub fn with_policy(reference: Arc<CharacterGenReference>, policy: CharacterGenPolicy) -> Self {
+        Self { reference, policy }
+    }
+
+    pub fn reference(&self) -> &CharacterGenReference {
+        self.reference.as_ref()
+    }
+
+    pub fn policy(&self) -> &CharacterGenPolicy {
+        &self.policy
+    }
+
+    pub fn validate(
+        &self,
+        build: &CharacterGenBuild,
+    ) -> Result<(), Vec<CharacterGenValidationError>> {
+        let errors = self.collect_errors(build);
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    pub fn build_request(
+        &self,
+        build: CharacterGenBuild,
+    ) -> Result<CharacterCreateRequestData, Vec<CharacterGenValidationError>> {
+        self.validate(&build)?;
+
+        Ok(CharacterCreateRequestData {
+            unknown_constant: self.policy.unknown_constant,
+            heritage: build.heritage,
+            gender: build.gender,
+            appearance: build.appearance,
+            template_option: build.template_option,
+            strength_ability: build.strength_ability,
+            endurance_ability: build.endurance_ability,
+            coordination_ability: build.coordination_ability,
+            quickness_ability: build.quickness_ability,
+            focus_ability: build.focus_ability,
+            self_ability: build.self_ability,
+            character_slot: build.character_slot,
+            class_id: self.policy.class_id,
+            skill_advancement_classes: build.skill_advancement_classes,
+            name: build.name,
+            start_area: build.start_area,
+            is_admin: build.is_admin,
+            is_sentinel: build.is_sentinel,
+        })
+    }
+
+    fn collect_errors(&self, build: &CharacterGenBuild) -> Vec<CharacterGenValidationError> {
+        let mut errors = Vec::new();
+
+        if self.policy.require_nonempty_name && build.name.trim().is_empty() {
+            errors.push(CharacterGenValidationError::EmptyName);
+        }
+
+        if build.is_admin && !self.policy.allow_admin_flag {
+            errors.push(CharacterGenValidationError::AdminFlagNotAllowed);
+        }
+
+        if build.is_sentinel && !self.policy.allow_sentinel_flag {
+            errors.push(CharacterGenValidationError::SentinelFlagNotAllowed);
+        }
+
+        if self.policy.disabled_heritages.contains(&build.heritage) {
+            errors.push(CharacterGenValidationError::DisabledHeritage {
+                heritage_id: build.heritage,
+            });
+        }
+
+        let Some(heritage) = self.reference.heritage_group(build.heritage) else {
+            errors.push(CharacterGenValidationError::UnknownHeritage {
+                heritage_id: build.heritage,
+            });
+            return errors;
+        };
+
+        let Some(gender) = heritage.genders.get(&build.gender) else {
+            errors.push(CharacterGenValidationError::UnknownGender {
+                heritage_id: build.heritage,
+                gender_id: build.gender,
+            });
+            return errors;
+        };
+
+        if build.template_option < 0 || build.template_option as usize >= heritage.templates.len() {
+            errors.push(CharacterGenValidationError::InvalidTemplateOption {
+                heritage_id: build.heritage,
+                template_option: build.template_option,
+            });
+        }
+
+        if self.reference.starter_area(build.start_area).is_none() {
+            errors.push(CharacterGenValidationError::InvalidStartArea {
+                start_area_id: build.start_area,
+            });
+        } else if self.policy.enforce_heritage_start_area_membership {
+            let allowed = self
+                .reference
+                .allowed_start_area_ids_for_heritage(build.heritage)
+                .unwrap_or_default();
+            if !allowed.contains(&build.start_area) {
+                errors.push(
+                    CharacterGenValidationError::StartAreaNotAllowedForHeritage {
+                        heritage_id: build.heritage,
+                        start_area_id: build.start_area,
+                    },
+                );
+            }
+        }
+
+        self.validate_attributes(build, heritage.attribute_credits, &mut errors);
+        self.validate_skills(build, heritage, &mut errors);
+        self.validate_appearance(build, gender, &mut errors);
+
+        errors
+    }
+
+    fn validate_attributes(
+        &self,
+        build: &CharacterGenBuild,
+        attribute_budget: u32,
+        errors: &mut Vec<CharacterGenValidationError>,
+    ) {
+        for (field, value) in [
+            ("strength", build.strength_ability),
+            ("endurance", build.endurance_ability),
+            ("coordination", build.coordination_ability),
+            ("quickness", build.quickness_ability),
+            ("focus", build.focus_ability),
+            ("self", build.self_ability),
+        ] {
+            if !(CHARACTER_GEN_MIN_ATTRIBUTE..=CHARACTER_GEN_MAX_ATTRIBUTE).contains(&value) {
+                errors.push(CharacterGenValidationError::AttributeOutOfRange {
+                    field,
+                    value,
+                    min: CHARACTER_GEN_MIN_ATTRIBUTE,
+                    max: CHARACTER_GEN_MAX_ATTRIBUTE,
+                });
+            }
+        }
+
+        let total = build.attribute_total();
+        if total > attribute_budget {
+            errors.push(CharacterGenValidationError::AttributeBudgetExceeded {
+                total,
+                budget: attribute_budget,
+            });
+        }
+    }
+
+    fn validate_skills(
+        &self,
+        build: &CharacterGenBuild,
+        heritage: &holtburger_content::character_gen::CharacterGenHeritageGroup,
+        errors: &mut Vec<CharacterGenValidationError>,
+    ) {
+        if build.skill_advancement_classes.len() != self.reference.expected_skill_slots {
+            errors.push(CharacterGenValidationError::SkillSlotCountMismatch {
+                expected: self.reference.expected_skill_slots,
+                actual: build.skill_advancement_classes.len(),
+            });
+            return;
+        }
+
+        let mut spent_credits = 0i64;
+
+        for (skill_id, advancement) in build.skill_advancement_classes.iter().enumerate() {
+            if *advancement == SkillAdvancementClass::Inactive {
+                continue;
+            }
+
+            let skill_id = skill_id as u32;
+            let Some(skill_definition) = self.reference.skill_definition(skill_id) else {
+                errors.push(CharacterGenValidationError::UnknownSkill { skill_id });
+                continue;
+            };
+
+            if !skill_definition.chargen_use && *advancement != SkillAdvancementClass::Untrained {
+                errors.push(
+                    CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id },
+                );
+                continue;
+            }
+
+            let Some(costs) = self
+                .reference
+                .skill_costs_for_heritage(build.heritage, skill_id)
+            else {
+                errors.push(CharacterGenValidationError::UnknownSkill { skill_id });
+                continue;
+            };
+
+            match advancement {
+                SkillAdvancementClass::Trained => {
+                    spent_credits += i64::from(costs.trained_cost);
+                }
+                SkillAdvancementClass::Specialized => {
+                    spent_credits += i64::from(costs.trained_cost + costs.specialized_cost);
+                }
+                SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => {}
+            }
+        }
+
+        if spent_credits > i64::from(heritage.skill_credits) {
+            errors.push(CharacterGenValidationError::SkillBudgetExceeded {
+                spent: spent_credits,
+                budget: i64::from(heritage.skill_credits),
+            });
+        }
+    }
+
+    fn validate_appearance(
+        &self,
+        build: &CharacterGenBuild,
+        gender: &holtburger_content::character_gen::CharacterGenGenderReference,
+        errors: &mut Vec<CharacterGenValidationError>,
+    ) {
+        let appearance = &gender.appearance;
+
+        validate_required_index(
+            "eyes",
+            build.appearance.eyes,
+            appearance.eye_strips.len(),
+            errors,
+        );
+        validate_required_index(
+            "nose",
+            build.appearance.nose,
+            appearance.nose_strips.len(),
+            errors,
+        );
+        validate_required_index(
+            "mouth",
+            build.appearance.mouth,
+            appearance.mouth_strips.len(),
+            errors,
+        );
+        validate_required_index(
+            "hair_color",
+            build.appearance.hair_color,
+            appearance.hair_color_ids.len(),
+            errors,
+        );
+        validate_required_index(
+            "eye_color",
+            build.appearance.eye_color,
+            appearance.eye_color_ids.len(),
+            errors,
+        );
+        validate_required_index(
+            "hair_style",
+            build.appearance.hair_style,
+            appearance.hair_styles.len(),
+            errors,
+        );
+        validate_optional_index(
+            "headgear_style",
+            build.appearance.headgear_style,
+            appearance.headgear.len(),
+            u32::MAX,
+            errors,
+        );
+        validate_required_index(
+            "shirt_style",
+            build.appearance.shirt_style,
+            appearance.shirts.len(),
+            errors,
+        );
+        validate_required_index(
+            "pants_style",
+            build.appearance.pants_style,
+            appearance.pants.len(),
+            errors,
+        );
+        validate_required_index(
+            "footwear_style",
+            build.appearance.footwear_style,
+            appearance.footwear.len(),
+            errors,
+        );
+
+        if build.appearance.headgear_style != u32::MAX {
+            validate_required_index(
+                "headgear_color",
+                build.appearance.headgear_color,
+                appearance.clothing_color_ids.len(),
+                errors,
+            );
+        }
+
+        validate_required_index(
+            "shirt_color",
+            build.appearance.shirt_color,
+            appearance.clothing_color_ids.len(),
+            errors,
+        );
+        validate_required_index(
+            "pants_color",
+            build.appearance.pants_color,
+            appearance.clothing_color_ids.len(),
+            errors,
+        );
+        validate_required_index(
+            "footwear_color",
+            build.appearance.footwear_color,
+            appearance.clothing_color_ids.len(),
+            errors,
+        );
+    }
+}
+
+fn validate_required_index(
+    field: &'static str,
+    value: u32,
+    options_len: usize,
+    errors: &mut Vec<CharacterGenValidationError>,
+) {
+    if options_len == 0 {
+        if value != 0 {
+            errors.push(CharacterGenValidationError::AppearanceChoiceOutOfRange {
+                field,
+                selected: value,
+                options_len,
+            });
+        }
+        return;
+    }
+
+    if value as usize >= options_len {
+        errors.push(CharacterGenValidationError::AppearanceChoiceOutOfRange {
+            field,
+            selected: value,
+            options_len,
+        });
+    }
+}
+
+fn validate_optional_index(
+    field: &'static str,
+    value: u32,
+    options_len: usize,
+    none_sentinel: u32,
+    errors: &mut Vec<CharacterGenValidationError>,
+) {
+    if value == none_sentinel {
+        return;
+    }
+
+    validate_required_index(field, value, options_len, errors);
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CharacterGenValidationError {
+    #[error("character name cannot be empty")]
+    EmptyName,
+    #[error("heritage {heritage_id} is disabled by local policy")]
+    DisabledHeritage { heritage_id: u32 },
+    #[error("unknown heritage {heritage_id}")]
+    UnknownHeritage { heritage_id: u32 },
+    #[error("unknown gender {gender_id} for heritage {heritage_id}")]
+    UnknownGender { heritage_id: u32, gender_id: u32 },
+    #[error("invalid template option {template_option} for heritage {heritage_id}")]
+    InvalidTemplateOption {
+        heritage_id: u32,
+        template_option: i32,
+    },
+    #[error("invalid start area {start_area_id}")]
+    InvalidStartArea { start_area_id: u32 },
+    #[error("start area {start_area_id} is not allowed for heritage {heritage_id}")]
+    StartAreaNotAllowedForHeritage {
+        heritage_id: u32,
+        start_area_id: u32,
+    },
+    #[error("attribute {field} value {value} must be between {min} and {max}")]
+    AttributeOutOfRange {
+        field: &'static str,
+        value: u32,
+        min: u32,
+        max: u32,
+    },
+    #[error("attribute total {total} exceeds budget {budget}")]
+    AttributeBudgetExceeded { total: u32, budget: u32 },
+    #[error("expected {expected} skill slots but got {actual}")]
+    SkillSlotCountMismatch { expected: usize, actual: usize },
+    #[error("unknown skill {skill_id}")]
+    UnknownSkill { skill_id: u32 },
+    #[error("skill {skill_id} is not available at character creation")]
+    SkillUnavailableAtCharacterCreation { skill_id: u32 },
+    #[error("skill credits spent {spent} exceed budget {budget}")]
+    SkillBudgetExceeded { spent: i64, budget: i64 },
+    #[error("appearance choice {field}={selected} is out of range for {options_len} options")]
+    AppearanceChoiceOutOfRange {
+        field: &'static str,
+        selected: u32,
+        options_len: usize,
+    },
+    #[error("admin flag is not allowed by local policy")]
+    AdminFlagNotAllowed,
+    #[error("sentinel flag is not allowed by local policy")]
+    SentinelFlagNotAllowed,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_content::character_gen::{
+        CharacterGenAppearanceOptions, CharacterGenGenderReference, CharacterGenHeritageGroup,
+        CharacterGenReference, CharacterGenSkillDefinition, CharacterGenStarterArea,
+        CharacterGenStarterLocation, CharacterGenTemplate,
+    };
+    use std::collections::BTreeMap;
+
+    fn test_reference() -> Arc<CharacterGenReference> {
+        Arc::new(CharacterGenReference {
+            starter_areas: vec![CharacterGenStarterArea {
+                start_area_id: 0,
+                name: "Holtburg".to_string(),
+                locations: vec![CharacterGenStarterLocation {
+                    obj_cell_id: 1,
+                    frame: Default::default(),
+                }],
+            }],
+            heritage_groups: BTreeMap::from([(
+                6,
+                CharacterGenHeritageGroup {
+                    heritage_id: 6,
+                    name: "Sho".to_string(),
+                    icon_image: 0,
+                    setup_id: 0,
+                    environment_setup_id: 0,
+                    attribute_credits: 330,
+                    skill_credits: 10,
+                    primary_start_area_ids: vec![0],
+                    secondary_start_area_ids: vec![],
+                    skill_overrides: BTreeMap::from([(
+                        1,
+                        holtburger_content::character_gen::CharacterGenSkillOverride {
+                            skill_id: 1,
+                            skill_type: None,
+                            trained_cost: 4,
+                            specialized_cost: 6,
+                        },
+                    )]),
+                    templates: vec![CharacterGenTemplate {
+                        template_option: 0,
+                        name: "Adventurer".to_string(),
+                        icon_image: 0,
+                        title_id: 1,
+                        strength: 100,
+                        endurance: 10,
+                        coordination: 100,
+                        quickness: 100,
+                        focus: 10,
+                        self_stat: 10,
+                        normal_skills: vec![],
+                        primary_skills: vec![],
+                    }],
+                    genders: BTreeMap::from([(
+                        1,
+                        CharacterGenGenderReference {
+                            gender_id: 1,
+                            name: "Male".to_string(),
+                            scale: 100,
+                            setup_id: 0,
+                            sound_table: 0,
+                            icon_image: 0,
+                            base_palette: 0,
+                            skin_palette_set: 0,
+                            physics_table: 0,
+                            motion_table: 0,
+                            combat_table: 0,
+                            appearance: CharacterGenAppearanceOptions {
+                                hair_color_ids: vec![1],
+                                hair_styles: vec![],
+                                eye_color_ids: vec![1],
+                                eye_strips: vec![
+                                    holtburger_content::character_gen::CharacterGenEyeStrip {
+                                        icon_image: 1,
+                                        icon_image_bald: 1,
+                                    },
+                                ],
+                                nose_strips: vec![
+                                    holtburger_content::character_gen::CharacterGenFaceStrip {
+                                        icon_image: 1,
+                                    },
+                                ],
+                                mouth_strips: vec![
+                                    holtburger_content::character_gen::CharacterGenFaceStrip {
+                                        icon_image: 1,
+                                    },
+                                ],
+                                headgear: vec![],
+                                shirts: vec![holtburger_content::character_gen::CharacterGenGear {
+                                    name: "Shirt".to_string(),
+                                    clothing_table: 1,
+                                    weenie_default: 1,
+                                }],
+                                pants: vec![holtburger_content::character_gen::CharacterGenGear {
+                                    name: "Pants".to_string(),
+                                    clothing_table: 1,
+                                    weenie_default: 1,
+                                }],
+                                footwear: vec![
+                                    holtburger_content::character_gen::CharacterGenGear {
+                                        name: "Boots".to_string(),
+                                        clothing_table: 1,
+                                        weenie_default: 1,
+                                    },
+                                ],
+                                clothing_color_ids: vec![1],
+                            },
+                        },
+                    )]),
+                },
+            )]),
+            skill_definitions: BTreeMap::from([
+                (
+                    0,
+                    CharacterGenSkillDefinition {
+                        skill_id: 0,
+                        skill_type: None,
+                        name: "Inactive".to_string(),
+                        description: "Inactive".to_string(),
+                        chargen_use: true,
+                        trained_cost: 0,
+                        specialized_cost: 0,
+                    },
+                ),
+                (
+                    1,
+                    CharacterGenSkillDefinition {
+                        skill_id: 1,
+                        skill_type: None,
+                        name: "Axe".to_string(),
+                        description: "Axe".to_string(),
+                        chargen_use: true,
+                        trained_cost: 6,
+                        specialized_cost: 4,
+                    },
+                ),
+                (
+                    2,
+                    CharacterGenSkillDefinition {
+                        skill_id: 2,
+                        skill_type: None,
+                        name: "Bow".to_string(),
+                        description: "Bow".to_string(),
+                        chargen_use: false,
+                        trained_cost: 6,
+                        specialized_cost: 4,
+                    },
+                ),
+                (
+                    3,
+                    CharacterGenSkillDefinition {
+                        skill_id: 3,
+                        skill_type: None,
+                        name: "Crossbow".to_string(),
+                        description: "Crossbow".to_string(),
+                        chargen_use: true,
+                        trained_cost: 6,
+                        specialized_cost: 4,
+                    },
+                ),
+            ]),
+            expected_skill_slots: 4,
+        })
+    }
+
+    fn test_build() -> CharacterGenBuild {
+        CharacterGenBuild {
+            heritage: 6,
+            gender: 1,
+            appearance: CharacterCreateAppearanceData {
+                eyes: 0,
+                nose: 0,
+                mouth: 0,
+                hair_color: 0,
+                eye_color: 0,
+                hair_style: 0,
+                headgear_style: u32::MAX,
+                headgear_color: 0,
+                shirt_style: 0,
+                shirt_color: 0,
+                pants_style: 0,
+                pants_color: 0,
+                footwear_style: 0,
+                footwear_color: 0,
+                skin_hue: 1.0,
+                hair_hue: 1.0,
+                headgear_hue: 0.0,
+                shirt_hue: 0.0,
+                pants_hue: 0.0,
+                footwear_hue: 0.0,
+            },
+            template_option: 0,
+            strength_ability: 100,
+            endurance_ability: 10,
+            coordination_ability: 100,
+            quickness_ability: 100,
+            focus_ability: 10,
+            self_ability: 10,
+            character_slot: 0,
+            skill_advancement_classes: vec![
+                SkillAdvancementClass::Inactive,
+                SkillAdvancementClass::Specialized,
+                SkillAdvancementClass::Untrained,
+                SkillAdvancementClass::Inactive,
+            ],
+            name: "Bestie".to_string(),
+            start_area: 0,
+            is_admin: false,
+            is_sentinel: false,
+        }
+    }
+
+    #[test]
+    fn build_request_uses_policy_defaults() {
+        let builder = CharacterGenBuilder::new(test_reference());
+        let request = builder
+            .build_request(test_build())
+            .expect("build should validate");
+
+        assert_eq!(request.unknown_constant, CHARACTER_GEN_UNKNOWN_CONSTANT);
+        assert_eq!(request.class_id, CHARACTER_GEN_DEFAULT_CLASS_ID);
+        assert_eq!(request.name, "Bestie");
+    }
+
+    #[test]
+    fn validate_rejects_attribute_budget_overrun() {
+        let builder = CharacterGenBuilder::new(test_reference());
+        let mut build = test_build();
+        build.focus_ability = 50;
+
+        let errors = builder.validate(&build).expect_err("build should fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            CharacterGenValidationError::AttributeBudgetExceeded { .. }
+        )));
+    }
+
+    #[test]
+    fn validate_rejects_skill_budget_overrun() {
+        let builder = CharacterGenBuilder::new(test_reference());
+        let mut build = test_build();
+        build.skill_advancement_classes[3] = SkillAdvancementClass::Specialized;
+
+        let errors = builder.validate(&build).expect_err("build should fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            CharacterGenValidationError::SkillBudgetExceeded { .. }
+        )));
+    }
+
+    #[test]
+    fn validate_rejects_non_chargen_skill() {
+        let builder = CharacterGenBuilder::new(test_reference());
+        let mut build = test_build();
+        build.skill_advancement_classes[2] = SkillAdvancementClass::Trained;
+
+        let errors = builder.validate(&build).expect_err("build should fail");
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id: 2 }
+        )));
+    }
+}

@@ -2,7 +2,9 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 use holtburger_core::client::movement_types::{AutonomousDriveIntent, Gait, PlayerDriveIntent};
 use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_world::{SelfMovementKinematics, SpatialEntitySample, project_pose_forward_distance};
+use holtburger_world::{
+    SelfMovementKinematics, SpatialEntitySample, project_pose_forward_distance,
+};
 use std::time::{Duration, Instant};
 
 use crate::types::Interaction;
@@ -106,13 +108,21 @@ pub enum NavigationInteractionChange {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum NavigationMode {
-    Approach { target: Guid, arrival_distance: f32 },
-    Follow { target: Guid, arrival_distance: f32 },
+    Approach {
+        target: Guid,
+        arrival_distance: f32,
+    },
+    Follow {
+        target: Guid,
+        arrival_distance: f32,
+    },
     Scoot {
         target_pose: WorldPosition,
         arrival_distance: f32,
     },
-    StickyMelee { target: Guid },
+    StickyMelee {
+        target: Guid,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -589,9 +599,7 @@ impl TuiNavigation {
             return None;
         };
 
-        let Some(player_position) = input.player_position else {
-            return None;
-        };
+        let player_position = input.player_position?;
 
         if player_position.distance_to(&target_pose) <= arrival_distance {
             self.active = ActiveNavigation::Idle;
@@ -1047,7 +1055,7 @@ mod tests {
             Some(PlayerDriveIntent::ArriveAtPose { pose: target_pose })
         );
         assert!(!navigation.drive_active);
-        assert!(matches!(navigation.navigation_mode(), None));
+        assert!(navigation.navigation_mode().is_none());
     }
 
     #[test]

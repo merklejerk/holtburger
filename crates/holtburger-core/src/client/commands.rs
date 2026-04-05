@@ -124,7 +124,6 @@ impl ClientRuntime {
             | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
-            | ClientCommand::ReadBook(_)
             | ClientCommand::ReadBookPage { .. }
             | ClientCommand::QueryHealth(_)
             | ClientCommand::Use(_)
@@ -356,11 +355,6 @@ impl ClientRuntime {
                     IdentifyObjectActionData { guid },
                 )))
                 .await
-            }
-            ClientCommand::ReadBook(guid) => {
-                log::info!(">>> Reading book: 0x{:08X}", guid);
-                self.send_game_action(GameAction::BookData(Box::new(BookDataActionData { guid })))
-                    .await
             }
             ClientCommand::ReadBookPage { book, page_index } => {
                 log::info!(">>> Reading book page {} from 0x{:08X}", page_index, book);

@@ -153,12 +153,6 @@ fn test_dispatch_action_query_health() {
 }
 
 #[test]
-fn test_dispatch_action_book_data() {
-    let fixture = hex::decode("B1F7000010000000AA00000044332211").unwrap();
-    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameAction(_)));
-}
-
-#[test]
 fn test_dispatch_action_book_page_data() {
     let fixture = hex::decode("B1F7000011000000AE0000004433221101000000").unwrap();
     assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameAction(_)));

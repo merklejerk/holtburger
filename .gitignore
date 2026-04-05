@@ -29,5 +29,7 @@ release-test/data/
 
 dist-manifest.json
 
+.vscode/
+
 # Machine-local references and working notes
 /local/

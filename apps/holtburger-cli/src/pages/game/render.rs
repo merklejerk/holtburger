@@ -124,6 +124,7 @@ impl GameState {
             .unwrap_or_else(|| self.context_buffer());
         render_context_pane(
             f,
+            &self.data,
             context_buffer,
             &self.view.context_view,
             self.view.context_scroll_offset,

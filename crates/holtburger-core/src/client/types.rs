@@ -513,7 +513,6 @@ pub enum ClientCommand {
         enabled: bool,
     },
     Identify(Guid),
-    ReadBook(Guid),
     ReadBookPage {
         book: Guid,
         page_index: u32,

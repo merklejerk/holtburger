@@ -289,6 +289,7 @@ pub enum ContextView {
     Default,
     Assess(InspectTarget),
     Debug(InspectTarget),
+    Book(Guid),
     Spell(u32),
     Enchantment(Enchantment),
     DebugSpell(u32),
@@ -463,6 +464,9 @@ pub enum AppAction {
         target: InspectTarget,
     },
     Use {
+        guid: Guid,
+    },
+    Read {
         guid: Guid,
     },
     Approach {

@@ -222,7 +222,7 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                                 form.catalog
                                     .skill_costs_for_heritage(form.heritage_id, *skill_id),
                             ),
-                            Style::default().fg(if *selected { Color::Black } else { Color::Gray }),
+                            Style::default().fg(if *selected { Color::White } else { Color::Gray }),
                         ),
                     ]))
                     .style(list_item_style(

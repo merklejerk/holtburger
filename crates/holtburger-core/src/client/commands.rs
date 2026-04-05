@@ -133,6 +133,8 @@ impl ClientRuntime {
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterOption { .. }
             | ClientCommand::RecallLifestone
+            | ClientCommand::TeleportToPklArena
+            | ClientCommand::TeleportToMarketplace
             | ClientCommand::RecallAllegianceHousing
             | ClientCommand::SwearAllegiance { .. }
             | ClientCommand::Unswear { .. }
@@ -574,6 +576,20 @@ impl ClientRuntime {
                 log::info!(">>> Recalling to lifestone");
                 self.send_game_action(GameAction::TeleToLifestone(Box::new(
                     TeleToLifestoneActionData,
+                )))
+                .await
+            }
+            ClientCommand::TeleportToPklArena => {
+                log::info!(">>> Teleporting to PKL arena");
+                self.send_game_action(GameAction::TeleToPklArena(Box::new(
+                    TeleToPklArenaActionData,
+                )))
+                .await
+            }
+            ClientCommand::TeleportToMarketplace => {
+                log::info!(">>> Teleporting to marketplace");
+                self.send_game_action(GameAction::TeleToMarketPlace(Box::new(
+                    TeleToMarketPlaceActionData,
                 )))
                 .await
             }
@@ -1369,7 +1385,6 @@ mod tests {
                 break;
             }
         }
-
         assert!(!saw_reference_data_event);
     }
 
@@ -1868,5 +1883,31 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn teleport_to_pkl_arena_sends_game_action() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::TeleportToPklArena)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn teleport_to_marketplace_sends_game_action() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::TeleportToMarketplace)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
     }
 }

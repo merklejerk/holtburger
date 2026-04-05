@@ -56,6 +56,8 @@ pub enum GameAction {
     QueryHealth(Box<QueryHealthActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
     TeleToLifestone(Box<TeleToLifestoneActionData>),
+    TeleToPklArena(Box<TeleToPklArenaActionData>),
+    TeleToMarketPlace(Box<TeleToMarketPlaceActionData>),
     TeleToMansion(Box<TeleToMansionActionData>),
     Suicide(Box<SuicideActionData>),
     EnterPkLite(Box<EnterPkLiteActionData>),
@@ -198,6 +200,12 @@ impl ProtocolUnpack for GameActionMessage {
                 )),
                 GameActionOpcode::TeleToLifestone => GameAction::TeleToLifestone(Box::new(
                     TeleToLifestoneActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::TeleToPklArena => GameAction::TeleToPklArena(Box::new(
+                    TeleToPklArenaActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::TeleToMarketPlace => GameAction::TeleToMarketPlace(Box::new(
+                    TeleToMarketPlaceActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::TeleToMansion => GameAction::TeleToMansion(Box::new(
                     TeleToMansionActionData::unpack(data, offset)?,
@@ -455,6 +463,16 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::TeleToLifestone(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToLifestone as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TeleToPklArena(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToPklArena as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TeleToMarketPlace(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToMarketPlace as u32)
                     .unwrap();
                 data.pack(buf);
             }

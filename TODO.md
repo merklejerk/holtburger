@@ -222,9 +222,9 @@
     - [x] `/create-party <NAME>` or `/createparty <NAME>` or `/party-create <NAME>` or `/partycreate <NAME>` - create a party, name is optional
     - [x] `/invite <PLAYER>`, `/uninvite <PLAYER>` - party invites
     - [x] `/? COMMAND` - targeted command help doc
-    - [~] `/swear`, `/leave`, `/unswear <VASSAL>`.
+    - [~] `/swear <PATRON>`, `/leave`, `/disown <VASSAL>`.
     - [x] `/permit <player>`, `/unpermit <player>` - corpse looting options
-    - [ ] `/arena`, `/mp`
+    - [x] `/arena`, `/mp`
 - [x] Interpolate entity motion properties.
 - [x] Harden reconnect. (Just quit on DC)
 - [x] Burden display missing.

@@ -509,6 +509,8 @@ pub enum ClientCommand {
     },
     Emote(String),
     RecallLifestone,
+    TeleportToPklArena,
+    TeleportToMarketplace,
     RecallAllegianceHousing,
     SwearAllegiance {
         target: Guid,

@@ -64,7 +64,6 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pages::selection::SelectionState;
     use crate::state::NetStats;
     use crate::types::Page;
     use holtburger_common::Guid;
@@ -90,7 +89,7 @@ mod tests {
             account_password: "password".to_string(),
             character_preference: None,
             chat_log,
-            page: Page::Selection(SelectionState::default()),
+            page: Page::Selection(Box::default()),
             client_state: ClientState::Connected,
             net_stats: NetStats::default(),
             world_name: "World".to_string(),

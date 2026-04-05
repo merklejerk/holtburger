@@ -28,8 +28,8 @@ const ATTRIBUTE_ORDER: [(AttributeType, &str); 6] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterCreationFocus {
     Name,
-    StarterTown,
     Heritage,
+    StarterTown,
     Gender,
     Attributes,
     Skills,
@@ -40,8 +40,8 @@ impl CharacterCreationFocus {
     pub fn step(self, delta: i32) -> Self {
         const ORDER: [CharacterCreationFocus; 7] = [
             CharacterCreationFocus::Name,
-            CharacterCreationFocus::StarterTown,
             CharacterCreationFocus::Heritage,
+            CharacterCreationFocus::StarterTown,
             CharacterCreationFocus::Gender,
             CharacterCreationFocus::Attributes,
             CharacterCreationFocus::Skills,
@@ -67,7 +67,7 @@ pub struct CharacterCreationFeedback {
 #[derive(Debug, Clone)]
 pub enum CharacterCreationState {
     Unavailable { message: String },
-    Ready(CharacterCreationFormState),
+    Ready(Box<CharacterCreationFormState>),
 }
 
 impl Default for CharacterCreationState {
@@ -109,19 +109,19 @@ impl CharacterCreationState {
     }
 
     pub fn from_catalog(catalog: Arc<CharacterGenCatalog>) -> Self {
-        Self::Ready(CharacterCreationFormState::new(catalog))
+        Self::Ready(Box::new(CharacterCreationFormState::new(catalog)))
     }
 
     pub fn ready(&self) -> Option<&CharacterCreationFormState> {
         match self {
-            Self::Ready(form) => Some(form),
+            Self::Ready(form) => Some(form.as_ref()),
             Self::Unavailable { .. } => None,
         }
     }
 
     pub fn ready_mut(&mut self) -> Option<&mut CharacterCreationFormState> {
         match self {
-            Self::Ready(form) => Some(form),
+            Self::Ready(form) => Some(form.as_mut()),
             Self::Unavailable { .. } => None,
         }
     }
@@ -469,12 +469,14 @@ impl CharacterCreationFormState {
     pub fn adjust_selected_attribute(&mut self, delta: i32) -> bool {
         let remaining_points = self.remaining_attribute_points();
         let value = &mut self.attribute_values[self.selected_attribute_index];
-        let new_value = (*value as i64 + delta as i64)
-            .clamp(CHARACTER_GEN_MIN_ATTRIBUTE as i64, CHARACTER_GEN_MAX_ATTRIBUTE as i64) as u32;
+        let new_value = (*value as i64 + delta as i64).clamp(
+            CHARACTER_GEN_MIN_ATTRIBUTE as i64,
+            CHARACTER_GEN_MAX_ATTRIBUTE as i64,
+        ) as u32;
         let spent = i64::from(new_value).saturating_sub(*value as i64);
         if spent > 0 && spent > remaining_points {
             return false;
-        } 
+        }
         if new_value == *value {
             return false;
         }
@@ -826,8 +828,8 @@ fn first_available_slot(occupied_slots: impl IntoIterator<Item = u32>) -> u32 {
     candidate
 }
 
-fn default_required_index(options_len: usize) -> u32 {
-    if options_len == 0 { 0 } else { 0 }
+fn default_required_index(_options_len: usize) -> u32 {
+    0
 }
 
 fn default_optional_index(options_len: usize) -> u32 {

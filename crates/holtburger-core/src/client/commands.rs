@@ -214,8 +214,7 @@ impl ClientRuntime {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
-                self.state = ClientState::EnteringWorld;
-                self.send_status_event();
+                self.begin_world_entry_transition().await?;
                 self.auth.select_character(id, &mut self.session).await
             }
             ClientCommand::CreateCharacter(request) => {
@@ -238,8 +237,7 @@ impl ClientRuntime {
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
-                    self.state = ClientState::EnteringWorld;
-                    self.send_status_event();
+                    self.begin_world_entry_transition().await?;
                     self.auth.select_character(char_id, &mut self.session).await
                 } else {
                     Ok(())
@@ -1156,10 +1154,13 @@ mod tests {
         ClientCommand, ClientViewEvent, WireEvent,
     };
     use crate::client::{ClientRuntime, ClientState};
+    use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_protocol::messages::{
-        CharacterCreateAppearanceData, CharacterCreateRequestData, SkillAdvancementClass,
+        CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
+        SkillAdvancementClass,
     };
+    use holtburger_world::RuntimeBodyResetCause;
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use holtburger_world::state::{
@@ -1475,6 +1476,48 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn select_character_resets_runtime_bodies_before_entering_world() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        let player_guid = Guid(0x5000_0001);
+
+        client.world.player.guid = player_guid;
+        client.world.player.position = WorldPosition {
+            landblock_id: Guid(0x0102_0000),
+            ..WorldPosition::default()
+        };
+        client
+            .world
+            .set_local_player_runtime_pose(client.world.player.position);
+        client.auth.characters = vec![CharacterEntry {
+            guid: player_guid,
+            name: "Player".to_string(),
+            delete_time: 0,
+        }];
+
+        client
+            .handle_command(ClientCommand::SelectCharacter(player_guid))
+            .await
+            .unwrap();
+
+        let mut saw_reset = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::RuntimeBodiesReset {
+                    cause: RuntimeBodyResetCause::TeleportOrWorldReset
+                }
+            ) {
+                saw_reset = true;
+                break;
+            }
+        }
+
+        assert!(saw_reset);
+        assert!(matches!(client.state, ClientState::EnteringWorld));
     }
 
     #[tokio::test]

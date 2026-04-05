@@ -314,11 +314,7 @@ pub(crate) fn project_pose_by_velocity(
         return authoritative_pose;
     }
 
-    project_pose_by_offset(
-        authoritative_pose,
-        velocity * dt_secs,
-        target_hint,
-    )
+    project_pose_by_offset(authoritative_pose, velocity * dt_secs, target_hint)
 }
 
 pub fn project_pose_forward_distance(

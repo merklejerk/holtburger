@@ -1,5 +1,5 @@
 use crate::EOR_PORTAL_NAMESPACE;
-use crate::file_type::{DatFileType, SkillTable, SpellTable, XpTable};
+use crate::file_type::{CharGen, DatFileType, SkillTable, SpellTable, XpTable};
 
 /// A manifest that defines which file IDs and file types should be kept when stripping archives.
 pub struct StripperManifest {
@@ -44,7 +44,12 @@ impl StripperManifest {
     /// Returns the manifest for the current TUI-oriented micro archive.
     pub fn micro() -> Self {
         let mut manifest = Self::new();
-        for file_id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
+        for file_id in [
+            CharGen::FILE_ID,
+            SkillTable::FILE_ID,
+            SpellTable::FILE_ID,
+            XpTable::FILE_ID,
+        ] {
             manifest.keep_namespaced_file(EOR_PORTAL_NAMESPACE, file_id);
         }
 
@@ -133,6 +138,11 @@ mod tests {
     fn micro_manifest_keeps_required_table_ids_and_excludes_raw_motion_assets() {
         let manifest = StripperManifest::micro();
 
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            CharGen::FILE_ID,
+            DatFileType::Table
+        ));
         assert!(manifest.should_keep_entry(
             EOR_PORTAL_NAMESPACE,
             SkillTable::FILE_ID,

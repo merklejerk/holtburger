@@ -526,6 +526,16 @@ fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
 }
 
 #[test]
+fn current_local_solve_body_input_requires_authoritative_spawn_pose() {
+    let mut world = WorldState::synthetic();
+    world.player.guid = Guid(0x50000123);
+
+    let movement = MovementSystem::new();
+
+    assert!(movement.current_local_solve_body_input(&world).is_none());
+}
+
+#[test]
 fn stop_pulse_is_still_required_when_server_motion_is_active() {
     let mut movement = MovementSystem::new();
     movement.note_server_motion_sent(server_motion_intent(

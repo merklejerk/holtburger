@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+holtburger-common.workspace = true
 holtburger-dat.workspace = true
 holtburger-world.workspace = true
 anyhow.workspace = true

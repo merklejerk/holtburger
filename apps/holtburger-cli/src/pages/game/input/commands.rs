@@ -83,6 +83,13 @@ fn parse_single_argument_command<'a>(command: &'a str, aliases: &[&str]) -> Opti
     Some(argument)
 }
 
+fn parse_float_argument_command(command: &str, aliases: &[&str]) -> Option<f32> {
+    let argument = parse_single_argument_command(command, aliases)?;
+    let value = argument.parse::<f32>().ok()?;
+
+    value.is_finite().then_some(value)
+}
+
 fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a str>> {
     for alias in aliases {
         if command == *alias {
@@ -157,7 +164,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageKind::System,
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
@@ -173,6 +180,10 @@ impl GameState {
             ChatMessageKind::System,
             "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
                 .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Movement: /scoot [METERS] (defaults to 1m)".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -219,6 +230,12 @@ impl GameState {
                 "Usage: /p <MSG>".to_string(),
                 "Send a message to party chat.".to_string(),
                 "Aliases: /party <MSG>, /p <MSG>".to_string(),
+            ],
+            "scoot" => vec![
+                "Usage: /scoot [METERS]".to_string(),
+                "Drive the player forward by approximately the requested distance.".to_string(),
+                "If METERS is omitted, the client defaults to 1m.".to_string(),
+                "Example: /scoot 3.5".to_string(),
             ],
             "create-party" | "createparty" | "party-create" | "partycreate" => vec![
                 "Usage: /create-party [NAME]".to_string(),
@@ -483,6 +500,27 @@ impl GameState {
             return result.with_redraw(true);
         }
 
+        if let Some(distance_m) = parse_float_argument_command(command, &["/scoot"]) {
+            if distance_m <= 0.0 {
+                self.log_command_usage("Usage: /scoot [METERS]");
+                return result.with_redraw(true);
+            }
+
+            result
+                .actions
+                .push(crate::types::AppAction::Scoot { distance_m });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/scoot" {
+            result
+                .actions
+                .push(crate::types::AppAction::Scoot { distance_m: 1.0 });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
         if let Some(name) = parse_optional_message_command(
             command,
             &[
@@ -599,7 +637,7 @@ impl GameState {
 mod tests {
     use super::*;
     use crate::pages::game::GameState;
-    use crate::types::FocusedPane;
+    use crate::types::{AppAction, FocusedPane};
     use crossterm::event::KeyModifiers;
     use holtburger_common::CharacterOption;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
@@ -830,6 +868,48 @@ mod tests {
                 .iter()
                 .any(|message| message.text == "Usage: /p <MSG> or /party")
         );
+    }
+
+    #[test]
+    fn scoot_command_dispatches_scoot_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.view.previous_focused_pane = FocusedPane::Dashboard;
+        state.chat_input.input.set_text("/scoot 3.5");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::Scoot { distance_m }) if (*distance_m - 3.5).abs() < f32::EPSILON
+        ));
+        assert!(result.commands.is_empty());
+        assert!(result.redraw_requested());
+        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert!(state.chat_input.input.is_empty());
+    }
+
+    #[test]
+    fn bare_scoot_command_defaults_to_one_meter() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.view.previous_focused_pane = FocusedPane::Dashboard;
+        state.chat_input.input.set_text("/scoot");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::Scoot { distance_m }) if (*distance_m - 1.0).abs() < f32::EPSILON
+        ));
+        assert!(result.commands.is_empty());
+        assert!(result.redraw_requested());
+        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert!(state.chat_input.input.is_empty());
     }
 
     #[test]

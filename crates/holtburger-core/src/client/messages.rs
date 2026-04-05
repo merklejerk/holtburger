@@ -142,25 +142,28 @@ impl ClientRuntime {
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
-                self.auth.characters = data.characters.clone();
+                self.character_selection.characters = data.characters.clone();
                 self.turbine_chat.enabled = data.use_turbine_chat;
                 if !data.use_turbine_chat {
                     self.turbine_chat.channels = None;
                 }
-                self.auth.pending_character_operation = None;
+                self.character_selection.pending_character_operation = None;
 
                 log::info!("Character List for account: {}", data.account_name);
-                for (i, c) in self.auth.characters.iter().enumerate() {
+                for (i, c) in self.character_selection.characters.iter().enumerate() {
                     log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
                 }
 
-                self.state = ClientState::CharacterSelection(self.auth.characters.clone());
+                self.state =
+                    ClientState::CharacterSelection(self.character_selection.characters.clone());
                 self.send_status_event();
-                self.emit_wire_event(WireEvent::CharacterList(self.auth.characters.clone()));
+                self.emit_wire_event(WireEvent::CharacterList(
+                    self.character_selection.characters.clone(),
+                ));
                 Ok(())
             }
             GameMessage::CharacterCreateResponse(data) => {
-                let operation = self.auth.take_pending_character_operation();
+                let operation = self.character_selection.take_pending_character_operation();
                 self.emit_wire_event(WireEvent::CharacterManagementResponse {
                     operation,
                     response: (*data).clone(),
@@ -168,13 +171,13 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterDeleteResponse => {
-                self.auth.take_pending_character_operation();
+                self.character_selection.take_pending_character_operation();
                 self.emit_wire_event(WireEvent::CharacterDeleteResponse);
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
-                if let Some(char_id) = self.auth.character_id {
-                    self.auth
+                if let Some(char_id) = self.character_selection.character_id {
+                    self.character_selection
                         .send_character_enter_world(char_id, &mut self.session)
                         .await
                 } else {
@@ -390,15 +393,15 @@ impl ClientRuntime {
                 self.world.player.guid = player_id;
 
                 let name = self
-                    .auth
+                    .character_selection
                     .characters
                     .iter()
                     .find(|c| c.guid == player_id)
                     .map(|c| c.name.clone())
                     .unwrap_or_else(|| {
                         // try search by character_id if we have it
-                        if let Some(char_id) = self.auth.character_id {
-                            self.auth
+                        if let Some(char_id) = self.character_selection.character_id {
+                            self.character_selection
                                 .characters
                                 .iter()
                                 .find(|c| c.guid == char_id)
@@ -438,12 +441,14 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterError(data) => {
-                let error = self.auth.handle_character_error(data.error_id);
+                let error = self
+                    .character_selection
+                    .handle_character_error(data.error_id);
                 self.emit_wire_event(WireEvent::CharacterError(error));
                 Ok(())
             }
             GameMessage::AccountBoot(data) => {
-                let reason = self.auth.handle_boot_account(*data);
+                let reason = self.character_selection.handle_boot_account(*data);
                 self.state = ClientState::Disconnected;
                 self.send_status_event();
                 self.emit_wire_event(WireEvent::BootAccount(reason));
@@ -908,7 +913,8 @@ mod tests {
         let mut client = build_test_client();
         let mut wire_events = client.subscribe_wire_events();
         let mut view_events = client.subscribe_client_view_events();
-        client.auth.pending_character_operation = Some(CharacterManagementOperation::Create);
+        client.character_selection.pending_character_operation =
+            Some(CharacterManagementOperation::Create);
 
         let encoded = encode_message(&GameMessage::CharacterCreateResponse(Box::new(
             CharacterCreateResponseData {
@@ -963,7 +969,8 @@ mod tests {
         let mut client = build_test_client();
         let mut wire_events = client.subscribe_wire_events();
         let mut view_events = client.subscribe_client_view_events();
-        client.auth.pending_character_operation = Some(CharacterManagementOperation::Delete);
+        client.character_selection.pending_character_operation =
+            Some(CharacterManagementOperation::Delete);
 
         let encoded = encode_message(&GameMessage::CharacterDeleteResponse);
 

@@ -54,17 +54,6 @@ impl TabController for EquipTab {
         let selection = self.get_selection(data);
         let mut verbs = Vec::new();
 
-        if let Some(interaction) = interaction
-            && matches!(&selection, EquipSelection::Item { .. })
-        {
-            match interaction {
-                Interaction::Targeting { .. } => {}
-                _ => {
-                    return verbs;
-                }
-            }
-        }
-
         match selection {
             EquipSelection::Item { guid, slot } => {
                 let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) =

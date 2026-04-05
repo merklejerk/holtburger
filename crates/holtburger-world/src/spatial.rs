@@ -4,6 +4,7 @@ mod types;
 
 pub use physics::{
     BasicSpatialPhysics, NoopSpatialPhysics, SpatialPhysics, advance_body_kinematics,
+    project_pose_forward_distance,
 };
 pub use scene::SpatialScene;
 pub use types::*;

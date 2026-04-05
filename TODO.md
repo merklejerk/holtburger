@@ -27,6 +27,7 @@
 - [ ] Replace context panel header with entity name.
 - [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
 - [ ] `/logopolis`
+- [ ] `AuthState` has mixed responsibilities (character management + handshake) for name.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -232,11 +233,13 @@
 - [x] Asset pipeline.
 - [x] isn't it strange that `get_run_rate` lives in cli?
 - [x] We aren't actually interpolating poses on other entities because the server doesn't attach velocity to entities that are grounded.
-- [ ] Character creation
+- [x] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
+- [x] Character creation, delete, restore.
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
-- [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
+- [ ] Can't use character sheet verbs when there's an interaction.
+- [ ] Character sheet doesn't identfy specialized skills.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -259,5 +262,5 @@
 - [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?
 - [x] Do tabs need to expose `item_count()`?
 - [x] Track "dead" creatures to avoid targeting them?
+- [x] Strange login issues when indoors.
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
-- [ ] Strange login issues when indoors.

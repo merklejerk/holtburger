@@ -19,6 +19,11 @@ pub use crate::messages::game_event::GameEventMessage;
 pub enum GameMessage {
     None, // 0x0000
     CharacterList(Box<CharacterListData>),
+    CharacterCreate(Box<CharacterCreateRequestData>),
+    CharacterCreateResponse(Box<CharacterCreateResponseData>),
+    CharacterDeleteRequest(Box<CharacterDeleteRequestData>),
+    CharacterDeleteResponse,
+    CharacterRestoreRequest(Box<CharacterRestoreRequestData>),
     CharacterEnterWorldRequest(Box<CharacterEnterWorldRequestData>),
     CharacterEnterWorld(Box<CharacterEnterWorldData>),
     CharacterEnterWorldServerReady, // 0xF7DF

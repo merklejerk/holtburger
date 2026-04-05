@@ -113,6 +113,9 @@ impl ClientRuntime {
         match cmd {
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
+            | ClientCommand::CreateCharacter(_)
+            | ClientCommand::DeleteCharacter { .. }
+            | ClientCommand::RestoreCharacter(_)
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
             ClientCommand::Talk(_)
@@ -211,9 +214,22 @@ impl ClientRuntime {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
-                self.state = ClientState::EnteringWorld;
-                self.send_status_event();
+                self.begin_world_entry_transition().await?;
                 self.auth.select_character(id, &mut self.session).await
+            }
+            ClientCommand::CreateCharacter(request) => {
+                log::info!("Creating character: {}", request.name);
+                self.auth
+                    .create_character(*request, &mut self.session)
+                    .await
+            }
+            ClientCommand::DeleteCharacter { slot } => {
+                log::info!("Deleting character in slot {}", slot);
+                self.auth.delete_character(slot, &mut self.session).await
+            }
+            ClientCommand::RestoreCharacter(guid) => {
+                log::info!("Restoring character: 0x{:08X}", guid);
+                self.auth.restore_character(guid, &mut self.session).await
             }
             ClientCommand::EnterWorld => {
                 if let Some(char_id) = self.auth.character_id {
@@ -221,8 +237,7 @@ impl ClientRuntime {
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
-                    self.state = ClientState::EnteringWorld;
-                    self.send_status_event();
+                    self.begin_world_entry_transition().await?;
                     self.auth.select_character(char_id, &mut self.session).await
                 } else {
                     Ok(())
@@ -1135,10 +1150,17 @@ mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
-        ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent, WireEvent,
+        ActiveCharacterConfirmation, BusyOperationKind, CharacterManagementOperation,
+        ClientCommand, ClientViewEvent, WireEvent,
     };
     use crate::client::{ClientRuntime, ClientState};
+    use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
+    use holtburger_protocol::messages::{
+        CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
+        SkillAdvancementClass,
+    };
+    use holtburger_world::RuntimeBodyResetCause;
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use holtburger_world::state::{
@@ -1457,6 +1479,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn select_character_resets_runtime_bodies_before_entering_world() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        let player_guid = Guid(0x5000_0001);
+
+        client.world.player.guid = player_guid;
+        client.world.player.position = WorldPosition {
+            landblock_id: Guid(0x0102_0000),
+            ..WorldPosition::default()
+        };
+        client
+            .world
+            .set_local_player_runtime_pose(client.world.player.position);
+        client.auth.characters = vec![CharacterEntry {
+            guid: player_guid,
+            name: "Player".to_string(),
+            delete_time: 0,
+        }];
+
+        client
+            .handle_command(ClientCommand::SelectCharacter(player_guid))
+            .await
+            .unwrap();
+
+        let mut saw_reset = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::RuntimeBodiesReset {
+                    cause: RuntimeBodyResetCause::TeleportOrWorldReset
+                }
+            ) {
+                saw_reset = true;
+                break;
+            }
+        }
+
+        assert!(saw_reset);
+        assert!(matches!(client.state, ClientState::EnteringWorld));
+    }
+
+    #[tokio::test]
     async fn show_party_status_logs_cached_fellowship_summary() {
         let mut client = build_test_client();
         client.world.player.guid = Guid(0x5000_0001);
@@ -1571,6 +1635,97 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 0);
         assert_eq!(client.session.bytes_out, 0);
+    }
+
+    #[tokio::test]
+    async fn create_character_command_sends_auth_message() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+
+        client
+            .handle_command(ClientCommand::CreateCharacter(Box::new(
+                CharacterCreateRequestData {
+                    account_name: String::new(),
+                    unknown_constant: 1,
+                    heritage: 6,
+                    gender: 1,
+                    appearance: CharacterCreateAppearanceData {
+                        eyes: 0,
+                        nose: 0,
+                        mouth: 0,
+                        hair_color: 0,
+                        eye_color: 0,
+                        hair_style: 0,
+                        headgear_style: u32::MAX,
+                        headgear_color: 0,
+                        shirt_style: 0,
+                        shirt_color: 0,
+                        pants_style: 0,
+                        pants_color: 0,
+                        footwear_style: 0,
+                        footwear_color: 0,
+                        skin_hue: 1.0,
+                        hair_hue: 1.0,
+                        headgear_hue: 0.0,
+                        shirt_hue: 0.0,
+                        pants_hue: 0.0,
+                        footwear_hue: 0.0,
+                    },
+                    template_option: 0,
+                    strength_ability: 100,
+                    endurance_ability: 10,
+                    coordination_ability: 100,
+                    quickness_ability: 100,
+                    focus_ability: 10,
+                    self_ability: 10,
+                    character_slot: 0,
+                    class_id: 1,
+                    skill_advancement_classes: vec![SkillAdvancementClass::Untrained; 55],
+                    name: "Bestie".to_string(),
+                    start_area: 2,
+                    is_admin: false,
+                    is_sentinel: false,
+                },
+            )))
+            .await
+            .unwrap();
+
+        assert!(client.session.bytes_out > 0);
+        assert_eq!(
+            client.auth.pending_character_operation,
+            Some(CharacterManagementOperation::Create)
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_character_command_sends_auth_message() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+
+        client
+            .handle_command(ClientCommand::DeleteCharacter { slot: 2 })
+            .await
+            .unwrap();
+
+        assert!(client.session.bytes_out > 0);
+        assert_eq!(
+            client.auth.pending_character_operation,
+            Some(CharacterManagementOperation::Delete)
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_character_command_sends_auth_message() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+
+        client
+            .handle_command(ClientCommand::RestoreCharacter(Guid(0x5000_1234)))
+            .await
+            .unwrap();
+
+        assert!(client.session.bytes_out > 0);
+        assert_eq!(
+            client.auth.pending_character_operation,
+            Some(CharacterManagementOperation::Restore)
+        );
     }
 
     #[tokio::test]

@@ -40,6 +40,24 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::CharacterList => Some(GameMessage::CharacterList(Box::new(
                 CharacterListData::unpack(data, offset)?,
             ))),
+            GameOpcode::CharacterCreate => Some(GameMessage::CharacterCreate(Box::new(
+                CharacterCreateRequestData::unpack(data, offset)?,
+            ))),
+            GameOpcode::CharacterCreateResponse => Some(GameMessage::CharacterCreateResponse(
+                Box::new(CharacterCreateResponseData::unpack(data, offset)?),
+            )),
+            GameOpcode::CharacterDelete => {
+                if *offset == data.len() {
+                    Some(GameMessage::CharacterDeleteResponse)
+                } else {
+                    Some(GameMessage::CharacterDeleteRequest(Box::new(
+                        CharacterDeleteRequestData::unpack(data, offset)?,
+                    )))
+                }
+            }
+            GameOpcode::CharacterRestore => Some(GameMessage::CharacterRestoreRequest(Box::new(
+                CharacterRestoreRequestData::unpack(data, offset)?,
+            ))),
             GameOpcode::CharacterEnterWorldRequest => {
                 Some(GameMessage::CharacterEnterWorldRequest(Box::new(
                     CharacterEnterWorldRequestData::unpack(data, offset)?,

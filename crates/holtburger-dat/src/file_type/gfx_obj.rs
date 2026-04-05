@@ -1,6 +1,6 @@
 use crate::graphics::{CVertexArray, Polygon};
 use crate::physics::{BspNode, BspType};
-use crate::utils::{read_compressed_u32, write_compressed_u32};
+use crate::utils::{read_compressed_u32, read_smart_vec, write_compressed_u32};
 use binrw::{
     BinRead, BinWrite,
     io::{Read, Seek, Write},
@@ -29,11 +29,7 @@ impl GfxObj {
         let flags_bits = u32::read_le(reader)?;
         let flags = GfxObjFlags::from_bits_retain(flags_bits);
 
-        let num_surfaces = read_compressed_u32(reader)?;
-        let mut surfaces = Vec::with_capacity(num_surfaces as usize);
-        for _ in 0..num_surfaces {
-            surfaces.push(u32::read_le(reader)?);
-        }
+        let surfaces = read_smart_vec(reader, u32::read_le)?;
 
         let vertex_array = CVertexArray::read_le(reader)?;
 

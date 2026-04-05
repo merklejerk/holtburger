@@ -63,13 +63,11 @@ async fn main() -> Result<()> {
     } else {
         ContentRepository::from_hba_path(&dats_path)?
     };
-    let world_bootstrap = content.world_bootstrap()?;
+    let mut builder =
+        ClientRuntimeBuilder::new(args.account.clone()).server(args.server.clone(), args.port);
+    builder.load_assets(&content)?;
 
-    let mut client = ClientRuntimeBuilder::new(args.account.clone())
-        .server(args.server.clone(), args.port)
-        .world_bootstrap(world_bootstrap)
-        .connect()
-        .await?;
+    let mut client = builder.connect().await?;
 
     client.message_dump_dir = Some(out_dir);
     let mut wire_rx = client.subscribe_wire_events();

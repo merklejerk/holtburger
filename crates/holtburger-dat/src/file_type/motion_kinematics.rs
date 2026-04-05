@@ -100,6 +100,18 @@ impl Default for MotionKinematics {
     }
 }
 
+impl BinRead for MotionKinematics {
+    type Args<'a> = ();
+
+    fn read_options<R: Read + Seek>(
+        reader: &mut R,
+        _endian: binrw::Endian,
+        _args: Self::Args<'_>,
+    ) -> BinResult<Self> {
+        Self::read(reader)
+    }
+}
+
 impl StaticResourceKey for MotionKinematics {
     const RESOURCE_KEY: ResourceKey<'static> =
         ResourceKey::new(HOLTBURGER_CORE_NAMESPACE, Self::FILE_ID);

@@ -321,6 +321,10 @@ pub fn project_pose_forward_distance(
     authoritative_pose: WorldPosition,
     distance_m: f32,
 ) -> WorldPosition {
+    if !distance_m.is_finite() {
+        return authoritative_pose;
+    }
+
     let heading = authoritative_pose.rotation.to_heading();
     let forward_offset = Vector3::new(-heading.cos(), heading.sin(), 0.0) * distance_m;
 

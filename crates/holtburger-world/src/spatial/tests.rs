@@ -153,6 +153,19 @@ fn project_pose_forward_distance_projects_outdoor_heading() {
 }
 
 #[test]
+fn project_pose_forward_distance_ignores_non_finite_distance() {
+    let authoritative = WorldPosition {
+        landblock_id: Guid((0x016C_u32 << 24) | (0x0171_u32 << 16)),
+        coords: Vector3::new(84.0, 108.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    let projected = project_pose_forward_distance(authoritative, f32::INFINITY);
+
+    assert_eq!(projected, authoritative);
+}
+
+#[test]
 fn advance_body_kinematics_rotates_velocity_with_turn_rate() {
     let input = SolveBodyInput::velocity(
         SpatialBodyId::Entity(Guid(0x5000_0001)),

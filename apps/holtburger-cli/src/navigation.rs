@@ -1,4 +1,4 @@
-use holtburger_common::position::WorldPosition;
+use holtburger_common::position::{METERS_PER_LANDBLOCK, WorldPosition};
 use holtburger_common::{Guid, Vector3};
 use holtburger_core::client::movement_types::{AutonomousDriveIntent, Gait, PlayerDriveIntent};
 use holtburger_protocol::messages::combat::CombatMode;
@@ -377,6 +377,13 @@ impl TuiNavigation {
 
     fn activate_scoot(&mut self, distance_m: f32, input: &NavigationSyncInput) {
         let Some(player_position) = input.player_position else {
+            self.active = ActiveNavigation::Idle;
+            return;
+        };
+
+        let distance_m = if distance_m.is_finite() {
+            distance_m.min(METERS_PER_LANDBLOCK)
+        } else {
             self.active = ActiveNavigation::Idle;
             return;
         };
@@ -962,6 +969,34 @@ mod tests {
 
         let update = navigation.handle_input(
             NavigationInput::StartScoot { distance_m: 3.5 },
+            snapshot(
+                Some(player_position),
+                None,
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        );
+
+        assert_eq!(update.drive_command, None);
+        assert!(matches!(
+            navigation.navigation_mode(),
+            Some(NavigationMode::Scoot {
+                target_pose,
+                arrival_distance,
+            }) if target_pose == target_position && (arrival_distance - SCOOT_ARRIVAL_DEADBAND_M).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn handle_input_start_scoot_clamps_to_one_landblock() {
+        let player_position = world_position(12.0, -4.0, 1.5);
+        let target_position = project_pose_forward_distance(player_position, METERS_PER_LANDBLOCK);
+        let mut navigation = TuiNavigation::default();
+
+        let update = navigation.handle_input(
+            NavigationInput::StartScoot {
+                distance_m: METERS_PER_LANDBLOCK * 2.0,
+            },
             snapshot(
                 Some(player_position),
                 None,

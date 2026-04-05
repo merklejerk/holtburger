@@ -135,6 +135,7 @@ impl ClientRuntime {
             | ClientCommand::RecallLifestone
             | ClientCommand::RecallAllegianceHousing
             | ClientCommand::SwearAllegiance { .. }
+            | ClientCommand::Unswear { .. }
             | ClientCommand::Suicide
             | ClientCommand::EnterPkLite
             | ClientCommand::RespondToConfirmation { .. } => {
@@ -571,6 +572,15 @@ impl ClientRuntime {
                 log::info!(">>> Swearing allegiance to 0x{:08X}", target_guid.0);
                 self.send_game_action(GameAction::SwearAllegiance(Box::new(
                     SwearAllegianceActionData { target_guid },
+                )))
+                .await
+            }
+            ClientCommand::Unswear {
+                target: target_guid,
+            } => {
+                log::info!(">>> Breaking allegiance from 0x{:08X}", target_guid.0);
+                self.send_game_action(GameAction::BreakAllegiance(Box::new(
+                    BreakAllegianceActionData { target_guid },
                 )))
                 .await
             }
@@ -1501,6 +1511,21 @@ mod tests {
 
         client
             .handle_command(ClientCommand::SwearAllegiance {
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn unswear_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::Unswear {
                 target: Guid(0x5000_0042),
             })
             .await

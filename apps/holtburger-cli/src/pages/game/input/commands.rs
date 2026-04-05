@@ -165,7 +165,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageKind::System,
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /swear, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /swear, /unswear, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
@@ -174,7 +174,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageKind::System,
-            "Allegiance: /g <MSG>, /swear <NAME>".to_string(),
+            "Allegiance: /g <MSG>, /swear <NAME>, /unswear".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -501,6 +501,22 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::SwearAllegiance { target });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/unswear" {
+            let Some(target) = self.data.get_player_monarch_guid() else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    "You are not currently sworn to anyone.".to_string(),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppUiAction::OpenUnswearConfirmation { target }.into());
             self.finish_input_command_submission(command);
             return result.with_redraw(true);
         }
@@ -893,6 +909,38 @@ mod tests {
             Some(AppAction::SwearAllegiance { target }) if *target == Guid(0x50000042)
         ));
         assert!(result.commands.is_empty());
+    }
+
+    #[test]
+    fn unswear_command_opens_confirmation_modal() {
+        let player_guid = Guid(0x50000001);
+        let monarch_guid = Guid(0x50000042);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+
+        let mut player = holtburger_world::entity::Entity::new(
+            player_guid,
+            "Player".to_string(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        player.properties.iids.insert(
+            holtburger_common::properties::PropertyInstanceId::Monarch,
+            monarch_guid,
+        );
+        state.data.entities.insert(player_guid, player);
+
+        state.chat_input.input.set_text("/unswear");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.first(),
+            Some(crate::types::AppAction::UiAction {
+                action: crate::types::AppUiAction::OpenUnswearConfirmation { target }
+            }) if *target == monarch_guid
+        ));
     }
 
     #[test]

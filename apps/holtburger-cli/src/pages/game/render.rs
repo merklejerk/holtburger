@@ -1,4 +1,6 @@
 use holtburger_common::ConfirmationType;
+use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::ActiveCharacterConfirmation;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -19,6 +21,7 @@ use crate::pages::game::panels::dynamic::render_dynamic_pane;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
+use holtburger_world::context::WorldContext;
 
 fn confirmation_title(confirmation_type: ConfirmationType) -> &'static str {
     match confirmation_type {
@@ -53,6 +56,35 @@ fn render_confirmation_overlay(
         area,
         ModalCardSpec::new(
             confirmation_title(confirmation.confirmation_type),
+            &text,
+            ModalPalette::CONFIRMATION,
+        ),
+    );
+}
+
+fn render_unswear_confirmation_overlay(f: &mut Frame, area: Rect, state: &GameState, target: Guid) {
+    let target_label = state
+        .data
+        .get_entity(target)
+        .map(|entity| {
+            let name = entity.name().trim();
+            if name.is_empty() {
+                format!("0x{:08X}", target.0)
+            } else {
+                name.to_string()
+            }
+        })
+        .unwrap_or_else(|| format!("0x{:08X}", target.0));
+    let text = format!(
+        "Break allegiance with {}?\n\n[Enter] Confirm    [Esc] Cancel",
+        target_label
+    );
+
+    render_modal_card(
+        f,
+        area,
+        ModalCardSpec::new(
+            " Break Allegiance Confirmation ",
             &text,
             ModalPalette::CONFIRMATION,
         ),
@@ -168,7 +200,9 @@ impl GameState {
         // Pulse Panel
         render_pulse_panel(f, ctx.client_state, ctx.net_stats, input_chunks[1]);
 
-        if let Some(confirmation) = self.view.active_confirmation.as_ref() {
+        if let Some(target) = self.view.unswear_confirmation {
+            render_unswear_confirmation_overlay(f, area, self, target);
+        } else if let Some(confirmation) = self.view.active_confirmation.as_ref() {
             render_confirmation_overlay(f, area, confirmation);
         }
     }
@@ -269,6 +303,50 @@ mod tests {
 
         assert!(rendered.contains("Bestie invited you to join their fellowship."));
         assert!(!rendered.contains("Chance of success is 75%. Continue?"));
+    }
+
+    #[test]
+    fn unswear_confirmation_overlay_renders_target_and_controls() {
+        let area = Rect::new(0, 0, 120, 40);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        let target_guid = Guid(0x50000042);
+        state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.data.entities.insert(
+            target_guid,
+            holtburger_world::entity::Entity::new(
+                target_guid,
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
+        state.view.unswear_confirmation = Some(target_guid);
+
+        let net_stats = NetStats::default();
+        let ctx = RenderContext {
+            account_name: "account",
+            client_state: &ClientState::InWorld,
+            net_stats: &net_stats,
+            server_time: None,
+        };
+
+        terminal
+            .draw(|frame| state.render(frame, area, &ctx))
+            .expect("game page should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Break Allegiance Confirmation"));
+        assert!(rendered.contains("Break allegiance with Bestie?"));
+        assert!(rendered.contains("[Enter] Confirm"));
+        assert!(rendered.contains("[Esc] Cancel"));
     }
 
     #[test]

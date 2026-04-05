@@ -242,8 +242,8 @@
 - [x] Can't use character sheet verbs when there's an interaction.
 - [x] Character sheet doesn't identfy specialized skills.
 - [x] Death notifications.
+- [~] Slash-commands should use `AppAction`s.
 - [ ] Some equipment swapping jank going on.
-- [ ] Slash-commands should use `AppAction`s.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

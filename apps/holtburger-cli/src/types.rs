@@ -393,7 +393,7 @@ impl UpdateResult {
 }
 
 pub enum Page {
-    Selection(SelectionState),
+    Selection(Box<SelectionState>),
     Game(Box<GameState>),
 }
 

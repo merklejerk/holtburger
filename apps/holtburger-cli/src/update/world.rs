@@ -64,7 +64,7 @@ impl AppState {
                         .to_lowercase()
                         .cmp(&b.character.name.to_lowercase())
                 });
-                self.page = Page::Selection(SelectionState {
+                self.page = Page::Selection(Box::new(SelectionState {
                     characters: chars,
                     selected_character_index: 0,
                     character_preference: self.character_preference.take(),
@@ -72,7 +72,7 @@ impl AppState {
                     creation: CharacterCreationState::from_repository(self.content.as_ref()),
                     pending_create: None,
                     delete_confirmation: None,
-                });
+                }));
             }
             ClientViewEvent::PlayerEntered { guid, name } => {
                 if let Page::Game(game) = &mut self.page {
@@ -278,7 +278,7 @@ mod tests {
             account_password: "password".to_string(),
             character_preference: None,
             chat_log: None,
-            page: Page::Selection(SelectionState::default()),
+            page: Page::Selection(Box::default()),
             client_state,
             net_stats: NetStats::default(),
             world_name: "World".to_string(),

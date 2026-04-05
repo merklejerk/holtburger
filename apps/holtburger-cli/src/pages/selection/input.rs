@@ -301,7 +301,7 @@ mod tests {
     }
 
     fn ready_creation_state() -> CharacterCreationState {
-        CharacterCreationState::Ready(CharacterCreationFormState {
+        CharacterCreationState::Ready(Box::new(CharacterCreationFormState {
             catalog: Arc::new(CharacterGenCatalog {
                 starter_areas: Vec::new(),
                 heritage_groups: BTreeMap::from([(
@@ -334,7 +334,7 @@ mod tests {
             skill_advancement_classes: Vec::new(),
             selected_skill_id: None,
             feedback: None,
-        })
+        }))
     }
 
     #[test]

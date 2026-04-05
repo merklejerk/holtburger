@@ -7,7 +7,6 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::pages;
-use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page, RedrawPriority, UpdateResult};
@@ -635,7 +634,7 @@ async fn run() -> Result<()> {
         account_password: args.password.clone(),
         character_preference: args.character.clone(),
         chat_log,
-        page: Page::Selection(SelectionState::default()),
+        page: Page::Selection(Box::default()),
         client_state: ClientState::Connected,
         verbosity: args.verbose,
         net_stats: NetStats::default(),

@@ -325,6 +325,104 @@ fn normalize_character_name(name: &str) -> String {
         .collect()
 }
 
+impl SelectionState {
+    fn handle_create_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
+        match response.response {
+            holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
+                let pending = self.pending_create.take();
+                if let Some((guid, slot)) = response
+                    .guid
+                    .zip(pending.as_ref().map(|pending| pending.slot))
+                {
+                    let name = response
+                        .name
+                        .clone()
+                        .or_else(|| pending.as_ref().map(|pending| pending.name.clone()))
+                        .unwrap_or_else(|| "New Character".to_string());
+                    self.characters.push(CharacterDashboardEntry {
+                        slot,
+                        character: CharacterEntry {
+                            guid,
+                            name: name.clone(),
+                            delete_time: 0,
+                        },
+                    });
+                    self.characters.sort_by(|left, right| {
+                        left.character
+                            .name
+                            .to_lowercase()
+                            .cmp(&right.character.name.to_lowercase())
+                    });
+                    if let Some(index) = self
+                        .characters
+                        .iter()
+                        .position(|entry| entry.character.guid == guid)
+                    {
+                        self.selected_character_index = index;
+                    }
+                    self.screen = CharacterScreen::Dashboard;
+                    if let Some(creation) = self.creation.ready_mut() {
+                        creation.set_feedback(format!("Character '{}' created.", name), false);
+                    }
+                } else if let Some(creation) = self.creation.ready_mut() {
+                    creation.set_feedback(
+                        "Character created, but the response was missing append metadata."
+                            .to_string(),
+                        false,
+                    );
+                }
+            }
+            other => {
+                self.pending_create = None;
+                if let Some(creation) = self.creation.ready_mut() {
+                    creation.set_feedback(
+                        format!("Character creation rejected by server: {:?}.", other),
+                        true,
+                    );
+                }
+            }
+        }
+
+        UpdateResult::redraw()
+    }
+
+    fn handle_restore_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
+        self.pending_create = None;
+
+        match response.response {
+            holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
+                if let Some(guid) = response.guid
+                    && let Some(entry) = self
+                        .characters
+                        .iter_mut()
+                        .find(|entry| entry.character.guid == guid)
+                {
+                    entry.character.delete_time = 0;
+                    if let Some(name) = response.name {
+                        entry.character.name = name;
+                    }
+                    if self.selected_character_index >= self.characters.len() {
+                        self.selected_character_index = self.characters.len().saturating_sub(1);
+                    }
+                    return UpdateResult::redraw();
+                }
+
+                UpdateResult::redraw()
+            }
+            other => {
+                if let Some(creation) = self.creation.ready_mut() {
+                    creation.set_feedback(
+                        format!("Character restore rejected by server: {:?}.", other),
+                        true,
+                    );
+                }
+
+                UpdateResult::redraw()
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,104 +622,5 @@ mod tests {
         assert!(result.redraw_requested());
         assert_eq!(state.characters[0].character.delete_time, 0);
         assert_eq!(state.characters[0].character.name, "Sho Girl");
-    }
-}
-
-impl SelectionState {
-    fn handle_create_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
-        match response.response {
-            holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
-                let pending = self.pending_create.take();
-                if let Some((guid, slot)) = response
-                    .guid
-                    .zip(pending.as_ref().map(|pending| pending.slot))
-                {
-                    let name = response
-                        .name
-                        .clone()
-                        .or_else(|| pending.as_ref().map(|pending| pending.name.clone()))
-                        .unwrap_or_else(|| "New Character".to_string());
-                    self.characters.push(CharacterDashboardEntry {
-                        slot,
-                        character: CharacterEntry {
-                            guid,
-                            name: name.clone(),
-                            delete_time: 0,
-                        },
-                    });
-                    self.characters.sort_by(|left, right| {
-                        left.character
-                            .name
-                            .to_lowercase()
-                            .cmp(&right.character.name.to_lowercase())
-                    });
-                    if let Some(index) = self
-                        .characters
-                        .iter()
-                        .position(|entry| entry.character.guid == guid)
-                    {
-                        self.selected_character_index = index;
-                    }
-                    self.screen = CharacterScreen::Dashboard;
-                    if let Some(creation) = self.creation.ready_mut() {
-                        creation.set_feedback(format!("Character '{}' created.", name), false);
-                    }
-                } else if let Some(creation) = self.creation.ready_mut() {
-                    creation.set_feedback(
-                        "Character created, but the response was missing append metadata."
-                            .to_string(),
-                        false,
-                    );
-                }
-            }
-            other => {
-                self.pending_create = None;
-                if let Some(creation) = self.creation.ready_mut() {
-                    creation.set_feedback(
-                        format!("Character creation rejected by server: {:?}.", other),
-                        true,
-                    );
-                }
-            }
-        }
-
-        UpdateResult::redraw()
-    }
-
-    fn handle_restore_response(&mut self, response: CharacterCreateResponseData) -> UpdateResult {
-        self.pending_create = None;
-
-        match response.response {
-            holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
-                if let Some(guid) = response.guid {
-                    if let Some(entry) = self
-                        .characters
-                        .iter_mut()
-                        .find(|entry| entry.character.guid == guid)
-                    {
-                        entry.character.delete_time = 0;
-                        if let Some(name) = response.name {
-                            entry.character.name = name;
-                        }
-                        if self.selected_character_index >= self.characters.len() {
-                            self.selected_character_index = self.characters.len().saturating_sub(1);
-                        }
-                        return UpdateResult::redraw();
-                    }
-                }
-
-                UpdateResult::redraw()
-            }
-            other => {
-                if let Some(creation) = self.creation.ready_mut() {
-                    creation.set_feedback(
-                        format!("Character restore rejected by server: {:?}.", other),
-                        true,
-                    );
-                }
-
-                UpdateResult::redraw()
-            }
-        }
     }
 }

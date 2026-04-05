@@ -4,6 +4,7 @@ use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
+use holtburger_world::RuntimeBodyResetCause;
 use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
 
@@ -19,6 +20,18 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl ClientRuntime {
+    pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        let reset_events = self
+            .world
+            .suspend_runtime_bodies(RuntimeBodyResetCause::TeleportOrWorldReset);
+        for event in &reset_events {
+            self.handle_runtime_world_event(event);
+        }
+        self.state = ClientState::EnteringWorld;
+        self.send_status_event();
+        Ok(())
+    }
+
     async fn enter_world(&mut self) -> Result<()> {
         if self.state == ClientState::InWorld {
             return Ok(());

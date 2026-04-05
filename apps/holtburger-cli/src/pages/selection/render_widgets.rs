@@ -142,17 +142,17 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
 
             f.render_widget(
                 render_picker_control(
-                    "Starter Town",
-                    form.start_area_name(),
-                    form.focus == CharacterCreationFocus::StarterTown,
+                    "Heritage",
+                    form.heritage_name(),
+                    form.focus == CharacterCreationFocus::Heritage,
                 ),
                 left[1],
             );
             f.render_widget(
                 render_picker_control(
-                    "Heritage",
-                    form.heritage_name(),
-                    form.focus == CharacterCreationFocus::Heritage,
+                    "Starter Town",
+                    form.start_area_name(),
+                    form.focus == CharacterCreationFocus::StarterTown,
                 ),
                 left[2],
             );

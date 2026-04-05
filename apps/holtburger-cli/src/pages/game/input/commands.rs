@@ -165,7 +165,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageKind::System,
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /swear, /unswear, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /swear, /unswear, /permit, /unpermit, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
@@ -175,6 +175,10 @@ impl GameState {
         self.chat.log(
             ChatMessageKind::System,
             "Allegiance: /g <MSG>, /swear <NAME>, /unswear".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Corpse permissions: /permit <PLAYER>, /unpermit <PLAYER>".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -232,6 +236,14 @@ impl GameState {
             "swear" => vec![
                 "Usage: /swear <NAME>".to_string(),
                 "Attempt to swear allegiance to the named player.".to_string(),
+            ],
+            "permit" => vec![
+                "Usage: /permit <PLAYER>".to_string(),
+                "Grant corpse-looting permission to the named player.".to_string(),
+            ],
+            "unpermit" => vec![
+                "Usage: /unpermit <PLAYER>".to_string(),
+                "Revoke corpse-looting permission from the named player.".to_string(),
             ],
             "party" | "p" => vec![
                 "Usage: /party".to_string(),
@@ -493,7 +505,10 @@ impl GameState {
             let Some(target) = self.data.resolve_player_guid_by_name(player_name) else {
                 self.chat.log(
                     ChatMessageKind::Warning,
-                    format!("Unable to find player '{}' to swear allegiance to.", player_name),
+                    format!(
+                        "Unable to find player '{}' to swear allegiance to.",
+                        player_name
+                    ),
                 );
                 return result.with_redraw(true);
             };
@@ -636,6 +651,32 @@ impl GameState {
 
         if command == "/uninvite" {
             self.log_command_usage("Usage: /uninvite <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(player_name) = parse_single_argument_command(command, &["/permit"]) {
+            result.commands.push(ClientCommand::AddPlayerPermission {
+                player_name: player_name.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/permit" {
+            self.log_command_usage("Usage: /permit <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(player_name) = parse_single_argument_command(command, &["/unpermit"]) {
+            result.commands.push(ClientCommand::RemovePlayerPermission {
+                player_name: player_name.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/unpermit" {
+            self.log_command_usage("Usage: /unpermit <PLAYER>");
             return result.with_redraw(true);
         }
 
@@ -1158,6 +1199,38 @@ mod tests {
             Some(AppAction::UninviteFromParty { target }) if *target == Guid(0x50000042)
         ));
         assert!(result.commands.is_empty());
+    }
+
+    #[test]
+    fn permit_command_dispatches_add_player_permission() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/permit Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::AddPlayerPermission { player_name }) if player_name == "Bestie"
+        ));
+    }
+
+    #[test]
+    fn unpermit_command_dispatches_remove_player_permission() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/unpermit Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::RemovePlayerPermission { player_name }) if player_name == "Bestie"
+        ));
     }
 
     #[test]

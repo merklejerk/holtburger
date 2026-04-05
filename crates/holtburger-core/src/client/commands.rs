@@ -138,6 +138,8 @@ impl ClientRuntime {
             | ClientCommand::Unswear { .. }
             | ClientCommand::Suicide
             | ClientCommand::EnterPkLite
+            | ClientCommand::AddPlayerPermission { .. }
+            | ClientCommand::RemovePlayerPermission { .. }
             | ClientCommand::RespondToConfirmation { .. } => {
                 self.handle_interaction_command(cmd).await
             }
@@ -553,6 +555,20 @@ impl ClientRuntime {
                     .set_character_option_enabled(option, value);
                 self.emit_player_options_updated();
                 Ok(())
+            }
+            ClientCommand::AddPlayerPermission { player_name } => {
+                log::info!(">>> Permitting {} to loot corpse", player_name);
+                self.send_game_action(GameAction::AddPlayerPermission(Box::new(
+                    AddPlayerPermissionActionData { player_name },
+                )))
+                .await
+            }
+            ClientCommand::RemovePlayerPermission { player_name } => {
+                log::info!(">>> Revoking corpse permission from {}", player_name);
+                self.send_game_action(GameAction::RemovePlayerPermission(Box::new(
+                    RemovePlayerPermissionActionData { player_name },
+                )))
+                .await
             }
             ClientCommand::RecallLifestone => {
                 log::info!(">>> Recalling to lifestone");

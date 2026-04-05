@@ -1,3 +1,4 @@
+use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::CharacterOption;
@@ -192,6 +193,42 @@ impl ProtocolPack for BreakAllegianceActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct AddPlayerPermissionActionData {
+    pub player_name: String,
+}
+
+impl ProtocolUnpack for AddPlayerPermissionActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let player_name = read_string16(data, offset)?;
+        Some(Self { player_name })
+    }
+}
+
+impl ProtocolPack for AddPlayerPermissionActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        write_string16(writer, &self.player_name);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemovePlayerPermissionActionData {
+    pub player_name: String,
+}
+
+impl ProtocolUnpack for RemovePlayerPermissionActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let player_name = read_string16(data, offset)?;
+        Some(Self { player_name })
+    }
+}
+
+impl ProtocolPack for RemovePlayerPermissionActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        write_string16(writer, &self.player_name);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +335,34 @@ mod tests {
         };
 
         let fixture = hex::decode("443322111E00000042000050").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_add_player_permission_parity() {
+        let action = GameActionMessage {
+            sequence: 0x01020304,
+            action: GameAction::AddPlayerPermission(Box::new(AddPlayerPermissionActionData {
+                player_name: "Bestie".to_string(),
+            })),
+        };
+
+        let fixture = hex::decode("04030201190200000600426573746965").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_remove_player_permission_parity() {
+        let action = GameActionMessage {
+            sequence: 0x05060708,
+            action: GameAction::RemovePlayerPermission(Box::new(
+                RemovePlayerPermissionActionData {
+                    player_name: "Bestie".to_string(),
+                },
+            )),
+        };
+
+        let fixture = hex::decode("080706051A0200000600426573746965").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 }

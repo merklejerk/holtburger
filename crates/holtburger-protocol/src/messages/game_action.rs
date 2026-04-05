@@ -36,6 +36,8 @@ pub enum GameAction {
     Tell(Box<TellActionData>),
     SwearAllegiance(Box<SwearAllegianceActionData>),
     BreakAllegiance(Box<BreakAllegianceActionData>),
+    AddPlayerPermission(Box<AddPlayerPermissionActionData>),
+    RemovePlayerPermission(Box<RemovePlayerPermissionActionData>),
     Emote(Box<EmoteActionData>),
     ChatChannel(Box<ChatChannelActionData>),
     FellowshipCreate(Box<FellowshipCreateActionData>),
@@ -137,6 +139,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::BreakAllegiance => GameAction::BreakAllegiance(Box::new(
                     BreakAllegianceActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::AddPlayerPermission => GameAction::AddPlayerPermission(Box::new(
+                    AddPlayerPermissionActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RemovePlayerPermission => GameAction::RemovePlayerPermission(
+                    Box::new(RemovePlayerPermissionActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::Emote => {
                     GameAction::Emote(Box::new(EmoteActionData::unpack(data, offset)?))
                 }
@@ -347,6 +355,16 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::BreakAllegiance(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::BreakAllegiance as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::AddPlayerPermission(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AddPlayerPermission as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RemovePlayerPermission(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RemovePlayerPermission as u32)
                     .unwrap();
                 data.pack(buf);
             }

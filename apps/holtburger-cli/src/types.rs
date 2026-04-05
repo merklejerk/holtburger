@@ -27,6 +27,7 @@ pub enum AppUiAction {
     OpenCharacterDashboard,
     OpenDeleteCharacterConfirmation,
     CancelDeleteCharacterConfirmation,
+    OpenUnswearConfirmation { target: Guid },
     RestoreSelectedCharacter,
     RaiseSelectedCharacterCreationSkill,
     LowerSelectedCharacterCreationSkill,
@@ -501,6 +502,9 @@ pub enum AppAction {
         target: Guid,
     },
     SwearAllegiance {
+        target: Guid,
+    },
+    Unswear {
         target: Guid,
     },
     Open {

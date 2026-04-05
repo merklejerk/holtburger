@@ -174,6 +174,24 @@ impl ProtocolPack for SwearAllegianceActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct BreakAllegianceActionData {
+    pub target_guid: Guid,
+}
+
+impl ProtocolUnpack for BreakAllegianceActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target_guid = Guid::unpack(data, offset)?;
+        Some(Self { target_guid })
+    }
+}
+
+impl ProtocolPack for BreakAllegianceActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.target_guid.pack(writer);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +285,19 @@ mod tests {
         };
 
         let fixture = hex::decode("443322111D00000042000050").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_break_allegiance_parity() {
+        let action = GameActionMessage {
+            sequence: 0x11223344,
+            action: GameAction::BreakAllegiance(Box::new(BreakAllegianceActionData {
+                target_guid: Guid(0x5000_0042),
+            })),
+        };
+
+        let fixture = hex::decode("443322111E00000042000050").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 }

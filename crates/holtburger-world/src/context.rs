@@ -64,7 +64,7 @@ pub fn run_rate_from_skill_and_burden(run_skill: f32, burden: f32) -> f32 {
 
 fn normalize_name_for_lookup(name: &str) -> String {
     name.chars()
-        .filter(|character| !character.is_whitespace())
+        .filter(|character| character.is_alphanumeric())
         .map(|character| character.to_ascii_lowercase())
         .collect()
 }
@@ -143,6 +143,11 @@ pub trait WorldContextExt: WorldContext {
         self.iter_entities()
             .find(|entity| normalize_name_for_lookup(entity.name()) == normalized_name)
             .map(|entity| entity.guid)
+    }
+
+    fn get_player_monarch_guid(&self) -> Option<Guid> {
+        let player_guid = self.get_player_guid()?;
+        self.get_entity(player_guid)?.monarch_id()
     }
 
     fn player_burden(&self) -> Option<f32> {
@@ -1146,13 +1151,41 @@ mod tests {
     }
 
     #[test]
+    fn get_player_monarch_guid_returns_player_monarch() {
+        let player_guid = Guid(0x5000_0001);
+        let monarch_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            ..Default::default()
+        };
+
+        let mut player = entity(player_guid, "Player");
+        player
+            .properties
+            .iids
+            .insert(PropertyInstanceId::Monarch, monarch_guid);
+        world.entities.insert(player_guid, player);
+
+        assert_eq!(world.get_player_monarch_guid(), Some(monarch_guid));
+    }
+
+    #[test]
     fn resolve_player_guid_by_name_ignores_whitespace_and_case() {
         let target_guid = Guid(0x8000_0001);
         let mut world = TestWorld::default();
-        world.entities.insert(target_guid, entity(target_guid, "Sir   Loin"));
+        world
+            .entities
+            .insert(target_guid, entity(target_guid, "Sir   Loin"));
 
-        assert_eq!(world.resolve_player_guid_by_name("sirloin"), Some(target_guid));
-        assert_eq!(world.resolve_player_guid_by_name(" S I R   L O I N "), Some(target_guid));
+        assert_eq!(
+            world.resolve_player_guid_by_name("sirloin"),
+            Some(target_guid)
+        );
+        assert_eq!(
+            world.resolve_player_guid_by_name(" S I R   L O I N "),
+            Some(target_guid)
+        );
         assert_eq!(world.resolve_player_guid_by_name("   \t  "), None);
     }
 }

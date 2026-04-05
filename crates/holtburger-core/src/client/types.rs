@@ -513,6 +513,9 @@ pub enum ClientCommand {
     SwearAllegiance {
         target: Guid,
     },
+    Unswear {
+        target: Guid,
+    },
     Suicide,
     EnterPkLite,
     Ping,

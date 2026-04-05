@@ -13,7 +13,7 @@ impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
 
-        if self.view.active_confirmation.is_some() {
+        if self.view.unswear_confirmation.is_some() || self.view.active_confirmation.is_some() {
             return result;
         }
 
@@ -92,6 +92,10 @@ impl GameState {
 
     pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
+
+        if let Some(confirmation_result) = self.handle_unswear_confirmation_input(key) {
+            return confirmation_result;
+        }
 
         if let Some(confirmation_result) = self.handle_confirmation_input(key) {
             return confirmation_result;
@@ -403,6 +407,28 @@ impl GameState {
 
         Some(result)
     }
+
+    fn handle_unswear_confirmation_input(&mut self, key: KeyEvent) -> Option<UpdateResult> {
+        let target = self.view.unswear_confirmation?;
+        let mut result = UpdateResult::new();
+
+        match key.code {
+            KeyCode::Enter => {
+                self.view.unswear_confirmation = None;
+                result
+                    .actions
+                    .push(crate::types::AppAction::Unswear { target });
+                result.request_redraw(RedrawPriority::Immediate);
+            }
+            KeyCode::Esc => {
+                self.view.unswear_confirmation = None;
+                result.request_redraw(RedrawPriority::Immediate);
+            }
+            _ => {}
+        }
+
+        Some(result)
+    }
 }
 
 #[cfg(test)]
@@ -578,6 +604,45 @@ mod tests {
         assert!(result.redraw_requested());
         assert!(state.view.active_confirmation.is_none());
         assert_eq!(state.chat_input.input.text(), "/options list");
+    }
+
+    #[test]
+    fn enter_accepts_unswear_confirmation_and_emits_unswear_action() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x50000042);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/unswear");
+        state.view.unswear_confirmation = Some(target_guid);
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::Unswear { target }) if *target == target_guid
+        ));
+        assert!(result.commands.is_empty());
+        assert!(result.redraw_requested());
+        assert!(state.view.unswear_confirmation.is_none());
+        assert_eq!(state.chat_input.input.text(), "/unswear");
+    }
+
+    #[test]
+    fn escape_clears_unswear_confirmation_without_dispatching() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x50000042);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dashboard;
+        state.view.unswear_confirmation = Some(target_guid);
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(result.actions.is_empty());
+        assert!(result.redraw_requested());
+        assert!(state.view.unswear_confirmation.is_none());
     }
 
     #[test]

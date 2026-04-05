@@ -35,6 +35,7 @@ pub enum GameAction {
     Talk(Box<TalkActionData>),
     Tell(Box<TellActionData>),
     SwearAllegiance(Box<SwearAllegianceActionData>),
+    BreakAllegiance(Box<BreakAllegianceActionData>),
     Emote(Box<EmoteActionData>),
     ChatChannel(Box<ChatChannelActionData>),
     FellowshipCreate(Box<FellowshipCreateActionData>),
@@ -132,6 +133,9 @@ impl ProtocolUnpack for GameActionMessage {
                 }
                 GameActionOpcode::SwearAllegiance => GameAction::SwearAllegiance(Box::new(
                     SwearAllegianceActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::BreakAllegiance => GameAction::BreakAllegiance(Box::new(
+                    BreakAllegianceActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::Emote => {
                     GameAction::Emote(Box::new(EmoteActionData::unpack(data, offset)?))
@@ -338,6 +342,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::SwearAllegiance(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::SwearAllegiance as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::BreakAllegiance(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::BreakAllegiance as u32)
                     .unwrap();
                 data.pack(buf);
             }

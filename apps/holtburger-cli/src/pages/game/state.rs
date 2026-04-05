@@ -538,6 +538,9 @@ impl GameState {
                     .commands
                     .push(ClientCommand::SwearAllegiance { target });
             }
+            AppAction::Unswear { target } => {
+                result.commands.push(ClientCommand::Unswear { target });
+            }
             AppAction::Open { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
@@ -826,9 +829,16 @@ impl GameState {
     }
 
     pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
-        self.dashboard
-            .handle_ui_action(action, &self.data, &self.view)
-            .unwrap_or_default()
+        match action {
+            AppUiAction::OpenUnswearConfirmation { target } => {
+                self.view.unswear_confirmation = Some(target);
+                UpdateResult::redraw()
+            }
+            _ => self
+                .dashboard
+                .handle_ui_action(action, &self.data, &self.view)
+                .unwrap_or_default(),
+        }
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
@@ -1716,6 +1726,8 @@ pub struct ViewState {
     pub salvaging: Option<SalvagingState>,
     /// Current core-projected confirmation request being surfaced by the game page.
     pub active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Current local confirmation request for breaking allegiance.
+    pub unswear_confirmation: Option<Guid>,
     /// Current core-projected busy operation for local action sequencing.
     pub active_busy_operation: Option<BusyOperationKind>,
 }
@@ -1754,6 +1766,7 @@ impl Default for ViewState {
             active_interaction: None,
             salvaging: None,
             active_confirmation: None,
+            unswear_confirmation: None,
             active_busy_operation: None,
         }
     }
@@ -2859,6 +2872,23 @@ mod tests {
         assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::SwearAllegiance { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
+    fn unswear_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::Unswear {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Unswear { target }) if *target == Guid(0x50000042)
         ));
     }
 

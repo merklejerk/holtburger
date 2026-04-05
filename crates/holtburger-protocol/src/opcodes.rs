@@ -327,16 +327,16 @@ pub enum GameActionOpcode {
     DeclineTrade = 0x01FB,
 
     // --- Books & Inscriptions ---
-    // /// C2S: Request book metadata (title, author, etc).
-    // BookData = 0x00AA,
+    /// C2S: Request book metadata and currently loaded page data.
+    BookData = 0x00AA,
     // /// C2S: Update the text of a book page.
     // BookModifyPage = 0x00AB,
     // /// C2S: Add a new page to a book.
     // BookAddPage = 0x00AC,
     // /// C2S: Remove a page from a book.
     // BookDeletePage = 0x00AD,
-    // /// C2S: Request the text content of a book page.
-    // BookPageData = 0x00AE,
+    /// C2S: Request the text content of a specific book page.
+    BookPageData = 0x00AE,
     // /// C2S: Add an inscription to an item (Notes, Crafted items).
     // SetInscription = 0x00BF,
 
@@ -709,16 +709,16 @@ pub enum GameEventOpcode {
     // GetInscriptionResponse = 0x00C3,
 
     // --- Books & Inscriptions ---
-    // /// S2C: Response containing the metadata and content of a book.
-    // BookDataResponse = 0x00B4,
+    /// S2C: Response containing book metadata plus any inline page payloads.
+    BookDataResponse = 0x00B4,
     // /// S2C: Result of a book page modification.
     // BookModifyPageResponse = 0x00B5,
     // /// S2C: Result of adding a new page to a book.
     // BookAddPageResponse = 0x00B6,
     // /// S2C: Result of deleting a page from a book.
     // BookDeletePageResponse = 0x00B7,
-    // /// S2C: Returns specific page data for a book.
-    // BookPageDataResponse = 0x00B8,
+    /// S2C: Returns specific page data for a book.
+    BookPageDataResponse = 0x00B8,
     // /// S2C: Result of a salvaging operation.
     // SalvageOperationsResult = 0x02B4,
 

@@ -1,6 +1,6 @@
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{ClientRuntime, ClientState};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
@@ -124,6 +124,8 @@ impl ClientRuntime {
             | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
+            | ClientCommand::ReadBook(_)
+            | ClientCommand::ReadBookPage { .. }
             | ClientCommand::QueryHealth(_)
             | ClientCommand::Use(_)
             | ClientCommand::CloseContainer(_)
@@ -353,6 +355,22 @@ impl ClientRuntime {
                 self.send_game_action(GameAction::IdentifyObject(Box::new(
                     IdentifyObjectActionData { guid },
                 )))
+                .await
+            }
+            ClientCommand::ReadBook(guid) => {
+                log::info!(">>> Reading book: 0x{:08X}", guid);
+                self.send_game_action(GameAction::BookData(Box::new(BookDataActionData { guid })))
+                    .await
+            }
+            ClientCommand::ReadBookPage { book, page_index } => {
+                log::info!(">>> Reading book page {} from 0x{:08X}", page_index, book);
+                let page_index = i32::try_from(page_index).map_err(|_| {
+                    anyhow!("book page index {} exceeds i32 wire range", page_index)
+                })?;
+                self.send_game_action(GameAction::BookPageData(Box::new(BookPageDataActionData {
+                    guid: book,
+                    page_index,
+                })))
                 .await
             }
             ClientCommand::QueryHealth(guid) => {

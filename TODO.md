@@ -95,6 +95,8 @@
 - [ ] Add intelligent entity context scanners.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
+- [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
+- [ ] Emotes.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -241,6 +243,7 @@
 - [x] Character sheet doesn't identfy specialized skills.
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] Death notifications.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

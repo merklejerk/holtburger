@@ -153,6 +153,18 @@ fn test_dispatch_action_query_health() {
 }
 
 #[test]
+fn test_dispatch_action_book_data() {
+    let fixture = hex::decode("B1F7000010000000AA00000044332211").unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameAction(_)));
+}
+
+#[test]
+fn test_dispatch_action_book_page_data() {
+    let fixture = hex::decode("B1F7000011000000AE0000004433221101000000").unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameAction(_)));
+}
+
+#[test]
 fn test_dispatch_action_login_complete() {
     assert_dispatch_match(test_fixtures::ACTION_LOGIN_COMPLETE, |msg| {
         matches!(msg, GameMessage::GameAction(_))
@@ -215,6 +227,18 @@ fn test_dispatch_force_obj_desc_send() {
     assert_dispatch_match(test_fixtures::FORCE_OBJ_DESC_SEND, |msg| {
         matches!(msg, GameMessage::ForceObjectDescSend(_))
     });
+}
+
+#[test]
+fn test_dispatch_event_book_data_response() {
+    let fixture = hex::decode("B0F700000100005021000000B4000000443322110300000003000000E803000002000000040302010A00536372696265204F6E6509006265657220676F6F64000200FFFF0000000001000000080706050A005363726962652054776F09006265657220676F6F64000200FFFF01000000010000001900546865207365636F6E6420706167652068617320746578742E0011005369676E656420616E64207365616C656400DDCCBBAA090041726368697669737400").unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameEvent(_)));
+}
+
+#[test]
+fn test_dispatch_event_book_page_data_response() {
+    let fixture = hex::decode("B0F700000100005022000000B80000004433221101000000080706050A005363726962652054776F120050617373776F7264206973206368656573650200FFFF01000000000000001900546865207365636F6E6420706167652068617320746578742E00").unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameEvent(_)));
 }
 
 #[test]

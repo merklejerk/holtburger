@@ -1,3 +1,4 @@
+use crate::book::BookData;
 use crate::hydration::WorldObjectPropertiesHydrationExt;
 use crate::identify::{self, IdentifyTarget};
 use holtburger_common::position::WorldPosition;
@@ -265,6 +266,7 @@ pub struct Entity {
     pub hook_profile: Option<HookProfile>,
     pub armor_levels: Option<ArmorLevels>,
     pub spell_book: Vec<u32>,
+    pub book: Option<BookData>,
 
     pub armor_highlight: Option<u16>,
     pub armor_color: Option<u16>,
@@ -474,6 +476,7 @@ impl Entity {
             hook_profile: None,
             armor_levels: None,
             spell_book: Vec::new(),
+            book: None,
             armor_highlight: None,
             armor_color: None,
             weapon_highlight: None,

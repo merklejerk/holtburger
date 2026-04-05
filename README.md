@@ -29,7 +29,7 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **3D Graphics & Sound** | 🟢 | 🔴 | Intentional limitation. TUI relies on text and data projection. |
 | **Login & Auth** | 🟢 | 🟢 | Full multi-stage GLS and world server handshake. |
 | **Character Selection** | 🟢 | 🟢 | Login via terminal UI or CLI arguments. |
-| **Character Creation** | 🟢 | 🔴 | Planned for a future update. |
+| **Character Creation** | 🟢 | 🟢 | Full character management flow-- Essential creation properties (minus appearance choices), delete, restore. |
 | **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
 | **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, approach/follow, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
 | **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |

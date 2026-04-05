@@ -42,6 +42,32 @@ impl ProtocolPack for TeleToLifestoneActionData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TeleToPklArenaActionData;
+
+impl ProtocolUnpack for TeleToPklArenaActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for TeleToPklArenaActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeleToMarketPlaceActionData;
+
+impl ProtocolUnpack for TeleToMarketPlaceActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for TeleToMarketPlaceActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct TeleToMansionActionData;
 
 impl ProtocolUnpack for TeleToMansionActionData {
@@ -165,6 +191,17 @@ mod tests {
     }
 
     #[test]
+    fn test_tele_to_pkl_arena_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x22222222,
+            action: GameAction::TeleToPklArena(Box::new(TeleToPklArenaActionData)),
+        };
+
+        let fixture = hex::decode("2222222226000000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
     fn test_tele_to_mansion_fixture() {
         let action = GameActionMessage {
             sequence: 0x22222222,
@@ -173,6 +210,17 @@ mod tests {
 
         // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
         let fixture = hex::decode("2222222278020000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_tele_to_marketplace_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x33333333,
+            action: GameAction::TeleToMarketPlace(Box::new(TeleToMarketPlaceActionData)),
+        };
+
+        let fixture = hex::decode("333333338d020000").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 

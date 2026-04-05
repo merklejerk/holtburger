@@ -165,7 +165,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageKind::System,
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /swear, /unswear, /permit, /unpermit, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
@@ -193,6 +193,14 @@ impl GameState {
         self.chat.log(
             ChatMessageKind::System,
             "Movement: /scoot [METERS] (defaults to 1m)".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Teleports: /arena (PKL arena), /mp (marketplace)".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "PK Lite: /pkl (turn on PK Lite mode)".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -301,6 +309,15 @@ impl GameState {
                 "Recall to your lifestone.".to_string(),
                 "Alias: /lifestone".to_string(),
             ],
+            "arena" => vec![
+                "Usage: /arena".to_string(),
+                "Teleport to the PK-Lite arena.".to_string(),
+            ],
+            "mp" => vec![
+                "Usage: /mp".to_string(),
+                "Teleport to the marketplace.".to_string(),
+            ],
+            "pkl" => vec!["Usage: /pkl".to_string(), "Enter PK Lite mode.".to_string()],
             "hq" => vec![
                 "Usage: /hq".to_string(),
                 "Recall to allegiance housing.".to_string(),
@@ -309,7 +326,6 @@ impl GameState {
                 "Usage: /rip".to_string(),
                 "Kill your character.".to_string(),
             ],
-            "pkl" => vec!["Usage: /pkl".to_string(), "Enter PK Lite mode.".to_string()],
             _ => return None,
         };
 
@@ -713,6 +729,21 @@ impl GameState {
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
+            "/arena" => {
+                result.commands.push(ClientCommand::TeleportToPklArena);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/mp" => {
+                result.commands.push(ClientCommand::TeleportToMarketplace);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/pkl" => {
+                result.commands.push(ClientCommand::EnterPkLite);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
             "/hq" => {
                 result.commands.push(ClientCommand::RecallAllegianceHousing);
                 self.finish_input_command_submission(command);
@@ -720,11 +751,6 @@ impl GameState {
             }
             "/rip" => {
                 result.commands.push(ClientCommand::Suicide);
-                self.finish_input_command_submission(command);
-                result.with_redraw(true)
-            }
-            "/pkl" => {
-                result.commands.push(ClientCommand::EnterPkLite);
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
@@ -785,6 +811,75 @@ mod tests {
         assert!(state.chat.messages.iter().any(|message| {
             message.text == "Use /help <COMMAND> for detailed help on a specific command."
         }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/arena"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/mp"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/pkl"))
+        );
+    }
+
+    #[test]
+    fn arena_command_dispatches_pkl_teleport() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/arena");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::TeleportToPklArena)
+        ));
+    }
+
+    #[test]
+    fn marketplace_command_dispatches_marketplace_teleport() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/mp");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::TeleportToMarketplace)
+        ));
+    }
+
+    #[test]
+    fn pkl_command_dispatches_enter_pklite() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/pkl");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::EnterPkLite)
+        ));
     }
 
     #[test]

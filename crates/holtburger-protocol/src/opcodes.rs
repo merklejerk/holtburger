@@ -531,8 +531,8 @@ pub enum GameActionOpcode {
     // ListAvailableHouses = 0x0270,
 
     // --- Movement (Extra) ---
-    // /// C2S: Teleport to a PK-Lite arena.
-    // TeleToPklArena = 0x0026,
+    /// C2S: Teleport to a PK-Lite arena.
+    TeleToPklArena = 0x0026,
     // /// C2S: Teleport to a PK arena.
     // TeleToPkArena = 0x0027,
     /// C2S: Teleport to the character's attuned Lifestone.
@@ -541,8 +541,8 @@ pub enum GameActionOpcode {
     // AdvocateTeleport = 0x00D6,
     /// C2S: Teleport to the allegiance mansion or villa.
     TeleToMansion = 0x0278,
-    // /// C2S: Teleport to the Marketplace.
-    // TeleToMarketPlace = 0x028D,
+    /// C2S: Teleport to the Marketplace.
+    TeleToMarketPlace = 0x028D,
     /// C2S: Enter PK-Lite state.
     EnterPkLite = 0x028F,
     // /// C2S: Server-controlled or legacy jump command.

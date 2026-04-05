@@ -7,6 +7,7 @@ use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{ContextView, InspectTarget};
+use crate::utils::wrap_text;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_world::book::BookData;
 use holtburger_world::inspect::InspectableObject;
@@ -22,12 +23,13 @@ pub fn render_context_pane(
     area: Rect,
 ) {
     let height = area.height.saturating_sub(2) as usize;
-    let total_ctx = context_buffer.len();
+    let display_lines = build_context_display_lines(context_buffer, context_view, area.width.saturating_sub(2) as usize);
+    let total_ctx = display_lines.len();
 
     let ctx_start = scroll_offset.min(total_ctx.saturating_sub(height));
     let ctx_end = (ctx_start + height).min(total_ctx);
 
-    let mut ctx_items: Vec<ListItem<'static>> = context_buffer[ctx_start..ctx_end]
+    let mut ctx_items: Vec<ListItem<'static>> = display_lines[ctx_start..ctx_end]
         .iter()
         .map(|s| ListItem::new(s.clone()))
         .collect();
@@ -56,11 +58,11 @@ pub fn render_context_pane(
 
     let ctx_title = format!(" {} ", base_title);
 
-    let ctx_list = List::new(ctx_items).block(
-        pane_block(is_focused)
-            .title(ctx_title)
-            .title_style(pane_title_style(is_focused)),
-    );
+    let ctx_block = pane_block(is_focused)
+        .title(ctx_title)
+        .title_style(pane_title_style(is_focused));
+
+    let ctx_list = List::new(ctx_items).block(ctx_block);
     f.render_widget(ctx_list, area);
 
     crate::components::scroll::render_scrollbar(
@@ -72,6 +74,25 @@ pub fn render_context_pane(
         total_ctx,
         ctx_start,
     );
+}
+
+pub fn build_context_display_lines(
+    context_buffer: &[Line<'static>],
+    context_view: &ContextView,
+    width: usize,
+) -> Vec<Line<'static>> {
+    match context_view {
+        ContextView::Book(_) => context_buffer
+            .iter()
+            .flat_map(|line| {
+                wrap_text(&line.to_string(), width)
+                    .into_iter()
+                    .map(Line::from)
+                    .collect::<Vec<_>>()
+            })
+            .collect(),
+        _ => context_buffer.to_vec(),
+    }
 }
 
 pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
@@ -210,7 +231,10 @@ fn resolve_inspectable_target<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{book_author_name, build_book_content};
+    use super::{book_author_name, build_book_content, build_context_display_lines};
+    use crate::types::ContextView;
+    use holtburger_common::Guid;
+    use ratatui::text::Line;
     use holtburger_world::book::{BookData, BookPage};
 
     #[test]
@@ -256,5 +280,15 @@ mod tests {
             ]
         );
         assert_eq!(book_author_name(&book), Some("A. Writer"));
+    }
+
+    #[test]
+    fn build_context_display_lines_wraps_book_content() {
+        let lines = vec![Line::from("This book line is long enough to wrap.")];
+
+        let rendered = build_context_display_lines(&lines, &ContextView::Book(Guid::NULL), 12);
+
+        assert!(rendered.len() > 1, "rendered: {:?}", rendered);
+        assert_eq!(rendered[0].to_string(), "This book");
     }
 }

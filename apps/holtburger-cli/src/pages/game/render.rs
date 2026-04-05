@@ -15,6 +15,7 @@ use crate::pages::game::panels::chat::render_chat_pane;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::game::panels::dynamic::render_dynamic_pane;
+use crate::pages::game::panels::context::build_context_display_lines;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
@@ -77,10 +78,16 @@ impl GameState {
             height: chat_area.height.saturating_sub(2),
         };
 
+        let context_width = main_chunks_vec[2].width.saturating_sub(2) as usize;
         let context_len = self
             .live_context_buffer()
-            .map(|content| content.len())
-            .unwrap_or_else(|| self.context_buffer_len());
+            .map(|content| {
+                build_context_display_lines(&content, &self.view.context_view, context_width).len()
+            })
+            .unwrap_or_else(|| {
+                build_context_display_lines(self.context_buffer(), &self.view.context_view, context_width)
+                    .len()
+            });
         let ctx_h = main_chunks_vec[2].height.saturating_sub(2) as usize;
         let max_ctx_scroll = context_len.saturating_sub(ctx_h);
         self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);

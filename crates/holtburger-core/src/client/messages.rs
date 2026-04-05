@@ -421,6 +421,16 @@ impl ClientRuntime {
                 self.enter_world().await?;
                 Ok(())
             }
+            GameMessage::PlayerKilled(data) => {
+                self.emit_wire_event(WireEvent::CombatFeedback(
+                    crate::client::types::CombatFeedback::PlayerKilled {
+                        death_message: data.death_message.clone(),
+                        victim_id: data.victim_id,
+                        killer_id: data.killer_id,
+                    },
+                ));
+                Ok(())
+            }
             GameMessage::PlayerTeleport(data) => {
                 log::info!(
                     "Portal transition started (seq: {})",

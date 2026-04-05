@@ -52,6 +52,9 @@ impl CombatRuntimeState {
                 self.attack_queued = false;
                 self.attack_sequence_active = false;
             }
+            // PlayerKilled notifies when any nearby player is killed, so it may
+            // not affect our own attack state.
+            CombatFeedback::PlayerKilled { .. } => {}
             CombatFeedback::AttackerNotification { .. }
             | CombatFeedback::DefenderNotification { .. }
             | CombatFeedback::EvasionAttackerNotification { .. }
@@ -175,6 +178,22 @@ mod tests {
 
         state.handle_feedback(&CombatFeedback::AttackDone {
             error: WeenieError::ActionCancelled,
+        });
+
+        assert_eq!(state.attack_activity(CombatMode::Melee), None);
+    }
+
+    #[test]
+    fn player_killed_feedback_clears_attack_activity() {
+        let mut state = CombatRuntimeState {
+            attack_queued: true,
+            attack_sequence_active: true,
+        };
+
+        state.handle_feedback(&CombatFeedback::PlayerKilled {
+            death_message: "A nearby player has died.".to_string(),
+            victim_id: holtburger_common::Guid(0x12345678),
+            killer_id: holtburger_common::Guid(0x90ABCDEF),
         });
 
         assert_eq!(state.attack_activity(CombatMode::Melee), None);

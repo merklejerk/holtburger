@@ -146,8 +146,8 @@ pub enum GameOpcode {
     PrivateUpdateVitalCurrent = 0x02E9,
     // /// S2C: Update public Vital current value (tick). (Note: Confirmed GHOST, 0x02EA is unused in ACE)
     // PublicUpdateVitalCurrentGhost = 0x02EA,
-    // /// S2C: Player was killed in combat.
-    // PlayerKilled = 0x019E,
+    /// S2C: Player was killed in combat.
+    PlayerKilled = 0x019E,
 
     // --- Communication & Chat ---
     /// S2C: Text emote.

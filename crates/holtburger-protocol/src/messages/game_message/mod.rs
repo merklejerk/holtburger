@@ -29,6 +29,7 @@ pub enum GameMessage {
     CharacterEnterWorldServerReady, // 0xF7DF
     ServerName(Box<ServerNameData>),
     ServerMessage(Box<ServerMessageData>),
+    PlayerKilled(Box<PlayerKilledData>),
     TurbineChat(Box<TurbineChatMessageData>),
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),

@@ -38,6 +38,12 @@ fn test_dispatch_character_enter_world() {
 }
 
 #[test]
+fn test_dispatch_player_killed() {
+    let fixture = hex::decode("9E010000040054657374000078563412EFCDAB90").unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::PlayerKilled(_)));
+}
+
+#[test]
 fn test_dispatch_character_enter_world_request() {
     assert_dispatch_match(test_fixtures::CHARACTER_ENTER_WORLD_REQUEST, |msg| {
         matches!(msg, GameMessage::CharacterEnterWorldRequest(_))

@@ -274,6 +274,11 @@ pub enum CombatFeedback {
     KillerNotification {
         death_message: String,
     },
+    PlayerKilled {
+        death_message: String,
+        victim_id: Guid,
+        killer_id: Guid,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 
 use crate::pages::selection::SelectionState;
 use crate::pages::selection::creation::CharacterCreationFocus;
+use crate::pages::selection::presentation_utils::dashboard_verbs;
 use crate::types::{RedrawPriority, UpdateResult};
 
 impl SelectionState {
@@ -57,8 +58,7 @@ impl SelectionState {
                 }
             }
             KeyCode::Enter => {
-                if let Some(verb) = self
-                    .dashboard_verbs()
+                if let Some(verb) = dashboard_verbs(self)
                     .into_iter()
                     .find(|verb| verb.shortcut == '\r')
                 {
@@ -74,8 +74,7 @@ impl SelectionState {
                         self.selected_character_index = idx;
                         result.request_redraw(RedrawPriority::Immediate);
                     }
-                } else if let Some(verb) = self
-                    .dashboard_verbs()
+                } else if let Some(verb) = dashboard_verbs(self)
                     .into_iter()
                     .find(|verb| verb.shortcut.eq_ignore_ascii_case(&c))
                 {

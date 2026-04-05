@@ -3,6 +3,7 @@ use crate::pages::selection::SelectionState;
 use crate::pages::selection::creation::{
     CharacterCreationFocus, CharacterCreationSkillRow, CharacterCreationState,
 };
+use crate::pages::selection::presentation_utils::{creation_footer_hint, dashboard_footer_hint};
 use crate::pages::selection::render::{advancement_group_label, skill_raise_cost_label};
 use crate::pages::selection::state::CharacterScreen;
 use crate::theme::{ERROR_FG, SUMMARY_FG, list_item_style, pane_block, pane_title_style};
@@ -26,7 +27,7 @@ pub fn render_character_selection(f: &mut Frame, state: &SelectionState, area: R
 fn render_character_dashboard(f: &mut Frame, state: &SelectionState, area: Rect) {
     let block = pane_block(true)
         .title(Line::from(" Character Dashboard ").style(pane_title_style(true)))
-        .title_bottom(Line::from(format!(" {} ", state.dashboard_footer_hint())));
+        .title_bottom(Line::from(format!(" {} ", dashboard_footer_hint(state))));
     let inner = block.inner(area);
 
     f.render_widget(block, area);
@@ -79,7 +80,7 @@ fn render_character_dashboard(f: &mut Frame, state: &SelectionState, area: Rect)
 fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) {
     let block = pane_block(true)
         .title(Line::from(" Character Creation ").style(pane_title_style(true)))
-        .title_bottom(Line::from(format!(" {} ", state.creation_footer_hint())));
+        .title_bottom(Line::from(format!(" {} ", creation_footer_hint(state))));
     let inner = block.inner(area);
     let chunks = Layout::default()
         .direction(Direction::Vertical)

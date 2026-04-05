@@ -4,7 +4,7 @@ use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry}
 
 use crate::components::text_input::SingleLineTextInput;
 use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
-use crate::types::{AppAction, AppUiAction, ChatMessageKind, UpdateResult, Verb};
+use crate::types::{AppAction, AppUiAction, ChatMessageKind, UpdateResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CharacterScreen {
@@ -66,73 +66,6 @@ pub struct SelectionState {
 impl SelectionState {
     pub fn selected_character(&self) -> Option<&CharacterDashboardEntry> {
         self.characters.get(self.selected_character_index)
-    }
-
-    pub fn dashboard_verbs(&self) -> Vec<Verb> {
-        let mut verbs = vec![Verb::new(
-            AppUiAction::OpenCharacterCreationScreen,
-            'n',
-            "New",
-        )];
-
-        if self
-            .selected_character()
-            .is_some_and(|character| character.character.delete_time == 0)
-        {
-            verbs.push(Verb::new(
-                AppUiAction::OpenDeleteCharacterConfirmation,
-                'd',
-                "Delete",
-            ));
-            verbs.push(Verb::new(AppAction::EnterSelectedCharacter, '\r', "World"));
-        }
-
-        if self
-            .selected_character()
-            .is_some_and(|character| character.character.delete_time != 0)
-        {
-            verbs.push(Verb::new(
-                AppUiAction::RestoreSelectedCharacter,
-                'r',
-                "Restore",
-            ));
-        }
-
-        verbs
-    }
-
-    pub fn creation_verbs(&self) -> Vec<Verb> {
-        self.creation
-            .ready()
-            .map(|creation| creation.verbs())
-            .unwrap_or_else(|| {
-                vec![Verb::new(
-                    AppUiAction::OpenCharacterDashboard,
-                    '\x1b',
-                    "Back",
-                )]
-            })
-    }
-
-    pub fn dashboard_footer_hint(&self) -> String {
-        let mut segments = vec![
-            "[1-9] Quick Select".to_string(),
-            "[UP/DOWN] Move".to_string(),
-        ];
-        segments.extend(
-            self.dashboard_verbs()
-                .iter()
-                .map(Verb::display_label)
-                .collect::<Vec<_>>(),
-        );
-        segments.join("  ")
-    }
-
-    pub fn creation_footer_hint(&self) -> String {
-        self.creation
-            .ready()
-            .map(|creation| creation.footer_hint())
-            .unwrap_or_else(|| "[ESC] Back".to_string())
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
@@ -426,6 +359,7 @@ impl SelectionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pages::selection::presentation_utils as selection_presentation;
     use holtburger_common::Guid;
 
     fn test_state() -> SelectionState {
@@ -450,7 +384,7 @@ mod tests {
     #[test]
     fn dashboard_verbs_hide_delete_and_world_when_no_selection() {
         let state = SelectionState::default();
-        let verbs = state.dashboard_verbs();
+        let verbs = selection_presentation::dashboard_verbs(&state);
 
         assert_eq!(verbs.len(), 1);
         assert_eq!(verbs[0].label, "New");
@@ -526,7 +460,7 @@ mod tests {
         let mut state = test_state();
         state.characters[0].character.delete_time = 123;
 
-        let verbs = state.dashboard_verbs();
+        let verbs = selection_presentation::dashboard_verbs(&state);
 
         assert!(verbs.iter().any(|verb| matches!(
             verb.action,

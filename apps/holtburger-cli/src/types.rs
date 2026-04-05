@@ -471,6 +471,9 @@ pub enum AppAction {
     Follow {
         guid: Guid,
     },
+    Scoot {
+        distance_m: f32,
+    },
     Drop {
         guid: Guid,
     },

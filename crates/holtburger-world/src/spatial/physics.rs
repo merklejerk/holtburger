@@ -255,13 +255,12 @@ fn advance_grounded_body_kinematics(
     }
 }
 
-pub(crate) fn project_pose_by_velocity(
+fn project_pose_by_offset(
     authoritative_pose: WorldPosition,
-    velocity: Vector3,
-    dt_secs: f32,
+    offset: Vector3,
     target_hint: Option<WorldPosition>,
 ) -> WorldPosition {
-    if dt_secs <= 0.0 {
+    if offset.length_squared() <= f32::EPSILON {
         return authoritative_pose;
     }
 
@@ -274,7 +273,7 @@ pub(crate) fn project_pose_by_velocity(
             rotation: authoritative_pose.rotation,
         }
         .global_coords();
-        let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
+        let projected_global = authoritative_pose.global_coords() + offset;
 
         return WorldPosition {
             landblock_id: indoor_landblock_id,
@@ -287,7 +286,7 @@ pub(crate) fn project_pose_by_velocity(
         };
     }
 
-    let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
+    let projected_global = authoritative_pose.global_coords() + offset;
     let landblock_x =
         (projected_global.x.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
     let landblock_y =
@@ -303,6 +302,33 @@ pub(crate) fn project_pose_by_velocity(
         ),
         rotation: authoritative_pose.rotation,
     }
+}
+
+pub(crate) fn project_pose_by_velocity(
+    authoritative_pose: WorldPosition,
+    velocity: Vector3,
+    dt_secs: f32,
+    target_hint: Option<WorldPosition>,
+) -> WorldPosition {
+    if dt_secs <= 0.0 {
+        return authoritative_pose;
+    }
+
+    project_pose_by_offset(
+        authoritative_pose,
+        velocity * dt_secs,
+        target_hint,
+    )
+}
+
+pub fn project_pose_forward_distance(
+    authoritative_pose: WorldPosition,
+    distance_m: f32,
+) -> WorldPosition {
+    let heading = authoritative_pose.rotation.to_heading();
+    let forward_offset = Vector3::new(-heading.cos(), heading.sin(), 0.0) * distance_m;
+
+    project_pose_by_offset(authoritative_pose, forward_offset, None)
 }
 
 pub fn advance_body_kinematics(input: &SolveBodyInput, dt: Duration) -> SolvedBodyKinematics {

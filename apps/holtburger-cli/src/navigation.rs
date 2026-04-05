@@ -2,7 +2,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 use holtburger_core::client::movement_types::{AutonomousDriveIntent, Gait, PlayerDriveIntent};
 use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_world::{SelfMovementKinematics, SpatialEntitySample};
+use holtburger_world::{SelfMovementKinematics, SpatialEntitySample, project_pose_forward_distance};
 use std::time::{Duration, Instant};
 
 use crate::types::Interaction;
@@ -11,6 +11,7 @@ const MELEE_ATTACK_DISTANCE: f32 = 0.6;
 const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 const DEFAULT_APPROACH_DISTANCE: f32 = 1.0;
 const DEFAULT_FOLLOW_DISTANCE: f32 = 0.1;
+const SCOOT_ARRIVAL_DEADBAND_M: f32 = 0.1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedNavigationTarget {
@@ -58,6 +59,7 @@ impl NavigationSyncInput {
 pub enum NavigationInput {
     StartApproach { target: Guid },
     StartFollow { target: Guid },
+    StartScoot { distance_m: f32 },
     Cancel,
     ForcedReposition,
     TeleportStarted,
@@ -106,6 +108,10 @@ pub enum NavigationInteractionChange {
 pub(crate) enum NavigationMode {
     Approach { target: Guid, arrival_distance: f32 },
     Follow { target: Guid, arrival_distance: f32 },
+    Scoot {
+        target_pose: WorldPosition,
+        arrival_distance: f32,
+    },
     StickyMelee { target: Guid },
 }
 
@@ -121,6 +127,10 @@ enum ActiveNavigation {
         target_guid: Guid,
         arrival_distance: f32,
         pursuing: bool,
+    },
+    Scoot {
+        target_pose: WorldPosition,
+        arrival_distance: f32,
     },
     StickyMelee {
         target_guid: Guid,
@@ -199,7 +209,7 @@ impl TuiNavigation {
             ActiveNavigation::Approach { target_guid, .. }
             | ActiveNavigation::Follow { target_guid, .. }
             | ActiveNavigation::StickyMelee { target_guid, .. } => Some(target_guid),
-            ActiveNavigation::Idle => None,
+            ActiveNavigation::Scoot { .. } | ActiveNavigation::Idle => None,
         }
     }
 
@@ -247,6 +257,10 @@ impl TuiNavigation {
                     NavigationUpdate::unchanged()
                 }
             }
+            NavigationInput::StartScoot { distance_m } => {
+                self.activate_scoot(distance_m, &sync_input);
+                NavigationUpdate::unchanged()
+            }
             NavigationInput::Cancel => {
                 self.clear_navigation();
                 NavigationUpdate {
@@ -284,6 +298,7 @@ impl TuiNavigation {
         let arrival_command = match self.active {
             ActiveNavigation::Approach { .. } => self.sync_approach(&sync_input),
             ActiveNavigation::Follow { .. } => self.sync_follow(&sync_input),
+            ActiveNavigation::Scoot { .. } => self.sync_scoot(&sync_input),
             ActiveNavigation::Idle | ActiveNavigation::StickyMelee { .. } => {
                 self.sync_sticky_melee(
                     combat_target_guid,
@@ -350,6 +365,24 @@ impl TuiNavigation {
         self.sync_follow(input);
     }
 
+    fn activate_scoot(&mut self, distance_m: f32, input: &NavigationSyncInput) {
+        let Some(player_position) = input.player_position else {
+            self.active = ActiveNavigation::Idle;
+            return;
+        };
+
+        let target_pose = project_pose_forward_distance(player_position, distance_m);
+        log::info!(
+            "tui navigation: starting scoot distance_m={:.2} target_pose={:?}",
+            distance_m,
+            target_pose
+        );
+        self.active = ActiveNavigation::Scoot {
+            target_pose,
+            arrival_distance: SCOOT_ARRIVAL_DEADBAND_M,
+        };
+    }
+
     fn clear_navigation(&mut self) {
         if !matches!(self.active, ActiveNavigation::Idle) {
             log::info!("tui navigation: clearing active navigation mode");
@@ -369,6 +402,7 @@ impl TuiNavigation {
                 arrival_distance,
                 pursuing: false,
             },
+            ActiveNavigation::Scoot { .. } => ActiveNavigation::Idle,
             ActiveNavigation::StickyMelee {
                 target_guid,
                 latched_target_guid,
@@ -402,6 +436,13 @@ impl TuiNavigation {
                 ..
             } => Some(NavigationMode::Follow {
                 target: target_guid,
+                arrival_distance,
+            }),
+            ActiveNavigation::Scoot {
+                target_pose,
+                arrival_distance,
+            } => Some(NavigationMode::Scoot {
+                target_pose,
                 arrival_distance,
             }),
             ActiveNavigation::StickyMelee {
@@ -445,6 +486,7 @@ impl TuiNavigation {
             | ActiveNavigation::StickyMelee { pursuing: true, .. } => input
                 .projected_target_position()
                 .ok_or(NavigationDriveBlockReason::MissingTargetPose)?,
+            ActiveNavigation::Scoot { target_pose, .. } => target_pose,
             ActiveNavigation::Idle
             | ActiveNavigation::Follow {
                 pursuing: false, ..
@@ -533,6 +575,30 @@ impl TuiNavigation {
         if !pursuing && was_pursuing && self.drive_active {
             self.clear_drive_active();
             return Some(self.arrival_drive_command(input));
+        }
+
+        None
+    }
+
+    fn sync_scoot(&mut self, input: &NavigationSyncInput) -> Option<PlayerDriveIntent> {
+        let ActiveNavigation::Scoot {
+            target_pose,
+            arrival_distance,
+        } = self.active
+        else {
+            return None;
+        };
+
+        let Some(player_position) = input.player_position else {
+            return None;
+        };
+
+        if player_position.distance_to(&target_pose) <= arrival_distance {
+            self.active = ActiveNavigation::Idle;
+            if self.drive_active {
+                self.clear_drive_active();
+                return Some(PlayerDriveIntent::ArriveAtPose { pose: target_pose });
+            }
         }
 
         None
@@ -881,6 +947,32 @@ mod tests {
     }
 
     #[test]
+    fn handle_input_start_scoot_creates_forward_target_pose() {
+        let player_position = world_position(12.0, -4.0, 1.5);
+        let target_position = project_pose_forward_distance(player_position, 3.5);
+        let mut navigation = TuiNavigation::default();
+
+        let update = navigation.handle_input(
+            NavigationInput::StartScoot { distance_m: 3.5 },
+            snapshot(
+                Some(player_position),
+                None,
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        );
+
+        assert_eq!(update.drive_command, None);
+        assert!(matches!(
+            navigation.navigation_mode(),
+            Some(NavigationMode::Scoot {
+                target_pose,
+                arrival_distance,
+            }) if target_pose == target_position && (arrival_distance - SCOOT_ARRIVAL_DEADBAND_M).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
     fn tick_emits_arrival_pose_when_drive_goes_idle() {
         let now = Instant::now();
         let player_position = world_position(0.0, 0.0, 0.0);
@@ -922,6 +1014,40 @@ mod tests {
             })
         );
         assert!(!navigation.drive_active);
+    }
+
+    #[test]
+    fn scoot_completion_emits_arrival_pose_and_stops_drive() {
+        let now = Instant::now();
+        let player_position = world_position(12.0, -4.0, 1.5);
+        let target_pose = project_pose_forward_distance(player_position, 2.0);
+        let mut navigation = TuiNavigation {
+            drive_active: true,
+            last_drive_block_reason: None,
+            ..Default::default()
+        };
+        navigation.active = ActiveNavigation::Scoot {
+            target_pose,
+            arrival_distance: SCOOT_ARRIVAL_DEADBAND_M,
+        };
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.1),
+            snapshot: snapshot(
+                Some(target_pose),
+                None,
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert_eq!(
+            update.drive_command,
+            Some(PlayerDriveIntent::ArriveAtPose { pose: target_pose })
+        );
+        assert!(!navigation.drive_active);
+        assert!(matches!(navigation.navigation_mode(), None));
     }
 
     #[test]

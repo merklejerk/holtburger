@@ -35,7 +35,7 @@ pub use spatial::{
     SelfPlayerDriveProjectionState, SolveBodyInput, SolveProjectionBasis, SolvedBodyKinematics,
     SpatialBody, SpatialBodyEvent, SpatialBodyId, SpatialEntitySample, SpatialPhysics,
     SpatialSampleMode, SpatialSamplingConfig, SpatialSamplingState, SpatialScene,
-    SpatialSolveBatch, SpatialSolveRequest, advance_body_kinematics,
+    SpatialSolveBatch, SpatialSolveRequest, advance_body_kinematics, project_pose_forward_distance,
 };
 pub use state::{
     PlayerMotionTableLookupError, PlayerMotionTableResolution, PlayerMotionTableSource,

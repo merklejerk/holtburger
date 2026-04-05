@@ -1,6 +1,7 @@
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::CharacterOption;
+use holtburger_common::Guid;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RaiseAttributeActionData {
@@ -155,6 +156,24 @@ impl ProtocolPack for SetSingleCharacterOptionActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SwearAllegianceActionData {
+    pub target_guid: Guid,
+}
+
+impl ProtocolUnpack for SwearAllegianceActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target_guid = Guid::unpack(data, offset)?;
+        Some(Self { target_guid })
+    }
+}
+
+impl ProtocolPack for SwearAllegianceActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.target_guid.pack(writer);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +255,18 @@ mod tests {
             )),
         };
         assert_pack_unpack_parity(fixtures::ACTION_SET_SINGLE_CHARACTER_OPTION, &action);
+    }
+
+    #[test]
+    fn test_swear_allegiance_parity() {
+        let action = GameActionMessage {
+            sequence: 0x11223344,
+            action: GameAction::SwearAllegiance(Box::new(SwearAllegianceActionData {
+                target_guid: Guid(0x5000_0042),
+            })),
+        };
+
+        let fixture = hex::decode("443322111D00000042000050").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
     }
 }

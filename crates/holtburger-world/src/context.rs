@@ -62,6 +62,13 @@ pub fn run_rate_from_skill_and_burden(run_skill: f32, burden: f32) -> f32 {
     }
 }
 
+fn normalize_name_for_lookup(name: &str) -> String {
+    name.chars()
+        .filter(|character| !character.is_whitespace())
+        .map(|character| character.to_ascii_lowercase())
+        .collect()
+}
+
 /// Provides access to the world state for common logic.
 pub trait WorldContext {
     fn get_player_guid(&self) -> Option<Guid>;
@@ -127,6 +134,17 @@ impl WorldContext for WorldState {
 
 /// Common game logic shared across all clients.
 pub trait WorldContextExt: WorldContext {
+    fn resolve_player_guid_by_name(&self, name: &str) -> Option<Guid> {
+        let normalized_name = normalize_name_for_lookup(name);
+        if normalized_name.is_empty() {
+            return None;
+        }
+
+        self.iter_entities()
+            .find(|entity| normalize_name_for_lookup(entity.name()) == normalized_name)
+            .map(|entity| entity.guid)
+    }
+
     fn player_burden(&self) -> Option<f32> {
         self.get_player_guid()?;
 
@@ -1125,5 +1143,16 @@ mod tests {
         assert!(world.is_owned_by_player(inventory_guid));
         assert!(world.is_owned_by_player(equipped_guid));
         assert!(!world.is_owned_by_player(other_guid));
+    }
+
+    #[test]
+    fn resolve_player_guid_by_name_ignores_whitespace_and_case() {
+        let target_guid = Guid(0x8000_0001);
+        let mut world = TestWorld::default();
+        world.entities.insert(target_guid, entity(target_guid, "Sir   Loin"));
+
+        assert_eq!(world.resolve_player_guid_by_name("sirloin"), Some(target_guid));
+        assert_eq!(world.resolve_player_guid_by_name(" S I R   L O I N "), Some(target_guid));
+        assert_eq!(world.resolve_player_guid_by_name("   \t  "), None);
     }
 }

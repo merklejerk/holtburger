@@ -510,6 +510,9 @@ pub enum ClientCommand {
     Emote(String),
     RecallLifestone,
     RecallAllegianceHousing,
+    SwearAllegiance {
+        target: Guid,
+    },
     Suicide,
     EnterPkLite,
     Ping,
@@ -593,11 +596,11 @@ pub enum ClientCommand {
     },
     ShowPartyStatus,
     InviteToParty {
-        player: String,
+        target: Guid,
     },
     LeaveParty,
     UninviteFromParty {
-        player: String,
+        target: Guid,
     },
     CloseContainer(Guid),
     UseWithTarget {

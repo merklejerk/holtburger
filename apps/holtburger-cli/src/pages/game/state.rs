@@ -523,6 +523,21 @@ impl GameState {
             AppAction::TalkTo { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
+            AppAction::InviteToParty { target } => {
+                result
+                    .commands
+                    .push(ClientCommand::InviteToParty { target });
+            }
+            AppAction::UninviteFromParty { target } => {
+                result
+                    .commands
+                    .push(ClientCommand::UninviteFromParty { target });
+            }
+            AppAction::SwearAllegiance { target } => {
+                result
+                    .commands
+                    .push(ClientCommand::SwearAllegiance { target });
+            }
             AppAction::Open { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
@@ -2828,6 +2843,57 @@ mod tests {
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
+    fn swear_allegiance_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::SwearAllegiance {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::SwearAllegiance { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
+    fn invite_to_party_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::InviteToParty {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::InviteToParty { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
+    fn uninvite_from_party_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::UninviteFromParty {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::UninviteFromParty { target }) if *target == Guid(0x50000042)
+        ));
     }
 
     #[test]

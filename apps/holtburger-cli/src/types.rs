@@ -494,6 +494,15 @@ pub enum AppAction {
     TalkTo {
         guid: Guid,
     },
+    InviteToParty {
+        target: Guid,
+    },
+    UninviteFromParty {
+        target: Guid,
+    },
+    SwearAllegiance {
+        target: Guid,
+    },
     Open {
         guid: Guid,
     },

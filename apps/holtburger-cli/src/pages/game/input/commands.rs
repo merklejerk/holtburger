@@ -2,6 +2,7 @@ use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
 use crate::types::{ChatMessageKind, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
+use holtburger_world::context::WorldContextExt;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
     match raw {
@@ -164,12 +165,16 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageKind::System,
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /swear, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
             "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Allegiance: /g <MSG>, /swear <NAME>".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -223,6 +228,10 @@ impl GameState {
                 "Usage: /g <MSG>".to_string(),
                 "Send a message to allegiance chat.".to_string(),
                 "Alias: /guild <MSG>".to_string(),
+            ],
+            "swear" => vec![
+                "Usage: /swear <NAME>".to_string(),
+                "Attempt to swear allegiance to the named player.".to_string(),
             ],
             "party" | "p" => vec![
                 "Usage: /party".to_string(),
@@ -480,6 +489,27 @@ impl GameState {
             return result.with_redraw(true);
         }
 
+        if let Some(target) = parse_single_argument_command(command, &["/swear"]) {
+            let Some(target) = self.data.resolve_player_guid_by_name(target) else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    format!("Unable to find player '{}' to swear allegiance to.", target),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppAction::SwearAllegiance { target });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/swear" {
+            self.log_command_usage("Usage: /swear <NAME>");
+            return result.with_redraw(true);
+        }
+
         if let Some(message) = parse_message_only_command(command, &["/p", "/party"]) {
             result.commands.push(ClientCommand::ChannelMessage {
                 channel: ChatChannelKind::Fellowship,
@@ -542,9 +572,17 @@ impl GameState {
         }
 
         if let Some(player) = parse_single_argument_command(command, &["/invite"]) {
-            result.commands.push(ClientCommand::InviteToParty {
-                player: player.to_string(),
-            });
+            let Some(target) = self.data.resolve_player_guid_by_name(player) else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    format!("Unable to find player '{}' to invite.", player),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppAction::InviteToParty { target });
             self.finish_input_command_submission(command);
             return result.with_redraw(true);
         }
@@ -561,9 +599,17 @@ impl GameState {
         }
 
         if let Some(player) = parse_single_argument_command(command, &["/uninvite"]) {
-            result.commands.push(ClientCommand::UninviteFromParty {
-                player: player.to_string(),
-            });
+            let Some(target) = self.data.resolve_player_guid_by_name(player) else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    format!("Unable to find player '{}' to remove from party.", player),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppAction::UninviteFromParty { target });
             self.finish_input_command_submission(command);
             return result.with_redraw(true);
         }
@@ -660,6 +706,13 @@ mod tests {
                 .messages
                 .iter()
                 .any(|message| message.text.contains("/options list"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/swear <NAME>"))
         );
         assert!(
             state
@@ -818,6 +871,31 @@ mod tests {
     }
 
     #[test]
+    fn swear_command_dispatches_dedicated_app_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.data.entities.insert(
+            Guid(0x50000042),
+            holtburger_world::entity::Entity::new(
+                Guid(0x50000042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
+        state.chat_input.input.set_text("/swear Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::SwearAllegiance { target }) if *target == Guid(0x50000042)
+        ));
+        assert!(result.commands.is_empty());
+    }
+
+    #[test]
     fn party_command_dispatches_fellowship_channel_message() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -965,15 +1043,24 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
+        state.data.entities.insert(
+            Guid(0x50000042),
+            holtburger_world::entity::Entity::new(
+                Guid(0x50000042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
         state.chat_input.input.set_text("/invite Bestie");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::InviteToParty { player }) if player == "Bestie"
+            result.actions.first(),
+            Some(AppAction::InviteToParty { target }) if *target == Guid(0x50000042)
         ));
+        assert!(result.commands.is_empty());
     }
 
     #[test]
@@ -997,15 +1084,24 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
+        state.data.entities.insert(
+            Guid(0x50000042),
+            holtburger_world::entity::Entity::new(
+                Guid(0x50000042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
         state.chat_input.input.set_text("/uninvite Bestie");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::UninviteFromParty { player }) if player == "Bestie"
+            result.actions.first(),
+            Some(AppAction::UninviteFromParty { target }) if *target == Guid(0x50000042)
         ));
+        assert!(result.commands.is_empty());
     }
 
     #[test]

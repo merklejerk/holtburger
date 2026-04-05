@@ -412,8 +412,8 @@ pub enum GameActionOpcode {
     // SetDesiredComponentLevel = 0x0224,
 
     // --- Allegiance & Social ---
-    // /// C2S: Swear allegiance to a patron.
-    // SwearAllegiance = 0x001D,
+    /// C2S: Swear allegiance to a patron.
+    SwearAllegiance = 0x001D,
     // /// C2S: Break allegiance from a patron/vassal.
     // BreakAllegiance = 0x001E,
     // /// C2S: Request an update of allegiance information.

@@ -47,18 +47,6 @@ fn normalize_spell_cast(
     }
 }
 impl ClientRuntime {
-    fn resolve_player_guid_by_name(&self, name: &str) -> Option<Guid> {
-        if self.world.player.name().eq_ignore_ascii_case(name) {
-            return Some(self.world.player.guid);
-        }
-
-        self.world
-            .entities
-            .iter()
-            .find(|entity| entity.name().eq_ignore_ascii_case(name))
-            .map(|entity| entity.guid)
-    }
-
     fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
         match kind {
             crate::client::types::ChatChannelKind::Fellowship => Some(ChatChannel::Fellow),
@@ -146,6 +134,7 @@ impl ClientRuntime {
             | ClientCommand::SetCharacterOption { .. }
             | ClientCommand::RecallLifestone
             | ClientCommand::RecallAllegianceHousing
+            | ClientCommand::SwearAllegiance { .. }
             | ClientCommand::Suicide
             | ClientCommand::EnterPkLite
             | ClientCommand::RespondToConfirmation { .. } => {
@@ -576,6 +565,15 @@ impl ClientRuntime {
                 self.send_game_action(GameAction::TeleToMansion(Box::new(TeleToMansionActionData)))
                     .await
             }
+            ClientCommand::SwearAllegiance {
+                target: target_guid,
+            } => {
+                log::info!(">>> Swearing allegiance to 0x{:08X}", target_guid.0);
+                self.send_game_action(GameAction::SwearAllegiance(Box::new(
+                    SwearAllegianceActionData { target_guid },
+                )))
+                .await
+            }
             ClientCommand::Suicide => {
                 log::info!(">>> Initiating suicide");
                 self.send_game_action(GameAction::Suicide(Box::new(SuicideActionData)))
@@ -996,18 +994,12 @@ impl ClientRuntime {
                 }
                 Ok(())
             }
-            ClientCommand::InviteToParty { player } => {
-                let Some(player_guid) = self.resolve_player_guid_by_name(&player) else {
-                    self.emit_wire_event(WireEvent::ClientError(format!(
-                        "Unable to find player '{}' to invite.",
-                        player
-                    )));
-                    return Ok(());
-                };
-
-                log::info!(">>> Inviting {} to party", player);
+            ClientCommand::InviteToParty { target } => {
+                log::info!(">>> Inviting 0x{:08X} to party", target.0);
                 self.send_game_action(GameAction::FellowshipRecruit(Box::new(
-                    FellowshipRecruitActionData { player_guid },
+                    FellowshipRecruitActionData {
+                        player_guid: target,
+                    },
                 )))
                 .await
             }
@@ -1018,18 +1010,12 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::UninviteFromParty { player } => {
-                let Some(player_guid) = self.resolve_player_guid_by_name(&player) else {
-                    self.emit_wire_event(WireEvent::ClientError(format!(
-                        "Unable to find player '{}' to remove from party.",
-                        player
-                    )));
-                    return Ok(());
-                };
-
-                log::info!(">>> Removing {} from party", player);
+            ClientCommand::UninviteFromParty { target } => {
+                log::info!(">>> Removing 0x{:08X} from party", target.0);
                 self.send_game_action(GameAction::FellowshipDismiss(Box::new(
-                    FellowshipDismissActionData { player_guid },
+                    FellowshipDismissActionData {
+                        player_guid: target,
+                    },
                 )))
                 .await
             }
@@ -1480,20 +1466,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invite_to_party_resolves_player_name_to_guid() {
+    async fn invite_to_party_sends_guid_directly() {
         let mut client = build_test_client();
-        client
-            .world
-            .entities
-            .insert(holtburger_world::entity::Entity::new(
-                Guid(0x5000_0042),
-                "Bestie".to_string(),
-                holtburger_common::position::WorldPosition::default(),
-            ));
 
         client
             .handle_command(ClientCommand::InviteToParty {
-                player: "bestie".to_string(),
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn uninvite_from_party_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::UninviteFromParty {
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn swear_allegiance_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SwearAllegiance {
+                target: Guid(0x5000_0042),
             })
             .await
             .unwrap();

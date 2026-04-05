@@ -1,4 +1,5 @@
 use crate::WorldEvent;
+use crate::book::BookData;
 use crate::entity::Entity;
 use crate::state::WorldState;
 use crate::state::liveness::EntityUpsertKind;
@@ -176,6 +177,29 @@ pub(crate) fn handle_event(
                 } else {
                     false
                 }
+            } else {
+                false
+            }
+        }
+        GameEvent::BookDataResponse(data) => {
+            let guid = data.object_guid;
+            if let Some(entity) = state.entities.get_mut(guid) {
+                entity.book = Some(BookData::from_response(data));
+                events.push(WorldEvent::EntityReplaced(Box::new(entity.clone())));
+                true
+            } else {
+                false
+            }
+        }
+        GameEvent::BookPageDataResponse(data) => {
+            let guid = data.object_guid;
+            if let Some(entity) = state.entities.get_mut(guid) {
+                entity
+                    .book
+                    .get_or_insert_with(BookData::default)
+                    .apply_page_response(data);
+                events.push(WorldEvent::EntityReplaced(Box::new(entity.clone())));
+                true
             } else {
                 false
             }

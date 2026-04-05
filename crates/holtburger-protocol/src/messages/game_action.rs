@@ -1,3 +1,4 @@
+pub use crate::messages::book::actions::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
 pub use crate::messages::fellowship::actions::*;
@@ -66,6 +67,8 @@ pub enum GameAction {
     CancelAttack(Box<CancelAttackActionData>),
     Buy(Box<BuyActionData>),
     Sell(Box<SellActionData>),
+    BookData(Box<BookDataActionData>),
+    BookPageData(Box<BookPageDataActionData>),
     ConfirmationResponse(Box<ConfirmationResponseActionData>),
     OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
     CloseTradeNegotiations(Box<CloseTradeNegotiationsActionData>),
@@ -226,6 +229,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Sell => {
                     GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::BookData => {
+                    GameAction::BookData(Box::new(BookDataActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::BookPageData => GameAction::BookPageData(Box::new(
+                    BookPageDataActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::ConfirmationResponse => GameAction::ConfirmationResponse(
                     Box::new(ConfirmationResponseActionData::unpack(data, offset)?),
                 ),
@@ -492,6 +501,16 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::BookData(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::BookData as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::BookPageData(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::BookPageData as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::ConfirmationResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::ConfirmationResponse as u32)
                     .unwrap();
@@ -602,6 +621,18 @@ mod tests {
     fn test_action_query_health_parity() {
         let fixture = hex::decode("B1F7000009000000BF01000003000080").unwrap();
         assert_action_parity(&fixture, 9);
+    }
+
+    #[test]
+    fn test_action_book_data_parity() {
+        let fixture = hex::decode("B1F7000010000000AA00000044332211").unwrap();
+        assert_action_parity(&fixture, 0x10);
+    }
+
+    #[test]
+    fn test_action_book_page_data_parity() {
+        let fixture = hex::decode("B1F7000011000000AE0000004433221101000000").unwrap();
+        assert_action_parity(&fixture, 0x11);
     }
 
     #[test]

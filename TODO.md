@@ -27,7 +27,7 @@
 - [ ] Replace context panel header with entity name.
 - [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
 - [ ] `/logopolis`
-- [ ] `AuthState` has mixed responsibilities (character management + handshake) for name.
+- [x] Split auth responsibilities into `LoginState` and `CharacterAuthState`.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -93,6 +93,7 @@
 - [ ] Some echantments duplicated in char tab.
 - [ ] Add intelligent entity context scanners.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
+- [ ] Add a `/nudge <METERS>` command.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

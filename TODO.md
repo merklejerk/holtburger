@@ -235,11 +235,11 @@
 - [x] We aren't actually interpolating poses on other entities because the server doesn't attach velocity to entities that are grounded.
 - [x] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
 - [x] Character creation, delete, restore.
+- [x] Can't use character sheet verbs when there's an interaction.
+- [x] Character sheet doesn't identfy specialized skills.
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
-- [ ] Can't use character sheet verbs when there's an interaction.
-- [ ] Character sheet doesn't identfy specialized skills.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -46,15 +46,6 @@ impl TabController for CharacterTab {
         let target = self.get_selection(data);
         let mut verbs = Vec::new();
 
-        if let Some(interaction) = interaction {
-            match interaction {
-                Interaction::Targeting { .. } => {}
-                _ => {
-                    return verbs;
-                }
-            }
-        }
-
         match target {
             CharacterSelection::Enchantment(enchant) => {
                 verbs.push(Verb::new(

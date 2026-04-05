@@ -144,6 +144,11 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                     training,
                     Some(TrainingLevel::Untrained) | Some(TrainingLevel::Unusable)
                 );
+                let label = if matches!(training, Some(TrainingLevel::Specialized)) {
+                    format!("{} [S]", label)
+                } else {
+                    label.clone()
+                };
 
                 let label_style = if highlight {
                     Style::default().fg(Color::White)

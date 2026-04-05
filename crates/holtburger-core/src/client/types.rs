@@ -11,9 +11,10 @@ use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
-    CharacterEntry, ChatChannel, ChatChannelId, GameMessage, SetTurbineChatChannelsEventData,
-    TurbineChatChannel, TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType,
-    TurbineChatTypeId, ViewContentsEventItem,
+    CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
+    ChatChannelId, GameMessage, SetTurbineChatChannelsEventData, TurbineChatChannel,
+    TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType, TurbineChatTypeId,
+    ViewContentsEventItem,
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
@@ -170,9 +171,21 @@ pub enum ClientState {
     Disconnected,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharacterManagementOperation {
+    Create,
+    Delete,
+    Restore,
+}
+
 #[derive(Debug, Clone)]
 pub enum WireEvent {
     CharacterList(Vec<CharacterEntry>),
+    CharacterManagementResponse {
+        operation: Option<CharacterManagementOperation>,
+        response: CharacterCreateResponseData,
+    },
+    CharacterDeleteResponse,
     PlayerEntered {
         guid: Guid,
         name: String,
@@ -442,6 +455,11 @@ pub enum ClientViewEvent {
         parameter: Option<String>,
     },
     CharacterList(Vec<CharacterEntry>),
+    CharacterManagementResponse {
+        operation: Option<CharacterManagementOperation>,
+        response: CharacterCreateResponseData,
+    },
+    CharacterDeleteResponse,
     PlayerEntered {
         guid: Guid,
         name: String,
@@ -469,6 +487,11 @@ pub enum ClientViewEvent {
 pub enum ClientCommand {
     Login(String),
     SelectCharacter(Guid),
+    CreateCharacter(Box<CharacterCreateRequestData>),
+    DeleteCharacter {
+        slot: u32,
+    },
+    RestoreCharacter(Guid),
     EnterWorld,
     Talk(String),
     Tell {

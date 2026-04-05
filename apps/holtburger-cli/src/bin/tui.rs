@@ -7,7 +7,6 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::pages;
-use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page, RedrawPriority, UpdateResult};
@@ -18,6 +17,7 @@ use holtburger_core::{
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
+use holtburger_world::spell::SpellCatalog;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -35,6 +35,7 @@ struct BootstrappedClient {
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     initial_events: Vec<ClientViewEvent>,
     content: Arc<ContentRepository>,
+    spell_catalog: Arc<SpellCatalog>,
 }
 
 enum BootstrapOutcome {
@@ -364,6 +365,7 @@ fn finalize_bootstrap_outcome(
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     content: Arc<ContentRepository>,
+    spell_catalog: Arc<SpellCatalog>,
 ) -> BootstrapOutcome {
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
@@ -373,6 +375,7 @@ fn finalize_bootstrap_outcome(
                 client_task_handle,
                 initial_events,
                 content,
+                spell_catalog,
             })
         }
         BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
@@ -391,14 +394,13 @@ async fn bootstrap_once(
     } else {
         ContentRepository::from_hba_path(dats_path)?
     });
-    let world_bootstrap = content.world_bootstrap()?;
-
-    let mut client = ClientRuntimeBuilder::new(args.account.clone())
+    let mut builder = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
-        .world_bootstrap(world_bootstrap)
-        .spatial_physics(Arc::new(BasicSpatialPhysics))
-        .connect()
-        .await?;
+        .spatial_physics(Arc::new(BasicSpatialPhysics));
+    builder.load_assets(content.as_ref())?;
+
+    let mut client = builder.connect().await?;
+    let spell_catalog = Arc::clone(&client.world.spell_catalog);
 
     apply_capture_path(&mut client, args.capture.as_ref());
 
@@ -435,6 +437,7 @@ async fn bootstrap_once(
                             server_event_rx,
                             client_task_handle,
                             Arc::clone(&content),
+                            Arc::clone(&spell_catalog),
                         ));
                     }
                 }
@@ -463,6 +466,7 @@ async fn bootstrap_once(
                                 server_event_rx,
                                 client_task_handle,
                                 Arc::clone(&content),
+                                Arc::clone(&spell_catalog),
                             ));
                         }
                     }
@@ -610,6 +614,7 @@ async fn run() -> Result<()> {
         client_task_handle,
         initial_events,
         content,
+        spell_catalog,
     } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
@@ -629,13 +634,14 @@ async fn run() -> Result<()> {
         account_password: args.password.clone(),
         character_preference: args.character.clone(),
         chat_log,
-        page: Page::Selection(SelectionState::default()),
+        page: Page::Selection(Box::default()),
         client_state: ClientState::Connected,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
         server_time: None,
         content: Some(content),
+        spell_catalog: Some(spell_catalog),
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,

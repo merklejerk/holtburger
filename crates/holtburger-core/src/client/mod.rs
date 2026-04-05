@@ -301,6 +301,22 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterList(list.clone()));
             }
+            WireEvent::CharacterManagementResponse {
+                operation,
+                response,
+            } => {
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::CharacterManagementResponse {
+                            operation: *operation,
+                            response: response.clone(),
+                        });
+            }
+            WireEvent::CharacterDeleteResponse => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterDeleteResponse);
+            }
             WireEvent::PlayerEntered { guid, name } => {
                 let _ = self
                     .client_view_event_tx

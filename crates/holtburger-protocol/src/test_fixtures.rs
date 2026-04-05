@@ -1,4 +1,13 @@
 pub const CHARACTER_LIST: &[u8] = include_bytes!("../tests/fixtures/character_list.bin");
+pub const CHARACTER_CREATE: &[u8] = include_bytes!("../tests/fixtures/character_create.bin");
+pub const CHARACTER_CREATE_RESPONSE_OK: &[u8] =
+    include_bytes!("../tests/fixtures/character_create_response_ok.bin");
+pub const CHARACTER_CREATE_RESPONSE_NAME_IN_USE: &[u8] =
+    include_bytes!("../tests/fixtures/character_create_response_name_in_use.bin");
+pub const CHARACTER_DELETE_REQUEST: &[u8] =
+    include_bytes!("../tests/fixtures/character_delete_request.bin");
+pub const CHARACTER_DELETE_RESPONSE: &[u8] =
+    include_bytes!("../tests/fixtures/character_delete_response.bin");
 pub const PLAYER_DESCRIPTION: &[u8] = include_bytes!("../tests/fixtures/player_description.bin");
 pub const UPDATE_PROPERTY_INT: &[u8] = include_bytes!("../tests/fixtures/update_property_int.bin");
 pub const CHARACTER_ENTER_WORLD: &[u8] =
@@ -6,6 +15,10 @@ pub const CHARACTER_ENTER_WORLD: &[u8] =
 pub const CHARACTER_ENTER_WORLD_REQUEST: &[u8] =
     include_bytes!("../tests/fixtures/character_enter_world_request.bin");
 pub const CHARACTER_ERROR: &[u8] = include_bytes!("../tests/fixtures/character_error.bin");
+pub const CHARACTER_RESTORE_REQUEST: &[u8] =
+    include_bytes!("../tests/fixtures/character_restore_request.bin");
+pub const CHARACTER_RESTORE_RESPONSE: &[u8] =
+    include_bytes!("../tests/fixtures/character_restore_response.bin");
 pub const PLAYER_DESCRIPTION_MINIMAL: &[u8] =
     include_bytes!("../tests/fixtures/player_description_minimal.bin");
 pub const CREATURE_SKILL_MELEE_DEF: &[u8] =

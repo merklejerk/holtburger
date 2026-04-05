@@ -489,11 +489,11 @@ impl GameState {
             return result.with_redraw(true);
         }
 
-        if let Some(target) = parse_single_argument_command(command, &["/swear"]) {
-            let Some(target) = self.data.resolve_player_guid_by_name(target) else {
+        if let Some(player_name) = parse_single_argument_command(command, &["/swear"]) {
+            let Some(target) = self.data.resolve_player_guid_by_name(player_name) else {
                 self.chat.log(
                     ChatMessageKind::Warning,
-                    format!("Unable to find player '{}' to swear allegiance to.", target),
+                    format!("Unable to find player '{}' to swear allegiance to.", player_name),
                 );
                 return result.with_redraw(true);
             };
@@ -501,6 +501,10 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::SwearAllegiance { target });
+            self.chat.log(
+                ChatMessageKind::System,
+                format!("Swearing allegiance to {}...", player_name),
+            );
             self.finish_input_command_submission(command);
             return result.with_redraw(true);
         }
@@ -909,6 +913,10 @@ mod tests {
             Some(AppAction::SwearAllegiance { target }) if *target == Guid(0x50000042)
         ));
         assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.kind == ChatMessageKind::System
+                && message.text == "You swear allegiance to Bestie."
+        }));
     }
 
     #[test]

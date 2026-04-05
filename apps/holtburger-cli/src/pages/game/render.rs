@@ -1,6 +1,4 @@
 use holtburger_common::ConfirmationType;
-use holtburger_common::Guid;
-use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::ActiveCharacterConfirmation;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -21,7 +19,6 @@ use crate::pages::game::panels::dynamic::render_dynamic_pane;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
-use holtburger_world::context::WorldContext;
 
 fn confirmation_title(confirmation_type: ConfirmationType) -> &'static str {
     match confirmation_type {
@@ -62,32 +59,12 @@ fn render_confirmation_overlay(
     );
 }
 
-fn render_unswear_confirmation_overlay(f: &mut Frame, area: Rect, state: &GameState, target: Guid) {
-    let target_label = state
-        .data
-        .get_entity(target)
-        .map(|entity| {
-            let name = entity.name().trim();
-            if name.is_empty() {
-                format!("0x{:08X}", target.0)
-            } else {
-                name.to_string()
-            }
-        })
-        .unwrap_or_else(|| format!("0x{:08X}", target.0));
-    let text = format!(
-        "Break allegiance with {}?\n\n[Enter] Confirm    [Esc] Cancel",
-        target_label
-    );
-
+fn render_local_confirmation_overlay(f: &mut Frame, area: Rect, title: &str, text: &str) {
+    let text = format!("{}\n\n[Enter] Confirm    [Esc] Cancel", text);
     render_modal_card(
         f,
         area,
-        ModalCardSpec::new(
-            " Break Allegiance Confirmation ",
-            &text,
-            ModalPalette::CONFIRMATION,
-        ),
+        ModalCardSpec::new(title, &text, ModalPalette::CONFIRMATION),
     );
 }
 
@@ -200,8 +177,8 @@ impl GameState {
         // Pulse Panel
         render_pulse_panel(f, ctx.client_state, ctx.net_stats, input_chunks[1]);
 
-        if let Some(target) = self.view.unswear_confirmation {
-            render_unswear_confirmation_overlay(f, area, self, target);
+        if let Some(confirmation) = self.view.local_confirmation.as_ref() {
+            render_local_confirmation_overlay(f, area, &confirmation.title, &confirmation.text);
         } else if let Some(confirmation) = self.view.active_confirmation.as_ref() {
             render_confirmation_overlay(f, area, confirmation);
         }
@@ -311,17 +288,14 @@ mod tests {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
-        let target_guid = Guid(0x50000042);
         state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
-        state.data.entities.insert(
-            target_guid,
-            holtburger_world::entity::Entity::new(
-                target_guid,
-                "Bestie".to_string(),
-                holtburger_common::position::WorldPosition::default(),
-            ),
-        );
-        state.view.unswear_confirmation = Some(target_guid);
+        state.view.local_confirmation = Some(crate::types::LocalConfirmation {
+            title: " Break Allegiance Confirmation ".to_string(),
+            text: "Break allegiance with Bestie?".to_string(),
+            action: crate::types::AppAction::Unswear {
+                target: Guid(0x50000042),
+            },
+        });
 
         let net_stats = NetStats::default();
         let ctx = RenderContext {

@@ -12,10 +12,10 @@ use crate::pages::game::layout::PULSE_PANEL_WIDTH;
 use crate::pages::game::layout::get_layout;
 use crate::pages::game::layout::layout_mode_for_size;
 use crate::pages::game::panels::chat::render_chat_pane;
+use crate::pages::game::panels::context::build_context_display_lines;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::game::panels::dynamic::render_dynamic_pane;
-use crate::pages::game::panels::context::build_context_display_lines;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
@@ -85,8 +85,12 @@ impl GameState {
                 build_context_display_lines(&content, &self.view.context_view, context_width).len()
             })
             .unwrap_or_else(|| {
-                build_context_display_lines(self.context_buffer(), &self.view.context_view, context_width)
-                    .len()
+                build_context_display_lines(
+                    self.context_buffer(),
+                    &self.view.context_view,
+                    context_width,
+                )
+                .len()
             });
         let ctx_h = main_chunks_vec[2].height.saturating_sub(2) as usize;
         let max_ctx_scroll = context_len.saturating_sub(ctx_h);

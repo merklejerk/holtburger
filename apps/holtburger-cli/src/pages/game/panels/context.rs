@@ -23,7 +23,11 @@ pub fn render_context_pane(
     area: Rect,
 ) {
     let height = area.height.saturating_sub(2) as usize;
-    let display_lines = build_context_display_lines(context_buffer, context_view, area.width.saturating_sub(2) as usize);
+    let display_lines = build_context_display_lines(
+        context_buffer,
+        context_view,
+        area.width.saturating_sub(2) as usize,
+    );
     let total_ctx = display_lines.len();
 
     let ctx_start = scroll_offset.min(total_ctx.saturating_sub(height));
@@ -234,8 +238,8 @@ mod tests {
     use super::{book_author_name, build_book_content, build_context_display_lines};
     use crate::types::ContextView;
     use holtburger_common::Guid;
-    use ratatui::text::Line;
     use holtburger_world::book::{BookData, BookPage};
+    use ratatui::text::Line;
 
     #[test]
     fn build_book_content_concatenates_pages_and_signature() {

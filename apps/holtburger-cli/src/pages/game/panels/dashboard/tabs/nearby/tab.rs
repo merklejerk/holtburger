@@ -410,7 +410,7 @@ impl TabController for NearbyTab {
                                 'u',
                                 "Use",
                             ));
-                        } 
+                        }
                     }
                 }
             }

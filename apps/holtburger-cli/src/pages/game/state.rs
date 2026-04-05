@@ -1923,9 +1923,13 @@ mod tests {
         state.view.context_view = ContextView::Book(book_guid);
         state.refresh_context_buffer();
 
-        assert!(context_buffer_contains(state.context_buffer(), "Reading..."));
+        assert!(context_buffer_contains(
+            state.context_buffer(),
+            "Reading..."
+        ));
 
-        let mut book_entity = Entity::new(book_guid, "Journal".to_string(), WorldPosition::default());
+        let mut book_entity =
+            Entity::new(book_guid, "Journal".to_string(), WorldPosition::default());
         book_entity.book = Some(BookData {
             author_name: Some("Scribe".to_string()),
             pages: vec![BookPage {
@@ -1966,7 +1970,12 @@ mod tests {
             .handle_action(AppAction::Read { guid: book_guid })
             .expect("read action should produce an update result");
 
-        assert!(result.commands.iter().any(|command| matches!(command, ClientCommand::Use(guid) if *guid == book_guid)));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::Use(guid) if *guid == book_guid))
+        );
         assert_eq!(state.view.context_view, ContextView::Book(book_guid));
     }
 

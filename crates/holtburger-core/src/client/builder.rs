@@ -161,13 +161,13 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::{Guid, Vector3};
     use holtburger_content::ContentRepository;
     use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
     use holtburger_dat::{
         DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
         ResourceSource,
     };
-    use holtburger_common::{Guid, Vector3};
     use holtburger_world::{
         ContactState, SolveActorInput, SolvedActorKinematics, SpatialScene, SpatialSolveBatch,
         SpatialSolveRequest,

@@ -3,10 +3,13 @@ use crate::types::{AppAction, AppUiAction, Verb};
 use holtburger_common::stats::AttributeType;
 use holtburger_content::character_gen::{
     CharacterGenGenderDefinition, CharacterGenHeritageGroup, CharacterGenSkillDefinition,
-    CharacterGenStarterArea,
+    CharacterGenStarterArea, CharacterGenTemplate,
 };
 use holtburger_content::{CharacterGenCatalog, ContentRepository};
-use holtburger_core::character_gen::{CHARACTER_GEN_MAX_ATTRIBUTE, CHARACTER_GEN_MIN_ATTRIBUTE};
+use holtburger_core::character_gen::{
+    CHARACTER_GEN_MAX_ATTRIBUTE, CHARACTER_GEN_MIN_ATTRIBUTE, custom_template_for_heritage,
+    is_unavailable_character_gen_skill_cost, minimum_skill_advancement_for_heritage,
+};
 use holtburger_core::{CharacterGenBuild, CharacterGenBuilder, CharacterGenValidationError};
 use holtburger_dat::file_type::{CharGen, SkillTable};
 use holtburger_protocol::messages::{CharacterCreateAppearanceData, SkillAdvancementClass};
@@ -173,9 +176,17 @@ impl CharacterCreationFormState {
     }
 
     pub fn verbs(&self) -> Vec<Verb> {
-        let mut verbs = vec![Verb::new(AppUiAction::OpenCharacterDashboard, '\x1b', "Back")];
+        let mut verbs = vec![Verb::new(
+            AppUiAction::OpenCharacterDashboard,
+            '\x1b',
+            "Back",
+        )];
         if self.focus == CharacterCreationFocus::Submit {
-            verbs.push(Verb::new(AppAction::SubmitCharacterCreation, '\r', "Create"));
+            verbs.push(Verb::new(
+                AppAction::SubmitCharacterCreation,
+                '\r',
+                "Create",
+            ));
         }
         verbs
     }
@@ -233,6 +244,10 @@ impl CharacterCreationFormState {
         self.catalog.starter_area(self.start_area_id)
     }
 
+    pub fn current_template(&self) -> Option<&CharacterGenTemplate> {
+        custom_template_for_heritage(self.current_heritage()?)
+    }
+
     pub fn heritage_name(&self) -> &str {
         self.current_heritage()
             .map(|heritage| heritage.name.as_str())
@@ -272,9 +287,17 @@ impl CharacterCreationFormState {
     }
 
     pub fn spent_skill_points(&self) -> i64 {
-        self.skill_ids_for_display()
-            .into_iter()
-            .map(|skill_id| self.skill_delta_cost(skill_id, SkillAdvancementClass::Untrained, self.skill_advancement_classes[skill_id as usize]))
+        self.catalog
+            .skill_definitions
+            .values()
+            .filter(|definition| definition.chargen_use)
+            .map(|definition| {
+                self.skill_delta_cost(
+                    definition.skill_id,
+                    SkillAdvancementClass::Untrained,
+                    self.skill_advancement_classes[definition.skill_id as usize],
+                )
+            })
             .sum()
     }
 
@@ -321,8 +344,12 @@ impl CharacterCreationFormState {
             let right_definition = self.catalog.skill_definition(*right);
 
             advancement_rank(self.skill_advancement_classes[*left as usize])
-                .cmp(&advancement_rank(self.skill_advancement_classes[*right as usize]))
-                .then_with(|| skill_sort_name(left_definition).cmp(&skill_sort_name(right_definition)))
+                .cmp(&advancement_rank(
+                    self.skill_advancement_classes[*right as usize],
+                ))
+                .then_with(|| {
+                    skill_sort_name(left_definition).cmp(&skill_sort_name(right_definition))
+                })
         });
 
         skill_ids
@@ -442,20 +469,16 @@ impl CharacterCreationFormState {
     pub fn adjust_selected_attribute(&mut self, delta: i32) -> bool {
         let remaining_points = self.remaining_attribute_points();
         let value = &mut self.attribute_values[self.selected_attribute_index];
-        if delta > 0 {
-            if *value >= CHARACTER_GEN_MAX_ATTRIBUTE || remaining_points <= 0 {
-                return false;
-            }
-            *value += 1;
-        } else if delta < 0 {
-            if *value <= CHARACTER_GEN_MIN_ATTRIBUTE {
-                return false;
-            }
-            *value -= 1;
-        } else {
+        let new_value = (*value as i64 + delta as i64)
+            .clamp(CHARACTER_GEN_MIN_ATTRIBUTE as i64, CHARACTER_GEN_MAX_ATTRIBUTE as i64) as u32;
+        let spent = i64::from(new_value).saturating_sub(*value as i64);
+        if spent > 0 && spent > remaining_points {
+            return false;
+        } 
+        if new_value == *value {
             return false;
         }
-
+        *value = new_value;
         self.clear_feedback();
         true
     }
@@ -520,6 +543,14 @@ impl CharacterCreationFormState {
         };
 
         let current = self.skill_advancement_classes[skill_id as usize];
+        let Some(costs) = self
+            .catalog
+            .skill_costs_for_heritage(self.heritage_id, skill_id)
+        else {
+            self.set_feedback("That skill cannot be raised at character creation.", true);
+            return false;
+        };
+
         let next = match current {
             SkillAdvancementClass::Inactive | SkillAdvancementClass::Untrained => {
                 SkillAdvancementClass::Trained
@@ -530,6 +561,22 @@ impl CharacterCreationFormState {
                 return false;
             }
         };
+
+        let next_tier_cost = match current {
+            SkillAdvancementClass::Inactive | SkillAdvancementClass::Untrained => {
+                costs.trained_cost
+            }
+            SkillAdvancementClass::Trained => costs.specialized_cost,
+            SkillAdvancementClass::Specialized => unreachable!(),
+        };
+
+        if is_unavailable_character_gen_skill_cost(next_tier_cost) {
+            self.set_feedback(
+                "That skill cannot be raised to the next tier at character creation.",
+                true,
+            );
+            return false;
+        }
 
         let delta_cost = self.skill_delta_cost(skill_id, current, next);
         if delta_cost > self.remaining_skill_points() {
@@ -548,13 +595,28 @@ impl CharacterCreationFormState {
         };
 
         let current = self.skill_advancement_classes[skill_id as usize];
+        if matches!(
+            current,
+            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive
+        ) {
+            self.set_feedback("That skill is already untrained.", true);
+            return false;
+        }
+
+        let minimum = self.minimum_skill_advancement(skill_id);
+        if !matches!(
+            minimum,
+            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive
+        ) && advancement_rank(current) <= advancement_rank(minimum)
+        {
+            self.set_feedback("That skill is already at its template minimum.", true);
+            return false;
+        }
+
         let next = match current {
             SkillAdvancementClass::Specialized => SkillAdvancementClass::Trained,
             SkillAdvancementClass::Trained => SkillAdvancementClass::Untrained,
-            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => {
-                self.set_feedback("That skill is already untrained.", true);
-                return false;
-            }
+            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => unreachable!(),
         };
 
         self.skill_advancement_classes[skill_id as usize] = next;
@@ -565,15 +627,17 @@ impl CharacterCreationFormState {
     pub fn build_request(
         &self,
         occupied_slots: impl IntoIterator<Item = u32>,
-    ) -> Result<holtburger_protocol::messages::CharacterCreateRequestData, Vec<CharacterGenValidationError>> {
+    ) -> Result<
+        holtburger_protocol::messages::CharacterCreateRequestData,
+        Vec<CharacterGenValidationError>,
+    > {
         let builder = CharacterGenBuilder::new(self.catalog.clone());
         let build = CharacterGenBuild {
             heritage: self.heritage_id,
             gender: self.gender_id,
             appearance: self.default_appearance(),
             template_option: self
-                .current_heritage()
-                .and_then(|heritage| heritage.templates.first())
+                .current_template()
                 .map(|template| template.template_option)
                 .unwrap_or_default(),
             strength_ability: self.attribute_values[0],
@@ -595,19 +659,25 @@ impl CharacterCreationFormState {
 
     fn reset_for_heritage(&mut self) {
         self.gender_id = self.gender_ids().into_iter().next().unwrap_or_default();
-        self.start_area_id = self.starter_area_ids().into_iter().next().unwrap_or_default();
-        self.attribute_values = [CHARACTER_GEN_MIN_ATTRIBUTE; 6];
+        self.start_area_id = self
+            .starter_area_ids()
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        self.attribute_values = self
+            .current_template()
+            .map(|template| std::array::from_fn(|index| template.attribute_values()[index].1))
+            .unwrap_or([CHARACTER_GEN_MIN_ATTRIBUTE; 6]);
 
-        self.skill_advancement_classes = vec![
-            SkillAdvancementClass::Inactive;
-            self.catalog.expected_skill_slots
-        ];
+        self.skill_advancement_classes =
+            vec![SkillAdvancementClass::Inactive; self.catalog.expected_skill_slots];
         for definition in self.catalog.skill_definitions.values() {
+            let minimum_advancement = self.minimum_skill_advancement(definition.skill_id);
             if let Some(slot) = self
                 .skill_advancement_classes
                 .get_mut(definition.skill_id as usize)
             {
-                *slot = SkillAdvancementClass::Untrained;
+                *slot = minimum_advancement;
             }
         }
 
@@ -672,13 +742,20 @@ impl CharacterCreationFormState {
         current: SkillAdvancementClass,
         next: SkillAdvancementClass,
     ) -> i64 {
-        let Some(costs) = self.catalog.skill_costs_for_heritage(self.heritage_id, skill_id) else {
+        let Some(costs) = self
+            .catalog
+            .skill_costs_for_heritage(self.heritage_id, skill_id)
+        else {
             return 0;
         };
 
         let current_cost = advancement_cost(current, costs.trained_cost, costs.specialized_cost);
         let next_cost = advancement_cost(next, costs.trained_cost, costs.specialized_cost);
         next_cost - current_cost
+    }
+
+    fn minimum_skill_advancement(&self, skill_id: u32) -> SkillAdvancementClass {
+        minimum_skill_advancement_for_heritage(self.catalog.as_ref(), self.heritage_id, skill_id)
     }
 }
 
@@ -702,7 +779,11 @@ fn advancement_rank(advancement: SkillAdvancementClass) -> u8 {
     }
 }
 
-fn advancement_cost(advancement: SkillAdvancementClass, trained_cost: i32, specialized_cost: i32) -> i64 {
+fn advancement_cost(
+    advancement: SkillAdvancementClass,
+    trained_cost: i32,
+    specialized_cost: i32,
+) -> i64 {
     match advancement {
         SkillAdvancementClass::Inactive | SkillAdvancementClass::Untrained => 0,
         SkillAdvancementClass::Trained => i64::from(trained_cost),
@@ -728,7 +809,10 @@ fn stepped_value(values: &[u32], current: u32, delta: i32) -> Option<u32> {
         return None;
     }
 
-    let index = values.iter().position(|value| *value == current).unwrap_or_default() as i32;
+    let index = values
+        .iter()
+        .position(|value| *value == current)
+        .unwrap_or_default() as i32;
     let len = values.len() as i32;
     Some(values[(index + delta).rem_euclid(len) as usize])
 }
@@ -761,13 +845,13 @@ pub fn format_creation_errors(errors: &[CharacterGenValidationError]) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::stats::SkillType;
     use holtburger_content::character_gen::{
         CharacterGenAppearanceOptions, CharacterGenCatalog, CharacterGenEyeStrip,
         CharacterGenFaceStrip, CharacterGenGear, CharacterGenGenderDefinition,
         CharacterGenHeritageGroup, CharacterGenSkillDefinition, CharacterGenStarterArea,
         CharacterGenStarterLocation, CharacterGenTemplate,
     };
-    use holtburger_common::stats::SkillType;
     use std::collections::BTreeMap;
 
     fn test_catalog() -> Arc<CharacterGenCatalog> {
@@ -796,20 +880,36 @@ mod tests {
                     primary_start_area_ids: vec![0],
                     secondary_start_area_ids: Vec::new(),
                     skill_overrides: BTreeMap::new(),
-                    templates: vec![CharacterGenTemplate {
-                        template_option: 0,
-                        name: "Custom".to_string(),
-                        icon_image: 0,
-                        title_id: 0,
-                        strength: 10,
-                        endurance: 10,
-                        coordination: 10,
-                        quickness: 10,
-                        focus: 10,
-                        self_stat: 10,
-                        normal_skills: Vec::new(),
-                        primary_skills: Vec::new(),
-                    }],
+                    templates: vec![
+                        CharacterGenTemplate {
+                            template_option: 0,
+                            name: "Warrior".to_string(),
+                            icon_image: 0,
+                            title_id: 0,
+                            strength: 30,
+                            endurance: 10,
+                            coordination: 10,
+                            quickness: 10,
+                            focus: 10,
+                            self_stat: 10,
+                            normal_skills: vec![SkillType::Jump as u32],
+                            primary_skills: Vec::new(),
+                        },
+                        CharacterGenTemplate {
+                            template_option: 1,
+                            name: "Custom".to_string(),
+                            icon_image: 0,
+                            title_id: 0,
+                            strength: 10,
+                            endurance: 10,
+                            coordination: 10,
+                            quickness: 10,
+                            focus: 10,
+                            self_stat: 10,
+                            normal_skills: vec![SkillType::Run as u32],
+                            primary_skills: Vec::new(),
+                        },
+                    ],
                     genders: BTreeMap::from([(
                         1,
                         CharacterGenGenderDefinition {
@@ -826,11 +926,13 @@ mod tests {
                             combat_table: 0,
                             appearance: CharacterGenAppearanceOptions {
                                 hair_color_ids: vec![0],
-                                hair_styles: vec![holtburger_content::character_gen::CharacterGenHairStyle {
-                                    icon_image: 0,
-                                    bald: false,
-                                    alternate_setup: 0,
-                                }],
+                                hair_styles: vec![
+                                    holtburger_content::character_gen::CharacterGenHairStyle {
+                                        icon_image: 0,
+                                        bald: false,
+                                        alternate_setup: 0,
+                                    },
+                                ],
                                 eye_color_ids: vec![0],
                                 eye_strips: vec![CharacterGenEyeStrip {
                                     icon_image: 0,
@@ -910,7 +1012,11 @@ mod tests {
         assert_eq!(form.gender_id, 1);
         assert_eq!(form.start_area_id, 0);
         assert_eq!(form.remaining_attribute_points(), 6);
-        assert_eq!(form.remaining_skill_points(), 8);
+        assert_eq!(form.remaining_skill_points(), 6);
+        assert_eq!(
+            form.skill_advancement_classes[SkillType::Run as usize],
+            SkillAdvancementClass::Trained
+        );
     }
 
     #[test]
@@ -929,6 +1035,7 @@ mod tests {
         assert_eq!(request.heritage, 7);
         assert_eq!(request.gender, 1);
         assert_eq!(request.start_area, 0);
+        assert_eq!(request.template_option, 1);
     }
 
     #[test]
@@ -964,11 +1071,14 @@ mod tests {
     fn raise_selected_skill_is_blocked_at_specialized() {
         let mut form = CharacterCreationFormState::new(test_catalog());
         form.selected_skill_id = Some(SkillType::Run as u32);
-        form.skill_advancement_classes[SkillType::Run as usize] = SkillAdvancementClass::Specialized;
+        form.skill_advancement_classes[SkillType::Run as usize] =
+            SkillAdvancementClass::Specialized;
 
         assert!(!form.raise_selected_skill());
         assert_eq!(
-            form.feedback.as_ref().map(|feedback| feedback.message.as_str()),
+            form.feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
             Some("That skill is already specialized.")
         );
     }
@@ -976,12 +1086,59 @@ mod tests {
     #[test]
     fn lower_selected_skill_is_blocked_at_untrained() {
         let mut form = CharacterCreationFormState::new(test_catalog());
+        form.selected_skill_id = Some(SkillType::Jump as u32);
+
+        assert!(!form.lower_selected_skill());
+        assert_eq!(
+            form.feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
+            Some("That skill is already untrained.")
+        );
+    }
+
+    #[test]
+    fn lower_selected_skill_is_blocked_at_template_minimum() {
+        let mut form = CharacterCreationFormState::new(test_catalog());
         form.selected_skill_id = Some(SkillType::Run as u32);
 
         assert!(!form.lower_selected_skill());
         assert_eq!(
-            form.feedback.as_ref().map(|feedback| feedback.message.as_str()),
-            Some("That skill is already untrained.")
+            form.feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
+            Some("That skill is already at its template minimum.")
+        );
+    }
+
+    #[test]
+    fn raise_selected_skill_is_blocked_when_next_tier_cost_is_unavailable() {
+        let mut catalog = (*test_catalog()).clone();
+        catalog.skill_definitions.insert(
+            SkillType::Salvaging as u32,
+            CharacterGenSkillDefinition {
+                skill_id: SkillType::Salvaging as u32,
+                skill_type: Some(SkillType::Salvaging),
+                name: "Salvaging".to_string(),
+                description: String::new(),
+                chargen_use: true,
+                trained_cost: 8,
+                specialized_cost: 999,
+            },
+        );
+        catalog.expected_skill_slots = SkillType::Salvaging as usize + 1;
+
+        let mut form = CharacterCreationFormState::new(Arc::new(catalog));
+        form.selected_skill_id = Some(SkillType::Salvaging as u32);
+        form.skill_advancement_classes[SkillType::Salvaging as usize] =
+            SkillAdvancementClass::Trained;
+
+        assert!(!form.raise_selected_skill());
+        assert_eq!(
+            form.feedback
+                .as_ref()
+                .map(|feedback| feedback.message.as_str()),
+            Some("That skill cannot be raised to the next tier at character creation.")
         );
     }
 }

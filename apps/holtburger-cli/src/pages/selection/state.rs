@@ -2,10 +2,8 @@ use holtburger_core::client::types::CharacterManagementOperation;
 use holtburger_core::{ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry};
 
-use crate::pages::selection::creation::{
-    CharacterCreationState, format_creation_errors,
-};
 use crate::components::text_input::SingleLineTextInput;
+use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
 use crate::types::{AppAction, AppUiAction, ChatMessageKind, UpdateResult, Verb};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -46,7 +44,8 @@ impl DeleteCharacterConfirmation {
     }
 
     pub fn expected_name_matches(&self) -> bool {
-        normalize_character_name(self.input.text()) == normalize_character_name(&self.character_name)
+        normalize_character_name(self.input.text())
+            == normalize_character_name(&self.character_name)
     }
 }
 
@@ -106,7 +105,13 @@ impl SelectionState {
         self.creation
             .ready()
             .map(|creation| creation.verbs())
-            .unwrap_or_else(|| vec![Verb::new(AppUiAction::OpenCharacterDashboard, '\x1b', "Back")])
+            .unwrap_or_else(|| {
+                vec![Verb::new(
+                    AppUiAction::OpenCharacterDashboard,
+                    '\x1b',
+                    "Back",
+                )]
+            })
     }
 
     pub fn dashboard_footer_hint(&self) -> String {
@@ -205,22 +210,20 @@ impl SelectionState {
                     return None;
                 }
 
-                Some(UpdateResult::commands(vec![ClientCommand::SelectCharacter(
-                    character.character.guid,
-                )]))
+                Some(UpdateResult::commands(vec![
+                    ClientCommand::SelectCharacter(character.character.guid),
+                ]))
             }
             AppAction::SubmitCharacterCreation => {
                 let creation = self.creation.ready_mut()?;
-                match creation.build_request(self.characters.iter().map(|character| character.slot)) {
+                match creation.build_request(self.characters.iter().map(|character| character.slot))
+                {
                     Ok(request) => {
                         self.pending_create = Some(PendingCharacterCreation {
                             slot: request.character_slot,
                             name: request.name.clone(),
                         });
-                        creation.set_feedback(
-                            "Submitting character creation request...",
-                            false,
-                        );
+                        creation.set_feedback("Submitting character creation request...", false);
 
                         let mut result = UpdateResult::new();
                         result
@@ -237,9 +240,9 @@ impl SelectionState {
             }
             AppAction::DeleteCharacterAtSlot { slot } => {
                 self.delete_confirmation = None;
-                Some(UpdateResult::commands(vec![ClientCommand::DeleteCharacter {
-                    slot,
-                }]))
+                Some(UpdateResult::commands(vec![
+                    ClientCommand::DeleteCharacter { slot },
+                ]))
             }
             AppAction::UiAction {
                 action: AppUiAction::OpenCharacterCreationScreen,
@@ -302,9 +305,9 @@ impl SelectionState {
                     return None;
                 }
 
-                Some(UpdateResult::commands(vec![ClientCommand::RestoreCharacter(
-                    character.character.guid,
-                )]))
+                Some(UpdateResult::commands(vec![
+                    ClientCommand::RestoreCharacter(character.character.guid),
+                ]))
             }
             _ => None,
         }
@@ -317,7 +320,7 @@ impl SelectionState {
 
 fn normalize_character_name(name: &str) -> String {
     name.chars()
-    .filter(|character| character.is_alphanumeric())
+        .filter(|character| character.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
 }
@@ -373,7 +376,11 @@ mod tests {
         let mut state = test_state();
         state.characters[0].character.delete_time = 123;
 
-        assert!(state.handle_action(AppAction::EnterSelectedCharacter).is_none());
+        assert!(
+            state
+                .handle_action(AppAction::EnterSelectedCharacter)
+                .is_none()
+        );
     }
 
     #[test]
@@ -473,7 +480,8 @@ mod tests {
         let result = state.handle_view_event(ClientViewEvent::CharacterManagementResponse {
             operation: Some(CharacterManagementOperation::Create),
             response: CharacterCreateResponseData {
-                response: holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
+                response:
+                    holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
                 guid: Some(Guid(0x5000_0009)),
                 name: Some("Zappy".to_string()),
                 seconds_disabled: Some(0),
@@ -483,12 +491,16 @@ mod tests {
         assert!(result.redraw_requested());
         assert_eq!(state.screen, CharacterScreen::Dashboard);
         assert_eq!(state.pending_create, None);
-        assert!(state
-            .characters
-            .iter()
-            .any(|entry| entry.slot == 2 && entry.character.name == "Zappy"));
+        assert!(
+            state
+                .characters
+                .iter()
+                .any(|entry| entry.slot == 2 && entry.character.name == "Zappy")
+        );
         assert_eq!(
-            state.selected_character().map(|entry| entry.character.name.as_str()),
+            state
+                .selected_character()
+                .map(|entry| entry.character.name.as_str()),
             Some("Zappy")
         );
     }
@@ -501,7 +513,8 @@ mod tests {
         let result = state.handle_view_event(ClientViewEvent::CharacterManagementResponse {
             operation: Some(CharacterManagementOperation::Restore),
             response: CharacterCreateResponseData {
-                response: holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
+                response:
+                    holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok,
                 guid: Some(Guid(0x5000_0001)),
                 name: Some("Sho Girl".to_string()),
                 seconds_disabled: Some(0),
@@ -519,7 +532,10 @@ impl SelectionState {
         match response.response {
             holtburger_protocol::messages::CharacterGenerationVerificationResponse::Ok => {
                 let pending = self.pending_create.take();
-                if let Some((guid, slot)) = response.guid.zip(pending.as_ref().map(|pending| pending.slot)) {
+                if let Some((guid, slot)) = response
+                    .guid
+                    .zip(pending.as_ref().map(|pending| pending.slot))
+                {
                     let name = response
                         .name
                         .clone()

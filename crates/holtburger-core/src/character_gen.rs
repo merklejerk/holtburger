@@ -1,4 +1,7 @@
 use holtburger_content::CharacterGenCatalog;
+use holtburger_content::character_gen::{
+    CharacterGenHeritageGroup, CharacterGenSkillCosts, CharacterGenTemplate,
+};
 use holtburger_protocol::messages::{
     CharacterCreateAppearanceData, CharacterCreateRequestData, SkillAdvancementClass,
 };
@@ -10,6 +13,63 @@ pub const CHARACTER_GEN_UNKNOWN_CONSTANT: u32 = 1;
 pub const CHARACTER_GEN_DEFAULT_CLASS_ID: u32 = 1;
 pub const CHARACTER_GEN_MIN_ATTRIBUTE: u32 = 10;
 pub const CHARACTER_GEN_MAX_ATTRIBUTE: u32 = 100;
+pub const CHARACTER_GEN_UNAVAILABLE_SKILL_COST: i32 = 999;
+
+pub fn is_unavailable_character_gen_skill_cost(cost: i32) -> bool {
+    cost >= CHARACTER_GEN_UNAVAILABLE_SKILL_COST
+}
+
+pub fn custom_template_for_heritage(
+    heritage: &CharacterGenHeritageGroup,
+) -> Option<&CharacterGenTemplate> {
+    heritage
+        .templates
+        .iter()
+        .find(|template| template.name.eq_ignore_ascii_case("Custom"))
+        .or_else(|| {
+            heritage
+                .templates
+                .iter()
+                .find(|template| template.template_option == 0)
+        })
+        .or_else(|| heritage.templates.first())
+}
+
+pub fn minimum_skill_advancement_for_heritage(
+    catalog: &CharacterGenCatalog,
+    heritage_id: u32,
+    skill_id: u32,
+) -> SkillAdvancementClass {
+    let Some(heritage) = catalog.heritage_group(heritage_id) else {
+        return SkillAdvancementClass::Untrained;
+    };
+
+    let Some(template) = custom_template_for_heritage(heritage) else {
+        return SkillAdvancementClass::Untrained;
+    };
+
+    minimum_skill_advancement_for_template(
+        template,
+        catalog.skill_costs_for_heritage(heritage_id, skill_id),
+        skill_id,
+    )
+}
+
+pub fn minimum_skill_advancement_for_template(
+    template: &CharacterGenTemplate,
+    costs: Option<CharacterGenSkillCosts>,
+    skill_id: u32,
+) -> SkillAdvancementClass {
+    if template.primary_skills.contains(&skill_id) {
+        SkillAdvancementClass::Specialized
+    } else if template.normal_skills.contains(&skill_id)
+        || costs.is_some_and(|costs| costs.trained_cost == 0)
+    {
+        SkillAdvancementClass::Trained
+    } else {
+        SkillAdvancementClass::Untrained
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CharacterGenBuild {
@@ -538,20 +598,36 @@ mod tests {
                             specialized_cost: 6,
                         },
                     )]),
-                    templates: vec![CharacterGenTemplate {
-                        template_option: 0,
-                        name: "Adventurer".to_string(),
-                        icon_image: 0,
-                        title_id: 1,
-                        strength: 100,
-                        endurance: 10,
-                        coordination: 100,
-                        quickness: 100,
-                        focus: 10,
-                        self_stat: 10,
-                        normal_skills: vec![],
-                        primary_skills: vec![],
-                    }],
+                    templates: vec![
+                        CharacterGenTemplate {
+                            template_option: 0,
+                            name: "Adventurer".to_string(),
+                            icon_image: 0,
+                            title_id: 1,
+                            strength: 100,
+                            endurance: 10,
+                            coordination: 100,
+                            quickness: 100,
+                            focus: 10,
+                            self_stat: 10,
+                            normal_skills: vec![],
+                            primary_skills: vec![],
+                        },
+                        CharacterGenTemplate {
+                            template_option: 1,
+                            name: "Custom".to_string(),
+                            icon_image: 0,
+                            title_id: 2,
+                            strength: 10,
+                            endurance: 10,
+                            coordination: 10,
+                            quickness: 10,
+                            focus: 10,
+                            self_stat: 10,
+                            normal_skills: vec![1],
+                            primary_skills: vec![3],
+                        },
+                    ],
                     genders: BTreeMap::from([(
                         1,
                         CharacterGenGenderDefinition {
@@ -642,8 +718,8 @@ mod tests {
                         skill_type: None,
                         name: "Bow".to_string(),
                         description: "Bow".to_string(),
-                        chargen_use: false,
-                        trained_cost: 6,
+                        chargen_use: true,
+                        trained_cost: 0,
                         specialized_cost: 4,
                     },
                 ),
@@ -659,8 +735,20 @@ mod tests {
                         specialized_cost: 4,
                     },
                 ),
+                (
+                    4,
+                    CharacterGenSkillDefinition {
+                        skill_id: 4,
+                        skill_type: None,
+                        name: "Hidden".to_string(),
+                        description: "Hidden".to_string(),
+                        chargen_use: false,
+                        trained_cost: 6,
+                        specialized_cost: 4,
+                    },
+                ),
             ]),
-            expected_skill_slots: 4,
+            expected_skill_slots: 5,
         })
     }
 
@@ -702,6 +790,7 @@ mod tests {
                 SkillAdvancementClass::Inactive,
                 SkillAdvancementClass::Specialized,
                 SkillAdvancementClass::Untrained,
+                SkillAdvancementClass::Inactive,
                 SkillAdvancementClass::Inactive,
             ],
             name: "Bestie".to_string(),
@@ -770,12 +859,43 @@ mod tests {
     fn validate_rejects_non_chargen_skill() {
         let builder = CharacterGenBuilder::new(test_catalog());
         let mut build = test_build();
-        build.skill_advancement_classes[2] = SkillAdvancementClass::Trained;
+        build.skill_advancement_classes[4] = SkillAdvancementClass::Trained;
 
         let errors = builder.validate(&build).expect_err("build should fail");
         assert!(errors.iter().any(|error| matches!(
             error,
-            CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id: 2 }
+            CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id: 4 }
         )));
+    }
+
+    #[test]
+    fn custom_template_for_heritage_prefers_named_custom_template() {
+        let catalog = test_catalog();
+        let heritage = catalog
+            .heritage_group(6)
+            .expect("test heritage should exist");
+
+        let template = custom_template_for_heritage(heritage).expect("custom template expected");
+
+        assert_eq!(template.name, "Custom");
+        assert_eq!(template.template_option, 1);
+    }
+
+    #[test]
+    fn minimum_skill_advancement_uses_template_lists_and_zero_cost_floor() {
+        let catalog = test_catalog();
+
+        assert_eq!(
+            minimum_skill_advancement_for_heritage(catalog.as_ref(), 6, 1),
+            SkillAdvancementClass::Trained
+        );
+        assert_eq!(
+            minimum_skill_advancement_for_heritage(catalog.as_ref(), 6, 2),
+            SkillAdvancementClass::Trained
+        );
+        assert_eq!(
+            minimum_skill_advancement_for_heritage(catalog.as_ref(), 6, 3),
+            SkillAdvancementClass::Specialized
+        );
     }
 }

@@ -6,11 +6,9 @@ use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{
-    ContactState, SolveActorInput, SolveBodyInput, SolvedActorKinematics, SolvedBodyKinematics,
-    SpatialBodyEvent, SpatialBodyId, SpatialEvent, SpatialSolveBatch, SpatialSolveRequest,
-    WorldEvent, WorldState,
+    ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialBodyId, SpatialSolveBatch,
+    SpatialSolveRequest, WorldEvent, WorldState,
 };
-use smallvec::SmallVec;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,7 +32,7 @@ fn calculate_arrival_position(
 
 #[derive(Debug, Default)]
 pub(super) struct ClientSimulationSystem {
-    tracked_body_ids: SmallVec<[SpatialBodyId; 4]>,
+    tracked_body_ids: Vec<SpatialBodyId>,
 }
 
 impl ClientSimulationSystem {
@@ -85,7 +83,7 @@ impl ClientSimulationSystem {
         let local_body = movement.current_local_solve_body_input(world).or_else(|| {
             (world.player.guid != Guid::NULL)
                 .then_some(SpatialBodyId::LocalPlayer(world.player.guid))
-                .and_then(|body_id| self.build_body_input(world, body_id))
+                .and_then(|body_id| world.resolve_body_projection_input(body_id))
         });
         let local_pose = local_body.map(|body| body.pose);
         let nearby_tracked = local_pose.map(|pose| {
@@ -93,17 +91,14 @@ impl ClientSimulationSystem {
                 .scene
                 .get_entities_in_range(&pose, ACTIVE_SOLVE_RADIUS_M)
         });
-        let mut actors = SmallVec::<[SolveActorInput; 1]>::new();
+        let mut bodies = Vec::<SolveBodyInput>::new();
 
-        if let Some(actor) = local_body.and_then(SolveBodyInput::into_actor_input) {
-            actors.push(actor);
+        if let Some(body) = local_body {
+            bodies.push(body);
         }
 
         for body_id in self.tracked_body_ids.iter().copied() {
-            if actors
-                .iter()
-                .any(|actor| Some(actor.actor_id) == body_id.authoritative_guid())
-            {
+            if bodies.iter().any(|body| body.body_id == body_id) {
                 continue;
             }
 
@@ -115,93 +110,26 @@ impl ClientSimulationSystem {
                 continue;
             }
 
-            if let Some(actor) = self
-                .build_body_input(world, body_id)
-                .and_then(SolveBodyInput::into_actor_input)
-            {
-                actors.push(actor);
+            let Some(input) = world.resolve_body_projection_input(body_id) else {
+                continue;
+            };
+
+            if input.basis.is_none() {
+                continue;
             }
+
+            bodies.push(input);
         }
 
-        if actors.is_empty() {
+        if bodies.is_empty() {
             return None;
         }
 
         Some(SpatialSolveRequest {
             dt,
-            actors,
+            bodies,
             local_drive: movement.current_local_drive_control(world),
         })
-    }
-
-    fn build_body_input(
-        &self,
-        world: &WorldState,
-        body_id: SpatialBodyId,
-    ) -> Option<SolveBodyInput> {
-        let guid = body_id.authoritative_guid()?;
-        let (resolved_body_id, pose, velocity, omega) = world.runtime_kinematics_for_guid(guid)?;
-
-        Some(SolveBodyInput {
-            body_id: if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-                body_id
-            } else {
-                resolved_body_id
-            },
-            pose,
-            velocity,
-            omega,
-        })
-    }
-
-    fn solve_body_kinematics_for_actor(
-        &self,
-        world: &WorldState,
-        solved: SolvedActorKinematics,
-    ) -> SolvedBodyKinematics {
-        let body_id = if solved.actor_id == world.player.guid {
-            SpatialBodyId::LocalPlayer(solved.actor_id)
-        } else {
-            SpatialBodyId::Entity(solved.actor_id)
-        };
-
-        SolvedBodyKinematics {
-            body_id,
-            pose: solved.pose,
-            velocity: solved.velocity,
-            omega: solved.omega,
-            contact: solved.contact,
-            projection_state: solved.projection_state,
-        }
-    }
-
-    fn solve_body_event_for_actor(
-        &self,
-        world: &WorldState,
-        event: SpatialEvent,
-    ) -> SpatialBodyEvent {
-        match event {
-            SpatialEvent::ContactChanged { actor_id, contact } => {
-                SpatialBodyEvent::ContactChanged {
-                    body_id: if actor_id == world.player.guid {
-                        SpatialBodyId::LocalPlayer(actor_id)
-                    } else {
-                        SpatialBodyId::Entity(actor_id)
-                    },
-                    contact,
-                }
-            }
-            SpatialEvent::ForcedReposition { actor_id, pose } => {
-                SpatialBodyEvent::ForcedReposition {
-                    body_id: if actor_id == world.player.guid {
-                        SpatialBodyId::LocalPlayer(actor_id)
-                    } else {
-                        SpatialBodyId::Entity(actor_id)
-                    },
-                    pose,
-                }
-            }
-        }
     }
 
     fn apply_solve_batch(
@@ -211,14 +139,12 @@ impl ClientSimulationSystem {
     ) -> Vec<WorldEvent> {
         let mut events = Vec::new();
 
-        for actor in solved.solved {
-            let solved_body = self.solve_body_kinematics_for_actor(world, actor);
-            events.extend(world.apply_solved_body_kinematics(&solved_body));
+        for body in solved.solved {
+            events.extend(world.apply_solved_body_kinematics(&body));
         }
 
         for event in solved.events {
-            let body_event = self.solve_body_event_for_actor(world, event);
-            events.extend(world.apply_spatial_body_event(&body_event));
+            events.extend(world.apply_spatial_body_event(&event));
         }
 
         events
@@ -372,7 +298,7 @@ mod tests {
     use holtburger_protocol::messages::{
         MotionStance, MovementEventData, MovementType, MovementTypeData,
     };
-    use holtburger_world::{SpatialEvent, entity::Entity};
+    use holtburger_world::{SpatialBodyEvent, entity::Entity};
 
     fn make_world_position(x: f32, y: f32, heading: f32) -> WorldPosition {
         WorldPosition {
@@ -422,17 +348,17 @@ mod tests {
         let events = simulation.apply_solve_batch(
             &mut world,
             SpatialSolveBatch {
-                solved: SmallVec::new(),
-                events: SmallVec::from_vec(vec![
-                    SpatialEvent::ContactChanged {
-                        actor_id: player_guid,
+                solved: Vec::new(),
+                events: vec![
+                    SpatialBodyEvent::ContactChanged {
+                        body_id: SpatialBodyId::LocalPlayer(player_guid),
                         contact: ContactState::Grounded,
                     },
-                    SpatialEvent::ForcedReposition {
-                        actor_id: remote_guid,
+                    SpatialBodyEvent::ForcedReposition {
+                        body_id: SpatialBodyId::Entity(remote_guid),
                         pose: remote_pose,
                     },
-                ]),
+                ],
             },
         );
 

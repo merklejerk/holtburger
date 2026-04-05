@@ -482,8 +482,13 @@ fn current_local_solve_body_input_uses_shared_resolved_manual_run_speed() {
         .current_local_solve_body_input(&world)
         .expect("active manual drive should produce local solve input");
     assert_eq!(body.body_id, SpatialBodyId::LocalPlayer(player_guid));
-    assert!(body.velocity.x.abs() < 1e-5);
-    assert!((body.velocity.y - expected_local_run_speed).abs() < 1e-5);
+    assert!(matches!(
+        body.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
+            if velocity.x.abs() < 1e-5
+                && (velocity.y - expected_local_run_speed).abs() < 1e-5
+                && omega == Vector3::zero()
+    ));
 }
 
 #[test]
@@ -512,8 +517,12 @@ fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
     let body = movement
         .current_local_solve_body_input(&world)
         .expect("turn-in-place manual drive should produce local solve input");
-    assert!(body.velocity.length_squared() <= 1e-6);
-    assert_eq!(body.omega, capabilities.kinematics().base_turn_left_omega);
+    assert!(matches!(
+        body.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
+            if velocity.length_squared() <= 1e-6
+                && omega == capabilities.kinematics().base_turn_left_omega
+    ));
 }
 
 #[test]
@@ -823,8 +832,11 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     let player = movement
         .current_local_solve_body_input(&world)
         .expect("held run input should produce local solve input");
-    assert!(player.velocity.x.abs() < 1e-5);
-    assert!((player.velocity.y - 4.5).abs() < 1e-5);
+    assert!(matches!(
+        player.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, .. })
+            if velocity.x.abs() < 1e-5 && (velocity.y - 4.5).abs() < 1e-5
+    ));
     assert_eq!(session.packet_sequence, 2);
 
     movement
@@ -835,8 +847,11 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     let player = movement
         .current_local_solve_body_input(&world)
         .expect("steady held run should keep solve input active");
-    assert!(player.velocity.x.abs() < 1e-5);
-    assert!((player.velocity.y - 4.5).abs() < 1e-5);
+    assert!(matches!(
+        player.basis,
+        Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, .. })
+            if velocity.x.abs() < 1e-5 && (velocity.y - 4.5).abs() < 1e-5
+    ));
     assert_eq!(session.packet_sequence, 2);
 }
 
@@ -1058,6 +1073,64 @@ async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
         .expect("local player runtime body should exist");
     assert!((body.pose.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
     assert_eq!(session.packet_sequence, 2);
+}
+
+#[tokio::test]
+async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(0.0),
+    };
+    let arrival_pose = WorldPosition {
+        landblock_id: Guid(0x1000_0100),
+        coords: Vector3::new(12.0, -4.0, 7.25),
+        rotation: Quaternion::from_heading(0.0),
+    };
+
+    world.player.guid = guid;
+    world.player.position = position;
+    world
+        .entities
+        .insert(Entity::new(guid, "Player".to_string(), position));
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: None,
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        start,
+    );
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("autonomous drive should emit a motion pulse");
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ArriveAtPose { pose: arrival_pose },
+        start + Duration::from_millis(30),
+    );
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("arrival pose should sync and stop motion");
+
+    let body = world
+        .scene
+        .body(SpatialBodyId::LocalPlayer(guid))
+        .expect("local player runtime body should exist");
+    assert_eq!(body.pose, arrival_pose);
+    assert_eq!(session.packet_sequence, 4);
+    assert!(!movement.should_send_stop_pulse());
 }
 
 #[tokio::test]

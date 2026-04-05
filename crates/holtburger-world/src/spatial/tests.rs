@@ -137,19 +137,20 @@ fn project_pose_by_velocity_uses_indoor_target_hint_landblock() {
 }
 
 #[test]
-fn advance_actor_kinematics_rotates_velocity_with_turn_rate() {
-    let input = SolveActorInput {
-        actor_id: Guid(0x5000_0001),
-        pose: WorldPosition {
+fn advance_body_kinematics_rotates_velocity_with_turn_rate() {
+    let input = SolveBodyInput::velocity(
+        SpatialBodyId::Entity(Guid(0x5000_0001)),
+        WorldPosition {
             landblock_id: Guid(0x1234_0000),
             coords: Vector3::zero(),
             rotation: Quaternion::from_heading(90.0f32.to_radians()),
         },
-        velocity: Vector3::new(0.0, 18.0, 0.0),
-        omega: Vector3::new(0.0, 0.0, 90.0f32.to_radians()),
-    };
+        ContactState::Unknown,
+        Vector3::new(0.0, 18.0, 0.0),
+        Vector3::new(0.0, 0.0, 90.0f32.to_radians()),
+    );
 
-    let solved = advance_actor_kinematics(&input, Duration::from_secs(1));
+    let solved = advance_body_kinematics(&input, Duration::from_secs(1));
 
     assert!((solved.pose.rotation.to_heading().to_degrees() - 180.0).abs() < 1e-4);
     assert!((solved.velocity.x - 18.0).abs() < 1e-4);
@@ -171,12 +172,13 @@ fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
 
     let request = SpatialSolveRequest {
         dt: Duration::from_millis(100),
-        actors: smallvec::smallvec![SolveActorInput {
-            actor_id: guid,
+        bodies: vec![SolveBodyInput::velocity(
+            body_id,
             pose,
-            velocity: Vector3::zero(),
-            omega: Vector3::zero(),
-        }],
+            ContactState::Grounded,
+            Vector3::zero(),
+            Vector3::zero(),
+        )],
         local_drive: Some(LocalDriveControl {
             body_id,
             desired_world_delta: Vector3::new(0.0, 4.5, 1.0),
@@ -189,13 +191,13 @@ fn basic_spatial_physics_realizes_local_grounded_direct_drive() {
 
     let solved = BasicSpatialPhysics.solve(&request, &mut scene);
     assert_eq!(solved.solved.len(), 1);
-    let actor = solved.solved[0];
-    assert_eq!(actor.actor_id, guid);
-    assert!((actor.pose.coords.y - 24.5).abs() < 1e-4);
-    assert!((actor.pose.coords.z - 1.0).abs() < 1e-4);
-    assert_eq!(actor.contact, ContactState::Grounded);
+    let body = solved.solved[0];
+    assert_eq!(body.body_id, body_id);
+    assert!((body.pose.coords.y - 24.5).abs() < 1e-4);
+    assert!((body.pose.coords.z - 1.0).abs() < 1e-4);
+    assert_eq!(body.contact, ContactState::Grounded);
     assert_eq!(
-        actor.projection_state,
+        body.projection_state,
         Some(SelfPlayerDriveProjectionState::LocalGroundedDirectDrive)
     );
 }
@@ -213,12 +215,13 @@ fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
 
     let request = SpatialSolveRequest {
         dt: Duration::from_millis(100),
-        actors: smallvec::smallvec![SolveActorInput {
-            actor_id: guid,
+        bodies: vec![SolveBodyInput::velocity(
+            body_id,
             pose,
-            velocity: Vector3::zero(),
-            omega: Vector3::zero(),
-        }],
+            ContactState::Grounded,
+            Vector3::zero(),
+            Vector3::zero(),
+        )],
         local_drive: Some(LocalDriveControl {
             body_id,
             desired_world_delta: Vector3::new(0.0, 4.5, 0.0),
@@ -231,11 +234,11 @@ fn basic_spatial_physics_freezes_local_drive_when_body_is_authority_frozen() {
 
     let solved = BasicSpatialPhysics.solve(&request, &mut scene);
     assert_eq!(solved.solved.len(), 1);
-    let actor = solved.solved[0];
-    assert_eq!(actor.pose, pose);
-    assert!(actor.velocity.length_squared() <= 1e-6);
+    let body = solved.solved[0];
+    assert_eq!(body.pose, pose);
+    assert!(body.velocity.length_squared() <= 1e-6);
     assert_eq!(
-        actor.projection_state,
+        body.projection_state,
         Some(SelfPlayerDriveProjectionState::AuthorityFrozen)
     );
 }
@@ -261,12 +264,13 @@ fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
 
     let request = SpatialSolveRequest {
         dt: Duration::from_secs(1),
-        actors: smallvec::smallvec![SolveActorInput {
-            actor_id: guid,
+        bodies: vec![SolveBodyInput::velocity(
+            body_id,
             pose,
-            velocity: Vector3::zero(),
-            omega: Vector3::zero(),
-        }],
+            ContactState::Grounded,
+            Vector3::zero(),
+            Vector3::zero(),
+        )],
         local_drive: Some(LocalDriveControl {
             body_id,
             desired_world_delta: Vector3::new(20.0, 10.0, 0.0),
@@ -278,10 +282,41 @@ fn basic_spatial_physics_uses_target_hint_for_indoor_destination_landblock() {
     };
 
     let solved = BasicSpatialPhysics.solve(&request, &mut scene);
-    let actor = solved.solved[0];
+    let body = solved.solved[0];
 
-    assert_eq!(actor.pose.landblock_id, target_hint.landblock_id);
-    assert_eq!(actor.pose.coords, Vector3::new(200.0, 6.0, 0.0));
+    assert_eq!(body.pose.landblock_id, target_hint.landblock_id);
+    assert_eq!(body.pose.coords, Vector3::new(200.0, 6.0, 0.0));
+}
+
+#[test]
+fn basic_spatial_physics_integrates_grounded_remote_basis_using_local_motion_semantics() {
+    let mut scene = SpatialScene::new();
+    let guid = Guid(0x5000_0004);
+    let pose = make_position(10.0, 20.0, 90.0_f32.to_radians());
+
+    let request = SpatialSolveRequest {
+        dt: Duration::from_secs(1),
+        bodies: vec![SolveBodyInput {
+            body_id: SpatialBodyId::Entity(guid),
+            pose,
+            contact: ContactState::Grounded,
+            basis: Some(SolveProjectionBasis::GroundedMotion {
+                desired_local_velocity: Vector3::new(2.0, 0.0, 0.0),
+                desired_local_omega: Vector3::new(0.0, 0.0, 1.0),
+            }),
+        }],
+        local_drive: None,
+    };
+
+    let solved = BasicSpatialPhysics.solve(&request, &mut scene);
+    let body = solved.solved[0];
+
+    assert!(body.velocity.x.abs() < 1e-4);
+    assert!((body.velocity.y - 2.0).abs() < 1e-4);
+    assert!((body.pose.coords.x - 10.0).abs() < 1e-4);
+    assert!((body.pose.coords.y - 22.0).abs() < 1e-4);
+    assert!((body.pose.rotation.to_heading() - (90.0_f32.to_radians() + 1.0)).abs() < 1e-4);
+    assert_eq!(body.contact, ContactState::Grounded);
 }
 
 #[test]
@@ -350,7 +385,7 @@ fn spatial_scene_allocates_ephemeral_bodies_monotonically() {
 }
 
 #[test]
-fn body_solver_bridge_supports_guid_backed_inputs_and_rejects_ephemeral_events() {
+fn body_solver_types_preserve_body_identity_and_support_ephemeral_events() {
     let pose = WorldPosition {
         landblock_id: Guid(0x9876_0000),
         coords: Vector3::new(1.0, 1.0, 1.0),
@@ -360,39 +395,44 @@ fn body_solver_bridge_supports_guid_backed_inputs_and_rejects_ephemeral_events()
     let entity_body_input = SolveBodyInput {
         body_id: SpatialBodyId::Entity(Guid(0x7000_0001)),
         pose,
-        velocity: Vector3::new(2.0, 0.0, 0.0),
-        omega: Vector3::new(0.0, 0.0, 3.0),
+        contact: ContactState::Unknown,
+        basis: Some(SolveProjectionBasis::velocity(
+            Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 3.0),
+        )),
     };
 
-    let entity_actor_input = entity_body_input
-        .into_actor_input()
-        .expect("entity body should bridge to Guid-backed actor input");
     assert_eq!(
-        SolveBodyInput::from_actor_input(entity_actor_input),
-        entity_body_input
+        entity_body_input.body_id,
+        SpatialBodyId::Entity(Guid(0x7000_0001))
     );
 
     let body_input = SolveBodyInput {
         body_id: SpatialBodyId::LocalPlayer(Guid(0x7000_0002)),
         pose,
-        velocity: Vector3::new(2.0, 0.0, 0.0),
-        omega: Vector3::new(0.0, 0.0, 3.0),
+        contact: ContactState::Unknown,
+        basis: Some(SolveProjectionBasis::velocity(
+            Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 3.0),
+        )),
     };
 
-    let actor_input = body_input
-        .into_actor_input()
-        .expect("local player should bridge to Guid-backed actor input");
-    assert_eq!(actor_input.actor_id, Guid(0x7000_0002));
     assert_eq!(
-        SolveBodyInput::from_actor_input(actor_input).body_id,
-        SpatialBodyId::Entity(Guid(0x7000_0002))
+        body_input.body_id,
+        SpatialBodyId::LocalPlayer(Guid(0x7000_0002))
     );
 
     let event = SpatialBodyEvent::ForcedReposition {
         body_id: SpatialBodyId::Ephemeral(99),
         pose,
     };
-    assert!(event.into_spatial_event().is_none());
+    assert!(matches!(
+        event,
+        SpatialBodyEvent::ForcedReposition {
+            body_id: SpatialBodyId::Ephemeral(99),
+            pose: event_pose,
+        } if event_pose == pose
+    ));
 }
 
 #[test]

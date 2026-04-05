@@ -231,12 +231,12 @@
 - [x] Rename `Client` -> `ClientRuntime`
 - [x] Asset pipeline.
 - [x] isn't it strange that `get_run_rate` lives in cli?
+- [x] We aren't actually interpolating poses on other entities because the server doesn't attach velocity to entities that are grounded.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
-- [ ] We aren't actually interpolating poses on other entities because the server doesn't attach velocity to entities that are grounded.
 - [ ] Can't use character sheet verbs when there's an interaction.
 - [ ] Character sheet doesn't identfy specialized skills.
 

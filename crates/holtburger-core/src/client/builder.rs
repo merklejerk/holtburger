@@ -169,11 +169,9 @@ mod tests {
         ResourceSource,
     };
     use holtburger_world::{
-        ContactState, SolveActorInput, SolvedActorKinematics, SpatialScene, SpatialSolveBatch,
+        ContactState, SolveBodyInput, SolvedBodyKinematics, SpatialScene, SpatialSolveBatch,
         SpatialSolveRequest,
     };
-    use smallvec::smallvec;
-    use std::path::{Path, PathBuf};
     use std::time::Duration;
     use tempfile::tempdir;
 
@@ -188,15 +186,28 @@ mod tests {
         ) -> SpatialSolveBatch {
             SpatialSolveBatch {
                 solved: request
-                    .actors
+                    .bodies
                     .iter()
-                    .map(|actor| SolvedActorKinematics {
-                        actor_id: actor.actor_id,
-                        pose: actor.pose,
-                        velocity: actor.velocity,
-                        omega: actor.omega,
-                        contact: ContactState::Grounded,
-                        projection_state: None,
+                    .map(|body| {
+                        let (velocity, omega) = match body.basis {
+                            Some(holtburger_world::SolveProjectionBasis::Velocity {
+                                velocity,
+                                omega,
+                            }) => (velocity, omega),
+                            Some(holtburger_world::SolveProjectionBasis::GroundedMotion {
+                                ..
+                            })
+                            | None => (Vector3::zero(), Vector3::zero()),
+                        };
+
+                        SolvedBodyKinematics {
+                            body_id: body.body_id,
+                            pose: body.pose,
+                            velocity,
+                            omega,
+                            contact: ContactState::Grounded,
+                            projection_state: None,
+                        }
                     })
                     .collect(),
                 events: Default::default(),
@@ -349,12 +360,13 @@ mod tests {
 
         let request = SpatialSolveRequest {
             dt: Duration::from_millis(30),
-            actors: smallvec![SolveActorInput {
-                actor_id: Guid(0x5000_0001),
-                pose: Default::default(),
-                velocity: Vector3::zero(),
-                omega: Vector3::zero(),
-            }],
+            bodies: vec![SolveBodyInput::velocity(
+                holtburger_world::SpatialBodyId::Entity(Guid(0x5000_0001)),
+                Default::default(),
+                holtburger_world::ContactState::Unknown,
+                Vector3::zero(),
+                Vector3::zero(),
+            )],
             local_drive: None,
         };
         let mut scene = SpatialScene::new_with_physics(Arc::clone(client.world.scene.physics()));

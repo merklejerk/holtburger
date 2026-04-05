@@ -1775,6 +1775,7 @@ mod tests {
         matches!(
             command,
             ClientCommand::DriveSelf(PlayerDriveIntent::Autonomous(_))
+                | ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
                 | ClientCommand::DriveSelf(PlayerDriveIntent::Stop)
         )
     }
@@ -1793,6 +1794,15 @@ mod tests {
             .commands
             .iter()
             .any(|command| matches!(command, ClientCommand::DriveSelf(PlayerDriveIntent::Stop)))
+    }
+
+    fn has_arrival_navigation_command(result: &UpdateResult) -> bool {
+        result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
+            )
+        })
     }
 
     fn is_snap_facing_command(command: &ClientCommand) -> bool {
@@ -3174,7 +3184,7 @@ mod tests {
 
         let result = state.handle_tick(0.1);
 
-        assert!(has_stop_navigation_command(&result));
+        assert!(has_arrival_navigation_command(&result));
     }
 
     #[test]
@@ -3452,7 +3462,7 @@ mod tests {
 
         let in_range_tick = state.handle_tick(0.016);
 
-        assert!(has_stop_navigation_command(&in_range_tick));
+        assert!(has_arrival_navigation_command(&in_range_tick));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })

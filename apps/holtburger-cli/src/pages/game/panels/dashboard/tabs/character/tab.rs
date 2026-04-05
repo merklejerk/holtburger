@@ -41,7 +41,7 @@ impl TabController for CharacterTab {
         &self,
         data: &GameData,
         _view: &ViewState,
-        interaction: &Option<Interaction>,
+        _interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let target = self.get_selection(data);
         let mut verbs = Vec::new();

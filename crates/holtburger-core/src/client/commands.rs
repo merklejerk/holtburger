@@ -208,37 +208,49 @@ impl ClientRuntime {
         match cmd {
             ClientCommand::Login(password) => {
                 log::info!("Attempting login...");
-                self.auth
-                    .send_login_request(&password, &mut self.session)
+                self.login
+                    .send_login_request(
+                        &self.character_selection.account_name,
+                        &password,
+                        &mut self.session,
+                    )
                     .await
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
                 self.begin_world_entry_transition().await?;
-                self.auth.select_character(id, &mut self.session).await
+                self.character_selection
+                    .select_character(id, &mut self.session)
+                    .await
             }
             ClientCommand::CreateCharacter(request) => {
                 log::info!("Creating character: {}", request.name);
-                self.auth
+                self.character_selection
                     .create_character(*request, &mut self.session)
                     .await
             }
             ClientCommand::DeleteCharacter { slot } => {
                 log::info!("Deleting character in slot {}", slot);
-                self.auth.delete_character(slot, &mut self.session).await
+                self.character_selection
+                    .delete_character(slot, &mut self.session)
+                    .await
             }
             ClientCommand::RestoreCharacter(guid) => {
                 log::info!("Restoring character: 0x{:08X}", guid);
-                self.auth.restore_character(guid, &mut self.session).await
+                self.character_selection
+                    .restore_character(guid, &mut self.session)
+                    .await
             }
             ClientCommand::EnterWorld => {
-                if let Some(char_id) = self.auth.character_id {
+                if let Some(char_id) = self.character_selection.character_id {
                     log::info!(
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
                     self.begin_world_entry_transition().await?;
-                    self.auth.select_character(char_id, &mut self.session).await
+                    self.character_selection
+                        .select_character(char_id, &mut self.session)
+                        .await
                 } else {
                     Ok(())
                 }
@@ -1492,7 +1504,7 @@ mod tests {
         client
             .world
             .set_local_player_runtime_pose(client.world.player.position);
-        client.auth.characters = vec![CharacterEntry {
+        client.character_selection.characters = vec![CharacterEntry {
             guid: player_guid,
             name: "Player".to_string(),
             delete_time: 0,
@@ -1691,7 +1703,7 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.auth.pending_character_operation,
+            client.character_selection.pending_character_operation,
             Some(CharacterManagementOperation::Create)
         );
     }
@@ -1707,7 +1719,7 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.auth.pending_character_operation,
+            client.character_selection.pending_character_operation,
             Some(CharacterManagementOperation::Delete)
         );
     }
@@ -1723,7 +1735,7 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.auth.pending_character_operation,
+            client.character_selection.pending_character_operation,
             Some(CharacterManagementOperation::Restore)
         );
     }

@@ -1,4 +1,5 @@
 use binrw::{BinRead, BinWrite};
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 pub fn read_compressed_u32<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<u32> {
@@ -40,6 +41,39 @@ pub fn write_compressed_u32<W: Write + Seek>(writer: &mut W, val: u32) -> binrw:
         s.write_le(writer)?;
     }
     Ok(())
+}
+
+pub fn read_smart_vec<T, R, F>(reader: &mut R, mut read_item: F) -> binrw::BinResult<Vec<T>>
+where
+    R: Read + Seek,
+    F: FnMut(&mut R) -> binrw::BinResult<T>,
+{
+    let count = read_compressed_u32(reader)? as usize;
+    let mut values = Vec::with_capacity(count);
+    for _ in 0..count {
+        values.push(read_item(reader)?);
+    }
+    Ok(values)
+}
+
+pub fn read_smart_map<K, T, R, FK, FV>(
+    reader: &mut R,
+    mut read_key: FK,
+    mut read_value: FV,
+) -> binrw::BinResult<HashMap<K, T>>
+where
+    R: Read + Seek,
+    K: Eq + std::hash::Hash,
+    FK: FnMut(&mut R) -> binrw::BinResult<K>,
+    FV: FnMut(&mut R) -> binrw::BinResult<T>,
+{
+    let count = read_compressed_u32(reader)? as usize;
+    let mut values = HashMap::with_capacity(count);
+    for _ in 0..count {
+        let key = read_key(reader)?;
+        values.insert(key, read_value(reader)?);
+    }
+    Ok(values)
 }
 
 pub fn read_pstring<R: Read + Seek>(
@@ -252,6 +286,33 @@ mod tests {
         let mut writer = Cursor::new(&mut buf);
         let res = write_compressed_u32(&mut writer, 0x4000_0000);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_read_smart_vec() {
+        let bytes = [0x02, 0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55];
+        let mut reader = Cursor::new(bytes);
+
+        let values = read_smart_vec(&mut reader, u32::read_le).unwrap();
+
+        assert_eq!(values, vec![0x1122_3344, 0x5566_7788]);
+    }
+
+    #[test]
+    fn test_read_smart_map() {
+        let bytes = [
+            0x02, // count
+            0x01, 0x00, 0x00, 0x00, // key 1
+            0xAA, 0xAA, 0x00, 0x00, // value 0xAAAA
+            0x02, 0x00, 0x00, 0x00, // key 2
+            0xBB, 0xBB, 0x00, 0x00, // value 0xBBBB
+        ];
+        let mut reader = Cursor::new(bytes);
+
+        let values = read_smart_map(&mut reader, u32::read_le, u32::read_le).unwrap();
+
+        assert_eq!(values.get(&1), Some(&0x0000_AAAA));
+        assert_eq!(values.get(&2), Some(&0x0000_BBBB));
     }
 
     #[test]

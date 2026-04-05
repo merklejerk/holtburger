@@ -1,5 +1,5 @@
 use crate::graphics::Frame;
-use crate::utils::{align_boundary, read_compressed_u32, read_dotnet_string};
+use crate::utils::{align_boundary, read_dotnet_string, read_smart_map, read_smart_vec};
 use crate::{EOR_PORTAL_NAMESPACE, ResourceKey, StaticResourceKey};
 use binrw::{
     BinRead, BinResult,
@@ -27,7 +27,7 @@ impl CharGen {
 
         let starter_areas = read_smart_vec(reader, StarterArea::read)?;
         reader.seek(SeekFrom::Current(1))?;
-        let heritage_groups = read_smart_map_u32(reader, HeritageGroup::read)?;
+        let heritage_groups = read_smart_map(reader, u32::read_le, HeritageGroup::read)?;
 
         Ok(Self {
             id,
@@ -107,13 +107,13 @@ impl HeritageGroup {
         let environment_setup_id = u32::read_le(reader)?;
         let attribute_credits = u32::read_le(reader)?;
         let skill_credits = u32::read_le(reader)?;
-        let primary_start_areas = read_smart_vec_i32(reader)?;
-        let secondary_start_areas = read_smart_vec_i32(reader)?;
+        let primary_start_areas = read_smart_vec(reader, i32::read_le)?;
+        let secondary_start_areas = read_smart_vec(reader, i32::read_le)?;
         let skills = read_smart_vec(reader, SkillOverride::read)?;
         let templates = read_smart_vec(reader, CharacterTemplate::read)?;
 
         reader.seek(SeekFrom::Current(1))?;
-        let genders = read_smart_map_i32(reader, CharacterGenGender::read)?;
+        let genders = read_smart_map(reader, i32::read_le, CharacterGenGender::read)?;
 
         Ok(Self {
             name,
@@ -178,8 +178,8 @@ impl CharacterTemplate {
             quickness: u32::read_le(reader)?,
             focus: u32::read_le(reader)?,
             self_stat: u32::read_le(reader)?,
-            normal_skills: read_smart_vec_u32(reader)?,
-            primary_skills: read_smart_vec_u32(reader)?,
+            normal_skills: read_smart_vec(reader, u32::read_le)?,
+            primary_skills: read_smart_vec(reader, u32::read_le)?,
         })
     }
 }
@@ -226,9 +226,9 @@ impl CharacterGenGender {
             motion_table: u32::read_le(reader)?,
             combat_table: u32::read_le(reader)?,
             base_obj_desc: ObjDesc::read(reader)?,
-            hair_color_list: read_smart_vec_u32(reader)?,
+            hair_color_list: read_smart_vec(reader, u32::read_le)?,
             hair_style_list: read_smart_vec(reader, HairStyle::read)?,
-            eye_color_list: read_smart_vec_u32(reader)?,
+            eye_color_list: read_smart_vec(reader, u32::read_le)?,
             eye_strip_list: read_smart_vec(reader, EyeStrip::read)?,
             nose_strip_list: read_smart_vec(reader, FaceStrip::read)?,
             mouth_strip_list: read_smart_vec(reader, FaceStrip::read)?,
@@ -236,7 +236,7 @@ impl CharacterGenGender {
             shirt_list: read_smart_vec(reader, Gear::read)?,
             pants_list: read_smart_vec(reader, Gear::read)?,
             footwear_list: read_smart_vec(reader, Gear::read)?,
-            clothing_colors_list: read_smart_vec_u32(reader)?,
+            clothing_colors_list: read_smart_vec(reader, u32::read_le)?,
         })
     }
 }
@@ -415,19 +415,6 @@ impl AnimationPartChange {
     }
 }
 
-fn read_smart_vec<T, R, F>(reader: &mut R, mut read_item: F) -> BinResult<Vec<T>>
-where
-    R: Read + Seek,
-    F: FnMut(&mut R) -> BinResult<T>,
-{
-    let count = read_compressed_u32(reader)? as usize;
-    let mut values = Vec::with_capacity(count);
-    for _ in 0..count {
-        values.push(read_item(reader)?);
-    }
-    Ok(values)
-}
-
 fn read_exact_count_vec<T, R, F>(
     reader: &mut R,
     count: usize,
@@ -440,42 +427,6 @@ where
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         values.push(read_item(reader)?);
-    }
-    Ok(values)
-}
-
-fn read_smart_vec_u32<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<u32>> {
-    read_smart_vec(reader, u32::read_le)
-}
-
-fn read_smart_vec_i32<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<i32>> {
-    read_smart_vec(reader, i32::read_le)
-}
-
-fn read_smart_map_u32<T, R, F>(reader: &mut R, mut read_value: F) -> BinResult<HashMap<u32, T>>
-where
-    R: Read + Seek,
-    F: FnMut(&mut R) -> BinResult<T>,
-{
-    let count = read_compressed_u32(reader)? as usize;
-    let mut values = HashMap::with_capacity(count);
-    for _ in 0..count {
-        let key = u32::read_le(reader)?;
-        values.insert(key, read_value(reader)?);
-    }
-    Ok(values)
-}
-
-fn read_smart_map_i32<T, R, F>(reader: &mut R, mut read_value: F) -> BinResult<HashMap<i32, T>>
-where
-    R: Read + Seek,
-    F: FnMut(&mut R) -> BinResult<T>,
-{
-    let count = read_compressed_u32(reader)? as usize;
-    let mut values = HashMap::with_capacity(count);
-    for _ in 0..count {
-        let key = i32::read_le(reader)?;
-        values.insert(key, read_value(reader)?);
     }
     Ok(values)
 }

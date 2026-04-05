@@ -5,6 +5,7 @@ use holtburger_content::character_gen::{
 use holtburger_protocol::messages::{
     CharacterCreateAppearanceData, CharacterCreateRequestData, SkillAdvancementClass,
 };
+use rand::RngExt;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
@@ -189,6 +190,55 @@ impl CharacterGenBuilder {
             is_admin: build.is_admin,
             is_sentinel: build.is_sentinel,
         })
+    }
+
+    pub fn randomize_appearance(
+        &self,
+        heritage_id: u32,
+        gender_id: u32,
+    ) -> CharacterCreateAppearanceData {
+        let Some(appearance) = self
+            .catalog
+            .heritage_group(heritage_id)
+            .and_then(|heritage| heritage.genders.get(&gender_id))
+            .map(|gender| &gender.appearance)
+        else {
+            return empty_appearance();
+        };
+
+        let mut rng = rand::rng();
+        let headgear_style = random_optional_index(&mut rng, appearance.headgear.len());
+
+        CharacterCreateAppearanceData {
+            eyes: random_required_index(&mut rng, appearance.eye_strips.len()),
+            nose: random_required_index(&mut rng, appearance.nose_strips.len()),
+            mouth: random_required_index(&mut rng, appearance.mouth_strips.len()),
+            hair_color: random_required_index(&mut rng, appearance.hair_color_ids.len()),
+            eye_color: random_required_index(&mut rng, appearance.eye_color_ids.len()),
+            hair_style: random_required_index(&mut rng, appearance.hair_styles.len()),
+            headgear_style,
+            headgear_color: if headgear_style == u32::MAX {
+                0
+            } else {
+                random_required_index(&mut rng, appearance.clothing_color_ids.len())
+            },
+            shirt_style: random_required_index(&mut rng, appearance.shirts.len()),
+            shirt_color: random_required_index(&mut rng, appearance.clothing_color_ids.len()),
+            pants_style: random_required_index(&mut rng, appearance.pants.len()),
+            pants_color: random_required_index(&mut rng, appearance.clothing_color_ids.len()),
+            footwear_style: random_required_index(&mut rng, appearance.footwear.len()),
+            footwear_color: random_required_index(&mut rng, appearance.clothing_color_ids.len()),
+            skin_hue: rng.random::<f64>(),
+            hair_hue: rng.random::<f64>(),
+            headgear_hue: if headgear_style == u32::MAX {
+                0.0
+            } else {
+                rng.random::<f64>()
+            },
+            shirt_hue: rng.random::<f64>(),
+            pants_hue: rng.random::<f64>(),
+            footwear_hue: rng.random::<f64>(),
+        }
     }
 
     fn collect_errors(&self, build: &CharacterGenBuild) -> Vec<CharacterGenValidationError> {
@@ -498,6 +548,47 @@ fn validate_optional_index(
     }
 
     validate_required_index(field, value, options_len, errors);
+}
+
+fn empty_appearance() -> CharacterCreateAppearanceData {
+    CharacterCreateAppearanceData {
+        eyes: 0,
+        nose: 0,
+        mouth: 0,
+        hair_color: 0,
+        eye_color: 0,
+        hair_style: 0,
+        headgear_style: u32::MAX,
+        headgear_color: 0,
+        shirt_style: 0,
+        shirt_color: 0,
+        pants_style: 0,
+        pants_color: 0,
+        footwear_style: 0,
+        footwear_color: 0,
+        skin_hue: 0.0,
+        hair_hue: 0.0,
+        headgear_hue: 0.0,
+        shirt_hue: 0.0,
+        pants_hue: 0.0,
+        footwear_hue: 0.0,
+    }
+}
+
+fn random_required_index(rng: &mut impl RngExt, options_len: usize) -> u32 {
+    if options_len == 0 {
+        0
+    } else {
+        rng.random_range(0..options_len) as u32
+    }
+}
+
+fn random_optional_index(rng: &mut impl RngExt, options_len: usize) -> u32 {
+    if options_len == 0 {
+        u32::MAX
+    } else {
+        random_required_index(rng, options_len)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -810,6 +901,34 @@ mod tests {
         assert_eq!(request.unknown_constant, CHARACTER_GEN_UNKNOWN_CONSTANT);
         assert_eq!(request.class_id, CHARACTER_GEN_DEFAULT_CLASS_ID);
         assert_eq!(request.name, "Bestie");
+    }
+
+    #[test]
+    fn randomize_appearance_uses_valid_catalog_ranges() {
+        let builder = CharacterGenBuilder::new(test_catalog());
+
+        let appearance = builder.randomize_appearance(6, 1);
+
+        assert_eq!(appearance.eyes, 0);
+        assert_eq!(appearance.nose, 0);
+        assert_eq!(appearance.mouth, 0);
+        assert_eq!(appearance.hair_color, 0);
+        assert_eq!(appearance.eye_color, 0);
+        assert_eq!(appearance.hair_style, 0);
+        assert_eq!(appearance.headgear_style, u32::MAX);
+        assert_eq!(appearance.headgear_color, 0);
+        assert_eq!(appearance.shirt_style, 0);
+        assert_eq!(appearance.shirt_color, 0);
+        assert_eq!(appearance.pants_style, 0);
+        assert_eq!(appearance.pants_color, 0);
+        assert_eq!(appearance.footwear_style, 0);
+        assert_eq!(appearance.footwear_color, 0);
+        assert!((0.0..1.0).contains(&appearance.skin_hue));
+        assert!((0.0..1.0).contains(&appearance.hair_hue));
+        assert_eq!(appearance.headgear_hue, 0.0);
+        assert!((0.0..1.0).contains(&appearance.shirt_hue));
+        assert!((0.0..1.0).contains(&appearance.pants_hue));
+        assert!((0.0..1.0).contains(&appearance.footwear_hue));
     }
 
     #[test]

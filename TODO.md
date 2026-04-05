@@ -17,6 +17,7 @@
 - [x] NPCs with VENDOR flag should display [S]hop instead of [U]se.
 - [x] NPCs without VENDOR flag should display [T]alk.
 - [x] Vendor entity class?
+- [x] Split auth responsibilities into `LoginState` and `CharacterAuthState`.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
@@ -27,7 +28,6 @@
 - [ ] Replace context panel header with entity name.
 - [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
 - [ ] `/logopolis`
-- [x] Split auth responsibilities into `LoginState` and `CharacterAuthState`.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -83,6 +83,7 @@
 - [x] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [x] Auto-follow.
 - [x] Add a movable cursor to the chat input.
+- [x] Add a `/scoot <METERS>` command.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -93,7 +94,7 @@
 - [ ] Some echantments duplicated in char tab.
 - [ ] Add intelligent entity context scanners.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
-- [ ] Add a `/nudge <METERS>` command.
+- [ ] `holtburger-core` abuses the shit out of WireEvents.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -240,7 +241,6 @@
 - [x] Character sheet doesn't identfy specialized skills.
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] `holtburger-core` abuses the shit out of WireEvents.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

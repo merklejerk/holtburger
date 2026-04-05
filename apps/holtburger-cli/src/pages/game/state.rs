@@ -467,7 +467,7 @@ impl GameState {
                 self.view.salvaging = None;
                 result.request_redraw(RedrawPriority::Immediate);
             }
-            AppAction::Approach { .. } | AppAction::Follow { .. } => {
+            AppAction::Approach { .. } | AppAction::Follow { .. } | AppAction::Scoot { .. } => {
                 self.apply_navigation_input(
                     navigation_input
                         .expect("navigation actions should project to navigation input"),
@@ -1277,6 +1277,7 @@ impl GameState {
             NavigationInput::StartApproach { target } | NavigationInput::StartFollow { target } => {
                 Some(target)
             }
+            NavigationInput::StartScoot { .. } => None,
             NavigationInput::Cancel
             | NavigationInput::ForcedReposition
             | NavigationInput::TeleportStarted => self.navigation_tick_target_guid(),
@@ -1293,6 +1294,9 @@ impl GameState {
         match action {
             AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
             AppAction::Follow { guid } => Some(NavigationInput::StartFollow { target: *guid }),
+            AppAction::Scoot { distance_m } => Some(NavigationInput::StartScoot {
+                distance_m: *distance_m,
+            }),
             AppAction::CancelInteraction
                 if Self::is_frontend_navigation_interaction(self.view.active_interaction) =>
             {

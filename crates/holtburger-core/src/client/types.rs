@@ -635,6 +635,12 @@ pub enum ClientCommand {
         option: CharacterOption,
         value: bool,
     },
+    AddPlayerPermission {
+        player_name: String,
+    },
+    RemovePlayerPermission {
+        player_name: String,
+    },
     RespondToConfirmation {
         accepted: bool,
     },

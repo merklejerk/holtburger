@@ -321,6 +321,11 @@ pub enum GameActionOpcode {
     AddToTrade = 0x01F8,
     /// C2S: Reset the trade offer (clears accept status).
     ResetTrade = 0x0204,
+    // --- Miscellaneous & Permissions ---
+    /// C2S: Grant corpse-looting permission to a player.
+    AddPlayerPermission = 0x0219,
+    /// C2S: Revoke corpse-looting permission from a player.
+    RemovePlayerPermission = 0x021A,
     /// C2S: Accept the current trade offer.
     AcceptTrade = 0x01FA,
     /// C2S: Decline the current trade offer.

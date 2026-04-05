@@ -9,10 +9,10 @@ pub enum GameOpcode {
     /// Internal/None opcode. Sometimes used as a logout signal or heartbeat.
     None = 0x0000,
     // --- Connection & Character Selection ---
-    // /// C2S: Request to create a new character.
-    // CharacterCreate = 0xF656,
-    // /// C2S: Request to delete a character.
-    // CharacterDelete = 0xF655,
+    /// C2S: Request to create a new character.
+    CharacterCreate = 0xF656,
+    /// C2S/S2C: Request to delete a character or confirm deletion.
+    CharacterDelete = 0xF655,
     /// S2C: Final character enter world message.
     /// Confirms the client is now active in the world.
     CharacterEnterWorld = 0xF657,
@@ -22,10 +22,10 @@ pub enum GameOpcode {
     /// S2C: Error during character operations.
     /// Sent if a login request fails (e.g., character already in world).
     CharacterError = 0xF659,
-    // /// S2C: Response to character creation/restore.
-    // CharacterCreateResponse = 0xF643,
-    // /// C2S: Request to restore a deleted character.
-    // CharacterRestore = 0xF7D9,
+    /// S2C: Response to character creation or restore.
+    CharacterCreateResponse = 0xF643,
+    /// C2S: Request to restore a deleted character.
+    CharacterRestore = 0xF7D9,
     /// C2S: Request to enter world with character.
     /// Initiates the world login sequence. Server typically responds with SERVER_READY or an error.
     CharacterEnterWorldRequest = 0xF7C8,

@@ -447,6 +447,12 @@ impl MovementSystem {
             return None;
         }
 
+        if world.scene.body(SpatialBodyId::LocalPlayer(guid)).is_none()
+            && world.player.position.landblock_id == Guid::NULL
+        {
+            return None;
+        }
+
         let body_id = SpatialBodyId::LocalPlayer(guid);
         let pose = world
             .local_player_runtime_pose()

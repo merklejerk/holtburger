@@ -67,8 +67,8 @@ Responsible for reading, mounting, and querying static local Asheron's Call data
 - **Provides**: Fast, memory-mapped queries for structural templates (Weenies), 3D models, and multi-layered Landblocks.
 
 ### 4. The Content Seam: [`holtburger-content`](crates/holtburger-content/ARCHITECTURE.md)
-Owns runtime content discovery, parsed startup asset loading, and lightweight static reference-data queries that frontends may retain directly.
-- **Provides**: `ContentRepository`, HBA discovery and mount policy, parsed `WorldBootstrap` assembly, and frontend-facing lookup seams such as `SpellCatalog`.
+Owns runtime content discovery and typed asset access over mounted HBA sources.
+- **Provides**: `ContentRepository`, HBA discovery and mount policy, and asset-derived models such as `CharacterGenReference`.
 
 ### 5. The Transport: [`holtburger-session`](crates/holtburger-session/ARCHITECTURE.md)
 Encapsulates pure networking logic. It handles the lowest levels of transport without knowing anything about the game world.
@@ -79,11 +79,11 @@ The authoritative in-memory world model for the client. It tracks hydrated entit
 - **Provides**: `WorldState`, `PlayerState`, entity hydration, canonical runtime body state, spatial and retention helpers, trade or vendor state, and world query surfaces.
 
 ### 7. The Brain: [`holtburger-core`](crates/holtburger-core/ARCHITECTURE.md)
-The primary engine orchestrator. It ties networking (`session`) and authority (`world`) together, executes movement and interaction primitives, and projects raw protocol plus world changes into frontend-safe semantic events. Runtime content loading now happens outside this crate; `core` consumes an explicit `WorldBootstrap` rather than discovering assets itself. Its runtime-body delivery surfaces publish mirrored read models over world-owned runtime state, not a second owner of runtime advancement.
+The primary engine orchestrator. It ties networking (`session`) and authority (`world`) together, executes movement and interaction primitives, and projects raw protocol plus world changes into frontend-safe semantic events. `ClientRuntimeBuilder` now owns the runtime asset-loading step by reading the specific assets it needs from `ContentRepository`. Its runtime-body delivery surfaces publish mirrored read models over world-owned runtime state, not a second owner of runtime advancement.
 - **Provides**: Handshake coordination, primitive movement execution and prediction, protocol-to-world orchestration, optional reusable controllers, and `ClientViewEvent` streams for applications to consume.
 
 ### 8. The Frontend: [`holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
-The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, owns frontend-specific control policy such as when to drive optional navigation or combat helpers, and currently keeps mirrored read caches for presentation and app-thread decisions. It also owns the content bootstrap seam for startup and static reference-data queries. Those caches are frontend-owned views only; they must not become a second runtime body authority.
+The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, owns frontend-specific control policy such as when to drive optional navigation or combat helpers, and currently keeps mirrored read caches for presentation and app-thread decisions. It also retains frontend-owned lookup caches derived from content or runtime state. Those caches are frontend-owned views only; they must not become a second runtime body authority.
 - **Provides**: Real-time ratatui screens, input mapping, mirrored read caches and modal state, frontend orchestration around shared core controllers, and frontend-owned content queries.
 
 ---

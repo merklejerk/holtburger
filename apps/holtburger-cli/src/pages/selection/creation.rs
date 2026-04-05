@@ -12,7 +12,7 @@ use holtburger_core::character_gen::{
 };
 use holtburger_core::{CharacterGenBuild, CharacterGenBuilder, CharacterGenValidationError};
 use holtburger_dat::file_type::{CharGen, SkillTable};
-use holtburger_protocol::messages::{CharacterCreateAppearanceData, SkillAdvancementClass};
+use holtburger_protocol::messages::SkillAdvancementClass;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -634,10 +634,11 @@ impl CharacterCreationFormState {
         Vec<CharacterGenValidationError>,
     > {
         let builder = CharacterGenBuilder::new(self.catalog.clone());
+        let appearance = builder.randomize_appearance(self.heritage_id, self.gender_id);
         let build = CharacterGenBuild {
             heritage: self.heritage_id,
             gender: self.gender_id,
-            appearance: self.default_appearance(),
+            appearance,
             template_option: self
                 .current_template()
                 .map(|template| template.template_option)
@@ -685,57 +686,6 @@ impl CharacterCreationFormState {
 
         self.selected_skill_id = self.skill_ids_for_display().into_iter().next();
         self.selected_attribute_index = 0;
-    }
-
-    fn default_appearance(&self) -> CharacterCreateAppearanceData {
-        let Some(gender) = self.current_gender() else {
-            return CharacterCreateAppearanceData {
-                eyes: 0,
-                nose: 0,
-                mouth: 0,
-                hair_color: 0,
-                eye_color: 0,
-                hair_style: 0,
-                headgear_style: u32::MAX,
-                headgear_color: 0,
-                shirt_style: 0,
-                shirt_color: 0,
-                pants_style: 0,
-                pants_color: 0,
-                footwear_style: 0,
-                footwear_color: 0,
-                skin_hue: 0.0,
-                hair_hue: 0.0,
-                headgear_hue: 0.0,
-                shirt_hue: 0.0,
-                pants_hue: 0.0,
-                footwear_hue: 0.0,
-            };
-        };
-
-        let appearance = &gender.appearance;
-        CharacterCreateAppearanceData {
-            eyes: default_required_index(appearance.eye_strips.len()),
-            nose: default_required_index(appearance.nose_strips.len()),
-            mouth: default_required_index(appearance.mouth_strips.len()),
-            hair_color: default_required_index(appearance.hair_color_ids.len()),
-            eye_color: default_required_index(appearance.eye_color_ids.len()),
-            hair_style: default_required_index(appearance.hair_styles.len()),
-            headgear_style: default_optional_index(appearance.headgear.len()),
-            headgear_color: default_required_index(appearance.clothing_color_ids.len()),
-            shirt_style: default_required_index(appearance.shirts.len()),
-            shirt_color: default_required_index(appearance.clothing_color_ids.len()),
-            pants_style: default_required_index(appearance.pants.len()),
-            pants_color: default_required_index(appearance.clothing_color_ids.len()),
-            footwear_style: default_required_index(appearance.footwear.len()),
-            footwear_color: default_required_index(appearance.clothing_color_ids.len()),
-            skin_hue: 0.0,
-            hair_hue: 0.0,
-            headgear_hue: 0.0,
-            shirt_hue: 0.0,
-            pants_hue: 0.0,
-            footwear_hue: 0.0,
-        }
     }
 
     fn skill_delta_cost(
@@ -826,14 +776,6 @@ fn first_available_slot(occupied_slots: impl IntoIterator<Item = u32>) -> u32 {
         candidate += 1;
     }
     candidate
-}
-
-fn default_required_index(_options_len: usize) -> u32 {
-    0
-}
-
-fn default_optional_index(options_len: usize) -> u32 {
-    if options_len == 0 { u32::MAX } else { 0 }
 }
 
 pub fn format_creation_errors(errors: &[CharacterGenValidationError]) -> String {

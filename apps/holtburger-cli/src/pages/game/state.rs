@@ -960,10 +960,27 @@ impl GameState {
                     error: WeenieError::ActionCancelled
                 }
             )
-            && matches!(
-                self.view.active_interaction,
-                Some(Interaction::Targeting { .. })
-            )
+            && self.should_rearm_sticky_auto_attack()
+    }
+
+    fn should_rearm_sticky_auto_attack(&self) -> bool {
+        let Some(target_guid) = self.current_target_guid() else {
+            return false;
+        };
+
+        self.data.combat_target_status(target_guid).is_available() && !self.player_is_dead()
+    }
+
+    fn player_is_dead(&self) -> bool {
+        let Some(player_guid) = self.data.player_guid else {
+            return false;
+        };
+
+        self.data
+            .entities
+            .get(&player_guid)
+            .and_then(|entity| entity.motion_snapshot)
+            .is_some_and(|snapshot| snapshot.indicates_death_motion())
     }
 
     pub(crate) fn toggled_combat_mode(&self) -> CombatMode {
@@ -1153,6 +1170,10 @@ impl GameState {
         mode: CombatMode,
         force_attack: bool,
     ) -> Option<CombatAutomationInput> {
+        if self.player_is_dead() {
+            return None;
+        }
+
         let target_guid = self.current_target_guid()?;
         let attack_profile = self.desired_attack_profile(mode)?;
         let target_position = self.runtime.navigation.automation_target_position(
@@ -3340,6 +3361,99 @@ mod tests {
                 || is_run_movement_command(command)
         }));
         assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn cancelled_attack_does_not_rearm_after_target_death_motion() {
+        use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+        use holtburger_world::entity::EntityMotionSnapshot;
+
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+            ..Default::default()
+        });
+        state.data.entities.insert(target_guid, target);
+
+        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(!result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
+        }));
+
+        let mut stale = UpdateResult::new();
+        state.refresh_stale_attack_sequence(Instant::now() + Duration::from_secs(2), &mut stale);
+
+        assert!(!stale.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
+        }));
+    }
+
+    #[test]
+    fn cancelled_attack_does_not_rearm_after_player_death_motion() {
+        use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+        use holtburger_world::entity::EntityMotionSnapshot;
+
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+        player.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+            ..Default::default()
+        });
+        state.data.entities.insert(player_guid, player);
+
+        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(!result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
+        }));
     }
 
     #[test]

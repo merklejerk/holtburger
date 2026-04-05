@@ -1,4 +1,8 @@
+use crate::messages::utils::{read_string16, write_string16};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, FromRepr};
 
@@ -55,4 +59,58 @@ pub enum DamageLocation {
     UpperLeg = 0x6,
     LowerLeg = 0x7,
     Foot = 0x8,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayerKilledData {
+    pub death_message: String,
+    pub victim_id: Guid,
+    pub killer_id: Guid,
+}
+
+impl ProtocolUnpack for PlayerKilledData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let death_message = read_string16(data, offset)?;
+
+        if *offset + 8 > data.len() {
+            return None;
+        }
+
+        let victim_id = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        *offset += 4;
+        let killer_id = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        *offset += 4;
+
+        Some(Self {
+            death_message,
+            victim_id,
+            killer_id,
+        })
+    }
+}
+
+impl ProtocolPack for PlayerKilledData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.death_message);
+        buf.write_u32::<LittleEndian>(self.victim_id.0).unwrap();
+        buf.write_u32::<LittleEndian>(self.killer_id.0).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_player_killed_fixture() {
+        let expected = PlayerKilledData {
+            death_message: "Test".to_string(),
+            victim_id: Guid(0x12345678),
+            killer_id: Guid(0x90ABCDEF),
+        };
+
+        let fixture = hex::decode("040054657374000078563412EFCDAB90").unwrap();
+        assert_pack_unpack_parity(&fixture, &expected);
+    }
 }

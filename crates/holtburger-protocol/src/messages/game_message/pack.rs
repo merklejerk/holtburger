@@ -82,6 +82,11 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::PlayerKilled(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayerKilled as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameMessage::TurbineChat(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::TurbineChat as u32)
                     .unwrap();

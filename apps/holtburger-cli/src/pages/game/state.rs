@@ -14,6 +14,7 @@ use holtburger_core::client::types::{
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
+use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 #[cfg(test)]
@@ -41,7 +42,7 @@ use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
-    Interaction, RedrawPriority, UpdateResult,
+    Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -831,7 +832,24 @@ impl GameState {
     pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
         match action {
             AppUiAction::OpenUnswearConfirmation { target } => {
-                self.view.unswear_confirmation = Some(target);
+                let target_label = self
+                    .data
+                    .get_entity(target)
+                    .map(|entity| {
+                        let name = entity.name().trim();
+                        if name.is_empty() {
+                            format!("0x{:08X}", target.0)
+                        } else {
+                            name.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| format!("0x{:08X}", target.0));
+
+                self.view.local_confirmation = Some(LocalConfirmation {
+                    title: " Break Allegiance Confirmation ".to_string(),
+                    text: format!("Break allegiance with {}?", target_label),
+                    action: AppAction::Unswear { target },
+                });
                 UpdateResult::redraw()
             }
             _ => self
@@ -1726,8 +1744,8 @@ pub struct ViewState {
     pub salvaging: Option<SalvagingState>,
     /// Current core-projected confirmation request being surfaced by the game page.
     pub active_confirmation: Option<ActiveCharacterConfirmation>,
-    /// Current local confirmation request for breaking allegiance.
-    pub unswear_confirmation: Option<Guid>,
+    /// Current local confirmation request for client-driven modals.
+    pub local_confirmation: Option<LocalConfirmation>,
     /// Current core-projected busy operation for local action sequencing.
     pub active_busy_operation: Option<BusyOperationKind>,
 }
@@ -1766,7 +1784,7 @@ impl Default for ViewState {
             active_interaction: None,
             salvaging: None,
             active_confirmation: None,
-            unswear_confirmation: None,
+            local_confirmation: None,
             active_busy_operation: None,
         }
     }

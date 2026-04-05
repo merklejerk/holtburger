@@ -620,6 +620,13 @@ pub enum AppAction {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalConfirmation {
+    pub title: String,
+    pub text: String,
+    pub action: AppAction,
+}
+
 impl From<Vec<AppAction>> for AppAction {
     fn from(actions: Vec<AppAction>) -> Self {
         AppAction::Sequence { actions }

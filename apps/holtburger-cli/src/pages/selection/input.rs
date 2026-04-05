@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 
-use crate::pages::selection::creation::CharacterCreationFocus;
 use crate::pages::selection::SelectionState;
+use crate::pages::selection::creation::CharacterCreationFocus;
 use crate::types::{RedrawPriority, UpdateResult};
 
 impl SelectionState {
@@ -44,7 +44,8 @@ impl SelectionState {
             }
             KeyCode::PageUp => {
                 if !self.characters.is_empty() {
-                    self.selected_character_index = self.selected_character_index.saturating_sub(10);
+                    self.selected_character_index =
+                        self.selected_character_index.saturating_sub(10);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
             }
@@ -95,16 +96,18 @@ impl SelectionState {
 
         match key.code {
             KeyCode::Esc => {
-                result.actions.push(
-                    crate::types::AppUiAction::CancelDeleteCharacterConfirmation.into(),
-                );
+                result
+                    .actions
+                    .push(crate::types::AppUiAction::CancelDeleteCharacterConfirmation.into());
                 result.request_redraw(RedrawPriority::Immediate);
             }
             KeyCode::Enter => {
                 if confirmation.expected_name_matches() {
-                    result.actions.push(crate::types::AppAction::DeleteCharacterAtSlot {
-                        slot: confirmation.slot,
-                    });
+                    result
+                        .actions
+                        .push(crate::types::AppAction::DeleteCharacterAtSlot {
+                            slot: confirmation.slot,
+                        });
                 } else {
                     confirmation.error_message = Some(format!(
                         "Type '{}' to confirm delete.",
@@ -128,14 +131,16 @@ impl SelectionState {
         let mut result = UpdateResult::new();
         let Some(creation) = self.creation.ready_mut() else {
             if key.code == KeyCode::Esc {
-                return result.with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
+                return result
+                    .with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
             }
             return result;
         };
 
         match key.code {
             KeyCode::Esc => {
-                return result.with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
+                return result
+                    .with_action(crate::types::AppUiAction::OpenCharacterDashboard.into());
             }
             KeyCode::Tab => {
                 creation.move_focus(1);
@@ -147,7 +152,9 @@ impl SelectionState {
             }
             KeyCode::Enter => match creation.focus {
                 CharacterCreationFocus::Submit => {
-                    result.actions.push(crate::types::AppAction::SubmitCharacterCreation);
+                    result
+                        .actions
+                        .push(crate::types::AppAction::SubmitCharacterCreation);
                 }
                 CharacterCreationFocus::Skills => {
                     result.actions.push(
@@ -192,6 +199,8 @@ impl SelectionState {
                     KeyCode::Left => {
                         let changed = if key.modifiers.contains(KeyModifiers::CONTROL) {
                             creation.minimize_selected_attribute()
+                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            creation.adjust_selected_attribute(-10)
                         } else {
                             creation.adjust_selected_attribute(-1)
                         };
@@ -203,6 +212,8 @@ impl SelectionState {
                     KeyCode::Right => {
                         let changed = if key.modifiers.contains(KeyModifiers::CONTROL) {
                             creation.maximize_selected_attribute()
+                        } else if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            creation.adjust_selected_attribute(10)
                         } else {
                             creation.adjust_selected_attribute(1)
                         };
@@ -260,10 +271,12 @@ fn cycle_selector_key(key: KeyEvent, mut apply: impl FnMut(i32) -> bool) -> bool
 mod tests {
     use super::*;
     use crate::pages::selection::creation::{CharacterCreationFormState, CharacterCreationState};
-    use crate::pages::selection::state::{CharacterDashboardEntry, CharacterScreen, DeleteCharacterConfirmation};
+    use crate::pages::selection::state::{
+        CharacterDashboardEntry, CharacterScreen, DeleteCharacterConfirmation,
+    };
     use crossterm::event::KeyModifiers;
-    use holtburger_content::{CharacterGenCatalog, character_gen::CharacterGenHeritageGroup};
     use holtburger_common::Guid;
+    use holtburger_content::{CharacterGenCatalog, character_gen::CharacterGenHeritageGroup};
     use holtburger_protocol::messages::CharacterEntry;
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -283,10 +296,7 @@ mod tests {
             screen: CharacterScreen::Dashboard,
             creation: crate::pages::selection::creation::CharacterCreationState::default(),
             pending_create: None,
-            delete_confirmation: Some(DeleteCharacterConfirmation::new(
-                4,
-                "Sho Girl".to_string(),
-            )),
+            delete_confirmation: Some(DeleteCharacterConfirmation::new(4, "Sho Girl".to_string())),
         }
     }
 
@@ -359,11 +369,13 @@ mod tests {
 
         assert!(result.actions.is_empty());
         assert!(result.redraw_requested());
-        assert!(state
-            .delete_confirmation
-            .as_ref()
-            .and_then(|confirmation| confirmation.error_message.as_ref())
-            .is_some());
+        assert!(
+            state
+                .delete_confirmation
+                .as_ref()
+                .and_then(|confirmation| confirmation.error_message.as_ref())
+                .is_some()
+        );
     }
 
     #[test]

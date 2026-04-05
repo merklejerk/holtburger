@@ -1,9 +1,9 @@
 use crate::components::modal::{ModalPalette, fit_modal_area};
-use crate::pages::selection::render::{advancement_group_label, skill_raise_cost_label};
+use crate::pages::selection::SelectionState;
 use crate::pages::selection::creation::{
     CharacterCreationFocus, CharacterCreationSkillRow, CharacterCreationState,
 };
-use crate::pages::selection::SelectionState;
+use crate::pages::selection::render::{advancement_group_label, skill_raise_cost_label};
 use crate::pages::selection::state::CharacterScreen;
 use crate::theme::{ERROR_FG, SUMMARY_FG, list_item_style, pane_block, pane_title_style};
 use ratatui::Frame;
@@ -54,11 +54,16 @@ fn render_character_dashboard(f: &mut Frame, state: &SelectionState, area: Rect)
             .iter()
             .enumerate()
             .map(|(index, character)| {
-                let mut spans = vec![Span::raw(format!("{:>2}. {}", index + 1, character.character.name))];
+                let mut spans = vec![Span::raw(format!(
+                    "{:>2}. {}",
+                    index + 1,
+                    character.character.name
+                ))];
                 if character.character.delete_time != 0 {
                     spans.push(Span::raw("  [pending delete]"));
                 }
-                ListItem::new(Line::from(spans)).style(list_item_style(index == state.selected_character_index))
+                ListItem::new(Line::from(spans))
+                    .style(list_item_style(index == state.selected_character_index))
             })
             .collect();
 
@@ -126,10 +131,10 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                 .split(body[1]);
 
             let name_widget = form.name_input.rendered_with_block(
-                pane_block(form.focus == CharacterCreationFocus::Name)
-                    .title(Line::from(" Name ").style(pane_title_style(
-                        form.focus == CharacterCreationFocus::Name,
-                    ))),
+                pane_block(form.focus == CharacterCreationFocus::Name).title(
+                    Line::from(" Name ")
+                        .style(pane_title_style(form.focus == CharacterCreationFocus::Name)),
+                ),
                 Style::default(),
                 form.focus == CharacterCreationFocus::Name,
             );
@@ -181,7 +186,9 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                         " Attributes  {} remaining ",
                         form.remaining_attribute_points()
                     ))
-                    .style(pane_title_style(form.focus == CharacterCreationFocus::Attributes)),
+                    .style(pane_title_style(
+                        form.focus == CharacterCreationFocus::Attributes,
+                    )),
                 );
             let mut attributes_state = ListState::default();
             attributes_state.select(Some(form.selected_attribute_index));
@@ -195,12 +202,12 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
             let skill_items = skill_rows
                 .iter()
                 .map(|row| match row {
-                    CharacterCreationSkillRow::Header(advancement) => ListItem::new(Line::from(vec![
-                        Span::styled(
+                    CharacterCreationSkillRow::Header(advancement) => {
+                        ListItem::new(Line::from(vec![Span::styled(
                             advancement_group_label(*advancement),
                             Style::default().add_modifier(Modifier::BOLD).fg(SUMMARY_FG),
-                        ),
-                    ])),
+                        )]))
+                    }
                     CharacterCreationSkillRow::Skill {
                         skill_id,
                         label,
@@ -215,11 +222,7 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                                 form.catalog
                                     .skill_costs_for_heritage(form.heritage_id, *skill_id),
                             ),
-                            Style::default().fg(if *selected {
-                                Color::Black
-                            } else {
-                                Color::Gray
-                            }),
+                            Style::default().fg(if *selected { Color::Black } else { Color::Gray }),
                         ),
                     ]))
                     .style(list_item_style(
@@ -236,7 +239,9 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                             " Skills  {} points remaining ",
                             form.remaining_skill_points()
                         ))
-                        .style(pane_title_style(form.focus == CharacterCreationFocus::Skills)),
+                        .style(pane_title_style(
+                            form.focus == CharacterCreationFocus::Skills,
+                        )),
                     ),
                 ),
                 right[0],
@@ -256,10 +261,11 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
                     .style(button_style)
                     .alignment(Alignment::Center)
                     .block(
-                        pane_block(form.focus == CharacterCreationFocus::Submit)
-                            .title(Line::from(" Submit ").style(pane_title_style(
+                        pane_block(form.focus == CharacterCreationFocus::Submit).title(
+                            Line::from(" Submit ").style(pane_title_style(
                                 form.focus == CharacterCreationFocus::Submit,
-                            ))),
+                            )),
+                        ),
                     ),
                 right[1],
             );
@@ -278,7 +284,6 @@ fn render_character_creation(f: &mut Frame, state: &SelectionState, area: Rect) 
             }
         }
     }
-
 }
 
 fn render_picker_control(title: &str, value: &str, focused: bool) -> Paragraph<'static> {
@@ -316,7 +321,11 @@ fn render_delete_confirmation_modal(
         .constraints([
             Constraint::Length(5),
             Constraint::Length(3),
-            Constraint::Length(if confirmation.error_message.is_some() { 1 } else { 0 }),
+            Constraint::Length(if confirmation.error_message.is_some() {
+                1
+            } else {
+                0
+            }),
         ])
         .split(inner);
 
@@ -334,7 +343,9 @@ fn render_delete_confirmation_modal(
         rows[0],
     );
 
-    let input_block = Block::default().borders(Borders::ALL).title(" Confirmation Name ");
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Confirmation Name ");
     let input_widget = confirmation
         .input
         .rendered_with_block(input_block, Style::default(), true);

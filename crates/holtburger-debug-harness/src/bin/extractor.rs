@@ -63,8 +63,8 @@ async fn main() -> Result<()> {
     } else {
         ContentRepository::from_hba_path(&dats_path)?
     };
-    let mut builder = ClientRuntimeBuilder::new(args.account.clone())
-        .server(args.server.clone(), args.port);
+    let mut builder =
+        ClientRuntimeBuilder::new(args.account.clone()).server(args.server.clone(), args.port);
     builder.load_assets(&content)?;
 
     let mut client = builder.connect().await?;

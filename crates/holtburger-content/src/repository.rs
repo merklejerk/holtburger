@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
-use holtburger_dat::{HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey};
+use holtburger_dat::{
+    HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
+};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Cursor;
@@ -348,11 +350,7 @@ mod tests {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
             &dir.path().join("bundle.hba"),
-            &[
-                SkillTable::FILE_ID,
-                SpellTable::FILE_ID,
-                XpTable::FILE_ID,
-            ],
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
             false,
         ) {
             return;
@@ -406,5 +404,4 @@ mod tests {
 
         assert!(error.to_string().contains("spell table"));
     }
-
 }

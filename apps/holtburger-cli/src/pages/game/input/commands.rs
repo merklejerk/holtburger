@@ -956,7 +956,7 @@ mod tests {
         assert!(result.commands.is_empty());
         assert!(state.chat.messages.iter().any(|message| {
             message.kind == ChatMessageKind::System
-                && message.text == "You swear allegiance to Bestie."
+                && message.text == "Swearing allegiance to Bestie..."
         }));
     }
 

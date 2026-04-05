@@ -223,7 +223,8 @@
     - [x] `/invite <PLAYER>`, `/uninvite <PLAYER>` - party invites
     - [x] `/? COMMAND` - targeted command help doc
     - [~] `/swear`, `/leave`, `/unswear <VASSAL>`.
-    - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
+    - [x] `/permit <player>`, `/unpermit <player>` - corpse looting options
+    - [ ] `/arena`, `/mp`
 - [x] Interpolate entity motion properties.
 - [x] Harden reconnect. (Just quit on DC)
 - [x] Burden display missing.

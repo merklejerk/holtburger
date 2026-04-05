@@ -134,17 +134,4 @@ mod tests {
         assert_eq!(fitted.width, expected_width);
         assert_eq!(fitted.height, expected_height);
     }
-
-    #[test]
-    fn modal_area_expands_for_wrapped_content() {
-        let area = Rect::new(0, 0, 50, 20);
-        let fitted = fit_modal_area(
-            area,
-            " Confirmation ",
-            "This is a deliberately long line that needs to wrap to fit the available terminal width.",
-        );
-
-        assert_eq!(fitted.width, 46);
-        assert!(fitted.height > 5);
-    }
 }

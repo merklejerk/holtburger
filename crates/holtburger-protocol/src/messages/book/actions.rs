@@ -2,25 +2,6 @@ use crate::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::Guid;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BookDataActionData {
-    pub guid: Guid,
-}
-
-impl ProtocolUnpack for BookDataActionData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        Some(Self {
-            guid: Guid::unpack(data, offset)?,
-        })
-    }
-}
-
-impl ProtocolPack for BookDataActionData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        self.guid.pack(buf);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BookPageDataActionData {
     pub guid: Guid,
     pub page_index: i32,
@@ -48,19 +29,6 @@ mod tests {
     use crate::messages::game_action::{GameAction, GameActionMessage};
     use crate::messages::game_message::GameMessage;
     use crate::test_helpers::assert_pack_unpack_parity;
-
-    #[test]
-    fn test_book_data_action_fixture() {
-        // Generated from ACE: SyntheticProtocolTests.DumpBookProtocolFixtures
-        let fixture = hex::decode("B1F7000010000000AA00000044332211").unwrap();
-        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
-            sequence: 0x10,
-            action: GameAction::BookData(Box::new(BookDataActionData {
-                guid: Guid(0x11223344),
-            })),
-        }));
-        assert_pack_unpack_parity(&fixture, &expected);
-    }
 
     #[test]
     fn test_book_page_data_action_fixture() {

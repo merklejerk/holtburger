@@ -8,11 +8,13 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{ContextView, InspectTarget};
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_world::book::BookData;
 use holtburger_world::inspect::InspectableObject;
 
 // In a fully dismantled view state, Context State should be passed directly here.
 pub fn render_context_pane(
     f: &mut Frame,
+    data: &GameData,
     context_buffer: &[ratatui::text::Line<'static>],
     context_view: &ContextView,
     scroll_offset: usize,
@@ -37,13 +39,19 @@ pub fn render_context_pane(
     }
 
     let base_title = match context_view {
-        ContextView::Default => "Context Information",
-        ContextView::Assess(_) => "Object Appraisal",
-        ContextView::Debug(_) => "Debug Information",
-        ContextView::Spell(_) => "Spell Details",
-        ContextView::Enchantment(_) => "Enchantment Details",
-        ContextView::DebugSpell(_) => "Debug Information",
-        ContextView::DebugEnchantment(_) => "Debug Information",
+        ContextView::Default => "Context Information".to_string(),
+        ContextView::Assess(_) => "Object Appraisal".to_string(),
+        ContextView::Debug(_) => "Debug Information".to_string(),
+        ContextView::Book(guid) => data
+            .entities
+            .get(guid)
+            .map(|entity| entity.name().to_string())
+            .map(|name| format!("Reading {}", name))
+            .unwrap_or_else(|| "Reading".to_string()),
+        ContextView::Spell(_) => "Spell Details".to_string(),
+        ContextView::Enchantment(_) => "Enchantment Details".to_string(),
+        ContextView::DebugSpell(_) => "Debug Information".to_string(),
+        ContextView::DebugEnchantment(_) => "Debug Information".to_string(),
     };
 
     let ctx_title = format!(" {} ", base_title);
@@ -134,8 +142,55 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
             let spell_catalog = data.spell_catalog();
             debug::get_enchantment_debug_info(&enchant, spell_catalog.as_deref())
         }
+        ContextView::Book(guid) => {
+            if let Some(entity) = data.entities.get(&guid)
+                && let Some(book) = entity.book.as_ref()
+            {
+                return build_book_content(book);
+            }
+
+            vec![Line::from("Reading...")]
+        }
         _ => vec![],
     }
+}
+
+fn build_book_content(book: &BookData) -> Vec<Line<'static>> {
+    let mut combined_text = book
+        .pages
+        .iter()
+        .filter_map(|page| page.page_text.as_deref())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if let Some(author_name) = book_author_name(book) {
+        if !combined_text.is_empty() {
+            combined_text.push('\n');
+        }
+        combined_text.push_str("       --  ");
+        combined_text.push_str(author_name);
+    }
+
+    if combined_text.is_empty() {
+        return vec![Line::from("No page contents available yet.")];
+    }
+
+    combined_text
+        .split('\n')
+        .map(|line| Line::from(line.to_string()))
+        .collect()
+}
+
+fn book_author_name(book: &BookData) -> Option<&str> {
+    book.author_name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            book.pages
+                .iter()
+                .map(|page| page.author_name.as_str())
+                .find(|name| !name.is_empty())
+        })
 }
 
 fn resolve_inspectable_target<'a>(
@@ -150,5 +205,56 @@ fn resolve_inspectable_target<'a>(
             .as_ref()
             .and_then(|vendor| vendor.items.iter().find(|item| item.guid == guid))
             .map(InspectableObject::from_vendor_item),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{book_author_name, build_book_content};
+    use holtburger_world::book::{BookData, BookPage};
+
+    #[test]
+    fn build_book_content_concatenates_pages_and_signature() {
+        let book = BookData {
+            author_name: Some("A. Writer".to_string()),
+            pages: vec![
+                BookPage {
+                    index: 0,
+                    author_id: 1,
+                    author_name: "A. Writer".to_string(),
+                    author_account: "acct".to_string(),
+                    flags: 0,
+                    text_included: true,
+                    ignore_author: false,
+                    page_text: Some("First page".to_string()),
+                },
+                BookPage {
+                    index: 1,
+                    author_id: 1,
+                    author_name: "A. Writer".to_string(),
+                    author_account: "acct".to_string(),
+                    flags: 0,
+                    text_included: true,
+                    ignore_author: false,
+                    page_text: Some("Second page".to_string()),
+                },
+            ],
+            ..BookData::default()
+        };
+
+        let rendered: Vec<String> = build_book_content(&book)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect();
+
+        assert_eq!(
+            rendered,
+            vec![
+                "First page".to_string(),
+                "Second page".to_string(),
+                "       --  A. Writer".to_string(),
+            ]
+        );
+        assert_eq!(book_author_name(&book), Some("A. Writer"));
     }
 }

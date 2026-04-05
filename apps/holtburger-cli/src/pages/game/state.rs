@@ -216,7 +216,7 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
-                self.refresh_entity_context_if_visible(entity_ref.guid);
+                self.refresh_entity_context_if_visible(entity_ref.guid, &mut result);
                 if self.update_inventory_and_equipment(entity_ref) {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
@@ -227,7 +227,7 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
-                self.refresh_entity_context_if_visible(entity_ref.guid);
+                self.refresh_entity_context_if_visible(entity_ref.guid, &mut result);
                 if self.update_inventory_and_equipment(entity_ref) {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
@@ -242,7 +242,7 @@ impl GameState {
                     needs_update = true;
                 }
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                     if self.update_inventory_and_equipment(&entity) {
                         result.request_redraw(RedrawPriority::Immediate);
                     }
@@ -257,7 +257,7 @@ impl GameState {
                         self.data.player_pos = Some(pos);
                     }
                 }
-                self.refresh_entity_context_if_visible(guid);
+                self.refresh_entity_context_if_visible(guid, &mut result);
                 result.request_redraw(RedrawPriority::Motion);
             }
             ClientViewEvent::EntityKinematicsUpdated {
@@ -268,14 +268,14 @@ impl GameState {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.velocity = velocity;
                     entity.omega = omega;
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                     result.request_redraw(RedrawPriority::Motion);
                 }
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.motion_snapshot = snapshot;
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                     result.request_redraw(RedrawPriority::Motion);
                 }
             }
@@ -291,13 +291,13 @@ impl GameState {
             }
             ClientViewEvent::RuntimeBodyUpserted { body } => {
                 if let Some(guid) = body.body_id.authoritative_guid() {
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                 }
                 result.request_redraw(RedrawPriority::Motion);
             }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 if let Some(guid) = body_id.authoritative_guid() {
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                 }
                 result.request_redraw(RedrawPriority::Immediate);
             }
@@ -313,7 +313,7 @@ impl GameState {
                         self.data.player_pos = Some(pos);
                     }
                 }
-                self.refresh_entity_context_if_visible(guid);
+                self.refresh_entity_context_if_visible(guid, &mut result);
                 result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::TeleportStarted { .. } => {}
@@ -417,6 +417,15 @@ impl GameState {
                 result.merge(
                     self.handle_action(AppAction::ChangeContextView {
                         view: crate::types::ContextView::Assess(target),
+                    })
+                    .unwrap_or_default(),
+                );
+            }
+            AppAction::Read { guid } => {
+                result.commands.push(ClientCommand::Use(guid));
+                result.merge(
+                    self.handle_action(AppAction::ChangeContextView {
+                        view: ContextView::Book(guid),
                     })
                     .unwrap_or_default(),
                 );
@@ -1600,6 +1609,7 @@ impl GameState {
             self.view.context_view,
             ContextView::Assess(InspectTarget::Entity(target_guid))
                 | ContextView::Debug(InspectTarget::Entity(target_guid))
+                | ContextView::Book(target_guid)
                 if target_guid == guid
         ) {
             self.view.context_view = ContextView::Default;
@@ -1639,13 +1649,15 @@ impl GameState {
         result
     }
 
-    fn refresh_entity_context_if_visible(&mut self, guid: Guid) {
+    fn refresh_entity_context_if_visible(&mut self, guid: Guid, result: &mut UpdateResult) {
         if matches!(
             self.view.context_view,
             ContextView::Assess(InspectTarget::Entity(target_guid))
+                | ContextView::Book(target_guid)
                 if target_guid == guid
         ) {
             self.refresh_context_buffer();
+            result.request_redraw(RedrawPriority::Immediate);
         }
     }
 }
@@ -1731,6 +1743,7 @@ mod tests {
     use holtburger_core::ActiveCharacterConfirmation;
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
+    use holtburger_world::book::{BookData, BookPage};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
     use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode};
     fn is_weapon_swap_active(state: &GameState) -> bool {
@@ -1895,6 +1908,66 @@ mod tests {
                 .map(|entity| entity.name()),
             Some("New Name")
         );
+    }
+
+    #[test]
+    fn book_response_refreshes_visible_context_and_requests_redraw() {
+        let player_guid = Guid(0x50000001);
+        let book_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.data.entities.insert(
+            book_guid,
+            Entity::new(book_guid, "Journal".to_string(), WorldPosition::default()),
+        );
+        state.view.context_view = ContextView::Book(book_guid);
+        state.refresh_context_buffer();
+
+        assert!(context_buffer_contains(state.context_buffer(), "Reading..."));
+
+        let mut book_entity = Entity::new(book_guid, "Journal".to_string(), WorldPosition::default());
+        book_entity.book = Some(BookData {
+            author_name: Some("Scribe".to_string()),
+            pages: vec![BookPage {
+                index: 0,
+                author_id: 1,
+                author_name: "Scribe".to_string(),
+                author_account: "acct".to_string(),
+                flags: 0,
+                text_included: true,
+                ignore_author: false,
+                page_text: Some("Hello from the book".to_string()),
+            }],
+            ..BookData::default()
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(book_entity),
+        });
+
+        assert!(result.redraw_requested());
+        assert!(context_buffer_contains(
+            state.context_buffer(),
+            "Hello from the book"
+        ));
+        assert!(context_buffer_contains(
+            state.context_buffer(),
+            "       --  Scribe"
+        ));
+    }
+
+    #[test]
+    fn read_action_uses_generic_use_command_for_books() {
+        let player_guid = Guid(0x50000001);
+        let book_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::Read { guid: book_guid })
+            .expect("read action should produce an update result");
+
+        assert!(result.commands.iter().any(|command| matches!(command, ClientCommand::Use(guid) if *guid == book_guid)));
+        assert_eq!(state.view.context_view, ContextView::Book(book_guid));
     }
 
     #[test]

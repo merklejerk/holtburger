@@ -327,8 +327,9 @@ pub enum GameActionOpcode {
     DeclineTrade = 0x01FB,
 
     // --- Books & Inscriptions ---
-    /// C2S: Request book metadata and currently loaded page data.
-    BookData = 0x00AA,
+    // /// C2S: Request book metadata and currently loaded page data.
+    // /// Defunct: inventory books are opened via `Use`, not this opcode.
+    // BookData = 0x00AA,
     // /// C2S: Update the text of a book page.
     // BookModifyPage = 0x00AB,
     // /// C2S: Add a new page to a book.

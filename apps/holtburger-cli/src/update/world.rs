@@ -291,6 +291,7 @@ mod tests {
             server_time: None,
             content: None,
             spell_catalog: None,
+            skill_table: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

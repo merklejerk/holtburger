@@ -248,9 +248,9 @@
 - [x] Death notifications.
 - [x] Chat tabs (Chat vs combat vs all).
 - [x] Assess output not showing weapon skill.
+- [x] Skills should show attribute formula in character tab.
 - [~] Slash-commands should use `AppAction`s.
 - [ ] Do not show recharge verb on uncharged mana stones.
-- [ ] Skills should show attribute formula in character tab.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

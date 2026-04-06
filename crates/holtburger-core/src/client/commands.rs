@@ -838,8 +838,7 @@ impl ClientRuntime {
             }
             ClientCommand::RequestInitialViewState => {
                 log::info!(">>> Client requested initial view state snapshot");
-                self.emit_fellowship_state_updated();
-                self.emit_runtime_body_snapshot();
+                self.emit_initial_view_state_snapshot();
                 Ok(())
             }
             ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
@@ -1213,8 +1212,9 @@ mod tests {
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use holtburger_world::state::{
         FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
-        FellowshipMemberState, FellowshipState,
+        FellowshipMemberState, FellowshipState, TradeSide, TradeState,
     };
+    use holtburger_world::vendor::{CoreVendorItem, VendorState};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -1467,6 +1467,67 @@ mod tests {
         }
 
         assert!(saw_snapshot);
+    }
+
+    #[tokio::test]
+    async fn request_initial_view_state_projects_trade_and_vendor_snapshot() {
+        let mut client = build_test_client();
+        let player_guid = client.world.player.guid;
+        let vendor_guid = Guid(0x7000_0001);
+
+        client.world.vendor = Some(VendorState {
+            vendor_guid,
+            items: vec![CoreVendorItem {
+                guid: Guid(0x7000_1001),
+                wcid: 1234,
+                ..CoreVendorItem::default()
+            }],
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: 0xDEAD_BEEF,
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::from("Pyreals"),
+        });
+        client.world.trade = Some(TradeState {
+            partner_guid: vendor_guid,
+            initiator_guid: player_guid,
+            trade_stamp: 0.0,
+            self_side: TradeSide {
+                guid: player_guid,
+                accepted: false,
+                items: vec![Guid(0x7000_2001)],
+            },
+            partner_side: TradeSide {
+                guid: vendor_guid,
+                accepted: false,
+                items: vec![Guid(0x7000_2002)],
+            },
+        });
+
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::RequestInitialViewState)
+            .await
+            .unwrap();
+
+        let mut saw_vendor = false;
+        let mut saw_trade = false;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::VendorStateUpdated { vendor } if vendor.is_some() => {
+                    saw_vendor = true;
+                }
+                ClientViewEvent::TradeStateUpdated { trade } if trade.is_some() => {
+                    saw_trade = true;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_vendor);
+        assert!(saw_trade);
     }
 
     #[tokio::test]

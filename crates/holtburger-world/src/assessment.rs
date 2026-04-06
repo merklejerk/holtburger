@@ -308,6 +308,7 @@ pub struct WeaponInfo {
     pub damage_min: f64,
     pub damage_max: f64,
     pub damage_type: DamageType,
+    pub weapon_skill: Option<SkillType>,
     pub speed: f32,
     pub weapon_type: Option<WeaponType>,
 }
@@ -641,6 +642,16 @@ impl WeaponInfo {
             return None;
         }
 
+        let weapon_skill = object
+            .get_int_prop(PropertyInt::WeaponSkill)
+            .and_then(|skill| SkillType::from_repr(skill as u32))
+            .or_else(|| {
+                object
+                    .weapon_profile
+                    .as_ref()
+                    .and_then(|profile| SkillType::from_repr(profile.weapon_skill))
+            });
+
         let range = compute_damage_range(
             object.get_int_prop(PropertyInt::Damage),
             object.get_float_prop(PropertyFloat::DamageVariance),
@@ -654,6 +665,7 @@ impl WeaponInfo {
             damage_min: range.min,
             damage_max: range.max,
             damage_type: range.damage_type,
+            weapon_skill,
             speed: object
                 .weapon_profile
                 .as_ref()

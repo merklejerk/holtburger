@@ -2,9 +2,11 @@ use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::types::{ChatMessageTags, Page, UpdateResult};
+use crate::utils::format_action_result_message;
+use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
-    BusyOperationKind, BusyOperationResult, ClientCommand, ClientState, ClientViewEvent,
-    ErrorReason,
+    ActionResultReason, BusyOperationKind, BusyOperationResult, ClientCommand, ClientState,
+    ClientViewEvent,
 };
 use holtburger_protocol::errors::CharacterError;
 
@@ -116,10 +118,10 @@ impl AppState {
                         .push(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true });
                 }
             }
-            ClientViewEvent::ErrorRaised {
-                reason, message, ..
-            } => {
-                if let ErrorReason::Character(error) = reason
+            ClientViewEvent::ActionResult { reason, .. } => {
+                let message = format_action_result_message(reason);
+
+                if let ActionResultReason::Character(error) = &reason
                     && matches!(
                         error,
                         CharacterError::Logon | CharacterError::EnterGameCharacterInWorld
@@ -131,11 +133,18 @@ impl AppState {
                     return result;
                 }
 
-                let chat_kind = match reason {
-                    ErrorReason::Weenie(_, _)
-                    | ErrorReason::Character(_)
-                    | ErrorReason::General(_) => ChatMessageTags::error(),
-                    ErrorReason::Transport(_) => ChatMessageTags::warning(),
+                let chat_kind = match &reason {
+                    ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
+                        ChatMessageTags::error()
+                    }
+                    ActionResultReason::Weenie(_, _) => ChatMessageTags::info(),
+                    ActionResultReason::InventoryServerSaveFailed { .. } => {
+                        ChatMessageTags::error()
+                    }
+                    ActionResultReason::Character(_) | ActionResultReason::General(_) => {
+                        ChatMessageTags::error()
+                    }
+                    ActionResultReason::Transport(_) => ChatMessageTags::warning(),
                 };
                 self.log(chat_kind, format!("[!] {}", message));
             }
@@ -172,7 +181,7 @@ impl AppState {
             _ => {}
         }
 
-        // Skip other events if not in-game, unless it's a StatusUpdate or ErrorRaised
+        // Skip other events if not in-game, unless it's a StatusUpdate or ActionResult
         // that handles transitions.
         if !matches!(
             event,
@@ -182,7 +191,7 @@ impl AppState {
                 | ClientViewEvent::CharacterManagementResponse { .. }
                 | ClientViewEvent::CharacterDeleteResponse
                 | ClientViewEvent::StatusUpdate { .. }
-                | ClientViewEvent::ErrorRaised { .. }
+                | ClientViewEvent::ActionResult { .. }
                 | ClientViewEvent::LogMessage(_)
                 | ClientViewEvent::ServerMessage { .. }
                 | ClientViewEvent::Chat { .. }
@@ -239,7 +248,7 @@ impl AppState {
                 result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));
             }
             ClientViewEvent::StatusUpdate { .. }
-            | ClientViewEvent::ErrorRaised { .. }
+            | ClientViewEvent::ActionResult { .. }
             | ClientViewEvent::BootAccount(_) => {
                 result.merge(self.handle_client_status_event(&event));
                 result.merge(self.page.handle_view_event(event));
@@ -285,6 +294,7 @@ mod tests {
             server_time: None,
             content: None,
             spell_catalog: None,
+            skill_table: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,
@@ -346,10 +356,9 @@ mod tests {
             "World".to_string(),
         )));
 
-        let result = app_state.handle_client_view_event(ClientViewEvent::ErrorRaised {
-            source: holtburger_core::client::types::ErrorSource::Wire,
-            reason: ErrorReason::Character(CharacterError::Logon),
-            message: "Character error: Logon".to_string(),
+        let result = app_state.handle_client_view_event(ClientViewEvent::ActionResult {
+            source: holtburger_core::client::types::ActionResultSource::Wire,
+            reason: ActionResultReason::Character(CharacterError::Logon),
         });
 
         assert!(result.commands.is_empty());
@@ -363,10 +372,9 @@ mod tests {
     fn pre_world_logon_error_exits_without_retry() {
         let mut app_state = build_test_app_state(ClientState::Connected);
 
-        let result = app_state.handle_client_view_event(ClientViewEvent::ErrorRaised {
-            source: holtburger_core::client::types::ErrorSource::Wire,
-            reason: ErrorReason::Character(CharacterError::Logon),
-            message: "Character error: Logon".to_string(),
+        let result = app_state.handle_client_view_event(ClientViewEvent::ActionResult {
+            source: holtburger_core::client::types::ActionResultSource::Wire,
+            reason: ActionResultReason::Character(CharacterError::Logon),
         });
 
         assert!(result.commands.is_empty());

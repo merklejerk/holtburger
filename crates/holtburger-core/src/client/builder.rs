@@ -112,7 +112,7 @@ impl ClientRuntimeBuilder {
             .unwrap_or_else(|| Arc::new(BasicSpatialPhysics));
 
         let (wire_event_tx, _) = broadcast::channel(1024);
-        let (client_view_event_tx, _) = broadcast::channel(256);
+        let (client_view_event_tx, _) = broadcast::channel(4096);
 
         Ok(ClientRuntime {
             session,
@@ -136,7 +136,7 @@ impl ClientRuntimeBuilder {
 #[cfg(test)]
 pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (wire_event_tx, _) = broadcast::channel(1024);
-    let (client_view_event_tx, _) = broadcast::channel(256);
+    let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
         session: Session::new_test(),

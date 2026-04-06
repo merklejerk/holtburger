@@ -231,15 +231,15 @@ impl ClientRuntime {
                         state: state.clone(),
                     });
             }
-            WireEvent::InventoryServerSaveFailed {
-                item_guid: _,
-                error,
-            } => {
+            WireEvent::InventoryServerSaveFailed { item_guid, error } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ActionResult {
                         source: ActionResultSource::Wire,
-                        reason: ActionResultReason::Weenie(*error, None),
+                        reason: ActionResultReason::InventoryServerSaveFailed {
+                            item_guid: *item_guid,
+                            error: *error,
+                        },
                     });
             }
             WireEvent::WeenieError { error, parameter } => {
@@ -852,6 +852,41 @@ mod tests {
         }
 
         assert!(saw_activity);
+    }
+
+    #[test]
+    fn inventory_server_save_failed_projection_preserves_item_guid() {
+        let client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let item_guid = Guid(0x4000_0001);
+
+        client.emit_wire_event(WireEvent::InventoryServerSaveFailed {
+            item_guid,
+            error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
+        });
+
+        let mut saw_projected_event = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::ActionResult {
+                source: ActionResultSource::Wire,
+                reason:
+                    ActionResultReason::InventoryServerSaveFailed {
+                        item_guid: projected_item_guid,
+                        error,
+                    },
+            } = event
+            {
+                assert_eq!(projected_item_guid, item_guid);
+                assert_eq!(
+                    error,
+                    holtburger_protocol::errors::WeenieError::YoureTooBusy
+                );
+                saw_projected_event = true;
+                break;
+            }
+        }
+
+        assert!(saw_projected_event);
     }
 
     #[test]

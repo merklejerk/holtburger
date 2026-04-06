@@ -10,10 +10,14 @@ use holtburger_cli::pages;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
+use holtburger_cli::utils::format_action_result_message;
 use holtburger_content::ContentRepository;
+use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
-    ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState, ClientViewEvent, ErrorReason,
+    ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
+    ClientViewEvent,
 };
+use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
@@ -36,6 +40,7 @@ struct BootstrappedClient {
     initial_events: Vec<ClientViewEvent>,
     content: Arc<ContentRepository>,
     spell_catalog: Arc<SpellCatalog>,
+    skill_table: Arc<SkillTable>,
 }
 
 enum BootstrapOutcome {
@@ -218,15 +223,24 @@ fn is_retryable_pre_world_character_error(error: CharacterError) -> bool {
     )
 }
 
-fn classify_pre_world_error(reason: &ErrorReason, message: String) -> BootstrapEventOutcome {
+fn classify_pre_world_action_result(reason: &ActionResultReason) -> Option<BootstrapEventOutcome> {
+    let message = format_action_result_message(reason);
+
     match reason {
-        ErrorReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
-            BootstrapEventOutcome::Retry { message }
+        ActionResultReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
+            Some(BootstrapEventOutcome::Retry { message })
         }
-        ErrorReason::Character(_) | ErrorReason::General(_) | ErrorReason::Weenie(_, _) => {
-            BootstrapEventOutcome::Fatal { message }
+        ActionResultReason::Character(_) | ActionResultReason::General(_) => {
+            Some(BootstrapEventOutcome::Fatal { message })
         }
-        ErrorReason::Transport(_) => BootstrapEventOutcome::Fatal { message },
+        ActionResultReason::InventoryServerSaveFailed { .. } => {
+            Some(BootstrapEventOutcome::Fatal { message })
+        }
+        ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
+            Some(BootstrapEventOutcome::Fatal { message })
+        }
+        ActionResultReason::Weenie(_, _) => None,
+        ActionResultReason::Transport(_) => Some(BootstrapEventOutcome::Fatal { message }),
     }
 }
 
@@ -346,9 +360,7 @@ fn process_bootstrap_event(
                 characters,
             ),
         }),
-        ClientViewEvent::ErrorRaised {
-            reason, message, ..
-        } => Some(classify_pre_world_error(&reason, message)),
+        ClientViewEvent::ActionResult { reason, .. } => classify_pre_world_action_result(&reason),
         ClientViewEvent::BootAccount(reason) => Some(BootstrapEventOutcome::Fatal {
             message: format_boot_account_message(&reason),
         }),
@@ -366,6 +378,7 @@ fn finalize_bootstrap_outcome(
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     content: Arc<ContentRepository>,
     spell_catalog: Arc<SpellCatalog>,
+    skill_table: Arc<SkillTable>,
 ) -> BootstrapOutcome {
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
@@ -376,6 +389,7 @@ fn finalize_bootstrap_outcome(
                 initial_events,
                 content,
                 spell_catalog,
+                skill_table,
             })
         }
         BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
@@ -401,6 +415,7 @@ async fn bootstrap_once(
 
     let mut client = builder.connect().await?;
     let spell_catalog = Arc::clone(&client.world.spell_catalog);
+    let skill_table = Arc::clone(&client.world.skill_table);
 
     apply_capture_path(&mut client, args.capture.as_ref());
 
@@ -415,6 +430,7 @@ async fn bootstrap_once(
     let mut latest_status = Some(ClientState::Connected);
     let mut latest_world_name = None;
     let mut latest_server_time = None;
+    let mut requested_initial_view_state = false;
 
     loop {
         tokio::select! {
@@ -438,6 +454,7 @@ async fn bootstrap_once(
                             client_task_handle,
                             Arc::clone(&content),
                             Arc::clone(&spell_catalog),
+                            Arc::clone(&skill_table),
                         ));
                     }
                 }
@@ -454,6 +471,7 @@ async fn bootstrap_once(
             event = server_event_rx.recv() => {
                 match event {
                     Ok(event) => {
+                        requested_initial_view_state = false;
                         if let Some(outcome) = process_bootstrap_event(
                             event,
                             &mut latest_status,
@@ -467,11 +485,15 @@ async fn bootstrap_once(
                                 client_task_handle,
                                 Arc::clone(&content),
                                 Arc::clone(&spell_catalog),
+                                Arc::clone(&skill_table),
                             ));
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                        if !requested_initial_view_state {
+                            requested_initial_view_state = true;
+                            let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         return Ok(BootstrapOutcome::Fatal {
@@ -615,6 +637,7 @@ async fn run() -> Result<()> {
         initial_events,
         content,
         spell_catalog,
+        skill_table,
     } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
@@ -642,6 +665,7 @@ async fn run() -> Result<()> {
         server_time: None,
         content: Some(content),
         spell_catalog: Some(spell_catalog),
+        skill_table: Some(skill_table),
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,
@@ -666,6 +690,7 @@ async fn run() -> Result<()> {
         immediate: true,
         motion: false,
     };
+    let mut requested_initial_view_state = false;
 
     let update_state = |res: UpdateResult,
                         pending_redraw: &mut PendingRedraw,
@@ -739,6 +764,7 @@ async fn run() -> Result<()> {
         loop {
             match server_event_rx.try_recv() {
                 Ok(event) => {
+                    requested_initial_view_state = false;
                     let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
                     update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
@@ -751,7 +777,10 @@ async fn run() -> Result<()> {
                         },
                     ));
                     update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
-                    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    if !requested_initial_view_state {
+                        requested_initial_view_state = true;
+                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    }
                     break;
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
@@ -852,7 +881,7 @@ async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
-    use holtburger_core::client::types::ErrorSource;
+    use holtburger_core::client::types::ActionResultSource;
 
     #[test]
     fn debug_verbosity_requires_debug_log() {
@@ -910,10 +939,9 @@ mod tests {
     #[test]
     fn retryable_pre_world_character_errors_are_classified_for_retry() {
         let outcome = process_bootstrap_event(
-            ClientViewEvent::ErrorRaised {
-                source: ErrorSource::Wire,
-                reason: ErrorReason::Character(CharacterError::LogonServerFull),
-                message: "Character error: LogonServerFull".to_string(),
+            ClientViewEvent::ActionResult {
+                source: ActionResultSource::Wire,
+                reason: ActionResultReason::Character(CharacterError::LogonServerFull),
             },
             &mut Some(ClientState::Connected),
             &mut None,
@@ -926,10 +954,9 @@ mod tests {
     #[test]
     fn fatal_pre_world_character_errors_do_not_retry() {
         let outcome = process_bootstrap_event(
-            ClientViewEvent::ErrorRaised {
-                source: ErrorSource::Wire,
-                reason: ErrorReason::Character(CharacterError::AccountInvalid),
-                message: "Character error: AccountInvalid".to_string(),
+            ClientViewEvent::ActionResult {
+                source: ActionResultSource::Wire,
+                reason: ActionResultReason::Character(CharacterError::AccountInvalid),
             },
             &mut Some(ClientState::Connected),
             &mut None,

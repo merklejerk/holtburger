@@ -19,6 +19,7 @@
 - [x] Vendor entity class?
 - [x] Split auth responsibilities into `LoginState` and `CharacterAuthState`.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
+- [x] `/logopolis`
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
 - [ ] Shift+backspace to clear chat input buffer.
@@ -26,7 +27,6 @@
 - [ ] Don't show Give verb on items that are attuned/sticky.
 - [ ] Replace context panel header with entity name.
 - [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
-- [ ] `/logopolis`
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -83,6 +83,9 @@
 - [x] Auto-follow.
 - [x] Add a movable cursor to the chat input.
 - [x] Add a `/scoot <METERS>` command.
+- [x] `/options` syntax is awkward.
+- [x] Rendering issues in chat for some names/items like the Blackmoor's Favor gem.
+- [x] Spellcasting chat should be categorized as combat.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -96,7 +99,7 @@
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
-- [ ] `/options` syntax is awkward.
+- [ ] Some equipment swapping jank going on.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -244,8 +247,10 @@
 - [x] Character sheet doesn't identfy specialized skills.
 - [x] Death notifications.
 - [x] Chat tabs (Chat vs combat vs all).
+- [x] Assess output not showing weapon skill.
+- [x] Skills should show attribute formula in character tab.
 - [~] Slash-commands should use `AppAction`s.
-- [ ] Some equipment swapping jank going on.
+- [ ] Do not show recharge verb on uncharged mana stones.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -269,5 +274,5 @@
 - [x] Do tabs need to expose `item_count()`?
 - [x] Track "dead" creatures to avoid targeting them?
 - [x] Strange login issues when indoors.
+- [x] Iffy trade behavior against trade bots.
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
-- [ ] Iffy trade behavior against trade bots.

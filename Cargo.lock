@@ -1050,6 +1050,7 @@ dependencies = [
  "binrw",
  "bitflags 2.11.0",
  "byteorder",
+ "encoding_rs",
  "hex",
  "holtburger-common",
  "log",

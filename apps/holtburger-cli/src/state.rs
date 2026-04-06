@@ -4,6 +4,7 @@ use std::{fs::File, sync::Mutex};
 use holtburger_common::Guid;
 use holtburger_content::ContentRepository;
 use holtburger_core::ClientState;
+use holtburger_dat::file_type::SkillTable;
 use holtburger_world::spell::SpellCatalog;
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub server_time: Option<(f64, Instant)>,
     pub content: Option<Arc<ContentRepository>>,
     pub spell_catalog: Option<Arc<SpellCatalog>>,
+    pub skill_table: Option<Arc<SkillTable>>,
     pub verbosity: u8,
     pub quit_on_disconnect: bool,
     pub disconnect_reason: Option<String>,

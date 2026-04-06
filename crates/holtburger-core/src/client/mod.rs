@@ -180,6 +180,29 @@ impl ClientRuntime {
             });
     }
 
+    fn emit_vendor_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::VendorStateUpdated {
+                vendor: self.world.vendor.clone(),
+            });
+    }
+
+    fn emit_trade_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::TradeStateUpdated {
+                trade: self.world.trade.clone(),
+            });
+    }
+
+    pub(super) fn emit_initial_view_state_snapshot(&self) {
+        self.emit_fellowship_state_updated();
+        self.emit_vendor_state_updated();
+        self.emit_trade_state_updated();
+        self.emit_runtime_body_snapshot();
+    }
+
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
         self.wire_event_tx.subscribe()
     }
@@ -211,51 +234,44 @@ impl ClientRuntime {
             WireEvent::InventoryServerSaveFailed { item_guid, error } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Weenie(*error, None),
-                        message: format!(
-                            "Inventory save failed for 0x{:08X}: {:?}",
-                            item_guid.0, error
-                        ),
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::InventoryServerSaveFailed {
+                            item_guid: *item_guid,
+                            error: *error,
+                        },
                     });
             }
             WireEvent::WeenieError { error, parameter } => {
-                let message = crate::errors::format_weenie_error(*error, parameter.as_deref());
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Weenie(*error, parameter.clone()),
-                        message,
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Weenie(*error, parameter.clone()),
                     });
             }
             WireEvent::CharacterError(err) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Character(*err),
-                        message: format!("Character error: {:?}", err),
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Character(*err),
                     });
             }
             WireEvent::ClientError(msg) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Client,
-                        reason: ErrorReason::General(msg.clone()),
-                        message: msg.clone(),
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Client,
+                        reason: ActionResultReason::General(msg.clone()),
                     });
             }
             WireEvent::UseDone { error } if *error != WeenieError::None => {
-                let message = crate::errors::format_weenie_error(*error, None);
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Weenie(*error, None),
-                        message,
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Weenie(*error, None),
                     });
             }
             WireEvent::CombatFeedback(feedback) => {
@@ -268,13 +284,18 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerMessage {
                         message: message.clone(),
-                        chat_type: *chat_type,
+                        chat_type: (*chat_type).into(),
                     });
             }
-            WireEvent::Chat { sender, message } => {
+            WireEvent::Chat {
+                sender,
+                message,
+                chat_type,
+            } => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
                     sender: sender.clone(),
                     message: message.clone(),
+                    chat_type: (*chat_type).into(),
                 });
             }
             WireEvent::ChannelMessage {
@@ -834,6 +855,41 @@ mod tests {
     }
 
     #[test]
+    fn inventory_server_save_failed_projection_preserves_item_guid() {
+        let client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let item_guid = Guid(0x4000_0001);
+
+        client.emit_wire_event(WireEvent::InventoryServerSaveFailed {
+            item_guid,
+            error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
+        });
+
+        let mut saw_projected_event = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::ActionResult {
+                source: ActionResultSource::Wire,
+                reason:
+                    ActionResultReason::InventoryServerSaveFailed {
+                        item_guid: projected_item_guid,
+                        error,
+                    },
+            } = event
+            {
+                assert_eq!(projected_item_guid, item_guid);
+                assert_eq!(
+                    error,
+                    holtburger_protocol::errors::WeenieError::YoureTooBusy
+                );
+                saw_projected_event = true;
+                break;
+            }
+        }
+
+        assert!(saw_projected_event);
+    }
+
+    #[test]
     fn entity_vector_updates_project_to_client_view_kinematics() {
         let client = builder::build_test_client(ClientState::InWorld);
         let mut events = client.subscribe_client_view_events();
@@ -941,7 +997,7 @@ mod tests {
         client.handle_world_event(&WorldEvent::EntityReplaced(entity));
 
         while let Ok(event) = events.try_recv() {
-            assert!(!matches!(event, ClientViewEvent::ErrorRaised { .. }));
+            assert!(!matches!(event, ClientViewEvent::ActionResult { .. }));
         }
     }
 

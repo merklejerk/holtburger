@@ -3,6 +3,9 @@ use crate::types::FocusedPane;
 use crate::types::Interaction;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};
+use holtburger_core::ActionResultReason;
+use holtburger_core::errors::format_weenie_error;
+use holtburger_protocol::errors::WeenieError;
 use holtburger_world::crafting::salvage::get_material_name;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
@@ -67,6 +70,29 @@ pub fn format_cost(n: u64) -> String {
         format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+pub fn format_action_result_message(reason: &ActionResultReason) -> String {
+    match reason {
+        ActionResultReason::Weenie(error, parameter) => {
+            format_weenie_error(*error, parameter.as_deref())
+        }
+        ActionResultReason::InventoryServerSaveFailed { item_guid, error } => {
+            if *error == WeenieError::None {
+                format!("Inventory save failed for {:?}", item_guid)
+            } else {
+                format!(
+                    "Inventory save failed for {:?}: {}",
+                    item_guid,
+                    format_weenie_error(*error, None)
+                )
+            }
+        }
+        ActionResultReason::Character(error) => format!("Character error: {:?}", error),
+        ActionResultReason::General(message) | ActionResultReason::Transport(message) => {
+            message.clone()
+        }
     }
 }
 
@@ -281,6 +307,19 @@ mod tests {
         assert!(fuzzy_subsequence_match("hlg", "Healing Kit"));
         assert!(fuzzy_subsequence_match("KIT", "healing kit"));
         assert!(!fuzzy_subsequence_match("hzk", "Healing Kit"));
+    }
+
+    #[test]
+    fn format_action_result_message_preserves_inventory_save_item_guid() {
+        let reason = ActionResultReason::InventoryServerSaveFailed {
+            item_guid: Guid(0x4000_0001),
+            error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
+        };
+
+        assert_eq!(
+            format_action_result_message(&reason),
+            "Inventory save failed for 0x40000001: You're too busy!"
+        );
     }
 
     #[test]

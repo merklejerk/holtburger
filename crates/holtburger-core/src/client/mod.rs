@@ -22,6 +22,8 @@ use movement::MovementSystem;
 use simulation::ClientSimulationSystem;
 use types::*;
 
+use crate::errors::is_actually_weenie_error;
+
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -244,14 +246,16 @@ impl ClientRuntime {
                     });
             }
             WireEvent::WeenieError { error, parameter } => {
-                let message = crate::errors::format_weenie_error(*error, parameter.as_deref());
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Weenie(*error, parameter.clone()),
-                        message,
-                    });
+                if is_actually_weenie_error(*error) {
+                    let message = crate::errors::format_weenie_error(*error, parameter.as_deref());
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ErrorRaised {
+                            source: ErrorSource::Wire,
+                            reason: ErrorReason::Weenie(*error, parameter.clone()),
+                            message,
+                        });
+                }
             }
             WireEvent::CharacterError(err) => {
                 let _ = self
@@ -291,13 +295,18 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerMessage {
                         message: message.clone(),
-                        chat_type: *chat_type,
+                        chat_type: (*chat_type).into(),
                     });
             }
-            WireEvent::Chat { sender, message } => {
+            WireEvent::Chat {
+                sender,
+                message,
+                chat_type,
+            } => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
                     sender: sender.clone(),
                     message: message.clone(),
+                    chat_type: (*chat_type).into(),
                 });
             }
             WireEvent::ChannelMessage {

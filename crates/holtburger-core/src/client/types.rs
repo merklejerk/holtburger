@@ -12,9 +12,9 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
-    ChatChannelId, GameMessage, SetTurbineChatChannelsEventData, TurbineChatChannel,
-    TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType, TurbineChatTypeId,
-    ViewContentsEventItem,
+    ChatChannelId, ChatMessageTypeId, GameMessage, SetTurbineChatChannelsEventData,
+    TurbineChatChannel, TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType,
+    TurbineChatTypeId, ViewContentsEventItem,
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
@@ -212,6 +212,7 @@ pub enum WireEvent {
     Chat {
         sender: String,
         message: String,
+        chat_type: u32,
     },
     ChannelMessage {
         channel: ChatChannelInfo,
@@ -440,11 +441,12 @@ pub enum ClientViewEvent {
     },
     ServerMessage {
         message: String,
-        chat_type: u32,
+        chat_type: ChatMessageTypeId,
     },
     Chat {
         sender: String,
         message: String,
+        chat_type: ChatMessageTypeId,
     },
     ChannelMessage {
         channel: ChatChannelInfo,

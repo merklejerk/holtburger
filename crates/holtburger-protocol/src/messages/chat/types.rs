@@ -58,8 +58,9 @@ impl From<ChatChannel> for ChatChannelId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
 #[repr(u32)]
+#[allow(non_camel_case_types)]
 pub enum ChatMessageType {
     Broadcast = 0x00,
     AllChannels = 0x01,
@@ -70,25 +71,70 @@ pub enum ChatMessageType {
     Combat = 0x06,
     Magic = 0x07,
     Channel = 0x08,
-    SocialGroup = 0x09,
-    Officer = 0x0A,
-    Allegiance = 0x0B,
-    DirectSpeech = 0x0C,
-    Appraisal = 0x0D,
-    WorldBroadcast = 0x0E,
-    AdminBroadcast = 0x0F,
-    Error = 0x10,
-    Warning = 0x11,
-    Filter = 0x12,
-    Tinker = 0x13,
-    Vendor = 0x14,
-    Help = 0x15,
-    Contract = 0x16,
-    AllegianceBroadcast = 0x17,
-    GeneralBroadcast = 0x18,
-    MaybeScroll = 0x19,
-    MaybeMerchant = 0x1A,
-    MaybeAppraisal = 0x1B,
+    ChannelSend = 0x09,
+    Social = 0x0A,
+    SocialSend = 0x0B,
+    Emote = 0x0C,
+    Advancement = 0x0D,
+    Abuse = 0x0E,
+    Help = 0x0F,
+    Appraisal = 0x10,
+    Spellcasting = 0x11,
+    Allegiance = 0x12,
+    Fellowship = 0x13,
+    WorldBroadcast = 0x14,
+    CombatEnemy = 0x15,
+    CombatSelf = 0x16,
+    Recall = 0x17,
+    Craft = 0x18,
+    Salvaging = 0x19,
+    x1A = 0x1A,
+    x1B = 0x1B,
+    x1C = 0x1C,
+    x1D = 0x1D,
+    x1E = 0x1E,
+    AdminTell = 0x1F,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChatMessageTypeId {
+    Known(ChatMessageType),
+    Unknown(u32),
+}
+
+impl ChatMessageTypeId {
+    pub fn from_raw(raw: u32) -> Self {
+        match ChatMessageType::from_repr(raw) {
+            Some(chat_message_type) => Self::Known(chat_message_type),
+            None => Self::Unknown(raw),
+        }
+    }
+
+    pub fn raw(self) -> u32 {
+        match self {
+            Self::Known(chat_message_type) => chat_message_type as u32,
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    pub fn known(self) -> Option<ChatMessageType> {
+        match self {
+            Self::Known(chat_message_type) => Some(chat_message_type),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
+impl From<ChatMessageType> for ChatMessageTypeId {
+    fn from(value: ChatMessageType) -> Self {
+        Self::Known(value)
+    }
+}
+
+impl From<u32> for ChatMessageTypeId {
+    fn from(value: u32) -> Self {
+        Self::from_raw(value)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -8,7 +8,7 @@ use tokio::sync::broadcast;
 
 use super::{
     ClientRuntime, ClientState, TurbineChatState, character_selection::CharacterSelectionState,
-    login::LoginState, movement::MovementSystem, simulation::ClientSimulationSystem,
+    movement::MovementSystem, simulation::ClientSimulationSystem,
 };
 
 #[derive(Clone)]
@@ -127,7 +127,6 @@ impl ClientRuntimeBuilder {
             message_counter: 0,
             movement: MovementSystem::new(),
             simulation: ClientSimulationSystem::new(),
-            login: LoginState::new(),
             character_selection: CharacterSelectionState::new(self.account_name),
             turbine_chat: TurbineChatState::default(),
         })
@@ -152,7 +151,6 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         message_counter: 0,
         movement: MovementSystem::new(),
         simulation: ClientSimulationSystem::new(),
-        login: LoginState::new(),
         character_selection: CharacterSelectionState::new("test".to_string()),
         turbine_chat: TurbineChatState::default(),
     };

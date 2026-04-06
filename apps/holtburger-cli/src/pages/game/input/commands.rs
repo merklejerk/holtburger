@@ -165,7 +165,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
@@ -325,6 +325,11 @@ impl GameState {
             "rip" => vec![
                 "Usage: /rip".to_string(),
                 "Kill your character.".to_string(),
+            ],
+            "logopolis" => vec![
+                "Usage: /logopolis".to_string(),
+                "You may hear a distant bounce if you stand very still.".to_string(),
+                "Some doors open only after the right name is spoken.".to_string(),
             ],
             _ => return None,
         };

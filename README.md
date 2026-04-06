@@ -39,7 +39,7 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Crafting** | 🟢 | 🟢 | Item combine flows, success prompts, and salvage preview/execution are implemented. |
 | **Magic System** | 🟢 | 🟢 | Spell catalog loading, spellbook/enchantment tracking, and targeted or untargeted casting are implemented. In the TUI, this is effectively the ceiling without scripting or a richer frontend. |
 | **Melee & Missile Combat** | 🟢 | 🟢 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
-| **Social Gameplay** | 🟢 | 🟡 | Most fellowship interactions supported + tracking HUD. Allegiance still TODO. |
+| **Social Gameplay** | 🟢 | 🟡 | Basic fellowship + allegiance interactions. TUI party HUD. |
 | **Scripting / Automation** | 🟡 | 🔴 | Embedded scripting remains planned, and that is the main path for pushing combat or spellcasting beyond the current TUI ceiling. |
 
 ## Roadmap

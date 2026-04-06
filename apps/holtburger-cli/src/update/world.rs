@@ -127,10 +127,7 @@ impl AppState {
                 {
                     self.remember_disconnect_reason(message.clone());
                     self.request_disconnect_exit();
-                    self.log(
-                        ChatMessageTags::error(),
-                        format!("[!] {}", message),
-                    );
+                    self.log(ChatMessageTags::error(), format!("[!] {}", message));
                     return result;
                 }
 
@@ -233,7 +230,10 @@ impl AppState {
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;
                 self.request_disconnect_exit();
-                self.log(ChatMessageTags::error(), self.current_disconnect_chat_message());
+                self.log(
+                    ChatMessageTags::error(),
+                    self.current_disconnect_chat_message(),
+                );
                 // For now, staying on the Game page lets the user see the error,
                 // but we could also transition back to selection.
                 result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));

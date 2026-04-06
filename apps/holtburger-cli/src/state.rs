@@ -89,8 +89,14 @@ impl AppState {
 
     pub fn display_client_info(&mut self) {
         let mut logs = Vec::new();
-        logs.push((ChatMessageTags::system(), "═══ CLIENT DEBUG INFO ═══".to_string()));
-        logs.push((ChatMessageTags::system(), format!("Account: {}", self.account_name)));
+        logs.push((
+            ChatMessageTags::system(),
+            "═══ CLIENT DEBUG INFO ═══".to_string(),
+        ));
+        logs.push((
+            ChatMessageTags::system(),
+            format!("Account: {}", self.account_name),
+        ));
 
         if let Some(game) = self.game_option() {
             if let Some(name) = &game.data.character_name {
@@ -160,7 +166,10 @@ impl AppState {
             ));
         }
 
-        logs.push((ChatMessageTags::system(), "══════════════════════════".to_string()));
+        logs.push((
+            ChatMessageTags::system(),
+            "══════════════════════════".to_string(),
+        ));
         for (chat_tags, msg) in logs {
             self.log(chat_tags, msg);
         }

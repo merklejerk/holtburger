@@ -648,7 +648,10 @@ async fn run() -> Result<()> {
     };
 
     if args.verbose > 0 {
-        app_state.log(ChatMessageTags::system(), format!("Verbosity level {} enabled.", args.verbose));
+        app_state.log(
+            ChatMessageTags::system(),
+            format!("Verbosity level {} enabled.", args.verbose),
+        );
     }
 
     let mut client_task_handle = Some(client_task_handle);
@@ -689,7 +692,10 @@ async fn run() -> Result<()> {
     loop {
         let mut should_quit = false;
 
-        if client_task_handle.as_ref().is_some_and(|handle| handle.is_finished()) {
+        if client_task_handle
+            .as_ref()
+            .is_some_and(|handle| handle.is_finished())
+        {
             let handle = client_task_handle
                 .take()
                 .expect("finished client task should still be present");
@@ -711,7 +717,10 @@ async fn run() -> Result<()> {
                     should_quit |= app_state.has_pending_exit();
                 } else {
                     app_state.client_state = ClientState::Disconnected;
-                    app_state.log(ChatMessageTags::error(), app_state.current_disconnect_chat_message());
+                    app_state.log(
+                        ChatMessageTags::error(),
+                        app_state.current_disconnect_chat_message(),
+                    );
                     pending_redraw.request(RedrawPriority::Immediate);
                 }
             }

@@ -1,6 +1,6 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
@@ -23,6 +23,38 @@ use crate::utils::wrap_text;
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 const MAX_CHAT: usize = 4000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatView {
+    #[default]
+    Everything,
+    Chat,
+}
+
+impl ChatView {
+    const ALL: [Self; 2] = [Self::Everything, Self::Chat];
+
+    fn shortcut(self) -> char {
+        match self {
+            Self::Everything => '1',
+            Self::Chat => '2',
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Everything => "Everything",
+            Self::Chat => "Chat",
+        }
+    }
+
+    fn allows(self, chat_tags: ChatMessageTags) -> bool {
+        match self {
+            Self::Everything => true,
+            Self::Chat => !chat_tags.contains(ChatMessageTags::COMBAT),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub text: String,
@@ -34,8 +66,9 @@ pub struct ChatState {
     pub messages: Vec<ChatMessage>,
     pub chat_log: Option<Mutex<File>>,
     pub wrapped_chat_cache: Vec<Vec<(String, Color)>>,
+    pub active_view: ChatView,
     pub last_chat_width: usize,
-    pub scroll_offset: usize,
+    pub scroll_offsets: [usize; ChatView::ALL.len()],
     pub total_lines: usize,
     pub last_incoming_tell_sender: Option<String>,
 }
@@ -46,8 +79,9 @@ impl Default for ChatState {
             messages: Vec::with_capacity(4000),
             chat_log: None,
             wrapped_chat_cache: Vec::with_capacity(4000),
+            active_view: ChatView::default(),
             last_chat_width: 0,
-            scroll_offset: 0,
+            scroll_offsets: [0; ChatView::ALL.len()],
             total_lines: 0,
             last_incoming_tell_sender: None,
         }
@@ -112,11 +146,17 @@ impl ChatState {
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
-                self.log(ChatMessageTags::system().party(), format_fellowship_activity(&activity));
+                self.log(
+                    ChatMessageTags::system().party(),
+                    format_fellowship_activity(&activity),
+                );
             }
             ClientViewEvent::Tell { sender, message } => {
                 self.last_incoming_tell_sender = Some(sender.clone());
-                self.log(ChatMessageTags::tell(), format!("{} tells you: {}", sender, message));
+                self.log(
+                    ChatMessageTags::tell(),
+                    format!("{} tells you: {}", sender, message),
+                );
             }
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
@@ -152,7 +192,12 @@ impl ChatState {
         self.log_with_channel(Some(channel), ChatMessageTags::chat().with(chat_tags), text);
     }
 
-    fn log_with_channel(&mut self, channel: Option<ChatChannelInfo>, chat_tags: ChatMessageTags, text: String) {
+    fn log_with_channel(
+        &mut self,
+        channel: Option<ChatChannelInfo>,
+        chat_tags: ChatMessageTags,
+        text: String,
+    ) {
         if let Some(log_mutex) = &self.chat_log
             && let Ok(mut file) = log_mutex.lock()
         {
@@ -180,13 +225,22 @@ impl ChatState {
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
-                    self.log(ChatMessageTags::debug().combat(), "Attack sequence finished.".to_string());
+                    self.log(
+                        ChatMessageTags::debug().combat(),
+                        "Attack sequence finished.".to_string(),
+                    );
                 } else {
-                        self.log(ChatMessageTags::warning().combat(), format!("Attack sequence finished with {:?}.", error));
+                    self.log(
+                        ChatMessageTags::warning().combat(),
+                        format!("Attack sequence finished with {:?}.", error),
+                    );
                 }
             }
             CombatFeedback::AttackCommenced => {
-                    self.log(ChatMessageTags::debug().combat(), "Attack sequence started.".to_string());
+                self.log(
+                    ChatMessageTags::debug().combat(),
+                    "Attack sequence started.".to_string(),
+                );
             }
             CombatFeedback::AttackerNotification {
                 defender_name,
@@ -233,10 +287,16 @@ impl ChatState {
                 );
             }
             CombatFeedback::EvasionAttackerNotification { defender_name } => {
-                self.log(ChatMessageTags::info().combat(), format!("{} evaded your attack.", defender_name));
+                self.log(
+                    ChatMessageTags::info().combat(),
+                    format!("{} evaded your attack.", defender_name),
+                );
             }
             CombatFeedback::EvasionDefenderNotification { attacker_name } => {
-                self.log(ChatMessageTags::info().combat(), format!("You evaded {}'s attack.", attacker_name));
+                self.log(
+                    ChatMessageTags::info().combat(),
+                    format!("You evaded {}'s attack.", attacker_name),
+                );
             }
             CombatFeedback::VictimNotification { death_message } => {
                 self.log(ChatMessageTags::error().combat(), death_message.clone());
@@ -255,7 +315,6 @@ impl ChatState {
         let height = area.height.saturating_sub(2) as usize;
 
         let m_len = self.messages.len();
-        let window_size = CHAT_HISTORY_WINDOW_SIZE;
 
         // Guard: Ensure the cache is not longer than the current number of messages (stale cache fix)
         if self.wrapped_chat_cache.len() > m_len {
@@ -283,18 +342,17 @@ impl ChatState {
             }
         }
 
+        let visible_wrapped_messages = visible_wrapped_message_slices(self);
         let old_total_lines = self.total_lines;
-        let window_start = m_len.saturating_sub(window_size);
-        self.total_lines = self.wrapped_chat_cache[window_start..]
-            .iter()
-            .map(|v| v.len())
-            .sum();
+        self.total_lines = visible_wrapped_messages.iter().map(|v| v.len()).sum();
 
         // If we were at the bottom (scroll_offset == 0) and new lines were added,
         // we stay at the bottom by default.
         // If we were scrolled up, we increment scroll_offset to maintain the relative position.
-        if self.scroll_offset > 0 && self.total_lines > old_total_lines {
-            self.scroll_offset += self.total_lines - old_total_lines;
+        let total_lines_delta = self.total_lines.saturating_sub(old_total_lines);
+        let active_scroll_offset = self.active_scroll_offset();
+        if active_scroll_offset > 0 && total_lines_delta > 0 {
+            *self.active_scroll_offset_mut() = active_scroll_offset + total_lines_delta;
         }
 
         self.clamp_scroll(height);
@@ -302,36 +360,102 @@ impl ChatState {
 
     fn clamp_scroll(&mut self, height: usize) {
         let max_scroll = self.total_lines.saturating_sub(height);
-        self.scroll_offset = self.scroll_offset.min(max_scroll);
+        *self.active_scroll_offset_mut() = self.active_scroll_offset().min(max_scroll);
     }
 
     pub fn handle_input(&mut self, key: KeyEvent, h: usize) -> bool {
         let mut needs_redraw = false;
         match key.code {
             KeyCode::Up => {
-                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                *self.active_scroll_offset_mut() = self.active_scroll_offset().saturating_add(1);
                 self.clamp_scroll(h);
                 needs_redraw = true;
             }
             KeyCode::Down => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                *self.active_scroll_offset_mut() = self.active_scroll_offset().saturating_sub(1);
                 needs_redraw = true;
             }
             KeyCode::PageUp => {
                 let step = (h / 2) + 1;
-                self.scroll_offset = self.scroll_offset.saturating_add(step);
+                *self.active_scroll_offset_mut() = self.active_scroll_offset().saturating_add(step);
                 self.clamp_scroll(h);
                 needs_redraw = true;
             }
             KeyCode::PageDown => {
                 let step = (h / 2) + 1;
-                self.scroll_offset = self.scroll_offset.saturating_sub(step);
+                *self.active_scroll_offset_mut() = self.active_scroll_offset().saturating_sub(step);
                 needs_redraw = true;
             }
             _ => {}
         }
         needs_redraw
     }
+
+    fn active_view_index(&self) -> usize {
+        match self.active_view {
+            ChatView::Everything => 0,
+            ChatView::Chat => 1,
+        }
+    }
+
+    pub fn active_scroll_offset(&self) -> usize {
+        self.scroll_offsets[self.active_view_index()]
+    }
+
+    pub fn active_scroll_offset_mut(&mut self) -> &mut usize {
+        let index = self.active_view_index();
+        &mut self.scroll_offsets[index]
+    }
+
+    pub fn active_scroll_offset_for(&self, view: ChatView) -> usize {
+        match view {
+            ChatView::Everything => self.scroll_offsets[0],
+            ChatView::Chat => self.scroll_offsets[1],
+        }
+    }
+
+    pub fn set_active_scroll_offset_for(&mut self, view: ChatView, offset: usize) {
+        match view {
+            ChatView::Everything => self.scroll_offsets[0] = offset,
+            ChatView::Chat => self.scroll_offsets[1] = offset,
+        }
+    }
+}
+
+fn visible_wrapped_message_slices(chat: &ChatState) -> Vec<&[(String, Color)]> {
+    let window_start = chat.messages.len().saturating_sub(CHAT_HISTORY_WINDOW_SIZE);
+
+    chat.messages[window_start..]
+        .iter()
+        .zip(chat.wrapped_chat_cache[window_start..].iter())
+        .filter_map(|(message, wrapped)| {
+            chat.active_view
+                .allows(message.chat_tags)
+                .then_some(wrapped.as_slice())
+        })
+        .collect()
+}
+
+fn chat_view_title_line(active_view: ChatView) -> Line<'static> {
+    let mut spans = Vec::new();
+
+    for (index, view) in ChatView::ALL.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("|"));
+        }
+
+        let mut style = Style::default();
+        if *view == active_view {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+
+        spans.push(Span::styled(
+            format!(" [{}] {} ", view.shortcut(), view.label()),
+            style,
+        ));
+    }
+
+    Line::from(spans).alignment(Alignment::Right)
 }
 
 fn channel_label(channel: ChatChannelInfo) -> String {
@@ -537,19 +661,14 @@ fn color_for_tags(chat_tags: ChatMessageTags) -> Color {
 pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
 
-    let m_len = chat.messages.len();
-    let window_size = CHAT_HISTORY_WINDOW_SIZE;
-
-    let window_start = m_len.saturating_sub(window_size);
-
-    let total_lines: usize = chat.total_lines;
-
-    let all_lines: Vec<&(String, Color)> = chat.wrapped_chat_cache[window_start..]
+    let all_lines: Vec<&(String, Color)> = visible_wrapped_message_slices(chat)
         .iter()
         .flat_map(|v| v.iter())
         .collect();
 
-    let effective_scroll = chat.scroll_offset;
+    let total_lines: usize = all_lines.len();
+
+    let effective_scroll = chat.active_scroll_offset();
     let end = total_lines.saturating_sub(effective_scroll);
     let start = end.saturating_sub(height);
 
@@ -583,8 +702,8 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
 
     let chat_list = List::new(messages).block(
         pane_block(is_focused)
-            .title(chat_title)
-            .title_style(pane_title_style(is_focused)),
+            .title(Line::from(chat_title).style(pane_title_style(is_focused)))
+            .title_bottom(chat_view_title_line(chat.active_view)),
     );
     f.render_widget(chat_list, area);
 
@@ -602,6 +721,9 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Margin;
 
     #[test]
     fn channel_message_formats_party_self_echo_without_blank_sender() {
@@ -841,5 +963,49 @@ mod tests {
 
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
         assert_eq!(message.text, "A nearby player has fallen.");
+    }
+
+    #[test]
+    fn chat_view_filters_combat_messages_and_renders_view_labels() {
+        let area = Rect::new(0, 0, 80, 8);
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::Chat {
+                sender: "Bestie".to_string(),
+                message: "hello world".to_string(),
+            },
+            Some("Player"),
+        );
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::CombatFeedback(CombatFeedback::AttackCommenced),
+            Some("Player"),
+        );
+
+        chat.active_view = ChatView::Chat;
+        chat.update_layout(area.inner(Margin {
+            vertical: 1,
+            horizontal: 0,
+        }));
+
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_chat_pane(frame, &chat, true, area))
+            .expect("chat pane should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("hello world"));
+        assert!(!rendered.contains("Attack sequence started."));
+        assert!(rendered.contains("[1] Everything"));
+        assert!(rendered.contains("[2] Chat"));
     }
 }

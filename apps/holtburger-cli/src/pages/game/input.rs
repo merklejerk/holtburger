@@ -9,7 +9,6 @@ use holtburger_protocol::messages::combat::CombatMode;
 use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatView;
 use crate::types::{FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
-use ratatui::layout::Margin;
 
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
@@ -106,17 +105,14 @@ impl GameState {
         }
 
         let main_chunks = self.main_chunks();
-        let chat_inner = main_chunks[1].inner(Margin {
-            vertical: 1,
-            horizontal: 0,
-        });
+        let chat_area = main_chunks[1];
 
         if self.view.focused_pane == FocusedPane::Chat {
             match key.code {
                 KeyCode::Char('1') => {
                     if self.chat.active_view != ChatView::Everything {
                         self.chat.active_view = ChatView::Everything;
-                        self.chat.update_layout(chat_inner);
+                        self.chat.update_layout(chat_area);
                         result.request_redraw(RedrawPriority::Immediate);
                     }
                     return result;
@@ -124,7 +120,7 @@ impl GameState {
                 KeyCode::Char('2') => {
                     if self.chat.active_view != ChatView::Chat {
                         self.chat.active_view = ChatView::Chat;
-                        self.chat.update_layout(chat_inner);
+                        self.chat.update_layout(chat_area);
                         result.request_redraw(RedrawPriority::Immediate);
                     }
                     return result;
@@ -388,7 +384,8 @@ impl GameState {
                 }
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
-                    *self.chat.active_scroll_offset_mut() = self.chat.total_lines.saturating_sub(h);
+                    *self.chat.active_scroll_offset_mut() =
+                        self.chat.active_total_lines().saturating_sub(h);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {

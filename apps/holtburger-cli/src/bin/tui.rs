@@ -9,7 +9,7 @@ use directories::ProjectDirs;
 use holtburger_cli::pages;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
-use holtburger_cli::types::{AppEvent, ChatMessageKind, Page, RedrawPriority, UpdateResult};
+use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_content::ContentRepository;
 use holtburger_core::{
     ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState, ClientViewEvent, ErrorReason,
@@ -57,7 +57,7 @@ enum BootstrapEventOutcome {
 }
 
 struct CapturedLog {
-    kind: ChatMessageKind,
+    chat_tags: ChatMessageTags,
     text: String,
 }
 
@@ -141,7 +141,7 @@ impl log::Log for TuiLogger {
 
             if should_send {
                 let _ = self.tx.send(CapturedLog {
-                    kind: ChatMessageKind::System,
+                    chat_tags: ChatMessageTags::system(),
                     text: log_msg,
                 });
             }
@@ -649,7 +649,7 @@ async fn run() -> Result<()> {
 
     if args.verbose > 0 {
         app_state.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             format!("Verbosity level {} enabled.", args.verbose),
         );
     }
@@ -710,13 +710,15 @@ async fn run() -> Result<()> {
                     app_state.remember_disconnect_reason(message.clone());
                 }
 
+                app_state.log(ChatMessageTags::error(), format!("[!] {}", message));
+
                 if app_state.should_exit_on_disconnect() {
                     app_state.request_disconnect_exit();
                     should_quit |= app_state.has_pending_exit();
                 } else {
                     app_state.client_state = ClientState::Disconnected;
                     app_state.log(
-                        ChatMessageKind::Error,
+                        ChatMessageTags::error(),
                         app_state.current_disconnect_chat_message(),
                     );
                     pending_redraw.request(RedrawPriority::Immediate);
@@ -727,7 +729,7 @@ async fn run() -> Result<()> {
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
             let res = app_state.handle_app_action(holtburger_cli::types::AppAction::Log {
-                kind: log.kind,
+                chat_tags: log.chat_tags,
                 message: log.text,
             });
             update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);

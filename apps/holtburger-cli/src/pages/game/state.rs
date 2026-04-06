@@ -41,7 +41,7 @@ use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
+    AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
     Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
@@ -490,7 +490,7 @@ impl GameState {
             AppAction::Equip { guid } => {
                 if self.runtime.weapon_swap.is_active() {
                     result.actions.push(AppAction::Log {
-                        kind: ChatMessageKind::Warning,
+                        chat_tags: ChatMessageTags::warning(),
                         message: "Already waiting on a weapon swap.".to_string(),
                     });
                 } else {
@@ -500,7 +500,7 @@ impl GameState {
             AppAction::EquipInSlot { guid, slot } => {
                 if self.runtime.weapon_swap.is_active() {
                     result.actions.push(AppAction::Log {
-                        kind: ChatMessageKind::Warning,
+                        chat_tags: ChatMessageTags::warning(),
                         message: "Already waiting on a weapon swap.".to_string(),
                     });
                 } else {
@@ -516,7 +516,7 @@ impl GameState {
                     });
                 } else {
                     result.actions.push(AppAction::Log {
-                        kind: ChatMessageKind::System,
+                        chat_tags: ChatMessageTags::system(),
                         message: "No available inventory space to unequip item.".to_string(),
                     });
                 }
@@ -568,7 +568,7 @@ impl GameState {
             AppAction::OpenShop { vendor } => {
                 if self.data.trade.is_some() {
                     result.actions.push(AppAction::Log {
-                        kind: ChatMessageKind::Warning,
+                        chat_tags: ChatMessageTags::warning(),
                         message: "You are currently in a trade.".to_string(),
                     });
                 } else {
@@ -747,7 +747,7 @@ impl GameState {
                     });
                 } else {
                     result.actions.push(AppAction::Log {
-                        kind: ChatMessageKind::System,
+                        chat_tags: ChatMessageTags::system(),
                         message: "No space left.".to_string(),
                     });
                 }
@@ -1042,7 +1042,7 @@ impl GameState {
         }
         if mode != CombatMode::NonCombat && self.data.get_suggested_combat_mode() != mode {
             result.actions.push(AppAction::Log {
-                kind: ChatMessageKind::Warning,
+                chat_tags: ChatMessageTags::warning(),
                 message: "Wrong weapon equipped!".to_string(),
             });
             return EnterCombatModeResult::Failed(result);
@@ -1475,7 +1475,7 @@ impl GameState {
 
     fn push_missing_ust_warning(&self, result: &mut UpdateResult) {
         result.actions.push(AppAction::Log {
-            kind: ChatMessageKind::Warning,
+            chat_tags: ChatMessageTags::warning(),
             message: "You do not have an Ust in your inventory.".to_string(),
         });
     }
@@ -1642,7 +1642,7 @@ impl GameState {
             label = format!("{} ({}x)", label, stack_size);
         }
         self.chat
-            .log(ChatMessageKind::System, format!("{}: {}", action, label));
+            .log(ChatMessageTags::system(), format!("{}: {}", action, label));
     }
 
     fn delay_inventory_notification_arming(&mut self) {
@@ -1706,7 +1706,7 @@ impl GameState {
             self.data.noclip = enabled;
             let status = if enabled { "ENABLED" } else { "DISABLED" };
             result.actions.push(AppAction::Log {
-                kind: ChatMessageKind::System,
+                chat_tags: ChatMessageTags::system(),
                 message: format!(">> NoClip is now {}", status),
             });
         }

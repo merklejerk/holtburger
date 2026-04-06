@@ -7,7 +7,7 @@ use holtburger_core::ClientState;
 use holtburger_world::spell::SpellCatalog;
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
-use crate::types::{ChatMessageKind, Page};
+use crate::types::{ChatMessageTags, Page};
 
 use crate::pages::game::GameState;
 use std::sync::Arc;
@@ -90,20 +90,20 @@ impl AppState {
     pub fn display_client_info(&mut self) {
         let mut logs = Vec::new();
         logs.push((
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "═══ CLIENT DEBUG INFO ═══".to_string(),
         ));
         logs.push((
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             format!("Account: {}", self.account_name),
         ));
 
         if let Some(game) = self.game_option() {
             if let Some(name) = &game.data.character_name {
-                logs.push((ChatMessageKind::System, format!("Character: {}", name)));
+                logs.push((ChatMessageTags::system(), format!("Character: {}", name)));
             }
             if let Some(guid) = game.data.player_guid {
-                logs.push((ChatMessageKind::System, format!("GUID: {:#010X}", guid.0)));
+                logs.push((ChatMessageTags::system(), format!("GUID: {:#010X}", guid.0)));
             }
         }
 
@@ -114,32 +114,32 @@ impl AppState {
             ClientState::InWorld => "In World",
             ClientState::Disconnected => "Disconnected",
         };
-        logs.push((ChatMessageKind::System, format!("State: {}", state_str)));
+        logs.push((ChatMessageTags::system(), format!("State: {}", state_str)));
 
         if let Some(game) = self.game_option() {
             if let Some(pos) = game.data.runtime_player_position() {
-                logs.push((ChatMessageKind::System, "".to_string()));
-                logs.push((ChatMessageKind::System, "═══ POSITION ═══".to_string()));
+                logs.push((ChatMessageTags::system(), "".to_string()));
+                logs.push((ChatMessageTags::system(), "═══ POSITION ═══".to_string()));
                 logs.push((
-                    ChatMessageKind::System,
+                    ChatMessageTags::system(),
                     format!("Landblock: {:#010X}", pos.landblock_id),
                 ));
                 logs.push((
-                    ChatMessageKind::System,
+                    ChatMessageTags::system(),
                     format!(
                         "Euclidean: ({:.2}, {:.2}, {:.2})",
                         pos.coords.x, pos.coords.y, pos.coords.z
                     ),
                 ));
                 logs.push((
-                    ChatMessageKind::System,
+                    ChatMessageTags::system(),
                     format!("Geographic: {}", pos.to_world_coords()),
                 ));
             }
 
             // Entity counts
-            logs.push((ChatMessageKind::System, "".to_string()));
-            logs.push((ChatMessageKind::System, "═══ ENTITIES ═══".to_string()));
+            logs.push((ChatMessageTags::system(), "".to_string()));
+            logs.push((ChatMessageTags::system(), "═══ ENTITIES ═══".to_string()));
             let world_entities = game
                 .data
                 .entities
@@ -153,25 +153,25 @@ impl AppState {
                 .filter(|e| e.position.landblock_id == Guid::NULL)
                 .count();
             logs.push((
-                ChatMessageKind::System,
+                ChatMessageTags::system(),
                 format!("World Entities: {}", world_entities),
             ));
             logs.push((
-                ChatMessageKind::System,
+                ChatMessageTags::system(),
                 format!("Inventory Items: {}", inventory_items),
             ));
             logs.push((
-                ChatMessageKind::System,
+                ChatMessageTags::system(),
                 format!("Total Entities: {}", game.data.entities.len()),
             ));
         }
 
         logs.push((
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "══════════════════════════".to_string(),
         ));
-        for (kind, msg) in logs {
-            self.log(kind, msg);
+        for (chat_tags, msg) in logs {
+            self.log(chat_tags, msg);
         }
     }
 
@@ -220,9 +220,9 @@ impl AppState {
 }
 
 impl AppState {
-    pub fn log(&mut self, kind: ChatMessageKind, msg: impl Into<String>) {
+    pub fn log(&mut self, chat_tags: ChatMessageTags, msg: impl Into<String>) {
         if let Some(game) = self.game_option_mut() {
-            game.chat.log(kind, msg.into());
+            game.chat.log(chat_tags, msg.into());
         }
     }
 }

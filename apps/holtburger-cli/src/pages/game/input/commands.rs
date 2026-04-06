@@ -1,6 +1,6 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::types::{ChatMessageTags, RedrawPriority};
+use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
 
@@ -474,11 +474,13 @@ impl GameState {
 
         if command.trim() == "/logopolis" {
             self.finish_input_command_submission(command);
-            return self
-                .handle_action(crate::types::AppAction::ChangeContextView {
-                    view: crate::types::ContextView::Logopolis,
-                })
-                .unwrap_or_default();
+            result.actions.push(
+                AppUiAction::ChangeContextView {
+                    view: ContextView::Logopolis,
+                }
+                .into(),
+            );
+            return result;
         }
 
         if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
@@ -921,6 +923,27 @@ mod tests {
                 .iter()
                 .any(|message| { message.text.contains("TUI generates a default") })
         );
+    }
+
+    #[test]
+    fn logopolis_command_queues_ui_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/logopolis");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: crate::types::AppUiAction::ChangeContextView {
+                    view: crate::types::ContextView::Logopolis
+                }
+            })
+        ));
     }
 
     #[test]

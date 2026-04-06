@@ -1641,7 +1641,8 @@ impl GameState {
         if stack_size > 1 {
             label = format!("{} ({}x)", label, stack_size);
         }
-        self.chat.log(ChatMessageTags::system(), format!("{}: {}", action, label));
+        self.chat
+            .log(ChatMessageTags::system(), format!("{}: {}", action, label));
     }
 
     fn delay_inventory_notification_arming(&mut self) {

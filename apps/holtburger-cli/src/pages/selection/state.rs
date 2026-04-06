@@ -4,7 +4,7 @@ use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry}
 
 use crate::components::text_input::SingleLineTextInput;
 use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
-use crate::types::{AppAction, AppUiAction, ChatMessageKind, UpdateResult};
+use crate::types::{AppAction, AppUiAction, ChatMessageTags, UpdateResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CharacterScreen {
@@ -98,12 +98,12 @@ impl SelectionState {
                         let mut result = UpdateResult::new();
                         result.commands.push(ClientCommand::SelectCharacter(guid));
                         return result.with_action(AppAction::Log {
-                            kind: ChatMessageKind::System,
+                            chat_tags: ChatMessageTags::system(),
                             message: format!("Auto-selecting character: {:08X}", guid),
                         });
                     } else {
                         return UpdateResult::new().with_action(AppAction::Log {
-                            kind: ChatMessageKind::Warning,
+                            chat_tags: ChatMessageTags::warning(),
                             message: format!(
                                 "Character preference '{}' not found in available characters.",
                                 pref

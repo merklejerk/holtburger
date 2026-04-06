@@ -148,14 +148,14 @@ impl Default for TargetSlot {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub enum ErrorSource {
+pub enum ActionResultSource {
     Wire,
     State,
     Client,
 }
 
 #[derive(Debug, PartialEq, Clone, Eq)]
-pub enum ErrorReason {
+pub enum ActionResultReason {
     Weenie(WeenieError, Option<String>),
     Character(CharacterError),
     General(String),
@@ -351,10 +351,9 @@ pub enum ClientViewEvent {
         operation: BusyOperationKind,
         result: BusyOperationResult,
     },
-    ErrorRaised {
-        source: ErrorSource,
-        reason: ErrorReason,
-        message: String,
+    ActionResult {
+        source: ActionResultSource,
+        reason: ActionResultReason,
     },
     EntitySpawned {
         entity: Box<Entity>,

@@ -181,7 +181,7 @@ impl ClientRuntime {
         let header = PacketHeader {
             flags: packet_flags::DISCONNECT,
             sequence: self.session.packet_sequence,
-            id: 0,
+            id: self.session.client_id,
             ..Default::default()
         };
         self.session.packet_sequence += 1;

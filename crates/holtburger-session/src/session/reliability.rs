@@ -179,7 +179,7 @@ impl Session {
     }
 
     pub(crate) fn should_request_retransmit(&self, expected: u32, received_sequence: u32) -> bool {
-        expected + 2 <= received_sequence
+        expected < received_sequence
             && self
                 .last_request_retransmit_time
                 .is_none_or(|last_request| {

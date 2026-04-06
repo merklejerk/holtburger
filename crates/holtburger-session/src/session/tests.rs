@@ -79,6 +79,18 @@ fn build_connect_request_packet(connect_request: ConnectRequestData) -> Vec<u8> 
     )
 }
 
+fn build_connect_response_packet(cookie: u64, client_id: u16) -> Vec<u8> {
+    build_transport_packet(
+        PacketHeader {
+            flags: packet_flags::CONNECT_RESPONSE,
+            id: client_id,
+            size: transport::CONNECT_RESPONSE_SIZE as u16,
+            ..Default::default()
+        },
+        &cookie.to_le_bytes(),
+    )
+}
+
 #[tokio::test]
 async fn test_payload_offset_handshake() {
     let session = Session::new("127.0.0.1:9000".parse().unwrap())
@@ -390,6 +402,24 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
 }
 
 #[tokio::test]
+async fn test_connect_response_parses_cookie_from_optional_header_offset() {
+    let cookie = 0x1122_3344_5566_7788u64;
+    let client_id = 0x345u16;
+    let transport = ScriptedTransport::new(
+        vec![build_connect_response_packet(cookie, client_id)],
+        "127.0.0.1:9001".parse().unwrap(),
+    );
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+
+    let events = session.recv_message().await.unwrap();
+    assert!(events.is_empty());
+    assert_eq!(session.connection_cookie, cookie);
+    assert_eq!(session.client_id, client_id);
+}
+
+#[tokio::test]
 async fn test_out_of_order_server_packet_requests_retransmit() {
     let transport = ScriptedTransport::new(
         vec![
@@ -420,7 +450,6 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
 
     let events = session.recv_message().await.unwrap();
     assert!(events.is_empty());
-    assert!(session.flush_pending_control_packets().await.unwrap());
 
     let sent_packets = sent_handle.sent_packets().await;
     let retransmit_packet = sent_packets
@@ -435,6 +464,40 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 2);
     assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
     assert_eq!(LittleEndian::read_u32(&payload[8..12]), 3);
+}
+
+#[tokio::test]
+async fn test_single_packet_gap_requests_retransmit() {
+    let transport = ScriptedTransport::new(
+        vec![build_transport_packet(
+            PacketHeader {
+                sequence: 3,
+                ..Default::default()
+            },
+            &[],
+        )],
+        "127.0.0.1:9001".parse().unwrap(),
+    );
+    let sent_handle = transport.clone();
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.packet_sequence = 5;
+    session.last_server_seq = 1;
+    session.has_server_seq = true;
+
+    let error = session.recv_message().await.unwrap_err();
+    assert!(error.to_string().contains("Empty"));
+
+    let sent_packets = sent_handle.sent_packets().await;
+    let retransmit_packet = sent_packets
+        .iter()
+        .find(|packet| (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0)
+        .expect("missing retransmit request packet");
+
+    let payload = &retransmit_packet[transport::HEADER_SIZE..];
+    assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
+    assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
 }
 
 #[tokio::test]

@@ -116,6 +116,55 @@ impl Session {
                 return Ok(packet);
             }
 
+            if self.flush_pending_control_packets().await? {
+                continue;
+            }
+
+            if let Some(deadline) = self.next_pending_control_deadline() {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
+                        continue;
+                    }
+                    result = async {
+                        let mut buf = [0u8; 1024 * 128];
+                        self.recv_packet_with_addr(&mut buf).await
+                    } => {
+                        let (header, data, addr) = result?;
+                        let packet = ReceivedPacket { header, data, addr };
+
+                        if !self.should_order_server_packet(&packet.header) {
+                            self.finalize_ordered_server_packet(&packet)?;
+                            return Ok(packet);
+                        }
+
+                        let expected = self.next_expected_server_sequence();
+                        if packet.header.sequence <= self.last_server_seq {
+                            log::debug!(
+                                "Server packet {} received again; last ordered sequence is {}",
+                                packet.header.sequence,
+                                self.last_server_seq
+                            );
+                            continue;
+                        }
+
+                        if packet.header.sequence > expected {
+                            let received_sequence = packet.header.sequence;
+                            self.pending_server_packets
+                                .entry(received_sequence)
+                                .or_insert(packet);
+
+                            if self.should_request_retransmit(expected, received_sequence) {
+                                self.send_request_retransmit(received_sequence)?;
+                            }
+                            continue;
+                        }
+
+                        self.finalize_ordered_server_packet(&packet)?;
+                        return Ok(packet);
+                    }
+                }
+            }
+
             let mut buf = [0u8; 1024 * 128];
             let (header, data, addr) = self.recv_packet_with_addr(&mut buf).await?;
             let packet = ReceivedPacket { header, data, addr };
@@ -152,33 +201,12 @@ impl Session {
         }
     }
 
-    async fn recv_next_packet_or_control(&mut self) -> Result<ReceivedPacket> {
-        loop {
-            if self.flush_pending_control_packets().await? {
-                continue;
-            }
-
-            if let Some(deadline) = self.next_pending_control_deadline() {
-                tokio::select! {
-                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
-                        continue;
-                    }
-                    packet = self.recv_ordered_packet() => {
-                        return packet;
-                    }
-                }
-            } else {
-                return self.recv_ordered_packet().await;
-            }
-        }
-    }
-
     pub fn get_payload_offset(&self, flags: u32, data: &[u8]) -> usize {
         OptionalHeaderCursor::new(data, flags).payload_offset()
     }
 
     pub async fn recv_message(&mut self) -> Result<Vec<SessionEvent>> {
-        let packet = self.recv_next_packet_or_control().await?;
+        let packet = self.recv_ordered_packet().await?;
         let header = packet.header;
         let data = packet.data;
         let mut events = Vec::new();
@@ -193,14 +221,14 @@ impl Session {
             }
         }
 
-        if header.flags & packet_flags::CONNECT_RESPONSE != 0 {
-            let offset = self.get_payload_offset(header.flags, &data);
-            if offset + transport::CONNECT_RESPONSE_SIZE <= data.len() {
-                let cookie = LittleEndian::read_u64(
-                    &data[offset..offset + transport::CONNECT_RESPONSE_SIZE],
-                );
-                self.handle_handshake_response(cookie, header.id);
-            }
+        if header.flags & packet_flags::CONNECT_RESPONSE != 0
+            && let Some(offset) = OptionalHeaderCursor::new(&data, header.flags)
+                .find_flag_offset(packet_flags::CONNECT_RESPONSE)
+                .filter(|&offset| offset + transport::CONNECT_RESPONSE_SIZE <= data.len())
+        {
+            let cookie =
+                LittleEndian::read_u64(&data[offset..offset + transport::CONNECT_RESPONSE_SIZE]);
+            self.handle_handshake_response(cookie, header.id);
         }
 
         if header.flags & packet_flags::TIME_SYNC != 0

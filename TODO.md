@@ -21,7 +21,6 @@
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
-- [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
 - [ ] Show enchantment source (caster) in enchantment debug.
 - [ ] Don't show Give verb on items that are attuned/sticky.
@@ -245,6 +244,7 @@
 - [x] Death notifications.
 - [~] Slash-commands should use `AppAction`s.
 - [ ] Some equipment swapping jank going on.
+- [ ] Chat tabs (Chat vs combat vs all).
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

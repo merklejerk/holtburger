@@ -1,6 +1,6 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::types::{ChatMessageKind, RedrawPriority};
+use crate::types::{ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
 
@@ -134,7 +134,7 @@ impl GameState {
 
     fn log_options_usage(&mut self) {
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]".to_string(),
         );
     }
@@ -146,68 +146,68 @@ impl GameState {
             .collect::<Vec<_>>()
             .join(", ");
         self.chat.log(
-            ChatMessageKind::Error,
+            ChatMessageTags::error(),
             format!("Unknown option '{}'. Valid options: {}", raw_name, valid),
         );
     }
 
     fn log_options_unavailable(&mut self) {
         self.chat.log(
-            ChatMessageKind::Warning,
+            ChatMessageTags::warning(),
             "Player option state has not been loaded yet.".to_string(),
         );
     }
 
     fn log_command_usage(&mut self, usage: &str) {
-        self.chat.log(ChatMessageKind::System, usage.to_string());
+        self.chat.log(ChatMessageTags::system(), usage.to_string());
     }
 
     fn log_command_help_overview(&mut self) {
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Allegiance: /g <MSG>, /swear <NAME>, /unswear".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Corpse permissions: /permit <PLAYER>, /unpermit <PLAYER>".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /leave, /uninvite <PLAYER>"
                 .to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
                 .to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Movement: /scoot [METERS] (defaults to 1m)".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Teleports: /arena (PKL arena), /mp (marketplace)".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "PK Lite: /pkl (turn on PK Lite mode)".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Use /help <COMMAND> for detailed help on a specific command.".to_string(),
         );
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), a-z (Verbs), ` (Combat Toggle)".to_string(),
         );
     }
@@ -335,7 +335,7 @@ impl GameState {
     fn log_command_help_topic(&mut self, topic: &str) {
         let Some(lines) = self.command_help_lines(topic) else {
             self.chat.log(
-                ChatMessageKind::Error,
+                ChatMessageTags::error(),
                 format!(
                     "Unknown help topic '{}'. Use /help to see available commands.",
                     topic
@@ -345,13 +345,13 @@ impl GameState {
         };
 
         for line in lines {
-            self.chat.log(ChatMessageKind::System, line);
+            self.chat.log(ChatMessageTags::system(), line);
         }
     }
 
     fn log_option_state(&mut self, option: CuratedCharacterOption, enabled: bool) {
         self.chat.log(
-            ChatMessageKind::System,
+            ChatMessageTags::system(),
             format!(
                 "{}: {}",
                 option.canonical_name(),
@@ -372,11 +372,11 @@ impl GameState {
                 };
 
                 self.chat
-                    .log(ChatMessageKind::System, "Character options:".to_string());
+                    .log(ChatMessageTags::system(), "Character options:".to_string());
                 for option in CuratedCharacterOption::ALL {
                     let enabled = option.is_enabled(options);
                     self.chat.log(
-                        ChatMessageKind::System,
+                        ChatMessageTags::system(),
                         format!(
                             "{}: {} ({})",
                             option.canonical_name(),
@@ -409,7 +409,7 @@ impl GameState {
                 };
                 let Some(value) = parse_option_value(raw_value) else {
                     self.chat.log(
-                        ChatMessageKind::Error,
+                        ChatMessageTags::error(),
                         format!("Invalid option value '{}'. Expected on or off.", raw_value),
                     );
                     return result.with_redraw(true);
@@ -420,7 +420,7 @@ impl GameState {
                     value,
                 });
                 self.chat.log(
-                    ChatMessageKind::System,
+                    ChatMessageTags::system(),
                     format!(
                         "Setting {} to {}.",
                         option.canonical_name(),
@@ -445,7 +445,7 @@ impl GameState {
                     value,
                 });
                 self.chat.log(
-                    ChatMessageKind::System,
+                    ChatMessageTags::system(),
                     format!(
                         "Setting {} to {}.",
                         option.canonical_name(),
@@ -484,7 +484,7 @@ impl GameState {
         if let Some(message) = parse_message_only_command(command, &["/reply", "/r"]) {
             let Some(target) = self.chat.last_incoming_tell_sender.clone() else {
                 self.chat.log(
-                    ChatMessageKind::Warning,
+                    ChatMessageTags::warning(),
                     "No incoming tell to reply to yet.".to_string(),
                 );
                 return result.with_redraw(true);
@@ -520,7 +520,7 @@ impl GameState {
         if let Some(player_name) = parse_single_argument_command(command, &["/swear"]) {
             let Some(target) = self.data.resolve_player_guid_by_name(player_name) else {
                 self.chat.log(
-                    ChatMessageKind::Warning,
+                    ChatMessageTags::warning(),
                     format!(
                         "Unable to find player '{}' to swear allegiance to.",
                         player_name
@@ -533,7 +533,7 @@ impl GameState {
                 .actions
                 .push(crate::types::AppAction::SwearAllegiance { target });
             self.chat.log(
-                ChatMessageKind::System,
+                ChatMessageTags::system(),
                 format!("Swearing allegiance to {}...", player_name),
             );
             self.finish_input_command_submission(command);
@@ -543,7 +543,7 @@ impl GameState {
         if command == "/unswear" {
             let Some(target) = self.data.get_player_monarch_guid() else {
                 self.chat.log(
-                    ChatMessageKind::Warning,
+                    ChatMessageTags::warning(),
                     "You are not currently sworn to anyone.".to_string(),
                 );
                 return result.with_redraw(true);
@@ -625,7 +625,7 @@ impl GameState {
         if let Some(player) = parse_single_argument_command(command, &["/invite"]) {
             let Some(target) = self.data.resolve_player_guid_by_name(player) else {
                 self.chat.log(
-                    ChatMessageKind::Warning,
+                    ChatMessageTags::warning(),
                     format!("Unable to find player '{}' to invite.", player),
                 );
                 return result.with_redraw(true);
@@ -652,7 +652,7 @@ impl GameState {
         if let Some(player) = parse_single_argument_command(command, &["/uninvite"]) {
             let Some(target) = self.data.resolve_player_guid_by_name(player) else {
                 self.chat.log(
-                    ChatMessageKind::Warning,
+                    ChatMessageTags::warning(),
                     format!("Unable to find player '{}' to remove from party.", player),
                 );
                 return result.with_redraw(true);
@@ -1050,7 +1050,7 @@ mod tests {
         ));
         assert!(result.commands.is_empty());
         assert!(state.chat.messages.iter().any(|message| {
-            message.kind == ChatMessageKind::System
+            message.chat_tags.contains(ChatMessageTags::system())
                 && message.text == "Swearing allegiance to Bestie..."
         }));
     }

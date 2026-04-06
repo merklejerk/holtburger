@@ -17,7 +17,7 @@ use std::io::Write;
 use std::sync::Mutex;
 
 use crate::theme::{pane_block, pane_title_style};
-use crate::types::ChatMessageKind;
+use crate::types::ChatMessageTags;
 use crate::utils::wrap_text;
 
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
@@ -25,9 +25,9 @@ const MAX_CHAT: usize = 4000;
 
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
-    pub kind: ChatMessageKind,
     pub text: String,
     pub channel: Option<ChatChannelInfo>,
+    pub chat_tags: ChatMessageTags,
 }
 
 pub struct ChatState {
@@ -71,34 +71,34 @@ impl ChatState {
         use holtburger_protocol::messages::ChatMessageType;
         match event {
             ClientViewEvent::LogMessage(msg) => {
-                let kind = if msg.contains("[ERROR]") {
-                    ChatMessageKind::Error
+                let chat_tags = if msg.contains("[ERROR]") {
+                    ChatMessageTags::error()
                 } else if msg.contains("[WARN]") {
-                    ChatMessageKind::Warning
+                    ChatMessageTags::warning()
                 } else if msg.contains("[INFO]") {
-                    ChatMessageKind::Info
+                    ChatMessageTags::info()
                 } else if msg.contains("[DEBUG]") || msg.contains("[TRACE]") {
-                    ChatMessageKind::Debug
+                    ChatMessageTags::debug()
                 } else {
-                    ChatMessageKind::System
+                    ChatMessageTags::system()
                 };
-                self.log(kind, msg);
+                self.log(chat_tags, msg);
             }
             ClientViewEvent::ServerMessage { message, chat_type } => {
-                let kind = match ChatMessageType::from_repr(chat_type) {
-                    Some(ChatMessageType::Error) => ChatMessageKind::Error,
-                    Some(ChatMessageType::Warning) => ChatMessageKind::Warning,
+                let kind_tags = match ChatMessageType::from_repr(chat_type) {
+                    Some(ChatMessageType::Error) => ChatMessageTags::error(),
+                    Some(ChatMessageType::Warning) => ChatMessageTags::warning(),
                     Some(ChatMessageType::Broadcast)
                     | Some(ChatMessageType::GeneralBroadcast)
                     | Some(ChatMessageType::AdminBroadcast)
                     | Some(ChatMessageType::WorldBroadcast)
-                    | Some(ChatMessageType::DirectSpeech) => ChatMessageKind::Info,
-                    _ => ChatMessageKind::System,
+                    | Some(ChatMessageType::DirectSpeech) => ChatMessageTags::info(),
+                    _ => ChatMessageTags::system(),
                 };
-                self.log(kind, message);
+                self.log(kind_tags.with(server_message_tags(chat_type)), message);
             }
             ClientViewEvent::Chat { sender, message } => {
-                self.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
+                self.log(ChatMessageTags::chat(), format!("{}: {}", sender, message));
             }
             ClientViewEvent::ChannelMessage {
                 channel,
@@ -106,26 +106,20 @@ impl ChatState {
                 message,
             } => {
                 self.log_channel(
-                    ChatMessageKind::Chat,
                     channel,
+                    channel_tags(channel),
                     format_channel_message(channel, &sender, &message, local_player_name),
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
-                self.log(
-                    ChatMessageKind::System,
-                    format_fellowship_activity(&activity),
-                );
+                self.log(ChatMessageTags::system().party(), format_fellowship_activity(&activity));
             }
             ClientViewEvent::Tell { sender, message } => {
                 self.last_incoming_tell_sender = Some(sender.clone());
-                self.log(
-                    ChatMessageKind::Tell,
-                    format!("{} tells you: {}", sender, message),
-                );
+                self.log(ChatMessageTags::tell(), format!("{} tells you: {}", sender, message));
             }
             ClientViewEvent::Emote { sender, text } => {
-                self.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
+                self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
             }
             ClientViewEvent::CombatFeedback(feedback) => {
                 self.log_combat_feedback(&feedback);
@@ -139,26 +133,26 @@ impl ChatState {
                 } else {
                     format!("Disconnected: Booted from server: {}", reason)
                 };
-                self.log(ChatMessageKind::Error, message);
+                self.log(ChatMessageTags::error(), message);
             }
             _ => {}
         }
     }
 
-    pub fn log(&mut self, kind: ChatMessageKind, text: String) {
-        self.log_with_channel(kind, None, text);
+    pub fn log(&mut self, chat_tags: ChatMessageTags, text: String) {
+        self.log_with_channel(None, chat_tags, text);
     }
 
-    pub fn log_channel(&mut self, kind: ChatMessageKind, channel: ChatChannelInfo, text: String) {
-        self.log_with_channel(kind, Some(channel), text);
-    }
-
-    fn log_with_channel(
+    pub fn log_channel(
         &mut self,
-        kind: ChatMessageKind,
-        channel: Option<ChatChannelInfo>,
+        channel: ChatChannelInfo,
+        chat_tags: ChatMessageTags,
         text: String,
     ) {
+        self.log_with_channel(Some(channel), ChatMessageTags::chat().with(chat_tags), text);
+    }
+
+    fn log_with_channel(&mut self, channel: Option<ChatChannelInfo>, chat_tags: ChatMessageTags, text: String) {
         if let Some(log_mutex) = &self.chat_log
             && let Ok(mut file) = log_mutex.lock()
         {
@@ -166,9 +160,9 @@ impl ChatState {
             let _ = file.flush();
         }
         self.messages.push(ChatMessage {
-            kind,
             text,
             channel,
+            chat_tags,
         });
 
         if self.messages.len() > MAX_CHAT {
@@ -186,22 +180,13 @@ impl ChatState {
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
-                    self.log(
-                        ChatMessageKind::Debug,
-                        "Attack sequence finished.".to_string(),
-                    );
+                    self.log(ChatMessageTags::debug().combat(), "Attack sequence finished.".to_string());
                 } else {
-                    self.log(
-                        ChatMessageKind::Warning,
-                        format!("Attack sequence finished with {:?}.", error),
-                    );
+                        self.log(ChatMessageTags::warning().combat(), format!("Attack sequence finished with {:?}.", error));
                 }
             }
             CombatFeedback::AttackCommenced => {
-                self.log(
-                    ChatMessageKind::Debug,
-                    "Attack sequence started.".to_string(),
-                );
+                    self.log(ChatMessageTags::debug().combat(), "Attack sequence started.".to_string());
             }
             CombatFeedback::AttackerNotification {
                 defender_name,
@@ -212,7 +197,7 @@ impl ChatState {
                 attack_conditions,
             } => {
                 self.log(
-                    ChatMessageKind::Info,
+                    ChatMessageTags::info().combat(),
                     format!(
                         "You hit {} for {} {} damage ({}).{}{}",
                         defender_name,
@@ -234,7 +219,7 @@ impl ChatState {
                 attack_conditions,
             } => {
                 self.log(
-                    ChatMessageKind::Warning,
+                    ChatMessageTags::warning().combat(),
                     format!(
                         "{} hit you for {} {} damage to your {} ({}).{}{}",
                         attacker_name,
@@ -248,25 +233,19 @@ impl ChatState {
                 );
             }
             CombatFeedback::EvasionAttackerNotification { defender_name } => {
-                self.log(
-                    ChatMessageKind::Info,
-                    format!("{} evaded your attack.", defender_name),
-                );
+                self.log(ChatMessageTags::info().combat(), format!("{} evaded your attack.", defender_name));
             }
             CombatFeedback::EvasionDefenderNotification { attacker_name } => {
-                self.log(
-                    ChatMessageKind::Info,
-                    format!("You evaded {}'s attack.", attacker_name),
-                );
+                self.log(ChatMessageTags::info().combat(), format!("You evaded {}'s attack.", attacker_name));
             }
             CombatFeedback::VictimNotification { death_message } => {
-                self.log(ChatMessageKind::Error, death_message.clone());
+                self.log(ChatMessageTags::error().combat(), death_message.clone());
             }
             CombatFeedback::KillerNotification { death_message } => {
-                self.log(ChatMessageKind::Info, death_message.clone());
+                self.log(ChatMessageTags::info().combat(), death_message.clone());
             }
             CombatFeedback::PlayerKilled { death_message, .. } => {
-                self.log(ChatMessageKind::Info, death_message.clone());
+                self.log(ChatMessageTags::info().combat(), death_message.clone());
             }
         }
     }
@@ -293,16 +272,7 @@ impl ChatState {
         if self.wrapped_chat_cache.len() < m_len {
             let start_idx = self.wrapped_chat_cache.len();
             for m in &self.messages[start_idx..] {
-                let color = match m.kind {
-                    ChatMessageKind::Chat => Color::White,
-                    ChatMessageKind::Tell => Color::Magenta,
-                    ChatMessageKind::Emote => Color::Green,
-                    ChatMessageKind::Info => Color::Cyan,
-                    ChatMessageKind::System => Color::LightBlue,
-                    ChatMessageKind::Error => Color::Red,
-                    ChatMessageKind::Warning => Color::Yellow,
-                    ChatMessageKind::Debug => Color::Indexed(242), // Greyish
-                };
+                let color = color_for_tags(m.chat_tags);
 
                 let wrapped = wrap_text(&m.text, width);
                 let mut msg_lines = Vec::new();
@@ -492,6 +462,78 @@ fn format_attack_conditions_suffix(attack_conditions: AttackConditions) -> Strin
     }
 }
 
+fn server_message_tags(chat_type: u32) -> ChatMessageTags {
+    match holtburger_protocol::messages::ChatMessageType::from_repr(chat_type) {
+        Some(holtburger_protocol::messages::ChatMessageType::Combat) => ChatMessageTags::COMBAT,
+        Some(holtburger_protocol::messages::ChatMessageType::Allegiance)
+        | Some(holtburger_protocol::messages::ChatMessageType::AllegianceBroadcast)
+        | Some(holtburger_protocol::messages::ChatMessageType::Officer)
+        | Some(holtburger_protocol::messages::ChatMessageType::SocialGroup) => {
+            ChatMessageTags::GUILD
+        }
+        Some(holtburger_protocol::messages::ChatMessageType::Help) => ChatMessageTags::HELP,
+        Some(holtburger_protocol::messages::ChatMessageType::Vendor)
+        | Some(holtburger_protocol::messages::ChatMessageType::Contract)
+        | Some(holtburger_protocol::messages::ChatMessageType::MaybeMerchant) => {
+            ChatMessageTags::TRADE
+        }
+        Some(holtburger_protocol::messages::ChatMessageType::Broadcast)
+        | Some(holtburger_protocol::messages::ChatMessageType::AllChannels)
+        | Some(holtburger_protocol::messages::ChatMessageType::WorldBroadcast)
+        | Some(holtburger_protocol::messages::ChatMessageType::AdminBroadcast)
+        | Some(holtburger_protocol::messages::ChatMessageType::GeneralBroadcast)
+        | Some(holtburger_protocol::messages::ChatMessageType::DirectSpeech)
+        | Some(holtburger_protocol::messages::ChatMessageType::Channel)
+        | Some(holtburger_protocol::messages::ChatMessageType::Magic)
+        | Some(holtburger_protocol::messages::ChatMessageType::Appraisal)
+        | Some(holtburger_protocol::messages::ChatMessageType::Filter)
+        | Some(holtburger_protocol::messages::ChatMessageType::Tinker)
+        | Some(holtburger_protocol::messages::ChatMessageType::MaybeScroll)
+        | Some(holtburger_protocol::messages::ChatMessageType::MaybeAppraisal) => {
+            ChatMessageTags::SYSTEM
+        }
+        _ => ChatMessageTags::empty(),
+    }
+}
+
+fn channel_tags(channel: ChatChannelInfo) -> ChatMessageTags {
+    match channel.kind {
+        ChatChannelKind::Fellowship => ChatMessageTags::PARTY,
+        ChatChannelKind::Allegiance
+        | ChatChannelKind::Vassals
+        | ChatChannelKind::Patron
+        | ChatChannelKind::Monarch
+        | ChatChannelKind::CoVassals => ChatMessageTags::GUILD,
+        ChatChannelKind::Trade => ChatMessageTags::TRADE,
+        ChatChannelKind::Society => ChatMessageTags::SOCIETY,
+        ChatChannelKind::General
+        | ChatChannelKind::Lfg
+        | ChatChannelKind::Roleplay
+        | ChatChannelKind::Olthoi
+        | ChatChannelKind::Unknown => ChatMessageTags::empty(),
+    }
+}
+
+fn color_for_tags(chat_tags: ChatMessageTags) -> Color {
+    if chat_tags.contains(ChatMessageTags::ERROR) {
+        Color::Red
+    } else if chat_tags.contains(ChatMessageTags::WARNING) {
+        Color::Yellow
+    } else if chat_tags.contains(ChatMessageTags::TELL) {
+        Color::Magenta
+    } else if chat_tags.contains(ChatMessageTags::EMOTE) {
+        Color::Green
+    } else if chat_tags.contains(ChatMessageTags::INFO) {
+        Color::Cyan
+    } else if chat_tags.contains(ChatMessageTags::DEBUG) {
+        Color::Indexed(242)
+    } else if chat_tags.contains(ChatMessageTags::SYSTEM) {
+        Color::LightBlue
+    } else {
+        Color::White
+    }
+}
+
 pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
 
@@ -577,7 +619,8 @@ mod tests {
         );
 
         let message = chat.messages.last().expect("channel message should log");
-        assert_eq!(message.kind, ChatMessageKind::Chat);
+        assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
+        assert!(message.chat_tags.contains(ChatMessageTags::PARTY));
         assert_eq!(
             message.channel,
             Some(ChatChannelInfo::legacy(
@@ -609,6 +652,8 @@ mod tests {
                 holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into()
             ))
         );
+        assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
+        assert!(message.chat_tags.contains(ChatMessageTags::GUILD));
         assert_eq!(message.text, "[Guild] Bestie: guild check");
     }
 
@@ -630,6 +675,7 @@ mod tests {
         );
 
         let message = chat.messages.last().expect("channel message should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
         assert_eq!(message.text, "[General] Bestie: world check");
     }
 
@@ -649,6 +695,8 @@ mod tests {
         );
 
         let message = chat.messages.last().expect("channel message should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
+        assert!(message.chat_tags.contains(ChatMessageTags::PARTY));
         assert_eq!(message.text, "[Party] You: party check");
     }
 
@@ -669,7 +717,9 @@ mod tests {
             .messages
             .last()
             .expect("fellowship activity should log");
-        assert_eq!(message.kind, ChatMessageKind::System);
+        assert!(message.chat_tags.contains(ChatMessageTags::STATUS));
+        assert!(message.chat_tags.contains(ChatMessageTags::SYSTEM));
+        assert!(message.chat_tags.contains(ChatMessageTags::PARTY));
         assert_eq!(message.text, "Bravo joined the fellowship.");
     }
 
@@ -689,6 +739,25 @@ mod tests {
             .last()
             .expect("fellowship activity should log");
         assert_eq!(message.text, "You were dismissed from the fellowship.");
+    }
+
+    #[test]
+    fn server_message_combat_type_gets_combat_tags() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ServerMessage {
+                message: "You enter combat.".to_string(),
+                chat_type: holtburger_protocol::messages::ChatMessageType::Combat as u32,
+            },
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("server message should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::STATUS));
+        assert!(message.chat_tags.contains(ChatMessageTags::SYSTEM));
+        assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
+        assert_eq!(message.text, "You enter combat.");
     }
 
     #[test]
@@ -712,7 +781,7 @@ mod tests {
 
         let message = chat.messages.last().expect("combat feedback should log");
 
-        assert_eq!(message.kind, ChatMessageKind::Info);
+        assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
         assert!(
             message
                 .text
@@ -745,7 +814,7 @@ mod tests {
 
         let message = chat.messages.last().expect("combat feedback should log");
 
-        assert_eq!(message.kind, ChatMessageKind::Warning);
+        assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
         assert!(
             message
                 .text
@@ -770,7 +839,7 @@ mod tests {
 
         let message = chat.messages.last().expect("combat feedback should log");
 
-        assert_eq!(message.kind, ChatMessageKind::Info);
+        assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
         assert_eq!(message.text, "A nearby player has fallen.");
     }
 }

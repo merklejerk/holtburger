@@ -98,7 +98,7 @@ impl Session {
             self.has_server_seq = true;
         }
 
-        if packet.header.sequence > 0 && (packet.header.flags & packet_flags::ACK_SEQUENCE == 0) {
+        if packet.header.sequence > 0 && packet.header.flags != packet_flags::ACK_SEQUENCE {
             self.queue_ack(packet.header.sequence)?;
         }
 

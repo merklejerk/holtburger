@@ -65,6 +65,9 @@ impl Session {
         }
 
         let count = LittleEndian::read_u32(&data[offset..offset + 4]) as usize;
+        if count > MAX_RETRANSMIT_SEQUENCE_IDS {
+            return None;
+        }
         let values_offset = offset + 4;
         let values_len = count.checked_mul(4)?;
         if values_offset + values_len > data.len() {

@@ -78,6 +78,12 @@ impl Session {
         }
 
         full_payload.extend_from_slice(payload);
+        if full_payload.len() > u16::MAX as usize {
+            return Err(anyhow!(
+                "packet payload too large: {} bytes exceeds u16::MAX",
+                full_payload.len()
+            ));
+        }
         header.size = full_payload.len() as u16;
 
         let is_handshake = (header.flags
@@ -112,6 +118,12 @@ impl Session {
         mut header: PacketHeader,
         payload: &[u8],
     ) -> Result<Vec<u8>> {
+        if payload.len() > u16::MAX as usize {
+            return Err(anyhow!(
+                "packet payload too large: {} bytes exceeds u16::MAX",
+                payload.len()
+            ));
+        }
         header.size = payload.len() as u16;
         let payload_hash = self.calculate_payload_hash(header.flags, payload)?;
         header.checksum = header.calculate_checksum().wrapping_add(payload_hash);

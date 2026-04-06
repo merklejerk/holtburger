@@ -203,6 +203,18 @@ impl GameState {
                 result.request_redraw(RedrawPriority::Immediate);
             }
             KeyCode::Esc => {
+                if self.view.context_view == ContextView::Logopolis
+                    && self.view.focused_pane == FocusedPane::Context
+                {
+                    result.actions.push(
+                        crate::types::AppUiAction::ChangeContextView {
+                            view: ContextView::Default,
+                        }
+                        .into(),
+                    );
+                    return result;
+                }
+
                 if self.view.focused_pane == FocusedPane::Input {
                     self.view.focused_pane = self.view.previous_focused_pane;
                 } else if self.view.active_interaction.is_some() {
@@ -631,6 +643,26 @@ mod tests {
         );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
+    fn escape_clears_logopolis_context_view_when_focused() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.context_view = ContextView::Logopolis;
+        state.view.focused_pane = FocusedPane::Context;
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: crate::types::AppUiAction::ChangeContextView {
+                    view: ContextView::Default
+                }
+            })
+        ));
     }
 
     #[test]

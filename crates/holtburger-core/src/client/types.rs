@@ -274,6 +274,11 @@ pub enum CombatFeedback {
     KillerNotification {
         death_message: String,
     },
+    PlayerKilled {
+        death_message: String,
+        victim_id: Guid,
+        killer_id: Guid,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -504,7 +509,15 @@ pub enum ClientCommand {
     },
     Emote(String),
     RecallLifestone,
+    TeleportToPklArena,
+    TeleportToMarketplace,
     RecallAllegianceHousing,
+    SwearAllegiance {
+        target: Guid,
+    },
+    Unswear {
+        target: Guid,
+    },
     Suicide,
     EnterPkLite,
     Ping,
@@ -513,6 +526,10 @@ pub enum ClientCommand {
         enabled: bool,
     },
     Identify(Guid),
+    ReadBookPage {
+        book: Guid,
+        page_index: u32,
+    },
     QueryHealth(Guid),
     Use(Guid),
     Drop(Guid),
@@ -584,11 +601,11 @@ pub enum ClientCommand {
     },
     ShowPartyStatus,
     InviteToParty {
-        player: String,
+        target: Guid,
     },
     LeaveParty,
     UninviteFromParty {
-        player: String,
+        target: Guid,
     },
     CloseContainer(Guid),
     UseWithTarget {
@@ -619,6 +636,12 @@ pub enum ClientCommand {
     SetCharacterOption {
         option: CharacterOption,
         value: bool,
+    },
+    AddPlayerPermission {
+        player_name: String,
+    },
+    RemovePlayerPermission {
+        player_name: String,
     },
     RespondToConfirmation {
         accepted: bool,

@@ -12,6 +12,7 @@ use crate::pages::game::layout::PULSE_PANEL_WIDTH;
 use crate::pages::game::layout::get_layout;
 use crate::pages::game::layout::layout_mode_for_size;
 use crate::pages::game::panels::chat::render_chat_pane;
+use crate::pages::game::panels::context::build_context_display_lines;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::game::panels::dynamic::render_dynamic_pane;
@@ -58,6 +59,15 @@ fn render_confirmation_overlay(
     );
 }
 
+fn render_local_confirmation_overlay(f: &mut Frame, area: Rect, title: &str, text: &str) {
+    let text = format!("{}\n\n[Enter] Confirm    [Esc] Cancel", text);
+    render_modal_card(
+        f,
+        area,
+        ModalCardSpec::new(title, &text, ModalPalette::CONFIRMATION),
+    );
+}
+
 impl GameState {
     pub fn update_layout(&mut self, area: Rect) {
         let (_chunks, main_chunks_vec, _dynamic_chunk) = get_layout(area);
@@ -77,10 +87,20 @@ impl GameState {
             height: chat_area.height.saturating_sub(2),
         };
 
+        let context_width = main_chunks_vec[2].width.saturating_sub(2) as usize;
         let context_len = self
             .live_context_buffer()
-            .map(|content| content.len())
-            .unwrap_or_else(|| self.context_buffer_len());
+            .map(|content| {
+                build_context_display_lines(&content, &self.view.context_view, context_width).len()
+            })
+            .unwrap_or_else(|| {
+                build_context_display_lines(
+                    self.context_buffer(),
+                    &self.view.context_view,
+                    context_width,
+                )
+                .len()
+            });
         let ctx_h = main_chunks_vec[2].height.saturating_sub(2) as usize;
         let max_ctx_scroll = context_len.saturating_sub(ctx_h);
         self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);
@@ -124,6 +144,7 @@ impl GameState {
             .unwrap_or_else(|| self.context_buffer());
         render_context_pane(
             f,
+            &self.data,
             context_buffer,
             &self.view.context_view,
             self.view.context_scroll_offset,
@@ -156,7 +177,9 @@ impl GameState {
         // Pulse Panel
         render_pulse_panel(f, ctx.client_state, ctx.net_stats, input_chunks[1]);
 
-        if let Some(confirmation) = self.view.active_confirmation.as_ref() {
+        if let Some(confirmation) = self.view.local_confirmation.as_ref() {
+            render_local_confirmation_overlay(f, area, &confirmation.title, &confirmation.text);
+        } else if let Some(confirmation) = self.view.active_confirmation.as_ref() {
             render_confirmation_overlay(f, area, confirmation);
         }
     }
@@ -257,6 +280,47 @@ mod tests {
 
         assert!(rendered.contains("Bestie invited you to join their fellowship."));
         assert!(!rendered.contains("Chance of success is 75%. Continue?"));
+    }
+
+    #[test]
+    fn unswear_confirmation_overlay_renders_target_and_controls() {
+        let area = Rect::new(0, 0, 120, 40);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.local_confirmation = Some(crate::types::LocalConfirmation {
+            title: " Break Allegiance Confirmation ".to_string(),
+            text: "Break allegiance with Bestie?".to_string(),
+            action: crate::types::AppAction::Unswear {
+                target: Guid(0x50000042),
+            },
+        });
+
+        let net_stats = NetStats::default();
+        let ctx = RenderContext {
+            account_name: "account",
+            client_state: &ClientState::InWorld,
+            net_stats: &net_stats,
+            server_time: None,
+        };
+
+        terminal
+            .draw(|frame| state.render(frame, area, &ctx))
+            .expect("game page should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Break Allegiance Confirmation"));
+        assert!(rendered.contains("Break allegiance with Bestie?"));
+        assert!(rendered.contains("[Enter] Confirm"));
+        assert!(rendered.contains("[Esc] Cancel"));
     }
 
     #[test]

@@ -27,6 +27,7 @@ pub enum AppUiAction {
     OpenCharacterDashboard,
     OpenDeleteCharacterConfirmation,
     CancelDeleteCharacterConfirmation,
+    OpenUnswearConfirmation { target: Guid },
     RestoreSelectedCharacter,
     RaiseSelectedCharacterCreationSkill,
     LowerSelectedCharacterCreationSkill,
@@ -289,6 +290,7 @@ pub enum ContextView {
     Default,
     Assess(InspectTarget),
     Debug(InspectTarget),
+    Book(Guid),
     Spell(u32),
     Enchantment(Enchantment),
     DebugSpell(u32),
@@ -465,6 +467,9 @@ pub enum AppAction {
     Use {
         guid: Guid,
     },
+    Read {
+        guid: Guid,
+    },
     Approach {
         guid: Guid,
     },
@@ -489,6 +494,18 @@ pub enum AppAction {
     },
     TalkTo {
         guid: Guid,
+    },
+    InviteToParty {
+        target: Guid,
+    },
+    UninviteFromParty {
+        target: Guid,
+    },
+    SwearAllegiance {
+        target: Guid,
+    },
+    Unswear {
+        target: Guid,
     },
     Open {
         guid: Guid,
@@ -601,6 +618,13 @@ pub enum AppAction {
     UiAction {
         action: AppUiAction,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct LocalConfirmation {
+    pub title: String,
+    pub text: String,
+    pub action: AppAction,
 }
 
 impl From<Vec<AppAction>> for AppAction {

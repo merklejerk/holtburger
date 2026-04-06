@@ -265,6 +265,9 @@ impl ChatState {
             CombatFeedback::KillerNotification { death_message } => {
                 self.log(ChatMessageKind::Info, death_message.clone());
             }
+            CombatFeedback::PlayerKilled { death_message, .. } => {
+                self.log(ChatMessageKind::Info, death_message.clone());
+            }
         }
     }
 
@@ -750,5 +753,24 @@ mod tests {
         );
         assert!(message.text.contains("12.5%"));
         assert!(message.text.contains("Overpower"));
+    }
+
+    #[test]
+    fn player_killed_feedback_logs_broadcast_message() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::CombatFeedback(CombatFeedback::PlayerKilled {
+                death_message: "A nearby player has fallen.".to_string(),
+                victim_id: holtburger_common::Guid(0x12345678),
+                killer_id: holtburger_common::Guid(0x90ABCDEF),
+            }),
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("combat feedback should log");
+
+        assert_eq!(message.kind, ChatMessageKind::Info);
+        assert_eq!(message.text, "A nearby player has fallen.");
     }
 }

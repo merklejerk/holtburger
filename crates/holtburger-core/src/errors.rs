@@ -299,7 +299,7 @@ pub fn format_weenie_error_id(error_id: u32, parameter: Option<&str>) -> String 
 }
 
 pub fn is_actually_weenie_error(err: WeenieError) -> bool {
-    matches!(
+    !matches!(
         err,
         WeenieError::YouHaveSucceededSpecializingSkill
             | WeenieError::YouHaveSucceededTransferringAttributes

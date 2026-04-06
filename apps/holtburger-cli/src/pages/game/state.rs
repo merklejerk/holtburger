@@ -425,20 +425,12 @@ impl GameState {
                 };
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
-                    self.handle_action(AppAction::ChangeContextView {
-                        view: crate::types::ContextView::Assess(target),
-                    })
-                    .unwrap_or_default(),
+                    self.apply_context_view_change(crate::types::ContextView::Assess(target)),
                 );
             }
             AppAction::Read { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
-                result.merge(
-                    self.handle_action(AppAction::ChangeContextView {
-                        view: ContextView::Book(guid),
-                    })
-                    .unwrap_or_default(),
-                );
+                result.merge(self.apply_context_view_change(ContextView::Book(guid)));
             }
             AppAction::Use { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
@@ -658,21 +650,15 @@ impl GameState {
                     result
                         .commands
                         .push(ClientCommand::QueryEntityDebugInfo(guid));
-                    result.merge(
-                        self.handle_action(AppAction::ChangeContextView {
-                            view: ContextView::Debug(InspectTarget::Entity(guid)),
-                        })
-                        .unwrap_or_default(),
-                    );
+                    result.merge(self.apply_context_view_change(ContextView::Debug(
+                        InspectTarget::Entity(guid),
+                    )));
                 }
                 InspectTarget::VendorItem(guid) => {
                     result.commands.push(ClientCommand::Identify(guid));
-                    result.merge(
-                        self.handle_action(AppAction::ChangeContextView {
-                            view: ContextView::Debug(InspectTarget::VendorItem(guid)),
-                        })
-                        .unwrap_or_default(),
-                    );
+                    result.merge(self.apply_context_view_change(ContextView::Debug(
+                        InspectTarget::VendorItem(guid),
+                    )));
                 }
             },
             AppAction::CastSpell { spell_id, target } => {
@@ -784,17 +770,6 @@ impl GameState {
             AppAction::ExitTrade => {
                 result.commands.push(ClientCommand::CloseTrade);
             }
-            AppAction::ChangeContextView { view } => {
-                self.view.context_view = view;
-                self.view.context_scroll_offset = 0;
-                if view == ContextView::Logopolis {
-                    self.runtime.logopolis = Some(LogopolisState::new());
-                    self.view.previous_focused_pane = FocusedPane::Context;
-                    self.view.focused_pane = FocusedPane::Context;
-                }
-                result.request_redraw(RedrawPriority::Immediate);
-                self.refresh_context_buffer();
-            }
             AppAction::BeginInteraction { interaction } => {
                 if interaction == Interaction::Salvaging {
                     if let Some(input) = navigation_input {
@@ -825,7 +800,7 @@ impl GameState {
                 result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::ViewDetails { view } => {
-                return self.handle_action(AppAction::ChangeContextView { view });
+                return Some(self.apply_context_view_change(view));
             }
             AppAction::UiAction { action } => {
                 return Some(self.handle_ui_action(action));
@@ -845,6 +820,7 @@ impl GameState {
 
     pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
         match action {
+            AppUiAction::ChangeContextView { view } => self.apply_context_view_change(view),
             AppUiAction::OpenUnswearConfirmation { target } => {
                 let target_label = self
                     .data
@@ -871,6 +847,18 @@ impl GameState {
                 .handle_ui_action(action, &self.data, &self.view)
                 .unwrap_or_default(),
         }
+    }
+
+    fn apply_context_view_change(&mut self, view: ContextView) -> UpdateResult {
+        self.view.context_view = view;
+        self.view.context_scroll_offset = 0;
+        if view == ContextView::Logopolis {
+            self.runtime.logopolis = Some(LogopolisState::new());
+            self.view.previous_focused_pane = FocusedPane::Context;
+            self.view.focused_pane = FocusedPane::Context;
+        }
+        self.refresh_context_buffer();
+        UpdateResult::redraw()
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
@@ -2087,11 +2075,9 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
 
-        let start_result = state
-            .handle_action(AppAction::ChangeContextView {
-                view: ContextView::Logopolis,
-            })
-            .expect("logopolis view should produce an update result");
+        let start_result = state.handle_ui_action(AppUiAction::ChangeContextView {
+            view: ContextView::Logopolis,
+        });
 
         assert!(start_result.redraw_requested());
         assert_eq!(state.view.context_view, ContextView::Logopolis);
@@ -2099,11 +2085,9 @@ mod tests {
         assert_eq!(state.view.focused_pane, FocusedPane::Context);
         assert_eq!(state.view.previous_focused_pane, FocusedPane::Context);
 
-        let stop_result = state
-            .handle_action(AppAction::ChangeContextView {
-                view: ContextView::Default,
-            })
-            .expect("changing away from logopolis should produce an update result");
+        let stop_result = state.handle_ui_action(AppUiAction::ChangeContextView {
+            view: ContextView::Default,
+        });
 
         assert!(stop_result.redraw_requested());
         assert_eq!(state.view.context_view, ContextView::Default);

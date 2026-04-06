@@ -140,13 +140,6 @@ impl ClientRuntime {
                                             return Ok(());
                                         }
                                     }
-                                    SessionEvent::HandshakeRequest(crd) => {
-                                        self.sync_server_time(crd.time, Instant::now());
-                                        self.login.handle_handshake_request(crd, &mut self.session).await?;
-                                    }
-                                    SessionEvent::HandshakeResponse { cookie, client_id } => {
-                                        self.login.handle_handshake_response(cookie, client_id, &mut self.session).await?;
-                                    }
                                     SessionEvent::TimeSync(server_time) => {
                                         self.sync_server_time(server_time, Instant::now());
                                     }

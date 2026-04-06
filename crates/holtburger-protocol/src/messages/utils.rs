@@ -1,4 +1,5 @@
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use encoding_rs::WINDOWS_1252;
 
 pub fn align_to_4(len: usize) -> usize {
     (len + 3) & !3
@@ -23,7 +24,7 @@ pub fn align_offset(offset: &mut usize, align: usize) {
 }
 
 pub fn write_string16(buf: &mut Vec<u8>, s: &str) {
-    let bytes = s.as_bytes();
+    let bytes = WINDOWS_1252.encode(s).0.into_owned();
     let len = bytes.len();
     if len >= 0xFFFF {
         buf.write_u16::<LittleEndian>(0xFFFF).unwrap();
@@ -31,12 +32,12 @@ pub fn write_string16(buf: &mut Vec<u8>, s: &str) {
     } else {
         buf.write_u16::<LittleEndian>(len as u16).unwrap();
     }
-    buf.extend_from_slice(bytes);
+    buf.extend_from_slice(&bytes);
     pad_to_4(buf);
 }
 
 pub fn write_string16_unpadded(buf: &mut Vec<u8>, s: &str) {
-    let bytes = s.as_bytes();
+    let bytes = WINDOWS_1252.encode(s).0.into_owned();
     let len = bytes.len();
     if len >= 0xFFFF {
         buf.write_u16::<LittleEndian>(0xFFFF).unwrap();
@@ -44,7 +45,7 @@ pub fn write_string16_unpadded(buf: &mut Vec<u8>, s: &str) {
     } else {
         buf.write_u16::<LittleEndian>(len as u16).unwrap();
     }
-    buf.extend_from_slice(bytes);
+    buf.extend_from_slice(&bytes);
 }
 
 pub fn write_string32(buf: &mut Vec<u8>, s: &str) {
@@ -80,7 +81,10 @@ pub fn read_string16(data: &[u8], offset: &mut usize) -> Option<String> {
     if *offset + len > data.len() {
         return None;
     }
-    let s = String::from_utf8_lossy(&data[*offset..*offset + len]).to_string();
+    let s = WINDOWS_1252
+        .decode(&data[*offset..*offset + len])
+        .0
+        .into_owned();
     *offset += len;
 
     align_offset(offset, 4);
@@ -120,7 +124,10 @@ pub fn read_string16_unpadded(data: &[u8], offset: &mut usize) -> Option<String>
     if *offset + len > data.len() {
         return None;
     }
-    let s = String::from_utf8_lossy(&data[*offset..*offset + len]).to_string();
+    let s = WINDOWS_1252
+        .decode(&data[*offset..*offset + len])
+        .0
+        .into_owned();
     *offset += len;
     Some(s)
 }
@@ -336,6 +343,35 @@ mod tests {
         let read = read_string16(&buf, &mut offset).unwrap();
         assert_eq!(read, s);
         assert_eq!(offset, 8);
+    }
+
+    #[test]
+    fn test_string16_windows_1252_round_trip() {
+        let s = "Blackmoor’s Favor";
+        let mut buf = Vec::new();
+        write_string16(&mut buf, s);
+
+        assert_eq!(&buf[0..2], &[0x11, 0x00]);
+        assert_eq!(buf[11], 0x92);
+
+        let mut offset = 0;
+        let read = read_string16(&buf, &mut offset).unwrap();
+        assert_eq!(read, s);
+        assert_eq!(offset, buf.len());
+    }
+
+    #[test]
+    fn test_string16_windows_1252_decoding_from_packet_bytes() {
+        let mut buf = vec![
+            0x11, 0x00, b'B', b'l', b'a', b'c', b'k', b'm', b'o', b'o', b'r', 0x92, b's', b' ',
+            b'F', b'a', b'v', b'o', b'r',
+        ];
+        pad_to_4(&mut buf);
+
+        let mut offset = 0;
+        let read = read_string16(&buf, &mut offset).unwrap();
+        assert_eq!(read, "Blackmoor’s Favor");
+        assert_eq!(offset, buf.len());
     }
 
     #[test]

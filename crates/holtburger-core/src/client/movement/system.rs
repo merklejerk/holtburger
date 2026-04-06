@@ -292,16 +292,20 @@ impl MovementSystem {
             (planar_delta.length_squared() > 1e-6)
                 .then(|| Vector3::zero().heading_to(&planar_delta))
         });
-        let turning = desired_heading.and_then(|desired_heading| {
-            let delta = signed_heading_delta(current_heading, desired_heading);
-            if delta.abs() <= 1e-4 {
-                None
-            } else if delta > 0.0 {
-                Some(Turn::Right)
-            } else {
-                Some(Turn::Left)
-            }
-        });
+        let turning = if locomotion.is_some() {
+            None
+        } else {
+            desired_heading.and_then(|desired_heading| {
+                let delta = signed_heading_delta(current_heading, desired_heading);
+                if delta.abs() <= 1e-4 {
+                    None
+                } else if delta > 0.0 {
+                    Some(Turn::Right)
+                } else {
+                    Some(Turn::Left)
+                }
+            })
+        };
 
         if locomotion.is_none() && turning.is_none() {
             return None;

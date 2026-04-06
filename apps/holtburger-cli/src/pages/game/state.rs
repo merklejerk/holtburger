@@ -1801,6 +1801,7 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use holtburger_common::ConfirmationType;
+    use holtburger_common::Quaternion;
     use holtburger_common::Vector3;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
@@ -3308,6 +3309,7 @@ mod tests {
         state.data.combat_mode = CombatMode::Melee;
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
         state.data.combat_runtime.attack_sequence_active = true;
@@ -3336,6 +3338,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3374,6 +3377,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3578,6 +3582,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3627,6 +3632,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3676,6 +3682,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3737,6 +3744,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3810,6 +3818,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3844,6 +3853,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3888,6 +3898,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -3925,6 +3936,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
         state.data.combat_mode = CombatMode::Melee;
@@ -3968,6 +3980,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -4009,6 +4022,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -4057,6 +4071,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 
@@ -4280,6 +4295,7 @@ mod tests {
         seed_navigation_motion_model(&mut state);
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: Quaternion::from_heading(180.0f32.to_radians()),
             ..WorldPosition::default()
         });
 

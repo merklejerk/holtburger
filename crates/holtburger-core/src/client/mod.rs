@@ -9,7 +9,6 @@ mod builder;
 mod character_selection;
 mod commands;
 pub mod controllers;
-mod login;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -19,7 +18,6 @@ mod simulation;
 pub mod types;
 pub use builder::ClientRuntimeBuilder;
 use character_selection::CharacterSelectionState;
-use login::LoginState;
 use movement::MovementSystem;
 use simulation::ClientSimulationSystem;
 use types::*;
@@ -48,7 +46,6 @@ pub struct ClientRuntime {
     message_counter: usize,
     movement: MovementSystem,
     simulation: ClientSimulationSystem,
-    login: LoginState,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
 }

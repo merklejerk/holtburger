@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
+use holtburger_protocol::messages::movement::VectorUpdateData;
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_protocol::messages::{
     GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid, MovementStateFlags,
@@ -846,6 +847,51 @@ fn test_update_motion_retains_turn_to_heading_directive() {
             speed: OrderedMotionSpeed::from_f32(1.5).expect("finite speed"),
         })
     );
+}
+
+#[test]
+fn test_vector_update_applies_self_velocity_and_omega() {
+    let mut state = WorldState::synthetic();
+    state.player.guid = Guid(0x50000001);
+
+    let start = WorldPosition::default();
+    state.player.position = start;
+    state.add_entity(Entity::new(state.player.guid, "Player".to_string(), start));
+
+    let msg = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
+        guid: state.player.guid,
+        velocity: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
+        omega: holtburger_common::Vector3::new(0.0, 0.0, 1.25),
+        instance_sequence: 11,
+        vector_sequence: 12,
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert_eq!(state.player.instance_sequence, 11);
+    assert_eq!(
+        state
+            .entities
+            .get(state.player.guid)
+            .expect("player entity should exist")
+            .velocity,
+        holtburger_common::Vector3::new(0.0, 0.0, 0.0)
+    );
+    assert_eq!(
+        state
+            .entities
+            .get(state.player.guid)
+            .expect("player entity should exist")
+            .omega,
+        holtburger_common::Vector3::new(0.0, 0.0, 1.25)
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityVectorUpdated { guid, velocity, omega }
+            if *guid == state.player.guid
+            && *velocity == holtburger_common::Vector3::new(0.0, 0.0, 0.0)
+            && *omega == holtburger_common::Vector3::new(0.0, 0.0, 1.25)
+    )));
 }
 
 #[test]

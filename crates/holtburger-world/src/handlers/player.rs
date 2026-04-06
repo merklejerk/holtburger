@@ -50,7 +50,8 @@ pub(crate) fn handle_message(
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
                 state.player.update_vector_sequence(data.instance_sequence);
-                return false;
+                events.extend(state.set_player_vector(data.velocity, data.omega));
+                return true;
             }
             false
         }

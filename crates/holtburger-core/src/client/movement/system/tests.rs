@@ -75,7 +75,7 @@ fn seed_self_movement_capabilities_override(
 }
 
 #[test]
-fn autonomous_wire_motion_state_adds_turn_when_heading_differs() {
+fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
     let mut world = WorldState::synthetic();
     world.player.position = WorldPosition {
         landblock_id: Guid(0x1234_0000),
@@ -97,7 +97,7 @@ fn autonomous_wire_motion_state_adds_turn_when_heading_differs() {
 
     assert_eq!(state.gait, Gait::Run);
     assert_eq!(state.locomotion, Some(Locomotion::Forward));
-    assert_eq!(state.turning, Some(Turn::Right));
+    assert_eq!(state.turning, None);
 }
 
 #[test]

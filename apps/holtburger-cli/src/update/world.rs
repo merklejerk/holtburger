@@ -6,7 +6,7 @@ use holtburger_core::{
     BusyOperationKind, BusyOperationResult, ClientCommand, ClientState, ClientViewEvent,
     ErrorReason,
 };
-use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::errors::{CharacterError};
 
 fn log_busy_operation_result(operation: BusyOperationKind, result: &BusyOperationResult) {
     let label = match operation {

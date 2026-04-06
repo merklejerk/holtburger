@@ -14,6 +14,7 @@ const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 const DEFAULT_APPROACH_DISTANCE: f32 = 1.0;
 const DEFAULT_FOLLOW_DISTANCE: f32 = 0.1;
 const SCOOT_ARRIVAL_DEADBAND_M: f32 = 0.1;
+const START_DRIVE_SNAP_THRESHOLD_RAD: f32 = 5.0_f32.to_radians();
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedNavigationTarget {
@@ -180,6 +181,7 @@ impl NavigationDriveBlockReason {
 pub struct TuiNavigation {
     active: ActiveNavigation,
     drive_active: bool,
+    pending_start_snap_heading: Option<f32>,
     last_drive_block_reason: Option<NavigationDriveBlockReason>,
     default_approach_distance: f32,
     default_follow_distance: f32,
@@ -191,6 +193,7 @@ impl Default for TuiNavigation {
         Self {
             active: ActiveNavigation::Idle,
             drive_active: false,
+            pending_start_snap_heading: None,
             last_drive_block_reason: None,
             default_approach_distance: DEFAULT_APPROACH_DISTANCE,
             default_follow_distance: DEFAULT_FOLLOW_DISTANCE,
@@ -202,6 +205,7 @@ impl Default for TuiNavigation {
 impl TuiNavigation {
     fn clear_drive_active(&mut self) {
         self.drive_active = false;
+        self.pending_start_snap_heading = None;
     }
 
     fn sync_input(&self, now: Instant, snapshot: NavigationSnapshot) -> NavigationSyncInput {
@@ -345,6 +349,7 @@ impl TuiNavigation {
             target.0,
             arrival_distance
         );
+        self.pending_start_snap_heading = None;
         self.active = ActiveNavigation::Approach {
             target_guid: target,
             arrival_distance,
@@ -367,6 +372,7 @@ impl TuiNavigation {
             target.0,
             arrival_distance
         );
+        self.pending_start_snap_heading = None;
         self.active = ActiveNavigation::Follow {
             target_guid: target,
             arrival_distance,
@@ -394,6 +400,7 @@ impl TuiNavigation {
             distance_m,
             target_pose
         );
+        self.pending_start_snap_heading = None;
         self.active = ActiveNavigation::Scoot {
             target_pose,
             arrival_distance: SCOOT_ARRIVAL_DEADBAND_M,
@@ -404,6 +411,7 @@ impl TuiNavigation {
         if !matches!(self.active, ActiveNavigation::Idle) {
             log::info!("tui navigation: clearing active navigation mode");
         }
+        self.pending_start_snap_heading = None;
         self.active = ActiveNavigation::Idle;
     }
 
@@ -661,12 +669,17 @@ impl TuiNavigation {
     ) -> Option<PlayerDriveIntent> {
         match self.active_drive_intent_result(input, dt) {
             Ok(intent) => {
+                if let Some(command) = self.snap_facing_before_first_drive(input, intent) {
+                    return Some(command);
+                }
+
                 if let Some(reason) = self.last_drive_block_reason.take() {
                     log::info!(
                         "tui navigation: autonomous drive resumed after block: {}",
                         reason.label()
                     );
                 }
+                self.pending_start_snap_heading = None;
                 self.drive_active = true;
                 Some(PlayerDriveIntent::Autonomous(intent))
             }
@@ -675,6 +688,43 @@ impl TuiNavigation {
                 self.stop_drive_command()
             }
         }
+    }
+
+    fn snap_facing_before_first_drive(
+        &mut self,
+        input: &NavigationSyncInput,
+        intent: AutonomousDriveIntent,
+    ) -> Option<PlayerDriveIntent> {
+        if self.drive_active {
+            self.pending_start_snap_heading = None;
+            return None;
+        }
+
+        let player_position = input.player_position?;
+        let desired_heading = intent.desired_heading?;
+        let current_heading = player_position.rotation.to_heading();
+        let heading_delta = signed_heading_delta(current_heading, desired_heading).abs();
+
+        if heading_delta <= START_DRIVE_SNAP_THRESHOLD_RAD {
+            self.pending_start_snap_heading = None;
+            return None;
+        }
+
+        if self
+            .pending_start_snap_heading
+            .is_some_and(|pending_heading| {
+                signed_heading_delta(pending_heading, desired_heading).abs()
+                    <= START_DRIVE_SNAP_THRESHOLD_RAD
+            })
+        {
+            self.pending_start_snap_heading = None;
+            return None;
+        }
+
+        self.pending_start_snap_heading = Some(desired_heading);
+        Some(PlayerDriveIntent::SnapFacing {
+            heading: desired_heading,
+        })
     }
 
     fn note_drive_blocked(&mut self, reason: NavigationDriveBlockReason) {
@@ -810,6 +860,16 @@ fn navigation_drive_delta(
     Ok(delta * step_scale)
 }
 
+fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
+    let mut delta = (desired_heading - current_heading) % std::f32::consts::TAU;
+    if delta <= -std::f32::consts::PI {
+        delta += std::f32::consts::TAU;
+    } else if delta > std::f32::consts::PI {
+        delta -= std::f32::consts::TAU;
+    }
+    delta
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -930,6 +990,101 @@ mod tests {
             intent,
             Err(NavigationDriveBlockReason::MissingRunRateScalar)
         );
+    }
+
+    #[test]
+    fn first_drive_tick_snaps_facing_before_autonomous_motion_when_misaligned() {
+        let now = Instant::now();
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 0.0);
+        let target_position = world_position(6.0, 0.0, 0.0);
+        let target_guid = Guid(0x5000_000A);
+        let mut navigation = TuiNavigation::default();
+
+        navigation.activate_approach_with_distance(
+            target_guid,
+            1.0,
+            &sync_input(
+                now,
+                Some(player_position),
+                Some(target_sample(target_guid, target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        );
+
+        let first_tick = navigation.tick(NavigationTick {
+            now: now + Duration::from_millis(16),
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample(target_guid, target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert_eq!(
+            first_tick.drive_command,
+            Some(PlayerDriveIntent::SnapFacing {
+                heading: 180.0_f32.to_radians(),
+            })
+        );
+        assert!(!navigation.drive_active);
+
+        let second_tick = navigation.tick(NavigationTick {
+            now: now + Duration::from_millis(32),
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample(target_guid, target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert!(matches!(
+            second_tick.drive_command,
+            Some(PlayerDriveIntent::Autonomous(_))
+        ));
+        assert!(navigation.drive_active);
+    }
+
+    #[test]
+    fn first_drive_tick_starts_autonomous_motion_when_already_facing_target() {
+        let now = Instant::now();
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 180.0_f32.to_radians());
+        let target_position = world_position(6.0, 0.0, 0.0);
+        let target_guid = Guid(0x5000_000B);
+        let mut navigation = TuiNavigation::default();
+
+        navigation.activate_approach_with_distance(
+            target_guid,
+            1.0,
+            &sync_input(
+                now,
+                Some(player_position),
+                Some(target_sample(target_guid, target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        );
+
+        let tick = navigation.tick(NavigationTick {
+            now: now + Duration::from_millis(16),
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample(target_guid, target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert!(matches!(
+            tick.drive_command,
+            Some(PlayerDriveIntent::Autonomous(_))
+        ));
+        assert!(navigation.drive_active);
     }
 
     #[test]
@@ -1096,7 +1251,7 @@ mod tests {
     #[test]
     fn follow_arrival_emits_single_arrival_pose() {
         let now = Instant::now();
-        let player_position = world_position(0.0, 0.0, 1.0);
+        let player_position = world_position_with_heading(0.0, 0.0, 1.0, 180.0_f32.to_radians());
         let far_target_position = world_position(6.0, 0.0, 7.0);
         let near_target_position = world_position(0.05, 0.0, 7.0);
         let target_guid = Guid(0x5000_0009);
@@ -1126,7 +1281,7 @@ mod tests {
         assert_eq!(
             update.drive_command,
             Some(PlayerDriveIntent::ArriveAtPose {
-                pose: world_position(0.0, 0.0, 7.0),
+                pose: world_position_with_heading(0.0, 0.0, 7.0, 180.0_f32.to_radians()),
             })
         );
         assert!(matches!(
@@ -1199,7 +1354,7 @@ mod tests {
     #[test]
     fn sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range() {
         let now = Instant::now();
-        let player_position = world_position(0.0, 0.0, 0.0);
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 180.0_f32.to_radians());
         let near_target_position = world_position(0.5, 0.0, 0.0);
         let far_target_position = world_position(6.0, 0.0, 0.0);
         let target_guid = Guid(0x5000_0007);
@@ -1381,10 +1536,14 @@ mod tests {
     }
 
     fn world_position(x: f32, y: f32, z: f32) -> WorldPosition {
+        world_position_with_heading(x, y, z, Quaternion::identity().to_heading())
+    }
+
+    fn world_position_with_heading(x: f32, y: f32, z: f32, heading: f32) -> WorldPosition {
         WorldPosition {
             landblock_id: Guid(0x016C_0171),
             coords: Vector3::new(x, y, z),
-            rotation: Quaternion::identity(),
+            rotation: Quaternion::from_heading(heading),
         }
     }
 }

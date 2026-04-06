@@ -12,7 +12,7 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, DashboardTab, FilterInputSession,
+    AppAction, AppUiAction, ChatMessageTags, DashboardTab, FilterInputSession,
     FooterVerbVisibility, InspectTarget, Interaction, TabController, TabFilterState, UpdateResult,
     Verb, VerbInputEvent, VerbInputState,
 };
@@ -181,7 +181,7 @@ impl InventoryTab {
             });
         } else {
             return Some(UpdateResult::new().with_action(AppAction::Log {
-                kind: ChatMessageKind::System,
+                chat_tags: ChatMessageTags::system(),
                 message:
                     "Unable to split item: player inventory container is unavailable.".to_string(),
             }));
@@ -680,7 +680,7 @@ impl TabController for InventoryTab {
                     UpdateResult::new()
                         .with_redraw(true)
                         .with_action(AppAction::Log {
-                            kind: ChatMessageKind::System,
+                            chat_tags: ChatMessageTags::system(),
                             message: err.message(),
                         }),
                 ),

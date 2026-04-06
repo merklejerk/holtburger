@@ -1,7 +1,7 @@
 use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
-use crate::types::{ChatMessageKind, Page, UpdateResult};
+use crate::types::{ChatMessageTags, Page, UpdateResult};
 use holtburger_core::{
     BusyOperationKind, BusyOperationResult, ClientCommand, ClientState, ClientViewEvent,
     ErrorReason,
@@ -100,7 +100,7 @@ impl AppState {
                         self.request_disconnect_exit();
                         if !self.should_exit_on_disconnect() && self.disconnect_reason.is_some() {
                             self.log(
-                                ChatMessageKind::Error,
+                                ChatMessageTags::error(),
                                 self.current_disconnect_chat_message(),
                             );
                         }
@@ -127,15 +127,18 @@ impl AppState {
                 {
                     self.remember_disconnect_reason(message.clone());
                     self.request_disconnect_exit();
-                    self.log(ChatMessageKind::Error, format!("[!] {}", message));
+                    self.log(
+                        ChatMessageTags::error(),
+                        format!("[!] {}", message),
+                    );
                     return result;
                 }
 
                 let chat_kind = match reason {
                     ErrorReason::Weenie(_, _)
                     | ErrorReason::Character(_)
-                    | ErrorReason::General(_) => ChatMessageKind::Error,
-                    ErrorReason::Transport(_) => ChatMessageKind::Warning,
+                    | ErrorReason::General(_) => ChatMessageTags::error(),
+                    ErrorReason::Transport(_) => ChatMessageTags::warning(),
                 };
                 self.log(chat_kind, format!("[!] {}", message));
             }
@@ -230,10 +233,7 @@ impl AppState {
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;
                 self.request_disconnect_exit();
-                self.log(
-                    ChatMessageKind::Error,
-                    self.current_disconnect_chat_message(),
-                );
+                self.log(ChatMessageTags::error(), self.current_disconnect_chat_message());
                 // For now, staying on the Game page lets the user see the error,
                 // but we could also transition back to selection.
                 result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));

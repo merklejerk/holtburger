@@ -17,6 +17,7 @@ use holtburger_core::{
     ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
     ClientViewEvent,
 };
+use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
@@ -39,6 +40,7 @@ struct BootstrappedClient {
     initial_events: Vec<ClientViewEvent>,
     content: Arc<ContentRepository>,
     spell_catalog: Arc<SpellCatalog>,
+    skill_table: Arc<SkillTable>,
 }
 
 enum BootstrapOutcome {
@@ -373,6 +375,7 @@ fn finalize_bootstrap_outcome(
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     content: Arc<ContentRepository>,
     spell_catalog: Arc<SpellCatalog>,
+    skill_table: Arc<SkillTable>,
 ) -> BootstrapOutcome {
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
@@ -383,6 +386,7 @@ fn finalize_bootstrap_outcome(
                 initial_events,
                 content,
                 spell_catalog,
+                skill_table,
             })
         }
         BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
@@ -408,6 +412,7 @@ async fn bootstrap_once(
 
     let mut client = builder.connect().await?;
     let spell_catalog = Arc::clone(&client.world.spell_catalog);
+    let skill_table = Arc::clone(&client.world.skill_table);
 
     apply_capture_path(&mut client, args.capture.as_ref());
 
@@ -446,6 +451,7 @@ async fn bootstrap_once(
                             client_task_handle,
                             Arc::clone(&content),
                             Arc::clone(&spell_catalog),
+                            Arc::clone(&skill_table),
                         ));
                     }
                 }
@@ -476,6 +482,7 @@ async fn bootstrap_once(
                                 client_task_handle,
                                 Arc::clone(&content),
                                 Arc::clone(&spell_catalog),
+                                Arc::clone(&skill_table),
                             ));
                         }
                     }
@@ -627,6 +634,7 @@ async fn run() -> Result<()> {
         initial_events,
         content,
         spell_catalog,
+        skill_table,
     } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
@@ -654,6 +662,7 @@ async fn run() -> Result<()> {
         server_time: None,
         content: Some(content),
         spell_catalog: Some(spell_catalog),
+        skill_table: Some(skill_table),
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,

@@ -299,14 +299,14 @@ pub fn format_weenie_error_id(error_id: u32, parameter: Option<&str>) -> String 
 }
 
 pub fn is_actually_weenie_error(err: WeenieError) -> bool {
-    match err {
+    matches!(
+        err,
         WeenieError::YouHaveSucceededSpecializingSkill
-        | WeenieError::YouHaveSucceededTransferringAttributes
-        | WeenieError::YouHaveSucceededUntrainingSkill
-        | WeenieError::TurbineChatIsEnabled
-        | WeenieError::YouHaveLeftTheChannel
-        | WeenieError::ITeleported
-        | WeenieError::YouHaveEnteredTheChannel => false,
-        _ => true,
-    }
+            | WeenieError::YouHaveSucceededTransferringAttributes
+            | WeenieError::YouHaveSucceededUntrainingSkill
+            | WeenieError::TurbineChatIsEnabled
+            | WeenieError::YouHaveLeftTheChannel
+            | WeenieError::ITeleported
+            | WeenieError::YouHaveEnteredTheChannel
+    )
 }

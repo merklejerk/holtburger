@@ -1,6 +1,6 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::types::{ChatMessageTags, RedrawPriority};
+use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
 
@@ -165,7 +165,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
@@ -326,6 +326,11 @@ impl GameState {
                 "Usage: /rip".to_string(),
                 "Kill your character.".to_string(),
             ],
+            "logopolis" => vec![
+                "Usage: /logopolis".to_string(),
+                "You may hear a distant bounce if you stand very still.".to_string(),
+                "Some doors open only after the right name is spoken.".to_string(),
+            ],
             _ => return None,
         };
 
@@ -466,6 +471,17 @@ impl GameState {
 
     pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
+
+        if command.trim() == "/logopolis" {
+            self.finish_input_command_submission(command);
+            result.actions.push(
+                AppUiAction::ChangeContextView {
+                    view: ContextView::Logopolis,
+                }
+                .into(),
+            );
+            return result;
+        }
 
         if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
             result.commands.push(ClientCommand::Tell {
@@ -907,6 +923,27 @@ mod tests {
                 .iter()
                 .any(|message| { message.text.contains("TUI generates a default") })
         );
+    }
+
+    #[test]
+    fn logopolis_command_queues_ui_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/logopolis");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: crate::types::AppUiAction::ChangeContextView {
+                    view: crate::types::ContextView::Logopolis
+                }
+            })
+        ));
     }
 
     #[test]

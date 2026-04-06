@@ -172,8 +172,10 @@ impl TabController for SpellsTab {
                 "Details",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::ChangeContextView {
-                    view: ContextView::DebugSpell(spell_id),
+                vec![AppAction::UiAction {
+                    action: AppUiAction::ChangeContextView {
+                        view: ContextView::DebugSpell(spell_id),
+                    },
                 }],
                 'g',
                 "Debug",

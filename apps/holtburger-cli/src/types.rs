@@ -21,6 +21,7 @@ pub type VerbSet = Vec<Verb>;
 #[derive(Debug, Clone)]
 pub enum AppUiAction {
     SetDashboardActiveTab(DashboardTab),
+    ChangeContextView { view: ContextView },
     InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
     BeginTabFilterInput { tab: DashboardTab },
     OpenCharacterCreationScreen,
@@ -366,6 +367,7 @@ pub enum ContextView {
     Enchantment(Enchantment),
     DebugSpell(u32),
     DebugEnchantment(Enchantment),
+    Logopolis,
 }
 
 #[derive(Debug)]
@@ -651,9 +653,6 @@ pub enum AppAction {
     CancelInteraction,
     SendCommands {
         commands: Vec<ClientCommand>,
-    },
-    ChangeContextView {
-        view: ContextView,
     },
     ClearVendor,
     DisplayClientInfo,

@@ -89,7 +89,7 @@ pub fn render_context_pane(f: &mut Frame, args: ContextPaneRenderArgs<'_>) {
         ContextView::Enchantment(_) => "Enchantment Details".to_string(),
         ContextView::DebugSpell(_) => "Debug Information".to_string(),
         ContextView::DebugEnchantment(_) => "Debug Information".to_string(),
-        ContextView::Logopolis => "0 - 0".to_string(),
+        ContextView::Logopolis => "Logopolis".to_string(),
     };
 
     let ctx_title = format!(" {} ", base_title);

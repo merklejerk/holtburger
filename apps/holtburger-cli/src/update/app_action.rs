@@ -10,10 +10,10 @@ impl AppState {
             let mut result = UpdateResult::new();
             match action {
                 AppAction::Log {
-                    kind,
+                    chat_tags,
                     message: text,
                 } => {
-                    self.log(kind, text);
+                    self.log(chat_tags, text);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 AppAction::SendCommands { commands: cmds } => {

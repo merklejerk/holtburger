@@ -252,16 +252,87 @@ pub enum TradeFocus {
     Partner,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChatMessageKind {
-    Info,
-    System,
-    Chat,
-    Tell,
-    Emote,
-    Error,
-    Warning,
-    Debug,
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ChatMessageTags: u32 {
+        const CHAT = 1 << 0;
+        const COMBAT = 1 << 1;
+        const GUILD = 1 << 2;
+        const PARTY = 1 << 3;
+        const STATUS = 1 << 4;
+        const SYSTEM = 1 << 5;
+        const TELL = 1 << 6;
+        const EMOTE = 1 << 7;
+        const TRADE = 1 << 8;
+        const HELP = 1 << 9;
+        const DEBUG = 1 << 10;
+        const INFO = 1 << 11;
+        const WARNING = 1 << 12;
+        const ERROR = 1 << 13;
+        const SOCIETY = 1 << 14;
+    }
+}
+
+impl ChatMessageTags {
+    pub fn chat() -> Self {
+        Self::CHAT
+    }
+
+    pub fn with(self, tags: Self) -> Self {
+        self | tags
+    }
+
+    pub fn tell() -> Self {
+        Self::CHAT | Self::TELL
+    }
+
+    pub fn emote() -> Self {
+        Self::CHAT | Self::EMOTE
+    }
+
+    pub fn info() -> Self {
+        Self::STATUS | Self::INFO
+    }
+
+    pub fn system() -> Self {
+        Self::STATUS | Self::SYSTEM
+    }
+
+    pub fn error() -> Self {
+        Self::STATUS | Self::SYSTEM | Self::ERROR
+    }
+
+    pub fn warning() -> Self {
+        Self::STATUS | Self::SYSTEM | Self::WARNING
+    }
+
+    pub fn debug() -> Self {
+        Self::STATUS | Self::SYSTEM | Self::DEBUG
+    }
+
+    pub fn combat(self) -> Self {
+        self | Self::COMBAT
+    }
+
+    pub fn party(self) -> Self {
+        self | Self::PARTY
+    }
+
+    pub fn guild(self) -> Self {
+        self | Self::GUILD
+    }
+
+    pub fn trade(self) -> Self {
+        self | Self::TRADE
+    }
+
+    pub fn help(self) -> Self {
+        self | Self::HELP
+    }
+
+    pub fn society(self) -> Self {
+        self | Self::SOCIETY
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, Default)]
@@ -571,7 +642,7 @@ pub enum AppAction {
         view: ContextView,
     },
     Log {
-        kind: ChatMessageKind,
+        chat_tags: ChatMessageTags,
         message: String,
     },
     BeginInteraction {

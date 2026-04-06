@@ -76,17 +76,6 @@ impl GameState {
         // Update layout cache
         self.set_layout_cache(main_chunks_vec.clone(), _dynamic_chunk, layout_mode);
 
-        let chat_area = main_chunks_vec[1];
-        // Note: the chat area rendering uses an inner margin horizontally
-        // Chat pane uses pane_block which adds 1 to all sides, so the actual text area is smaller.
-        // We'll calculate the inner bounds exactly like `pane_block().inner(area)` would.
-        let chat_inner = ratatui::layout::Rect {
-            x: chat_area.x.saturating_add(1),
-            y: chat_area.y.saturating_add(1),
-            width: chat_area.width.saturating_sub(2),
-            height: chat_area.height.saturating_sub(2),
-        };
-
         let context_width = main_chunks_vec[2].width.saturating_sub(2) as usize;
         let context_len = self
             .live_context_buffer()
@@ -105,7 +94,12 @@ impl GameState {
         let max_ctx_scroll = context_len.saturating_sub(ctx_h);
         self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);
 
-        self.chat.update_layout(chat_inner);
+        self.chat.update_layout(ratatui::layout::Rect {
+            x: main_chunks_vec[1].x,
+            y: main_chunks_vec[1].y,
+            width: main_chunks_vec[1].width,
+            height: main_chunks_vec[1].height,
+        });
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, ctx: &RenderContext) {

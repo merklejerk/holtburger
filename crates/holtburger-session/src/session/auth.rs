@@ -1,5 +1,5 @@
 use super::types::{DEFAULT_LOGIN_PROTOCOL_VERSION, Session};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::utils::build_login_payload;
@@ -38,8 +38,12 @@ impl Session {
         self.isaac_s2c = Some(Isaac::new(crd.server_seed));
         self.packet_sequence = 2;
 
+        let activation_port =
+            self.server_addr.port().checked_add(1).ok_or_else(|| {
+                anyhow!("server activation port overflow for {}", self.server_addr)
+            })?;
         let mut activation_addr = self.server_addr;
-        activation_addr.set_port(self.server_addr.port() + 1);
+        activation_addr.set_port(activation_port);
 
         let resp_header = PacketHeader {
             flags: packet_flags::CONNECT_RESPONSE,

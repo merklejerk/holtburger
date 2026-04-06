@@ -180,6 +180,29 @@ impl ClientRuntime {
             });
     }
 
+    fn emit_vendor_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::VendorStateUpdated {
+                vendor: self.world.vendor.clone(),
+            });
+    }
+
+    fn emit_trade_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::TradeStateUpdated {
+                trade: self.world.trade.clone(),
+            });
+    }
+
+    pub(super) fn emit_initial_view_state_snapshot(&self) {
+        self.emit_fellowship_state_updated();
+        self.emit_vendor_state_updated();
+        self.emit_trade_state_updated();
+        self.emit_runtime_body_snapshot();
+    }
+
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
         self.wire_event_tx.subscribe()
     }

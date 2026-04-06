@@ -415,6 +415,7 @@ async fn bootstrap_once(
     let mut latest_status = Some(ClientState::Connected);
     let mut latest_world_name = None;
     let mut latest_server_time = None;
+    let mut requested_initial_view_state = false;
 
     loop {
         tokio::select! {
@@ -454,6 +455,7 @@ async fn bootstrap_once(
             event = server_event_rx.recv() => {
                 match event {
                     Ok(event) => {
+                        requested_initial_view_state = false;
                         if let Some(outcome) = process_bootstrap_event(
                             event,
                             &mut latest_status,
@@ -471,7 +473,10 @@ async fn bootstrap_once(
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                        if !requested_initial_view_state {
+                            requested_initial_view_state = true;
+                            let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         return Ok(BootstrapOutcome::Fatal {
@@ -666,6 +671,7 @@ async fn run() -> Result<()> {
         immediate: true,
         motion: false,
     };
+    let mut requested_initial_view_state = false;
 
     let update_state = |res: UpdateResult,
                         pending_redraw: &mut PendingRedraw,
@@ -739,6 +745,7 @@ async fn run() -> Result<()> {
         loop {
             match server_event_rx.try_recv() {
                 Ok(event) => {
+                    requested_initial_view_state = false;
                     let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
                     update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
@@ -751,7 +758,10 @@ async fn run() -> Result<()> {
                         },
                     ));
                     update_state(reset, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
-                    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    if !requested_initial_view_state {
+                        requested_initial_view_state = true;
+                        let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+                    }
                     break;
                 }
                 Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {

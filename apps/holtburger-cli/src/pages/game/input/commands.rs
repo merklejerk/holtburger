@@ -135,7 +135,8 @@ impl GameState {
     fn log_options_usage(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]".to_string(),
+            "Usage: /options or /option to list options, /option <SETTING> <on|off> to change one."
+                .to_string(),
         );
     }
 
@@ -165,7 +166,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -187,7 +188,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
+            "Options: /options or /option to list, /option <SETTING> <on|off> to change a setting"
                 .to_string(),
         );
         self.chat.log(
@@ -286,10 +287,16 @@ impl GameState {
                 "Dismiss a player from your party.".to_string(),
             ],
             "options" => vec![
-                "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]".to_string(),
-                "Inspect and change curated character options exposed by the TUI.".to_string(),
-                "Examples: /options list, /options get trade-chat, /options toggle share-xp"
+                "Usage: /options or /option to list all curated character options.".to_string(),
+                "Usage: /option <SETTING> <on|off> to change a curated character option."
                     .to_string(),
+                "Examples: /options, /option trade-chat on, /option share-xp off".to_string(),
+            ],
+            "option" => vec![
+                "Usage: /options or /option to list all curated character options.".to_string(),
+                "Usage: /option <SETTING> <on|off> to change a curated character option."
+                    .to_string(),
+                "Examples: /options, /option trade-chat on, /option share-xp off".to_string(),
             ],
             "quit" | "exit" => vec![
                 "Usage: /quit".to_string(),
@@ -354,23 +361,12 @@ impl GameState {
         }
     }
 
-    fn log_option_state(&mut self, option: CuratedCharacterOption, enabled: bool) {
-        self.chat.log(
-            ChatMessageTags::system(),
-            format!(
-                "{}: {}",
-                option.canonical_name(),
-                if enabled { "on" } else { "off" }
-            ),
-        );
-    }
-
     fn handle_options_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
         let parts: Vec<_> = command.split_whitespace().collect();
 
         match parts.as_slice() {
-            ["/options"] | ["/options", "list"] => {
+            ["/options"] | ["/option"] | ["/options", "list"] | ["/option", "list"] => {
                 let Some(options) = self.data.player_options else {
                     self.log_options_unavailable();
                     return result.with_redraw(true);
@@ -393,21 +389,7 @@ impl GameState {
                 self.finish_input_command_submission(command);
                 result.request_redraw(RedrawPriority::Immediate);
             }
-            ["/options", "get", raw_name] => {
-                let Some(option) = CuratedCharacterOption::parse(raw_name) else {
-                    self.log_unknown_option(raw_name);
-                    return result.with_redraw(true);
-                };
-                let Some(enabled) = self.data.curated_option_enabled(option) else {
-                    self.log_options_unavailable();
-                    return result.with_redraw(true);
-                };
-
-                self.log_option_state(option, enabled);
-                self.finish_input_command_submission(command);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ["/options", "set", raw_name, raw_value] => {
+            ["/option", raw_name, raw_value] => {
                 let Some(option) = CuratedCharacterOption::parse(raw_name) else {
                     self.log_unknown_option(raw_name);
                     return result.with_redraw(true);
@@ -420,31 +402,6 @@ impl GameState {
                     return result.with_redraw(true);
                 };
 
-                result.commands.push(ClientCommand::SetCharacterOption {
-                    option: option.character_option(),
-                    value,
-                });
-                self.chat.log(
-                    ChatMessageTags::system(),
-                    format!(
-                        "Setting {} to {}.",
-                        option.canonical_name(),
-                        if value { "on" } else { "off" }
-                    ),
-                );
-                self.finish_input_command_submission(command);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ["/options", "toggle", raw_name] => {
-                let Some(option) = CuratedCharacterOption::parse(raw_name) else {
-                    self.log_unknown_option(raw_name);
-                    return result.with_redraw(true);
-                };
-                let Some(current) = self.data.curated_option_enabled(option) else {
-                    self.log_options_unavailable();
-                    return result.with_redraw(true);
-                };
-                let value = !current;
                 result.commands.push(ClientCommand::SetCharacterOption {
                     option: option.character_option(),
                     value,
@@ -770,7 +727,7 @@ impl GameState {
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
-            _ if command.starts_with("/options") => self.handle_options_command(command),
+            _ if command.starts_with("/option") => self.handle_options_command(command),
             _ => {
                 self.finish_input_command_submission(command);
                 result
@@ -808,7 +765,7 @@ mod tests {
                 .chat
                 .messages
                 .iter()
-                .any(|message| message.text.contains("/options list"))
+                .any(|message| message.text.contains("/option <SETTING> <on|off>"))
         );
         assert!(
             state
@@ -1374,7 +1331,7 @@ mod tests {
             options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
             options2: CharacterOptions2::HEAR_TRADE_CHAT,
         });
-        state.chat_input.input.set_text("/options list");
+        state.chat_input.input.set_text("/options");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1397,15 +1354,15 @@ mod tests {
     }
 
     #[test]
-    fn options_get_logs_requested_value() {
+    fn option_list_alias_logs_curated_option_values() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
         state.data.player_options = Some(PlayerCharacterOptions {
-            options1: CharacterOptions1::empty(),
-            options2: CharacterOptions2::HEAR_GENERAL_CHAT,
+            options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+            options2: CharacterOptions2::HEAR_TRADE_CHAT,
         });
-        state.chat_input.input.set_text("/options get general-chat");
+        state.chat_input.input.set_text("/option");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1416,19 +1373,26 @@ mod tests {
                 .chat
                 .messages
                 .iter()
-                .any(|message| message.text == "general-chat: on")
+                .any(|message| message.text.contains("craft-success-dialog: on"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("trade-chat: on"))
         );
     }
 
     #[test]
-    fn options_set_dispatches_client_command() {
+    fn option_set_dispatches_client_command() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
         state
             .chat_input
             .input
-            .set_text("/options set craft-success-dialog on");
+            .set_text("/option craft-success-dialog on");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1443,37 +1407,11 @@ mod tests {
     }
 
     #[test]
-    fn options_toggle_dispatches_inverted_client_command() {
+    fn option_set_invalid_name_logs_error() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.data.player_options = Some(PlayerCharacterOptions {
-            options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
-            options2: CharacterOptions2::empty(),
-        });
-        state
-            .chat_input
-            .input
-            .set_text("/options toggle craft-success-dialog");
-        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
-
-        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::SetCharacterOption {
-                option: CharacterOption::UseCraftingChanceOfSuccessDialog,
-                value: false,
-            })
-        ));
-    }
-
-    #[test]
-    fn options_set_invalid_name_logs_error() {
-        let player_guid = Guid(0x50000001);
-        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-        state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input.set_text("/options set bogus on");
+        state.chat_input.input.set_text("/option bogus on");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));

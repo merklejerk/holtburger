@@ -333,6 +333,7 @@ async fn test_request_retransmit_replays_cached_packet() {
 
     let mut buf = [0u8; 1024];
     let _ = session.recv_packet(&mut buf).await.unwrap();
+    assert!(session.flush_pending_control_packets().await.unwrap());
 
     let sent_packets = sent_handle.sent_packets().await;
     assert_eq!(sent_packets.len(), 2);
@@ -368,16 +369,16 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
     let events = session.recv_message().await.unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], SessionEvent::TimeSync(time) if time == connect_request.time));
-    assert!(session.pending_handshake_response.is_some());
+    assert_eq!(session.pending_control_packets.len(), 1);
     assert!(sent_handle.sent_packets().await.is_empty());
 
     session
-        .pending_handshake_response
-        .as_mut()
+        .pending_control_packets
+        .first_mut()
         .expect("handshake response should be queued")
         .ready_at = std::time::Instant::now() - std::time::Duration::from_millis(1);
 
-    assert!(session.flush_pending_handshake_response().await.unwrap());
+    assert!(session.flush_pending_control_packets().await.unwrap());
 
     let sent_packets = sent_handle.sent_packets().await;
     assert_eq!(sent_packets.len(), 1);
@@ -419,6 +420,7 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
 
     let events = session.recv_message().await.unwrap();
     assert!(events.is_empty());
+    assert!(session.flush_pending_control_packets().await.unwrap());
 
     let sent_packets = sent_handle.sent_packets().await;
     let retransmit_packet = sent_packets
@@ -508,6 +510,7 @@ async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
 
     let mut buf = [0u8; 1024];
     let _ = session.recv_packet(&mut buf).await.unwrap();
+    assert!(session.flush_pending_control_packets().await.unwrap());
 
     let sent_packets = sent_handle.sent_packets().await;
     assert_eq!(sent_packets.len(), 2);

@@ -10,13 +10,12 @@ services:
       - ./db-data:/var/lib/mysql
     ports:
       - "3306:3306/tcp"
-    restart: unless-stopped
+    restart: "no"
     healthcheck:
         test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
 
   ace-server:
-    build: .
-    image: acemulator/ace:latest
+    build: ../ACE
     depends_on:
       ace-db:
         condition: service_healthy
@@ -32,5 +31,4 @@ services:
     ports:
       - "9000-9001:9000-9001/udp"
     stdin_open: true
-    #restart: unless-stopped
-    restart: on-failure
+    restart: "no"

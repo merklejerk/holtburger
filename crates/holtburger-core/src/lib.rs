@@ -7,7 +7,8 @@ pub use character_gen::{
 };
 pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
-    ActiveCharacterConfirmation, BusyOperationKind, BusyOperationResult, ClientCommand,
-    ClientState, ClientViewEvent, ErrorReason, PlayerCharacterOptions, RetryState, WireEvent,
+    ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
+    BusyOperationResult, ClientCommand, ClientState, ClientViewEvent, PlayerCharacterOptions,
+    RetryState, WireEvent,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};

@@ -7,6 +7,7 @@ use holtburger_common::properties::{
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
 use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
+use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
@@ -290,6 +291,8 @@ pub struct GameData {
     pub self_movement_kinematics: Option<SelfMovementKinematics>,
     /// Frontend-owned spell metadata lookup cache.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
+    /// Loaded portal skill table for skill formulas and skill costs.
+    pub skill_table: Option<Arc<SkillTable>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
     /// Server name (e.g. "Morningthaw").
@@ -337,6 +340,7 @@ impl Default for GameData {
             runtime_body_cache: RuntimeBodyViewCache::default(),
             self_movement_kinematics: None,
             spell_catalog: None,
+            skill_table: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
@@ -386,6 +390,10 @@ impl GameData {
 
     pub fn spell_catalog(&self) -> Option<Arc<SpellCatalog>> {
         self.spell_catalog.clone()
+    }
+
+    pub fn skill_table(&self) -> Option<Arc<SkillTable>> {
+        self.skill_table.clone()
     }
 
     pub fn spell_info(&self, spell_id: u32) -> Option<SpellInfo> {

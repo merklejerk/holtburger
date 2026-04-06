@@ -271,6 +271,7 @@ bitflags::bitflags! {
         const WARNING = 1 << 12;
         const ERROR = 1 << 13;
         const SOCIETY = 1 << 14;
+        const MAGIC = 1 << 15;
     }
 }
 
@@ -333,6 +334,10 @@ impl ChatMessageTags {
 
     pub fn society(self) -> Self {
         self | Self::SOCIETY
+    }
+
+    pub fn magic(self) -> Self {
+        self | Self::MAGIC
     }
 }
 

@@ -12,9 +12,9 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
-    ChatChannelId, GameMessage, SetTurbineChatChannelsEventData, TurbineChatChannel,
-    TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType, TurbineChatTypeId,
-    ViewContentsEventItem,
+    ChatChannelId, ChatMessageTypeId, GameMessage, SetTurbineChatChannelsEventData,
+    TurbineChatChannel, TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType,
+    TurbineChatTypeId, ViewContentsEventItem,
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
@@ -148,15 +148,16 @@ impl Default for TargetSlot {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub enum ErrorSource {
+pub enum ActionResultSource {
     Wire,
     State,
     Client,
 }
 
 #[derive(Debug, PartialEq, Clone, Eq)]
-pub enum ErrorReason {
+pub enum ActionResultReason {
     Weenie(WeenieError, Option<String>),
+    InventoryServerSaveFailed { item_guid: Guid, error: WeenieError },
     Character(CharacterError),
     General(String),
     Transport(String),
@@ -212,6 +213,7 @@ pub enum WireEvent {
     Chat {
         sender: String,
         message: String,
+        chat_type: u32,
     },
     ChannelMessage {
         channel: ChatChannelInfo,
@@ -350,10 +352,9 @@ pub enum ClientViewEvent {
         operation: BusyOperationKind,
         result: BusyOperationResult,
     },
-    ErrorRaised {
-        source: ErrorSource,
-        reason: ErrorReason,
-        message: String,
+    ActionResult {
+        source: ActionResultSource,
+        reason: ActionResultReason,
     },
     EntitySpawned {
         entity: Box<Entity>,
@@ -440,11 +441,12 @@ pub enum ClientViewEvent {
     },
     ServerMessage {
         message: String,
-        chat_type: u32,
+        chat_type: ChatMessageTypeId,
     },
     Chat {
         sender: String,
         message: String,
+        chat_type: ChatMessageTypeId,
     },
     ChannelMessage {
         channel: ChatChannelInfo,

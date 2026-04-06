@@ -157,6 +157,7 @@ pub enum ActionResultSource {
 #[derive(Debug, PartialEq, Clone, Eq)]
 pub enum ActionResultReason {
     Weenie(WeenieError, Option<String>),
+    InventoryServerSaveFailed { item_guid: Guid, error: WeenieError },
     Character(CharacterError),
     General(String),
     Transport(String),

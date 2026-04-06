@@ -233,6 +233,9 @@ fn classify_pre_world_action_result(reason: &ActionResultReason) -> Option<Boots
         ActionResultReason::Character(_) | ActionResultReason::General(_) => {
             Some(BootstrapEventOutcome::Fatal { message })
         }
+        ActionResultReason::InventoryServerSaveFailed { .. } => {
+            Some(BootstrapEventOutcome::Fatal { message })
+        }
         ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
             Some(BootstrapEventOutcome::Fatal { message })
         }

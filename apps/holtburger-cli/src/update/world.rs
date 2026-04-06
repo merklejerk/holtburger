@@ -138,6 +138,9 @@ impl AppState {
                         ChatMessageTags::error()
                     }
                     ActionResultReason::Weenie(_, _) => ChatMessageTags::info(),
+                    ActionResultReason::InventoryServerSaveFailed { .. } => {
+                        ChatMessageTags::error()
+                    }
                     ActionResultReason::Character(_) | ActionResultReason::General(_) => {
                         ChatMessageTags::error()
                     }

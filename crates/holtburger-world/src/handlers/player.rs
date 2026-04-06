@@ -51,7 +51,7 @@ pub(crate) fn handle_message(
             {
                 state.player.update_vector_sequence(data.instance_sequence);
                 events.extend(state.set_player_vector(data.velocity, data.omega));
-                return false;
+                return true;
             }
             false
         }

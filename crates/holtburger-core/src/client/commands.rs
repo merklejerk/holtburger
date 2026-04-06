@@ -203,12 +203,8 @@ impl ClientRuntime {
         match cmd {
             ClientCommand::Login(password) => {
                 log::info!("Attempting login...");
-                self.login
-                    .send_login_request(
-                        &self.character_selection.account_name,
-                        &password,
-                        &mut self.session,
-                    )
+                self.session
+                    .send_login_request(&self.character_selection.account_name, &password)
                     .await
             }
             ClientCommand::SelectCharacter(id) => {

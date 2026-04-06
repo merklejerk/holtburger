@@ -28,3 +28,5 @@ release-test/data/
 !README.md
 
 dist-manifest.json
+
+.vscode/

@@ -2,6 +2,7 @@ use super::GameMessage;
 pub use crate::messages::character::types::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::chat::types::*;
+pub use crate::messages::combat::types::*;
 pub use crate::messages::effects::types::*;
 pub use crate::messages::inventory::types::*;
 pub use crate::messages::misc::types::*;
@@ -68,6 +69,9 @@ impl ProtocolUnpack for GameMessage {
             ))),
             GameOpcode::ServerName => Some(GameMessage::ServerName(Box::new(
                 ServerNameData::unpack(data, offset)?,
+            ))),
+            GameOpcode::PlayerKilled => Some(GameMessage::PlayerKilled(Box::new(
+                PlayerKilledData::unpack(data, offset)?,
             ))),
             GameOpcode::CharacterEnterWorldServerReady => {
                 Some(GameMessage::CharacterEnterWorldServerReady)

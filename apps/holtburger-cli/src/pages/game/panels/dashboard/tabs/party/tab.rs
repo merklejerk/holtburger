@@ -193,10 +193,8 @@ impl TabController for PartyTab {
 
         if self.is_party_leader(data) && Some(selected.member.guid) != data.player_guid {
             verbs.push(Verb::new(
-                AppAction::SendCommands {
-                    commands: vec![ClientCommand::UninviteFromParty {
-                        player: selected.member.name.clone(),
-                    }],
+                AppAction::UninviteFromParty {
+                    target: selected.member.guid,
                 },
                 'k',
                 "Kick",

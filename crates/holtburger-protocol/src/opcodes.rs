@@ -146,8 +146,8 @@ pub enum GameOpcode {
     PrivateUpdateVitalCurrent = 0x02E9,
     // /// S2C: Update public Vital current value (tick). (Note: Confirmed GHOST, 0x02EA is unused in ACE)
     // PublicUpdateVitalCurrentGhost = 0x02EA,
-    // /// S2C: Player was killed in combat.
-    // PlayerKilled = 0x019E,
+    /// S2C: Player was killed in combat.
+    PlayerKilled = 0x019E,
 
     // --- Communication & Chat ---
     /// S2C: Text emote.
@@ -321,13 +321,19 @@ pub enum GameActionOpcode {
     AddToTrade = 0x01F8,
     /// C2S: Reset the trade offer (clears accept status).
     ResetTrade = 0x0204,
+    // --- Miscellaneous & Permissions ---
+    /// C2S: Grant corpse-looting permission to a player.
+    AddPlayerPermission = 0x0219,
+    /// C2S: Revoke corpse-looting permission from a player.
+    RemovePlayerPermission = 0x021A,
     /// C2S: Accept the current trade offer.
     AcceptTrade = 0x01FA,
     /// C2S: Decline the current trade offer.
     DeclineTrade = 0x01FB,
 
     // --- Books & Inscriptions ---
-    // /// C2S: Request book metadata (title, author, etc).
+    // /// C2S: Request book metadata and currently loaded page data.
+    // /// Defunct: inventory books are opened via `Use`, not this opcode.
     // BookData = 0x00AA,
     // /// C2S: Update the text of a book page.
     // BookModifyPage = 0x00AB,
@@ -335,8 +341,8 @@ pub enum GameActionOpcode {
     // BookAddPage = 0x00AC,
     // /// C2S: Remove a page from a book.
     // BookDeletePage = 0x00AD,
-    // /// C2S: Request the text content of a book page.
-    // BookPageData = 0x00AE,
+    /// C2S: Request the text content of a specific book page.
+    BookPageData = 0x00AE,
     // /// C2S: Add an inscription to an item (Notes, Crafted items).
     // SetInscription = 0x00BF,
 
@@ -411,10 +417,10 @@ pub enum GameActionOpcode {
     // SetDesiredComponentLevel = 0x0224,
 
     // --- Allegiance & Social ---
-    // /// C2S: Swear allegiance to a patron.
-    // SwearAllegiance = 0x001D,
-    // /// C2S: Break allegiance from a patron/vassal.
-    // BreakAllegiance = 0x001E,
+    /// C2S: Swear allegiance to a patron.
+    SwearAllegiance = 0x001D,
+    /// C2S: Break allegiance from a patron/vassal.
+    BreakAllegiance = 0x001E,
     // /// C2S: Request an update of allegiance information.
     // AllegianceUpdateRequest = 0x001F,
     // /// C2S: Add a player to the friends list.
@@ -525,8 +531,8 @@ pub enum GameActionOpcode {
     // ListAvailableHouses = 0x0270,
 
     // --- Movement (Extra) ---
-    // /// C2S: Teleport to a PK-Lite arena.
-    // TeleToPklArena = 0x0026,
+    /// C2S: Teleport to a PK-Lite arena.
+    TeleToPklArena = 0x0026,
     // /// C2S: Teleport to a PK arena.
     // TeleToPkArena = 0x0027,
     /// C2S: Teleport to the character's attuned Lifestone.
@@ -535,8 +541,8 @@ pub enum GameActionOpcode {
     // AdvocateTeleport = 0x00D6,
     /// C2S: Teleport to the allegiance mansion or villa.
     TeleToMansion = 0x0278,
-    // /// C2S: Teleport to the Marketplace.
-    // TeleToMarketPlace = 0x028D,
+    /// C2S: Teleport to the Marketplace.
+    TeleToMarketPlace = 0x028D,
     /// C2S: Enter PK-Lite state.
     EnterPkLite = 0x028F,
     // /// C2S: Server-controlled or legacy jump command.
@@ -709,16 +715,16 @@ pub enum GameEventOpcode {
     // GetInscriptionResponse = 0x00C3,
 
     // --- Books & Inscriptions ---
-    // /// S2C: Response containing the metadata and content of a book.
-    // BookDataResponse = 0x00B4,
+    /// S2C: Response containing book metadata plus any inline page payloads.
+    BookDataResponse = 0x00B4,
     // /// S2C: Result of a book page modification.
     // BookModifyPageResponse = 0x00B5,
     // /// S2C: Result of adding a new page to a book.
     // BookAddPageResponse = 0x00B6,
     // /// S2C: Result of deleting a page from a book.
     // BookDeletePageResponse = 0x00B7,
-    // /// S2C: Returns specific page data for a book.
-    // BookPageDataResponse = 0x00B8,
+    /// S2C: Returns specific page data for a book.
+    BookPageDataResponse = 0x00B8,
     // /// S2C: Result of a salvaging operation.
     // SalvageOperationsResult = 0x02B4,
 

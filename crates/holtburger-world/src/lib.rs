@@ -8,6 +8,7 @@
 //!   narrow state mutations plus [`WorldEvent`] emission.
 
 pub mod assessment;
+pub mod book;
 pub mod bootstrap;
 pub mod context;
 pub mod crafting;

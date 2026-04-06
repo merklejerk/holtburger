@@ -1,3 +1,4 @@
+pub use crate::messages::book::actions::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
 pub use crate::messages::fellowship::actions::*;
@@ -33,6 +34,10 @@ pub enum GameAction {
     StackableSplitToWield(Box<StackableSplitToWieldActionData>),
     Talk(Box<TalkActionData>),
     Tell(Box<TellActionData>),
+    SwearAllegiance(Box<SwearAllegianceActionData>),
+    BreakAllegiance(Box<BreakAllegianceActionData>),
+    AddPlayerPermission(Box<AddPlayerPermissionActionData>),
+    RemovePlayerPermission(Box<RemovePlayerPermissionActionData>),
     Emote(Box<EmoteActionData>),
     ChatChannel(Box<ChatChannelActionData>),
     FellowshipCreate(Box<FellowshipCreateActionData>),
@@ -51,6 +56,8 @@ pub enum GameAction {
     QueryHealth(Box<QueryHealthActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
     TeleToLifestone(Box<TeleToLifestoneActionData>),
+    TeleToPklArena(Box<TeleToPklArenaActionData>),
+    TeleToMarketPlace(Box<TeleToMarketPlaceActionData>),
     TeleToMansion(Box<TeleToMansionActionData>),
     Suicide(Box<SuicideActionData>),
     EnterPkLite(Box<EnterPkLiteActionData>),
@@ -66,6 +73,7 @@ pub enum GameAction {
     CancelAttack(Box<CancelAttackActionData>),
     Buy(Box<BuyActionData>),
     Sell(Box<SellActionData>),
+    BookPageData(Box<BookPageDataActionData>),
     ConfirmationResponse(Box<ConfirmationResponseActionData>),
     OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
     CloseTradeNegotiations(Box<CloseTradeNegotiationsActionData>),
@@ -127,6 +135,18 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Tell => {
                     GameAction::Tell(Box::new(TellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::SwearAllegiance => GameAction::SwearAllegiance(Box::new(
+                    SwearAllegianceActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::BreakAllegiance => GameAction::BreakAllegiance(Box::new(
+                    BreakAllegianceActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::AddPlayerPermission => GameAction::AddPlayerPermission(Box::new(
+                    AddPlayerPermissionActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RemovePlayerPermission => GameAction::RemovePlayerPermission(
+                    Box::new(RemovePlayerPermissionActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::Emote => {
                     GameAction::Emote(Box::new(EmoteActionData::unpack(data, offset)?))
                 }
@@ -181,6 +201,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::TeleToLifestone => GameAction::TeleToLifestone(Box::new(
                     TeleToLifestoneActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::TeleToPklArena => GameAction::TeleToPklArena(Box::new(
+                    TeleToPklArenaActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::TeleToMarketPlace => GameAction::TeleToMarketPlace(Box::new(
+                    TeleToMarketPlaceActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::TeleToMansion => GameAction::TeleToMansion(Box::new(
                     TeleToMansionActionData::unpack(data, offset)?,
                 )),
@@ -226,6 +252,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Sell => {
                     GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::BookPageData => GameAction::BookPageData(Box::new(
+                    BookPageDataActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::ConfirmationResponse => GameAction::ConfirmationResponse(
                     Box::new(ConfirmationResponseActionData::unpack(data, offset)?),
                 ),
@@ -327,6 +356,26 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::SwearAllegiance(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::SwearAllegiance as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::BreakAllegiance(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::BreakAllegiance as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::AddPlayerPermission(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AddPlayerPermission as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RemovePlayerPermission(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RemovePlayerPermission as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::Emote(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Emote as u32)
                     .unwrap();
@@ -417,6 +466,16 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::TeleToPklArena(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToPklArena as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TeleToMarketPlace(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToMarketPlace as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::TeleToMansion(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::TeleToMansion as u32)
                     .unwrap();
@@ -489,6 +548,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::Sell(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Sell as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::BookPageData(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::BookPageData as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -602,6 +666,12 @@ mod tests {
     fn test_action_query_health_parity() {
         let fixture = hex::decode("B1F7000009000000BF01000003000080").unwrap();
         assert_action_parity(&fixture, 9);
+    }
+
+    #[test]
+    fn test_action_book_page_data_parity() {
+        let fixture = hex::decode("B1F7000011000000AE0000004433221101000000").unwrap();
+        assert_action_parity(&fixture, 0x11);
     }
 
     #[test]

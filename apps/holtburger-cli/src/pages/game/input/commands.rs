@@ -2,6 +2,7 @@ use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
 use crate::types::{ChatMessageKind, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
+use holtburger_world::context::WorldContextExt;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
     match raw {
@@ -164,12 +165,20 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageKind::System,
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
                 .to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
             "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Allegiance: /g <MSG>, /swear <NAME>, /unswear".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Corpse permissions: /permit <PLAYER>, /unpermit <PLAYER>".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -184,6 +193,14 @@ impl GameState {
         self.chat.log(
             ChatMessageKind::System,
             "Movement: /scoot [METERS] (defaults to 1m)".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Teleports: /arena (PKL arena), /mp (marketplace)".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "PK Lite: /pkl (turn on PK Lite mode)".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -223,6 +240,18 @@ impl GameState {
                 "Usage: /g <MSG>".to_string(),
                 "Send a message to allegiance chat.".to_string(),
                 "Alias: /guild <MSG>".to_string(),
+            ],
+            "swear" => vec![
+                "Usage: /swear <NAME>".to_string(),
+                "Attempt to swear allegiance to the named player.".to_string(),
+            ],
+            "permit" => vec![
+                "Usage: /permit <PLAYER>".to_string(),
+                "Grant corpse-looting permission to the named player.".to_string(),
+            ],
+            "unpermit" => vec![
+                "Usage: /unpermit <PLAYER>".to_string(),
+                "Revoke corpse-looting permission from the named player.".to_string(),
             ],
             "party" | "p" => vec![
                 "Usage: /party".to_string(),
@@ -280,6 +309,15 @@ impl GameState {
                 "Recall to your lifestone.".to_string(),
                 "Alias: /lifestone".to_string(),
             ],
+            "arena" => vec![
+                "Usage: /arena".to_string(),
+                "Teleport to the PK-Lite arena.".to_string(),
+            ],
+            "mp" => vec![
+                "Usage: /mp".to_string(),
+                "Teleport to the marketplace.".to_string(),
+            ],
+            "pkl" => vec!["Usage: /pkl".to_string(), "Enter PK Lite mode.".to_string()],
             "hq" => vec![
                 "Usage: /hq".to_string(),
                 "Recall to allegiance housing.".to_string(),
@@ -288,7 +326,6 @@ impl GameState {
                 "Usage: /rip".to_string(),
                 "Kill your character.".to_string(),
             ],
-            "pkl" => vec!["Usage: /pkl".to_string(), "Enter PK Lite mode.".to_string()],
             _ => return None,
         };
 
@@ -480,6 +517,50 @@ impl GameState {
             return result.with_redraw(true);
         }
 
+        if let Some(player_name) = parse_single_argument_command(command, &["/swear"]) {
+            let Some(target) = self.data.resolve_player_guid_by_name(player_name) else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    format!(
+                        "Unable to find player '{}' to swear allegiance to.",
+                        player_name
+                    ),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppAction::SwearAllegiance { target });
+            self.chat.log(
+                ChatMessageKind::System,
+                format!("Swearing allegiance to {}...", player_name),
+            );
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/unswear" {
+            let Some(target) = self.data.get_player_monarch_guid() else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    "You are not currently sworn to anyone.".to_string(),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppUiAction::OpenUnswearConfirmation { target }.into());
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/swear" {
+            self.log_command_usage("Usage: /swear <NAME>");
+            return result.with_redraw(true);
+        }
+
         if let Some(message) = parse_message_only_command(command, &["/p", "/party"]) {
             result.commands.push(ClientCommand::ChannelMessage {
                 channel: ChatChannelKind::Fellowship,
@@ -542,9 +623,17 @@ impl GameState {
         }
 
         if let Some(player) = parse_single_argument_command(command, &["/invite"]) {
-            result.commands.push(ClientCommand::InviteToParty {
-                player: player.to_string(),
-            });
+            let Some(target) = self.data.resolve_player_guid_by_name(player) else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    format!("Unable to find player '{}' to invite.", player),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppAction::InviteToParty { target });
             self.finish_input_command_submission(command);
             return result.with_redraw(true);
         }
@@ -561,15 +650,49 @@ impl GameState {
         }
 
         if let Some(player) = parse_single_argument_command(command, &["/uninvite"]) {
-            result.commands.push(ClientCommand::UninviteFromParty {
-                player: player.to_string(),
-            });
+            let Some(target) = self.data.resolve_player_guid_by_name(player) else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    format!("Unable to find player '{}' to remove from party.", player),
+                );
+                return result.with_redraw(true);
+            };
+
+            result
+                .actions
+                .push(crate::types::AppAction::UninviteFromParty { target });
             self.finish_input_command_submission(command);
             return result.with_redraw(true);
         }
 
         if command == "/uninvite" {
             self.log_command_usage("Usage: /uninvite <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(player_name) = parse_single_argument_command(command, &["/permit"]) {
+            result.commands.push(ClientCommand::AddPlayerPermission {
+                player_name: player_name.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/permit" {
+            self.log_command_usage("Usage: /permit <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(player_name) = parse_single_argument_command(command, &["/unpermit"]) {
+            result.commands.push(ClientCommand::RemovePlayerPermission {
+                player_name: player_name.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/unpermit" {
+            self.log_command_usage("Usage: /unpermit <PLAYER>");
             return result.with_redraw(true);
         }
 
@@ -606,6 +729,21 @@ impl GameState {
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
+            "/arena" => {
+                result.commands.push(ClientCommand::TeleportToPklArena);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/mp" => {
+                result.commands.push(ClientCommand::TeleportToMarketplace);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/pkl" => {
+                result.commands.push(ClientCommand::EnterPkLite);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
             "/hq" => {
                 result.commands.push(ClientCommand::RecallAllegianceHousing);
                 self.finish_input_command_submission(command);
@@ -613,11 +751,6 @@ impl GameState {
             }
             "/rip" => {
                 result.commands.push(ClientCommand::Suicide);
-                self.finish_input_command_submission(command);
-                result.with_redraw(true)
-            }
-            "/pkl" => {
-                result.commands.push(ClientCommand::EnterPkLite);
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
@@ -666,11 +799,87 @@ mod tests {
                 .chat
                 .messages
                 .iter()
+                .any(|message| message.text.contains("/swear <NAME>"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
                 .any(|message| message.text.contains(":<MSG>"))
         );
         assert!(state.chat.messages.iter().any(|message| {
             message.text == "Use /help <COMMAND> for detailed help on a specific command."
         }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/arena"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/mp"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/pkl"))
+        );
+    }
+
+    #[test]
+    fn arena_command_dispatches_pkl_teleport() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/arena");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::TeleportToPklArena)
+        ));
+    }
+
+    #[test]
+    fn marketplace_command_dispatches_marketplace_teleport() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/mp");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::TeleportToMarketplace)
+        ));
+    }
+
+    #[test]
+    fn pkl_command_dispatches_enter_pklite() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/pkl");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::EnterPkLite)
+        ));
     }
 
     #[test]
@@ -814,6 +1023,67 @@ mod tests {
             Some(ClientCommand::ChannelMessage { channel, message })
                 if *channel == ChatChannelKind::Allegiance
                     && message == "assemble at the mansion"
+        ));
+    }
+
+    #[test]
+    fn swear_command_dispatches_dedicated_app_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.data.entities.insert(
+            Guid(0x50000042),
+            holtburger_world::entity::Entity::new(
+                Guid(0x50000042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
+        state.chat_input.input.set_text("/swear Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::SwearAllegiance { target }) if *target == Guid(0x50000042)
+        ));
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.kind == ChatMessageKind::System
+                && message.text == "Swearing allegiance to Bestie..."
+        }));
+    }
+
+    #[test]
+    fn unswear_command_opens_confirmation_modal() {
+        let player_guid = Guid(0x50000001);
+        let monarch_guid = Guid(0x50000042);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+
+        let mut player = holtburger_world::entity::Entity::new(
+            player_guid,
+            "Player".to_string(),
+            holtburger_common::position::WorldPosition::default(),
+        );
+        player.properties.iids.insert(
+            holtburger_common::properties::PropertyInstanceId::Monarch,
+            monarch_guid,
+        );
+        state.data.entities.insert(player_guid, player);
+
+        state.chat_input.input.set_text("/unswear");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.first(),
+            Some(crate::types::AppAction::UiAction {
+                action: crate::types::AppUiAction::OpenUnswearConfirmation { target }
+            }) if *target == monarch_guid
         ));
     }
 
@@ -965,15 +1235,24 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
+        state.data.entities.insert(
+            Guid(0x50000042),
+            holtburger_world::entity::Entity::new(
+                Guid(0x50000042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
         state.chat_input.input.set_text("/invite Bestie");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::InviteToParty { player }) if player == "Bestie"
+            result.actions.first(),
+            Some(AppAction::InviteToParty { target }) if *target == Guid(0x50000042)
         ));
+        assert!(result.commands.is_empty());
     }
 
     #[test]
@@ -997,14 +1276,55 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
+        state.data.entities.insert(
+            Guid(0x50000042),
+            holtburger_world::entity::Entity::new(
+                Guid(0x50000042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ),
+        );
         state.chat_input.input.set_text("/uninvite Bestie");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UninviteFromParty { target }) if *target == Guid(0x50000042)
+        ));
+        assert!(result.commands.is_empty());
+    }
+
+    #[test]
+    fn permit_command_dispatches_add_player_permission() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/permit Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
             result.commands.first(),
-            Some(ClientCommand::UninviteFromParty { player }) if player == "Bestie"
+            Some(ClientCommand::AddPlayerPermission { player_name }) if player_name == "Bestie"
+        ));
+    }
+
+    #[test]
+    fn unpermit_command_dispatches_remove_player_permission() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/unpermit Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::RemovePlayerPermission { player_name }) if player_name == "Bestie"
         ));
     }
 

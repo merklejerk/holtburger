@@ -332,6 +332,44 @@ async fn test_ack_sequence_prunes_cached_packets() {
 }
 
 #[tokio::test]
+async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
+    let fragment_packet = build_single_fragment_packet(7, &[0xAA, 0xBB, 0xCC]);
+    let fragment_payload = &fragment_packet[transport::HEADER_SIZE..];
+
+    let mut payload = Vec::with_capacity(transport::ACK_SEQUENCE_SIZE + fragment_payload.len());
+    payload.extend_from_slice(&6u32.to_le_bytes());
+    payload.extend_from_slice(fragment_payload);
+
+    let packet = build_transport_packet(
+        PacketHeader {
+            sequence: 7,
+            flags: packet_flags::BLOB_FRAGMENTS | packet_flags::ACK_SEQUENCE,
+            size: payload.len() as u16,
+            ..Default::default()
+        },
+        &payload,
+    );
+    let transport = ScriptedTransport::new(vec![packet], "127.0.0.1:9001".parse().unwrap());
+    let sent_handle = transport.clone();
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.last_server_seq = 6;
+    session.has_server_seq = true;
+
+    let events = session.recv_message().await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(session.flush_pending_control_packets().await.unwrap());
+
+    let sent_packets = sent_handle.sent_packets().await;
+    assert!(
+        sent_packets
+            .iter()
+            .any(|packet| unpack_header(packet).flags == packet_flags::ACK_SEQUENCE)
+    );
+}
+
+#[tokio::test]
 async fn test_request_retransmit_replays_cached_packet() {
     let requested_sequence = 9u32;
     let retransmit_payload = [1u32.to_le_bytes(), requested_sequence.to_le_bytes()].concat();
@@ -563,6 +601,60 @@ async fn test_send_request_retransmit_wraps_sequence_window() {
     let payload = &retransmit_packet[transport::HEADER_SIZE..];
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
     assert_eq!(LittleEndian::read_u32(&payload[4..8]), 0);
+}
+
+#[test]
+fn test_read_sequence_list_rejects_oversized_count() {
+    let session = Session::new_test();
+    let count = (crate::session::types::MAX_RETRANSMIT_SEQUENCE_IDS + 1) as u32;
+    let payload = count.to_le_bytes();
+
+    let result = session.read_sequence_list(
+        packet_flags::REQUEST_RETRANSMIT,
+        &payload,
+        packet_flags::REQUEST_RETRANSMIT,
+    );
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_build_packet_bytes_rejects_payloads_larger_than_u16() {
+    let mut session = Session::new_test();
+    let payload = vec![0u8; u16::MAX as usize + 1];
+
+    let err = session.send_packet_to_addr(
+        PacketHeader {
+            flags: packet_flags::BLOB_FRAGMENTS,
+            sequence: 1,
+            ..Default::default()
+        },
+        &payload,
+        session.server_addr,
+    );
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
+    let err = runtime.block_on(err).unwrap_err();
+    assert!(err.to_string().contains("packet payload too large"));
+}
+
+#[test]
+fn test_build_cleartext_control_packet_rejects_payloads_larger_than_u16() {
+    let mut session = Session::new_test();
+    let payload = vec![0u8; u16::MAX as usize + 1];
+
+    let err = session
+        .queue_cleartext_control_packet(
+            PacketHeader {
+                flags: packet_flags::ACK_SEQUENCE,
+                ..Default::default()
+            },
+            &payload,
+            session.server_addr,
+            std::time::Instant::now(),
+        )
+        .unwrap_err();
+
+    assert!(err.to_string().contains("packet payload too large"));
 }
 
 #[test]

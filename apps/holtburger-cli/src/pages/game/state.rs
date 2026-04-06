@@ -14,6 +14,7 @@ use holtburger_core::client::types::{
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
+use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 #[cfg(test)]
@@ -41,7 +42,7 @@ use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
-    Interaction, RedrawPriority, UpdateResult,
+    Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -216,7 +217,7 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
-                self.refresh_entity_context_if_visible(entity_ref.guid);
+                self.refresh_entity_context_if_visible(entity_ref.guid, &mut result);
                 if self.update_inventory_and_equipment(entity_ref) {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
@@ -227,7 +228,7 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
-                self.refresh_entity_context_if_visible(entity_ref.guid);
+                self.refresh_entity_context_if_visible(entity_ref.guid, &mut result);
                 if self.update_inventory_and_equipment(entity_ref) {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
@@ -242,7 +243,7 @@ impl GameState {
                     needs_update = true;
                 }
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                     if self.update_inventory_and_equipment(&entity) {
                         result.request_redraw(RedrawPriority::Immediate);
                     }
@@ -257,7 +258,7 @@ impl GameState {
                         self.data.player_pos = Some(pos);
                     }
                 }
-                self.refresh_entity_context_if_visible(guid);
+                self.refresh_entity_context_if_visible(guid, &mut result);
                 result.request_redraw(RedrawPriority::Motion);
             }
             ClientViewEvent::EntityKinematicsUpdated {
@@ -268,14 +269,14 @@ impl GameState {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.velocity = velocity;
                     entity.omega = omega;
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                     result.request_redraw(RedrawPriority::Motion);
                 }
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.motion_snapshot = snapshot;
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                     result.request_redraw(RedrawPriority::Motion);
                 }
             }
@@ -291,13 +292,13 @@ impl GameState {
             }
             ClientViewEvent::RuntimeBodyUpserted { body } => {
                 if let Some(guid) = body.body_id.authoritative_guid() {
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                 }
                 result.request_redraw(RedrawPriority::Motion);
             }
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 if let Some(guid) = body_id.authoritative_guid() {
-                    self.refresh_entity_context_if_visible(guid);
+                    self.refresh_entity_context_if_visible(guid, &mut result);
                 }
                 result.request_redraw(RedrawPriority::Immediate);
             }
@@ -313,7 +314,7 @@ impl GameState {
                         self.data.player_pos = Some(pos);
                     }
                 }
-                self.refresh_entity_context_if_visible(guid);
+                self.refresh_entity_context_if_visible(guid, &mut result);
                 result.request_redraw(RedrawPriority::Immediate);
             }
             ClientViewEvent::TeleportStarted { .. } => {}
@@ -421,6 +422,15 @@ impl GameState {
                     .unwrap_or_default(),
                 );
             }
+            AppAction::Read { guid } => {
+                result.commands.push(ClientCommand::Use(guid));
+                result.merge(
+                    self.handle_action(AppAction::ChangeContextView {
+                        view: ContextView::Book(guid),
+                    })
+                    .unwrap_or_default(),
+                );
+            }
             AppAction::Use { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
@@ -513,6 +523,24 @@ impl GameState {
             }
             AppAction::TalkTo { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
+            }
+            AppAction::InviteToParty { target } => {
+                result
+                    .commands
+                    .push(ClientCommand::InviteToParty { target });
+            }
+            AppAction::UninviteFromParty { target } => {
+                result
+                    .commands
+                    .push(ClientCommand::UninviteFromParty { target });
+            }
+            AppAction::SwearAllegiance { target } => {
+                result
+                    .commands
+                    .push(ClientCommand::SwearAllegiance { target });
+            }
+            AppAction::Unswear { target } => {
+                result.commands.push(ClientCommand::Unswear { target });
             }
             AppAction::Open { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
@@ -802,9 +830,33 @@ impl GameState {
     }
 
     pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
-        self.dashboard
-            .handle_ui_action(action, &self.data, &self.view)
-            .unwrap_or_default()
+        match action {
+            AppUiAction::OpenUnswearConfirmation { target } => {
+                let target_label = self
+                    .data
+                    .get_entity(target)
+                    .map(|entity| {
+                        let name = entity.name().trim();
+                        if name.is_empty() {
+                            format!("0x{:08X}", target.0)
+                        } else {
+                            name.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| format!("0x{:08X}", target.0));
+
+                self.view.local_confirmation = Some(LocalConfirmation {
+                    title: " Break Allegiance Confirmation ".to_string(),
+                    text: format!("Break allegiance with {}?", target_label),
+                    action: AppAction::Unswear { target },
+                });
+                UpdateResult::redraw()
+            }
+            _ => self
+                .dashboard
+                .handle_ui_action(action, &self.data, &self.view)
+                .unwrap_or_default(),
+        }
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
@@ -951,10 +1003,27 @@ impl GameState {
                     error: WeenieError::ActionCancelled
                 }
             )
-            && matches!(
-                self.view.active_interaction,
-                Some(Interaction::Targeting { .. })
-            )
+            && self.should_rearm_sticky_auto_attack()
+    }
+
+    fn should_rearm_sticky_auto_attack(&self) -> bool {
+        let Some(target_guid) = self.current_target_guid() else {
+            return false;
+        };
+
+        self.data.combat_target_status(target_guid).is_available() && !self.player_is_dead()
+    }
+
+    fn player_is_dead(&self) -> bool {
+        let Some(player_guid) = self.data.player_guid else {
+            return false;
+        };
+
+        self.data
+            .entities
+            .get(&player_guid)
+            .and_then(|entity| entity.motion_snapshot)
+            .is_some_and(|snapshot| snapshot.indicates_death_motion())
     }
 
     pub(crate) fn toggled_combat_mode(&self) -> CombatMode {
@@ -1144,6 +1213,10 @@ impl GameState {
         mode: CombatMode,
         force_attack: bool,
     ) -> Option<CombatAutomationInput> {
+        if self.player_is_dead() {
+            return None;
+        }
+
         let target_guid = self.current_target_guid()?;
         let attack_profile = self.desired_attack_profile(mode)?;
         let target_position = self.runtime.navigation.automation_target_position(
@@ -1600,6 +1673,7 @@ impl GameState {
             self.view.context_view,
             ContextView::Assess(InspectTarget::Entity(target_guid))
                 | ContextView::Debug(InspectTarget::Entity(target_guid))
+                | ContextView::Book(target_guid)
                 if target_guid == guid
         ) {
             self.view.context_view = ContextView::Default;
@@ -1639,13 +1713,15 @@ impl GameState {
         result
     }
 
-    fn refresh_entity_context_if_visible(&mut self, guid: Guid) {
+    fn refresh_entity_context_if_visible(&mut self, guid: Guid, result: &mut UpdateResult) {
         if matches!(
             self.view.context_view,
             ContextView::Assess(InspectTarget::Entity(target_guid))
+                | ContextView::Book(target_guid)
                 if target_guid == guid
         ) {
             self.refresh_context_buffer();
+            result.request_redraw(RedrawPriority::Immediate);
         }
     }
 }
@@ -1668,6 +1744,8 @@ pub struct ViewState {
     pub salvaging: Option<SalvagingState>,
     /// Current core-projected confirmation request being surfaced by the game page.
     pub active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Current local confirmation request for client-driven modals.
+    pub local_confirmation: Option<LocalConfirmation>,
     /// Current core-projected busy operation for local action sequencing.
     pub active_busy_operation: Option<BusyOperationKind>,
 }
@@ -1706,6 +1784,7 @@ impl Default for ViewState {
             active_interaction: None,
             salvaging: None,
             active_confirmation: None,
+            local_confirmation: None,
             active_busy_operation: None,
         }
     }
@@ -1731,6 +1810,7 @@ mod tests {
     use holtburger_core::ActiveCharacterConfirmation;
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
+    use holtburger_world::book::{BookData, BookPage};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
     use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode};
     fn is_weapon_swap_active(state: &GameState) -> bool {
@@ -1895,6 +1975,75 @@ mod tests {
                 .map(|entity| entity.name()),
             Some("New Name")
         );
+    }
+
+    #[test]
+    fn book_response_refreshes_visible_context_and_requests_redraw() {
+        let player_guid = Guid(0x50000001);
+        let book_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.data.entities.insert(
+            book_guid,
+            Entity::new(book_guid, "Journal".to_string(), WorldPosition::default()),
+        );
+        state.view.context_view = ContextView::Book(book_guid);
+        state.refresh_context_buffer();
+
+        assert!(context_buffer_contains(
+            state.context_buffer(),
+            "Reading..."
+        ));
+
+        let mut book_entity =
+            Entity::new(book_guid, "Journal".to_string(), WorldPosition::default());
+        book_entity.book = Some(BookData {
+            author_name: Some("Scribe".to_string()),
+            pages: vec![BookPage {
+                index: 0,
+                author_id: 1,
+                author_name: "Scribe".to_string(),
+                author_account: "acct".to_string(),
+                flags: 0,
+                text_included: true,
+                ignore_author: false,
+                page_text: Some("Hello from the book".to_string()),
+            }],
+            ..BookData::default()
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(book_entity),
+        });
+
+        assert!(result.redraw_requested());
+        assert!(context_buffer_contains(
+            state.context_buffer(),
+            "Hello from the book"
+        ));
+        assert!(context_buffer_contains(
+            state.context_buffer(),
+            "       --  Scribe"
+        ));
+    }
+
+    #[test]
+    fn read_action_uses_generic_use_command_for_books() {
+        let player_guid = Guid(0x50000001);
+        let book_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::Read { guid: book_guid })
+            .expect("read action should produce an update result");
+
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::Use(guid) if *guid == book_guid))
+        );
+        assert_eq!(state.view.context_view, ContextView::Book(book_guid));
     }
 
     #[test]
@@ -2728,6 +2877,74 @@ mod tests {
     }
 
     #[test]
+    fn swear_allegiance_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::SwearAllegiance {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::SwearAllegiance { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
+    fn unswear_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::Unswear {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Unswear { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
+    fn invite_to_party_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::InviteToParty {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::InviteToParty { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
+    fn uninvite_from_party_action_dispatches_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state
+            .handle_action(AppAction::UninviteFromParty {
+                target: Guid(0x50000042),
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::UninviteFromParty { target }) if *target == Guid(0x50000042)
+        ));
+    }
+
+    #[test]
     fn switching_from_targeting_to_non_targeting_cancels_attack() {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
@@ -3258,6 +3475,99 @@ mod tests {
                 || is_run_movement_command(command)
         }));
         assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn cancelled_attack_does_not_rearm_after_target_death_motion() {
+        use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+        use holtburger_world::entity::EntityMotionSnapshot;
+
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+            ..Default::default()
+        });
+        state.data.entities.insert(target_guid, target);
+
+        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(!result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
+        }));
+
+        let mut stale = UpdateResult::new();
+        state.refresh_stale_attack_sequence(Instant::now() + Duration::from_secs(2), &mut stale);
+
+        assert!(!stale.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
+        }));
+    }
+
+    #[test]
+    fn cancelled_attack_does_not_rearm_after_player_death_motion() {
+        use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+        use holtburger_world::entity::EntityMotionSnapshot;
+
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+        player.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+            ..Default::default()
+        });
+        state.data.entities.insert(player_guid, player);
+
+        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(!result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
+        }));
     }
 
     #[test]

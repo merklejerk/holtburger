@@ -1,6 +1,6 @@
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{ClientRuntime, ClientState};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
@@ -47,18 +47,6 @@ fn normalize_spell_cast(
     }
 }
 impl ClientRuntime {
-    fn resolve_player_guid_by_name(&self, name: &str) -> Option<Guid> {
-        if self.world.player.name().eq_ignore_ascii_case(name) {
-            return Some(self.world.player.guid);
-        }
-
-        self.world
-            .entities
-            .iter()
-            .find(|entity| entity.name().eq_ignore_ascii_case(name))
-            .map(|entity| entity.guid)
-    }
-
     fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
         match kind {
             crate::client::types::ChatChannelKind::Fellowship => Some(ChatChannel::Fellow),
@@ -124,6 +112,7 @@ impl ClientRuntime {
             | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
+            | ClientCommand::ReadBookPage { .. }
             | ClientCommand::QueryHealth(_)
             | ClientCommand::Use(_)
             | ClientCommand::CloseContainer(_)
@@ -144,9 +133,15 @@ impl ClientRuntime {
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterOption { .. }
             | ClientCommand::RecallLifestone
+            | ClientCommand::TeleportToPklArena
+            | ClientCommand::TeleportToMarketplace
             | ClientCommand::RecallAllegianceHousing
+            | ClientCommand::SwearAllegiance { .. }
+            | ClientCommand::Unswear { .. }
             | ClientCommand::Suicide
             | ClientCommand::EnterPkLite
+            | ClientCommand::AddPlayerPermission { .. }
+            | ClientCommand::RemovePlayerPermission { .. }
             | ClientCommand::RespondToConfirmation { .. } => {
                 self.handle_interaction_command(cmd).await
             }
@@ -355,6 +350,17 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::ReadBookPage { book, page_index } => {
+                log::info!(">>> Reading book page {} from 0x{:08X}", page_index, book);
+                let page_index = i32::try_from(page_index).map_err(|_| {
+                    anyhow!("book page index {} exceeds i32 wire range", page_index)
+                })?;
+                self.send_game_action(GameAction::BookPageData(Box::new(BookPageDataActionData {
+                    guid: book,
+                    page_index,
+                })))
+                .await
+            }
             ClientCommand::QueryHealth(guid) => {
                 log::info!(">>> Querying health for: 0x{:08X}", guid.0);
                 self.send_game_action(GameAction::QueryHealth(Box::new(QueryHealthActionData {
@@ -552,6 +558,20 @@ impl ClientRuntime {
                 self.emit_player_options_updated();
                 Ok(())
             }
+            ClientCommand::AddPlayerPermission { player_name } => {
+                log::info!(">>> Permitting {} to loot corpse", player_name);
+                self.send_game_action(GameAction::AddPlayerPermission(Box::new(
+                    AddPlayerPermissionActionData { player_name },
+                )))
+                .await
+            }
+            ClientCommand::RemovePlayerPermission { player_name } => {
+                log::info!(">>> Revoking corpse permission from {}", player_name);
+                self.send_game_action(GameAction::RemovePlayerPermission(Box::new(
+                    RemovePlayerPermissionActionData { player_name },
+                )))
+                .await
+            }
             ClientCommand::RecallLifestone => {
                 log::info!(">>> Recalling to lifestone");
                 self.send_game_action(GameAction::TeleToLifestone(Box::new(
@@ -559,10 +579,42 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::TeleportToPklArena => {
+                log::info!(">>> Teleporting to PKL arena");
+                self.send_game_action(GameAction::TeleToPklArena(Box::new(
+                    TeleToPklArenaActionData,
+                )))
+                .await
+            }
+            ClientCommand::TeleportToMarketplace => {
+                log::info!(">>> Teleporting to marketplace");
+                self.send_game_action(GameAction::TeleToMarketPlace(Box::new(
+                    TeleToMarketPlaceActionData,
+                )))
+                .await
+            }
             ClientCommand::RecallAllegianceHousing => {
                 log::info!(">>> Recalling to allegiance housing");
                 self.send_game_action(GameAction::TeleToMansion(Box::new(TeleToMansionActionData)))
                     .await
+            }
+            ClientCommand::SwearAllegiance {
+                target: target_guid,
+            } => {
+                log::info!(">>> Swearing allegiance to 0x{:08X}", target_guid.0);
+                self.send_game_action(GameAction::SwearAllegiance(Box::new(
+                    SwearAllegianceActionData { target_guid },
+                )))
+                .await
+            }
+            ClientCommand::Unswear {
+                target: target_guid,
+            } => {
+                log::info!(">>> Breaking allegiance from 0x{:08X}", target_guid.0);
+                self.send_game_action(GameAction::BreakAllegiance(Box::new(
+                    BreakAllegianceActionData { target_guid },
+                )))
+                .await
             }
             ClientCommand::Suicide => {
                 log::info!(">>> Initiating suicide");
@@ -984,18 +1036,12 @@ impl ClientRuntime {
                 }
                 Ok(())
             }
-            ClientCommand::InviteToParty { player } => {
-                let Some(player_guid) = self.resolve_player_guid_by_name(&player) else {
-                    self.emit_wire_event(WireEvent::ClientError(format!(
-                        "Unable to find player '{}' to invite.",
-                        player
-                    )));
-                    return Ok(());
-                };
-
-                log::info!(">>> Inviting {} to party", player);
+            ClientCommand::InviteToParty { target } => {
+                log::info!(">>> Inviting 0x{:08X} to party", target.0);
                 self.send_game_action(GameAction::FellowshipRecruit(Box::new(
-                    FellowshipRecruitActionData { player_guid },
+                    FellowshipRecruitActionData {
+                        player_guid: target,
+                    },
                 )))
                 .await
             }
@@ -1006,18 +1052,12 @@ impl ClientRuntime {
                 )))
                 .await
             }
-            ClientCommand::UninviteFromParty { player } => {
-                let Some(player_guid) = self.resolve_player_guid_by_name(&player) else {
-                    self.emit_wire_event(WireEvent::ClientError(format!(
-                        "Unable to find player '{}' to remove from party.",
-                        player
-                    )));
-                    return Ok(());
-                };
-
-                log::info!(">>> Removing {} from party", player);
+            ClientCommand::UninviteFromParty { target } => {
+                log::info!(">>> Removing 0x{:08X} from party", target.0);
                 self.send_game_action(GameAction::FellowshipDismiss(Box::new(
-                    FellowshipDismissActionData { player_guid },
+                    FellowshipDismissActionData {
+                        player_guid: target,
+                    },
                 )))
                 .await
             }
@@ -1345,7 +1385,6 @@ mod tests {
                 break;
             }
         }
-
         assert!(!saw_reference_data_event);
     }
 
@@ -1468,20 +1507,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invite_to_party_resolves_player_name_to_guid() {
+    async fn invite_to_party_sends_guid_directly() {
         let mut client = build_test_client();
-        client
-            .world
-            .entities
-            .insert(holtburger_world::entity::Entity::new(
-                Guid(0x5000_0042),
-                "Bestie".to_string(),
-                holtburger_common::position::WorldPosition::default(),
-            ));
 
         client
             .handle_command(ClientCommand::InviteToParty {
-                player: "bestie".to_string(),
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn uninvite_from_party_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::UninviteFromParty {
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn swear_allegiance_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SwearAllegiance {
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn unswear_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::Unswear {
+                target: Guid(0x5000_0042),
             })
             .await
             .unwrap();
@@ -1807,5 +1883,31 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn teleport_to_pkl_arena_sends_game_action() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::TeleportToPklArena)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn teleport_to_marketplace_sends_game_action() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::TeleportToMarketplace)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
     }
 }

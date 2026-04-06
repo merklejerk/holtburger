@@ -1,3 +1,4 @@
+pub mod book;
 pub mod character;
 pub mod chat;
 pub mod combat;

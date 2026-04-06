@@ -1,3 +1,4 @@
+pub use crate::messages::book::events::*;
 pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
@@ -75,6 +76,8 @@ pub enum GameEvent {
     ResetTrade(Box<ResetTradeEventData>),
     TradeFailure(Box<TradeFailureEventData>),
     ClearTradeAcceptance,
+    BookDataResponse(Box<BookDataResponseEventData>),
+    BookPageDataResponse(Box<BookPageDataResponseEventData>),
     ApproachVendor(Box<ApproachVendorEventData>),
     FellowshipQuit(Box<FellowshipQuitEventData>),
     FellowshipDismiss(Box<FellowshipDismissEventData>),
@@ -276,6 +279,12 @@ impl ProtocolUnpack for GameEventMessage {
                     GameEvent::TradeFailure(Box::new(TradeFailureEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::ClearTradeAcceptance => GameEvent::ClearTradeAcceptance,
+                GameEventOpcode::BookDataResponse => GameEvent::BookDataResponse(Box::new(
+                    BookDataResponseEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::BookPageDataResponse => GameEvent::BookPageDataResponse(Box::new(
+                    BookPageDataResponseEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::ApproachVendor => GameEvent::ApproachVendor(Box::new(
                     ApproachVendorEventData::unpack(data, offset)?,
                 )),
@@ -573,6 +582,16 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::ClearTradeAcceptance => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ClearTradeAcceptance as u32)
                     .unwrap();
+            }
+            GameEvent::BookDataResponse(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::BookDataResponse as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::BookPageDataResponse(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::BookPageDataResponse as u32)
+                    .unwrap();
+                data.pack(buf);
             }
             GameEvent::ApproachVendor(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ApproachVendor as u32)

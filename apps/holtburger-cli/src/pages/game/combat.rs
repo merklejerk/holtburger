@@ -52,6 +52,9 @@ impl CombatRuntimeState {
                 self.attack_queued = false;
                 self.attack_sequence_active = false;
             }
+            // PlayerKilled notifies when any nearby player is killed, so it may
+            // not affect our own attack state.
+            CombatFeedback::PlayerKilled { .. } => {}
             CombatFeedback::AttackerNotification { .. }
             | CombatFeedback::DefenderNotification { .. }
             | CombatFeedback::EvasionAttackerNotification { .. }

@@ -31,7 +31,8 @@ use holtburger_protocol::messages::movement::{
 };
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 use holtburger_protocol::messages::{
-    FellowUpdateType, FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
+    BookDataResponseEventData, BookPageData, BookPageDataResponseEventData, FellowUpdateType,
+    FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
     FellowshipUpdateFellowEventData, GameMessage, PlayerTeleportData,
 };
 use holtburger_protocol::traits::ProtocolPack;
@@ -58,7 +59,6 @@ fn write_micro_portal_hba(path: &Path) -> bool {
         );
         return false;
     }
-
     let source = match HbaReader::open(&source_path) {
         Ok(source) => source,
         Err(error) => panic!(
@@ -3936,6 +3936,107 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
         state
             .entity_lifecycle_state(preview_guid)
             .is_some_and(|state| state.prune_deadline.is_none() && state.container_preview)
+    );
+}
+
+#[test]
+fn test_book_data_response_updates_entity_book_state() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x11223344);
+    state.entities.insert(Entity::new(
+        guid,
+        "Book".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let message = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid(0x50000001),
+        sequence: 0x21,
+        event: GameEvent::BookDataResponse(Box::new(BookDataResponseEventData {
+            object_guid: guid,
+            max_num_pages: 3,
+            num_pages: 3,
+            max_num_chars_per_page: 1000,
+            pages: vec![BookPageData {
+                author_id: 0x01020304,
+                author_name: "Scribe One".to_string(),
+                author_account: "beer good".to_string(),
+                flags: 0xFFFF0002,
+                text_included: false,
+                ignore_author: true,
+                page_text: None,
+            }],
+            inscription: "Signed and sealed".to_string(),
+            author_id: 0xAABBCCDD,
+            author_name: "Archivist".to_string(),
+        })),
+    }));
+
+    let events = state.handle_message(&message);
+
+    assert!(
+        matches!(events.first(), Some(WorldEvent::EntityReplaced(entity)) if entity.guid == guid)
+    );
+
+    let entity = state.entities.get(guid).expect("entity should still exist");
+    let book = entity.book.as_ref().expect("book data should be populated");
+    assert_eq!(book.max_num_pages, Some(3));
+    assert_eq!(book.pages.len(), 1);
+    assert_eq!(book.pages[0].author_name, "Scribe One");
+    assert_eq!(book.inscription.as_deref(), Some("Signed and sealed"));
+}
+
+#[test]
+fn test_book_page_data_response_merges_into_existing_book_state() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x11223344);
+    let mut entity = Entity::new(guid, "Book".to_string(), WorldPosition::default());
+    entity.book = Some(crate::book::BookData {
+        pages: vec![crate::book::BookPage {
+            index: 0,
+            author_id: 1,
+            author_name: "Page Zero".to_string(),
+            author_account: "old".to_string(),
+            flags: 0xFFFF0002,
+            text_included: false,
+            ignore_author: false,
+            page_text: None,
+        }],
+        ..crate::book::BookData::default()
+    });
+    state.entities.insert(entity);
+
+    let message = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid(0x50000001),
+        sequence: 0x22,
+        event: GameEvent::BookPageDataResponse(Box::new(BookPageDataResponseEventData {
+            object_guid: guid,
+            page_index: 1,
+            page: BookPageData {
+                author_id: 0x05060708,
+                author_name: "Scribe Two".to_string(),
+                author_account: "Password is cheese".to_string(),
+                flags: 0xFFFF0002,
+                text_included: true,
+                ignore_author: false,
+                page_text: Some("The second page has text.".to_string()),
+            },
+        })),
+    }));
+
+    let events = state.handle_message(&message);
+
+    assert!(
+        matches!(events.first(), Some(WorldEvent::EntityReplaced(entity)) if entity.guid == guid)
+    );
+
+    let entity = state.entities.get(guid).expect("entity should still exist");
+    let book = entity.book.as_ref().expect("book data should be populated");
+    assert_eq!(book.pages.len(), 2);
+    assert_eq!(book.pages[1].index, 1);
+    assert_eq!(
+        book.pages[1].page_text.as_deref(),
+        Some("The second page has text.")
     );
 }
 

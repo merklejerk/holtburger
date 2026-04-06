@@ -468,6 +468,14 @@ impl TabController for InventoryTab {
                     'c',
                     "Combine",
                 ));
+            } else if class == EntityClass::Writable {
+                verbs.push(Verb::new(
+                    vec![AppAction::Read {
+                        guid: cur_entity.guid,
+                    }],
+                    'e',
+                    "Read",
+                ));
             } else if data.can_use(cur_entity.guid) {
                 verbs.push(Verb::new(
                     vec![AppAction::Use {

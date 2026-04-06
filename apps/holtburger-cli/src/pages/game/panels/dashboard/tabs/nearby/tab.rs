@@ -398,7 +398,19 @@ impl TabController for NearbyTab {
                 }
                 _ => {
                     if data.can_use(e.guid) {
-                        verbs.push(Verb::new(vec![AppAction::Use { guid: e.guid }], 'u', "Use"));
+                        if class == EntityClass::Writable {
+                            verbs.push(Verb::new(
+                                vec![AppAction::Read { guid: e.guid }],
+                                'e',
+                                "Read",
+                            ));
+                        } else {
+                            verbs.push(Verb::new(
+                                vec![AppAction::Use { guid: e.guid }],
+                                'u',
+                                "Use",
+                            ));
+                        }
                     }
                 }
             }

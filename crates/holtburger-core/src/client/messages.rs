@@ -482,7 +482,7 @@ impl ClientRuntime {
                 self.emit_wire_event(WireEvent::Chat {
                     sender,
                     message: data.message.clone(),
-                    chat_type: data.chat_type.into(),
+                    chat_type: data.chat_type,
                 });
                 Ok(())
             }
@@ -490,7 +490,7 @@ impl ClientRuntime {
                 self.emit_wire_event(WireEvent::Chat {
                     sender: data.sender_name.clone(),
                     message: data.message.clone(),
-                    chat_type: data.chat_type.into(),
+                    chat_type: data.chat_type,
                 });
                 Ok(())
             }

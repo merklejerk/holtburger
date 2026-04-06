@@ -3,6 +3,8 @@ use crate::types::FocusedPane;
 use crate::types::Interaction;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};
+use holtburger_core::ActionResultReason;
+use holtburger_core::errors::format_weenie_error;
 use holtburger_world::crafting::salvage::get_material_name;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
@@ -67,6 +69,18 @@ pub fn format_cost(n: u64) -> String {
         format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+pub fn format_action_result_message(reason: &ActionResultReason) -> String {
+    match reason {
+        ActionResultReason::Weenie(error, parameter) => {
+            format_weenie_error(*error, parameter.as_deref())
+        }
+        ActionResultReason::Character(error) => format!("Character error: {:?}", error),
+        ActionResultReason::General(message) | ActionResultReason::Transport(message) => {
+            message.clone()
+        }
     }
 }
 

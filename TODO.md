@@ -85,6 +85,7 @@
 - [x] Add a `/scoot <METERS>` command.
 - [x] `/options` syntax is awkward.
 - [x] Rendering issues in chat for some names/items like the Blackmoor's Favor gem.
+- [x] Spellcasting chat should be categorized as combat.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -99,7 +100,6 @@
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
 - [ ] Some equipment swapping jank going on.
-- [ ] Spellcasting chat should be categorized as combat.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -247,8 +247,10 @@
 - [x] Character sheet doesn't identfy specialized skills.
 - [x] Death notifications.
 - [x] Chat tabs (Chat vs combat vs all).
+- [x] Assess output not showing weapon skill.
 - [~] Slash-commands should use `AppAction`s.
-- [ ] Assess output not showing weapon skill.
+- [ ] Do not show recharge verb on uncharged mana stones.
+- [ ] Skills should show attribute formula in character tab.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

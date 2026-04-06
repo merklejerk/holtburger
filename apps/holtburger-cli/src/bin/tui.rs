@@ -10,9 +10,12 @@ use holtburger_cli::pages;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
+use holtburger_cli::utils::format_action_result_message;
 use holtburger_content::ContentRepository;
+use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
-    ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState, ClientViewEvent, ErrorReason,
+    ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
+    ClientViewEvent,
 };
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::BasicSpatialPhysics;
@@ -218,15 +221,21 @@ fn is_retryable_pre_world_character_error(error: CharacterError) -> bool {
     )
 }
 
-fn classify_pre_world_error(reason: &ErrorReason, message: String) -> BootstrapEventOutcome {
+fn classify_pre_world_action_result(reason: &ActionResultReason) -> Option<BootstrapEventOutcome> {
+    let message = format_action_result_message(reason);
+
     match reason {
-        ErrorReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
-            BootstrapEventOutcome::Retry { message }
+        ActionResultReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
+            Some(BootstrapEventOutcome::Retry { message })
         }
-        ErrorReason::Character(_) | ErrorReason::General(_) | ErrorReason::Weenie(_, _) => {
-            BootstrapEventOutcome::Fatal { message }
+        ActionResultReason::Character(_) | ActionResultReason::General(_) => {
+            Some(BootstrapEventOutcome::Fatal { message })
         }
-        ErrorReason::Transport(_) => BootstrapEventOutcome::Fatal { message },
+        ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
+            Some(BootstrapEventOutcome::Fatal { message })
+        }
+        ActionResultReason::Weenie(_, _) => None,
+        ActionResultReason::Transport(_) => Some(BootstrapEventOutcome::Fatal { message }),
     }
 }
 
@@ -346,9 +355,7 @@ fn process_bootstrap_event(
                 characters,
             ),
         }),
-        ClientViewEvent::ErrorRaised {
-            reason, message, ..
-        } => Some(classify_pre_world_error(&reason, message)),
+        ClientViewEvent::ActionResult { reason, .. } => classify_pre_world_action_result(&reason),
         ClientViewEvent::BootAccount(reason) => Some(BootstrapEventOutcome::Fatal {
             message: format_boot_account_message(&reason),
         }),
@@ -862,7 +869,7 @@ async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
-    use holtburger_core::client::types::ErrorSource;
+    use holtburger_core::client::types::ActionResultSource;
 
     #[test]
     fn debug_verbosity_requires_debug_log() {
@@ -920,10 +927,9 @@ mod tests {
     #[test]
     fn retryable_pre_world_character_errors_are_classified_for_retry() {
         let outcome = process_bootstrap_event(
-            ClientViewEvent::ErrorRaised {
-                source: ErrorSource::Wire,
-                reason: ErrorReason::Character(CharacterError::LogonServerFull),
-                message: "Character error: LogonServerFull".to_string(),
+            ClientViewEvent::ActionResult {
+                source: ActionResultSource::Wire,
+                reason: ActionResultReason::Character(CharacterError::LogonServerFull),
             },
             &mut Some(ClientState::Connected),
             &mut None,
@@ -936,10 +942,9 @@ mod tests {
     #[test]
     fn fatal_pre_world_character_errors_do_not_retry() {
         let outcome = process_bootstrap_event(
-            ClientViewEvent::ErrorRaised {
-                source: ErrorSource::Wire,
-                reason: ErrorReason::Character(CharacterError::AccountInvalid),
-                message: "Character error: AccountInvalid".to_string(),
+            ClientViewEvent::ActionResult {
+                source: ActionResultSource::Wire,
+                reason: ActionResultReason::Character(CharacterError::AccountInvalid),
             },
             &mut Some(ClientState::Connected),
             &mut None,

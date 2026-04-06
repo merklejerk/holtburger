@@ -613,15 +613,16 @@ fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
         Some(ChatMessageType::Combat)
         | Some(ChatMessageType::CombatEnemy)
         | Some(ChatMessageType::CombatSelf) => ChatMessageTags::COMBAT,
-        | Some(ChatMessageType::Spellcasting)
-        | Some(ChatMessageType::Magic) => ChatMessageTags::MAGIC,
+        Some(ChatMessageType::Spellcasting) | Some(ChatMessageType::Magic) => {
+            ChatMessageTags::MAGIC
+        }
         Some(ChatMessageType::Allegiance)
         | Some(ChatMessageType::Social)
         | Some(ChatMessageType::SocialSend) => ChatMessageTags::info().guild(),
         Some(ChatMessageType::Fellowship) => ChatMessageTags::info().party(),
         Some(ChatMessageType::Help) => ChatMessageTags::warning().help(),
         Some(ChatMessageType::Abuse) => ChatMessageTags::warning(),
-        | Some(ChatMessageType::Appraisal)
+        Some(ChatMessageType::Appraisal)
         | Some(ChatMessageType::Advancement)
         | Some(ChatMessageType::Recall)
         | Some(ChatMessageType::Craft)
@@ -887,8 +888,6 @@ mod tests {
         );
 
         let message = chat.messages.last().expect("server message should log");
-        assert!(message.chat_tags.contains(ChatMessageTags::STATUS));
-        assert!(message.chat_tags.contains(ChatMessageTags::INFO));
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
         assert_eq!(message.text, "You enter combat.");
     }
@@ -918,8 +917,7 @@ mod tests {
 
         chat.handle_event(
             holtburger_core::ClientViewEvent::ServerMessage {
-                message: "Buff Dude has granted you access to their home's storage."
-                    .to_string(),
+                message: "Buff Dude has granted you access to their home's storage.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Tell.into(),
             },
             Some("Player"),
@@ -929,7 +927,10 @@ mod tests {
         assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
         assert!(message.chat_tags.contains(ChatMessageTags::TELL));
         assert!(!message.chat_tags.contains(ChatMessageTags::INFO));
-        assert_eq!(message.text, "Buff Dude has granted you access to their home's storage.");
+        assert_eq!(
+            message.text,
+            "Buff Dude has granted you access to their home's storage."
+        );
     }
 
     #[test]

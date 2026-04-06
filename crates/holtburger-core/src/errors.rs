@@ -305,6 +305,7 @@ pub fn is_actually_weenie_error(err: WeenieError) -> bool {
         | WeenieError::YouHaveSucceededUntrainingSkill
         | WeenieError::TurbineChatIsEnabled
         | WeenieError::YouHaveLeftTheChannel
+        | WeenieError::ITeleported
         | WeenieError::YouHaveEnteredTheChannel => false,
         _ => true,
     }

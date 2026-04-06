@@ -22,8 +22,6 @@ use movement::MovementSystem;
 use simulation::ClientSimulationSystem;
 use types::*;
 
-use crate::errors::is_actually_weenie_error;
-
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -233,56 +231,47 @@ impl ClientRuntime {
                         state: state.clone(),
                     });
             }
-            WireEvent::InventoryServerSaveFailed { item_guid, error } => {
+            WireEvent::InventoryServerSaveFailed {
+                item_guid: _,
+                error,
+            } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Weenie(*error, None),
-                        message: format!(
-                            "Inventory save failed for 0x{:08X}: {:?}",
-                            item_guid.0, error
-                        ),
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Weenie(*error, None),
                     });
             }
             WireEvent::WeenieError { error, parameter } => {
-                if is_actually_weenie_error(*error) {
-                    let message = crate::errors::format_weenie_error(*error, parameter.as_deref());
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::ErrorRaised {
-                            source: ErrorSource::Wire,
-                            reason: ErrorReason::Weenie(*error, parameter.clone()),
-                            message,
-                        });
-                }
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Weenie(*error, parameter.clone()),
+                    });
             }
             WireEvent::CharacterError(err) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Character(*err),
-                        message: format!("Character error: {:?}", err),
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Character(*err),
                     });
             }
             WireEvent::ClientError(msg) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Client,
-                        reason: ErrorReason::General(msg.clone()),
-                        message: msg.clone(),
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Client,
+                        reason: ActionResultReason::General(msg.clone()),
                     });
             }
             WireEvent::UseDone { error } if *error != WeenieError::None => {
-                let message = crate::errors::format_weenie_error(*error, None);
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::ErrorRaised {
-                        source: ErrorSource::Wire,
-                        reason: ErrorReason::Weenie(*error, None),
-                        message,
+                    .send(ClientViewEvent::ActionResult {
+                        source: ActionResultSource::Wire,
+                        reason: ActionResultReason::Weenie(*error, None),
                     });
             }
             WireEvent::CombatFeedback(feedback) => {
@@ -973,7 +962,7 @@ mod tests {
         client.handle_world_event(&WorldEvent::EntityReplaced(entity));
 
         while let Ok(event) = events.try_recv() {
-            assert!(!matches!(event, ClientViewEvent::ErrorRaised { .. }));
+            assert!(!matches!(event, ClientViewEvent::ActionResult { .. }));
         }
     }
 

@@ -6,16 +6,20 @@ use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
 use byteorder::{ByteOrder, LittleEndian};
-use holtburger_common::sequence::is_newer_u32;
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::messages::transport::{packet_flags, queues};
 use holtburger_protocol::messages::utils::align_offset;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+
+const MAX_CACHED_PACKETS: usize = 512;
+const MAX_RETRANSMIT_SEQUENCE_IDS: usize = 115;
+const MAX_RETRANSMIT_SEQUENCE_WINDOW: u32 = 256;
+const REQUEST_RETRANSMIT_INTERVAL: Duration = Duration::from_secs(1);
 
 #[async_trait]
 pub trait Transport: Send + Sync {
@@ -51,6 +55,19 @@ pub struct PendingMessage {
     pub received_count: u16,
 }
 
+#[derive(Clone, Debug)]
+struct CachedPacket {
+    addr: SocketAddr,
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+struct ReceivedPacket {
+    header: PacketHeader,
+    data: Vec<u8>,
+    addr: SocketAddr,
+}
+
 #[derive(Debug)]
 pub enum SessionEvent {
     Message(Vec<u8>),
@@ -72,6 +89,9 @@ pub struct Session {
     pub last_server_seq: u32,
     pub has_server_seq: bool,
     pub fragment_reassembler: HashMap<u32, PendingMessage>,
+    pending_server_packets: BTreeMap<u32, ReceivedPacket>,
+    last_request_retransmit_time: Option<Instant>,
+    cached_packets: BTreeMap<u32, CachedPacket>,
     pub capture: Option<CaptureWriter>,
     pub game_action_sequence: u32,
     pub bytes_in: u64,
@@ -92,9 +112,12 @@ impl Session {
             fragment_sequence: 1,
             fragment_id: 1,
             client_id: 0,
-            last_server_seq: 0,
+            last_server_seq: 1,
             has_server_seq: false,
             fragment_reassembler: HashMap::new(),
+            pending_server_packets: BTreeMap::new(),
+            last_request_retransmit_time: None,
+            cached_packets: BTreeMap::new(),
             capture: None,
             game_action_sequence: 0,
             bytes_in: 0,
@@ -120,8 +143,11 @@ impl Session {
             fragment_id: 1,
             fragment_reassembler: HashMap::new(),
             client_id: 0,
-            last_server_seq: 0,
+            last_server_seq: 1,
             has_server_seq: false,
+            pending_server_packets: BTreeMap::new(),
+            last_request_retransmit_time: None,
+            cached_packets: BTreeMap::new(),
             capture: None,
             game_action_sequence: 0,
             bytes_in: 0,
@@ -236,12 +262,186 @@ impl Session {
         header.pack(&mut packet);
         packet.extend_from_slice(&full_payload);
 
+        self.maybe_cache_packet(&header, &packet, addr);
+
+        self.send_raw_packet(&packet, addr).await?;
+        Ok(())
+    }
+
+    fn maybe_cache_packet(&mut self, header: &PacketHeader, packet: &[u8], addr: SocketAddr) {
+        if header.sequence < 2
+            || (header.flags & packet_flags::REQUEST_RETRANSMIT) != 0
+        {
+            return;
+        }
+
+        self.cached_packets.entry(header.sequence).or_insert(CachedPacket {
+                addr,
+                bytes: packet.to_vec(),
+            });
+
+        while self.cached_packets.len() > MAX_CACHED_PACKETS {
+            let Some((&oldest_sequence, _)) = self.cached_packets.first_key_value() else {
+                break;
+            };
+            self.cached_packets.remove(&oldest_sequence);
+        }
+    }
+
+    fn acknowledge_sequence(&mut self, sequence: u32) {
+        self.cached_packets.retain(|cached_sequence, _| *cached_sequence >= sequence);
+    }
+
+    fn current_client_sequence(&self) -> u32 {
+        self.packet_sequence.saturating_sub(1)
+    }
+
+    fn read_ack_sequence(&self, flags: u32, data: &[u8]) -> Option<u32> {
+        let offset = OptionalHeaderCursor::new(data, flags).find_flag_offset(packet_flags::ACK_SEQUENCE)?;
+        (offset + transport::ACK_SEQUENCE_SIZE <= data.len())
+            .then(|| LittleEndian::read_u32(&data[offset..offset + transport::ACK_SEQUENCE_SIZE]))
+    }
+
+    fn read_sequence_list(&self, flags: u32, data: &[u8], flag: u32) -> Option<Vec<u32>> {
+        let offset = OptionalHeaderCursor::new(data, flags).find_flag_offset(flag)?;
+        if offset + 4 > data.len() {
+            return None;
+        }
+
+        let count = LittleEndian::read_u32(&data[offset..offset + 4]) as usize;
+        let values_offset = offset + 4;
+        let values_len = count.checked_mul(4)?;
+        if values_offset + values_len > data.len() {
+            return None;
+        }
+
+        let mut sequences = Vec::with_capacity(count);
+        for index in 0..count {
+            let start = values_offset + (index * 4);
+            sequences.push(LittleEndian::read_u32(&data[start..start + 4]));
+        }
+        Some(sequences)
+    }
+
+    async fn retransmit_sequences(&mut self, sequences: &[u32]) -> Result<()> {
+        for sequence in sequences {
+            let Some(cached_packet) = self.cached_packets.get(sequence).cloned() else {
+                log::warn!("Server requested retransmit for uncached C2S packet {}", sequence);
+                continue;
+            };
+
+            log::debug!("Retransmitting cached C2S packet {}", sequence);
+            let retransmission_packet = self.build_retransmission_packet(&cached_packet.bytes)?;
+            self.send_raw_packet(&retransmission_packet, cached_packet.addr)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    fn build_retransmission_packet(&self, packet: &[u8]) -> Result<Vec<u8>> {
+        let mut offset = 0;
+        let mut header = PacketHeader::unpack(packet, &mut offset)
+            .ok_or_else(|| anyhow!("Failed to unpack cached packet header"))?;
+        let payload = &packet[HEADER_SIZE..];
+        let was_encrypted = (header.flags & packet_flags::ENCRYPTED_CHECKSUM) != 0;
+        let original_header_hash = header.calculate_checksum();
+        let payload_hash = self.calculate_payload_hash(header.flags, payload)?;
+        let isaac_key = if was_encrypted {
+            Some(payload_hash ^ header.checksum.wrapping_sub(original_header_hash))
+        } else {
+            None
+        };
+
+        header.flags |= packet_flags::RETRANSMISSION;
+        let new_header_hash = header.calculate_checksum();
+        header.checksum = if let Some(isaac_key) = isaac_key {
+            new_header_hash.wrapping_add(payload_hash ^ isaac_key)
+        } else {
+            new_header_hash.wrapping_add(payload_hash)
+        };
+
+        let mut retransmission_packet = Vec::with_capacity(packet.len());
+        header.pack(&mut retransmission_packet);
+        retransmission_packet.extend_from_slice(payload);
+        Ok(retransmission_packet)
+    }
+
+    async fn send_cleartext_control_packet(
+        &mut self,
+        mut header: PacketHeader,
+        payload: &[u8],
+        addr: SocketAddr,
+    ) -> Result<()> {
+        header.size = payload.len() as u16;
+        let payload_hash = self.calculate_payload_hash(header.flags, payload)?;
+        header.checksum = header.calculate_checksum().wrapping_add(payload_hash);
+
+        let mut packet = Vec::with_capacity(HEADER_SIZE + payload.len());
+        header.pack(&mut packet);
+        packet.extend_from_slice(payload);
+
+        self.maybe_cache_packet(&header, &packet, addr);
+        self.send_raw_packet(&packet, addr).await
+    }
+
+    async fn send_request_retransmit(&mut self, received_sequence: u32) -> Result<()> {
+        let desired_sequence = self.last_server_seq + 1;
+        let bottom = desired_sequence + 1;
+
+        if received_sequence < bottom
+            || received_sequence.saturating_sub(bottom) > MAX_RETRANSMIT_SEQUENCE_WINDOW
+        {
+            return Err(anyhow!(
+                "Abnormal server packet sequence received: expected around {}, got {}",
+                desired_sequence,
+                received_sequence
+            ));
+        }
+
+        let mut needed_sequences = Vec::with_capacity(MAX_RETRANSMIT_SEQUENCE_IDS);
+        needed_sequences.push(desired_sequence);
+        for sequence in bottom..received_sequence {
+            if !self.pending_server_packets.contains_key(&sequence) {
+                needed_sequences.push(sequence);
+                if needed_sequences.len() >= MAX_RETRANSMIT_SEQUENCE_IDS {
+                    break;
+                }
+            }
+        }
+
+        let mut payload = Vec::with_capacity(4 + (needed_sequences.len() * 4));
+        payload.extend_from_slice(&(needed_sequences.len() as u32).to_le_bytes());
+        for sequence in &needed_sequences {
+            payload.extend_from_slice(&sequence.to_le_bytes());
+        }
+
+        log::debug!("Requesting retransmit of S2C packets {:?}", needed_sequences);
+        self.send_cleartext_control_packet(
+            PacketHeader {
+                sequence: self.current_client_sequence(),
+                flags: packet_flags::REQUEST_RETRANSMIT,
+                id: self.client_id,
+                ..Default::default()
+            },
+            &payload,
+            self.server_addr,
+        )
+        .await?;
+        self.last_request_retransmit_time = Some(Instant::now());
+        Ok(())
+    }
+
+    async fn send_raw_packet(&mut self, packet: &[u8], addr: SocketAddr) -> Result<()> {
+        let mut offset = 0;
+        let header = PacketHeader::unpack(packet, &mut offset);
+
         log::trace!(
             ">>> Outbound to {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
             addr,
-            header.sequence,
-            header.id,
-            header.flags,
+            header.as_ref().map_or(0, |header| header.sequence),
+            header.as_ref().map_or(0, |header| header.id),
+            header.as_ref().map_or(0, |header| header.flags),
             packet.len(),
             packet
         );
@@ -346,20 +546,26 @@ impl Session {
     }
 
     pub async fn send_ack(&mut self, sequence: u32) -> Result<()> {
-        let header = PacketHeader {
-            flags: packet_flags::ACK_SEQUENCE,
-            sequence: 0,
-            id: self.client_id,
-            ..Default::default()
-        };
-
         let mut payload = vec![0u8; 4];
         LittleEndian::write_u32(&mut payload[0..4], sequence);
 
-        self.send_packet(header, &payload).await
+        self.send_cleartext_control_packet(
+            PacketHeader {
+                flags: packet_flags::ACK_SEQUENCE,
+                sequence: self.current_client_sequence(),
+                id: self.client_id,
+                ..Default::default()
+            },
+            &payload,
+            self.server_addr,
+        )
+        .await
     }
 
-    pub async fn recv_packet(&mut self, buf: &mut [u8]) -> Result<(PacketHeader, Vec<u8>)> {
+    async fn recv_packet_with_addr(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Result<(PacketHeader, Vec<u8>, SocketAddr)> {
         let (len, addr) = self.transport.recv_from(buf).await?;
         if len < HEADER_SIZE {
             return Err(anyhow!("Packet too short"));
@@ -387,9 +593,27 @@ impl Session {
             &buf[..len]
         );
 
-        if is_newer_u32(header.sequence, self.last_server_seq) {
-            self.last_server_seq = header.sequence;
-            self.has_server_seq = true;
+        if (header.flags & packet_flags::ACK_SEQUENCE) != 0
+            && let Some(sequence) = self.read_ack_sequence(header.flags, &data)
+        {
+            self.acknowledge_sequence(sequence);
+        }
+
+        if (header.flags & packet_flags::REQUEST_RETRANSMIT) != 0
+            && let Some(sequences) = self.read_sequence_list(
+                header.flags,
+                &data,
+                packet_flags::REQUEST_RETRANSMIT,
+            )
+        {
+            self.retransmit_sequences(&sequences).await?;
+        }
+
+        if (header.flags & packet_flags::REJECT_RETRANSMIT) != 0
+            && let Some(sequences) =
+                self.read_sequence_list(header.flags, &data, packet_flags::REJECT_RETRANSMIT)
+        {
+            log::warn!("Server rejected retransmit for S2C sequences: {:?}", sequences);
         }
 
         if header.flags & packet_flags::ENCRYPTED_CHECKSUM != 0
@@ -398,19 +622,95 @@ impl Session {
             isaac.consume_key();
         }
 
-        // Handle Transport-layer housekeeping (ACKs)
-        if header.sequence > 0 && (header.flags & packet_flags::ACK_SEQUENCE == 0) {
-            let _ = self.send_ack(header.sequence).await;
+        Ok((header, data, addr))
+    }
+
+    pub async fn recv_packet(&mut self, buf: &mut [u8]) -> Result<(PacketHeader, Vec<u8>)> {
+        let (header, data, _) = self.recv_packet_with_addr(buf).await?;
+        Ok((header, data))
+    }
+
+    fn should_order_server_packet(&self, header: &PacketHeader) -> bool {
+        header.sequence != 0 && header.flags != packet_flags::ACK_SEQUENCE
+    }
+
+    fn next_expected_server_sequence(&self) -> u32 {
+        self.last_server_seq + 1
+    }
+
+    fn take_pending_server_packet(&mut self) -> Option<ReceivedPacket> {
+        let expected = self.next_expected_server_sequence();
+        self.pending_server_packets.remove(&expected)
+    }
+
+    async fn finalize_ordered_server_packet(&mut self, packet: &ReceivedPacket) -> Result<()> {
+        if self.should_order_server_packet(&packet.header) {
+            self.last_server_seq = packet.header.sequence;
+            self.has_server_seq = true;
+        }
+
+        if packet.header.sequence > 0 && (packet.header.flags & packet_flags::ACK_SEQUENCE == 0) {
+            self.send_ack(packet.header.sequence).await?;
         }
 
         // ECHO_REQUEST Handling
-        if header.flags & packet_flags::ECHO_REQUEST != 0 {
-            let mut resp = header.clone();
+        if packet.header.flags & packet_flags::ECHO_REQUEST != 0 {
+            let mut resp = packet.header.clone();
             resp.flags = packet_flags::ECHO_RESPONSE;
-            let _ = self.send_packet_to_addr(resp, &[], addr).await;
+            let _ = self.send_packet_to_addr(resp, &[], packet.addr).await;
         }
 
-        Ok((header, data))
+        Ok(())
+    }
+
+    async fn recv_ordered_packet(&mut self) -> Result<ReceivedPacket> {
+        loop {
+            if let Some(packet) = self.take_pending_server_packet() {
+                self.finalize_ordered_server_packet(&packet).await?;
+                return Ok(packet);
+            }
+
+            let mut buf = [0u8; 1024 * 128];
+            let (header, data, addr) = self.recv_packet_with_addr(&mut buf).await?;
+            let packet = ReceivedPacket { header, data, addr };
+
+            if !self.should_order_server_packet(&packet.header) {
+                self.finalize_ordered_server_packet(&packet).await?;
+                return Ok(packet);
+            }
+
+            let expected = self.next_expected_server_sequence();
+            if packet.header.sequence <= self.last_server_seq {
+                log::debug!(
+                    "Server packet {} received again; last ordered sequence is {}",
+                    packet.header.sequence,
+                    self.last_server_seq
+                );
+                continue;
+            }
+
+            if packet.header.sequence > expected {
+                let received_sequence = packet.header.sequence;
+                self.pending_server_packets
+                    .entry(received_sequence)
+                    .or_insert(packet);
+
+                let should_request_retransmit = expected + 2 <= received_sequence
+                    && self
+                        .last_request_retransmit_time
+                        .is_none_or(|last_request| {
+                            Instant::now().duration_since(last_request)
+                                > REQUEST_RETRANSMIT_INTERVAL
+                        });
+                if should_request_retransmit {
+                    self.send_request_retransmit(received_sequence).await?;
+                }
+                continue;
+            }
+
+            self.finalize_ordered_server_packet(&packet).await?;
+            return Ok(packet);
+        }
     }
 
     pub fn get_payload_offset(&self, flags: u32, data: &[u8]) -> usize {
@@ -419,8 +719,9 @@ impl Session {
 
     /// Higher-level receiver that handles fragmentation and returns complete message payloads or handshake events.
     pub async fn recv_message(&mut self) -> Result<Vec<SessionEvent>> {
-        let mut buf = [0u8; 1024 * 128];
-        let (header, data) = self.recv_packet(&mut buf).await?;
+        let packet = self.recv_ordered_packet().await?;
+        let header = packet.header;
+        let data = packet.data;
         let mut events = Vec::new();
 
         // 1. Check for Handshake Request (Seeds/NetID from Server)
@@ -488,6 +789,60 @@ impl Session {
 mod tests {
     use super::*;
     use holtburger_protocol::messages::packet_flags;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[derive(Clone)]
+    struct ScriptedTransport {
+        sent: Arc<Mutex<Vec<Vec<u8>>>>,
+        recv: Arc<Mutex<Vec<Vec<u8>>>>,
+        recv_addr: SocketAddr,
+    }
+
+    impl ScriptedTransport {
+        fn new(recv_packets: Vec<Vec<u8>>, recv_addr: SocketAddr) -> Self {
+            Self {
+                sent: Arc::new(Mutex::new(Vec::new())),
+                recv: Arc::new(Mutex::new(recv_packets)),
+                recv_addr,
+            }
+        }
+
+        async fn sent_packets(&self) -> Vec<Vec<u8>> {
+            self.sent.lock().await.clone()
+        }
+    }
+
+    #[async_trait]
+    impl Transport for ScriptedTransport {
+        async fn send_to(&self, buf: &[u8], _addr: SocketAddr) -> Result<usize> {
+            self.sent.lock().await.push(buf.to_vec());
+            Ok(buf.len())
+        }
+
+        async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+            let mut recv = self.recv.lock().await;
+            if recv.is_empty() {
+                return Err(anyhow!("Empty"));
+            }
+
+            let data = recv.remove(0);
+            buf[..data.len()].copy_from_slice(&data);
+            Ok((data.len(), self.recv_addr))
+        }
+    }
+
+    fn build_transport_packet(header: PacketHeader, payload: &[u8]) -> Vec<u8> {
+        let mut packet = Vec::new();
+        header.pack(&mut packet);
+        packet.extend_from_slice(payload);
+        packet
+    }
+
+    fn unpack_header(packet: &[u8]) -> PacketHeader {
+        let mut offset = 0;
+        PacketHeader::unpack(packet, &mut offset).expect("packet header should unpack")
+    }
 
     #[tokio::test]
     async fn test_payload_offset_handshake() {
@@ -617,9 +972,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_fragment_packet_unaligned() {
-        use std::sync::Arc;
-        use tokio::sync::Mutex;
-
         struct MultiFragMock(Arc<Mutex<Vec<Vec<u8>>>>);
         #[async_trait]
         impl Transport for MultiFragMock {
@@ -646,6 +998,8 @@ mod tests {
         let q = Arc::new(Mutex::new(vec![data]));
         let mut session = Session::new_test();
         session.transport = Box::new(MultiFragMock(q));
+        session.last_server_seq = 112;
+        session.has_server_seq = true;
 
         let events = session.recv_message().await.unwrap();
 
@@ -670,5 +1024,243 @@ mod tests {
                 panic!("Expected SessionEvent::Message");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_ack_sequence_prunes_cached_packets() {
+        let transport = ScriptedTransport::new(
+            vec![build_transport_packet(
+                PacketHeader {
+                    sequence: 11,
+                    flags: packet_flags::ACK_SEQUENCE,
+                    size: 4,
+                    ..Default::default()
+                },
+                &6u32.to_le_bytes(),
+            )],
+            "127.0.0.1:9001".parse().unwrap(),
+        );
+
+        let mut session = Session::new_test();
+        session.transport = Box::new(transport);
+
+        session
+            .send_packet(
+                PacketHeader {
+                    sequence: 5,
+                    flags: packet_flags::BLOB_FRAGMENTS,
+                    id: session.client_id,
+                    ..Default::default()
+                },
+                &[1, 2, 3, 4],
+            )
+            .await
+            .unwrap();
+        session
+            .send_packet(
+                PacketHeader {
+                    sequence: 6,
+                    flags: packet_flags::BLOB_FRAGMENTS,
+                    id: session.client_id,
+                    ..Default::default()
+                },
+                &[5, 6, 7, 8],
+            )
+            .await
+            .unwrap();
+
+        assert!(session.cached_packets.contains_key(&5));
+        assert!(session.cached_packets.contains_key(&6));
+
+        let mut buf = [0u8; 1024];
+        let _ = session.recv_packet(&mut buf).await.unwrap();
+
+        assert!(!session.cached_packets.contains_key(&5));
+        assert!(session.cached_packets.contains_key(&6));
+    }
+
+    #[tokio::test]
+    async fn test_request_retransmit_replays_cached_packet() {
+        let requested_sequence = 9u32;
+        let retransmit_payload = [1u32.to_le_bytes(), requested_sequence.to_le_bytes()].concat();
+        let transport = ScriptedTransport::new(
+            vec![build_transport_packet(
+                PacketHeader {
+                    sequence: 12,
+                    flags: packet_flags::REQUEST_RETRANSMIT,
+                    size: retransmit_payload.len() as u16,
+                    ..Default::default()
+                },
+                &retransmit_payload,
+            )],
+            "127.0.0.1:9001".parse().unwrap(),
+        );
+        let sent_handle = transport.clone();
+
+        let mut session = Session::new_test();
+        session.transport = Box::new(transport);
+
+        session
+            .send_packet(
+                PacketHeader {
+                    sequence: requested_sequence,
+                    flags: packet_flags::BLOB_FRAGMENTS,
+                    id: session.client_id,
+                    ..Default::default()
+                },
+                &[0xAA, 0xBB, 0xCC, 0xDD],
+            )
+            .await
+            .unwrap();
+
+        let original_packet = sent_handle.sent_packets().await[0].clone();
+
+        let mut buf = [0u8; 1024];
+        let _ = session.recv_packet(&mut buf).await.unwrap();
+
+        let sent_packets = sent_handle.sent_packets().await;
+        assert_eq!(sent_packets.len(), 2);
+
+        let original_header = unpack_header(&original_packet);
+        let retransmit_header = unpack_header(&sent_packets[1]);
+        assert_eq!(retransmit_header.sequence, original_header.sequence);
+        assert_eq!(retransmit_header.id, original_header.id);
+        assert_eq!(
+            retransmit_header.flags,
+            original_header.flags | packet_flags::RETRANSMISSION
+        );
+    }
+
+    #[tokio::test]
+    async fn test_out_of_order_server_packet_requests_retransmit() {
+        let transport = ScriptedTransport::new(
+            vec![
+                build_transport_packet(
+                    PacketHeader {
+                        sequence: 4,
+                        ..Default::default()
+                    },
+                    &[],
+                ),
+                build_transport_packet(
+                    PacketHeader {
+                        sequence: 2,
+                        ..Default::default()
+                    },
+                    &[],
+                ),
+            ],
+            "127.0.0.1:9001".parse().unwrap(),
+        );
+        let sent_handle = transport.clone();
+
+        let mut session = Session::new_test();
+        session.transport = Box::new(transport);
+        session.packet_sequence = 5;
+        session.last_server_seq = 1;
+        session.has_server_seq = true;
+
+        let events = session.recv_message().await.unwrap();
+        assert!(events.is_empty());
+
+        let sent_packets = sent_handle.sent_packets().await;
+        let retransmit_packet = sent_packets
+            .iter()
+            .find(|packet| (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0)
+            .expect("missing retransmit request packet");
+        let retransmit_header = unpack_header(retransmit_packet);
+        assert_eq!(retransmit_header.sequence, 4);
+        assert_eq!(
+            retransmit_header.flags,
+            packet_flags::REQUEST_RETRANSMIT
+        );
+
+        let payload = &retransmit_packet[HEADER_SIZE..];
+        assert_eq!(LittleEndian::read_u32(&payload[0..4]), 2);
+        assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
+        assert_eq!(LittleEndian::read_u32(&payload[8..12]), 3);
+    }
+
+    #[tokio::test]
+    async fn test_first_server_packet_sequence_two_does_not_request_retransmit() {
+        let transport = ScriptedTransport::new(
+            vec![build_transport_packet(
+                PacketHeader {
+                    sequence: 2,
+                    flags: packet_flags::TIME_SYNC,
+                    size: 8,
+                    ..Default::default()
+                },
+                &0.0f64.to_le_bytes(),
+            )],
+            "127.0.0.1:9001".parse().unwrap(),
+        );
+        let sent_handle = transport.clone();
+
+        let mut session = Session::new_test();
+        session.transport = Box::new(transport);
+
+        let events = session.recv_message().await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], SessionEvent::TimeSync(_)));
+
+        let sent_packets = sent_handle.sent_packets().await;
+        assert!(sent_packets.iter().all(|packet| {
+            (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) == 0
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
+        let requested_sequence = 9u32;
+        let retransmit_payload = [1u32.to_le_bytes(), requested_sequence.to_le_bytes()].concat();
+        let transport = ScriptedTransport::new(
+            vec![build_transport_packet(
+                PacketHeader {
+                    sequence: 50,
+                    flags: packet_flags::REQUEST_RETRANSMIT,
+                    size: retransmit_payload.len() as u16,
+                    ..Default::default()
+                },
+                &retransmit_payload,
+            )],
+            "127.0.0.1:9001".parse().unwrap(),
+        );
+        let sent_handle = transport.clone();
+
+        let mut session = Session::new_test();
+        session.transport = Box::new(transport);
+        session.has_server_seq = true;
+        session.last_server_seq = 42;
+
+        session
+            .send_packet(
+                PacketHeader {
+                    sequence: requested_sequence,
+                    flags: packet_flags::BLOB_FRAGMENTS,
+                    id: session.client_id,
+                    ..Default::default()
+                },
+                &[0xAA, 0xBB, 0xCC, 0xDD],
+            )
+            .await
+            .unwrap();
+
+        let original_packet = sent_handle.sent_packets().await[0].clone();
+        let original_header = unpack_header(&original_packet);
+        assert_ne!(original_header.flags & packet_flags::ACK_SEQUENCE, 0);
+
+        let mut buf = [0u8; 1024];
+        let _ = session.recv_packet(&mut buf).await.unwrap();
+
+        let sent_packets = sent_handle.sent_packets().await;
+        assert_eq!(sent_packets.len(), 2);
+
+        let retransmit_header = unpack_header(&sent_packets[1]);
+        assert_eq!(retransmit_header.sequence, original_header.sequence);
+        assert_eq!(
+            retransmit_header.flags,
+            original_header.flags | packet_flags::RETRANSMISSION
+        );
     }
 }

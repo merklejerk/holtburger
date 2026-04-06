@@ -20,6 +20,8 @@ use crate::utils::{
     format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
 };
 
+const MAX_NEARBY_LANDBLOCK_DISTANCE: u8 = 3;
+
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {
     pub selected_index: usize,
@@ -83,6 +85,19 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
                 .or_default()
                 .push(e.guid);
         }
+    }
+
+    if let Some(player_pos) = player_pos {
+        roots.retain(|guid| {
+            let entity = &entities[guid];
+            let entity_pos = data
+                .runtime_position_for_guid(*guid)
+                .unwrap_or(entity.position);
+
+            entity_pos
+                .landblock_chebyshev_distance_to(&player_pos)
+                .is_some_and(|distance| distance <= MAX_NEARBY_LANDBLOCK_DISTANCE)
+        });
     }
 
     // Sort roots by distance
@@ -522,5 +537,47 @@ impl TabController for NearbyTab {
                 Some(UpdateResult::new().with_redraw(true))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::math::{Quaternion, Vector3};
+    use holtburger_common::position::WorldPosition;
+
+    fn make_entity(guid: u32, landblock_id: u32, name: &str) -> Entity {
+        Entity::new(
+            Guid(guid),
+            name.to_string(),
+            WorldPosition {
+                landblock_id: Guid(landblock_id),
+                coords: Vector3::zero(),
+                rotation: Quaternion::identity(),
+            },
+        )
+    }
+
+    #[test]
+    fn visible_entities_excludes_roots_beyond_three_landblocks() {
+        let mut data = GameData::default();
+        data.player_guid = Some(Guid(0x0100_0001));
+        data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x0101_0000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        });
+
+        let near = make_entity(0x0200_0001, 0x0401_0000, "Near");
+        let far = make_entity(0x0200_0002, 0x0501_0000, "Far");
+
+        data.entities.insert(near.guid, near);
+        data.entities.insert(far.guid, far);
+
+        let tab = NearbyTab::default();
+        let visible = tab.visible_entities(&data);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].0.guid, Guid(0x0200_0001));
     }
 }

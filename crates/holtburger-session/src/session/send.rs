@@ -1,4 +1,4 @@
-use super::types::{PendingMessage, Session};
+use super::types::{PendingControlPacket, PendingMessage, Session};
 use crate::capture::Direction;
 use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
@@ -7,8 +7,15 @@ use holtburger_protocol::messages::transport::{self, packet_flags, queues};
 use holtburger_protocol::messages::utils::align_offset;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
+use std::time::Instant;
 
 impl Session {
+    fn unpack_packet_header(packet: &[u8]) -> Result<PacketHeader> {
+        let mut offset = 0;
+        PacketHeader::unpack(packet, &mut offset)
+            .ok_or_else(|| anyhow!("Failed to unpack packet header"))
+    }
+
     pub(crate) fn calculate_payload_hash(&self, flags: u32, payload: &[u8]) -> Result<u32> {
         let mut total_payload_checksum: u32 = 0;
 
@@ -53,17 +60,7 @@ impl Session {
         Ok(total_payload_checksum)
     }
 
-    pub async fn send_packet(&mut self, header: PacketHeader, payload: &[u8]) -> Result<()> {
-        self.send_packet_to_addr(header, payload, self.server_addr)
-            .await
-    }
-
-    pub async fn send_packet_to_addr(
-        &mut self,
-        mut header: PacketHeader,
-        payload: &[u8],
-        addr: std::net::SocketAddr,
-    ) -> Result<()> {
+    fn build_packet_bytes(&mut self, mut header: PacketHeader, payload: &[u8]) -> Result<Vec<u8>> {
         let mut full_payload = Vec::new();
         let caller_provided_ack = (header.flags & packet_flags::ACK_SEQUENCE) != 0;
 
@@ -107,17 +104,14 @@ impl Session {
         let mut packet = Vec::with_capacity(transport::HEADER_SIZE + full_payload.len());
         header.pack(&mut packet);
         packet.extend_from_slice(&full_payload);
-
-        self.maybe_cache_packet(&header, &packet, addr);
-        self.send_raw_packet(&packet, addr).await
+        Ok(packet)
     }
 
-    pub(crate) async fn send_cleartext_control_packet(
-        &mut self,
+    fn build_cleartext_control_packet_bytes(
+        &self,
         mut header: PacketHeader,
         payload: &[u8],
-        addr: std::net::SocketAddr,
-    ) -> Result<()> {
+    ) -> Result<Vec<u8>> {
         header.size = payload.len() as u16;
         let payload_hash = self.calculate_payload_hash(header.flags, payload)?;
         header.checksum = header.calculate_checksum().wrapping_add(payload_hash);
@@ -125,9 +119,105 @@ impl Session {
         let mut packet = Vec::with_capacity(transport::HEADER_SIZE + payload.len());
         header.pack(&mut packet);
         packet.extend_from_slice(payload);
+        Ok(packet)
+    }
 
+    pub(crate) fn queue_prebuilt_control_packet(
+        &mut self,
+        packet: Vec<u8>,
+        addr: std::net::SocketAddr,
+        ready_at: Instant,
+    ) {
+        self.pending_control_packets.push(PendingControlPacket {
+            addr,
+            ready_at,
+            bytes: packet,
+        });
+    }
+
+    pub(crate) fn queue_packet_to_addr(
+        &mut self,
+        header: PacketHeader,
+        payload: &[u8],
+        addr: std::net::SocketAddr,
+        ready_at: Instant,
+    ) -> Result<()> {
+        let packet = self.build_packet_bytes(header, payload)?;
+        self.queue_prebuilt_control_packet(packet, addr, ready_at);
+        Ok(())
+    }
+
+    pub(crate) fn queue_cleartext_control_packet(
+        &mut self,
+        header: PacketHeader,
+        payload: &[u8],
+        addr: std::net::SocketAddr,
+        ready_at: Instant,
+    ) -> Result<()> {
+        let packet = self.build_cleartext_control_packet_bytes(header, payload)?;
+        self.queue_prebuilt_control_packet(packet, addr, ready_at);
+        Ok(())
+    }
+
+    pub(crate) fn next_pending_control_deadline(&self) -> Option<Instant> {
+        self.pending_control_packets
+            .iter()
+            .map(|packet| packet.ready_at)
+            .min()
+    }
+
+    pub(crate) async fn flush_pending_control_packets(&mut self) -> Result<bool> {
+        let mut flushed_any = false;
+
+        loop {
+            let now = Instant::now();
+            let Some(index) = self
+                .pending_control_packets
+                .iter()
+                .position(|packet| packet.ready_at <= now)
+            else {
+                return Ok(flushed_any);
+            };
+
+            let pending = self.pending_control_packets[index].clone();
+            self.send_raw_packet(&pending.bytes, pending.addr).await?;
+
+            let header = Self::unpack_packet_header(&pending.bytes)?;
+            self.maybe_cache_packet(&header, &pending.bytes, pending.addr);
+            self.pending_control_packets.remove(index);
+            flushed_any = true;
+        }
+    }
+
+    pub async fn send_packet(&mut self, header: PacketHeader, payload: &[u8]) -> Result<()> {
+        self.send_packet_to_addr(header, payload, self.server_addr)
+            .await
+    }
+
+    pub async fn send_packet_to_addr(
+        &mut self,
+        header: PacketHeader,
+        payload: &[u8],
+        addr: std::net::SocketAddr,
+    ) -> Result<()> {
+        let packet = self.build_packet_bytes(header, payload)?;
+        self.send_raw_packet(&packet, addr).await?;
+        let header = Self::unpack_packet_header(&packet)?;
         self.maybe_cache_packet(&header, &packet, addr);
-        self.send_raw_packet(&packet, addr).await
+        Ok(())
+    }
+
+    pub(crate) async fn send_cleartext_control_packet(
+        &mut self,
+        header: PacketHeader,
+        payload: &[u8],
+        addr: std::net::SocketAddr,
+    ) -> Result<()> {
+        let packet = self.build_cleartext_control_packet_bytes(header, payload)?;
+        self.send_raw_packet(&packet, addr).await?;
+        let header = Self::unpack_packet_header(&packet)?;
+        self.maybe_cache_packet(&header, &packet, addr);
+        Ok(())
     }
 
     pub(crate) async fn send_raw_packet(
@@ -214,6 +304,23 @@ impl Session {
             self.server_addr,
         )
         .await
+    }
+
+    pub(crate) fn queue_ack(&mut self, sequence: u32) -> Result<()> {
+        let mut payload = vec![0u8; 4];
+        LittleEndian::write_u32(&mut payload[0..4], sequence);
+
+        self.queue_cleartext_control_packet(
+            PacketHeader {
+                flags: packet_flags::ACK_SEQUENCE,
+                sequence: self.current_client_sequence(),
+                id: self.client_id,
+                ..Default::default()
+            },
+            &payload,
+            self.server_addr,
+            Instant::now(),
+        )
     }
 
     pub(crate) fn process_fragment(

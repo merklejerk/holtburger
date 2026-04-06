@@ -6,6 +6,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
+use std::time::Instant;
 
 impl Session {
     async fn recv_packet_with_addr(
@@ -49,7 +50,7 @@ impl Session {
             && let Some(sequences) =
                 self.read_sequence_list(header.flags, &data, packet_flags::REQUEST_RETRANSMIT)
         {
-            self.retransmit_sequences(&sequences).await?;
+            self.retransmit_sequences(&sequences)?;
         }
 
         if (header.flags & packet_flags::REJECT_RETRANSMIT) != 0
@@ -89,20 +90,20 @@ impl Session {
         self.pending_server_packets.remove(&expected)
     }
 
-    async fn finalize_ordered_server_packet(&mut self, packet: &ReceivedPacket) -> Result<()> {
+    fn finalize_ordered_server_packet(&mut self, packet: &ReceivedPacket) -> Result<()> {
         if self.should_order_server_packet(&packet.header) {
             self.last_server_seq = packet.header.sequence;
             self.has_server_seq = true;
         }
 
         if packet.header.sequence > 0 && (packet.header.flags & packet_flags::ACK_SEQUENCE == 0) {
-            self.send_ack(packet.header.sequence).await?;
+            self.queue_ack(packet.header.sequence)?;
         }
 
         if packet.header.flags & packet_flags::ECHO_REQUEST != 0 {
             let mut resp = packet.header.clone();
             resp.flags = packet_flags::ECHO_RESPONSE;
-            let _ = self.send_packet_to_addr(resp, &[], packet.addr).await;
+            self.queue_packet_to_addr(resp, &[], packet.addr, Instant::now())?;
         }
 
         Ok(())
@@ -111,7 +112,7 @@ impl Session {
     async fn recv_ordered_packet(&mut self) -> Result<ReceivedPacket> {
         loop {
             if let Some(packet) = self.take_pending_server_packet() {
-                self.finalize_ordered_server_packet(&packet).await?;
+                self.finalize_ordered_server_packet(&packet)?;
                 return Ok(packet);
             }
 
@@ -120,7 +121,7 @@ impl Session {
             let packet = ReceivedPacket { header, data, addr };
 
             if !self.should_order_server_packet(&packet.header) {
-                self.finalize_ordered_server_packet(&packet).await?;
+                self.finalize_ordered_server_packet(&packet)?;
                 return Ok(packet);
             }
 
@@ -141,13 +142,34 @@ impl Session {
                     .or_insert(packet);
 
                 if self.should_request_retransmit(expected, received_sequence) {
-                    self.send_request_retransmit(received_sequence).await?;
+                    self.send_request_retransmit(received_sequence)?;
                 }
                 continue;
             }
 
-            self.finalize_ordered_server_packet(&packet).await?;
+            self.finalize_ordered_server_packet(&packet)?;
             return Ok(packet);
+        }
+    }
+
+    async fn recv_next_packet_or_control(&mut self) -> Result<ReceivedPacket> {
+        loop {
+            if self.flush_pending_control_packets().await? {
+                continue;
+            }
+
+            if let Some(deadline) = self.next_pending_control_deadline() {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {
+                        continue;
+                    }
+                    packet = self.recv_ordered_packet() => {
+                        return packet;
+                    }
+                }
+            } else {
+                return self.recv_ordered_packet().await;
+            }
         }
     }
 
@@ -156,7 +178,7 @@ impl Session {
     }
 
     pub async fn recv_message(&mut self) -> Result<Vec<SessionEvent>> {
-        let packet = self.recv_ordered_packet().await?;
+        let packet = self.recv_next_packet_or_control().await?;
         let header = packet.header;
         let data = packet.data;
         let mut events = Vec::new();
@@ -166,7 +188,7 @@ impl Session {
             if offset + transport::CONNECT_REQUEST_SIZE <= data.len() {
                 let crd = ConnectRequestData::unpack(&data, &mut offset)
                     .ok_or_else(|| anyhow!("Failed to unpack connect request"))?;
-                let server_time = self.handle_handshake_request(crd);
+                let server_time = self.handle_handshake_request(crd)?;
                 events.push(SessionEvent::TimeSync(server_time));
             }
         }

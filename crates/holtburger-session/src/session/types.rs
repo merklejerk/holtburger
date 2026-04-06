@@ -65,10 +65,10 @@ pub(crate) struct ReceivedPacket {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct PendingHandshakeResponse {
+pub(crate) struct PendingControlPacket {
     pub(crate) addr: SocketAddr,
     pub(crate) ready_at: Instant,
-    pub(crate) payload: Vec<u8>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -91,7 +91,7 @@ pub struct Session {
     pub has_server_seq: bool,
     pub fragment_reassembler: HashMap<u32, PendingMessage>,
     pub(crate) pending_server_packets: BTreeMap<u32, ReceivedPacket>,
-    pub(crate) pending_handshake_response: Option<PendingHandshakeResponse>,
+    pub(crate) pending_control_packets: Vec<PendingControlPacket>,
     pub(crate) last_request_retransmit_time: Option<Instant>,
     pub(crate) cached_packets: BTreeMap<u32, CachedPacket>,
     pub capture: Option<CaptureWriter>,

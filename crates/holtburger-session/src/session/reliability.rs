@@ -78,7 +78,7 @@ impl Session {
         Some(sequences)
     }
 
-    pub(crate) async fn retransmit_sequences(&mut self, sequences: &[u32]) -> Result<()> {
+    pub(crate) fn retransmit_sequences(&mut self, sequences: &[u32]) -> Result<()> {
         for sequence in sequences {
             let Some(cached_packet) = self.cached_packets.get(sequence).cloned() else {
                 log::warn!(
@@ -90,8 +90,11 @@ impl Session {
 
             log::debug!("Retransmitting cached C2S packet {}", sequence);
             let retransmission_packet = self.build_retransmission_packet(&cached_packet.bytes)?;
-            self.send_raw_packet(&retransmission_packet, cached_packet.addr)
-                .await?;
+            self.queue_prebuilt_control_packet(
+                retransmission_packet,
+                cached_packet.addr,
+                Instant::now(),
+            );
         }
 
         Ok(())
@@ -125,7 +128,7 @@ impl Session {
         Ok(retransmission_packet)
     }
 
-    pub(crate) async fn send_request_retransmit(&mut self, received_sequence: u32) -> Result<()> {
+    pub(crate) fn send_request_retransmit(&mut self, received_sequence: u32) -> Result<()> {
         let desired_sequence = self.last_server_seq + 1;
         let bottom = desired_sequence + 1;
 
@@ -160,7 +163,7 @@ impl Session {
             "Requesting retransmit of S2C packets {:?}",
             needed_sequences
         );
-        self.send_cleartext_control_packet(
+        self.queue_cleartext_control_packet(
             PacketHeader {
                 sequence: self.current_client_sequence(),
                 flags: packet_flags::REQUEST_RETRANSMIT,
@@ -169,8 +172,8 @@ impl Session {
             },
             &payload,
             self.server_addr,
-        )
-        .await?;
+            Instant::now(),
+        )?;
         self.last_request_retransmit_time = Some(Instant::now());
         Ok(())
     }

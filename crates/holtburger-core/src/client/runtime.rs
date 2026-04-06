@@ -99,8 +99,6 @@ impl ClientRuntime {
                 break;
             }
 
-            self.session.flush_pending_handshake_response().await?;
-
             tokio::select! {
                 _ = net_tick.tick() => {
                     let now = Instant::now();

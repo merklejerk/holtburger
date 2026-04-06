@@ -96,6 +96,7 @@
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
+- [ ] `/options` syntax is awkward.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

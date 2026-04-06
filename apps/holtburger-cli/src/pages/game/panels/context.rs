@@ -4,6 +4,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{List, ListItem};
 
 use crate::pages::game::panels::dashboard::{assess, debug};
+use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{ContextView, InspectTarget};
@@ -13,15 +14,45 @@ use holtburger_world::book::BookData;
 use holtburger_world::inspect::InspectableObject;
 
 // In a fully dismantled view state, Context State should be passed directly here.
-pub fn render_context_pane(
-    f: &mut Frame,
-    data: &GameData,
-    context_buffer: &[ratatui::text::Line<'static>],
-    context_view: &ContextView,
-    scroll_offset: usize,
-    is_focused: bool,
-    area: Rect,
-) {
+pub struct ContextPaneRenderArgs<'a> {
+    pub data: &'a GameData,
+    pub context_buffer: &'a [ratatui::text::Line<'static>],
+    pub context_view: &'a ContextView,
+    pub logopolis: Option<&'a LogopolisState>,
+    pub scroll_offset: usize,
+    pub is_focused: bool,
+    pub area: Rect,
+}
+
+pub fn render_context_pane(f: &mut Frame, args: ContextPaneRenderArgs<'_>) {
+    let ContextPaneRenderArgs {
+        data,
+        context_buffer,
+        context_view,
+        logopolis,
+        scroll_offset,
+        is_focused,
+        area,
+    } = args;
+
+    if let Some(game) = logopolis {
+        let height = area.height.saturating_sub(2) as usize;
+        let width = area.width.saturating_sub(2) as usize;
+        let ctx_items: Vec<ListItem<'static>> = game
+            .render_lines(width, height)
+            .into_iter()
+            .map(ListItem::new)
+            .collect();
+
+        let ctx_block = pane_block(is_focused)
+            .title(format!(" {} ", game.score_title()))
+            .title_style(pane_title_style(is_focused));
+
+        let ctx_list = List::new(ctx_items).block(ctx_block);
+        f.render_widget(ctx_list, area);
+        return;
+    }
+
     let height = area.height.saturating_sub(2) as usize;
     let display_lines = build_context_display_lines(
         context_buffer,
@@ -58,6 +89,7 @@ pub fn render_context_pane(
         ContextView::Enchantment(_) => "Enchantment Details".to_string(),
         ContextView::DebugSpell(_) => "Debug Information".to_string(),
         ContextView::DebugEnchantment(_) => "Debug Information".to_string(),
+        ContextView::Logopolis => "0 - 0".to_string(),
     };
 
     let ctx_title = format!(" {} ", base_title);
@@ -235,10 +267,16 @@ fn resolve_inspectable_target<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::{book_author_name, build_book_content, build_context_display_lines};
+    use super::{
+        book_author_name, build_book_content, build_context_display_lines, render_context_pane,
+    };
+    use crate::pages::game::GameData;
+    use crate::pages::game::panels::logopolis::LogopolisState;
     use crate::types::ContextView;
     use holtburger_common::Guid;
     use holtburger_world::book::{BookData, BookPage};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
     use ratatui::text::Line;
 
     #[test]
@@ -294,5 +332,42 @@ mod tests {
 
         assert!(rendered.len() > 1, "rendered: {:?}", rendered);
         assert_eq!(rendered[0].to_string(), "This book");
+    }
+
+    #[test]
+    fn logopolis_renderer_uses_score_title() {
+        let area = ratatui::layout::Rect::new(0, 0, 40, 10);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("terminal should initialize");
+        let data = GameData::new(Guid::NULL, "Player".to_string(), "World".to_string());
+        let game = LogopolisState::new();
+
+        terminal
+            .draw(|frame| {
+                render_context_pane(
+                    frame,
+                    super::ContextPaneRenderArgs {
+                        data: &data,
+                        context_buffer: &[],
+                        context_view: &ContextView::Logopolis,
+                        logopolis: Some(&game),
+                        scroll_offset: 0,
+                        is_focused: false,
+                        area,
+                    },
+                )
+            })
+            .expect("game should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("You: 0 - Bael'Zharon: 0"));
+        assert!(rendered.contains('█'));
     }
 }

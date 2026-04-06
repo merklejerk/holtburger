@@ -366,6 +366,7 @@ pub enum ContextView {
     Enchantment(Enchantment),
     DebugSpell(u32),
     DebugEnchantment(Enchantment),
+    Logopolis,
 }
 
 #[derive(Debug)]

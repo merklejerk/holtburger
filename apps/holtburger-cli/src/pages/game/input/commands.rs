@@ -467,6 +467,15 @@ impl GameState {
     pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
 
+        if command.trim() == "/logopolis" {
+            self.finish_input_command_submission(command);
+            return self
+                .handle_action(crate::types::AppAction::ChangeContextView {
+                    view: crate::types::ContextView::Logopolis,
+                })
+                .unwrap_or_default();
+        }
+
         if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
             result.commands.push(ClientCommand::Tell {
                 target: target.to_string(),

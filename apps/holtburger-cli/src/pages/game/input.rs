@@ -8,7 +8,7 @@ use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatView;
-use crate::types::{FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
+use crate::types::{ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
 
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
@@ -139,6 +139,30 @@ impl GameState {
                 result.merge(tab_result);
             }
             return result;
+        }
+
+        if self.view.context_view == ContextView::Logopolis
+            && self.view.focused_pane == FocusedPane::Context
+        {
+            let mut handled = false;
+            let paddle_delta = match key.code {
+                KeyCode::Left => Some(-0.05),
+                KeyCode::Right => Some(0.05),
+                KeyCode::Char('a') | KeyCode::Char('A') => Some(-0.05),
+                KeyCode::Char('d') | KeyCode::Char('D') => Some(0.05),
+                _ => None,
+            };
+
+            if let Some(delta) = paddle_delta
+                && let Some(game) = self.logopolis_state_mut()
+            {
+                handled = game.nudge_player_paddle(delta);
+            }
+
+            if handled {
+                result.request_redraw(RedrawPriority::Immediate);
+                return result;
+            }
         }
 
         if self.view.focused_pane == FocusedPane::Dashboard {

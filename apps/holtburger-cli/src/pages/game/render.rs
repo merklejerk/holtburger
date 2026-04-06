@@ -138,12 +138,15 @@ impl GameState {
             .unwrap_or_else(|| self.context_buffer());
         render_context_pane(
             f,
-            &self.data,
-            context_buffer,
-            &self.view.context_view,
-            self.view.context_scroll_offset,
-            self.view.focused_pane == FocusedPane::Context,
-            main_chunks[2],
+            crate::pages::game::panels::context::ContextPaneRenderArgs {
+                data: &self.data,
+                context_buffer,
+                context_view: &self.view.context_view,
+                logopolis: self.logopolis_state(),
+                scroll_offset: self.view.context_scroll_offset,
+                is_focused: self.view.focused_pane == FocusedPane::Context,
+                area: main_chunks[2],
+            },
         );
 
         // Dynamic Pane

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
+use holtburger_dat::file_type::skill_table::{SkillFormula, SkillTable};
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 
@@ -21,6 +22,7 @@ pub enum CharTabLine {
     Stat {
         label: String,
         value: String,
+        formula: Option<String>,
         xp_cost: Option<u64>,
         sp_cost: Option<u32>,
         has_xp: bool,
@@ -133,6 +135,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
             CharTabLine::Stat {
                 label,
                 value,
+                formula,
                 xp_cost,
                 sp_cost,
                 has_xp,
@@ -186,6 +189,20 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                         Style::default().fg(if *has_sp { Color::Green } else { Color::Yellow }),
                     ));
                     spans.push(Span::raw(" SP)"));
+                }
+
+                if let Some(formula) = formula {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        formula.clone(),
+                        Style::default()
+                            .fg(if highlight {
+                                Color::White
+                            } else {
+                                Color::DarkGray
+                            })
+                            .add_modifier(Modifier::ITALIC),
+                    ));
                 }
 
                 list_items.push(ListItem::new(Line::from(spans)).style(style));
@@ -387,6 +404,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         lines.push(CharTabLine::Stat {
             label: "Vitae Penalty".to_string(),
             value: format!("{:.0}%", penalty_pct),
+            formula: None,
             xp_cost: None,
             sp_cost: None,
             has_xp: false,
@@ -416,6 +434,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
             value: val,
+            formula: None,
             xp_cost,
             sp_cost: None,
             has_xp,
@@ -454,6 +473,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
             value: val,
+            formula: None,
             xp_cost,
             sp_cost: None,
             has_xp,
@@ -476,6 +496,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         .values()
         .filter(|s| s.skill_type.is_eor())
         .collect();
+    let skill_table = data.skill_table();
 
     // Sort: (Specialized | Trained) > Untrained, then alphabetically within those two groups
     skills.sort_by(|a, b| {
@@ -530,6 +551,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         lines.push(CharTabLine::Stat {
             label: s.skill_type.to_string(),
             value: val,
+            formula: skill_formula_text(skill_table.as_deref(), s.skill_type),
             xp_cost,
             sp_cost,
             has_xp,
@@ -552,6 +574,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
             value: data.armor.to_string(),
+            formula: None,
             xp_cost: None,
             sp_cost: None,
             has_xp: false,
@@ -579,6 +602,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             lines.push(CharTabLine::Stat {
                 label: format!("{:?}", prop),
                 value: format!("{:.2}", val),
+                formula: None,
                 xp_cost: None,
                 sp_cost: None,
                 has_xp: false,
@@ -608,6 +632,41 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     lines
 }
 
+fn skill_formula_text(skill_table: Option<&SkillTable>, skill_type: SkillType) -> Option<String> {
+    let skill_table = skill_table?;
+    let skill_base = skill_table.skill_base_hash.get(&(skill_type as u32))?;
+    format_skill_formula(&skill_base.formula)
+}
+
+fn format_skill_formula(formula: &SkillFormula) -> Option<String> {
+    if formula.x == 0 {
+        return None;
+    }
+
+    let first = attribute_abbreviation(formula.attr1)?;
+    let expression = match attribute_abbreviation(formula.attr2) {
+        Some(second) => format!("({}+{})", first, second),
+        None => first.to_string(),
+    };
+
+    if formula.z != 1 {
+        Some(format!("{}/{}", expression, formula.z))
+    } else {
+        Some(expression)
+    }
+}
+
+fn attribute_abbreviation(attribute_id: u32) -> Option<&'static str> {
+    Some(match AttributeType::from_repr(attribute_id)? {
+        AttributeType::StrengthAttr => "St",
+        AttributeType::EnduranceAttr => "En",
+        AttributeType::QuicknessAttr => "Qu",
+        AttributeType::CoordinationAttr => "Co",
+        AttributeType::FocusAttr => "Fo",
+        AttributeType::SelfAttr => "Se",
+    })
+}
+
 fn format_duration(start: f64, duration: f64) -> String {
     if duration < 0.0 {
         "Inf".to_string()
@@ -620,5 +679,92 @@ fn format_duration(start: f64, duration: f64) -> String {
         } else {
             format!("{}s", remain as u32)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::Guid;
+    use holtburger_dat::file_type::skill_table::{SkillBase, SkillFormula, SkillTable};
+    use holtburger_world::stats::{AttributeType, Skill, SkillType, TrainingLevel};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn sample_skill_table() -> SkillTable {
+        SkillTable {
+            id: SkillTable::FILE_ID,
+            skill_base_hash: HashMap::from([(
+                SkillType::MeleeDefense as u32,
+                SkillBase {
+                    description: String::new(),
+                    _align1: (),
+                    name: "Melee Defense".to_string(),
+                    _align2: (),
+                    icon_id: 0,
+                    trained_cost: 0,
+                    specialized_cost: 0,
+                    category: 0,
+                    chargen_use: 1,
+                    min_level: 1,
+                    formula: SkillFormula {
+                        w: 0,
+                        x: 1,
+                        y: 0,
+                        z: 3,
+                        attr1: AttributeType::QuicknessAttr as u32,
+                        attr2: AttributeType::CoordinationAttr as u32,
+                    },
+                    upper_bound: 0.0,
+                    lower_bound: 0.0,
+                    learn_mod: 0.0,
+                },
+            )]),
+        }
+    }
+
+    #[test]
+    fn skill_formula_text_formats_attribute_shorthands() {
+        let table = sample_skill_table();
+
+        assert_eq!(
+            skill_formula_text(Some(&table), SkillType::MeleeDefense),
+            Some("(Qu+Co)/3".to_string())
+        );
+    }
+
+    #[test]
+    fn get_char_tab_lines_includes_skill_formula_text() {
+        let mut data = GameData::default();
+        data.player_guid = Some(Guid(1));
+        data.skill_table = Some(Arc::new(sample_skill_table()));
+        data.skills.insert(
+            SkillType::MeleeDefense,
+            Skill {
+                skill_type: SkillType::MeleeDefense,
+                ranks: 0,
+                init: 0,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 10,
+                current: 10,
+                training: TrainingLevel::Untrained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+
+        let formula = get_char_tab_lines(&data)
+            .into_iter()
+            .find_map(|line| match line {
+                CharTabLine::Stat { label, formula, .. } if label == "Melee Defense" => {
+                    Some(formula)
+                }
+                _ => None,
+            })
+            .flatten()
+            .expect("melee defense row should exist");
+
+        assert_eq!(formula, "(Qu+Co)/3");
     }
 }

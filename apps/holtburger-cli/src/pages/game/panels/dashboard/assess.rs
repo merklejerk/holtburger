@@ -313,6 +313,13 @@ pub fn get_assess_info(
             ),
         ]));
 
+        if let Some(skill) = weapon.weapon_skill {
+            lines.push(Line::from(vec![
+                Span::styled("Weapon Skill: ", Style::default().fg(Color::Gray)),
+                Span::styled(skill.to_string(), Style::default().fg(Color::Cyan)),
+            ]));
+        }
+
         if let Some(wt) = weapon.weapon_type
             && wt != holtburger_common::properties::WeaponType::Undef
         {

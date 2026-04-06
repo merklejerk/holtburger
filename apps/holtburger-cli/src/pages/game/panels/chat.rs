@@ -11,6 +11,7 @@ use holtburger_core::client::types::{
 };
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
+use holtburger_protocol::messages::{ChatMessageType, ChatMessageTypeId};
 use holtburger_world::FellowshipActivity;
 use std::fs::File;
 use std::io::Write;
@@ -50,7 +51,7 @@ impl ChatView {
     fn allows(self, chat_tags: ChatMessageTags) -> bool {
         match self {
             Self::Everything => true,
-            Self::Chat => !chat_tags.contains(ChatMessageTags::COMBAT),
+            Self::Chat => !chat_tags.intersects(ChatMessageTags::COMBAT | ChatMessageTags::MAGIC),
         }
     }
 }
@@ -102,7 +103,6 @@ impl ChatState {
         local_player_name: Option<&str>,
     ) {
         use holtburger_core::ClientViewEvent;
-        use holtburger_protocol::messages::ChatMessageType;
         match event {
             ClientViewEvent::LogMessage(msg) => {
                 let chat_tags = if msg.contains("[ERROR]") {
@@ -119,20 +119,17 @@ impl ChatState {
                 self.log(chat_tags, msg);
             }
             ClientViewEvent::ServerMessage { message, chat_type } => {
-                let kind_tags = match ChatMessageType::from_repr(chat_type) {
-                    Some(ChatMessageType::Error) => ChatMessageTags::error(),
-                    Some(ChatMessageType::Warning) => ChatMessageTags::warning(),
-                    Some(ChatMessageType::Broadcast)
-                    | Some(ChatMessageType::GeneralBroadcast)
-                    | Some(ChatMessageType::AdminBroadcast)
-                    | Some(ChatMessageType::WorldBroadcast)
-                    | Some(ChatMessageType::DirectSpeech) => ChatMessageTags::info(),
-                    _ => ChatMessageTags::system(),
-                };
-                self.log(kind_tags.with(server_message_tags(chat_type)), message);
+                self.log(chat_message_tags(chat_type), message);
             }
-            ClientViewEvent::Chat { sender, message } => {
-                self.log(ChatMessageTags::chat(), format!("{}: {}", sender, message));
+            ClientViewEvent::Chat {
+                sender,
+                message,
+                chat_type,
+            } => {
+                self.log(
+                    chat_message_tags(chat_type),
+                    format!("{}: {}", sender, message),
+                );
             }
             ClientViewEvent::ChannelMessage {
                 channel,
@@ -597,37 +594,42 @@ fn format_attack_conditions_suffix(attack_conditions: AttackConditions) -> Strin
     }
 }
 
-fn server_message_tags(chat_type: u32) -> ChatMessageTags {
-    match holtburger_protocol::messages::ChatMessageType::from_repr(chat_type) {
-        Some(holtburger_protocol::messages::ChatMessageType::Combat) => ChatMessageTags::COMBAT,
-        Some(holtburger_protocol::messages::ChatMessageType::Allegiance)
-        | Some(holtburger_protocol::messages::ChatMessageType::AllegianceBroadcast)
-        | Some(holtburger_protocol::messages::ChatMessageType::Officer)
-        | Some(holtburger_protocol::messages::ChatMessageType::SocialGroup) => {
-            ChatMessageTags::GUILD
+fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
+    match chat_type.known() {
+        Some(ChatMessageType::Broadcast)
+        | Some(ChatMessageType::AllChannels)
+        | Some(ChatMessageType::System)
+        | Some(ChatMessageType::x1A)
+        | Some(ChatMessageType::x1B)
+        | Some(ChatMessageType::x1C)
+        | Some(ChatMessageType::x1D)
+        | Some(ChatMessageType::x1E) => ChatMessageTags::system(),
+        Some(ChatMessageType::Tell)
+        | Some(ChatMessageType::OutgoingTell)
+        | Some(ChatMessageType::AdminTell) => ChatMessageTags::tell(),
+        Some(ChatMessageType::Speech)
+        | Some(ChatMessageType::Channel)
+        | Some(ChatMessageType::ChannelSend) => ChatMessageTags::info(),
+        Some(ChatMessageType::Combat)
+        | Some(ChatMessageType::CombatEnemy)
+        | Some(ChatMessageType::CombatSelf) => ChatMessageTags::COMBAT,
+        Some(ChatMessageType::Spellcasting) | Some(ChatMessageType::Magic) => {
+            ChatMessageTags::MAGIC
         }
-        Some(holtburger_protocol::messages::ChatMessageType::Help) => ChatMessageTags::HELP,
-        Some(holtburger_protocol::messages::ChatMessageType::Vendor)
-        | Some(holtburger_protocol::messages::ChatMessageType::Contract)
-        | Some(holtburger_protocol::messages::ChatMessageType::MaybeMerchant) => {
-            ChatMessageTags::TRADE
-        }
-        Some(holtburger_protocol::messages::ChatMessageType::Broadcast)
-        | Some(holtburger_protocol::messages::ChatMessageType::AllChannels)
-        | Some(holtburger_protocol::messages::ChatMessageType::WorldBroadcast)
-        | Some(holtburger_protocol::messages::ChatMessageType::AdminBroadcast)
-        | Some(holtburger_protocol::messages::ChatMessageType::GeneralBroadcast)
-        | Some(holtburger_protocol::messages::ChatMessageType::DirectSpeech)
-        | Some(holtburger_protocol::messages::ChatMessageType::Channel)
-        | Some(holtburger_protocol::messages::ChatMessageType::Magic)
-        | Some(holtburger_protocol::messages::ChatMessageType::Appraisal)
-        | Some(holtburger_protocol::messages::ChatMessageType::Filter)
-        | Some(holtburger_protocol::messages::ChatMessageType::Tinker)
-        | Some(holtburger_protocol::messages::ChatMessageType::MaybeScroll)
-        | Some(holtburger_protocol::messages::ChatMessageType::MaybeAppraisal) => {
-            ChatMessageTags::SYSTEM
-        }
-        _ => ChatMessageTags::empty(),
+        Some(ChatMessageType::Allegiance)
+        | Some(ChatMessageType::Social)
+        | Some(ChatMessageType::SocialSend) => ChatMessageTags::info().guild(),
+        Some(ChatMessageType::Fellowship) => ChatMessageTags::info().party(),
+        Some(ChatMessageType::Help) => ChatMessageTags::warning().help(),
+        Some(ChatMessageType::Abuse) => ChatMessageTags::warning(),
+        Some(ChatMessageType::Appraisal)
+        | Some(ChatMessageType::Advancement)
+        | Some(ChatMessageType::Recall)
+        | Some(ChatMessageType::Craft)
+        | Some(ChatMessageType::Salvaging)
+        | Some(ChatMessageType::WorldBroadcast) => ChatMessageTags::info(),
+        Some(ChatMessageType::Emote) => ChatMessageTags::emote(),
+        None => ChatMessageTags::system(),
     }
 }
 
@@ -880,7 +882,24 @@ mod tests {
         chat.handle_event(
             holtburger_core::ClientViewEvent::ServerMessage {
                 message: "You enter combat.".to_string(),
-                chat_type: holtburger_protocol::messages::ChatMessageType::Combat as u32,
+                chat_type: holtburger_protocol::messages::ChatMessageType::Combat.into(),
+            },
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("server message should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
+        assert_eq!(message.text, "You enter combat.");
+    }
+
+    #[test]
+    fn server_message_broadcast_type_gets_system_tags() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ServerMessage {
+                message: "Welcome to Asheron's Call.".to_string(),
+                chat_type: holtburger_protocol::messages::ChatMessageType::Broadcast.into(),
             },
             Some("Player"),
         );
@@ -888,8 +907,30 @@ mod tests {
         let message = chat.messages.last().expect("server message should log");
         assert!(message.chat_tags.contains(ChatMessageTags::STATUS));
         assert!(message.chat_tags.contains(ChatMessageTags::SYSTEM));
-        assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
-        assert_eq!(message.text, "You enter combat.");
+        assert!(!message.chat_tags.contains(ChatMessageTags::INFO));
+        assert_eq!(message.text, "Welcome to Asheron's Call.");
+    }
+
+    #[test]
+    fn server_message_tell_type_gets_tell_tags() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ServerMessage {
+                message: "Buff Dude has granted you access to their home's storage.".to_string(),
+                chat_type: holtburger_protocol::messages::ChatMessageType::Tell.into(),
+            },
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("server message should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::CHAT));
+        assert!(message.chat_tags.contains(ChatMessageTags::TELL));
+        assert!(!message.chat_tags.contains(ChatMessageTags::INFO));
+        assert_eq!(
+            message.text,
+            "Buff Dude has granted you access to their home's storage."
+        );
     }
 
     #[test]
@@ -984,6 +1025,7 @@ mod tests {
             holtburger_core::ClientViewEvent::Chat {
                 sender: "Bestie".to_string(),
                 message: "hello world".to_string(),
+                chat_type: holtburger_protocol::messages::ChatMessageType::Speech.into(),
             },
             Some("Player"),
         );

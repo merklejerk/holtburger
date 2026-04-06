@@ -96,6 +96,7 @@
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
+- [ ] `/options` syntax is awkward.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -269,3 +270,4 @@
 - [x] Track "dead" creatures to avoid targeting them?
 - [x] Strange login issues when indoors.
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
+- [ ] Iffy trade behavior against trade bots.

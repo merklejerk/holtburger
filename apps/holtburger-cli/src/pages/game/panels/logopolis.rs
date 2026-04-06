@@ -281,7 +281,6 @@ impl LogopolisState {
 
         let paddle_length = (width as f32 * PADDLE_LENGTH_RATIO)
             .round()
-            .max(5.0)
             .min(width as f32) as usize;
         let center_column = normalized_to_column(clamp_paddle_center(paddle_x), width);
         let half_length = paddle_length / 2;

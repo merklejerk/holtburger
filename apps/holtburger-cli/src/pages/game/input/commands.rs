@@ -208,7 +208,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), a-z (Verbs), ` (Combat Toggle)".to_string(),
+            "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), 1/2 in chat (Switch Chat View), a-z (Verbs), ` (Combat Toggle)".to_string(),
         );
     }
 

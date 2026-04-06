@@ -69,7 +69,7 @@ pub struct ChatState {
     pub active_view: ChatView,
     pub last_chat_width: usize,
     pub scroll_offsets: [usize; ChatView::ALL.len()],
-    pub total_lines: usize,
+    total_lines_per_view: [usize; ChatView::ALL.len()],
     pub last_incoming_tell_sender: Option<String>,
 }
 
@@ -82,7 +82,7 @@ impl Default for ChatState {
             active_view: ChatView::default(),
             last_chat_width: 0,
             scroll_offsets: [0; ChatView::ALL.len()],
-            total_lines: 0,
+            total_lines_per_view: [0; ChatView::ALL.len()],
             last_incoming_tell_sender: None,
         }
     }
@@ -343,23 +343,25 @@ impl ChatState {
         }
 
         let visible_wrapped_messages = visible_wrapped_message_slices(self);
-        let old_total_lines = self.total_lines;
-        self.total_lines = visible_wrapped_messages.iter().map(|v| v.len()).sum();
+        let old_total_lines = self.active_total_lines();
+        let total_lines: usize = visible_wrapped_messages.iter().map(|v| v.len()).sum();
 
         // If we were at the bottom (scroll_offset == 0) and new lines were added,
         // we stay at the bottom by default.
         // If we were scrolled up, we increment scroll_offset to maintain the relative position.
-        let total_lines_delta = self.total_lines.saturating_sub(old_total_lines);
+        let total_lines_delta = total_lines.saturating_sub(old_total_lines);
         let active_scroll_offset = self.active_scroll_offset();
         if active_scroll_offset > 0 && total_lines_delta > 0 {
             *self.active_scroll_offset_mut() = active_scroll_offset + total_lines_delta;
         }
 
+        *self.active_total_lines_mut() = total_lines;
+
         self.clamp_scroll(height);
     }
 
     fn clamp_scroll(&mut self, height: usize) {
-        let max_scroll = self.total_lines.saturating_sub(height);
+        let max_scroll = self.active_total_lines().saturating_sub(height);
         *self.active_scroll_offset_mut() = self.active_scroll_offset().min(max_scroll);
     }
 
@@ -405,6 +407,15 @@ impl ChatState {
     pub fn active_scroll_offset_mut(&mut self) -> &mut usize {
         let index = self.active_view_index();
         &mut self.scroll_offsets[index]
+    }
+
+    pub fn active_total_lines(&self) -> usize {
+        self.total_lines_per_view[self.active_view_index()]
+    }
+
+    fn active_total_lines_mut(&mut self) -> &mut usize {
+        let index = self.active_view_index();
+        &mut self.total_lines_per_view[index]
     }
 
     pub fn active_scroll_offset_for(&self, view: ChatView) -> usize {
@@ -723,7 +734,6 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::layout::Margin;
 
     #[test]
     fn channel_message_formats_party_self_echo_without_blank_sender() {
@@ -984,10 +994,7 @@ mod tests {
         );
 
         chat.active_view = ChatView::Chat;
-        chat.update_layout(area.inner(Margin {
-            vertical: 1,
-            horizontal: 0,
-        }));
+        chat.update_layout(area);
 
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
@@ -1007,5 +1014,37 @@ mod tests {
         assert!(!rendered.contains("Attack sequence started."));
         assert!(rendered.contains("[1] Everything"));
         assert!(rendered.contains("[2] Chat"));
+    }
+
+    #[test]
+    fn chat_scroll_offsets_are_tracked_per_view() {
+        let area = Rect::new(0, 0, 80, 8);
+        let mut chat = ChatState::new(None);
+
+        for index in 0..20 {
+            chat.log(ChatMessageTags::chat(), format!("chat {}", index));
+        }
+
+        for index in 0..10 {
+            chat.log(
+                ChatMessageTags::info().combat(),
+                format!("combat {}", index),
+            );
+        }
+
+        chat.active_view = ChatView::Everything;
+        chat.update_layout(area);
+
+        chat.active_view = ChatView::Chat;
+        chat.update_layout(area);
+
+        chat.set_active_scroll_offset_for(ChatView::Everything, 3);
+        chat.set_active_scroll_offset_for(ChatView::Chat, 2);
+
+        chat.active_view = ChatView::Everything;
+        chat.update_layout(area);
+
+        assert_eq!(chat.active_scroll_offset_for(ChatView::Everything), 3);
+        assert_eq!(chat.active_scroll_offset_for(ChatView::Chat), 2);
     }
 }

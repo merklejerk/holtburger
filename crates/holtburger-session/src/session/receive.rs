@@ -3,6 +3,7 @@ use crate::capture::Direction;
 use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::sequence::is_newer_u32;
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
@@ -78,11 +79,12 @@ impl Session {
     }
 
     fn should_order_server_packet(&self, header: &PacketHeader) -> bool {
-        header.sequence != 0 && header.flags != packet_flags::ACK_SEQUENCE
+        header.flags != packet_flags::ACK_SEQUENCE
+            && (header.sequence != 0 || (header.flags & packet_flags::BLOB_FRAGMENTS) != 0)
     }
 
     fn next_expected_server_sequence(&self) -> u32 {
-        self.last_server_seq + 1
+        self.last_server_seq.wrapping_add(1)
     }
 
     fn take_pending_server_packet(&mut self) -> Option<ReceivedPacket> {
@@ -137,18 +139,28 @@ impl Session {
                             return Ok(packet);
                         }
 
+                        let received_sequence = packet.header.sequence;
                         let expected = self.next_expected_server_sequence();
-                        if packet.header.sequence <= self.last_server_seq {
+                        if !is_newer_u32(received_sequence, self.last_server_seq) {
                             log::debug!(
                                 "Server packet {} received again; last ordered sequence is {}",
-                                packet.header.sequence,
+                                received_sequence,
                                 self.last_server_seq
                             );
                             continue;
                         }
 
-                        if packet.header.sequence > expected {
-                            let received_sequence = packet.header.sequence;
+                        if received_sequence != expected {
+                            if !is_newer_u32(received_sequence, expected) {
+                                log::debug!(
+                                    "Server packet {} is newer than {} but not the expected sequence {}",
+                                    received_sequence,
+                                    self.last_server_seq,
+                                    expected
+                                );
+                                continue;
+                            }
+
                             self.pending_server_packets
                                 .entry(received_sequence)
                                 .or_insert(packet);
@@ -174,18 +186,28 @@ impl Session {
                 return Ok(packet);
             }
 
+            let received_sequence = packet.header.sequence;
             let expected = self.next_expected_server_sequence();
-            if packet.header.sequence <= self.last_server_seq {
+            if !is_newer_u32(received_sequence, self.last_server_seq) {
                 log::debug!(
                     "Server packet {} received again; last ordered sequence is {}",
-                    packet.header.sequence,
+                    received_sequence,
                     self.last_server_seq
                 );
                 continue;
             }
 
-            if packet.header.sequence > expected {
-                let received_sequence = packet.header.sequence;
+            if received_sequence != expected {
+                if !is_newer_u32(received_sequence, expected) {
+                    log::debug!(
+                        "Server packet {} is newer than {} but not the expected sequence {}",
+                        received_sequence,
+                        self.last_server_seq,
+                        expected
+                    );
+                    continue;
+                }
+
                 self.pending_server_packets
                     .entry(received_sequence)
                     .or_insert(packet);

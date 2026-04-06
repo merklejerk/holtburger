@@ -91,6 +91,30 @@ fn build_connect_response_packet(cookie: u64, client_id: u16) -> Vec<u8> {
     )
 }
 
+fn build_single_fragment_packet(sequence: u32, payload: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    FragmentHeader {
+        sequence: 1,
+        id: 1,
+        count: 1,
+        index: 0,
+        size: (transport::FRAGMENT_HEADER_SIZE + payload.len()) as u16,
+        queue: transport::queues::GENERAL,
+    }
+    .pack(&mut body);
+    body.extend_from_slice(payload);
+
+    build_transport_packet(
+        PacketHeader {
+            sequence,
+            flags: packet_flags::BLOB_FRAGMENTS,
+            size: body.len() as u16,
+            ..Default::default()
+        },
+        &body,
+    )
+}
+
 #[tokio::test]
 async fn test_payload_offset_handshake() {
     let session = Session::new("127.0.0.1:9000".parse().unwrap())
@@ -420,6 +444,24 @@ async fn test_connect_response_parses_cookie_from_optional_header_offset() {
 }
 
 #[tokio::test]
+async fn test_wrapped_server_sequence_zero_is_processed_as_expected() {
+    let transport = ScriptedTransport::new(
+        vec![build_single_fragment_packet(0, &[0xAA, 0xBB, 0xCC])],
+        "127.0.0.1:9001".parse().unwrap(),
+    );
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.last_server_seq = u32::MAX;
+    session.has_server_seq = true;
+
+    let events = session.recv_message().await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0], SessionEvent::Message(ref msg) if msg == &vec![0xAA, 0xBB, 0xCC]));
+    assert_eq!(session.last_server_seq, 0);
+}
+
+#[tokio::test]
 async fn test_out_of_order_server_packet_requests_retransmit() {
     let transport = ScriptedTransport::new(
         vec![
@@ -498,6 +540,47 @@ async fn test_single_packet_gap_requests_retransmit() {
     let payload = &retransmit_packet[transport::HEADER_SIZE..];
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
     assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
+}
+
+#[tokio::test]
+async fn test_send_request_retransmit_wraps_sequence_window() {
+    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9001".parse().unwrap());
+    let sent_handle = transport.clone();
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.last_server_seq = u32::MAX;
+
+    session.send_request_retransmit(1).unwrap();
+    assert!(session.flush_pending_control_packets().await.unwrap());
+
+    let sent_packets = sent_handle.sent_packets().await;
+    let retransmit_packet = sent_packets
+        .iter()
+        .find(|packet| (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0)
+        .expect("missing retransmit request packet");
+
+    let payload = &retransmit_packet[transport::HEADER_SIZE..];
+    assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
+    assert_eq!(LittleEndian::read_u32(&payload[4..8]), 0);
+}
+
+#[test]
+fn test_handshake_request_rejects_activation_port_overflow() {
+    let mut session = Session::new_test();
+    session.server_addr = "127.0.0.1:65535".parse().unwrap();
+
+    let err = session
+        .handle_handshake_request(ConnectRequestData {
+            time: 1.0,
+            cookie: 0x1122_3344_5566_7788,
+            client_id: 0x345,
+            server_seed: 0x1234_5678,
+            client_seed: 0x9ABC_DEF0,
+        })
+        .unwrap_err();
+
+    assert!(err.to_string().contains("activation port overflow"));
 }
 
 #[tokio::test]

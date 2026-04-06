@@ -5,6 +5,7 @@ use super::types::{
 use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::sequence::is_newer_u32;
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
@@ -129,11 +130,12 @@ impl Session {
     }
 
     pub(crate) fn send_request_retransmit(&mut self, received_sequence: u32) -> Result<()> {
-        let desired_sequence = self.last_server_seq + 1;
-        let bottom = desired_sequence + 1;
+        let desired_sequence = self.last_server_seq.wrapping_add(1);
+        let bottom = desired_sequence.wrapping_add(1);
+        let missing_span = received_sequence.wrapping_sub(desired_sequence);
 
-        if received_sequence < bottom
-            || received_sequence.saturating_sub(bottom) > MAX_RETRANSMIT_SEQUENCE_WINDOW
+        if !is_newer_u32(received_sequence, desired_sequence)
+            || missing_span > MAX_RETRANSMIT_SEQUENCE_WINDOW + 1
         {
             return Err(anyhow!(
                 "Abnormal server packet sequence received: expected around {}, got {}",
@@ -144,13 +146,15 @@ impl Session {
 
         let mut needed_sequences = Vec::with_capacity(MAX_RETRANSMIT_SEQUENCE_IDS);
         needed_sequences.push(desired_sequence);
-        for sequence in bottom..received_sequence {
+        let mut sequence = bottom;
+        while sequence != received_sequence {
             if !self.pending_server_packets.contains_key(&sequence) {
                 needed_sequences.push(sequence);
                 if needed_sequences.len() >= MAX_RETRANSMIT_SEQUENCE_IDS {
                     break;
                 }
             }
+            sequence = sequence.wrapping_add(1);
         }
 
         let mut payload = Vec::with_capacity(4 + (needed_sequences.len() * 4));
@@ -179,7 +183,7 @@ impl Session {
     }
 
     pub(crate) fn should_request_retransmit(&self, expected: u32, received_sequence: u32) -> bool {
-        expected < received_sequence
+        is_newer_u32(received_sequence, expected)
             && self
                 .last_request_retransmit_time
                 .is_none_or(|last_request| {

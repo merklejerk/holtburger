@@ -39,6 +39,7 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
+use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
@@ -160,6 +161,14 @@ impl GameState {
             }
             _ => None,
         }
+    }
+
+    pub(super) fn logopolis_state(&self) -> Option<&LogopolisState> {
+        self.runtime.logopolis.as_ref()
+    }
+
+    pub(super) fn logopolis_state_mut(&mut self) -> Option<&mut LogopolisState> {
+        self.runtime.logopolis.as_mut()
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
@@ -416,20 +425,12 @@ impl GameState {
                 };
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
-                    self.handle_action(AppAction::ChangeContextView {
-                        view: crate::types::ContextView::Assess(target),
-                    })
-                    .unwrap_or_default(),
+                    self.apply_context_view_change(crate::types::ContextView::Assess(target)),
                 );
             }
             AppAction::Read { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
-                result.merge(
-                    self.handle_action(AppAction::ChangeContextView {
-                        view: ContextView::Book(guid),
-                    })
-                    .unwrap_or_default(),
-                );
+                result.merge(self.apply_context_view_change(ContextView::Book(guid)));
             }
             AppAction::Use { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
@@ -649,21 +650,15 @@ impl GameState {
                     result
                         .commands
                         .push(ClientCommand::QueryEntityDebugInfo(guid));
-                    result.merge(
-                        self.handle_action(AppAction::ChangeContextView {
-                            view: ContextView::Debug(InspectTarget::Entity(guid)),
-                        })
-                        .unwrap_or_default(),
-                    );
+                    result.merge(self.apply_context_view_change(ContextView::Debug(
+                        InspectTarget::Entity(guid),
+                    )));
                 }
                 InspectTarget::VendorItem(guid) => {
                     result.commands.push(ClientCommand::Identify(guid));
-                    result.merge(
-                        self.handle_action(AppAction::ChangeContextView {
-                            view: ContextView::Debug(InspectTarget::VendorItem(guid)),
-                        })
-                        .unwrap_or_default(),
-                    );
+                    result.merge(self.apply_context_view_change(ContextView::Debug(
+                        InspectTarget::VendorItem(guid),
+                    )));
                 }
             },
             AppAction::CastSpell { spell_id, target } => {
@@ -775,12 +770,6 @@ impl GameState {
             AppAction::ExitTrade => {
                 result.commands.push(ClientCommand::CloseTrade);
             }
-            AppAction::ChangeContextView { view } => {
-                self.view.context_view = view;
-                self.view.context_scroll_offset = 0;
-                result.request_redraw(RedrawPriority::Immediate);
-                self.refresh_context_buffer();
-            }
             AppAction::BeginInteraction { interaction } => {
                 if interaction == Interaction::Salvaging {
                     if let Some(input) = navigation_input {
@@ -811,7 +800,7 @@ impl GameState {
                 result.request_redraw(RedrawPriority::Immediate);
             }
             AppAction::ViewDetails { view } => {
-                return self.handle_action(AppAction::ChangeContextView { view });
+                return Some(self.apply_context_view_change(view));
             }
             AppAction::UiAction { action } => {
                 return Some(self.handle_ui_action(action));
@@ -831,6 +820,7 @@ impl GameState {
 
     pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
         match action {
+            AppUiAction::ChangeContextView { view } => self.apply_context_view_change(view),
             AppUiAction::OpenUnswearConfirmation { target } => {
                 let target_label = self
                     .data
@@ -857,6 +847,18 @@ impl GameState {
                 .handle_ui_action(action, &self.data, &self.view)
                 .unwrap_or_default(),
         }
+    }
+
+    fn apply_context_view_change(&mut self, view: ContextView) -> UpdateResult {
+        self.view.context_view = view;
+        self.view.context_scroll_offset = 0;
+        if view == ContextView::Logopolis {
+            self.runtime.logopolis = Some(LogopolisState::new());
+            self.view.previous_focused_pane = FocusedPane::Context;
+            self.view.focused_pane = FocusedPane::Context;
+        }
+        self.refresh_context_buffer();
+        UpdateResult::redraw()
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
@@ -887,6 +889,19 @@ impl GameState {
         self.refresh_stale_attack_sequence(now, &mut result);
         self.sync_weapon_swap_controller(now, &mut result);
 
+        if self.view.context_view == ContextView::Logopolis {
+            let game = self
+                .runtime
+                .logopolis
+                .get_or_insert_with(LogopolisState::new);
+            if elapsed.is_finite() && elapsed > 0.0 {
+                game.tick(Duration::from_secs_f64(elapsed));
+            }
+            result.request_redraw(RedrawPriority::Immediate);
+        } else if self.runtime.logopolis.is_some() {
+            self.runtime.logopolis = None;
+        }
+
         let update = self
             .runtime
             .navigation
@@ -897,6 +912,13 @@ impl GameState {
     }
 
     pub fn refresh_context_buffer(&mut self) {
+        if self.view.context_view == ContextView::Logopolis {
+            self.render_state.context_buffer.clear();
+            return;
+        }
+
+        self.runtime.logopolis = None;
+
         if self.view.context_view == crate::types::ContextView::Default {
             self.render_state.context_buffer.clear();
             return;
@@ -1758,6 +1780,7 @@ struct GameRuntimeState {
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,
+    logopolis: Option<LogopolisState>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2045,6 +2068,30 @@ mod tests {
                 .any(|command| matches!(command, ClientCommand::Use(guid) if *guid == book_guid))
         );
         assert_eq!(state.view.context_view, ContextView::Book(book_guid));
+    }
+
+    #[test]
+    fn logopolis_context_view_starts_and_clears_runtime_state() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let start_result = state.handle_ui_action(AppUiAction::ChangeContextView {
+            view: ContextView::Logopolis,
+        });
+
+        assert!(start_result.redraw_requested());
+        assert_eq!(state.view.context_view, ContextView::Logopolis);
+        assert!(state.runtime.logopolis.is_some());
+        assert_eq!(state.view.focused_pane, FocusedPane::Context);
+        assert_eq!(state.view.previous_focused_pane, FocusedPane::Context);
+
+        let stop_result = state.handle_ui_action(AppUiAction::ChangeContextView {
+            view: ContextView::Default,
+        });
+
+        assert!(stop_result.redraw_requested());
+        assert_eq!(state.view.context_view, ContextView::Default);
+        assert!(state.runtime.logopolis.is_none());
     }
 
     #[test]

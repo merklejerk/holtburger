@@ -660,7 +660,7 @@ async fn run() -> Result<()> {
     let tick_rate = std::time::Duration::from_millis(100);
     let immediate_frame_rate = std::time::Duration::from_millis(1000 / 24);
     let motion_frame_rate = std::time::Duration::from_millis(1000);
-    let event_poll_interval = std::time::Duration::from_millis(10);
+    let event_poll_interval = std::time::Duration::from_millis(1000 / 30);
     let mut last_draw = Instant::now();
     let mut pending_redraw = PendingRedraw {
         immediate: true,

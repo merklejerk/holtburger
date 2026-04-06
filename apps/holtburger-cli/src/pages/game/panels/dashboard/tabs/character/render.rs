@@ -729,7 +729,7 @@ mod tests {
 
         assert_eq!(
             skill_formula_text(Some(&table), SkillType::MeleeDefense),
-            Some("(Q + C) / 3".to_string())
+            Some("(Qu+Co)/3".to_string())
         );
     }
 
@@ -765,6 +765,6 @@ mod tests {
             .flatten()
             .expect("melee defense row should exist");
 
-        assert_eq!(formula, "(Q + C) / 3");
+        assert_eq!(formula, "(Qu+Co)/3");
     }
 }

@@ -270,3 +270,4 @@
 - [x] Track "dead" creatures to avoid targeting them?
 - [x] Strange login issues when indoors.
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
+- [ ] Iffy trade behavior against trade bots.

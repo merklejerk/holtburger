@@ -2584,7 +2584,7 @@ mod tests {
     }
 
     #[test]
-    fn navigation_sync_input_prefers_runtime_body_mirror_for_player_and_target() {
+    fn navigation_sync_input_prefers_runtime_body_mirror_for_player_and_keeps_target_poses() {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -2645,8 +2645,8 @@ mod tests {
         let target = input.target.expect("target sample should exist");
 
         assert_eq!(input.player_position, Some(runtime_player));
-        assert_eq!(target.sample.projected_pose, runtime_target);
         assert_eq!(target.sample.authoritative_pose, authoritative_target);
+        assert_eq!(target.sample.projected_pose, runtime_target);
     }
 
     #[test]

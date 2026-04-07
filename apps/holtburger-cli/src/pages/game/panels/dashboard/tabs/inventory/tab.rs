@@ -36,9 +36,8 @@ pub struct InventoryTab {
     filter_input: Option<FilterInputSession>,
 }
 
-pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
+pub fn get_entities(data: &GameData) -> Vec<(&Entity, usize)> {
     let entities = &data.entities;
-    let player_pos = data.runtime_player_position();
 
     let candidates: Vec<_> = entities
         .values()
@@ -89,14 +88,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 
     while let Some((guid, depth)) = stack.pop() {
         let e = &entities[&guid];
-        let dist = if let Some(p) = player_pos {
-            data.runtime_position_for_guid(guid)
-                .unwrap_or(e.position)
-                .distance_to(&p)
-        } else {
-            0.0
-        };
-        result.push((e, dist, depth));
+        result.push((e, depth));
 
         if let Some(mut children) = children_map.remove(&guid) {
             children.sort_by_key(|id| item_names.get(id).unwrap());
@@ -113,18 +105,24 @@ impl InventoryTab {
     pub(crate) fn visible_entities<'a>(&self, data: &'a GameData) -> Vec<(&'a Entity, f32, usize)> {
         let entities = get_entities(data);
         let Some(active_filter) = &self.active_filter else {
-            return entities;
+            return entities
+                .into_iter()
+                .map(|(entity, depth)| (entity, 0.0, depth))
+                .collect();
         };
 
         if active_filter.tokens.is_empty() {
-            return entities;
+            return entities
+                .into_iter()
+                .map(|(entity, depth)| (entity, 0.0, depth))
+                .collect();
         }
 
         retain_matching_hierarchy(
             entities,
-            |(entity, _, _)| entity.guid,
-            |(_, _, depth)| *depth,
-            |(entity, _, _)| {
+            |(entity, _)| entity.guid,
+            |(_, depth)| *depth,
+            |(entity, _)| {
                 let display_name = format_item_name(*entity, entity.guid);
                 active_filter
                     .tokens
@@ -132,6 +130,9 @@ impl InventoryTab {
                     .any(|token| fuzzy_subsequence_match(token, &display_name))
             },
         )
+        .into_iter()
+        .map(|(entity, depth)| (entity, 0.0, depth))
+        .collect()
     }
 
     fn clamp_selected_index(&mut self, data: &GameData) {
@@ -723,5 +724,59 @@ impl TabController for InventoryTab {
                 Some(UpdateResult::new().with_redraw(true))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::math::{Quaternion, Vector3};
+    use holtburger_common::position::WorldPosition;
+
+    fn make_entity(guid: u32, name: &str, container_id: Option<Guid>) -> Entity {
+        let mut entity = Entity::new(
+            Guid(guid),
+            name.to_string(),
+            WorldPosition {
+                landblock_id: Guid(0x0100_0000),
+                coords: Vector3::zero(),
+                rotation: Quaternion::identity(),
+            },
+        );
+        if let Some(container_id) = container_id {
+            entity.set_container_id(Some(container_id));
+        }
+
+        entity
+    }
+
+    #[test]
+    fn visible_entities_are_sorted_by_name_not_distance() {
+        let player_guid = Guid(0x5000_0001);
+        let far_guid = Guid(0x5000_0002);
+        let near_guid = Guid(0x5000_0003);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(10.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        });
+        data.entities
+            .insert(far_guid, make_entity(0x5000_0002, "Zulu", None));
+        data.entities
+            .insert(near_guid, make_entity(0x5000_0003, "Alpha", None));
+        data.inventory.insert(far_guid);
+        data.inventory.insert(near_guid);
+
+        let tab = InventoryTab::default();
+        let visible = tab.visible_entities(&data);
+
+        assert_eq!(
+            visible
+                .iter()
+                .map(|(entity, _, _)| entity.name())
+                .collect::<Vec<_>>(),
+            vec!["Alpha", "Zulu"]
+        );
     }
 }

@@ -41,13 +41,13 @@ impl NavigationSyncInput {
         self.target.map(|target| target.sample)
     }
 
-    fn projected_target_position(&self) -> Option<WorldPosition> {
-        self.target_sample().map(|target| target.projected_pose)
+    fn authoritative_target_position(&self) -> Option<WorldPosition> {
+        self.target_sample().map(|target| target.authoritative_pose)
     }
 
     fn arrival_pose(&self) -> Option<WorldPosition> {
         let mut arrival_pose = self.player_position?;
-        let target_pose = self.projected_target_position()?;
+        let target_pose = self.authoritative_target_position()?;
 
         arrival_pose.coords.z = target_pose.coords.z;
         if target_pose.is_indoors() {
@@ -505,11 +505,11 @@ impl TuiNavigation {
             .ok_or(NavigationDriveBlockReason::MissingPlayerPosition)?;
         let target_pose = match self.active {
             ActiveNavigation::Approach { .. } => input
-                .projected_target_position()
+                .authoritative_target_position()
                 .ok_or(NavigationDriveBlockReason::MissingTargetPose)?,
             ActiveNavigation::Follow { pursuing: true, .. }
             | ActiveNavigation::StickyMelee { pursuing: true, .. } => input
-                .projected_target_position()
+                .authoritative_target_position()
                 .ok_or(NavigationDriveBlockReason::MissingTargetPose)?,
             ActiveNavigation::Scoot { target_pose, .. } => target_pose,
             ActiveNavigation::Idle
@@ -777,7 +777,7 @@ impl TuiNavigation {
         let target_position = Self::automation_target_position_with_limit(
             self.automation_target_distance_limit_m,
             Some(player_position),
-            input.projected_target_position(),
+            input.authoritative_target_position(),
         )?;
 
         let player_global = player_position.global_coords();
@@ -1215,6 +1215,61 @@ mod tests {
     }
 
     #[test]
+    fn approach_uses_authoritative_target_pose_when_projected_pose_drifted() {
+        let now = Instant::now();
+        let player_position = world_position(0.0, 0.0, 0.0);
+        let far_authoritative_target_position = world_position(6.0, 0.0, 4.5);
+        let near_authoritative_target_position = world_position(0.2, 0.0, 4.5);
+        let projected_target_position = world_position(120.0, 0.0, 99.0);
+        let target_guid = Guid(0x5000_000A);
+        let mut navigation = TuiNavigation {
+            drive_active: true,
+            last_drive_block_reason: None,
+            ..Default::default()
+        };
+
+        navigation.activate_approach_with_distance(
+            target_guid,
+            1.0,
+            &sync_input(
+                now,
+                Some(player_position),
+                Some(target_sample_with_projection(
+                    target_guid,
+                    far_authoritative_target_position,
+                    projected_target_position,
+                )),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        );
+
+        let update = navigation.tick(NavigationTick {
+            now: now + Duration::from_millis(100),
+            dt: Duration::from_secs_f32(0.1),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample_with_projection(
+                    target_guid,
+                    near_authoritative_target_position,
+                    projected_target_position,
+                )),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert_eq!(
+            update.drive_command,
+            Some(PlayerDriveIntent::ArriveAtPose {
+                pose: world_position(0.0, 0.0, 4.5),
+            })
+        );
+        assert!(!navigation.drive_active);
+        assert_eq!(navigation.navigation_mode(), None);
+    }
+
+    #[test]
     fn scoot_completion_emits_arrival_pose_and_stops_drive() {
         let now = Instant::now();
         let player_position = world_position(12.0, -4.0, 1.5);
@@ -1526,6 +1581,26 @@ mod tests {
                 guid,
                 authoritative_pose: target_pose,
                 projected_pose: target_pose,
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(),
+                motion_state: None,
+                projection_mode: SpatialSampleMode::AuthoritativeOnly,
+            },
+            use_radius: None,
+        }
+    }
+
+    fn target_sample_with_projection(
+        guid: Guid,
+        authoritative_pose: WorldPosition,
+        projected_pose: WorldPosition,
+    ) -> ResolvedNavigationTarget {
+        ResolvedNavigationTarget {
+            guid,
+            sample: SpatialEntitySample {
+                guid,
+                authoritative_pose,
+                projected_pose,
                 velocity: Vector3::zero(),
                 omega: Vector3::zero(),
                 motion_state: None,

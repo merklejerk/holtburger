@@ -433,6 +433,14 @@ impl GameData {
             .or_else(|| self.entities.get(&guid).map(|entity| entity.position))
     }
 
+    pub fn distance_position_for_guid(&self, guid: Guid) -> Option<WorldPosition> {
+        if Some(guid) == self.player_guid {
+            return self.runtime_player_position();
+        }
+
+        self.entities.get(&guid).map(|entity| entity.position)
+    }
+
     pub fn runtime_sample_for_guid(&self, guid: Guid) -> Option<SpatialEntitySample> {
         if Some(guid) == self.player_guid {
             if let Some(sample) = self.runtime_body_cache.spatial_sample(guid) {
@@ -543,13 +551,42 @@ impl WorldContext for GameData {
 mod tests {
     use super::{CuratedCharacterOption, GameData, OPENED_CONTAINER_HISTORY_LIMIT};
     use holtburger_common::Guid;
+    use holtburger_common::Vector3;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{CharacterOptions1, CharacterOptions2};
+    use holtburger_core::ClientViewEvent;
     use holtburger_core::PlayerCharacterOptions;
     use holtburger_world::context::WorldContextExt;
     use holtburger_world::entity::Entity;
     use holtburger_world::stats::{Attribute, AttributeType};
+    use holtburger_world::{
+        ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode,
+    };
+    use std::time::Instant;
+
+    fn seed_runtime_body(
+        data: &mut GameData,
+        body_id: SpatialBodyId,
+        authoritative_pose: WorldPosition,
+        runtime_pose: WorldPosition,
+    ) {
+        data.runtime_body_cache.apply_view_event(
+            &ClientViewEvent::RuntimeBodyUpserted {
+                body: Box::new(RuntimeSpatialBodyView {
+                    body_id,
+                    authoritative_pose: Some(authoritative_pose),
+                    runtime_pose,
+                    velocity: Vector3::zero(),
+                    omega: Vector3::zero(),
+                    motion_state: None,
+                    contact: ContactState::Grounded,
+                    sample_mode: SpatialSampleMode::SimulatingMotionState,
+                }),
+            },
+            Instant::now(),
+        );
+    }
 
     #[test]
     fn opened_container_history_is_bounded() {
@@ -582,6 +619,65 @@ mod tests {
         assert!(!data.has_opened_container_before(Guid(2)));
     }
 
+    #[test]
+    fn distance_position_uses_projected_player_and_authoritative_other_entities() {
+        let player_guid = Guid(0x5000_0001);
+        let target_guid = Guid(0x5000_0002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let authoritative_player = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let projected_player = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(10.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let authoritative_target = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(50.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let projected_target = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(90.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+
+        data.player_pos = Some(authoritative_player);
+        data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), authoritative_player),
+        );
+        data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Target".to_string(), authoritative_target),
+        );
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::LocalPlayer(player_guid),
+            authoritative_player,
+            projected_player,
+        );
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::Entity(target_guid),
+            authoritative_target,
+            projected_target,
+        );
+
+        assert_eq!(
+            data.distance_position_for_guid(player_guid),
+            Some(projected_player)
+        );
+        assert_eq!(
+            data.distance_position_for_guid(target_guid),
+            Some(authoritative_target)
+        );
+    }
     #[test]
     fn curated_character_option_parses_aliases() {
         assert_eq!(

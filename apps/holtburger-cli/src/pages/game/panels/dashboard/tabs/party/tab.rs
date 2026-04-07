@@ -81,9 +81,8 @@ impl PartyTab {
         }
 
         let player_pos = data.runtime_player_position()?;
-        let entity = data.entities.get(&guid)?;
-        (entity.position.landblock_id != Guid::NULL)
-            .then(|| entity.position.distance_to(&player_pos))
+        let entity_pos = data.distance_position_for_guid(guid)?;
+        (entity_pos.landblock_id != Guid::NULL).then(|| entity_pos.distance_to(&player_pos))
     }
 
     fn is_member_nearby(&self, data: &GameData, guid: Guid) -> bool {
@@ -94,12 +93,11 @@ impl PartyTab {
         let Some(player_pos) = data.runtime_player_position() else {
             return false;
         };
-        let Some(entity) = data.entities.get(&guid) else {
+        let Some(entity_pos) = data.distance_position_for_guid(guid) else {
             return false;
         };
 
-        entity
-            .position
+        entity_pos
             .landblock_chebyshev_distance_to(&player_pos)
             .is_some_and(|distance| distance <= 1)
     }

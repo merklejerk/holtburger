@@ -91,7 +91,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
         roots.retain(|guid| {
             let entity = &entities[guid];
             let entity_pos = data
-                .runtime_position_for_guid(*guid)
+                .distance_position_for_guid(*guid)
                 .unwrap_or(entity.position);
 
             entity_pos
@@ -105,14 +105,14 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
         let ea = &entities[&a];
         let eb = &entities[&b];
         let da = if let Some(p) = player_pos {
-            data.runtime_position_for_guid(ea.guid)
+            data.distance_position_for_guid(ea.guid)
                 .unwrap_or(ea.position)
                 .distance_to(&p)
         } else {
             999.0
         };
         let db = if let Some(p) = player_pos {
-            data.runtime_position_for_guid(eb.guid)
+            data.distance_position_for_guid(eb.guid)
                 .unwrap_or(eb.position)
                 .distance_to(&p)
         } else {
@@ -128,7 +128,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     while let Some((guid, depth)) = stack.pop() {
         let e = &entities[&guid];
         let dist = if let Some(p) = player_pos {
-            data.runtime_position_for_guid(guid)
+            data.distance_position_for_guid(guid)
                 .unwrap_or(e.position)
                 .distance_to(&p)
         } else {
@@ -545,6 +545,11 @@ mod tests {
     use super::*;
     use holtburger_common::math::{Quaternion, Vector3};
     use holtburger_common::position::WorldPosition;
+    use holtburger_core::ClientViewEvent;
+    use holtburger_world::{
+        ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode,
+    };
+    use std::time::Instant;
 
     fn make_entity(guid: u32, landblock_id: u32, name: &str) -> Entity {
         Entity::new(
@@ -556,6 +561,29 @@ mod tests {
                 rotation: Quaternion::identity(),
             },
         )
+    }
+
+    fn seed_runtime_body(
+        data: &mut GameData,
+        body_id: SpatialBodyId,
+        authoritative_pose: WorldPosition,
+        runtime_pose: WorldPosition,
+    ) {
+        data.runtime_body_cache.apply_view_event(
+            &ClientViewEvent::RuntimeBodyUpserted {
+                body: Box::new(RuntimeSpatialBodyView {
+                    body_id,
+                    authoritative_pose: Some(authoritative_pose),
+                    runtime_pose,
+                    velocity: Vector3::zero(),
+                    omega: Vector3::zero(),
+                    motion_state: None,
+                    contact: ContactState::Grounded,
+                    sample_mode: SpatialSampleMode::SimulatingMotionState,
+                }),
+            },
+            Instant::now(),
+        );
     }
 
     #[test]
@@ -579,5 +607,85 @@ mod tests {
 
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].0.guid, Guid(0x0200_0001));
+    }
+
+    #[test]
+    fn visible_entities_orders_roots_by_authoritative_entity_pose_and_projected_player_pose() {
+        let player_guid = Guid(0x0100_0001);
+        let near_guid = Guid(0x0200_0001);
+        let far_guid = Guid(0x0200_0002);
+        let mut data = GameData::default();
+        data.player_guid = Some(player_guid);
+        let authoritative_player = WorldPosition {
+            landblock_id: Guid(0x0101_0000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        data.player_pos = Some(authoritative_player);
+
+        let projected_player = WorldPosition {
+            landblock_id: Guid(0x0101_0000),
+            coords: Vector3::new(100.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let authoritative_near = WorldPosition {
+            landblock_id: Guid(0x0101_0000),
+            coords: Vector3::new(5.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let authoritative_far = WorldPosition {
+            landblock_id: Guid(0x0101_0000),
+            coords: Vector3::new(50.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), authoritative_player),
+        );
+        data.entities.insert(
+            near_guid,
+            Entity::new(near_guid, "Near".to_string(), authoritative_near),
+        );
+        data.entities.insert(
+            far_guid,
+            Entity::new(far_guid, "Far".to_string(), authoritative_far),
+        );
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::LocalPlayer(player_guid),
+            authoritative_player,
+            projected_player,
+        );
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::Entity(near_guid),
+            authoritative_near,
+            WorldPosition {
+                landblock_id: Guid(0x0101_0000),
+                coords: Vector3::new(1.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::Entity(far_guid),
+            authoritative_far,
+            WorldPosition {
+                landblock_id: Guid(0x0101_0000),
+                coords: Vector3::new(500.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+
+        let visible = NearbyTab::default().visible_entities(&data);
+
+        assert_eq!(visible[0].0.guid, player_guid);
+        assert_eq!(visible[1].0.guid, far_guid);
+        assert_eq!(visible[2].0.guid, near_guid);
+        assert_eq!(visible[0].1, 0.0);
+        assert_eq!(visible[1].1, 50.0);
+        assert_eq!(visible[2].1, 95.0);
     }
 }

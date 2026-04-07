@@ -249,9 +249,9 @@
 - [x] Chat tabs (Chat vs combat vs all).
 - [x] Assess output not showing weapon skill.
 - [x] Skills should show attribute formula in character tab.
+- [x] Navigation not setting arrival landblock?
 - [~] Slash-commands should use `AppAction`s.
 - [ ] Do not show recharge verb on uncharged mana stones.
-- [ ] Navigation not setting arrival landblock?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

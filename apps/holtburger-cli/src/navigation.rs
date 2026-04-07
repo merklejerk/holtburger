@@ -50,9 +50,7 @@ impl NavigationSyncInput {
         let target_pose = self.authoritative_target_position()?;
 
         arrival_pose.coords.z = target_pose.coords.z;
-        if target_pose.is_indoors() {
-            arrival_pose.landblock_id = target_pose.landblock_id;
-        }
+        arrival_pose.landblock_id = target_pose.landblock_id;
 
         Some(arrival_pose)
     }

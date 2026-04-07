@@ -251,6 +251,7 @@
 - [x] Skills should show attribute formula in character tab.
 - [~] Slash-commands should use `AppAction`s.
 - [ ] Do not show recharge verb on uncharged mana stones.
+- [ ] Navigation not setting arrival landblock?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -165,7 +165,7 @@ impl log::Log for TuiLogger {
 #[derive(Parser, Debug)]
 #[command(
     author,
-    version,
+    version = holtburger_cli::version::BUILD_VERSION,
     about,
     long_about = None,
     disable_help_flag = true,
@@ -881,6 +881,7 @@ async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use clap::error::ErrorKind;
     use holtburger_core::client::types::ActionResultSource;
 
     #[test]
@@ -888,6 +889,14 @@ mod tests {
         let result = Args::try_parse_from(["tui", "--account", "acct", "-V"]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn version_flag_parses_and_exits() {
+        let error = Args::try_parse_from(["tui", "--version"])
+            .expect_err("--version should short-circuit parsing");
+
+        assert_eq!(error.kind(), ErrorKind::DisplayVersion);
     }
 
     #[test]

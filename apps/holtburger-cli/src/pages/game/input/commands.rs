@@ -171,7 +171,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
+            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -230,6 +230,10 @@ impl GameState {
                 "Show the general command list or detailed help for a specific command."
                     .to_string(),
                 "Examples: /help party, /? create-party, /help options".to_string(),
+            ],
+            "version" => vec![
+                "Usage: /version".to_string(),
+                "Show the current build version and commit hash for this client.".to_string(),
             ],
             "tell" | "t" => vec![
                 "Usage: /tell <NAME> <MSG>".to_string(),
@@ -431,6 +435,13 @@ impl GameState {
 
     pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
+
+        if command.trim() == "/version" {
+            self.chat
+                .log(ChatMessageTags::system(), crate::version::display_version());
+            result.merge(self.finish_input_command_submission(command));
+            return result.with_redraw(true);
+        }
 
         if command.trim() == "/logopolis" {
             result.merge(self.finish_input_command_submission(command));
@@ -792,6 +803,13 @@ mod tests {
                 .chat
                 .messages
                 .iter()
+                .any(|message| message.text.contains("/version"))
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
                 .any(|message| message.text.contains("/arena"))
         );
         assert!(
@@ -912,6 +930,26 @@ mod tests {
         )));
         assert_eq!(state.view.context_view, ContextView::Default);
         assert_eq!(state.view.focused_pane, FocusedPane::Input);
+    }
+
+    #[test]
+    fn version_command_logs_build_version() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/version");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == crate::version::display_version())
+        );
     }
 
     #[test]

@@ -170,14 +170,24 @@ pub fn get_assess_info(
         ));
     }
 
+    if let Some(is_open) = assess.is_open {
+        status_spans.push(Span::styled(
+            if is_open { "Open" } else { "Closed" },
+            Style::default().fg(if is_open { Color::Green } else { Color::Red }),
+        ));
+    }
+
     if assess.is_retained {
         status_spans.push(Span::styled(
             "Retained",
             Style::default().fg(Color::Magenta),
         ));
     }
-    if assess.is_locked {
-        status_spans.push(Span::styled("Locked", Style::default().fg(Color::Red)));
+    if let Some(is_locked) = assess.is_locked {
+        status_spans.push(Span::styled(
+            if is_locked { "Locked" } else { "Unlocked" },
+            Style::default().fg(if is_locked { Color::Red } else { Color::Green }),
+        ));
     }
     if !assess.is_sellable {
         status_spans.push(Span::styled(
@@ -594,4 +604,37 @@ pub fn get_assess_info(
     }
 
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pages::game::data::GameData;
+    use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
+    use holtburger_world::entity::Entity;
+    use holtburger_world::inspect::InspectableObject;
+
+    #[test]
+    fn assess_output_shows_open_and_locked_status() {
+        let mut entity = Entity::new(
+            Guid(0x60000002),
+            "Test Door".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_bool_prop(PropertyBool::Open, true);
+        entity.set_bool_prop(PropertyBool::Locked, false);
+
+        let data = GameData::new(Guid::NULL, "Player".to_string(), "World".to_string());
+        let object = InspectableObject::from_entity(&entity);
+        let lines = get_assess_info(&data, &object, None);
+
+        assert!(lines.iter().any(|line| line.to_string().contains("Open")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_string().contains("Unlocked"))
+        );
+    }
 }

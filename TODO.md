@@ -250,11 +250,12 @@
 - [x] Assess output not showing weapon skill.
 - [x] Skills should show attribute formula in character tab.
 - [x] Navigation not setting arrival landblock?
-- [~] Slash-commands should use `AppAction`s.
-- [ ] Do not show recharge verb on uncharged mana stones.
-- [ ] Salvaging waits for UseDone, leaving us in a busy state.
-- [ ] Wielded items do not despawn with wielders in nearby list (and maybe further up).
-- [ ] Show closed/open/locked/unlocked on assess if properties exist.
+- [x] Wielded items do not despawn with wielders in nearby list (and maybe further up).
+- [x] Slash-commands should use `AppAction`s.
+- [x] Show closed/open/locked/unlocked on assess if properties exist.
+- [x] Do not show recharge verb on uncharged mana stones.
+- [x] Salvaging waits for UseDone, leaving us in a busy state.
+- [x] `/version` and `--version`, seeded from commit hash env var set by build system?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

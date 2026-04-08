@@ -746,7 +746,7 @@ impl GameState {
 mod tests {
     use super::*;
     use crate::pages::game::GameState;
-    use crate::types::{AppAction, FocusedPane};
+    use crate::types::{AppAction, AppUiAction, ContextView, FocusedPane};
     use crossterm::event::KeyModifiers;
     use holtburger_common::CharacterOption;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
@@ -899,11 +899,19 @@ mod tests {
         assert!(matches!(
             result.actions.first(),
             Some(AppAction::UiAction {
-                action: crate::types::AppUiAction::ChangeContextView {
-                    view: crate::types::ContextView::Logopolis
-                }
-            })
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/logopolis"
         ));
+        assert!(result.actions.iter().any(|action| matches!(
+            action,
+            AppAction::UiAction {
+                action: AppUiAction::ChangeContextView {
+                    view: ContextView::Logopolis
+                }
+            }
+        )));
+        assert_eq!(state.view.context_view, ContextView::Default);
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
     }
 
     #[test]
@@ -1152,9 +1160,15 @@ mod tests {
             result.actions.first(),
             Some(AppAction::Scoot { distance_m }) if (*distance_m - 3.5).abs() < f32::EPSILON
         ));
+        assert!(matches!(
+            result.actions.get(1),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/scoot 3.5"
+        ));
         assert!(result.commands.is_empty());
         assert!(result.redraw_requested());
-        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
         assert!(state.chat_input.input.is_empty());
     }
 
@@ -1173,9 +1187,15 @@ mod tests {
             result.actions.first(),
             Some(AppAction::Scoot { distance_m }) if (*distance_m - 1.0).abs() < f32::EPSILON
         ));
+        assert!(matches!(
+            result.actions.get(1),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/scoot"
+        ));
         assert!(result.commands.is_empty());
         assert!(result.redraw_requested());
-        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
         assert!(state.chat_input.input.is_empty());
     }
 
@@ -1441,19 +1461,18 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/wave hello"
+        ));
+        assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::Talk(text)) if text == "/wave hello"
         ));
-        assert!(result.actions.is_empty());
         assert!(result.redraw_requested());
-        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
         assert!(state.chat_input.input.is_empty());
-        assert!(
-            state
-                .chat_input
-                .input_history
-                .iter()
-                .any(|entry| entry == "/wave hello")
-        );
+        assert!(state.chat_input.input_history.is_empty());
     }
 }

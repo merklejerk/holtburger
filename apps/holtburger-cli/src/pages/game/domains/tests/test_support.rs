@@ -34,14 +34,13 @@ pub(super) fn is_run_movement_command(command: &ClientCommand) -> bool {
         ClientCommand::DriveSelf(PlayerDriveIntent::ManualHeld(MotionState {
             locomotion: Some(Locomotion::Forward),
             ..
-        }))
-            | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
-                state: MotionState {
-                    locomotion: Some(Locomotion::Forward),
-                    ..
-                },
+        })) | ClientCommand::DriveSelf(PlayerDriveIntent::ManualPulse {
+            state: MotionState {
+                locomotion: Some(Locomotion::Forward),
                 ..
-            })
+            },
+            ..
+        })
     )
 }
 

@@ -113,7 +113,10 @@ fn combat_control_actions_cycle_defaults() {
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
 
     assert_eq!(state.data.combat_controls.profile_level.wire_value(), 0.5);
-    assert_eq!(state.data.combat_controls.attack_height, AttackHeight::Medium);
+    assert_eq!(
+        state.data.combat_controls.attack_height,
+        AttackHeight::Medium
+    );
 
     state
         .handle_action(AppAction::CycleCombatProfileLevel)
@@ -595,7 +598,8 @@ fn cancelled_attack_does_not_rearm_after_explicit_cancel() {
     ));
 
     assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. }) || is_run_movement_command(command)
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+            || is_run_movement_command(command)
     }));
     assert_eq!(state.view.active_interaction, None);
 }
@@ -636,7 +640,8 @@ fn cancelled_attack_does_not_rearm_after_target_death_motion() {
     ));
 
     assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. }) || is_run_movement_command(command)
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+            || is_run_movement_command(command)
     }));
 
     let mut stale = UpdateResult::new();
@@ -647,7 +652,8 @@ fn cancelled_attack_does_not_rearm_after_target_death_motion() {
     );
 
     assert!(!stale.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. }) || is_run_movement_command(command)
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+            || is_run_movement_command(command)
     }));
 }
 
@@ -690,7 +696,8 @@ fn cancelled_attack_does_not_rearm_after_player_death_motion() {
     ));
 
     assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. }) || is_run_movement_command(command)
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+            || is_run_movement_command(command)
     }));
 }
 

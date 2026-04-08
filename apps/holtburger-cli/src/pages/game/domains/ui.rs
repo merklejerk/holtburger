@@ -1,6 +1,6 @@
-use super::*;
 use super::context;
 use super::logopolis;
+use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppUiAction) -> UpdateResult {
     match action {
@@ -19,9 +19,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppUiAction) -> Updat
             );
             UpdateResult::redraw()
         }
-        AppUiAction::EnterInputMode => {
-            apply_set_focused_pane(state, FocusedPane::Input, true)
-        }
+        AppUiAction::EnterInputMode => apply_set_focused_pane(state, FocusedPane::Input, true),
         AppUiAction::ExitInputMode => {
             apply_set_focused_pane(state, state.view.previous_focused_pane, false)
         }
@@ -139,8 +137,6 @@ fn get_pane_order(layout_mode: LayoutMode) -> [FocusedPane; 4] {
         ]
     }
 }
-
-
 
 fn apply_set_focused_pane(
     state: &mut GameState,

@@ -1,5 +1,3 @@
-use crate::pages::game::layout::LayoutMode;
-use crate::types::FocusedPane;
 use crate::types::Interaction;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};

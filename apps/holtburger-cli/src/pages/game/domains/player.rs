@@ -1,5 +1,5 @@
-use super::*;
 use super::inventory;
+use super::*;
 
 pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();

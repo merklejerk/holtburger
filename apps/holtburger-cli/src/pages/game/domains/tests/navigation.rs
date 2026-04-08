@@ -96,7 +96,8 @@ fn navigation_sync_input_prefers_runtime_body_mirror_for_player_and_keeps_target
         )),
     });
 
-    let snapshot = super::super::navigation::navigation_snapshot_for_tests(&state, Some(target_guid));
+    let snapshot =
+        super::super::navigation::navigation_snapshot_for_tests(&state, Some(target_guid));
     let input = NavigationSyncInput {
         now: Instant::now(),
         player_position: snapshot.player_position,
@@ -388,7 +389,17 @@ fn remote_forced_reposition_updates_target_position_and_restarts_follow_when_out
 
     assert!(event_result.redraw_requested());
 
-    assert_eq!(state.data.entities.get(&target_guid).unwrap().position.coords.x, 6.0);
+    assert_eq!(
+        state
+            .data
+            .entities
+            .get(&target_guid)
+            .unwrap()
+            .position
+            .coords
+            .x,
+        6.0
+    );
 
     let tick_result = state.handle_tick(0.016);
 

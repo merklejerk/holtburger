@@ -5,13 +5,19 @@ pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> Update
 
     match action {
         AppAction::InviteToParty { target } => {
-            result.commands.push(ClientCommand::InviteToParty { target });
+            result
+                .commands
+                .push(ClientCommand::InviteToParty { target });
         }
         AppAction::UninviteFromParty { target } => {
-            result.commands.push(ClientCommand::UninviteFromParty { target });
+            result
+                .commands
+                .push(ClientCommand::UninviteFromParty { target });
         }
         AppAction::SwearAllegiance { target } => {
-            result.commands.push(ClientCommand::SwearAllegiance { target });
+            result
+                .commands
+                .push(ClientCommand::SwearAllegiance { target });
         }
         AppAction::Unswear { target } => {
             result.commands.push(ClientCommand::Unswear { target });
@@ -39,7 +45,9 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             state.runtime.open_party_tab_on_next_fellowship_update = false;
             state.data.party = fellowship;
             if should_open_party_tab {
-                result.actions.push(AppUiAction::SetDashboardActiveTab(DashboardTab::Party).into());
+                result
+                    .actions
+                    .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Party).into());
             }
             result.request_redraw(RedrawPriority::Immediate);
         }

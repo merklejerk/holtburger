@@ -1,5 +1,5 @@
-use super::*;
 use super::inventory;
+use super::*;
 
 pub(super) fn reduce_view_event(
     state: &mut GameState,

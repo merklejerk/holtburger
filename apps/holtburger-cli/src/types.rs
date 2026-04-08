@@ -21,19 +21,35 @@ pub type VerbSet = Vec<Verb>;
 #[derive(Debug, Clone)]
 pub enum AppUiAction {
     SetDashboardActiveTab(DashboardTab),
-    ChangeContextView { view: ContextView },
-    SetFocusedPane { pane: FocusedPane, remember_previous: bool },
-    CycleFocusedPane { delta: i8 },
+    ChangeContextView {
+        view: ContextView,
+    },
+    SetFocusedPane {
+        pane: FocusedPane,
+        remember_previous: bool,
+    },
+    CycleFocusedPane {
+        delta: i8,
+    },
     EnterInputMode,
     ExitInputMode,
-    FinishInputCommandSubmission { command: String },
-    InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
-    BeginTabFilterInput { tab: DashboardTab },
+    FinishInputCommandSubmission {
+        command: String,
+    },
+    InventoryBeginSplitInput {
+        item_guid: Guid,
+        max_amount: u32,
+    },
+    BeginTabFilterInput {
+        tab: DashboardTab,
+    },
     OpenCharacterCreationScreen,
     OpenCharacterDashboard,
     OpenDeleteCharacterConfirmation,
     CancelDeleteCharacterConfirmation,
-    OpenUnswearConfirmation { target: Guid },
+    OpenUnswearConfirmation {
+        target: Guid,
+    },
     ConfirmLocalConfirmation,
     DismissLocalConfirmation,
     RaiseSelectedCharacterCreationSkill,

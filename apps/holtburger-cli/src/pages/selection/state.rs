@@ -460,10 +460,11 @@ mod tests {
 
         let verbs = selection_presentation::dashboard_verbs(&state);
 
-        assert!(verbs.iter().any(|verb| matches!(
-            verb.action,
-            AppAction::RestoreSelectedCharacter
-        )));
+        assert!(
+            verbs
+                .iter()
+                .any(|verb| matches!(verb.action, AppAction::RestoreSelectedCharacter))
+        );
     }
 
     #[test]

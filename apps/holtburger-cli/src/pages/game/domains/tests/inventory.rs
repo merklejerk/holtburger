@@ -88,7 +88,10 @@ fn newly_owned_stacked_item_logs_stack_size() {
 
     assert!(result.redraw_requested());
     assert_eq!(state.chat.messages.len(), 1);
-    assert_eq!(state.chat.messages[0].text, "Added to inventory: Pyreal (7x)");
+    assert_eq!(
+        state.chat.messages[0].text,
+        "Added to inventory: Pyreal (7x)"
+    );
 }
 
 #[test]
@@ -120,7 +123,10 @@ fn newly_unowned_item_logs_to_chat() {
 
     assert!(result.redraw_requested());
     assert_eq!(state.chat.messages.len(), 1);
-    assert_eq!(state.chat.messages[0].text, "Removed from inventory: Pyreal");
+    assert_eq!(
+        state.chat.messages[0].text,
+        "Removed from inventory: Pyreal"
+    );
 }
 
 #[test]
@@ -207,7 +213,10 @@ fn despawning_owned_item_logs_removal_to_chat() {
 
     assert!(result.redraw_requested());
     assert_eq!(state.chat.messages.len(), 1);
-    assert_eq!(state.chat.messages[0].text, "Removed from inventory: Pyreal");
+    assert_eq!(
+        state.chat.messages[0].text,
+        "Removed from inventory: Pyreal"
+    );
 }
 
 #[test]

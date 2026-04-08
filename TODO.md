@@ -252,6 +252,9 @@
 - [x] Navigation not setting arrival landblock?
 - [~] Slash-commands should use `AppAction`s.
 - [ ] Do not show recharge verb on uncharged mana stones.
+- [ ] Salvaging waits for UseDone, leaving us in a busy state.
+- [ ] Wielded items do not despawn with wielders in nearby list (and maybe further up).
+- [ ] Show closed/open/locked/unlocked on assess if properties exist.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

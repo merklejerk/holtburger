@@ -8,7 +8,10 @@ use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatView;
-use crate::types::{ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
+use crate::pages::game::state::domains;
+use crate::types::{
+    AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult,
+};
 
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
@@ -154,7 +157,7 @@ impl GameState {
             };
 
             if let Some(delta) = paddle_delta
-                && let Some(game) = self.logopolis_state_mut()
+                && let Some(game) = domains::logopolis_state_mut(self)
             {
                 handled = game.nudge_player_paddle(delta);
             }
@@ -184,7 +187,6 @@ impl GameState {
 
         match key.code {
             KeyCode::Tab | KeyCode::BackTab => {
-                let active = self.view.active_interaction.is_some();
                 let delta = if key
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -194,20 +196,16 @@ impl GameState {
                 } else {
                     1
                 };
-                self.view.focused_pane = crate::utils::get_adjacent_pane(
-                    self.view.focused_pane,
-                    self.layout_mode(),
-                    active,
-                    delta,
-                );
-                result.request_redraw(RedrawPriority::Immediate);
+                result
+                    .actions
+                    .push(AppUiAction::CycleFocusedPane { delta }.into());
             }
             KeyCode::Esc => {
                 if self.view.context_view == ContextView::Logopolis
                     && self.view.focused_pane == FocusedPane::Context
                 {
                     result.actions.push(
-                        crate::types::AppUiAction::ChangeContextView {
+                        AppUiAction::ChangeContextView {
                             view: ContextView::Default,
                         }
                         .into(),
@@ -216,42 +214,46 @@ impl GameState {
                 }
 
                 if self.view.focused_pane == FocusedPane::Input {
-                    self.view.focused_pane = self.view.previous_focused_pane;
-                } else if self.view.active_interaction.is_some() {
-                    self.clear_active_interaction(&mut result);
-                    self.view.salvaging = None;
+                    result.actions.push(AppUiAction::ExitInputMode.into());
+                } else if self.view.active_interaction.is_some()
+                    && let Some(action_result) = self.handle_action(AppAction::CancelInteraction)
+                {
+                    result.merge(action_result);
                 }
-                result.request_redraw(RedrawPriority::Immediate);
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
                     let command = self.chat_input.input.take_text();
                     if command.is_empty() {
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
+                        result.actions.push(AppUiAction::ExitInputMode.into());
+                        return result;
                     }
                     if command.starts_with('/') {
                         return self.handle_slash_command(&command);
                     }
                     if let Some(emote) = command.strip_prefix(':') {
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
+                        result.actions.push(
+                            AppUiAction::FinishInputCommandSubmission {
+                                command: command.clone(),
+                            }
+                            .into(),
+                        );
                         result
                             .commands
                             .push(ClientCommand::Emote(emote.to_string()));
-                        result.request_redraw(RedrawPriority::Immediate);
                         return result;
                     }
-                    self.chat_input.input_history.push(command.clone());
-                    self.chat_input.history_index = None;
-                    self.view.focused_pane = self.view.previous_focused_pane;
+                    result.actions.push(
+                        AppUiAction::FinishInputCommandSubmission {
+                            command: command.clone(),
+                        }
+                        .into(),
+                    );
                     result.commands.push(ClientCommand::Talk(command));
-                    result.request_redraw(RedrawPriority::Immediate);
+                    return result;
                 } else {
-                    self.view.previous_focused_pane = self.view.focused_pane;
-                    self.view.focused_pane = FocusedPane::Input;
-                    result.request_redraw(RedrawPriority::Immediate);
+                    result.actions.push(AppUiAction::EnterInputMode.into());
+                    return result;
                 }
             }
             KeyCode::Backspace | KeyCode::Delete => {
@@ -383,7 +385,7 @@ impl GameState {
                     }
                 } else if c == '`' {
                     result.actions.push(crate::types::AppAction::SetCombatMode {
-                        mode: self.toggled_combat_mode(),
+                        mode: crate::pages::game::state::domains::toggled_combat_mode(self),
                     });
                     result.request_redraw(RedrawPriority::Immediate);
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
@@ -441,7 +443,8 @@ impl GameState {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
-                    self.view.context_scroll_offset = self.context_buffer_len().saturating_sub(1);
+                    self.view.context_scroll_offset =
+                        domains::context_buffer_len(self).saturating_sub(1);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
@@ -476,23 +479,25 @@ impl GameState {
     }
 
     fn handle_local_confirmation_input(&mut self, key: KeyEvent) -> Option<UpdateResult> {
-        let confirmation = self.view.local_confirmation.clone()?;
-        let mut result = UpdateResult::new();
+        self.view.local_confirmation.as_ref()?;
 
         match key.code {
             KeyCode::Enter => {
-                self.view.local_confirmation = None;
-                result.actions.push(confirmation.action);
-                result.request_redraw(RedrawPriority::Immediate);
+                let mut result = UpdateResult::new();
+                result
+                    .actions
+                    .push(AppUiAction::ConfirmLocalConfirmation.into());
+                Some(result)
             }
             KeyCode::Esc => {
-                self.view.local_confirmation = None;
-                result.request_redraw(RedrawPriority::Immediate);
+                let mut result = UpdateResult::new();
+                result
+                    .actions
+                    .push(AppUiAction::DismissLocalConfirmation.into());
+                Some(result)
             }
-            _ => {}
+            _ => Some(UpdateResult::new()),
         }
-
-        Some(result)
     }
 }
 
@@ -500,7 +505,7 @@ impl GameState {
 mod tests {
     use super::*;
     use crate::pages::game::GameState;
-    use crate::types::{AppAction, FocusedPane, Interaction};
+    use crate::types::{AppAction, AppUiAction, FocusedPane, Interaction};
     use crossterm::event::KeyModifiers;
     use holtburger_common::ConfirmationType;
     use holtburger_common::Guid;
@@ -523,7 +528,14 @@ mod tests {
                 mode: CombatMode::Melee
             })
         ));
-        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert!(matches!(
+            result.actions.get(1),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/combat"
+        ));
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
+        assert!(state.chat_input.input.is_empty());
     }
 
     #[test]
@@ -543,6 +555,13 @@ mod tests {
                 mode: CombatMode::NonCombat
             })
         ));
+        assert!(matches!(
+            result.actions.get(1),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/combat"
+        ));
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
     }
 
     #[test]
@@ -658,11 +677,13 @@ mod tests {
         assert!(matches!(
             result.actions.first(),
             Some(AppAction::UiAction {
-                action: crate::types::AppUiAction::ChangeContextView {
+                action: AppUiAction::ChangeContextView {
                     view: ContextView::Default
                 }
             })
         ));
+        assert_eq!(state.view.context_view, ContextView::Logopolis);
+        assert_eq!(state.view.focused_pane, FocusedPane::Context);
     }
 
     #[test]
@@ -711,11 +732,13 @@ mod tests {
 
         assert!(matches!(
             result.actions.first(),
-            Some(AppAction::Unswear { target }) if *target == target_guid
+            Some(AppAction::UiAction {
+                action: AppUiAction::ConfirmLocalConfirmation
+            })
         ));
         assert!(result.commands.is_empty());
-        assert!(result.redraw_requested());
-        assert!(state.view.local_confirmation.is_none());
+        assert!(!result.redraw_requested());
+        assert!(state.view.local_confirmation.is_some());
         assert_eq!(state.chat_input.input.text(), "/unswear");
     }
 
@@ -737,9 +760,14 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
-        assert!(result.actions.is_empty());
-        assert!(result.redraw_requested());
-        assert!(state.view.local_confirmation.is_none());
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: AppUiAction::DismissLocalConfirmation
+            })
+        ));
+        assert!(!result.redraw_requested());
+        assert!(state.view.local_confirmation.is_some());
     }
 
     #[test]

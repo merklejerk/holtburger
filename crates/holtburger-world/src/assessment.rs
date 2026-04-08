@@ -398,31 +398,6 @@ impl Assessment {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::entity::Entity;
-    use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
-    use holtburger_common::Guid;
-
-    #[test]
-    fn from_entity_captures_open_status_property() {
-        let mut entity = Entity::new(
-            Guid(0x60000001),
-            "Door".to_string(),
-            WorldPosition::default(),
-        );
-        entity.set_bool_prop(PropertyBool::Open, true);
-        entity.set_bool_prop(PropertyBool::Locked, false);
-
-        let assessment = Assessment::from_entity(&entity);
-
-        assert_eq!(assessment.is_open, Some(true));
-        assert_eq!(assessment.is_locked, Some(false));
-    }
-}
-
 fn get_wield_requirements(object: &InspectableObject<'_>) -> Vec<WieldRequirement> {
     let mut reqs = Vec::new();
 
@@ -892,4 +867,29 @@ fn get_imbued_effects(object: &InspectableObject<'_>) -> Vec<String> {
         .iter_display_names()
         .map(|s| s.to_string())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::Entity;
+    use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
+
+    #[test]
+    fn from_entity_captures_open_status_property() {
+        let mut entity = Entity::new(
+            Guid(0x60000001),
+            "Door".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_bool_prop(PropertyBool::Open, true);
+        entity.set_bool_prop(PropertyBool::Locked, false);
+
+        let assessment = Assessment::from_entity(&entity);
+
+        assert_eq!(assessment.is_open, Some(true));
+        assert_eq!(assessment.is_locked, Some(false));
+    }
 }

@@ -880,8 +880,8 @@ async fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::error::ErrorKind;
     use clap::Parser;
+    use clap::error::ErrorKind;
     use holtburger_core::client::types::ActionResultSource;
 
     #[test]

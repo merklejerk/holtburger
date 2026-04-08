@@ -437,10 +437,8 @@ impl GameState {
         let mut result = UpdateResult::new();
 
         if command.trim() == "/version" {
-            self.chat.log(
-                ChatMessageTags::system(),
-                crate::version::display_version(),
-            );
+            self.chat
+                .log(ChatMessageTags::system(), crate::version::display_version());
             result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
@@ -800,7 +798,13 @@ mod tests {
         assert!(state.chat.messages.iter().any(|message| {
             message.text == "Use /help <COMMAND> for detailed help on a specific command."
         }));
-        assert!(state.chat.messages.iter().any(|message| message.text.contains("/version")));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains("/version"))
+        );
         assert!(
             state
                 .chat
@@ -939,11 +943,13 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
-        assert!(state
-            .chat
-            .messages
-            .iter()
-            .any(|message| message.text == crate::version::display_version()));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == crate::version::display_version())
+        );
     }
 
     #[test]

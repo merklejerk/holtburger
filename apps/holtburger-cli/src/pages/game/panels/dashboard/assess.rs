@@ -610,9 +610,9 @@ pub fn get_assess_info(
 mod tests {
     use super::*;
     use crate::pages::game::data::GameData;
+    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
-    use holtburger_common::Guid;
     use holtburger_world::entity::Entity;
     use holtburger_world::inspect::InspectableObject;
 
@@ -631,6 +631,10 @@ mod tests {
         let lines = get_assess_info(&data, &object, None);
 
         assert!(lines.iter().any(|line| line.to_string().contains("Open")));
-        assert!(lines.iter().any(|line| line.to_string().contains("Unlocked")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_string().contains("Unlocked"))
+        );
     }
 }

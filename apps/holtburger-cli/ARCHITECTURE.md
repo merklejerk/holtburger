@@ -60,3 +60,55 @@ Rendering is strictly separated from logic.
 - **No Direct Engine Mod**: The TUI never directly modifies the `holtburger-core` state. It communicates via `ClientCommand` and `ClientViewEvent`.
 - **State-Specific Logic**: Prefer implementing logic in sub-state structs (like `SelectionState` or `GameState`) and delegating from `AppState`.
 - **Borrowing**: If you hit a borrow checker error during rendering, add the field to `RenderContext` instead of passing `&mut AppState`.
+
+## 🎮 Game Page Architecture
+
+The game page uses the same update model as the app shell. It is driven through a small `GameState` entry surface and an internal reducer split under `src/pages/game/domains/`.
+
+### `GameState` Integration Surface
+
+These methods are the supported semantic entrypoints for driving the page:
+
+- `handle_input(key)` for raw keyboard input.
+- `handle_mouse(mouse)` for raw mouse input.
+- `handle_action(action)` for gameplay and workflow intents.
+- `handle_view_event(event)` for server-driven state projection.
+- `handle_tick(elapsed)` for time-based maintenance and controller coordination.
+
+Each entrypoint returns `UpdateResult`, which carries emitted `ClientCommand`s, follow-up `AppAction`s, and redraw requests. Durable local UI transitions are still modeled as `AppUiAction`, but they now flow through the normal action drain as `AppAction::UiAction` instead of a separate `GameState` entrypoint.
+
+### Internal Reducer Roles
+
+- `domains/mod.rs`: thin action, view-event, and tick routers that dispatch by owning subsystem rather than by trigger type.
+- `domains/chat.rs`: chat/event projection.
+- `domains/combat.rs`: combat actions, combat feedback projection, combat automation, and stale attack refresh on tick.
+- `domains/context.rs`: assess/read/debug/context-view actions.
+- `domains/entity.rs`: world-entity projection, motion/position updates, and container tracking.
+- `domains/inventory.rs`: inventory actions, salvage state, weapon-swap coordination, inventory/equipment projection, and inventory notification arming.
+- `domains/lifecycle.rs`: busy/confirmation/status and other client lifecycle view events.
+- `domains/navigation.rs`: interaction/navigation actions, runtime-body projection, frontend navigation policy, navigation interrupts, and navigation tick coordination.
+- `domains/party.rs`: fellowship projection plus party/allegiance actions.
+- `domains/player.rs`: player projection and player-timed maintenance such as enchantment decay.
+- `domains/progression.rs`: stat and skill training actions.
+- `domains/trade_vendor.rs`: trade/shop actions and vendor/trade projection.
+- `domains/ui.rs`: durable local UI transitions, context-buffer maintenance, and Logopolis tick-time behavior.
+
+Helpers that remain in `state.rs` are reducer internals or page-local support code. They are not part of the external control surface.
+
+### Integration Rules
+
+- Drive gameplay behavior through `AppAction`.
+- Drive durable UI-mode changes through `AppUiAction`, wrapped into the normal action pipeline as `AppAction::UiAction`.
+- Project core/client state changes through `ClientViewEvent`.
+- Use `handle_tick` for time-based maintenance and coordination, not ad hoc callers into controller helpers.
+- Treat raw key or mouse simulation as a fallback for widget-local behavior, not the primary integration path.
+
+For script or other external integration layers, compile external intents into `AppAction` values. UI intents should be wrapped as `AppAction::UiAction`. Feed emitted `ClientCommand`s back into the normal app shell flow.
+
+### Boundary Rules
+
+- `GameState` is a page host and reducer entry surface, not a bag of general-purpose mutators.
+- Reducer-private policy belongs under `src/pages/game/domains/`, organized by owning subsystem rather than by trigger shape.
+- Render and layout support remain presentation concerns; they should not become alternative state-transition pathways.
+
+If a new behavior cannot be described cleanly as input handling, an `AppAction`, an `AppUiAction`, a `ClientViewEvent`, or a tick update, revisit the design before adding another direct mutator path.

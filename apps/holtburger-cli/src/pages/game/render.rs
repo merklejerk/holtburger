@@ -16,6 +16,7 @@ use crate::pages::game::panels::context::build_context_display_lines;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::game::panels::dynamic::render_dynamic_pane;
+use crate::pages::game::state::domains;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
@@ -69,6 +70,25 @@ fn render_local_confirmation_overlay(f: &mut Frame, area: Rect, title: &str, tex
 }
 
 impl GameState {
+    pub(super) fn main_chunks(&self) -> std::rc::Rc<Vec<Rect>> {
+        std::rc::Rc::clone(&self.render_state.layout_cache.main_chunks)
+    }
+
+    pub(super) fn layout_mode(&self) -> crate::pages::game::layout::LayoutMode {
+        self.render_state.layout_cache.mode
+    }
+
+    pub(super) fn set_layout_cache(
+        &mut self,
+        main_chunks: Vec<Rect>,
+        dynamic_chunk: Rect,
+        mode: crate::pages::game::layout::LayoutMode,
+    ) {
+        self.render_state.layout_cache.main_chunks = std::rc::Rc::new(main_chunks);
+        self.render_state.layout_cache.dynamic_chunk = dynamic_chunk;
+        self.render_state.layout_cache.mode = mode;
+    }
+
     pub fn update_layout(&mut self, area: Rect) {
         let (_chunks, main_chunks_vec, _dynamic_chunk) = get_layout(area);
         let layout_mode = layout_mode_for_size(area.width, area.height);
@@ -77,14 +97,13 @@ impl GameState {
         self.set_layout_cache(main_chunks_vec.clone(), _dynamic_chunk, layout_mode);
 
         let context_width = main_chunks_vec[2].width.saturating_sub(2) as usize;
-        let context_len = self
-            .live_context_buffer()
+        let context_len = domains::live_context_buffer(self)
             .map(|content| {
                 build_context_display_lines(&content, &self.view.context_view, context_width).len()
             })
             .unwrap_or_else(|| {
                 build_context_display_lines(
-                    self.context_buffer(),
+                    domains::context_buffer(self),
                     &self.view.context_view,
                     context_width,
                 )
@@ -132,17 +151,17 @@ impl GameState {
         );
 
         // Context Pane
-        let live_context = self.live_context_buffer();
+        let live_context = domains::live_context_buffer(self);
         let context_buffer = live_context
             .as_deref()
-            .unwrap_or_else(|| self.context_buffer());
+            .unwrap_or_else(|| domains::context_buffer(self));
         render_context_pane(
             f,
             crate::pages::game::panels::context::ContextPaneRenderArgs {
                 data: &self.data,
                 context_buffer,
                 context_view: &self.view.context_view,
-                logopolis: self.logopolis_state(),
+                logopolis: domains::logopolis_state(self),
                 scroll_offset: self.view.context_scroll_offset,
                 is_focused: self.view.focused_pane == FocusedPane::Context,
                 area: main_chunks[2],

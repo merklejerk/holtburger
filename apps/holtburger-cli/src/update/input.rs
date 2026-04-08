@@ -6,46 +6,19 @@ use crate::types::UpdateResult;
 
 impl AppState {
     pub(super) fn handle_key_press(&mut self, key: KeyEvent) -> UpdateResult {
-        let mut result = UpdateResult::new();
-
         // Global shortcut: Ctrl-Q to Quit
         if let KeyCode::Char('q') | KeyCode::Char('Q') = key.code
             && key
                 .modifiers
                 .contains(crossterm::event::KeyModifiers::CONTROL)
         {
-            result.commands.push(ClientCommand::Quit);
-            return result;
+            return UpdateResult::commands(vec![ClientCommand::Quit]);
         }
 
-        // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_input(key);
-
-        while !page_result.actions.is_empty() {
-            let actions: Vec<_> = page_result.actions.drain(..).collect();
-            for action in actions {
-                let action_result = self.handle_app_action(action);
-                result.merge(action_result);
-            }
-        }
-        result.merge(page_result);
-        result
+        self.page.handle_input(key)
     }
 
     pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent) -> UpdateResult {
-        let mut result = UpdateResult::new();
-
-        // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_mouse(mouse);
-        while !page_result.actions.is_empty() {
-            let actions: Vec<_> = page_result.actions.drain(..).collect();
-            for action in actions {
-                let action_result = self.handle_app_action(action);
-                result.merge(action_result);
-            }
-        }
-        result.merge(page_result);
-
-        result
+        self.page.handle_mouse(mouse)
     }
 }

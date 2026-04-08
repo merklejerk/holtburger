@@ -230,9 +230,7 @@ impl SelectionState {
                     None
                 }
             }
-            AppAction::UiAction {
-                action: AppUiAction::RestoreSelectedCharacter,
-            } => {
+            AppAction::RestoreSelectedCharacter => {
                 let character = self.selected_character()?;
                 if character.character.delete_time == 0 {
                     return None;
@@ -462,12 +460,11 @@ mod tests {
 
         let verbs = selection_presentation::dashboard_verbs(&state);
 
-        assert!(verbs.iter().any(|verb| matches!(
-            verb.action,
-            AppAction::UiAction {
-                action: AppUiAction::RestoreSelectedCharacter,
-            }
-        )));
+        assert!(
+            verbs
+                .iter()
+                .any(|verb| matches!(verb.action, AppAction::RestoreSelectedCharacter))
+        );
     }
 
     #[test]
@@ -476,7 +473,7 @@ mod tests {
         state.characters[0].character.delete_time = 123;
 
         let result = state
-            .handle_action(AppUiAction::RestoreSelectedCharacter.into())
+            .handle_action(AppAction::RestoreSelectedCharacter)
             .expect("restore action should produce a result");
 
         assert!(matches!(

@@ -1,7 +1,7 @@
 use super::*;
-use super::super::inventory_projection;
+use super::inventory;
 
-pub(super) fn reduce_entity_event(
+pub(super) fn reduce_view_event(
     state: &mut GameState,
     event: ClientViewEvent,
     now: Instant,
@@ -18,11 +18,11 @@ pub(super) fn reduce_entity_event(
         }
         ClientViewEvent::EntitySpawned { entity } | ClientViewEvent::EntityReplaced { entity } => {
             let entity_ref = entity.as_ref();
-            if inventory_projection::update_inventory_and_equipment(state, entity_ref) {
+            if inventory::update_inventory_and_equipment(state, entity_ref) {
                 result.request_redraw(RedrawPriority::Immediate);
             }
-            inventory_projection::refresh_entity_context_if_visible(state, entity_ref.guid, &mut result);
-            state.sync_weapon_swap_controller(now, &mut result);
+            inventory::refresh_entity_context_if_visible(state, entity_ref.guid, &mut result);
+            inventory::sync_weapon_swap_controller(state, now, &mut result);
         }
         ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
             let mut needs_update = false;
@@ -33,11 +33,11 @@ pub(super) fn reduce_entity_event(
                 needs_update = true;
             }
             if needs_update && let Some(entity) = state.data.entities.get(&guid).cloned() {
-                inventory_projection::refresh_entity_context_if_visible(state, guid, &mut result);
-                if inventory_projection::update_inventory_and_equipment(state, &entity) {
+                inventory::refresh_entity_context_if_visible(state, guid, &mut result);
+                if inventory::update_inventory_and_equipment(state, &entity) {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-                state.sync_weapon_swap_controller(now, &mut result);
+                inventory::sync_weapon_swap_controller(state, now, &mut result);
             }
         }
         ClientViewEvent::EntityMoved { guid, pos } => {
@@ -48,7 +48,7 @@ pub(super) fn reduce_entity_event(
                     state.data.player_pos = Some(pos);
                 }
             }
-            inventory_projection::refresh_entity_context_if_visible(state, guid, &mut result);
+            inventory::refresh_entity_context_if_visible(state, guid, &mut result);
             result.request_redraw(RedrawPriority::Motion);
         }
         ClientViewEvent::EntityKinematicsUpdated {
@@ -59,14 +59,14 @@ pub(super) fn reduce_entity_event(
             if let Some(entity) = state.data.entities.get_mut(&guid) {
                 entity.velocity = velocity;
                 entity.omega = omega;
-                inventory_projection::refresh_entity_context_if_visible(state, guid, &mut result);
+                inventory::refresh_entity_context_if_visible(state, guid, &mut result);
                 result.request_redraw(RedrawPriority::Motion);
             }
         }
         ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
             if let Some(entity) = state.data.entities.get_mut(&guid) {
                 entity.motion_snapshot = snapshot;
-                inventory_projection::refresh_entity_context_if_visible(state, guid, &mut result);
+                inventory::refresh_entity_context_if_visible(state, guid, &mut result);
                 result.request_redraw(RedrawPriority::Motion);
             }
         }
@@ -78,20 +78,19 @@ pub(super) fn reduce_entity_event(
                     state.data.player_pos = Some(pos);
                 }
             }
-            inventory_projection::refresh_entity_context_if_visible(state, guid, &mut result);
+            inventory::refresh_entity_context_if_visible(state, guid, &mut result);
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::TeleportStarted { .. } => {}
         ClientViewEvent::EntityDespawned { guid } => {
-            result.merge(inventory_projection::handle_entity_removed(state, guid));
+            result.merge(inventory::handle_entity_removed(state, guid));
         }
         ClientViewEvent::EntityIdentified { entity } => {
             let entity_ref = entity.as_ref();
-            if inventory_projection::update_inventory_and_equipment(state, entity_ref) {
+            if inventory::update_inventory_and_equipment(state, entity_ref) {
                 result.request_redraw(RedrawPriority::Immediate);
             }
-            inventory_projection::handle_entity_identified(state, entity_ref);
-            state.sync_weapon_swap_controller(now, &mut result);
+            inventory::handle_entity_identified(state, entity_ref);
+            inventory::sync_weapon_swap_controller(state, now, &mut result);
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::ContainerOpened { guid } => {

@@ -63,7 +63,7 @@ Rendering is strictly separated from logic.
 
 ## 🎮 Game Page Architecture
 
-The game page uses the same update model as the app shell. It is driven through a small `GameState` entry surface and an internal reducer split under `src/pages/game/update/`.
+The game page uses the same update model as the app shell. It is driven through a small `GameState` entry surface and an internal reducer split under `src/pages/game/domains/`.
 
 ### `GameState` Integration Surface
 
@@ -72,43 +72,43 @@ These methods are the supported semantic entrypoints for driving the page:
 - `handle_input(key)` for raw keyboard input.
 - `handle_mouse(mouse)` for raw mouse input.
 - `handle_action(action)` for gameplay and workflow intents.
-- `handle_ui_action(action)` for durable local UI transitions.
 - `handle_view_event(event)` for server-driven state projection.
 - `handle_tick(elapsed)` for time-based maintenance and controller coordination.
 
-Each entrypoint returns `UpdateResult`, which carries emitted `ClientCommand`s, follow-up `AppAction`s, and redraw requests.
+Each entrypoint returns `UpdateResult`, which carries emitted `ClientCommand`s, follow-up `AppAction`s, and redraw requests. Durable local UI transitions are still modeled as `AppUiAction`, but they now flow through the normal action drain as `AppAction::UiAction` instead of a separate `GameState` entrypoint.
 
 ### Internal Reducer Roles
 
-- `update/action/`: routes gameplay and workflow intents to the relevant domain reducers.
-    - `reduce.rs`: action-family dispatch and sequencing.
-    - `combat.rs`, `detail.rs`, `interaction.rs`, `inventory.rs`, `progression.rs`, `trade.rs`: domain reducers.
-- `update/ui_action.rs`: owns durable local UI transitions such as focus changes, confirmation lifecycle, and context-view changes.
-- `update/view_event/`: owns `ClientViewEvent` projection plus the shared event-seam orchestration that does not belong to a single event family.
-    - `reduce.rs`: event-family dispatch and shared orchestration.
-    - `chat.rs`, `combat.rs`, `entity.rs`, `lifecycle.rs`, `navigation.rs`, `party.rs`, `player.rs`, `runtime_body.rs`, `trade_vendor.rs`: event-domain reducers.
-- `update/tick/`: owns tick-time orchestration over maintenance, controller coordination, and Logopolis presentation updates.
-    - `reduce.rs`: tick orchestration.
-    - `controller_coordination.rs`, `logopolis.rs`, `maintenance.rs`: tick-time slices.
-- `update/interaction_policy.rs`: owns shared interaction and frontend-navigation transition rules.
-- `update/inventory_projection.rs`: owns inventory and equipment projection, related notification arming, and entity-driven context refresh/cleanup.
+- `domains/mod.rs`: thin action, view-event, and tick routers that dispatch by owning subsystem rather than by trigger type.
+- `domains/chat.rs`: chat/event projection.
+- `domains/combat.rs`: combat actions, combat feedback projection, combat automation, and stale attack refresh on tick.
+- `domains/context.rs`: assess/read/debug/context-view actions.
+- `domains/entity.rs`: world-entity projection, motion/position updates, and container tracking.
+- `domains/inventory.rs`: inventory actions, salvage state, weapon-swap coordination, inventory/equipment projection, and inventory notification arming.
+- `domains/lifecycle.rs`: busy/confirmation/status and other client lifecycle view events.
+- `domains/navigation.rs`: interaction/navigation actions, runtime-body projection, frontend navigation policy, navigation interrupts, and navigation tick coordination.
+- `domains/party.rs`: fellowship projection plus party/allegiance actions.
+- `domains/player.rs`: player projection and player-timed maintenance such as enchantment decay.
+- `domains/progression.rs`: stat and skill training actions.
+- `domains/trade_vendor.rs`: trade/shop actions and vendor/trade projection.
+- `domains/ui.rs`: durable local UI transitions, context-buffer maintenance, and Logopolis tick-time behavior.
 
 Helpers that remain in `state.rs` are reducer internals or page-local support code. They are not part of the external control surface.
 
 ### Integration Rules
 
 - Drive gameplay behavior through `AppAction`.
-- Drive durable UI-mode changes through `AppUiAction`.
+- Drive durable UI-mode changes through `AppUiAction`, wrapped into the normal action pipeline as `AppAction::UiAction`.
 - Project core/client state changes through `ClientViewEvent`.
 - Use `handle_tick` for time-based maintenance and coordination, not ad hoc callers into controller helpers.
 - Treat raw key or mouse simulation as a fallback for widget-local behavior, not the primary integration path.
 
-For script or other external integration layers, compile external intents into `AppAction` or `AppUiAction`, pass them through the `GameState` entrypoints above, and feed emitted `ClientCommand`s back into the normal app shell flow.
+For script or other external integration layers, compile external intents into `AppAction` values. UI intents should be wrapped as `AppAction::UiAction`. Feed emitted `ClientCommand`s back into the normal app shell flow.
 
 ### Boundary Rules
 
 - `GameState` is a page host and reducer entry surface, not a bag of general-purpose mutators.
-- Reducer-private policy belongs under `src/pages/game/update/` or in private `state.rs` helpers, depending on ownership and reuse.
+- Reducer-private policy belongs under `src/pages/game/domains/`, organized by owning subsystem rather than by trigger shape.
 - Render and layout support remain presentation concerns; they should not become alternative state-transition pathways.
 
 If a new behavior cannot be described cleanly as input handling, an `AppAction`, an `AppUiAction`, a `ClientViewEvent`, or a tick update, revisit the design before adding another direct mutator path.

@@ -8,6 +8,7 @@ use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatView;
+use crate::pages::game::state::domains;
 use crate::types::{AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
 
 impl GameState {
@@ -154,7 +155,7 @@ impl GameState {
             };
 
             if let Some(delta) = paddle_delta
-                && let Some(game) = self.logopolis_state_mut()
+                && let Some(game) = domains::logopolis_state_mut(self)
             {
                 handled = game.nudge_player_paddle(delta);
             }
@@ -380,7 +381,7 @@ impl GameState {
                     }
                 } else if c == '`' {
                     result.actions.push(crate::types::AppAction::SetCombatMode {
-                        mode: self.toggled_combat_mode(),
+                        mode: crate::pages::game::state::domains::toggled_combat_mode(self),
                     });
                     result.request_redraw(RedrawPriority::Immediate);
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
@@ -438,7 +439,8 @@ impl GameState {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
-                    self.view.context_scroll_offset = self.context_buffer_len().saturating_sub(1);
+                    self.view.context_scroll_offset = domains::context_buffer_len(self)
+                        .saturating_sub(1);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}

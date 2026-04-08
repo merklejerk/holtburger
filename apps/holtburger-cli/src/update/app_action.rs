@@ -31,12 +31,8 @@ impl AppState {
                     self.display_client_info();
                 }
                 AppAction::TransitionToGame { guid, name } => {
-                    let mut game = GameState::with_chat_log(
-                        guid,
-                        name,
-                        self.world_name.clone(),
-                        self.chat_log.take(),
-                    );
+                    let mut game = GameState::new(guid, name, self.world_name.clone());
+                    game.chat.chat_log = self.chat_log.take();
                     game.data.spell_catalog = self.spell_catalog.clone();
                     game.data.skill_table = self.skill_table.clone();
                     self.page = Page::Game(Box::new(game));

@@ -141,8 +141,10 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();
             for inner_action in actions {
-                if let Some(inner_result) = reduce_action(state, inner_action) {
+                if let Some(inner_result) = reduce_action(state, inner_action.clone()) {
                     result.merge(inner_result);
+                } else {
+                    result.actions.push(inner_action);
                 }
             }
             Some(result)

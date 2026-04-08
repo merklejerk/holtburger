@@ -44,3 +44,50 @@ fn vendor_item_identified_refreshes_visible_assess_context() {
         "OLD NAME"
     ));
 }
+
+#[test]
+fn oversize_vendor_amounts_are_rejected() {
+    let player_guid = Guid(0x50000001);
+    let vendor_guid = Guid(0x60000001);
+    let item_guid = Guid(0x70000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+    state.view.vendor = Some(VendorState {
+        vendor_guid,
+        items: vec![vendor_item_named(item_guid, 1, "Item")],
+        buy_multiplier: 1.0,
+        sell_multiplier: 1.0,
+        merchandise_item_types: 0,
+        alternate_currency_wcid: 0,
+        alternate_currency_amount: 0,
+        alternate_currency_name: String::new(),
+    });
+
+    let sell_result = state
+        .handle_action(AppAction::SellToVendor {
+            vendor: vendor_guid,
+            item: item_guid,
+            amount: u32::MAX,
+        })
+        .expect("sell should be handled by the trade vendor reducer");
+
+    assert!(sell_result.commands.is_empty());
+    assert!(matches!(
+        sell_result.actions.first(),
+        Some(AppAction::Log { message, .. }) if message.contains("too large")
+    ));
+
+    let buy_result = state
+        .handle_action(AppAction::BuyFromVendor {
+            vendor: vendor_guid,
+            item: item_guid,
+            amount: u32::MAX,
+        })
+        .expect("buy should be handled by the trade vendor reducer");
+
+    assert!(buy_result.commands.is_empty());
+    assert!(matches!(
+        buy_result.actions.first(),
+        Some(AppAction::Log { message, .. }) if message.contains("too large")
+    ));
+}

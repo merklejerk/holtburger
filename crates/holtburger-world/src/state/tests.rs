@@ -4060,9 +4060,11 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     let mut item = Entity::new(
         item_guid,
         "Wielded Item".to_string(),
-        WorldPosition::default(),
+        WorldPosition {
+            landblock_id: Guid(0x0404_FFFF),
+            ..WorldPosition::default()
+        },
     );
-    item.position.landblock_id = Guid::NULL;
     item.set_wielder_id(Some(wielder_guid));
     item.set_int_prop(
         PropertyInt::CurrentWieldedLocation,
@@ -4074,6 +4076,7 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
 
     assert!(removed.is_some());
     assert_eq!(state.entities.get(item_guid).unwrap().wielder_id(), None);
+    assert_eq!(state.entities.get(item_guid).unwrap().position.landblock_id, Guid::NULL);
     assert!(
         state
             .entity_lifecycle_state(item_guid)
@@ -4088,6 +4091,38 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
         events
             .iter()
             .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
+    );
+}
+
+#[test]
+fn test_orphaned_wielded_item_is_not_retained() {
+    let mut state = WorldState::synthetic();
+    let item_guid = Guid(0x6000015B);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
+    let mut item = Entity::new(
+        item_guid,
+        "Orphaned Wielded Item".to_string(),
+        WorldPosition::default(),
+    );
+    item.position.landblock_id = Guid::NULL;
+    item.set_wielder_id(Some(Guid(0xDEAD_BEEF)));
+    item.set_int_prop(
+        PropertyInt::CurrentWieldedLocation,
+        EquipMask::MELEE_WEAPON.bits() as i32,
+    );
+    state.add_entity(item);
+
+    assert!(state.mark_entity_immediately_eligible_for_pruning_if_unretained(item_guid));
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .and_then(|state| state.prune_deadline)
+            .is_some()
     );
 }
 

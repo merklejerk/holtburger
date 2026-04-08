@@ -1,19 +1,6 @@
-use super::super::*;
+use super::*;
 
-#[path = "action_combat.rs"]
-mod combat_actions;
-#[path = "action_detail.rs"]
-mod detail_actions;
-#[path = "action_interaction.rs"]
-mod interaction_actions;
-#[path = "action_inventory.rs"]
-mod inventory_actions;
-#[path = "action_progression.rs"]
-mod progression_actions;
-#[path = "action_trade.rs"]
-mod trade_actions;
-
-pub(in super::super) fn reduce_action(
+pub(crate) fn reduce_action(
     state: &mut GameState,
     action: AppAction,
 ) -> Option<UpdateResult> {
@@ -26,7 +13,7 @@ pub(in super::super) fn reduce_action(
         | AppAction::Close { .. }
         | AppAction::QueryDebugInfo { .. }
         | AppAction::ViewDetails { .. }
-        | AppAction::ClearVendor) => Some(detail_actions::reduce_detail_action(state, action)),
+        | AppAction::ClearVendor) => Some(detail::reduce_detail_action(state, action)),
 
         action @ (AppAction::QueueSalvageItem { .. }
         | AppAction::UnqueueSalvageItem { .. }
@@ -41,7 +28,7 @@ pub(in super::super) fn reduce_action(
         | AppAction::PickUp { .. }
         | AppAction::Give { .. }
         | AppAction::UseWith { .. }) => {
-            Some(inventory_actions::reduce_inventory_action(state, action))
+            Some(inventory::reduce_inventory_action(state, action))
         }
 
         action @ (AppAction::Approach { .. }
@@ -49,7 +36,7 @@ pub(in super::super) fn reduce_action(
         | AppAction::Scoot { .. }
         | AppAction::BeginInteraction { .. }
         | AppAction::CancelInteraction) => {
-            Some(interaction_actions::reduce_interaction_action(state, action))
+            Some(interaction::reduce_interaction_action(state, action))
         }
 
         action @ (AppAction::OpenTrade { .. }
@@ -64,20 +51,22 @@ pub(in super::super) fn reduce_action(
         | AppAction::AcceptTrade
         | AppAction::DeclineTrade
         | AppAction::ResetTrade
-        | AppAction::ExitTrade) => Some(trade_actions::reduce_trade_action(state, action)),
+        | AppAction::ExitTrade) => Some(trade::reduce_trade_action(state, action)),
 
         action @ (AppAction::CastSpell { .. }
         | AppAction::CycleCombatProfileLevel
         | AppAction::CycleCombatAttackHeight
         | AppAction::SetCombatMode { .. }) => {
-            Some(combat_actions::reduce_combat_action(state, action))
+            Some(combat::reduce_combat_action(state, action))
         }
 
         action @ (AppAction::LevelUpStat { .. } | AppAction::TrainSkill { .. }) => {
-            Some(progression_actions::reduce_progression_action(state, action))
+            Some(progression::reduce_progression_action(state, action))
         }
 
-        AppAction::UiAction { action } => Some(state.handle_ui_action(action)),
+        AppAction::UiAction { action } => {
+            Some(super::super::ui_action::reduce_ui_action(state, action))
+        }
 
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();

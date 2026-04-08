@@ -182,10 +182,6 @@ impl GameState {
         update::action::reduce_action(self, action)
     }
 
-    pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
-        update::ui_action::reduce_ui_action(self, action)
-    }
-
     fn apply_context_view_change(&mut self, view: ContextView) -> UpdateResult {
         let mut result = UpdateResult::new();
         self.view.context_view = view;
@@ -193,10 +189,13 @@ impl GameState {
         if view == ContextView::Logopolis {
             self.runtime.logopolis = Some(LogopolisState::new());
             self.view.previous_focused_pane = FocusedPane::Context;
-            result.merge(self.handle_ui_action(AppUiAction::SetFocusedPane {
-                pane: FocusedPane::Context,
-                remember_previous: false,
-            }));
+            result.actions.push(
+                AppUiAction::SetFocusedPane {
+                    pane: FocusedPane::Context,
+                    remember_previous: false,
+                }
+                .into(),
+            );
         }
         self.refresh_context_buffer();
         result.request_redraw(RedrawPriority::Immediate);
@@ -267,25 +266,6 @@ impl GameState {
                     CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
                 ) {
                     self.runtime.combat_automation = None;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_game_lifecycle_event(&mut self, event: ClientViewEvent) {
-        match event {
-            ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
-                self.view.active_confirmation = confirmation;
-            }
-            ClientViewEvent::BusyStateUpdated { busy } => {
-                self.view.active_busy_operation = busy;
-            }
-            ClientViewEvent::StatusUpdate { state } => {
-                if matches!(state, holtburger_core::client::types::ClientState::InWorld) {
-                    self.runtime
-                        .inventory_notifications
-                        .begin_quiet_period(Instant::now());
                 }
             }
             _ => {}
@@ -696,6 +676,24 @@ mod tests {
     use holtburger_world::book::{BookData, BookPage};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
     use holtburger_world::{RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode};
+
+    fn apply_queued_ui_action(state: &mut GameState, action: AppUiAction) -> UpdateResult {
+        let mut result = state
+            .handle_action(action.into())
+            .expect("UI action should produce an update result");
+
+        while !result.actions.is_empty() {
+            let actions = std::mem::take(&mut result.actions);
+            for queued_action in actions {
+                if let Some(next_result) = state.handle_action(queued_action) {
+                    result.merge(next_result);
+                }
+            }
+        }
+
+        result
+    }
+
     fn is_weapon_swap_active(state: &GameState) -> bool {
         state.runtime.weapon_swap.is_active()
     }
@@ -934,9 +932,12 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
 
-        let start_result = state.handle_ui_action(AppUiAction::ChangeContextView {
-            view: ContextView::Logopolis,
-        });
+        let start_result = apply_queued_ui_action(
+            &mut state,
+            AppUiAction::ChangeContextView {
+                view: ContextView::Logopolis,
+            },
+        );
 
         assert!(start_result.redraw_requested());
         assert_eq!(state.view.context_view, ContextView::Logopolis);
@@ -944,9 +945,12 @@ mod tests {
         assert_eq!(state.view.focused_pane, FocusedPane::Context);
         assert_eq!(state.view.previous_focused_pane, FocusedPane::Context);
 
-        let stop_result = state.handle_ui_action(AppUiAction::ChangeContextView {
-            view: ContextView::Default,
-        });
+        let stop_result = apply_queued_ui_action(
+            &mut state,
+            AppUiAction::ChangeContextView {
+                view: ContextView::Default,
+            },
+        );
 
         assert!(stop_result.redraw_requested());
         assert_eq!(state.view.context_view, ContextView::Default);
@@ -960,7 +964,7 @@ mod tests {
         state.view.focused_pane = FocusedPane::Context;
         state.view.previous_focused_pane = FocusedPane::Dashboard;
 
-        let result = state.handle_ui_action(AppUiAction::EnterInputMode);
+        let result = apply_queued_ui_action(&mut state, AppUiAction::EnterInputMode);
 
         assert!(result.redraw_requested());
         assert_eq!(state.view.focused_pane, FocusedPane::Input);
@@ -975,9 +979,12 @@ mod tests {
         state.view.previous_focused_pane = FocusedPane::Dashboard;
         state.chat_input.history_index = Some(0);
 
-        let result = state.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
-            command: "/scoot 3.5".to_string(),
-        });
+        let result = apply_queued_ui_action(
+            &mut state,
+            AppUiAction::FinishInputCommandSubmission {
+                command: "/scoot 3.5".to_string(),
+            },
+        );
 
         assert!(result.redraw_requested());
         assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);

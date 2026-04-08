@@ -127,9 +127,14 @@ impl GameState {
     }
 
     fn finish_input_command_submission(&mut self, command: &str) -> UpdateResult {
-        self.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
-            command: command.to_string(),
-        })
+        let mut result = UpdateResult::new();
+        result.actions.push(
+            AppUiAction::FinishInputCommandSubmission {
+                command: command.to_string(),
+            }
+            .into(),
+        );
+        result
     }
 
     fn log_options_usage(&mut self) {

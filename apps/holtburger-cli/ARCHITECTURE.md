@@ -80,10 +80,16 @@ Each entrypoint returns `UpdateResult`, which carries emitted `ClientCommand`s, 
 
 ### Internal Reducer Roles
 
-- `update/action.rs`: routes gameplay and workflow intents to the relevant domain reducers.
+- `update/action/`: routes gameplay and workflow intents to the relevant domain reducers.
+    - `reduce.rs`: action-family dispatch and sequencing.
+    - `combat.rs`, `detail.rs`, `interaction.rs`, `inventory.rs`, `progression.rs`, `trade.rs`: domain reducers.
 - `update/ui_action.rs`: owns durable local UI transitions such as focus changes, confirmation lifecycle, and context-view changes.
-- `update/view_event.rs`: owns `ClientViewEvent` projection plus the shared event-seam orchestration that does not belong to a single event family.
-- `update/tick.rs`: owns tick-time orchestration over maintenance, controller coordination, and Logopolis presentation updates.
+- `update/view_event/`: owns `ClientViewEvent` projection plus the shared event-seam orchestration that does not belong to a single event family.
+    - `reduce.rs`: event-family dispatch and shared orchestration.
+    - `chat.rs`, `combat.rs`, `entity.rs`, `lifecycle.rs`, `navigation.rs`, `party.rs`, `player.rs`, `runtime_body.rs`, `trade_vendor.rs`: event-domain reducers.
+- `update/tick/`: owns tick-time orchestration over maintenance, controller coordination, and Logopolis presentation updates.
+    - `reduce.rs`: tick orchestration.
+    - `controller_coordination.rs`, `logopolis.rs`, `maintenance.rs`: tick-time slices.
 - `update/interaction_policy.rs`: owns shared interaction and frontend-navigation transition rules.
 - `update/inventory_projection.rs`: owns inventory and equipment projection, related notification arming, and entity-driven context refresh/cleanup.
 

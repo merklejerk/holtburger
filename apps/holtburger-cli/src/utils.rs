@@ -1,5 +1,3 @@
-use crate::pages::game::layout::LayoutMode;
-use crate::types::FocusedPane;
 use crate::types::Interaction;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};
@@ -241,46 +239,6 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
         }
     }
     result
-}
-
-pub fn get_adjacent_pane(
-    current: FocusedPane,
-    layout_mode: LayoutMode,
-    active_interaction: bool,
-    delta: i32,
-) -> FocusedPane {
-    let order = get_pane_order(layout_mode);
-    let n = order.len() as i32;
-    let current_idx = order.iter().position(|&p| p == current).unwrap_or(0) as i32;
-
-    let mut next_idx = (current_idx + delta).rem_euclid(n);
-
-    // Skip dynamic if not moving anything
-    if order[next_idx as usize] == FocusedPane::Dynamic && !active_interaction {
-        next_idx = (next_idx + delta).rem_euclid(n);
-    }
-
-    order[next_idx as usize]
-}
-
-fn get_pane_order(layout_mode: LayoutMode) -> [FocusedPane; 4] {
-    if layout_mode == LayoutMode::Narrow {
-        // Narrow: Dashboard -> Context -> Dynamic -> Chat
-        [
-            FocusedPane::Dashboard,
-            FocusedPane::Context,
-            FocusedPane::Dynamic,
-            FocusedPane::Chat,
-        ]
-    } else {
-        // Wide: Dashboard -> Chat -> Context -> Dynamic
-        [
-            FocusedPane::Dashboard,
-            FocusedPane::Chat,
-            FocusedPane::Context,
-            FocusedPane::Dynamic,
-        ]
-    }
 }
 
 #[cfg(test)]

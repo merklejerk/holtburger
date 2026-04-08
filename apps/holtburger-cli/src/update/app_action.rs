@@ -4,7 +4,15 @@ use crate::types::{AppAction, Page, RedrawPriority, UpdateResult};
 
 impl AppState {
     pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
-        let mut result = if let Some(res) = self.page.handle_action(action.clone()) {
+        let mut result = self.reduce_app_action(action);
+
+        self.drain_actions(&mut result);
+
+        result
+    }
+
+    fn reduce_app_action(&mut self, action: AppAction) -> UpdateResult {
+        if let Some(res) = self.page.handle_action(action.clone()) {
             res
         } else {
             let mut result = UpdateResult::new();
@@ -23,12 +31,8 @@ impl AppState {
                     self.display_client_info();
                 }
                 AppAction::TransitionToGame { guid, name } => {
-                    let mut game = GameState::with_chat_log(
-                        guid,
-                        name,
-                        self.world_name.clone(),
-                        self.chat_log.take(),
-                    );
+                    let mut game = GameState::new(guid, name, self.world_name.clone());
+                    game.chat.chat_log = self.chat_log.take();
                     game.data.spell_catalog = self.spell_catalog.clone();
                     game.data.skill_table = self.skill_table.clone();
                     self.page = Page::Game(Box::new(game));
@@ -45,18 +49,14 @@ impl AppState {
                 ),
             }
             result
-        };
-
-        self.drain_actions(&mut result);
-
-        result
+        }
     }
 
     pub fn drain_actions(&mut self, result: &mut UpdateResult) {
         while !result.actions.is_empty() {
             let actions = std::mem::take(&mut result.actions);
             for action in actions {
-                result.merge(self.handle_app_action(action));
+                result.merge(self.reduce_app_action(action));
             }
         }
     }
@@ -119,5 +119,45 @@ mod tests {
         assert!(app_state.chat_log.is_none());
 
         let _ = std::fs::remove_file(log_path);
+    }
+
+    #[test]
+    fn sequence_preserves_unhandled_inner_actions_for_app_level_draining() {
+        let mut app_state = AppState {
+            account_name: "account".to_string(),
+            account_password: "password".to_string(),
+            character_preference: None,
+            chat_log: None,
+            page: Page::Game(Box::new(GameState::new(
+                Guid(0x50000001),
+                "Old Player".to_string(),
+                "World".to_string(),
+            ))),
+            client_state: ClientState::Connected,
+            net_stats: NetStats::default(),
+            world_name: "World".to_string(),
+            server_time: None,
+            content: None,
+            spell_catalog: None,
+            skill_table: None,
+            verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
+        };
+
+        let _ = app_state.handle_app_action(AppAction::Sequence {
+            actions: vec![AppAction::TransitionToGame {
+                guid: Guid(0x50000002),
+                name: "New Player".to_string(),
+            }],
+        });
+
+        match &app_state.page {
+            Page::Game(game) => {
+                assert_eq!(game.data.character_name.as_deref(), Some("New Player"));
+            }
+            _ => panic!("expected game page after sequence transition"),
+        }
     }
 }

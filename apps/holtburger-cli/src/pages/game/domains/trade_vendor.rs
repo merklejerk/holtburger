@@ -1,6 +1,20 @@
 use super::combat;
 use super::inventory;
 use super::*;
+use std::convert::TryFrom;
+
+fn checked_vendor_amount(amount: u32, result: &mut UpdateResult) -> Option<i32> {
+    match i32::try_from(amount) {
+        Ok(amount) => Some(amount),
+        Err(_) => {
+            result.actions.push(AppAction::Log {
+                chat_tags: ChatMessageTags::warning(),
+                message: format!("Vendor amount {} is too large.", amount),
+            });
+            None
+        }
+    }
+}
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -39,11 +53,14 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             item,
             amount,
         } => {
+            let Some(amount) = checked_vendor_amount(amount, &mut result) else {
+                return result;
+            };
             result.commands.push(ClientCommand::Sell {
                 vendor,
                 items: vec![ItemProfileActionData {
                     object_guid: item,
-                    amount: amount as i32,
+                    amount,
                 }],
             });
         }
@@ -52,11 +69,14 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             item,
             amount,
         } => {
+            let Some(amount) = checked_vendor_amount(amount, &mut result) else {
+                return result;
+            };
             result.commands.push(ClientCommand::Buy {
                 vendor,
                 items: vec![ItemProfileActionData {
                     object_guid: item,
-                    amount: amount as i32,
+                    amount,
                 }],
             });
         }

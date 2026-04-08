@@ -120,4 +120,44 @@ mod tests {
 
         let _ = std::fs::remove_file(log_path);
     }
+
+    #[test]
+    fn sequence_preserves_unhandled_inner_actions_for_app_level_draining() {
+        let mut app_state = AppState {
+            account_name: "account".to_string(),
+            account_password: "password".to_string(),
+            character_preference: None,
+            chat_log: None,
+            page: Page::Game(Box::new(GameState::new(
+                Guid(0x50000001),
+                "Old Player".to_string(),
+                "World".to_string(),
+            ))),
+            client_state: ClientState::Connected,
+            net_stats: NetStats::default(),
+            world_name: "World".to_string(),
+            server_time: None,
+            content: None,
+            spell_catalog: None,
+            skill_table: None,
+            verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
+        };
+
+        let _ = app_state.handle_app_action(AppAction::Sequence {
+            actions: vec![AppAction::TransitionToGame {
+                guid: Guid(0x50000002),
+                name: "New Player".to_string(),
+            }],
+        });
+
+        match &app_state.page {
+            Page::Game(game) => {
+                assert_eq!(game.data.character_name.as_deref(), Some("New Player"));
+            }
+            _ => panic!("expected game page after sequence transition"),
+        }
+    }
 }

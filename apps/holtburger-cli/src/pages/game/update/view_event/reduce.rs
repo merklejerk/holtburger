@@ -1,26 +1,6 @@
-use super::super::*;
-use super::interaction_policy;
+use super::*;
 
-#[path = "view_event_chat.rs"]
-mod chat_events;
-#[path = "view_event_combat.rs"]
-mod combat_events;
-#[path = "view_event_entity.rs"]
-mod entity_events;
-#[path = "view_event_lifecycle.rs"]
-mod lifecycle_events;
-#[path = "view_event_navigation.rs"]
-mod navigation_events;
-#[path = "view_event_party.rs"]
-mod party_events;
-#[path = "view_event_player.rs"]
-mod player_events;
-#[path = "view_event_runtime_body.rs"]
-mod runtime_body_events;
-#[path = "view_event_trade_vendor.rs"]
-mod trade_vendor_events;
-
-pub(in super::super) fn reduce_view_event(
+pub(crate) fn reduce_view_event(
     state: &mut GameState,
     event: ClientViewEvent,
 ) -> UpdateResult {
@@ -36,11 +16,11 @@ pub(in super::super) fn reduce_view_event(
         | ClientViewEvent::ChannelMessage { .. }
         | ClientViewEvent::Tell { .. }
         | ClientViewEvent::Emote { .. }) => {
-            result.merge(chat_events::reduce_chat_event(state, event));
+            result.merge(chat::reduce_chat_event(state, event));
         }
 
         event @ ClientViewEvent::CombatFeedback(_) => {
-            result.merge(combat_events::reduce_combat_event(state, event));
+            result.merge(combat::reduce_combat_event(state, event));
         }
 
         event @ (ClientViewEvent::PingResponse
@@ -51,7 +31,7 @@ pub(in super::super) fn reduce_view_event(
         | ClientViewEvent::BusyStateUpdated { .. }
         | ClientViewEvent::BusyOperationFinished { .. }
         | ClientViewEvent::StatusUpdate { .. }) => {
-            result.merge(lifecycle_events::reduce_lifecycle_event(state, event));
+            result.merge(lifecycle::reduce_lifecycle_event(state, event));
         }
 
         event @ (ClientViewEvent::PlayerEnchantmentsUpdated { .. }
@@ -62,7 +42,7 @@ pub(in super::super) fn reduce_view_event(
         | ClientViewEvent::PlayerOptionsUpdated { .. }
         | ClientViewEvent::CombatModeUpdated { .. }
         | ClientViewEvent::TeleportStarted { .. }) => {
-            result.merge(player_events::reduce_player_event(state, event));
+            result.merge(player::reduce_player_event(state, event));
         }
 
         event @ (ClientViewEvent::EntityDebugInfoSnapshot { .. }
@@ -77,7 +57,7 @@ pub(in super::super) fn reduce_view_event(
         | ClientViewEvent::EntityIdentified { .. }
         | ClientViewEvent::ContainerOpened { .. }
         | ClientViewEvent::ContainerClosed { .. }) => {
-            result.merge(entity_events::reduce_entity_event(state, event, now));
+            result.merge(entity::reduce_entity_event(state, event, now));
         }
 
         event @ (ClientViewEvent::PlayerGroundedUpdated { .. }
@@ -86,29 +66,29 @@ pub(in super::super) fn reduce_view_event(
         | ClientViewEvent::RuntimeBodyUpserted { .. }
         | ClientViewEvent::RuntimeBodyRemoved { .. }
         | ClientViewEvent::RuntimeBodiesReset { .. }) => {
-            result.merge(runtime_body_events::reduce_runtime_body_event(state, event));
+            result.merge(runtime_body::reduce_runtime_body_event(state, event));
         }
 
         event @ (ClientViewEvent::FellowshipActivity { .. }
         | ClientViewEvent::FellowshipStateUpdated { .. }) => {
-            result.merge(party_events::reduce_party_event(state, event));
+            result.merge(party::reduce_party_event(state, event));
         }
 
         event @ (ClientViewEvent::VendorStateUpdated { .. }
         | ClientViewEvent::VendorItemIdentified(_)
         | ClientViewEvent::TradeStateUpdated { .. }) => {
-            result.merge(trade_vendor_events::reduce_trade_vendor_event(state, event));
+            result.merge(trade_vendor::reduce_trade_vendor_event(state, event));
         }
 
         event @ ClientViewEvent::NoClipUpdated { .. } => {
-            result.merge(navigation_events::reduce_navigation_event(state, event));
+            result.merge(navigation::reduce_navigation_event(state, event));
         }
 
         _ => {}
     }
 
     if let Some(input) = navigation_interrupt {
-        navigation_events::apply_navigation_interrupt(state, input, &mut result);
+        navigation::apply_navigation_interrupt(state, input, &mut result);
     }
 
     result

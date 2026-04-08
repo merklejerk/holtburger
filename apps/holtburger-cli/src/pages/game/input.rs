@@ -193,20 +193,25 @@ impl GameState {
                 } else {
                     1
                 };
-                result.merge(self.handle_ui_action(AppUiAction::CycleFocusedPane { delta }));
+                result
+                    .actions
+                    .push(AppUiAction::CycleFocusedPane { delta }.into());
             }
             KeyCode::Esc => {
                 if self.view.context_view == ContextView::Logopolis
                     && self.view.focused_pane == FocusedPane::Context
                 {
-                    result.merge(self.handle_ui_action(AppUiAction::ChangeContextView {
-                        view: ContextView::Default,
-                    }));
+                    result.actions.push(
+                        AppUiAction::ChangeContextView {
+                            view: ContextView::Default,
+                        }
+                        .into(),
+                    );
                     return result;
                 }
 
                 if self.view.focused_pane == FocusedPane::Input {
-                    result.merge(self.handle_ui_action(AppUiAction::ExitInputMode));
+                    result.actions.push(AppUiAction::ExitInputMode.into());
                 } else if self.view.active_interaction.is_some() {
                     if let Some(action_result) = self.handle_action(AppAction::CancelInteraction) {
                         result.merge(action_result);
@@ -217,27 +222,33 @@ impl GameState {
                 if self.view.focused_pane == FocusedPane::Input {
                     let command = self.chat_input.input.take_text();
                     if command.is_empty() {
-                        result.merge(self.handle_ui_action(AppUiAction::ExitInputMode));
+                        result.actions.push(AppUiAction::ExitInputMode.into());
                         return result;
                     }
                     if command.starts_with('/') {
                         return self.handle_slash_command(&command);
                     }
                     if let Some(emote) = command.strip_prefix(':') {
-                        result.merge(self.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
-                            command: command.clone(),
-                        }));
+                        result.actions.push(
+                            AppUiAction::FinishInputCommandSubmission {
+                                command: command.clone(),
+                            }
+                            .into(),
+                        );
                         result
                             .commands
                             .push(ClientCommand::Emote(emote.to_string()));
                         return result;
                     }
-                    result.merge(self.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
-                        command: command.clone(),
-                    }));
+                    result.actions.push(
+                        AppUiAction::FinishInputCommandSubmission {
+                            command: command.clone(),
+                        }
+                        .into(),
+                    );
                     result.commands.push(ClientCommand::Talk(command));
                 } else {
-                    result.merge(self.handle_ui_action(AppUiAction::EnterInputMode));
+                    result.actions.push(AppUiAction::EnterInputMode.into());
                 }
             }
             KeyCode::Backspace | KeyCode::Delete => {
@@ -465,8 +476,16 @@ impl GameState {
         self.view.local_confirmation.as_ref()?;
 
         match key.code {
-            KeyCode::Enter => Some(self.handle_ui_action(AppUiAction::ConfirmLocalConfirmation)),
-            KeyCode::Esc => Some(self.handle_ui_action(AppUiAction::DismissLocalConfirmation)),
+            KeyCode::Enter => {
+                let mut result = UpdateResult::new();
+                result.actions.push(AppUiAction::ConfirmLocalConfirmation.into());
+                Some(result)
+            }
+            KeyCode::Esc => {
+                let mut result = UpdateResult::new();
+                result.actions.push(AppUiAction::DismissLocalConfirmation.into());
+                Some(result)
+            }
             _ => Some(UpdateResult::new()),
         }
     }

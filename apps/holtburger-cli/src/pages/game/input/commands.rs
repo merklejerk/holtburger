@@ -693,7 +693,7 @@ impl GameState {
                 result.with_redraw(true)
             }
             "/combat" => {
-                let mode = self.toggled_combat_mode();
+                let mode = crate::pages::game::state::domains::toggled_combat_mode(self);
                 result
                     .actions
                     .push(crate::types::AppAction::SetCombatMode { mode });

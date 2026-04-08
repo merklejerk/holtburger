@@ -1,50 +1,104 @@
-use super::super::*;
+use super::*;
+use super::context;
+use super::combat;
+use super::inventory;
 
-pub(super) fn apply_navigation_input(
-    state: &mut GameState,
-    input: NavigationInput,
-    result: &mut UpdateResult,
-) {
-    let target_guid = match input {
-        NavigationInput::StartApproach { target } | NavigationInput::StartFollow { target } => {
-            Some(target)
+pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
+    let mut result = UpdateResult::new();
+    let navigation_input = navigation_input_for_action(state, &action);
+
+    match action {
+        AppAction::Approach { .. } | AppAction::Follow { .. } | AppAction::Scoot { .. } => {
+            apply_navigation_input(
+                state,
+                navigation_input.expect("navigation actions should project to navigation input"),
+                &mut result,
+            );
         }
-        NavigationInput::StartScoot { .. } => None,
-        NavigationInput::Cancel
-        | NavigationInput::ForcedReposition
-        | NavigationInput::TeleportStarted => navigation_tick_target_guid(state),
-    };
+        AppAction::BeginInteraction { interaction } => {
+            if interaction == Interaction::Salvaging {
+                if let Some(input) = navigation_input {
+                    apply_navigation_input(state, input, &mut result);
+                }
+                if !inventory::begin_salvaging_interaction(state, &mut result) {
+                    return result;
+                }
+            } else {
+                if let Some(input) = navigation_input {
+                    apply_navigation_input(state, input, &mut result);
+                }
+                set_active_interaction(state, Some(interaction), &mut result);
+            }
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        AppAction::CancelInteraction => {
+            if let Some(input) = navigation_input {
+                apply_navigation_input(state, input, &mut result);
+            } else {
+                clear_active_interaction(state, &mut result);
+            }
+            state.view.salvaging = None;
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        _ => unreachable!("unsupported navigation action"),
+    }
 
-    let update = state
-        .runtime
-        .navigation
-        .handle_input(input, navigation_snapshot(state, target_guid));
-    apply_navigation_update(state, update, result);
+    result
 }
 
-pub(super) fn navigation_input_for_app_action(
-    state: &GameState,
-    action: &AppAction,
-) -> Option<NavigationInput> {
-    match action {
-        AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
-        AppAction::Follow { guid } => Some(NavigationInput::StartFollow { target: *guid }),
-        AppAction::Scoot { distance_m } => Some(NavigationInput::StartScoot {
-            distance_m: *distance_m,
-        }),
-        AppAction::CancelInteraction
-            if is_frontend_navigation_interaction(state.view.active_interaction) =>
-        {
-            Some(NavigationInput::Cancel)
+pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+    let mut result = UpdateResult::new();
+
+    match event {
+        ClientViewEvent::PlayerGroundedUpdated { grounded } => {
+            state.data.player_grounded = Some(grounded);
         }
-        AppAction::BeginInteraction { interaction }
-            if is_frontend_navigation_interaction(state.view.active_interaction)
-                && !is_frontend_navigation_interaction(Some(*interaction)) =>
-        {
-            Some(NavigationInput::Cancel)
+        ClientViewEvent::SelfMovementKinematicsUpdated { kinematics } => {
+            state.data.self_movement_kinematics = kinematics;
         }
-        _ => None,
+        ClientViewEvent::RuntimeBodySnapshot { .. } => {
+            context::refresh_context_buffer(state);
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        ClientViewEvent::RuntimeBodyUpserted { body } => {
+            if let Some(guid) = body.body_id.authoritative_guid() {
+                inventory::refresh_entity_context_if_visible(state, guid, &mut result);
+            }
+            result.request_redraw(RedrawPriority::Motion);
+        }
+        ClientViewEvent::RuntimeBodyRemoved { body_id } => {
+            if let Some(guid) = body_id.authoritative_guid() {
+                inventory::refresh_entity_context_if_visible(state, guid, &mut result);
+            }
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        ClientViewEvent::RuntimeBodiesReset { .. } => {
+            context::refresh_context_buffer(state);
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        ClientViewEvent::NoClipUpdated { enabled } => {
+            state.data.noclip = enabled;
+            let status = if enabled { "ENABLED" } else { "DISABLED" };
+            result.actions.push(AppAction::Log {
+                chat_tags: ChatMessageTags::system(),
+                message: format!(">> NoClip is now {}", status),
+            });
+        }
+        ClientViewEvent::TeleportStarted { .. } => {}
+        _ => {}
     }
+
+    result
+}
+
+pub(super) fn apply_tick(
+    state: &mut GameState,
+    now: Instant,
+    elapsed: f64,
+    result: &mut UpdateResult,
+) {
+    let update = state.runtime.navigation.tick(navigation_tick(state, now, elapsed));
+    apply_navigation_update(state, update, result);
 }
 
 pub(super) fn navigation_interrupt_for_view_event(
@@ -60,7 +114,7 @@ pub(super) fn navigation_interrupt_for_view_event(
     }
 }
 
-pub(super) fn handle_navigation_interrupt(
+pub(super) fn apply_navigation_interrupt(
     state: &mut GameState,
     input: NavigationInput,
     result: &mut UpdateResult,
@@ -79,10 +133,7 @@ pub(super) fn handle_navigation_interrupt(
         result.request_redraw(RedrawPriority::Immediate);
     }
 
-    if matches!(
-        state.view.active_interaction,
-        Some(Interaction::Targeting { .. })
-    ) {
+    if matches!(state.view.active_interaction, Some(Interaction::Targeting { .. })) {
         if matches!(state.data.combat_mode, CombatMode::Melee | CombatMode::Missile) {
             result.commands.push(ClientCommand::CancelAttack);
             state.data.combat_runtime.cancel_attack();
@@ -106,43 +157,56 @@ pub(super) fn clear_active_interaction(state: &mut GameState, result: &mut Updat
     set_active_interaction(state, None, result);
 }
 
-pub(super) fn set_active_interaction(
-    state: &mut GameState,
-    next_interaction: Option<Interaction>,
-    result: &mut UpdateResult,
-) {
-    let previous_interaction = state.view.active_interaction;
-    state.view.active_interaction = next_interaction;
-
-    sync_target_health_query(state, previous_interaction, next_interaction, result);
-
-    if should_cancel_attack(state, previous_interaction, next_interaction) {
-        result.commands.push(ClientCommand::CancelAttack);
-        state.data.combat_runtime.cancel_attack();
-        state.runtime.combat_automation = None;
-    }
-
-    if should_resume_attack(state, previous_interaction, next_interaction) {
-        state.queue_auto_attack_for_mode(state.data.combat_mode, result);
-    }
-}
-
-pub(super) fn apply_navigation_tick(
-    state: &mut GameState,
-    now: Instant,
-    elapsed: f64,
-    result: &mut UpdateResult,
-) {
-    let update = state.runtime.navigation.tick(navigation_tick(state, now, elapsed));
-    apply_navigation_update(state, update, result);
-}
-
 #[cfg(test)]
 pub(in super::super) fn navigation_snapshot_for_tests(
     state: &GameState,
     target_guid: Option<Guid>,
 ) -> NavigationSnapshot {
     navigation_snapshot(state, target_guid)
+}
+
+fn apply_navigation_input(
+    state: &mut GameState,
+    input: NavigationInput,
+    result: &mut UpdateResult,
+) {
+    let target_guid = match input {
+        NavigationInput::StartApproach { target } | NavigationInput::StartFollow { target } => {
+            Some(target)
+        }
+        NavigationInput::StartScoot { .. } => None,
+        NavigationInput::Cancel
+        | NavigationInput::ForcedReposition
+        | NavigationInput::TeleportStarted => navigation_tick_target_guid(state),
+    };
+
+    let update = state
+        .runtime
+        .navigation
+        .handle_input(input, navigation_snapshot(state, target_guid));
+    apply_navigation_update(state, update, result);
+}
+
+fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<NavigationInput> {
+    match action {
+        AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
+        AppAction::Follow { guid } => Some(NavigationInput::StartFollow { target: *guid }),
+        AppAction::Scoot { distance_m } => {
+            Some(NavigationInput::StartScoot { distance_m: *distance_m })
+        }
+        AppAction::CancelInteraction
+            if is_frontend_navigation_interaction(state.view.active_interaction) =>
+        {
+            Some(NavigationInput::Cancel)
+        }
+        AppAction::BeginInteraction { interaction }
+            if is_frontend_navigation_interaction(state.view.active_interaction)
+                && !is_frontend_navigation_interaction(Some(*interaction)) =>
+        {
+            Some(NavigationInput::Cancel)
+        }
+        _ => None,
+    }
 }
 
 fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool {
@@ -152,8 +216,28 @@ fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool 
     )
 }
 
+fn set_active_interaction(
+    state: &mut GameState,
+    next_interaction: Option<Interaction>,
+    result: &mut UpdateResult,
+) {
+    let previous_interaction = state.view.active_interaction;
+    state.view.active_interaction = next_interaction;
+
+    sync_target_health_query(previous_interaction, next_interaction, result);
+
+    if should_cancel_attack(state, previous_interaction, next_interaction) {
+        result.commands.push(ClientCommand::CancelAttack);
+        state.data.combat_runtime.cancel_attack();
+        state.runtime.combat_automation = None;
+    }
+
+    if should_resume_attack(state, previous_interaction, next_interaction) {
+        combat::queue_auto_attack_for_mode(state, state.data.combat_mode, result);
+    }
+}
+
 fn sync_target_health_query(
-    _state: &GameState,
     previous_interaction: Option<Interaction>,
     next_interaction: Option<Interaction>,
     result: &mut UpdateResult,
@@ -173,9 +257,7 @@ fn sync_target_health_query(
 
     match next_target {
         Some(target_guid) => result.commands.push(ClientCommand::QueryHealth(target_guid)),
-        None if previous_target.is_some() => {
-            result.commands.push(ClientCommand::QueryHealth(Guid::NULL))
-        }
+        None if previous_target.is_some() => result.commands.push(ClientCommand::QueryHealth(Guid::NULL)),
         None => {}
     }
 }
@@ -238,7 +320,7 @@ fn navigation_snapshot(state: &GameState, target_guid: Option<Guid>) -> Navigati
         player_position: state.data.runtime_player_position(),
         self_movement_kinematics: state.data.self_movement_kinematics.clone(),
         run_rate_scalar: state.data.player_run_rate(),
-        combat_target_guid: state.current_target_guid(),
+        combat_target_guid: combat::current_target_guid(state),
         combat_mode: state.data.combat_mode,
         attack_sequence_active: state
             .data
@@ -265,9 +347,8 @@ fn navigation_tick(state: &GameState, now: Instant, elapsed: f64) -> NavigationT
 
 fn navigation_tick_target_guid(state: &GameState) -> Option<Guid> {
     state.runtime.navigation.tracked_target_guid().or_else(|| {
-        state
-            .current_target_guid()
-            .filter(|guid| state.is_valid_combat_target(*guid))
+        combat::current_target_guid(state)
+            .filter(|guid| combat::is_valid_combat_target(state, *guid))
     })
 }
 

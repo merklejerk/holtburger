@@ -1,9 +1,6 @@
 use super::*;
 
-pub(super) fn reduce_progression_action(
-    _state: &mut GameState,
-    action: AppAction,
-) -> UpdateResult {
+pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match action {

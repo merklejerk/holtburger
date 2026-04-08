@@ -1,9 +1,6 @@
 use super::*;
 
-pub(super) fn reduce_lifecycle_event(
-    state: &mut GameState,
-    event: ClientViewEvent,
-) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match event {

@@ -255,7 +255,7 @@
 - [x] Show closed/open/locked/unlocked on assess if properties exist.
 - [x] Do not show recharge verb on uncharged mana stones.
 - [x] Salvaging waits for UseDone, leaving us in a busy state.
-- [ ] `/version` and `--version`, seeded from commit hash env var set by build system?
+- [x] `/version` and `--version`, seeded from commit hash env var set by build system?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 default-run = "tui"
+build = "build.rs"
 
 [dependencies]
 holtburger-content = { workspace = true }

@@ -126,10 +126,10 @@ impl GameState {
             .unwrap_or_else(|| "My Fellowship".to_string())
     }
 
-    fn finish_input_command_submission(&mut self, command: &str) {
-        self.chat_input.input_history.push(command.to_string());
-        self.chat_input.history_index = None;
-        self.view.focused_pane = self.view.previous_focused_pane;
+    fn finish_input_command_submission(&mut self, command: &str) -> UpdateResult {
+        self.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
+            command: command.to_string(),
+        })
     }
 
     fn log_options_usage(&mut self) {
@@ -386,8 +386,7 @@ impl GameState {
                         ),
                     );
                 }
-                self.finish_input_command_submission(command);
-                result.request_redraw(RedrawPriority::Immediate);
+                result.merge(self.finish_input_command_submission(command));
             }
             ["/option", raw_name, raw_value] => {
                 let Some(option) = CuratedCharacterOption::parse(raw_name) else {
@@ -414,8 +413,7 @@ impl GameState {
                         if value { "on" } else { "off" }
                     ),
                 );
-                self.finish_input_command_submission(command);
-                result.request_redraw(RedrawPriority::Immediate);
+                result.merge(self.finish_input_command_submission(command));
             }
             _ => {
                 self.log_options_usage();
@@ -430,7 +428,7 @@ impl GameState {
         let mut result = UpdateResult::new();
 
         if command.trim() == "/logopolis" {
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             result.actions.push(
                 AppUiAction::ChangeContextView {
                     view: ContextView::Logopolis,
@@ -445,7 +443,7 @@ impl GameState {
                 target: target.to_string(),
                 message: message.to_string(),
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -467,7 +465,7 @@ impl GameState {
                 target,
                 message: message.to_string(),
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -481,7 +479,7 @@ impl GameState {
                 channel: ChatChannelKind::Allegiance,
                 message: message.to_string(),
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -509,7 +507,7 @@ impl GameState {
                 ChatMessageTags::system(),
                 format!("Swearing allegiance to {}...", player_name),
             );
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -525,7 +523,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppUiAction::OpenUnswearConfirmation { target }.into());
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -539,13 +537,13 @@ impl GameState {
                 channel: ChatChannelKind::Fellowship,
                 message: message.to_string(),
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
         if command == "/party" {
             result.commands.push(ClientCommand::ShowPartyStatus);
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -563,7 +561,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::Scoot { distance_m });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -571,7 +569,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::Scoot { distance_m: 1.0 });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -591,7 +589,7 @@ impl GameState {
                     name.to_string()
                 },
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -607,7 +605,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::InviteToParty { target });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -618,7 +616,7 @@ impl GameState {
 
         if command == "/leave" {
             result.commands.push(ClientCommand::LeaveParty);
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -634,7 +632,7 @@ impl GameState {
             result
                 .actions
                 .push(crate::types::AppAction::UninviteFromParty { target });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -647,7 +645,7 @@ impl GameState {
             result.commands.push(ClientCommand::AddPlayerPermission {
                 player_name: player_name.to_string(),
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -660,7 +658,7 @@ impl GameState {
             result.commands.push(ClientCommand::RemovePlayerPermission {
                 player_name: player_name.to_string(),
             });
-            self.finish_input_command_submission(command);
+            result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
@@ -694,42 +692,42 @@ impl GameState {
                 result
                     .actions
                     .push(crate::types::AppAction::SetCombatMode { mode });
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             "/ls" | "/lifestone" => {
                 result.commands.push(ClientCommand::RecallLifestone);
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             "/arena" => {
                 result.commands.push(ClientCommand::TeleportToPklArena);
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             "/mp" => {
                 result.commands.push(ClientCommand::TeleportToMarketplace);
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             "/pkl" => {
                 result.commands.push(ClientCommand::EnterPkLite);
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             "/hq" => {
                 result.commands.push(ClientCommand::RecallAllegianceHousing);
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             "/rip" => {
                 result.commands.push(ClientCommand::Suicide);
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
             _ if command.starts_with("/option") => self.handle_options_command(command),
             _ => {
-                self.finish_input_command_submission(command);
+                result.merge(self.finish_input_command_submission(command));
                 result
                     .commands
                     .push(ClientCommand::Talk(command.to_string()));

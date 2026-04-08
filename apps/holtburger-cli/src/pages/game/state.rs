@@ -47,6 +47,9 @@ use crate::types::{
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
+#[path = "update/mod.rs"]
+mod update;
+
 #[derive(Default)]
 pub struct GameState {
     pub data: GameData,
@@ -172,746 +175,39 @@ impl GameState {
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
-        let mut result = UpdateResult::new();
-        let now = Instant::now();
-        let navigation_interrupt = self.navigation_interrupt_for_view_event(&event);
-        self.data.runtime_body_cache.apply_view_event(&event, now);
-        match event {
-            ClientViewEvent::LogMessage(_)
-            | ClientViewEvent::ServerMessage { .. }
-            | ClientViewEvent::Chat { .. }
-            | ClientViewEvent::FellowshipActivity { .. }
-            | ClientViewEvent::ChannelMessage { .. }
-            | ClientViewEvent::Tell { .. }
-            | ClientViewEvent::Emote { .. }
-            | ClientViewEvent::PingResponse
-            | ClientViewEvent::BootAccount(_)
-            | ClientViewEvent::NetPulse { .. }
-            | ClientViewEvent::Disconnected => {
-                self.chat
-                    .handle_event(event, self.data.character_name.as_deref());
-            }
-            ClientViewEvent::CombatFeedback(feedback) => {
-                result.merge(self.handle_combat_feedback(&feedback));
-                self.chat.handle_event(
-                    ClientViewEvent::CombatFeedback(feedback),
-                    self.data.character_name.as_deref(),
-                );
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::PlayerEnchantmentsUpdated { .. }
-            | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
-            | ClientViewEvent::PlayerLevelInfoUpdated { .. }
-            | ClientViewEvent::PlayerVitalsUpdated { .. }
-            | ClientViewEvent::PlayerSpellsUpdated { .. }
-            | ClientViewEvent::PlayerOptionsUpdated { .. }
-            | ClientViewEvent::ActiveCharacterConfirmationUpdated { .. }
-            | ClientViewEvent::BusyStateUpdated { .. }
-            | ClientViewEvent::CombatModeUpdated { .. } => {
-                self.handle_player_event(event);
-                self.sync_weapon_swap_controller(Instant::now(), &mut result);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::BusyOperationFinished { .. } => {
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
-                let entity_ref = entity.as_ref();
-                self.data
-                    .entities
-                    .insert(entity_ref.guid, entity_ref.clone());
-            }
-            ClientViewEvent::EntitySpawned { entity } => {
-                let entity_ref = entity.as_ref();
-                self.data
-                    .entities
-                    .insert(entity_ref.guid, entity_ref.clone());
-                self.refresh_entity_context_if_visible(entity_ref.guid, &mut result);
-                if self.update_inventory_and_equipment(entity_ref) {
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-                self.sync_weapon_swap_controller(now, &mut result);
-            }
-            ClientViewEvent::EntityReplaced { entity } => {
-                let entity_ref = entity.as_ref();
-                self.data
-                    .entities
-                    .insert(entity_ref.guid, entity_ref.clone());
-                self.refresh_entity_context_if_visible(entity_ref.guid, &mut result);
-                if self.update_inventory_and_equipment(entity_ref) {
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-                self.sync_weapon_swap_controller(now, &mut result);
-            }
-            ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
-                let mut needs_update = false;
-                if let Some(entity) = self.data.entities.get_mut(&guid) {
-                    for update in updates.drain(..) {
-                        entity.properties.apply(update);
-                    }
-                    needs_update = true;
-                }
-                if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
-                    self.refresh_entity_context_if_visible(guid, &mut result);
-                    if self.update_inventory_and_equipment(&entity) {
-                        result.request_redraw(RedrawPriority::Immediate);
-                    }
-                    self.sync_weapon_swap_controller(now, &mut result);
-                }
-            }
-            ClientViewEvent::EntityMoved { guid, pos } => {
-                let is_player_move = Some(guid) == self.data.player_guid;
-                if let Some(entity) = self.data.entities.get_mut(&guid) {
-                    entity.position = pos;
-                    if is_player_move {
-                        self.data.player_pos = Some(pos);
-                    }
-                }
-                self.refresh_entity_context_if_visible(guid, &mut result);
-                result.request_redraw(RedrawPriority::Motion);
-            }
-            ClientViewEvent::EntityKinematicsUpdated {
-                guid,
-                velocity,
-                omega,
-            } => {
-                if let Some(entity) = self.data.entities.get_mut(&guid) {
-                    entity.velocity = velocity;
-                    entity.omega = omega;
-                    self.refresh_entity_context_if_visible(guid, &mut result);
-                    result.request_redraw(RedrawPriority::Motion);
-                }
-            }
-            ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
-                if let Some(entity) = self.data.entities.get_mut(&guid) {
-                    entity.motion_snapshot = snapshot;
-                    self.refresh_entity_context_if_visible(guid, &mut result);
-                    result.request_redraw(RedrawPriority::Motion);
-                }
-            }
-            ClientViewEvent::PlayerGroundedUpdated { grounded } => {
-                self.data.player_grounded = Some(grounded);
-            }
-            ClientViewEvent::SelfMovementKinematicsUpdated { kinematics } => {
-                self.data.self_movement_kinematics = kinematics;
-            }
-            ClientViewEvent::RuntimeBodySnapshot { .. } => {
-                self.refresh_context_buffer();
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::RuntimeBodyUpserted { body } => {
-                if let Some(guid) = body.body_id.authoritative_guid() {
-                    self.refresh_entity_context_if_visible(guid, &mut result);
-                }
-                result.request_redraw(RedrawPriority::Motion);
-            }
-            ClientViewEvent::RuntimeBodyRemoved { body_id } => {
-                if let Some(guid) = body_id.authoritative_guid() {
-                    self.refresh_entity_context_if_visible(guid, &mut result);
-                }
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::RuntimeBodiesReset { .. } => {
-                self.refresh_context_buffer();
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::ForcedReposition { guid, pos, .. } => {
-                let is_player_move = Some(guid) == self.data.player_guid;
-                if let Some(entity) = self.data.entities.get_mut(&guid) {
-                    entity.position = pos;
-                    if is_player_move {
-                        self.data.player_pos = Some(pos);
-                    }
-                }
-                self.refresh_entity_context_if_visible(guid, &mut result);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::TeleportStarted { .. } => {}
-            ClientViewEvent::EntityDespawned { guid } => {
-                result.merge(self.handle_entity_removed(guid));
-            }
-            ClientViewEvent::VendorStateUpdated { vendor } => {
-                if self.data.trade.is_some() {
-                    // If we're in a trade, ignore vendor sessions.
-                    return result;
-                }
-                let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
-                self.view.vendor = vendor;
-                // If we just opened a vendor and we initiated it, switch to Trade tab.
-                if let Some(v_guid) = vendor_guid
-                    && let Some((last_time, target_guid)) = self.runtime.last_trade_initiation
-                    && target_guid == v_guid
-                    && last_time.elapsed() < std::time::Duration::from_secs(5)
-                {
-                    result.actions.push(AppAction::UiAction {
-                        action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
-                    });
-                }
-            }
-            ClientViewEvent::VendorItemIdentified(item) => {
-                if let Some(vendor) = self.view.vendor.as_mut()
-                    && let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid)
-                {
-                    *existing = *item.clone();
-                    self.refresh_vendor_item_context_if_visible(item.guid);
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-            }
-            ClientViewEvent::FellowshipStateUpdated { fellowship } => {
-                let should_open_party_tab =
-                    fellowship.is_some() && self.runtime.open_party_tab_on_next_fellowship_update;
-
-                self.runtime.open_party_tab_on_next_fellowship_update = false;
-
-                self.data.party = fellowship;
-                if should_open_party_tab {
-                    result.actions.push(AppAction::UiAction {
-                        action: AppUiAction::SetDashboardActiveTab(DashboardTab::Party),
-                    });
-                }
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::TradeStateUpdated { trade } => {
-                let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
-                // Cancel vendor session.
-                self.view.vendor = None;
-                self.data.trade = trade;
-                // If we just opened a trade and we initiated it, switch to Trade tab.
-                if let Some(p_guid) = partner_guid
-                    && let Some((last_time, target_guid)) = self.runtime.last_trade_initiation
-                    && target_guid == p_guid
-                    && last_time.elapsed() < std::time::Duration::from_secs(5)
-                {
-                    result.actions.push(AppAction::UiAction {
-                        action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
-                    });
-                }
-            }
-            ClientViewEvent::EntityIdentified { entity } => {
-                let entity_ref = entity.as_ref();
-                if self.update_inventory_and_equipment(entity_ref) {
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-                self.handle_entity_identified(entity_ref);
-                self.sync_weapon_swap_controller(now, &mut result);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            ClientViewEvent::NoClipUpdated { .. } => {
-                result.merge(self.handle_navigation_event(event));
-            }
-            ClientViewEvent::ContainerOpened { guid } => {
-                self.data.track_container_opened(guid);
-            }
-            ClientViewEvent::ContainerClosed { guid } => {
-                self.data.track_container_closed(guid);
-            }
-            _ => {}
-        }
-
-        if let Some(input) = navigation_interrupt {
-            self.handle_navigation_interrupt(input, &mut result);
-        }
-
-        result
+        update::view_event::reduce_view_event(self, event)
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
-        let mut result = UpdateResult::new();
-        let navigation_input = self.navigation_input_for_app_action(&action);
-        match action {
-            AppAction::Assess { target } => {
-                let guid = match target {
-                    InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
-                };
-                result.commands.push(ClientCommand::Identify(guid));
-                result.merge(
-                    self.apply_context_view_change(crate::types::ContextView::Assess(target)),
-                );
-            }
-            AppAction::Read { guid } => {
-                result.commands.push(ClientCommand::Use(guid));
-                result.merge(self.apply_context_view_change(ContextView::Book(guid)));
-            }
-            AppAction::Use { guid } => {
-                result.commands.push(ClientCommand::Use(guid));
-            }
-            AppAction::QueueSalvageItem { guid } => {
-                if (self.view.active_interaction != Some(Interaction::Salvaging)
-                    || self.view.salvaging.is_none())
-                    && !self.reset_salvaging_state(&mut result)
-                {
-                    return Some(result);
-                }
-
-                if self.data.is_salvage_candidate(guid)
-                    && let Some(session) = self.view.salvaging.as_mut()
-                    && !session.queued_items.contains(&guid)
-                {
-                    session.queued_items.push(guid);
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-            }
-            AppAction::UnqueueSalvageItem { guid } => {
-                if let Some(session) = self.view.salvaging.as_mut() {
-                    session
-                        .queued_items
-                        .retain(|queued_guid| *queued_guid != guid);
-
-                    if session.queued_items.is_empty() {
-                        self.clear_active_interaction(&mut result);
-                        self.view.salvaging = None;
-                    }
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-            }
-            AppAction::SalvageItems {
-                ust_guid,
-                item_guids,
-            } => {
-                if !item_guids.is_empty() {
-                    result.commands.push(ClientCommand::SalvageItemsWith {
-                        tool: ust_guid,
-                        items: item_guids,
-                    });
-                }
-                self.clear_active_interaction(&mut result);
-                self.view.salvaging = None;
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            AppAction::Approach { .. } | AppAction::Follow { .. } | AppAction::Scoot { .. } => {
-                self.apply_navigation_input(
-                    navigation_input
-                        .expect("navigation actions should project to navigation input"),
-                    &mut result,
-                );
-            }
-            AppAction::Drop { guid } => {
-                result.commands.push(ClientCommand::Drop(guid));
-            }
-            AppAction::Equip { guid } => {
-                if self.runtime.weapon_swap.is_active() {
-                    result.actions.push(AppAction::Log {
-                        chat_tags: ChatMessageTags::warning(),
-                        message: "Already waiting on a weapon swap.".to_string(),
-                    });
-                } else {
-                    self.handle_equip_request(guid, None, &mut result);
-                }
-            }
-            AppAction::EquipInSlot { guid, slot } => {
-                if self.runtime.weapon_swap.is_active() {
-                    result.actions.push(AppAction::Log {
-                        chat_tags: ChatMessageTags::warning(),
-                        message: "Already waiting on a weapon swap.".to_string(),
-                    });
-                } else {
-                    self.handle_equip_request(guid, Some(slot), &mut result);
-                }
-            }
-            AppAction::Unequip { guid } => {
-                if let Some(container) = self.data.find_non_full_pack(guid, None) {
-                    result.commands.push(ClientCommand::MoveItem {
-                        item: guid,
-                        container,
-                        placement: 0,
-                    });
-                } else {
-                    result.actions.push(AppAction::Log {
-                        chat_tags: ChatMessageTags::system(),
-                        message: "No available inventory space to unequip item.".to_string(),
-                    });
-                }
-            }
-            AppAction::TalkTo { guid } => {
-                result.commands.push(ClientCommand::Use(guid));
-            }
-            AppAction::InviteToParty { target } => {
-                result
-                    .commands
-                    .push(ClientCommand::InviteToParty { target });
-            }
-            AppAction::UninviteFromParty { target } => {
-                result
-                    .commands
-                    .push(ClientCommand::UninviteFromParty { target });
-            }
-            AppAction::SwearAllegiance { target } => {
-                result
-                    .commands
-                    .push(ClientCommand::SwearAllegiance { target });
-            }
-            AppAction::Unswear { target } => {
-                result.commands.push(ClientCommand::Unswear { target });
-            }
-            AppAction::Open { guid } => {
-                result.commands.push(ClientCommand::Use(guid));
-            }
-            AppAction::Close { guid } => {
-                result.commands.push(ClientCommand::CloseContainer(guid));
-            }
-            AppAction::OpenTrade { guid } => {
-                match self.try_enter_combat_mode(CombatMode::NonCombat) {
-                    EnterCombatModeResult::Failed(res) => {
-                        result.merge(res);
-                    }
-                    EnterCombatModeResult::Success(res) => {
-                        result.merge(res);
-                        self.runtime.last_trade_initiation = Some((Instant::now(), guid));
-                        result.commands.push(ClientCommand::OpenTrade(guid));
-                    }
-                }
-            }
-            AppAction::AddToTrade { guid } => {
-                result
-                    .commands
-                    .push(ClientCommand::AddToTrade { item: guid });
-            }
-            AppAction::OpenShop { vendor } => {
-                if self.data.trade.is_some() {
-                    result.actions.push(AppAction::Log {
-                        chat_tags: ChatMessageTags::warning(),
-                        message: "You are currently in a trade.".to_string(),
-                    });
-                } else {
-                    self.runtime.last_trade_initiation = Some((Instant::now(), vendor));
-                    result.commands.push(ClientCommand::Use(vendor));
-                }
-            }
-            AppAction::SellToVendor {
-                vendor,
-                item,
-                amount,
-            } => {
-                result.commands.push(ClientCommand::Sell {
-                    vendor,
-                    items: vec![ItemProfileActionData {
-                        object_guid: item,
-                        amount: amount as i32,
-                    }],
-                });
-            }
-            AppAction::BuyFromVendor {
-                vendor,
-                item,
-                amount,
-            } => {
-                result.commands.push(ClientCommand::Buy {
-                    vendor,
-                    items: vec![ItemProfileActionData {
-                        object_guid: item,
-                        amount: amount as i32,
-                    }],
-                });
-            }
-            AppAction::MoveItem { item, container } => {
-                result.commands.push(ClientCommand::MoveItem {
-                    item,
-                    container,
-                    placement: 0,
-                });
-                self.clear_active_interaction(&mut result);
-            }
-            AppAction::StackItems {
-                source,
-                destination,
-                amount,
-            } => {
-                result.commands.push(ClientCommand::Stack {
-                    source,
-                    destination,
-                    amount,
-                });
-            }
-            AppAction::SplitItem {
-                item,
-                container,
-                amount,
-            } => {
-                result.commands.push(ClientCommand::Split {
-                    item,
-                    container,
-                    amount,
-                });
-            }
-            AppAction::UseWith { item, target } => {
-                result
-                    .commands
-                    .push(ClientCommand::UseWithTarget { item, target });
-                if let Some(Interaction::Combining {
-                    item_guid: interact_guid,
-                }) = self.view.active_interaction
-                    && interact_guid == item
-                {
-                    self.view.active_interaction = None;
-                }
-            }
-            AppAction::QueryDebugInfo { target } => match target {
-                InspectTarget::Entity(guid) => {
-                    result
-                        .commands
-                        .push(ClientCommand::QueryEntityDebugInfo(guid));
-                    result.merge(self.apply_context_view_change(ContextView::Debug(
-                        InspectTarget::Entity(guid),
-                    )));
-                }
-                InspectTarget::VendorItem(guid) => {
-                    result.commands.push(ClientCommand::Identify(guid));
-                    result.merge(self.apply_context_view_change(ContextView::Debug(
-                        InspectTarget::VendorItem(guid),
-                    )));
-                }
-            },
-            AppAction::CastSpell { spell_id, target } => {
-                match self.try_enter_combat_mode(CombatMode::Magic) {
-                    EnterCombatModeResult::Failed(res) => {
-                        result.merge(res);
-                    }
-                    EnterCombatModeResult::Success(res) => {
-                        result.merge(res);
-                        if let Some(target) = target {
-                            result
-                                .commands
-                                .push(ClientCommand::CastTargetedSpell { spell_id, target });
-                        } else {
-                            result
-                                .commands
-                                .push(ClientCommand::CastUntargetedSpell { spell_id });
-                        }
-                    }
-                }
-            }
-            AppAction::CycleCombatProfileLevel => {
-                self.data.combat_controls.cycle_profile_level();
-                self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            AppAction::CycleCombatAttackHeight => {
-                self.data.combat_controls.cycle_attack_height();
-                self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            AppAction::SetCombatMode { mode } => match self.try_enter_combat_mode(mode) {
-                EnterCombatModeResult::Failed(res) => {
-                    result.merge(res);
-                }
-                EnterCombatModeResult::Success(res) => {
-                    result.merge(res);
-                    self.queue_auto_attack_for_mode(mode, &mut result);
-                }
-            },
-            AppAction::LevelUpStat {
-                stat,
-                amount: xp_spent,
-            } => match stat {
-                crate::types::StatType::Attribute(attribute) => {
-                    result.commands.push(ClientCommand::RaiseAttribute {
-                        attribute,
-                        xp_spent,
-                    });
-                }
-                crate::types::StatType::Vital(vital) => {
-                    result
-                        .commands
-                        .push(ClientCommand::RaiseVital { vital, xp_spent });
-                }
-                crate::types::StatType::Skill(skill) => {
-                    result
-                        .commands
-                        .push(ClientCommand::RaiseSkill { skill, xp_spent });
-                }
-            },
-            AppAction::TrainSkill {
-                skill,
-                amount: credits,
-            } => {
-                result
-                    .commands
-                    .push(ClientCommand::TrainSkill { skill, credits });
-            }
-            AppAction::PickUp {
-                item: guid,
-                container: preferred_container_id,
-            } => {
-                if let Some(container_id) =
-                    self.data.find_non_full_pack(guid, preferred_container_id)
-                {
-                    result.commands.push(ClientCommand::MoveItem {
-                        item: guid,
-                        container: container_id,
-                        placement: 0,
-                    });
-                } else {
-                    result.actions.push(AppAction::Log {
-                        chat_tags: ChatMessageTags::system(),
-                        message: "No space left.".to_string(),
-                    });
-                }
-            }
-            AppAction::Give {
-                item,
-                recipient,
-                amount,
-            } => {
-                result.commands.push(ClientCommand::GiveObjectRequest {
-                    target: recipient,
-                    item,
-                    amount,
-                });
-            }
-            AppAction::AcceptTrade => {
-                result.commands.push(ClientCommand::AcceptTrade);
-            }
-            AppAction::DeclineTrade => {
-                result.commands.push(ClientCommand::DeclineTrade);
-            }
-            AppAction::ResetTrade => {
-                result.commands.push(ClientCommand::ResetTrade);
-            }
-            AppAction::ExitTrade => {
-                result.commands.push(ClientCommand::CloseTrade);
-            }
-            AppAction::BeginInteraction { interaction } => {
-                if interaction == Interaction::Salvaging {
-                    if let Some(input) = navigation_input {
-                        self.apply_navigation_input(input, &mut result);
-                    }
-                    if !self.reset_salvaging_state(&mut result) {
-                        return Some(result);
-                    }
-                } else {
-                    if let Some(input) = navigation_input {
-                        self.apply_navigation_input(input, &mut result);
-                    }
-                    self.set_active_interaction(Some(interaction), &mut result);
-                }
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            AppAction::CancelInteraction => {
-                if let Some(input) = navigation_input {
-                    self.apply_navigation_input(input, &mut result);
-                } else {
-                    self.clear_active_interaction(&mut result);
-                }
-                self.view.salvaging = None;
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            AppAction::ClearVendor => {
-                self.view.vendor = None;
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            AppAction::ViewDetails { view } => {
-                return Some(self.apply_context_view_change(view));
-            }
-            AppAction::UiAction { action } => {
-                return Some(self.handle_ui_action(action));
-            }
-            AppAction::Sequence { actions } => {
-                for inner_action in actions {
-                    if let Some(inner_result) = self.handle_action(inner_action) {
-                        result.merge(inner_result);
-                    }
-                }
-            }
-            _ => return None,
-        }
-
-        Some(result)
+        update::action::reduce_action(self, action)
     }
 
     pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
-        match action {
-            AppUiAction::ChangeContextView { view } => self.apply_context_view_change(view),
-            AppUiAction::OpenUnswearConfirmation { target } => {
-                let target_label = self
-                    .data
-                    .get_entity(target)
-                    .map(|entity| {
-                        let name = entity.name().trim();
-                        if name.is_empty() {
-                            format!("0x{:08X}", target.0)
-                        } else {
-                            name.to_string()
-                        }
-                    })
-                    .unwrap_or_else(|| format!("0x{:08X}", target.0));
-
-                self.view.local_confirmation = Some(LocalConfirmation {
-                    title: " Break Allegiance Confirmation ".to_string(),
-                    text: format!("Break allegiance with {}?", target_label),
-                    action: AppAction::Unswear { target },
-                });
-                UpdateResult::redraw()
-            }
-            _ => self
-                .dashboard
-                .handle_ui_action(action, &self.data, &self.view)
-                .unwrap_or_default(),
-        }
+        update::ui_action::reduce_ui_action(self, action)
     }
 
     fn apply_context_view_change(&mut self, view: ContextView) -> UpdateResult {
+        let mut result = UpdateResult::new();
         self.view.context_view = view;
         self.view.context_scroll_offset = 0;
         if view == ContextView::Logopolis {
             self.runtime.logopolis = Some(LogopolisState::new());
             self.view.previous_focused_pane = FocusedPane::Context;
-            self.view.focused_pane = FocusedPane::Context;
+            result.merge(self.handle_ui_action(AppUiAction::SetFocusedPane {
+                pane: FocusedPane::Context,
+                remember_previous: false,
+            }));
         }
         self.refresh_context_buffer();
-        UpdateResult::redraw()
-    }
-
-    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
-        let mut result = UpdateResult::new();
-        let now = Instant::now();
-        self.sync_inventory_notification_arming(now);
-
-        // Proactive enchantment purge
-        let old_count = self.data.player_enchantments.len();
-        self.data.player_enchantments.retain(|e| {
-            if e.duration < 0.0 {
-                return true;
-            }
-            let expires_at = e.start_time + e.duration;
-            expires_at > 0.0
-        });
-        if self.data.player_enchantments.len() != old_count {
-            result.request_redraw(RedrawPriority::Immediate);
-        }
-
-        // Update enchantment timers locally
-        for enchant in &mut self.data.player_enchantments {
-            if enchant.duration >= 0.0 {
-                enchant.start_time -= elapsed;
-            }
-        }
-
-        self.refresh_stale_attack_sequence(now, &mut result);
-        self.sync_weapon_swap_controller(now, &mut result);
-
-        if self.view.context_view == ContextView::Logopolis {
-            let game = self
-                .runtime
-                .logopolis
-                .get_or_insert_with(LogopolisState::new);
-            if elapsed.is_finite() && elapsed > 0.0 {
-                game.tick(Duration::from_secs_f64(elapsed));
-            }
-            result.request_redraw(RedrawPriority::Immediate);
-        } else if self.runtime.logopolis.is_some() {
-            self.runtime.logopolis = None;
-        }
-
-        let update = self
-            .runtime
-            .navigation
-            .tick(self.navigation_tick(now, elapsed));
-        self.apply_navigation_update(update, &mut result);
-
+        result.request_redraw(RedrawPriority::Immediate);
         result
     }
 
-    pub fn refresh_context_buffer(&mut self) {
+    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
+        update::tick::reduce_tick(self, elapsed)
+    }
+
+    fn refresh_context_buffer(&mut self) {
         if self.view.context_view == ContextView::Logopolis {
             self.render_state.context_buffer.clear();
             return;
@@ -927,7 +223,7 @@ impl GameState {
         self.render_state.context_buffer = content;
     }
 
-    pub(crate) fn handle_player_event(&mut self, event: ClientViewEvent) {
+    fn handle_player_projection_event(&mut self, event: ClientViewEvent) {
         match event {
             ClientViewEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 self.data.player_enchantments = enchantments;
@@ -959,12 +255,6 @@ impl GameState {
             ClientViewEvent::PlayerOptionsUpdated { options } => {
                 self.data.player_options = Some(options);
             }
-            ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
-                self.view.active_confirmation = confirmation;
-            }
-            ClientViewEvent::BusyStateUpdated { busy } => {
-                self.view.active_busy_operation = busy;
-            }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
                     // Clear active p2p trade. Vendoring in combat is allowed!
@@ -978,6 +268,18 @@ impl GameState {
                 ) {
                     self.runtime.combat_automation = None;
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_game_lifecycle_event(&mut self, event: ClientViewEvent) {
+        match event {
+            ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
+                self.view.active_confirmation = confirmation;
+            }
+            ClientViewEvent::BusyStateUpdated { busy } => {
+                self.view.active_busy_operation = busy;
             }
             ClientViewEvent::StatusUpdate { state } => {
                 if matches!(state, holtburger_core::client::types::ClientState::InWorld) {
@@ -1048,7 +350,7 @@ impl GameState {
             .is_some_and(|snapshot| snapshot.indicates_death_motion())
     }
 
-    pub(crate) fn toggled_combat_mode(&self) -> CombatMode {
+    pub(super) fn toggled_combat_mode(&self) -> CombatMode {
         if self.data.combat_mode != CombatMode::NonCombat {
             CombatMode::NonCombat
         } else {
@@ -1071,131 +373,6 @@ impl GameState {
         }
         result.commands.push(ClientCommand::SetCombatMode(mode));
         EnterCombatModeResult::Success(result)
-    }
-
-    pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
-        if Self::is_frontend_navigation_interaction(self.view.active_interaction) {
-            let update = self.runtime.navigation.handle_input(
-                NavigationInput::Cancel,
-                self.navigation_snapshot(self.navigation_tick_target_guid()),
-            );
-            self.apply_navigation_update(update, result);
-            return;
-        }
-
-        self.set_active_interaction(None, result);
-    }
-
-    fn set_active_interaction(
-        &mut self,
-        next_interaction: Option<Interaction>,
-        result: &mut UpdateResult,
-    ) {
-        let previous_interaction = self.view.active_interaction;
-        self.view.active_interaction = next_interaction;
-
-        self.sync_target_health_query(previous_interaction, next_interaction, result);
-
-        if self.should_cancel_attack(previous_interaction, next_interaction) {
-            result.commands.push(ClientCommand::CancelAttack);
-            self.data.combat_runtime.cancel_attack();
-            self.runtime.combat_automation = None;
-        }
-
-        if self.should_resume_attack(previous_interaction, next_interaction) {
-            self.queue_auto_attack_for_mode(self.data.combat_mode, result);
-        }
-    }
-
-    fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool {
-        matches!(
-            interaction,
-            Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
-        )
-    }
-
-    fn sync_target_health_query(
-        &self,
-        previous_interaction: Option<Interaction>,
-        next_interaction: Option<Interaction>,
-        result: &mut UpdateResult,
-    ) {
-        let previous_target = match previous_interaction {
-            Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-            _ => None,
-        };
-        let next_target = match next_interaction {
-            Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-            _ => None,
-        };
-
-        if previous_target == next_target {
-            return;
-        }
-
-        match next_target {
-            Some(target_guid) => result
-                .commands
-                .push(ClientCommand::QueryHealth(target_guid)),
-            None if previous_target.is_some() => {
-                result.commands.push(ClientCommand::QueryHealth(Guid::NULL))
-            }
-            None => {}
-        }
-    }
-
-    fn should_cancel_attack(
-        &self,
-        previous_interaction: Option<Interaction>,
-        next_interaction: Option<Interaction>,
-    ) -> bool {
-        matches!(
-            self.data.combat_mode,
-            CombatMode::Melee | CombatMode::Missile
-        ) && match (previous_interaction, next_interaction) {
-            (
-                Some(Interaction::Targeting {
-                    target_guid: previous_target,
-                }),
-                Some(Interaction::Targeting {
-                    target_guid: next_target,
-                }),
-            ) => previous_target != next_target,
-            (
-                Some(Interaction::Targeting { .. }),
-                None
-                | Some(Interaction::Moving { .. })
-                | Some(Interaction::Approaching { .. })
-                | Some(Interaction::Following { .. })
-                | Some(Interaction::Combining { .. })
-                | Some(Interaction::Salvaging),
-            ) => true,
-            _ => false,
-        }
-    }
-
-    fn should_resume_attack(
-        &self,
-        previous_interaction: Option<Interaction>,
-        next_interaction: Option<Interaction>,
-    ) -> bool {
-        matches!(
-            (
-                previous_interaction,
-                next_interaction,
-                self.data.combat_mode
-            ),
-            (
-                None | Some(Interaction::Moving { .. })
-                    | Some(Interaction::Approaching { .. })
-                    | Some(Interaction::Following { .. })
-                    | Some(Interaction::Combining { .. })
-                    | Some(Interaction::Salvaging)
-                    | Some(Interaction::Targeting { .. }),
-                Some(Interaction::Targeting { .. }),
-                CombatMode::Melee | CombatMode::Missile
-            )
-        )
     }
 
     fn queue_auto_attack_for_mode(&mut self, mode: CombatMode, result: &mut UpdateResult) {
@@ -1311,149 +488,6 @@ impl GameState {
         }
     }
 
-    fn navigation_snapshot(&self, target_guid: Option<Guid>) -> NavigationSnapshot {
-        let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
-        let target_sample = target_guid.and_then(|guid| self.data.runtime_sample_for_guid(guid));
-        let target_use_radius = target_entity
-            .and_then(|entity| entity.use_radius())
-            .map(|radius| radius as f32);
-        NavigationSnapshot {
-            player_position: self.data.runtime_player_position(),
-            self_movement_kinematics: self.data.self_movement_kinematics.clone(),
-            run_rate_scalar: self.data.player_run_rate(),
-            combat_target_guid: self.current_target_guid(),
-            combat_mode: self.data.combat_mode,
-            attack_sequence_active: self
-                .data
-                .combat_runtime
-                .attack_activity(self.data.combat_mode)
-                .is_some(),
-            tracked_target: target_guid.zip(target_sample).map(|(guid, sample)| {
-                ResolvedNavigationTarget {
-                    guid,
-                    sample,
-                    use_radius: target_use_radius,
-                }
-            }),
-        }
-    }
-
-    fn navigation_tick(&self, now: Instant, elapsed: f64) -> NavigationTick {
-        NavigationTick {
-            now,
-            dt: Duration::from_secs_f64(elapsed.max(0.0)),
-            snapshot: self.navigation_snapshot(self.navigation_tick_target_guid()),
-        }
-    }
-
-    fn navigation_tick_target_guid(&self) -> Option<Guid> {
-        self.runtime.navigation.tracked_target_guid().or_else(|| {
-            self.current_target_guid()
-                .filter(|guid| self.is_valid_combat_target(*guid))
-        })
-    }
-
-    fn apply_navigation_update(&mut self, update: NavigationUpdate, result: &mut UpdateResult) {
-        if let Some(command) = update.drive_command {
-            result.commands.push(ClientCommand::DriveSelf(command));
-        }
-
-        match update.interaction_change {
-            NavigationInteractionChange::Unchanged => {}
-            NavigationInteractionChange::Set(next_interaction) => {
-                self.set_active_interaction(next_interaction, result);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-        }
-    }
-
-    fn apply_navigation_input(&mut self, input: NavigationInput, result: &mut UpdateResult) {
-        let target_guid = match input {
-            NavigationInput::StartApproach { target } | NavigationInput::StartFollow { target } => {
-                Some(target)
-            }
-            NavigationInput::StartScoot { .. } => None,
-            NavigationInput::Cancel
-            | NavigationInput::ForcedReposition
-            | NavigationInput::TeleportStarted => self.navigation_tick_target_guid(),
-        };
-
-        let update = self
-            .runtime
-            .navigation
-            .handle_input(input, self.navigation_snapshot(target_guid));
-        self.apply_navigation_update(update, result);
-    }
-
-    fn navigation_input_for_app_action(&self, action: &AppAction) -> Option<NavigationInput> {
-        match action {
-            AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
-            AppAction::Follow { guid } => Some(NavigationInput::StartFollow { target: *guid }),
-            AppAction::Scoot { distance_m } => Some(NavigationInput::StartScoot {
-                distance_m: *distance_m,
-            }),
-            AppAction::CancelInteraction
-                if Self::is_frontend_navigation_interaction(self.view.active_interaction) =>
-            {
-                Some(NavigationInput::Cancel)
-            }
-            AppAction::BeginInteraction { interaction }
-                if Self::is_frontend_navigation_interaction(self.view.active_interaction)
-                    && !Self::is_frontend_navigation_interaction(Some(*interaction)) =>
-            {
-                Some(NavigationInput::Cancel)
-            }
-            _ => None,
-        }
-    }
-
-    fn navigation_interrupt_for_view_event(
-        &self,
-        event: &ClientViewEvent,
-    ) -> Option<NavigationInput> {
-        match event {
-            ClientViewEvent::ForcedReposition { guid, .. }
-                if Some(*guid) == self.data.player_guid =>
-            {
-                Some(NavigationInput::ForcedReposition)
-            }
-            ClientViewEvent::TeleportStarted { .. } => Some(NavigationInput::TeleportStarted),
-            _ => None,
-        }
-    }
-
-    fn handle_navigation_interrupt(&mut self, input: NavigationInput, result: &mut UpdateResult) {
-        self.apply_navigation_input(input, result);
-
-        if input != NavigationInput::TeleportStarted {
-            return;
-        }
-
-        if matches!(
-            self.view.active_interaction,
-            Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
-        ) {
-            self.view.active_interaction = None;
-            result.request_redraw(RedrawPriority::Immediate);
-        }
-
-        if matches!(
-            self.view.active_interaction,
-            Some(Interaction::Targeting { .. })
-        ) {
-            if matches!(
-                self.data.combat_mode,
-                CombatMode::Melee | CombatMode::Missile
-            ) {
-                result.commands.push(ClientCommand::CancelAttack);
-                self.data.combat_runtime.cancel_attack();
-                self.runtime.combat_automation = None;
-            }
-            self.view.active_interaction = None;
-            result.request_redraw(RedrawPriority::Immediate);
-        }
-    }
-
     fn current_target_guid(&self) -> Option<Guid> {
         match self.view.active_interaction {
             Some(Interaction::Targeting { target_guid }) => Some(target_guid),
@@ -1500,24 +534,6 @@ impl GameState {
             chat_tags: ChatMessageTags::warning(),
             message: "You do not have an Ust in your inventory.".to_string(),
         });
-    }
-
-    fn handle_entity_identified(&mut self, entity: &Entity) {
-        let guid = entity.guid;
-        self.data.entities.insert(guid, entity.clone());
-        self.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
-        self.refresh_context_buffer();
-    }
-
-    fn refresh_vendor_item_context_if_visible(&mut self, guid: Guid) {
-        if matches!(
-            self.view.context_view,
-            ContextView::Assess(InspectTarget::VendorItem(target_guid))
-                | ContextView::Debug(InspectTarget::VendorItem(target_guid))
-                if target_guid == guid
-        ) {
-            self.refresh_context_buffer();
-        }
     }
 
     fn handle_equip_request(
@@ -1577,151 +593,6 @@ impl GameState {
         }
     }
 
-    fn update_inventory_and_equipment(&mut self, entity: &Entity) -> bool {
-        let guid = entity.guid;
-        let was_owned = self.data.is_owned_by_player(guid);
-        let should_be_owned = self.should_track_entity_as_owned_by_player(entity);
-        let mut logged_inventory_change = false;
-
-        // Handle player position if it's the player entity
-        if Some(guid) == self.data.player_guid {
-            self.data.player_pos = Some(entity.position);
-        }
-
-        if should_be_owned {
-            self.delay_inventory_notification_arming();
-        }
-
-        // Update inventory tracking
-        if should_be_owned != was_owned {
-            self.data.update_inventory_recursive(guid, should_be_owned);
-        } else if should_be_owned {
-            self.data.inventory.insert(guid);
-        }
-
-        if should_be_owned {
-            if self.runtime.inventory_notifications.is_armed() && !was_owned {
-                self.log_inventory_addition(entity);
-                logged_inventory_change = true;
-            }
-        } else {
-            if self.runtime.inventory_notifications.is_armed() && was_owned {
-                self.log_inventory_removal(entity);
-                logged_inventory_change = true;
-            }
-            // If it's no longer in our inventory/wielded, remove it
-            self.data.inventory.remove(&guid);
-        }
-
-        // Update equipment tracking
-        if self.should_track_entity_as_equipped_by_player(entity) {
-            let mask = entity.wield_location();
-            if mask.is_empty() {
-                self.data.equipment.remove(&guid);
-            } else {
-                self.data.equipment.insert(guid, mask);
-            }
-        } else {
-            self.data.equipment.remove(&guid);
-        }
-
-        self.data.entities.insert(entity.guid, entity.clone());
-        logged_inventory_change
-    }
-
-    fn should_track_entity_as_owned_by_player(&self, entity: &Entity) -> bool {
-        let Some(player_guid) = self.data.player_guid else {
-            return false;
-        };
-
-        entity.container_id().is_some_and(|container_guid| {
-            container_guid == player_guid || self.data.is_in_player_inventory(container_guid)
-        }) || self.should_track_entity_as_equipped_by_player(entity)
-    }
-
-    fn should_track_entity_as_equipped_by_player(&self, entity: &Entity) -> bool {
-        self.data
-            .player_guid
-            .is_some_and(|player_guid| entity.wielder_id() == Some(player_guid))
-    }
-
-    fn log_inventory_addition(&mut self, entity: &Entity) {
-        self.log_inventory_change(entity, "Added to inventory");
-    }
-
-    fn log_inventory_removal(&mut self, entity: &Entity) {
-        self.log_inventory_change(entity, "Removed from inventory");
-    }
-
-    fn log_inventory_change(&mut self, entity: &Entity, action: &str) {
-        let mut label = if entity.name().is_empty() {
-            format!("0x{:08X}", entity.guid.0)
-        } else {
-            entity.name().to_string()
-        };
-        let stack_size = entity.stack_size();
-        if stack_size > 1 {
-            label = format!("{} ({}x)", label, stack_size);
-        }
-        self.chat
-            .log(ChatMessageTags::system(), format!("{}: {}", action, label));
-    }
-
-    fn delay_inventory_notification_arming(&mut self) {
-        self.runtime
-            .inventory_notifications
-            .extend_quiet_period(Instant::now());
-    }
-
-    fn sync_inventory_notification_arming(&mut self, now: Instant) {
-        self.runtime.inventory_notifications.sync(now);
-    }
-
-    fn handle_entity_removed(&mut self, guid: Guid) -> UpdateResult {
-        let mut result = UpdateResult::new();
-        let removed_entity = self.data.entities.get(&guid).cloned();
-        let was_owned = self.data.is_owned_by_player(guid);
-        if self.runtime.inventory_notifications.is_armed()
-            && was_owned
-            && let Some(entity) = removed_entity.as_ref()
-        {
-            self.log_inventory_removal(entity);
-            result.request_redraw(RedrawPriority::Immediate);
-        }
-        self.data.update_inventory_recursive(guid, false);
-        self.data.entities.remove(&guid);
-        self.data.equipment.remove(&guid);
-        if matches!(
-            self.view.context_view,
-            ContextView::Assess(InspectTarget::Entity(target_guid))
-                | ContextView::Debug(InspectTarget::Entity(target_guid))
-                | ContextView::Book(target_guid)
-                if target_guid == guid
-        ) {
-            self.view.context_view = ContextView::Default;
-            self.refresh_context_buffer();
-        }
-        if matches!(
-            self.view.active_interaction,
-            Some(Interaction::Targeting { target_guid }) if target_guid == guid
-        ) {
-            self.clear_active_interaction(&mut result);
-        }
-        if let Some(session) = self.view.salvaging.as_mut() {
-            session
-                .queued_items
-                .retain(|queued_guid| *queued_guid != guid);
-            if session.ust_guid == guid {
-                self.view.salvaging = None;
-                if self.view.active_interaction == Some(Interaction::Salvaging) {
-                    self.clear_active_interaction(&mut result);
-                }
-            }
-        }
-
-        result
-    }
-
     fn handle_navigation_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         if let ClientViewEvent::NoClipUpdated { enabled } = event {
@@ -1733,18 +604,6 @@ impl GameState {
             });
         }
         result
-    }
-
-    fn refresh_entity_context_if_visible(&mut self, guid: Guid, result: &mut UpdateResult) {
-        if matches!(
-            self.view.context_view,
-            ContextView::Assess(InspectTarget::Entity(target_guid))
-                | ContextView::Book(target_guid)
-                if target_guid == guid
-        ) {
-            self.refresh_context_buffer();
-            result.request_redraw(RedrawPriority::Immediate);
-        }
     }
 }
 
@@ -2092,6 +951,41 @@ mod tests {
         assert!(stop_result.redraw_requested());
         assert_eq!(state.view.context_view, ContextView::Default);
         assert!(state.runtime.logopolis.is_none());
+    }
+
+    #[test]
+    fn enter_input_mode_tracks_previous_focus() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Context;
+        state.view.previous_focused_pane = FocusedPane::Dashboard;
+
+        let result = state.handle_ui_action(AppUiAction::EnterInputMode);
+
+        assert!(result.redraw_requested());
+        assert_eq!(state.view.focused_pane, FocusedPane::Input);
+        assert_eq!(state.view.previous_focused_pane, FocusedPane::Context);
+    }
+
+    #[test]
+    fn finish_input_command_submission_restores_focus_and_records_history() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.view.previous_focused_pane = FocusedPane::Dashboard;
+        state.chat_input.history_index = Some(0);
+
+        let result = state.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
+            command: "/scoot 3.5".to_string(),
+        });
+
+        assert!(result.redraw_requested());
+        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert_eq!(state.chat_input.history_index, None);
+        assert_eq!(
+            state.chat_input.input_history.last().map(String::as_str),
+            Some("/scoot 3.5")
+        );
     }
 
     #[test]
@@ -2634,7 +1528,10 @@ mod tests {
             )),
         });
 
-        let snapshot = state.navigation_snapshot(Some(target_guid));
+        let snapshot = update::interaction_policy::navigation_snapshot_for_tests(
+            &state,
+            Some(target_guid),
+        );
         let input = NavigationSyncInput {
             now: Instant::now(),
             player_position: snapshot.player_position,
@@ -2670,7 +1567,7 @@ mod tests {
         });
 
         assert!(result.commands.is_empty());
-        let snapshot = state.navigation_snapshot(None);
+        let snapshot = update::interaction_policy::navigation_snapshot_for_tests(&state, None);
         assert_eq!(snapshot.self_movement_kinematics, Some(kinematics));
     }
 
@@ -2872,7 +1769,7 @@ mod tests {
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
 
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-        let _ = state.handle_entity_removed(target_guid);
+        let _ = state.handle_view_event(ClientViewEvent::EntityDespawned { guid: target_guid });
 
         assert_eq!(state.view.active_interaction, None);
     }

@@ -4,7 +4,15 @@ use crate::types::{AppAction, Page, RedrawPriority, UpdateResult};
 
 impl AppState {
     pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
-        let mut result = if let Some(res) = self.page.handle_action(action.clone()) {
+        let mut result = self.reduce_app_action(action);
+
+        self.drain_actions(&mut result);
+
+        result
+    }
+
+    fn reduce_app_action(&mut self, action: AppAction) -> UpdateResult {
+        if let Some(res) = self.page.handle_action(action.clone()) {
             res
         } else {
             let mut result = UpdateResult::new();
@@ -45,18 +53,14 @@ impl AppState {
                 ),
             }
             result
-        };
-
-        self.drain_actions(&mut result);
-
-        result
+        }
     }
 
     pub fn drain_actions(&mut self, result: &mut UpdateResult) {
         while !result.actions.is_empty() {
             let actions = std::mem::take(&mut result.actions);
             for action in actions {
-                result.merge(self.handle_app_action(action));
+                result.merge(self.reduce_app_action(action));
             }
         }
     }

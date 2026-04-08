@@ -24,11 +24,7 @@ pub(super) fn dashboard_verbs(state: &SelectionState) -> Vec<Verb> {
         .selected_character()
         .is_some_and(|character| character.character.delete_time != 0)
     {
-        verbs.push(Verb::new(
-            AppUiAction::RestoreSelectedCharacter,
-            'r',
-            "Restore",
-        ));
+        verbs.push(Verb::new(AppAction::RestoreSelectedCharacter, 'r', "Restore"));
     }
 
     verbs

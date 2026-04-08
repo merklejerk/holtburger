@@ -272,6 +272,7 @@ impl WorldState {
 
             for dependent_guid in dependent_guids {
                 let mut detached = false;
+                let mut detached_wielder = false;
 
                 if let Some(dependent) = self.entities.get_mut(dependent_guid) {
                     if dependent.container_id() == Some(guid) {
@@ -286,12 +287,17 @@ impl WorldState {
                             EquipMask::NONE.bits() as i32,
                         );
                         detached = true;
+                        detached_wielder = true;
                     }
 
                     if dependent.physics_parent_id == Some(guid) {
                         dependent.physics_parent_id = None;
                         detached = true;
                     }
+                }
+
+                if detached_wielder {
+                    let _ = self.clear_entity_world_presence(dependent_guid);
                 }
 
                 if detached {

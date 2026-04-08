@@ -266,7 +266,9 @@ impl WorldState {
             equipped_by_player: self.is_equipped_item(guid),
             inside_open_container: open_container,
             has_container_owner: container_id.is_some() && (!container_preview || open_container),
-            has_wielder_owner: entity.wielder_id().is_some(),
+            has_wielder_owner: entity
+                .wielder_id()
+                .is_some_and(|wielder| self.entities.get(wielder).is_some()),
             has_parent_owner: entity.physics_parent_id.is_some(),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,

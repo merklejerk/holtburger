@@ -446,6 +446,7 @@ impl TabController for InventoryTab {
             }
 
             if class == EntityClass::ManaStone
+                && cur_entity.ui_effects().is_some_and(|effects| effects != 0)
                 && let Some(pguid) = player_guid
                 && data.can_use_with(cur_entity.guid, pguid)
             {
@@ -732,6 +733,9 @@ mod tests {
     use super::*;
     use holtburger_common::math::{Quaternion, Vector3};
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{
+        ItemType, PropertyInt, Usable, WorldObjectPropertyAccessorsMut,
+    };
 
     fn make_entity(guid: u32, name: &str, container_id: Option<Guid>) -> Entity {
         let mut entity = Entity::new(
@@ -747,6 +751,19 @@ mod tests {
             entity.set_container_id(Some(container_id));
         }
 
+        entity
+    }
+
+    fn make_player_entity(guid: Guid) -> Entity {
+        let mut entity = Entity::new(guid, "Player".to_string(), WorldPosition::default());
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        entity
+    }
+
+    fn make_mana_stone(guid: Guid, name: &str, ui_effects: i32) -> Entity {
+        let mut entity = Entity::new(guid, name.to_string(), WorldPosition::default());
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::MANA_STONE.bits() as i32);
+        entity.set_int_prop(PropertyInt::UiEffects, ui_effects);
         entity
     }
 
@@ -778,5 +795,53 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["Alpha", "Zulu"]
         );
+    }
+
+    #[test]
+    fn recharge_all_is_hidden_for_uncharged_mana_stones() {
+        let player_guid = Guid(0x5000_0001);
+        let stone_guid = Guid(0x5000_0002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.entities
+            .insert(player_guid, make_player_entity(player_guid));
+        data.entities
+            .insert(stone_guid, make_mana_stone(stone_guid, "Mana Stone", 0));
+        data.inventory.insert(stone_guid);
+
+        let tab = InventoryTab {
+            selected_index: 0,
+            ..InventoryTab::default()
+        };
+
+        let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
+
+        assert!(!verbs.iter().any(|verb| verb.label == "Recharge all"));
+    }
+
+    #[test]
+    fn recharge_all_is_shown_for_charged_mana_stones() {
+        let player_guid = Guid(0x5000_0001);
+        let stone_guid = Guid(0x5000_0002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.entities
+            .insert(player_guid, make_player_entity(player_guid));
+        let mut stone = make_mana_stone(stone_guid, "Mana Stone", 1);
+        stone.set_container_id(Some(player_guid));
+        stone.set_int_prop(
+            PropertyInt::ItemUseable,
+            Usable::SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED.bits() as i32,
+        );
+        stone.set_int_prop(PropertyInt::TargetType, ItemType::CREATURE.bits() as i32);
+        data.entities.insert(stone_guid, stone);
+        data.inventory.insert(stone_guid);
+
+        let tab = InventoryTab {
+            selected_index: 0,
+            ..InventoryTab::default()
+        };
+
+        let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
+
+        assert!(verbs.iter().any(|verb| verb.label == "Recharge all"));
     }
 }

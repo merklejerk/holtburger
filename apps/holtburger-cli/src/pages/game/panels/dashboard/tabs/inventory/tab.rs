@@ -733,7 +733,9 @@ mod tests {
     use super::*;
     use holtburger_common::math::{Quaternion, Vector3};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{ItemType, PropertyInt, Usable, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{
+        ItemType, PropertyInt, Usable, WorldObjectPropertyAccessorsMut,
+    };
 
     fn make_entity(guid: u32, name: &str, container_id: Option<Guid>) -> Entity {
         let mut entity = Entity::new(
@@ -806,8 +808,10 @@ mod tests {
             .insert(stone_guid, make_mana_stone(stone_guid, "Mana Stone", 0));
         data.inventory.insert(stone_guid);
 
-        let mut tab = InventoryTab::default();
-        tab.selected_index = 0;
+        let tab = InventoryTab {
+            selected_index: 0,
+            ..InventoryTab::default()
+        };
 
         let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
 
@@ -831,8 +835,10 @@ mod tests {
         data.entities.insert(stone_guid, stone);
         data.inventory.insert(stone_guid);
 
-        let mut tab = InventoryTab::default();
-        tab.selected_index = 0;
+        let tab = InventoryTab {
+            selected_index: 0,
+            ..InventoryTab::default()
+        };
 
         let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
 

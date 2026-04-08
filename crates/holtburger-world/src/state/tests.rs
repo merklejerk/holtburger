@@ -4076,7 +4076,10 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
 
     assert!(removed.is_some());
     assert_eq!(state.entities.get(item_guid).unwrap().wielder_id(), None);
-    assert_eq!(state.entities.get(item_guid).unwrap().position.landblock_id, Guid::NULL);
+    assert_eq!(
+        state.entities.get(item_guid).unwrap().position.landblock_id,
+        Guid::NULL
+    );
     assert!(
         state
             .entity_lifecycle_state(item_guid)

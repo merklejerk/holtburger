@@ -8,7 +8,7 @@ use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatView;
-use crate::types::{ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
+use crate::types::{AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
 
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
@@ -184,7 +184,6 @@ impl GameState {
 
         match key.code {
             KeyCode::Tab | KeyCode::BackTab => {
-                let active = self.view.active_interaction.is_some();
                 let delta = if key
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -194,64 +193,51 @@ impl GameState {
                 } else {
                     1
                 };
-                self.view.focused_pane = crate::utils::get_adjacent_pane(
-                    self.view.focused_pane,
-                    self.layout_mode(),
-                    active,
-                    delta,
-                );
-                result.request_redraw(RedrawPriority::Immediate);
+                result.merge(self.handle_ui_action(AppUiAction::CycleFocusedPane { delta }));
             }
             KeyCode::Esc => {
                 if self.view.context_view == ContextView::Logopolis
                     && self.view.focused_pane == FocusedPane::Context
                 {
-                    result.actions.push(
-                        crate::types::AppUiAction::ChangeContextView {
-                            view: ContextView::Default,
-                        }
-                        .into(),
-                    );
+                    result.merge(self.handle_ui_action(AppUiAction::ChangeContextView {
+                        view: ContextView::Default,
+                    }));
                     return result;
                 }
 
                 if self.view.focused_pane == FocusedPane::Input {
-                    self.view.focused_pane = self.view.previous_focused_pane;
+                    result.merge(self.handle_ui_action(AppUiAction::ExitInputMode));
                 } else if self.view.active_interaction.is_some() {
-                    self.clear_active_interaction(&mut result);
-                    self.view.salvaging = None;
+                    if let Some(action_result) = self.handle_action(AppAction::CancelInteraction) {
+                        result.merge(action_result);
+                    }
                 }
-                result.request_redraw(RedrawPriority::Immediate);
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
                     let command = self.chat_input.input.take_text();
                     if command.is_empty() {
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
+                        result.merge(self.handle_ui_action(AppUiAction::ExitInputMode));
+                        return result;
                     }
                     if command.starts_with('/') {
                         return self.handle_slash_command(&command);
                     }
                     if let Some(emote) = command.strip_prefix(':') {
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
+                        result.merge(self.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
+                            command: command.clone(),
+                        }));
                         result
                             .commands
                             .push(ClientCommand::Emote(emote.to_string()));
-                        result.request_redraw(RedrawPriority::Immediate);
                         return result;
                     }
-                    self.chat_input.input_history.push(command.clone());
-                    self.chat_input.history_index = None;
-                    self.view.focused_pane = self.view.previous_focused_pane;
+                    result.merge(self.handle_ui_action(AppUiAction::FinishInputCommandSubmission {
+                        command: command.clone(),
+                    }));
                     result.commands.push(ClientCommand::Talk(command));
-                    result.request_redraw(RedrawPriority::Immediate);
                 } else {
-                    self.view.previous_focused_pane = self.view.focused_pane;
-                    self.view.focused_pane = FocusedPane::Input;
-                    result.request_redraw(RedrawPriority::Immediate);
+                    result.merge(self.handle_ui_action(AppUiAction::EnterInputMode));
                 }
             }
             KeyCode::Backspace | KeyCode::Delete => {
@@ -476,23 +462,13 @@ impl GameState {
     }
 
     fn handle_local_confirmation_input(&mut self, key: KeyEvent) -> Option<UpdateResult> {
-        let confirmation = self.view.local_confirmation.clone()?;
-        let mut result = UpdateResult::new();
+        self.view.local_confirmation.as_ref()?;
 
         match key.code {
-            KeyCode::Enter => {
-                self.view.local_confirmation = None;
-                result.actions.push(confirmation.action);
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            KeyCode::Esc => {
-                self.view.local_confirmation = None;
-                result.request_redraw(RedrawPriority::Immediate);
-            }
-            _ => {}
+            KeyCode::Enter => Some(self.handle_ui_action(AppUiAction::ConfirmLocalConfirmation)),
+            KeyCode::Esc => Some(self.handle_ui_action(AppUiAction::DismissLocalConfirmation)),
+            _ => Some(UpdateResult::new()),
         }
-
-        Some(result)
     }
 }
 

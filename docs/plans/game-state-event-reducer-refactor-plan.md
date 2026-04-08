@@ -693,7 +693,6 @@ Mitigation:
 - `GameState` is a thin composition root, not the primary location of domain behavior.
 - The main game-page update logic is split by input kind and domain responsibility.
 - The dominant mental model is event/action reduction plus emitted `UpdateResult`, not direct mutator choreography.
-- Existing behavior remains intact for combat, navigation, trade/vendor, interaction, and inventory-notification flows.
 - Existing behavior remains intact for combat, navigation, trade/vendor, interaction, and inventory notification flows.
 - Tests cover the reducer seams well enough that future scripting work can add new action producers without fear.
 - A short documentation note exists describing the action-first integration model for future script bindings.
@@ -714,19 +713,27 @@ Keep these notes short and decision-oriented. The goal is to make plan drift aud
 
 ### Task Checklist
 
-- [ ] Create `pages/game/update/` and move top-level reducers behind it.
-- [ ] Extract `AppAction` handling into domain reducers.
-- [ ] Extract `AppUiAction` handling into a dedicated reducer.
-- [ ] Audit imperative branches for promotion into `AppAction` or `AppUiAction` flows.
-- [ ] Extract `ClientViewEvent` projection into domain reducers.
-- [ ] Normalize transient UI-state mutation in `input.rs` and `input/commands.rs`.
-- [ ] Extract tick/controller orchestration into a dedicated reducer.
-- [ ] Consolidate shared interaction transition helpers.
-- [ ] Consolidate inventory/equipment projection helpers.
-- [ ] Review extracted domains for vestigial subsystem risk.
-- [ ] Fold or delete thin subsystems that do not retain real policy ownership.
+- [x] Create `pages/game/update/` and move top-level reducers behind it.
+- [x] Extract `AppAction` handling into domain reducers.
+- [x] Extract `AppUiAction` handling into a dedicated reducer.
+- [x] Audit imperative branches for promotion into `AppAction` or `AppUiAction` flows.
+- [x] Extract `ClientViewEvent` projection into domain reducers.
+- [x] Normalize transient UI-state mutation in `input.rs` and `input/commands.rs`.
+- [x] Extract tick/controller orchestration into a dedicated reducer.
+- [x] Consolidate shared interaction transition helpers.
+- [x] Consolidate inventory/equipment projection helpers.
+- [x] Review extracted domains for vestigial subsystem risk.
+- [x] Fold or delete thin subsystems that do not retain real policy ownership.
 - [ ] Re-home or expand tests to follow the new reducer boundaries.
-- [ ] Add a short script-integration architecture note.
+- [x] Add a short script-integration architecture note.
+
+### Checklist Status Notes
+
+- `Consolidate shared interaction transition helpers` is now complete. The interaction transition policy lives under [apps/holtburger-cli/src/pages/game/update/interaction_policy.rs](apps/holtburger-cli/src/pages/game/update/interaction_policy.rs) and is consumed by the interaction, tick, and view-event reducers instead of staying smeared across [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs).
+- `Consolidate inventory/equipment projection helpers` is now complete. Inventory/equipment projection, entity-removal cleanup, and inventory-notification arming live under [apps/holtburger-cli/src/pages/game/update/inventory_projection.rs](apps/holtburger-cli/src/pages/game/update/inventory_projection.rs), which is shared by the entity, runtime-body, trade/vendor, and maintenance reducers.
+- `Review extracted domains for vestigial subsystem risk` is now considered complete. The review result is that the current reducer slices are justified, but no additional subsystem promotion is warranted yet.
+- `Fold or delete thin subsystems that do not retain real policy ownership` is now considered complete for this refactor pass. We did not introduce new vestigial subsystem layers beyond reducer slices, so there is nothing concrete to fold today.
+- `Re-home or expand tests to follow the new reducer boundaries` remains intentionally deferred. The current [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs) test seam is still the highest-value contract boundary, and moving tests now would mostly reshuffle ownership without increasing signal.
 
 ### Decisions Log
 
@@ -736,6 +743,26 @@ Keep these notes short and decision-oriented. The goal is to make plan drift aud
 - Preferred direction: test migration follows ownership, not file creation; do not copy tests across layers or widen visibility just to preserve old assertions.
 - Preferred direction: prefer contract-level assertions and delete low-value or over-specified tests rather than carrying them forward mechanically.
 - Preferred direction: keep the initial reducer split under `pages/game/update/`, then revisit whether later domain helpers should stay there or move into sibling modules only after real ownership seams stabilize.
+- Phase 1 decision: implement `pages/game/update/` as a child module of [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs) via a path-based include so extracted reducers can keep using existing private helpers without widening production visibility.
+- Phase 1 decision: keep Phase 1 limited to four top-level reducer files (`action`, `ui_action`, `view_event`, `tick`) and defer all domain sub-splitting until later phases.
+- Phase 1.5 decision: split app-action handling into “reduce one action” versus “reduce plus drain,” so action draining has one internal code path instead of being recursively interleaved through both event and action entrypoints.
+- Phase 1.5 decision: keep `handle_app_event` as the event finalizer that normalizes redraw policy and drains page-emitted actions, and simplify key/mouse routing so it no longer executes actions on the side.
+- Phase 2 decision: keep `update/action.rs` as the orchestration dispatcher for `Sequence` and `UiAction`, while moving concrete `AppAction` behavior into domain reducers for detail, inventory, interaction, trade, combat, and progression.
+- Phase 2 decision: keep party/allegiance actions grouped with trade/vendor actions for now because the current surface did not yet justify a separate social reducer.
+- Phase 2 decision: do not introduce new `AppAction` or `AppUiAction` variants in this phase; the strongest remaining promotion opportunities are still in `input.rs` and `input/commands.rs`, not inside the current action reducer bodies.
+- Phase 2.5 decision: defer subsystem promotion for now. The current domain reducers are readable as reducer slices, but the strongest subsystem candidates (`event_projection`, `controller_coordination`, `interaction_policy`, `inventory_notifications`) still depend on event and tick seams that have not been extracted yet.
+- Phase 2.5 decision: if we promote a subsystem before Phase 3 or Phase 4, it should only happen in response to a concrete cross-file policy seam, not because the plan outline says a subsystem should exist.
+- Phase 3 decision: keep `update/view_event.rs` as the shared event pre/post-processing seam for runtime-body cache application and navigation interrupts, and split only the event-family match arms into focused reducers.
+- Phase 3 decision: use event-domain reducer files for `social`, `player`, `entity`, `runtime_body`, `trade_vendor`, and `navigation` instead of introducing a broader projection subsystem; the split improved scanability without yet proving a stronger ownership boundary.
+- Phase 3.5 decision: promote durable input-mode transitions, pane-focus cycling, local confirmation lifecycle, and command-submission cleanup into `AppUiAction`, but keep character editing, history stepping, and scroll nudges local to the input reducer.
+- Phase 3.5 decision: call `handle_ui_action` and `handle_action` directly from the input path for same-event responsiveness instead of queueing those transitions through a later drain step; the architecture gain here is explicit intent, not extra latency.
+- Phase 4 decision: keep `update/tick.rs` as the orchestration seam and split tick work into three slices: deterministic maintenance, controller coordination, and Logopolis presentation ticking.
+- Phase 4 decision: do not promote a standalone `controller_coordination` subsystem yet; the current tick split clarifies ordering, but navigation/combat/weapon-swap coordination still reads better as reducer-owned orchestration than as a new subsystem boundary.
+- Phase 5 decision: treat `GameState::{handle_input, handle_mouse, handle_action, handle_ui_action, handle_view_event, handle_tick}` as the stable page-driving surface for future scripting and integration work.
+- Phase 5 decision: tighten helper visibility when a method is reducer-internal rather than a real page-driving contract, and document the remaining helper categories instead of widening them into a pseudo-public API.
+- Phase 5 decision: consolidate the last cross-reducer helper families into reducer-owned helper modules, specifically `interaction_policy` for interaction/navigation transitions and `inventory_projection` for inventory/equipment projection plus entity cleanup.
+- Post-phase review decision: the helper-family cleanup is complete. The only remaining unchecked plan item is the intentionally deferred test-boundary reshuffle, which is still lower value than preserving the current state-level contract seam.
+- Post-phase review decision: do not migrate tests out of [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs) yet. The reducer slices are clearer, but the state-level contract is still the best high-signal safety net for this code.
 - Preferred direction: allow domain-scoped subsystems when they encode real policy ownership, especially for `interaction_policy`, `event_projection`, `controller_coordination`, and `inventory_notifications`.
 - Initial pruning bias: `weapon_swap` likely stays, `combat` may partially fold, and `salvaging` should justify itself or get absorbed into a stronger owner.
 - Preferred direction: keep `UpdateResult` unified for this refactor rather than splitting reducer outputs and effects immediately.
@@ -747,11 +774,75 @@ Keep these notes short and decision-oriented. The goal is to make plan drift aud
 
 ### Verification Log
 
-- Pending implementation.
+- Phase 1 verification: `cargo test -p holtburger-cli state:: --quiet` passed with 78 tests.
+- Phase 1 verification: editor diagnostics for [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs) and the new reducer files under `pages/game/update/` reported no errors after extraction.
+- Phase 1.5 verification: `cargo test -p holtburger-cli state:: --quiet` passed after the app pipeline cleanup.
+- Phase 1.5 verification: editor diagnostics for [apps/holtburger-cli/src/update/app_event.rs](apps/holtburger-cli/src/update/app_event.rs), [apps/holtburger-cli/src/update/app_action.rs](apps/holtburger-cli/src/update/app_action.rs), and [apps/holtburger-cli/src/update/input.rs](apps/holtburger-cli/src/update/input.rs) reported no errors after the split.
+- Phase 2 verification: `cargo test -p holtburger-cli state:: --quiet` passed after splitting `AppAction` handling into domain reducers.
+- Phase 2 verification: editor diagnostics for [apps/holtburger-cli/src/pages/game/update/action.rs](apps/holtburger-cli/src/pages/game/update/action.rs) and the new action domain reducer files reported no errors after the split.
+- Phase 3 verification: `cargo test -p holtburger-cli state:: --quiet` passed after splitting `ClientViewEvent` handling into event-domain reducers.
+- Phase 3 verification: editor diagnostics for [apps/holtburger-cli/src/pages/game/update/view_event.rs](apps/holtburger-cli/src/pages/game/update/view_event.rs) and the new event domain reducer files reported no errors after the split.
+- Phase 3.5 verification: `cargo test -p holtburger-cli state:: --quiet` passed with 80 tests after promoting durable input transitions into `AppUiAction` flows.
+- Phase 3.5 verification: editor diagnostics for [apps/holtburger-cli/src/types.rs](apps/holtburger-cli/src/types.rs), [apps/holtburger-cli/src/pages/game/update/ui_action.rs](apps/holtburger-cli/src/pages/game/update/ui_action.rs), [apps/holtburger-cli/src/pages/game/input.rs](apps/holtburger-cli/src/pages/game/input.rs), and [apps/holtburger-cli/src/pages/game/input/commands.rs](apps/holtburger-cli/src/pages/game/input/commands.rs) reported no errors after the refactor.
+- Phase 4 verification: `cargo test -p holtburger-cli state:: --quiet` passed with 80 tests after splitting tick-time logic into maintenance, controller coordination, and Logopolis reducer slices.
+- Phase 4 verification: editor diagnostics for [apps/holtburger-cli/src/pages/game/update/tick.rs](apps/holtburger-cli/src/pages/game/update/tick.rs) and the new tick reducer files reported no errors after the split.
+- Phase 5 verification: `cargo test -p holtburger-cli state:: --quiet` passed with 80 tests after tightening reducer-internal helper visibility and documenting the game-page reducer surface.
+- Phase 5 verification: editor diagnostics for [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs) reported no errors after the visibility cleanup.
+- Post-phase cleanup verification: `cargo test -p holtburger-cli state:: --quiet` passed with 80 tests after consolidating the interaction and inventory projection helper families under `pages/game/update/`.
+- Post-phase cleanup verification: editor diagnostics for [apps/holtburger-cli/src/pages/game/state.rs](apps/holtburger-cli/src/pages/game/state.rs), [apps/holtburger-cli/src/pages/game/update/interaction_policy.rs](apps/holtburger-cli/src/pages/game/update/interaction_policy.rs), [apps/holtburger-cli/src/pages/game/update/inventory_projection.rs](apps/holtburger-cli/src/pages/game/update/inventory_projection.rs), and the updated reducer callers reported no errors after the consolidation.
 
 ### Reassessment Log
 
-- Pending implementation.
+- Phase: 1
+- What changed in our understanding: a sibling `pages/game/update/` module would have forced visibility expansion across `GameState` fields and helpers, while a child module preserved the Phase 1 seam without abstraction leakage.
+- Decision kept, changed, or dropped: kept the Phase 1 reducer-extraction goal, changed the implementation detail of how `update/` is mounted.
+- Impact on later phases: later reducer splits can continue without `pub(crate)` creep, but any future move to sibling modules should require a fresh boundary review.
+- Follow-up validation needed: confirm in Phase 2 that the child-module arrangement still feels clean once `action.rs` starts splitting by domain.
+- Phase: 1.5
+- What changed in our understanding: the real app-pipeline friction was duplicated action-drain responsibility, not the async terminal loop or a need for a new effect type.
+- Decision kept, changed, or dropped: kept the pipeline cleanup optional in scope, kept `UpdateResult` unified, and changed the internal app-action handling so reduction and draining are more clearly separated.
+- Impact on later phases: page reducers now have a cleaner contract with the app shell, and input routing no longer hides its own action execution path.
+- Follow-up validation needed: as Phase 3.5 progresses, confirm that the remaining action-first gaps are truly page-local and not another symptom of app-shell pipeline ambiguity.
+- Phase: 2
+- What changed in our understanding: the `AppAction` surface did split cleanly by domain, but the current reducer did not reveal strong new action-promotion candidates; the more meaningful remaining action-first cleanup still sits in input and command handling.
+- Decision kept, changed, or dropped: kept the Phase 2 domain split goal and kept the action vocabulary stable for this pass.
+- Impact on later phases: Phase 3.5 remains the main place to promote additional UI or intent actions, while future Phase 2.5 subsystem work should build on the new domain files rather than inventing another intermediate layer.
+- Follow-up validation needed: verify in the next reassessment checkpoint whether the `trade` grouping should stay combined or split into separate social versus vendor/trade reducers once more behavior moves out of `action.rs`.
+- Phase: 2.5
+- What changed in our understanding: after the Phase 2 split, the awkwardness is still mostly at the boundary between action, view-event, tick, and input handling rather than inside any one action-domain reducer.
+- Decision kept, changed, or dropped: kept Phase 2.5 in the plan, but deferred implementation for now.
+- Impact on later phases: Phase 3 and Phase 4 should expose better evidence for whether `event_projection`, `controller_coordination`, `interaction_policy`, or `inventory_notifications` deserve subsystem status.
+- Follow-up validation needed: reassess subsystem promotion after view-event or tick extraction, especially around trade/session follow-up, weapon-swap synchronization, inventory-notification arming, and interaction/navigation coupling.
+- Phase: 3
+- What changed in our understanding: the `ClientViewEvent` surface split cleanly into event families, but the shared runtime-body cache application and navigation-interrupt follow-up still belong at the top-level reducer seam rather than inside any one event-domain file.
+- Decision kept, changed, or dropped: kept the Phase 3 event split goal and kept subsystem promotion deferred; changed the concrete structure to use thin event-domain reducer files under `view_event.rs` instead of a heavier projection layer.
+- Impact on later phases: Phase 3.5 can now target UI-state normalization without wading through unrelated entity or trade event handling, and Phase 4 should give a clearer read on whether controller coordination deserves its own owner.
+- Follow-up validation needed: reassess after Phase 4 whether the shared post-processing left in `view_event.rs` still feels like orchestration or has grown into a real subsystem boundary.
+- Phase: 3.5
+- What changed in our understanding: the strongest durable UI transitions were concentrated in focus-mode changes, local confirmation lifecycle, and submission cleanup, while history stepping and fine-grained scrolling still read as reducer-local editing behavior rather than reusable intents.
+- Decision kept, changed, or dropped: kept the Phase 3.5 UI-normalization goal and changed the implementation detail so the input path invokes explicit `AppUiAction` and `AppAction` reducers directly for immediate local state changes.
+- Impact on later phases: the input path now has one clearer semantic seam for durable UI transitions, and Phase 4 can focus on controller/tick ownership without also untangling pane and submission state.
+- Follow-up validation needed: as Phase 4 and Phase 5 progress, confirm whether active server-driven confirmation handling should stay local or also graduate into an explicit UI action flow.
+- Phase: 4
+- What changed in our understanding: tick-time logic did separate cleanly into maintenance, controller coordination, and presentation-side Logopolis ticking, but that clearer ordering still did not prove a stronger standalone subsystem boundary.
+- Decision kept, changed, or dropped: kept the Phase 4 extraction goal, kept subsystem promotion deferred, and changed the concrete structure to use focused tick reducer files under `tick.rs` rather than promoting a larger coordination module.
+- Impact on later phases: Phase 5 can now classify remaining helper methods against a clearer tick architecture, and any future subsystem promotion can build on the controller-coordination slice instead of guessing where that boundary should start.
+- Follow-up validation needed: reassess after Phase 5 whether the controller-coordination slice has grown into a real subsystem candidate or should remain reducer-local orchestration.
+- Phase: 5
+- What changed in our understanding: the extracted reducer surface is now stable enough that the missing piece was not another code split, but a clearer statement of which `GameState` methods are actual integration entrypoints and which helpers remain reducer-internal implementation details.
+- Decision kept, changed, or dropped: kept the Phase 5 script-surface goal, kept the future script API aimed at `AppAction` and `AppUiAction`, and changed helper visibility where methods were broader than their true contract.
+- Impact on later phases: future scripting or subsystem work now has a documented reducer surface to target, and any remaining helper refactors can be evaluated against that explicit contract instead of against ad hoc mutator usage.
+- Follow-up validation needed: if later work exposes another helper that starts attracting external callers, either promote it into an explicit action/event entrypoint or narrow its visibility before it becomes accidental API.
+- Phase: post-phase cleanup completion
+- What changed in our understanding: the two remaining open checklist items were both real reducer-owned helper seams, but they did not justify broader subsystem promotion; small shared helper modules were enough.
+- Decision kept, changed, or dropped: kept the “no extra subsystem layer” bias, changed the helper ownership by moving the interaction and inventory projection families under `pages/game/update/`.
+- Impact on later phases: the checklist now reflects a genuinely completed reducer-surface pass, and future work can choose subsystem promotion based on new behavior rather than leftover migration debt.
+- Follow-up validation needed: if either helper module starts accumulating unrelated policy, split it by reducer responsibility rather than letting it become a second `state.rs`.
+- Phase: post-phase cleanup review
+- What changed in our understanding: after the phase work landed, only two unchecked tasks still pointed at concrete code seams worth changing; the rest were either satisfied by review or better deferred to avoid churn without stronger ownership signal.
+- Decision kept, changed, or dropped: kept the interaction-helper and inventory-projection consolidation items open; changed subsystem-pruning review items to complete; kept test migration deferred rather than forcing file-by-file symmetry.
+- Impact on later phases: any continued cleanup can now be a focused pass over those two helper families instead of another vague “finish the checklist” effort.
+- Follow-up validation needed: if we later extract an `interaction_policy` or `event_projection` helper surface, re-check whether test ownership should move with it at that time.
 
 ### Open Questions
 

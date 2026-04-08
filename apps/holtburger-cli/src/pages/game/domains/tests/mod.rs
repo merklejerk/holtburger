@@ -1,9 +1,10 @@
 pub(super) use super::super::*;
+pub(super) use crate::navigation::{NavigationMode, NavigationSyncInput};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
-    WorldObjectProperties, WorldObjectPropertyAccessorsMut,
+    ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString, WorldObjectProperties,
+    WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{ConfirmationType, Quaternion, Vector3};
 use holtburger_core::ActiveCharacterConfirmation;
@@ -17,14 +18,13 @@ use holtburger_world::{
     PlayerMotionTableSource, RuntimeSpatialBodyView, SelfMovementKinematics, SpatialBodyId,
     SpatialSampleMode,
 };
-pub(super) use crate::navigation::{NavigationMode, NavigationSyncInput};
 
 mod combat;
 mod context;
 mod entity;
 mod inventory;
-mod logopolis;
 mod lifecycle;
+mod logopolis;
 mod navigation;
 mod party;
 mod player;

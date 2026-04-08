@@ -12,7 +12,9 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             state.view.active_busy_operation = busy;
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::StatusUpdate { state: client_state } => {
+        ClientViewEvent::StatusUpdate {
+            state: client_state,
+        } => {
             if matches!(
                 client_state,
                 holtburger_core::client::types::ClientState::InWorld

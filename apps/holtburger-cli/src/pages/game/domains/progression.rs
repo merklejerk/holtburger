@@ -15,17 +15,23 @@ pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> Update
                 });
             }
             crate::types::StatType::Vital(vital) => {
-                result.commands.push(ClientCommand::RaiseVital { vital, xp_spent });
+                result
+                    .commands
+                    .push(ClientCommand::RaiseVital { vital, xp_spent });
             }
             crate::types::StatType::Skill(skill) => {
-                result.commands.push(ClientCommand::RaiseSkill { skill, xp_spent });
+                result
+                    .commands
+                    .push(ClientCommand::RaiseSkill { skill, xp_spent });
             }
         },
         AppAction::TrainSkill {
             skill,
             amount: credits,
         } => {
-            result.commands.push(ClientCommand::TrainSkill { skill, credits });
+            result
+                .commands
+                .push(ClientCommand::TrainSkill { skill, credits });
         }
         _ => unreachable!("unsupported progression action"),
     }

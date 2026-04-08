@@ -1,6 +1,6 @@
-use super::*;
 use super::context;
 use super::navigation;
+use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -24,7 +24,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         }
         AppAction::UnqueueSalvageItem { guid } => {
             if let Some(session) = state.view.salvaging.as_mut() {
-                session.queued_items.retain(|queued_guid| *queued_guid != guid);
+                session
+                    .queued_items
+                    .retain(|queued_guid| *queued_guid != guid);
 
                 if session.queued_items.is_empty() {
                     navigation::clear_active_interaction(state, &mut result);
@@ -279,7 +281,9 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
         navigation::clear_active_interaction(state, &mut result);
     }
     if let Some(session) = state.view.salvaging.as_mut() {
-        session.queued_items.retain(|queued_guid| *queued_guid != guid);
+        session
+            .queued_items
+            .retain(|queued_guid| *queued_guid != guid);
         if session.ust_guid == guid {
             state.view.salvaging = None;
             if state.view.active_interaction == Some(Interaction::Salvaging) {

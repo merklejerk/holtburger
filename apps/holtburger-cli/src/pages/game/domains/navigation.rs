@@ -1,7 +1,7 @@
-use super::*;
-use super::context;
 use super::combat;
+use super::context;
 use super::inventory;
+use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -97,7 +97,10 @@ pub(super) fn apply_tick(
     elapsed: f64,
     result: &mut UpdateResult,
 ) {
-    let update = state.runtime.navigation.tick(navigation_tick(state, now, elapsed));
+    let update = state
+        .runtime
+        .navigation
+        .tick(navigation_tick(state, now, elapsed));
     apply_navigation_update(state, update, result);
 }
 
@@ -133,8 +136,14 @@ pub(super) fn apply_navigation_interrupt(
         result.request_redraw(RedrawPriority::Immediate);
     }
 
-    if matches!(state.view.active_interaction, Some(Interaction::Targeting { .. })) {
-        if matches!(state.data.combat_mode, CombatMode::Melee | CombatMode::Missile) {
+    if matches!(
+        state.view.active_interaction,
+        Some(Interaction::Targeting { .. })
+    ) {
+        if matches!(
+            state.data.combat_mode,
+            CombatMode::Melee | CombatMode::Missile
+        ) {
             result.commands.push(ClientCommand::CancelAttack);
             state.data.combat_runtime.cancel_attack();
             state.runtime.combat_automation = None;
@@ -191,9 +200,9 @@ fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<
     match action {
         AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
         AppAction::Follow { guid } => Some(NavigationInput::StartFollow { target: *guid }),
-        AppAction::Scoot { distance_m } => {
-            Some(NavigationInput::StartScoot { distance_m: *distance_m })
-        }
+        AppAction::Scoot { distance_m } => Some(NavigationInput::StartScoot {
+            distance_m: *distance_m,
+        }),
         AppAction::CancelInteraction
             if is_frontend_navigation_interaction(state.view.active_interaction) =>
         {
@@ -256,8 +265,12 @@ fn sync_target_health_query(
     }
 
     match next_target {
-        Some(target_guid) => result.commands.push(ClientCommand::QueryHealth(target_guid)),
-        None if previous_target.is_some() => result.commands.push(ClientCommand::QueryHealth(Guid::NULL)),
+        Some(target_guid) => result
+            .commands
+            .push(ClientCommand::QueryHealth(target_guid)),
+        None if previous_target.is_some() => {
+            result.commands.push(ClientCommand::QueryHealth(Guid::NULL))
+        }
         None => {}
     }
 }
@@ -267,27 +280,29 @@ fn should_cancel_attack(
     previous_interaction: Option<Interaction>,
     next_interaction: Option<Interaction>,
 ) -> bool {
-    matches!(state.data.combat_mode, CombatMode::Melee | CombatMode::Missile)
-        && match (previous_interaction, next_interaction) {
-            (
-                Some(Interaction::Targeting {
-                    target_guid: previous_target,
-                }),
-                Some(Interaction::Targeting {
-                    target_guid: next_target,
-                }),
-            ) => previous_target != next_target,
-            (
-                Some(Interaction::Targeting { .. }),
-                None
-                | Some(Interaction::Moving { .. })
-                | Some(Interaction::Approaching { .. })
-                | Some(Interaction::Following { .. })
-                | Some(Interaction::Combining { .. })
-                | Some(Interaction::Salvaging),
-            ) => true,
-            _ => false,
-        }
+    matches!(
+        state.data.combat_mode,
+        CombatMode::Melee | CombatMode::Missile
+    ) && match (previous_interaction, next_interaction) {
+        (
+            Some(Interaction::Targeting {
+                target_guid: previous_target,
+            }),
+            Some(Interaction::Targeting {
+                target_guid: next_target,
+            }),
+        ) => previous_target != next_target,
+        (
+            Some(Interaction::Targeting { .. }),
+            None
+            | Some(Interaction::Moving { .. })
+            | Some(Interaction::Approaching { .. })
+            | Some(Interaction::Following { .. })
+            | Some(Interaction::Combining { .. })
+            | Some(Interaction::Salvaging),
+        ) => true,
+        _ => false,
+    }
 }
 
 fn should_resume_attack(
@@ -296,7 +311,11 @@ fn should_resume_attack(
     next_interaction: Option<Interaction>,
 ) -> bool {
     matches!(
-        (previous_interaction, next_interaction, state.data.combat_mode),
+        (
+            previous_interaction,
+            next_interaction,
+            state.data.combat_mode
+        ),
         (
             None | Some(Interaction::Moving { .. })
                 | Some(Interaction::Approaching { .. })

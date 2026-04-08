@@ -104,7 +104,6 @@ impl GameState {
         }
     }
 
-
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         domains::reduce_view_event(self, event)
     }
@@ -188,4 +187,3 @@ impl ViewState {
         Self::default()
     }
 }
-

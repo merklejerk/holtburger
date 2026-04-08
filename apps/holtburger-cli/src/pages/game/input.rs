@@ -9,7 +9,9 @@ use holtburger_protocol::messages::combat::CombatMode;
 use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatView;
 use crate::pages::game::state::domains;
-use crate::types::{AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult};
+use crate::types::{
+    AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult,
+};
 
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
@@ -213,10 +215,10 @@ impl GameState {
 
                 if self.view.focused_pane == FocusedPane::Input {
                     result.actions.push(AppUiAction::ExitInputMode.into());
-                } else if self.view.active_interaction.is_some() {
-                    if let Some(action_result) = self.handle_action(AppAction::CancelInteraction) {
-                        result.merge(action_result);
-                    }
+                } else if self.view.active_interaction.is_some()
+                    && let Some(action_result) = self.handle_action(AppAction::CancelInteraction)
+                {
+                    result.merge(action_result);
                 }
             }
             KeyCode::Enter => {
@@ -439,8 +441,8 @@ impl GameState {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 FocusedPane::Context => {
-                    self.view.context_scroll_offset = domains::context_buffer_len(self)
-                        .saturating_sub(1);
+                    self.view.context_scroll_offset =
+                        domains::context_buffer_len(self).saturating_sub(1);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
                 _ => {}
@@ -480,12 +482,16 @@ impl GameState {
         match key.code {
             KeyCode::Enter => {
                 let mut result = UpdateResult::new();
-                result.actions.push(AppUiAction::ConfirmLocalConfirmation.into());
+                result
+                    .actions
+                    .push(AppUiAction::ConfirmLocalConfirmation.into());
                 Some(result)
             }
             KeyCode::Esc => {
                 let mut result = UpdateResult::new();
-                result.actions.push(AppUiAction::DismissLocalConfirmation.into());
+                result
+                    .actions
+                    .push(AppUiAction::DismissLocalConfirmation.into());
                 Some(result)
             }
             _ => Some(UpdateResult::new()),

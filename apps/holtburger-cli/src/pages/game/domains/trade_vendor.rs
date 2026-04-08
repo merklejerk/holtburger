@@ -1,23 +1,27 @@
-use super::*;
 use super::combat;
 use super::inventory;
+use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match action {
-        AppAction::OpenTrade { guid } => match combat::try_enter_combat_mode(state, CombatMode::NonCombat) {
-            combat::EnterCombatModeResult::Failed(res) => {
-                result.merge(res);
+        AppAction::OpenTrade { guid } => {
+            match combat::try_enter_combat_mode(state, CombatMode::NonCombat) {
+                combat::EnterCombatModeResult::Failed(res) => {
+                    result.merge(res);
+                }
+                combat::EnterCombatModeResult::Success(res) => {
+                    result.merge(res);
+                    state.runtime.last_trade_initiation = Some((Instant::now(), guid));
+                    result.commands.push(ClientCommand::OpenTrade(guid));
+                }
             }
-            combat::EnterCombatModeResult::Success(res) => {
-                result.merge(res);
-                state.runtime.last_trade_initiation = Some((Instant::now(), guid));
-                result.commands.push(ClientCommand::OpenTrade(guid));
-            }
-        },
+        }
         AppAction::AddToTrade { guid } => {
-            result.commands.push(ClientCommand::AddToTrade { item: guid });
+            result
+                .commands
+                .push(ClientCommand::AddToTrade { item: guid });
         }
         AppAction::OpenShop { vendor } => {
             if state.data.trade.is_some() {
@@ -89,7 +93,9 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                 && target_guid == v_guid
                 && last_time.elapsed() < std::time::Duration::from_secs(5)
             {
-                result.actions.push(AppUiAction::SetDashboardActiveTab(DashboardTab::Trade).into());
+                result
+                    .actions
+                    .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Trade).into());
             }
         }
         ClientViewEvent::VendorItemIdentified(item) => {
@@ -110,7 +116,9 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                 && target_guid == p_guid
                 && last_time.elapsed() < std::time::Duration::from_secs(5)
             {
-                result.actions.push(AppUiAction::SetDashboardActiveTab(DashboardTab::Trade).into());
+                result
+                    .actions
+                    .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Trade).into());
             }
         }
         _ => {}

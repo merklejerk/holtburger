@@ -1,5 +1,5 @@
-use super::*;
 use super::ui;
+use super::*;
 use crate::pages::game::panels::context::build_context_panel_content;
 
 pub(crate) fn context_buffer(state: &GameState) -> &[Line<'static>] {
@@ -42,11 +42,17 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
             };
             result.commands.push(ClientCommand::Identify(guid));
-            result.merge(ui::apply_context_view_change(state, ContextView::Assess(target)));
+            result.merge(ui::apply_context_view_change(
+                state,
+                ContextView::Assess(target),
+            ));
         }
         AppAction::Read { guid } => {
             result.commands.push(ClientCommand::Use(guid));
-            result.merge(ui::apply_context_view_change(state, ContextView::Book(guid)));
+            result.merge(ui::apply_context_view_change(
+                state,
+                ContextView::Book(guid),
+            ));
         }
         AppAction::Use { guid } | AppAction::TalkTo { guid } | AppAction::Open { guid } => {
             result.commands.push(ClientCommand::Use(guid));
@@ -56,7 +62,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         }
         AppAction::QueryDebugInfo { target } => match target {
             InspectTarget::Entity(guid) => {
-                result.commands.push(ClientCommand::QueryEntityDebugInfo(guid));
+                result
+                    .commands
+                    .push(ClientCommand::QueryEntityDebugInfo(guid));
                 result.merge(ui::apply_context_view_change(
                     state,
                     ContextView::Debug(InspectTarget::Entity(guid)),

@@ -18,6 +18,10 @@ pub trait WorldObjectPropertyAccessors: HasProperties {
         self.properties().bools.get(&prop).copied().unwrap_or(false)
     }
 
+    fn get_bool_prop_opt(&self, prop: PropertyBool) -> Option<bool> {
+        self.properties().bools.get(&prop).copied()
+    }
+
     fn get_int_prop(&self, prop: PropertyInt) -> Option<i32> {
         self.properties().ints.get(&prop).copied()
     }

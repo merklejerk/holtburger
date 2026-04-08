@@ -254,7 +254,7 @@
 - [x] Slash-commands should use `AppAction`s.
 - [x] Show closed/open/locked/unlocked on assess if properties exist.
 - [x] Do not show recharge verb on uncharged mana stones.
-- [ ] Salvaging waits for UseDone, leaving us in a busy state.
+- [x] Salvaging waits for UseDone, leaving us in a busy state.
 - [ ] `/version` and `--version`, seeded from commit hash env var set by build system?
 
 ### Critical

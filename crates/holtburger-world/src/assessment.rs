@@ -25,7 +25,8 @@ pub struct Assessment {
     pub bonded: Option<BondedStatus>,
     pub attuned: Option<AttunedStatus>,
     pub is_retained: bool,
-    pub is_locked: bool,
+    pub is_open: Option<bool>,
+    pub is_locked: Option<bool>,
     pub is_sellable: bool,
     pub is_ivoryable: bool,
     pub stack: Option<StackInfo>,
@@ -365,7 +366,8 @@ impl Assessment {
             bonded: BondedStatus::from_object(object),
             attuned: AttunedStatus::from_object(object),
             is_retained: object.get_bool_prop(PropertyBool::Retained),
-            is_locked: object.is_locked(),
+            is_open: object.get_bool_prop_opt(PropertyBool::Open),
+            is_locked: object.get_bool_prop_opt(PropertyBool::Locked),
             is_sellable: object.is_sellable(),
             is_ivoryable: object.get_bool_prop(PropertyBool::Ivoryable),
             stack: StackInfo::from_object(object),
@@ -393,6 +395,31 @@ impl Assessment {
 
     pub fn from_vendor_item(item: &CoreVendorItem) -> Self {
         Self::from_object(&InspectableObject::from_vendor_item(item))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::entity::Entity;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::Guid;
+
+    #[test]
+    fn from_entity_captures_open_status_property() {
+        let mut entity = Entity::new(
+            Guid(0x60000001),
+            "Door".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_bool_prop(PropertyBool::Open, true);
+        entity.set_bool_prop(PropertyBool::Locked, false);
+
+        let assessment = Assessment::from_entity(&entity);
+
+        assert_eq!(assessment.is_open, Some(true));
+        assert_eq!(assessment.is_locked, Some(false));
     }
 }
 

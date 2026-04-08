@@ -252,9 +252,9 @@
 - [x] Navigation not setting arrival landblock?
 - [x] Wielded items do not despawn with wielders in nearby list (and maybe further up).
 - [x] Slash-commands should use `AppAction`s.
+- [x] Show closed/open/locked/unlocked on assess if properties exist.
 - [ ] Do not show recharge verb on uncharged mana stones.
 - [ ] Salvaging waits for UseDone, leaving us in a busy state.
-- [ ] Show closed/open/locked/unlocked on assess if properties exist.
 - [ ] `/version` and `--version`, seeded from commit hash env var set by build system?
 
 ### Critical

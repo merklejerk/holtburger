@@ -149,9 +149,18 @@ Two workable options exist:
 1. Run the JS runtime in a dedicated frontend-owned thread with a current-thread Tokio runtime.
 2. Run the JS runtime in the frontend side synchronously as a locally owned component that is pumped from the main shell loop.
 
-Option 1 is the safer long-term choice because it isolates `deno_core` ownership and avoids making the TUI loop responsible for driving V8 progress directly. Option 2 is viable for a narrow MVP but risks making the shell loop harder to reason about.
+The earlier version of this plan prematurely preferred option 1. That was a mistake.
 
-This plan assumes Option 1 as the target shape.
+From first principles, option 2 is the cleaner phase-2 shape for this codebase:
+
+- the frontend thread already owns `AppState`, `GameState`, and action draining
+- scripts want to query that local projection directly
+- colocating the runtime with the frontend avoids cross-thread state replication and transport glue
+- it keeps the scripting model aligned with the existing reducer-first shell instead of introducing another queue-driven subsystem
+
+So phase 2 should assume option 2 as the target shape.
+
+Option 1 should be treated as a later optimization or extraction path only if we prove that same-thread hosting creates real shell-loop problems.
 
 ## 5. Script API Shape
 
@@ -161,7 +170,7 @@ The public script API should expose stable game concepts, not raw Rust UI struct
 
 ### Read Surface
 
-The read surface should be query-oriented and snapshot-like.
+The read surface should be query-oriented.
 
 The top-level name should reflect that scripts are reading client-visible state, not just world state. More workflow-oriented concepts will likely follow, so the contract should admit both projected world facts and frontend-owned semantic state.
 
@@ -185,6 +194,8 @@ pub trait ScriptClientView {
 ```
 
 This trait is intentionally small. It is not a mirror of every `GameData` field.
+
+Important clarification: "query-oriented" does not require a copied snapshot object. For phase 2, the runtime should be able to ask the frontend-owned adapter for current values directly because it lives on the same thread as the frontend shell.
 
 `target_entity()` should specifically mean the entity selected by the client targeting concept, not the subject of any arbitrary active interaction. If the TUI currently reuses the same GUID across targeting, approach, and follow display logic, that is an implementation shortcut, not the contract we should bless in the scripting API.
 
@@ -428,7 +439,7 @@ That means:
 Deliverables:
 
 - Add scripting architecture docs.
-- Define `ScriptEvent`, `ScriptIntent`, and `ScriptClientView` traits and view types on paper.
+- Define `ScriptEvent`, `ScriptIntent`, and `ScriptClientView` traits and view types in a shared boundary crate.
 - Define the three translation seams explicitly.
 
 Acceptance Criteria:
@@ -436,31 +447,98 @@ Acceptance Criteria:
 - We can describe how a script observes state, queries current client-visible state, and emits commands without referring to direct `GameState` mutation.
 - The API shape avoids TUI widget concepts.
 
+### Phase 1 Implementation Status
+
+Completed in this phase:
+
+- Added `crates/holtburger-scripting` as a new shared boundary crate.
+- Moved the phase-1 contract out of the plan doc and into compilable Rust types.
+- Recorded the three seams directly in crate-level docs:
+  - read seam via `ScriptClientView`
+  - event seam via `ScriptEvent`
+  - write seam via `ScriptIntent`
+
+Concrete implementation decisions taken:
+
+- The shared boundary crate depends on `holtburger-common`, `holtburger-core`, and `holtburger-protocol`, but not on any TUI crate.
+- `ClientState`, `ActiveCharacterConfirmation`, and `BusyOperationKind` are reused from `holtburger-core` rather than duplicated for phase 1, because they already describe client-domain semantics rather than TUI presentation details.
+- `ScriptLocalConfirmation` stays script-owned and distinct from `ActiveCharacterConfirmation`, since local confirmations are frontend workflow state even when the TUI currently renders them as modals.
+- `ScriptIntent` is flattened as planned and retains `Client(ScriptClientIntent)` for current-client policy actions.
+- Phase 1 stops at shared boundary definitions. It does not yet create the event bridge, TUI adapter, or runtime host owner.
+
+Progress note:
+
+- Phase 1 is complete once the workspace compiles with the new crate and the contract remains free of TUI widget state.
+- Phase 2 now starts from a real crate boundary rather than another doc-only API sketch.
+
 ### Phase 2: TUI-Side MVP Host
 
 Deliverables:
 
-- Create a minimal host owner on the frontend side.
-- Feed a curated event stream into the host.
-- Implement one TUI-side `ScriptClientView` adapter.
-- Support a small set of intents such as log, say, approach, use, attack.
+- Create a minimal same-thread host owner on the frontend side.
+- Feed a curated event stream into the host from the normal app-event flow.
+- Implement one TUI-side `ScriptClientView` adapter that reads live frontend projection state.
+- Support a small set of intents such as log, say, target, approach, use, and targeted spellcasting.
 
 Acceptance Criteria:
 
 - A test script can react to a chat or entity event and emit at least one gameplay intent through the normal app shell.
 - No direct reads from authoritative `WorldState` are required.
+- No cross-thread snapshot cache is required for ordinary script reads.
+
+### Phase 2 Implementation Status
+
+The first attempted phase-2 implementation diverged from the desired architecture.
+
+What went wrong:
+
+- it moved the runtime onto a dedicated host thread
+- it introduced a copied `ScriptSnapshot` transport layer so the off-thread runtime could query state
+- it added queue-flush mechanics to recover same-turn intent delivery
+
+That implementation was useful as a spike, but it should not be treated as the settled phase-2 architecture.
+
+Revised phase-2 target:
+
+- the `deno_core` runtime is owned by the frontend shell on the same thread as `AppState`
+- script query ops read through `TuiScriptClientView` against live frontend projection state
+- the centralized event bridge stays, but becomes a direct in-process handoff rather than a cross-thread message queue
+- intents are drained immediately back into normal `AppAction` flow in the same reducer turn
+
+Current phase-2 reality:
+
+- host lifetime is now scoped to the active in-world `GameState` session rather than shell-wide `AppState`
+- deferred script startup state is also scoped to the active game session
+- script loading is driven by frontend commands (`/run <BASENAME>` and `/unrun`) rather than eager shell bootstrap config
+- the event surface now includes lifecycle notifications (`Started`, `Stopped`, and `Tick`) within the main `ScriptEvent` stream
+- the current same-thread host still reaches live frontend state through a temporary thread-local pointer to `AppState` during JS execution
+
+Progress note:
+
+- The threaded host code remains exploratory implementation debt and is no longer the target.
+- The remaining phase-2 debt is not topology; it is extraction readiness. The current host works, but it still has one TUI-coupled access seam that phase 3 should remove.
 
 ### Phase 3: Shared Surface Extraction
 
 Deliverables:
 
-- Move generic scripting types and host code into a shared crate.
+- Move reusable runtime/host code into a shared crate once the MVP shape is proven.
 - Keep the TUI-specific adapter in the TUI crate.
+- Keep the boundary types from phase 1 as the stable public surface; phase 3 is about extraction, not redefining the contract.
+
+Concrete extraction target:
+
+- move the `deno_core` runtime owner, bootstrap JS, op registration, event dispatch plumbing, and host output queue into `crates/holtburger-scripting`
+- leave `TuiScriptClientView`, script-event derivation from `ClientViewEvent` plus local workflow state, script file loading policy, and `ScriptIntent -> AppAction` compilation in `apps/holtburger-cli`
+- replace the current `ACTIVE_SCRIPT_APP_STATE` thread-local seam with an explicit host-provided query context/callback seam so the shared runtime no longer knows what `AppState` is
+- keep session ownership in the frontend: the TUI should still decide when a game-session host exists, what source to load, and how intents compile back into client actions
 
 Acceptance Criteria:
 
-- The scripting API no longer depends on TUI-local types.
+- The scripting runtime no longer depends on TUI-local types.
 - The TUI host code becomes adapter glue rather than the home of the whole runtime.
+- The shared runtime does not depend on `AppState`, `GameState`, or thread-local frontend pointers.
+- The TUI continues to own session lifetime, script source resolution, event derivation, and intent compilation.
 
 ## 9. Risks And Mitigations
 
@@ -492,12 +570,19 @@ Mitigation:
 - Write the scripting surface without ratatui or widget-local types.
 - Use trait-based world access from the start.
 
+### Risk: The Shared Runtime Keeps A Hidden Dependency On `AppState`
+
+Mitigation:
+
+- Treat the current `ACTIVE_SCRIPT_APP_STATE` thread-local as transitional implementation debt, not an acceptable phase-3 boundary.
+- Extract the host only after introducing an explicit query context seam so JS ops can obtain current `ScriptClientView` data without naming TUI state types.
+
 ### Risk: `deno_core` Pumping Complicates The Main Shell Loop
 
 Mitigation:
 
-- Prefer a dedicated owner thread for the JS runtime.
-- Treat shell integration as channel-based rather than direct shared ownership.
+- Keep the host frontend-owned and same-thread for phase 2.
+- Only promote the runtime to its own thread if real shell-loop constraints justify the extra synchronization complexity.
 
 ## 10. Definition Of Done
 
@@ -513,20 +598,45 @@ Mitigation:
 ### Recorded Decisions
 
 - The first script host should emit `ScriptIntent` only. Do not add a direct `ClientCommand` escape hatch in the MVP.
-- Confirmation and busy-operation state should be available both as events and as snapshot-style reads.
+- Confirmation and busy-operation state should be available both as events and as direct query reads.
 - The first host can be scoped to active in-world game-page state. In practice that means one host per entered-world character session is fine for now, but it should start on actual in-world session entry rather than merely on `Page::Game` creation.
 - `ScriptIntent only` means scripts do not bypass the intent layer. It does not mean every intent payload is already a universally shared cross-client semantic; `Client(ScriptClientIntent)` exists specifically for current-client policy.
+- For phase 2, the runtime should live on the same thread as the frontend shell and query the existing local projection directly.
+- Lifecycle notifications belong on the main `ScriptEvent` stream instead of a separate callback surface.
+- Deferred script source and live host ownership should both be scoped to the in-world game-session state, not split across shell state and page state.
+- `ACTIVE_SCRIPT_APP_STATE` is an implementation shortcut for the MVP, not a boundary we should preserve into phase 3.
 
 ### Rationale
 
 - Keeping the MVP write surface to `ScriptIntent` preserves the action-first integration model and avoids locking scripts onto low-level command details too early.
-- Exposing workflow state as both events and snapshot reads avoids forcing scripts to reconstruct current state solely from event history while still letting them react incrementally.
+- Exposing workflow state as both events and direct query reads avoids forcing scripts to reconstruct current state solely from event history while still letting them react incrementally.
+- Same-thread hosting keeps the scripting model honest: scripts are part of the frontend shell, not a distributed subsystem that happens to mirror frontend state.
 - The current TUI does not have meaningful session-restart orchestration, and scripts only make sense after entering the world anyway, so binding host lifetime to the game-page session is operationally simple and architecturally acceptable.
+- Lifecycle events in the main stream keep script control flow uniform: one inbound event model, one ordering model, no extra callback API to maintain.
+- Keeping source resolution and host lifetime in the frontend preserves the right policy split even after the runtime moves into a shared crate.
 
 ### Remaining Open Questions
 
-- Should the host be created eagerly on entering `ClientState::InWorld`, or lazily on first script load after entering the world?
-- Should script source loading be restricted to local files for the MVP, or do we want an abstract loader seam from the start?
+- The main remaining extraction question is the exact host/query seam that replaces `ACTIVE_SCRIPT_APP_STATE` in phase 3.
+- A good answer likely looks like explicit shared-host callbacks or a host context trait, but we should choose the narrowest shape that keeps the shared runtime ignorant of frontend state types.
+
+### Phase 2 Defaults
+
+Use these defaults unless a later spike proves they are wrong:
+
+- Create the host eagerly when the client transitions into `ClientState::InWorld`, and tear it down when the client leaves the in-world session.
+- Have the frontend resolve script source into a `ScriptSource` value and pass that into the host. The host should not know or care whether that source came from a local file, embedded asset, config value, test fixture, or future remote loader.
+- Add a source-provider seam only in the frontend if phase 2 needs it for testing or packaging.
+- Keep the first event bridge centralized, even if it initially handles only chat, entity, status, confirmation, and target transitions.
+- Keep the runtime on the same thread as the frontend shell so script reads can query `AppState` and `GameState` directly.
+- Do not introduce a copied cross-thread snapshot transport in phase 2.
+- Treat lifecycle notifications as ordinary `ScriptEvent` traffic.
+- Keep the host session-scoped to `GameState`, not shell-scoped to `AppState`.
+
+Superseded exploratory result:
+
+- A threaded-host spike exists and proved that the event and intent surfaces are viable.
+- That spike should not be used as evidence that cross-thread snapshots and queue flushing are the right steady-state design.
 
 ### Deferred Workflow Note
 
@@ -546,7 +656,7 @@ Practical implication:
 
 Start with the smallest slice that proves the architecture without overcommitting the API:
 
-- script host owner thread
+- same-thread script host owner
 - `ScriptEvent::ChatMessage`
 - `ScriptEvent::EntityAppeared`
 - `ScriptClientView::self_entity`
@@ -557,5 +667,21 @@ Start with the smallest slice that proves the architecture without overcommittin
 - `ScriptIntent::Client(ScriptClientIntent::Approach { .. })`
 
 Host lifetime for this slice should be tied to the active in-world game-page session. Concretely, that means it should start only once the client is actually in world rather than merely after `TransitionToGame`, and it does not need to survive character changes or pre-world selection state in the first implementation.
+
+The first phase-2 implementation pass should be ordered like this:
+
+1. Add a same-thread script host owner that is stored with the active in-world game-session state and starts and stops with that session.
+2. Wire the host so JS query ops resolve through a live `TuiScriptClientView` over current `AppState` and `GameState`.
+3. Implement the event bridge for the minimal `ScriptEvent` set, starting from core `ClientViewEvent` and frontend workflow state.
+4. Implement the intent compiler from `ScriptIntent` and `ScriptClientIntent` into the normal `AppAction` flow.
+5. Wire a minimal frontend `ScriptSource` provider only after the host and bridge are stable enough to exercise with a real script.
+
+### Phase 3 Refactor Outline
+
+1. Introduce a shared host-context seam so JS ops can query current script-visible state without naming `AppState` or using a thread-local frontend pointer.
+2. Move `TuiScriptHostOwner` internals, bootstrap JS, op registration, and shared event dispatch into `crates/holtburger-scripting`.
+3. Keep `TuiScriptClientView`, `ClientViewEvent`/workflow-to-`ScriptEvent` translation, and `ScriptIntent` compilation inside `apps/holtburger-cli`.
+4. Preserve frontend ownership of `/run`, `/unrun`, file lookup policy, session lifetime, and action/command integration.
+5. Prove the extraction with the existing focused scripting tests plus one additional test that the shared host can be driven without any TUI state types in scope.
 
 If that slice feels awkward, the architecture is wrong. If that slice feels clean, the rest can grow from the same seams.

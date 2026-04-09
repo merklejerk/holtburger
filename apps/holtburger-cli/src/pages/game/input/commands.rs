@@ -171,7 +171,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
+            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -207,6 +207,10 @@ impl GameState {
         self.chat.log(
             ChatMessageTags::system(),
             "PK Lite: /pkl (turn on PK Lite mode)".to_string(),
+        );
+        self.chat.log(
+            ChatMessageTags::system(),
+            "Scripting: /run <BASENAME> loads SCRIPT_DIR/<BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -347,6 +351,18 @@ impl GameState {
                 "You may hear a distant bounce if you stand very still.".to_string(),
                 "Some doors open only after the right name is spoken.".to_string(),
             ],
+            "run" => vec![
+                "Usage: /run <BASENAME>".to_string(),
+                "Load or replace the active long-running script for this session.".to_string(),
+                "The client loads SCRIPT_DIR/<BASENAME>.js, where SCRIPT_DIR defaults to scripts/."
+                    .to_string(),
+                "Example: /run loot-bot".to_string(),
+            ],
+            "unrun" => vec![
+                "Usage: /unrun".to_string(),
+                "Stop the active long-running script and clear any queued script startup."
+                    .to_string(),
+            ],
             _ => return None,
         };
 
@@ -452,6 +468,25 @@ impl GameState {
                 .into(),
             );
             return result;
+        }
+
+        if let Some(basename) = parse_single_argument_command(command, &["/run"]) {
+            result.actions.push(crate::types::AppAction::RunScript {
+                basename: basename.to_string(),
+            });
+            result.merge(self.finish_input_command_submission(command));
+            return result.with_redraw(true);
+        }
+
+        if command == "/run" {
+            self.log_command_usage("Usage: /run <BASENAME>");
+            return result.with_redraw(true);
+        }
+
+        if command.trim() == "/unrun" {
+            result.actions.push(crate::types::AppAction::UnrunScript);
+            result.merge(self.finish_input_command_submission(command));
+            return result.with_redraw(true);
         }
 
         if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
@@ -841,6 +876,38 @@ mod tests {
         assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::TeleportToPklArena)
+        ));
+    }
+
+    #[test]
+    fn run_command_dispatches_run_script_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/run farmer");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::RunScript { basename }) if basename == "farmer"
+        ));
+    }
+
+    #[test]
+    fn unrun_command_dispatches_unrun_script_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/unrun");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UnrunScript)
         ));
     }
 

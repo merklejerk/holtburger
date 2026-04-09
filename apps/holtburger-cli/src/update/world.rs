@@ -169,6 +169,12 @@ impl AppState {
 
     pub(super) fn handle_client_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
+        let workflow_before = self
+            .game_option()
+            .map(|game| game.script_workflow_projection())
+            .unwrap_or_default();
+        let script_event = event.clone();
+        let server_time = self.server_time;
         // Handle setup and chat events regardless of being locally in-game
         match &event {
             ClientViewEvent::CharacterList(_)
@@ -204,6 +210,14 @@ impl AppState {
                 | ClientViewEvent::Disconnected
         ) && self.game_option().is_none()
         {
+            if let Some(game) = self.game_option_mut() {
+                game.sync_script_host_for_view_event(
+                    server_time,
+                    &script_event,
+                    &workflow_before,
+                    &mut result,
+                );
+            }
             return result;
         }
 
@@ -270,6 +284,15 @@ impl AppState {
                 // All other entity, player, trade, and combat events delegate completely!
                 result.merge(self.page.handle_view_event(event));
             }
+        }
+
+        if let Some(game) = self.game_option_mut() {
+            game.sync_script_host_for_view_event(
+                server_time,
+                &script_event,
+                &workflow_before,
+                &mut result,
+            );
         }
         result
     }

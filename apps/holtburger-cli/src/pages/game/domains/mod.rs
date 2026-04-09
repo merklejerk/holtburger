@@ -12,6 +12,7 @@ mod party;
 mod player;
 mod progression;
 mod reduce;
+mod script;
 mod trade_vendor;
 pub(super) mod ui;
 

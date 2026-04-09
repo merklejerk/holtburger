@@ -7,8 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::pages;
-use holtburger_cli::state::AppState;
-use holtburger_cli::state::NetStats;
+use holtburger_cli::state::{AppState, NetStats};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_cli::utils::format_action_result_message;
 use holtburger_content::ContentRepository;

@@ -675,6 +675,10 @@ pub enum AppAction {
         chat_tags: ChatMessageTags,
         message: String,
     },
+    RunScript {
+        basename: String,
+    },
+    UnrunScript,
     BeginInteraction {
         interaction: Interaction,
     },

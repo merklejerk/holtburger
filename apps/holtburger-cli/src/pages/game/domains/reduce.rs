@@ -82,6 +82,10 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
 
 pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<UpdateResult> {
     match action {
+        AppAction::RunScript { .. } | AppAction::UnrunScript => {
+            Some(script::reduce_action(state, action))
+        }
+
         action @ (AppAction::Assess { .. }
         | AppAction::Read { .. }
         | AppAction::Use { .. }

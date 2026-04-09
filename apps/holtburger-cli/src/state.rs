@@ -1,7 +1,6 @@
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use holtburger_common::Guid;
 use holtburger_content::ContentRepository;
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
@@ -56,6 +55,16 @@ pub struct RenderContext<'a> {
     pub account_name: &'a str,
     pub client_state: &'a ClientState,
     pub net_stats: &'a NetStats,
+    pub server_time: Option<(f64, Instant)>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EventContext {
+    pub server_time: Option<(f64, Instant)>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TickContext {
     pub server_time: Option<(f64, Instant)>,
 }
 

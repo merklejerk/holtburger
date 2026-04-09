@@ -30,6 +30,7 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
+use crate::state::{EventContext, TickContext};
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
@@ -115,7 +116,24 @@ impl GameState {
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
-        domains::reduce_view_event(self, event)
+        self.handle_view_event_with_context(event, &EventContext::default())
+    }
+
+    pub fn handle_view_event_with_context(
+        &mut self,
+        event: ClientViewEvent,
+        ctx: &EventContext,
+    ) -> UpdateResult {
+        let workflow_before = self.script_workflow_projection();
+        let script_event = event.clone();
+        let mut result = domains::reduce_view_event(self, event);
+        self.sync_script_host_for_view_event(
+            ctx.server_time,
+            &script_event,
+            &workflow_before,
+            &mut result,
+        );
+        result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
@@ -123,7 +141,13 @@ impl GameState {
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
-        domains::reduce_tick(self, elapsed)
+        self.handle_tick_with_context(elapsed, &TickContext::default())
+    }
+
+    pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
+        let mut result = domains::reduce_tick(self, elapsed);
+        self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
+        result
     }
 }
 

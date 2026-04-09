@@ -1,4 +1,5 @@
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
+use crate::state::TickContext;
 use crate::state::AppState;
 use crate::types::{AppEvent, RedrawPriority, UpdateResult};
 
@@ -45,8 +46,6 @@ impl AppState {
     fn update_tick(&mut self, elapsed: f64) -> UpdateResult {
         let mut result = UpdateResult::new();
         let now = std::time::Instant::now();
-        let server_time = self.server_time;
-
         // Update net stats
         let last_update = self.net_stats.last_update.get_or_insert(now);
         if now.duration_since(*last_update).as_secs() >= 1 {
@@ -67,11 +66,12 @@ impl AppState {
         }
 
         // Delegate Page/GameState tick logic
-        result.merge(self.page.handle_tick(elapsed));
-
-        if let Some(game) = self.game_option_mut() {
-            game.sync_script_host_for_tick(server_time, elapsed, &mut result);
-        }
+        result.merge(self.page.handle_tick(
+            elapsed,
+            &TickContext {
+                server_time: self.server_time,
+            },
+        ));
 
         result
     }

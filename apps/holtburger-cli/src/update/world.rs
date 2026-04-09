@@ -1,5 +1,6 @@
 use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
+use crate::state::EventContext;
 use crate::state::AppState;
 use crate::types::{ChatMessageTags, Page, UpdateResult};
 use crate::utils::format_action_result_message;
@@ -169,12 +170,6 @@ impl AppState {
 
     pub(super) fn handle_client_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
-        let workflow_before = self
-            .game_option()
-            .map(|game| game.script_workflow_projection())
-            .unwrap_or_default();
-        let script_event = event.clone();
-        let server_time = self.server_time;
         // Handle setup and chat events regardless of being locally in-game
         match &event {
             ClientViewEvent::CharacterList(_)
@@ -210,16 +205,12 @@ impl AppState {
                 | ClientViewEvent::Disconnected
         ) && self.game_option().is_none()
         {
-            if let Some(game) = self.game_option_mut() {
-                game.sync_script_host_for_view_event(
-                    server_time,
-                    &script_event,
-                    &workflow_before,
-                    &mut result,
-                );
-            }
             return result;
         }
+
+        let ctx = EventContext {
+            server_time: self.server_time,
+        };
 
         match event {
             ClientViewEvent::NetPulse {
@@ -245,10 +236,10 @@ impl AppState {
                 }
 
                 // Bubble down the event so chat/logs can still get network pings if needed
-                result.merge(self.page.handle_view_event(ClientViewEvent::NetPulse {
-                    bytes_in,
-                    bytes_out,
-                }));
+                result.merge(self.page.handle_view_event(
+                    ClientViewEvent::NetPulse { bytes_in, bytes_out },
+                    &ctx,
+                ));
             }
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;
@@ -259,13 +250,16 @@ impl AppState {
                 );
                 // For now, staying on the Game page lets the user see the error,
                 // but we could also transition back to selection.
-                result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));
+                result.merge(
+                    self.page
+                        .handle_view_event(ClientViewEvent::Disconnected, &ctx),
+                );
             }
             ClientViewEvent::StatusUpdate { .. }
             | ClientViewEvent::ActionResult { .. }
             | ClientViewEvent::BootAccount(_) => {
                 result.merge(self.handle_client_status_event(&event));
-                result.merge(self.page.handle_view_event(event));
+                result.merge(self.page.handle_view_event(event, &ctx));
             }
             ClientViewEvent::BusyOperationFinished {
                 operation,
@@ -273,26 +267,19 @@ impl AppState {
             } => {
                 log_busy_operation_result(operation, &busy_result);
                 result.merge(
-                    self.page
-                        .handle_view_event(ClientViewEvent::BusyOperationFinished {
+                    self.page.handle_view_event(
+                        ClientViewEvent::BusyOperationFinished {
                             operation,
                             result: busy_result,
-                        }),
+                        },
+                        &ctx,
+                    ),
                 );
             }
             _ => {
                 // All other entity, player, trade, and combat events delegate completely!
-                result.merge(self.page.handle_view_event(event));
+                result.merge(self.page.handle_view_event(event, &ctx));
             }
-        }
-
-        if let Some(game) = self.game_option_mut() {
-            game.sync_script_host_for_view_event(
-                server_time,
-                &script_event,
-                &workflow_before,
-                &mut result,
-            );
         }
         result
     }

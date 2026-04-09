@@ -27,9 +27,12 @@ fn set_combat_mode_with_valid_target_defers_melee_attack_until_tick() {
         result.commands.first(),
         Some(ClientCommand::SetCombatMode(CombatMode::Melee))
     ));
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 
     state.data.combat_mode = CombatMode::Melee;
 
@@ -181,9 +184,12 @@ fn cycling_profile_while_targeting_defers_melee_attack_reissue_until_tick() {
         .handle_action(AppAction::CycleCombatProfileLevel)
         .unwrap();
 
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 
     let mut tick_result = UpdateResult::new();
     super::super::combat::refresh_stale_attack_sequence(
@@ -225,9 +231,12 @@ fn cycling_height_while_targeting_resends_missile_attack_with_new_height() {
         .handle_action(AppAction::CycleCombatAttackHeight)
         .unwrap();
 
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMissileAttack { .. })
-    }));
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
+    );
 
     let mut tick_result = UpdateResult::new();
     super::super::combat::refresh_stale_attack_sequence(
@@ -298,9 +307,12 @@ fn switching_to_targeting_in_combat_mode_defers_attack_until_tick() {
         })
         .unwrap();
 
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 
     let mut tick_result = UpdateResult::new();
     super::super::combat::refresh_stale_attack_sequence(
@@ -361,12 +373,18 @@ fn switching_targets_retargets_attack_sequence() {
             .iter()
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
-    assert!(result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::CancelAttack)
-    }));
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
+    assert!(
+        result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::CancelAttack) })
+    );
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
     assert!(!state.data.combat_runtime.attack_queued);
 
     let mut tick_result = UpdateResult::new();
@@ -409,9 +427,12 @@ fn targeting_creature_item_type_without_profile_still_starts_attack() {
         })
         .unwrap();
 
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 
     let mut tick_result = UpdateResult::new();
     super::super::combat::refresh_stale_attack_sequence(

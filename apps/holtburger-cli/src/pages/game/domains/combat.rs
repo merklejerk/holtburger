@@ -96,11 +96,7 @@ pub(super) fn try_enter_combat_mode(
     EnterCombatModeResult::Success(result)
 }
 
-fn queue_auto_attack_for_mode(
-    state: &mut GameState,
-    mode: CombatMode,
-    result: &mut UpdateResult,
-) {
+fn queue_auto_attack_for_mode(state: &mut GameState, mode: CombatMode, result: &mut UpdateResult) {
     sync_combat_automation(state, Instant::now(), mode, true, result);
 }
 

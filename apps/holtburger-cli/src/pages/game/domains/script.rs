@@ -11,11 +11,13 @@ use holtburger_scripting::{
 };
 
 fn script_client_view<'a>(
-    state: &'a GameState,
+    data: &'a GameData,
+    view: &'a ViewState,
     server_time: Option<(f64, Instant)>,
 ) -> TuiScriptClientView<'a> {
     TuiScriptClientView {
-        game: Some(state),
+        data,
+        view,
         server_time,
     }
 }
@@ -55,45 +57,26 @@ impl GameState {
             .is_some_and(|guid| self.data.entities.contains_key(&guid))
     }
 
-    fn take_script_host(&mut self) -> Option<ScriptHost> {
-        self.script.host.take()
-    }
-
-    fn store_script_host(&mut self, host: ScriptHost) {
-        self.script.host = Some(host);
-    }
-
-    fn dispatch_script_event_to_host(
-        &self,
-        server_time: Option<(f64, Instant)>,
-        host: &mut ScriptHost,
-        event: ScriptEvent,
-        result: &mut UpdateResult,
-    ) {
-        let view = script_client_view(self, server_time);
-        if let Err(error) = host.dispatch_event(&view, event) {
-            result.actions.push(AppAction::Log {
-                chat_tags: ChatMessageTags::error(),
-                message: format!("[script] {error}"),
-            });
-        }
-
-        let outputs = host.drain_outputs();
-        self.drain_script_host_outputs(outputs, result);
-    }
-
     fn stop_script_host(&mut self, result: &mut UpdateResult) {
-        let Some(mut host) = self.take_script_host() else {
-            return;
+        let view = script_client_view(&self.data, &self.view, None);
+
+        let had_host = {
+            let Some(host) = self.script.host.as_mut() else {
+                return;
+            };
+
+            dispatch_script_event_to_host(
+                &view,
+                host,
+                ScriptEvent::Lifecycle(ScriptLifecycleEvent::Stopped),
+                result,
+            );
+            true
         };
 
-        self.dispatch_script_event_to_host(
-            None,
-            &mut host,
-            ScriptEvent::Lifecycle(ScriptLifecycleEvent::Stopped),
-            result,
-        );
-        host.shutdown();
+        if had_host {
+            self.script.host = None;
+        }
     }
 
     pub(crate) fn run_script_command(&mut self, basename: &str, result: &mut UpdateResult) {
@@ -172,16 +155,16 @@ impl GameState {
             }
         };
 
-        let view = script_client_view(self, server_time);
+        let view = script_client_view(&self.data, &self.view, server_time);
         match ScriptHost::spawn(source, &view) {
             Ok(mut host) => {
-                self.dispatch_script_event_to_host(
-                    server_time,
+                dispatch_script_event_to_host(
+                    &view,
                     &mut host,
                     ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started),
                     result,
                 );
-                self.store_script_host(host);
+                self.script.host = Some(host);
             }
             Err(error) => {
                 self.set_pending_script_source(None);
@@ -193,7 +176,7 @@ impl GameState {
         }
     }
 
-    fn compile_script_intent(&self, intent: ScriptIntent) -> Result<AppAction> {
+    fn compile_script_intent(view: &ViewState, intent: ScriptIntent) -> Result<AppAction> {
         match intent {
             ScriptIntent::Log { level, message } => Ok(AppAction::Log {
                 chat_tags: chat_tags_for_level(level),
@@ -215,13 +198,13 @@ impl GameState {
                 target: Some(target),
             }),
             ScriptIntent::RespondToConfirmation { accepted } => {
-                if self.view.active_confirmation.is_some() {
+                if view.active_confirmation.is_some() {
                     return Ok(AppAction::SendCommands {
                         commands: vec![ClientCommand::RespondToConfirmation { accepted }],
                     });
                 }
 
-                if self.view.local_confirmation.is_some() {
+                if view.local_confirmation.is_some() {
                     return Ok(AppAction::UiAction {
                         action: if accepted {
                             AppUiAction::ConfirmLocalConfirmation
@@ -247,9 +230,13 @@ impl GameState {
         }
     }
 
-    fn drain_script_host_outputs(&self, outputs: Vec<ScriptIntent>, result: &mut UpdateResult) {
+    fn drain_script_host_outputs(
+        view: &ViewState,
+        outputs: Vec<ScriptIntent>,
+        result: &mut UpdateResult,
+    ) {
         for intent in outputs {
-            match self.compile_script_intent(intent) {
+            match Self::compile_script_intent(view, intent) {
                 Ok(action) => result.actions.push(action),
                 Err(error) => result.actions.push(AppAction::Log {
                     chat_tags: ChatMessageTags::warning(),
@@ -273,34 +260,42 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let Some(mut host) = self.take_script_host() else {
-            return;
+        let view = script_client_view(&self.data, &self.view, server_time);
+        let after_workflow = workflow_projection(Some(self));
+
+        let host_was_cleared = {
+            let Some(host) = self.script.host.as_mut() else {
+                return;
+            };
+
+            if let Some(script_event) = script_event_from_view_event(event) {
+                dispatch_script_event_to_host(&view, host, script_event, result);
+            }
+
+            for workflow_event in workflow_events(before_workflow, &after_workflow) {
+                dispatch_script_event_to_host(
+                    &view,
+                    host,
+                    ScriptEvent::Workflow(workflow_event),
+                    result,
+                );
+            }
+
+            if !should_run_after {
+                dispatch_script_event_to_host(
+                    &view,
+                    host,
+                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Stopped),
+                    result,
+                );
+                true
+            } else {
+                false
+            }
         };
 
-        if let Some(script_event) = script_event_from_view_event(event) {
-            self.dispatch_script_event_to_host(server_time, &mut host, script_event, result);
-        }
-
-        let after_workflow = workflow_projection(Some(self));
-        for workflow_event in workflow_events(before_workflow, &after_workflow) {
-            self.dispatch_script_event_to_host(
-                server_time,
-                &mut host,
-                ScriptEvent::Workflow(workflow_event),
-                result,
-            );
-        }
-
-        if should_run_after {
-            self.store_script_host(host);
-        } else {
-            self.dispatch_script_event_to_host(
-                server_time,
-                &mut host,
-                ScriptEvent::Lifecycle(ScriptLifecycleEvent::Stopped),
-                result,
-            );
-            host.shutdown();
+        if host_was_cleared {
+            self.script.host = None;
         }
     }
 
@@ -317,27 +312,52 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let Some(mut host) = self.take_script_host() else {
-            return;
+        let view = script_client_view(&self.data, &self.view, server_time);
+
+        let host_was_cleared = {
+            let Some(host) = self.script.host.as_mut() else {
+                return;
+            };
+
+            dispatch_script_event_to_host(
+                &view,
+                host,
+                ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
+                    elapsed_seconds: elapsed,
+                }),
+                result,
+            );
+
+            if !should_run_after {
+                true
+            } else {
+                false
+            }
         };
 
-        self.dispatch_script_event_to_host(
-            server_time,
-            &mut host,
-            ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
-                elapsed_seconds: elapsed,
-            }),
-            result,
-        );
-
-        if should_run_after {
-            self.store_script_host(host);
-        } else {
-            host.shutdown();
+        if host_was_cleared {
+            self.script.host = None;
         }
     }
 
     pub(crate) fn script_workflow_projection(&self) -> WorkflowProjection {
         workflow_projection(Some(self))
     }
+}
+
+fn dispatch_script_event_to_host(
+    view: &TuiScriptClientView<'_>,
+    host: &mut ScriptHost,
+    event: ScriptEvent,
+    result: &mut UpdateResult,
+) {
+    if let Err(error) = host.dispatch_event(view, event) {
+        result.actions.push(AppAction::Log {
+            chat_tags: ChatMessageTags::error(),
+            message: format!("[script] {error}"),
+        });
+    }
+
+    let outputs = host.drain_outputs();
+    GameState::drain_script_host_outputs(view.view, outputs, result);
 }

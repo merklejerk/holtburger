@@ -752,7 +752,7 @@ async fn run() -> Result<()> {
 
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
-            let res = app_state.handle_app_action(holtburger_cli::types::AppAction::Log {
+            let res = app_state.reduce_app_action(holtburger_cli::types::AppAction::Log {
                 chat_tags: log.chat_tags,
                 message: log.text,
             });

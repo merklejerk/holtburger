@@ -225,7 +225,7 @@ fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool 
     )
 }
 
-fn set_active_interaction(
+pub(super) fn set_active_interaction(
     state: &mut GameState,
     next_interaction: Option<Interaction>,
     result: &mut UpdateResult,

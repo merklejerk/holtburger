@@ -57,6 +57,7 @@ pub enum DesiredAttackInput {
         target_guid: Guid,
         target_available: bool,
         attack_profile: DesiredAttackProfile,
+        attack_armed: bool,
         attack_sequence_active: bool,
         force_attack: bool,
     },
@@ -82,6 +83,7 @@ impl Controller for DesiredAttackController {
             target_guid,
             target_available,
             attack_profile,
+            attack_armed,
             attack_sequence_active,
             force_attack,
         } = *input;
@@ -96,6 +98,10 @@ impl Controller for DesiredAttackController {
 
         if attack_sequence_active {
             return ControllerUpdate::new(ControllerStatus::Active);
+        }
+
+        if !attack_armed {
+            return ControllerUpdate::new(ControllerStatus::Idle);
         }
 
         if !force_attack
@@ -198,6 +204,7 @@ pub enum CombatAutomationInput {
         player_position: Option<WorldPosition>,
         target_position: Option<WorldPosition>,
         attack_profile: DesiredAttackProfile,
+        attack_armed: bool,
         attack_sequence_active: bool,
         force_attack: bool,
     },
@@ -229,6 +236,7 @@ impl Controller for CombatAutomationController {
             player_position,
             target_position,
             attack_profile,
+            attack_armed,
             attack_sequence_active,
             force_attack,
         } = *input;
@@ -265,6 +273,7 @@ impl Controller for CombatAutomationController {
             target_guid,
             target_available,
             attack_profile,
+            attack_armed,
             attack_sequence_active,
             force_attack,
         });
@@ -318,6 +327,7 @@ mod tests {
                 attack_height: AttackHeight::Medium,
                 charge_level: 0.5,
             },
+            attack_armed: true,
             attack_sequence_active: false,
             force_attack: false,
         };
@@ -335,6 +345,7 @@ mod tests {
                 attack_height: AttackHeight::Medium,
                 charge_level: 0.5,
             },
+            attack_armed: true,
             attack_sequence_active: false,
             force_attack: false,
         });
@@ -350,11 +361,35 @@ mod tests {
                 attack_height: AttackHeight::Medium,
                 charge_level: 0.5,
             },
+            attack_armed: true,
             attack_sequence_active: false,
             force_attack: false,
         });
         assert_eq!(refreshed.status, ControllerStatus::Active);
         assert_eq!(refreshed.effects.len(), 1);
+    }
+
+    #[test]
+    fn desired_attack_controller_stays_idle_until_armed() {
+        let now = Instant::now();
+        let mut controller = DesiredAttackController::default();
+
+        let update = controller.handle(&DesiredAttackInput::Tick {
+            now,
+            target_guid: Guid(0x1234),
+            target_available: true,
+            attack_profile: DesiredAttackProfile {
+                mode: CombatMode::Melee,
+                attack_height: AttackHeight::Medium,
+                charge_level: 0.5,
+            },
+            attack_armed: false,
+            attack_sequence_active: false,
+            force_attack: false,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Idle);
+        assert!(update.effects.is_empty());
     }
 
     #[test]
@@ -371,6 +406,7 @@ mod tests {
                 attack_height: AttackHeight::Medium,
                 charge_level: 0.5,
             },
+            attack_armed: true,
             attack_sequence_active: false,
             force_attack: true,
         });
@@ -431,6 +467,7 @@ mod tests {
                 attack_height: AttackHeight::Medium,
                 charge_level: 0.5,
             },
+            attack_armed: true,
             attack_sequence_active: false,
             force_attack: true,
         };
@@ -455,6 +492,7 @@ mod tests {
                 attack_height: AttackHeight::Medium,
                 charge_level: 0.5,
             },
+            attack_armed: true,
             attack_sequence_active: false,
             force_attack: true,
         });

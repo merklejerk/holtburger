@@ -2,7 +2,7 @@ use super::test_support::*;
 use super::*;
 
 #[test]
-fn set_combat_mode_with_valid_target_queues_melee_attack() {
+fn set_combat_mode_with_valid_target_defers_melee_attack_until_tick() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -27,14 +27,29 @@ fn set_combat_mode_with_valid_target_queues_melee_attack() {
         result.commands.first(),
         Some(ClientCommand::SetCombatMode(CombatMode::Melee))
     ));
-    assert!(matches!(
-        result.commands.get(1),
-        Some(ClientCommand::TargetedMeleeAttack {
-            target,
-            attack_height: AttackHeight::Medium,
-            power_level,
-        }) if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
-    ));
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+    }));
+
+    state.data.combat_mode = CombatMode::Melee;
+
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
+        matches!(
+            command,
+            ClientCommand::TargetedMeleeAttack {
+                target,
+                attack_height: AttackHeight::Medium,
+                power_level,
+            } if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
+        )
+    }));
 }
 
 #[test]
@@ -72,7 +87,7 @@ fn combat_feedback_updates_auto_attack_runtime_state() {
 }
 
 #[test]
-fn begin_targeting_in_missile_mode_queues_missile_attack() {
+fn begin_targeting_in_missile_mode_defers_missile_attack_until_tick() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -93,9 +108,25 @@ fn begin_targeting_in_missile_mode_queues_missile_attack() {
         })
         .unwrap();
 
-    assert!(state.data.combat_runtime.attack_queued);
+    assert!(!result.commands.iter().any(|command| {
+        matches!(
+            command,
+            ClientCommand::TargetedMissileAttack {
+                target,
+                attack_height: AttackHeight::Medium,
+                accuracy_level,
+            } if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
+        )
+    }));
 
-    assert!(result.commands.iter().any(|command| {
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMissileAttack {
@@ -130,7 +161,7 @@ fn combat_control_actions_cycle_defaults() {
 }
 
 #[test]
-fn cycling_profile_while_targeting_resends_melee_attack_with_new_power() {
+fn cycling_profile_while_targeting_defers_melee_attack_reissue_until_tick() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -150,9 +181,18 @@ fn cycling_profile_while_targeting_resends_melee_attack_with_new_power() {
         .handle_action(AppAction::CycleCombatProfileLevel)
         .unwrap();
 
-    assert!(state.data.combat_runtime.attack_queued);
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+    }));
 
-    assert!(result.commands.iter().any(|command| {
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMeleeAttack {
@@ -185,9 +225,18 @@ fn cycling_height_while_targeting_resends_missile_attack_with_new_height() {
         .handle_action(AppAction::CycleCombatAttackHeight)
         .unwrap();
 
-    assert!(state.data.combat_runtime.attack_queued);
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMissileAttack { .. })
+    }));
 
-    assert!(result.commands.iter().any(|command| {
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMissileAttack {
@@ -228,7 +277,7 @@ fn switching_from_targeting_to_non_targeting_cancels_attack() {
 }
 
 #[test]
-fn switching_to_targeting_in_combat_mode_resumes_attack() {
+fn switching_to_targeting_in_combat_mode_defers_attack_until_tick() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -249,7 +298,18 @@ fn switching_to_targeting_in_combat_mode_resumes_attack() {
         })
         .unwrap();
 
-    assert!(result.commands.iter().any(|command| {
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+    }));
+
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMeleeAttack {
@@ -302,6 +362,21 @@ fn switching_targets_retargets_attack_sequence() {
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
     assert!(result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::CancelAttack)
+    }));
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+    }));
+    assert!(!state.data.combat_runtime.attack_queued);
+
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMeleeAttack { target, .. } if *target == second_target_guid
@@ -334,7 +409,18 @@ fn targeting_creature_item_type_without_profile_still_starts_attack() {
         })
         .unwrap();
 
-    assert!(result.commands.iter().any(|command| {
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+    }));
+
+    let mut tick_result = UpdateResult::new();
+    super::super::combat::refresh_stale_attack_sequence(
+        &mut state,
+        Instant::now(),
+        &mut tick_result,
+    );
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
     }));
 }

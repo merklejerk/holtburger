@@ -256,6 +256,7 @@
 - [x] Do not show recharge verb on uncharged mana stones.
 - [x] Salvaging waits for UseDone, leaving us in a busy state.
 - [x] `/version` and `--version`, seeded from commit hash env var set by build system?
+- [ ] Attack spam too verbose.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

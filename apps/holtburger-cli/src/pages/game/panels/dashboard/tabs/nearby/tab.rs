@@ -384,9 +384,16 @@ impl TabController for NearbyTab {
                 }
                 EntityClass::Npc => {
                     verbs.push(Verb::new(
-                        vec![AppAction::Use { guid: e.guid }],
+                        AppAction::Use { guid: e.guid },
                         'k',
                         "Talk",
+                    ));
+                }
+                EntityClass::Monster => {
+                    verbs.push(Verb::new(
+                        AppAction::Attack { guid: e.guid },
+                        'k',
+                        "Attack",
                     ));
                 }
                 EntityClass::Chest | EntityClass::Container => {
@@ -543,6 +550,12 @@ impl TabController for NearbyTab {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pages::game::panels::dashboard::tabs::classification::EntityClass;
+    use crate::types::AppAction;
+    use holtburger_common::properties::{
+        ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt,
+        WorldObjectPropertyAccessorsMut as _,
+    };
     use holtburger_common::math::{Quaternion, Vector3};
     use holtburger_common::position::WorldPosition;
     use holtburger_core::ClientViewEvent;
@@ -584,6 +597,40 @@ mod tests {
             },
             Instant::now(),
         );
+    }
+
+    #[test]
+    fn nearby_verbs_offer_attack_for_monsters_and_talk_for_npcs() {
+        let monster_guid = Guid(0x0200_0001);
+        let npc_guid = Guid(0x0200_0002);
+        let mut monster = make_entity(monster_guid.0, 0x0101_0000, "Drudge");
+        monster.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        monster.set_bool_prop(PropertyBool::Attackable, true);
+        monster.flags |= ObjectDescriptionFlag::ATTACKABLE;
+
+        let mut npc = make_entity(npc_guid.0, 0x0101_0000, "Town Crier");
+        npc.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+
+        assert_eq!(classification::classify_entity(&monster), EntityClass::Monster);
+        assert_eq!(classification::classify_entity(&npc), EntityClass::Npc);
+
+        let mut monster_data = GameData::default();
+        monster_data.entities.insert(monster_guid, monster);
+        let monster_verbs = NearbyTab::default().get_verbs(&monster_data, &ViewState::default(), &None);
+        assert!(monster_verbs.iter().any(|verb| {
+            verb.shortcut == 'k'
+                && verb.label == "Attack"
+                && matches!(verb.action, AppAction::Attack { guid } if guid == monster_guid)
+        }));
+
+        let mut npc_data = GameData::default();
+        npc_data.entities.insert(npc_guid, npc);
+        let npc_verbs = NearbyTab::default().get_verbs(&npc_data, &ViewState::default(), &None);
+        assert!(npc_verbs.iter().any(|verb| {
+            verb.shortcut == 'k'
+                && verb.label == "Talk"
+                && matches!(verb.action, AppAction::Use { guid } if guid == npc_guid)
+        }));
     }
 
     #[test]

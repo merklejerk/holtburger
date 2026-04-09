@@ -1,4 +1,5 @@
 use super::*;
+use holtburger_common::properties::{ItemType, PropertyBool, WorldObjectPropertyAccessors as _};
 
 pub(super) enum EnterCombatModeResult {
     Success(UpdateResult),
@@ -17,6 +18,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     let mut result = UpdateResult::new();
 
     match action {
+        AppAction::Attack { guid } => {
+            result.merge(start_explicit_attack(state, guid));
+        }
         AppAction::CastSpell { spell_id, target } => {
             match try_enter_combat_mode(state, CombatMode::Magic) {
                 EnterCombatModeResult::Failed(res) => {
@@ -98,6 +102,82 @@ pub(super) fn try_enter_combat_mode(
 
 fn queue_auto_attack_for_mode(state: &mut GameState, mode: CombatMode, result: &mut UpdateResult) {
     sync_combat_automation(state, Instant::now(), mode, true, result);
+}
+
+fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResult {
+    let mut result = UpdateResult::new();
+
+    if !is_explicit_attack_target(state, target_guid) {
+        result.actions.push(AppAction::Log {
+            chat_tags: ChatMessageTags::warning().combat(),
+            message: format!(
+                "Can't attack 0x{:08X}; target must be an attackable creature.",
+                target_guid.0
+            ),
+        });
+        return result;
+    }
+
+    super::navigation::set_active_interaction(
+        state,
+        Some(Interaction::Targeting { target_guid }),
+        &mut result,
+    );
+
+    let desired_mode = explicit_attack_mode(state);
+    let Some(desired_mode) = desired_mode else {
+        result.actions.push(AppAction::Log {
+            chat_tags: ChatMessageTags::warning().combat(),
+            message: "Can't attack without a melee or missile weapon equipped!".to_string(),
+        });
+        result.request_redraw(RedrawPriority::Immediate);
+        return result;
+    };
+
+    if state.data.combat_mode != desired_mode {
+        match try_enter_combat_mode(state, desired_mode) {
+            EnterCombatModeResult::Failed(res) => {
+                result.merge(res);
+                result.request_redraw(RedrawPriority::Immediate);
+                return result;
+            }
+            EnterCombatModeResult::Success(res) => {
+                result.merge(res);
+            }
+        }
+    }
+
+    state.data.combat_runtime.queue_attack();
+    result.request_redraw(RedrawPriority::Immediate);
+
+    if state.data.combat_mode == desired_mode {
+        sync_combat_automation(state, Instant::now(), desired_mode, true, &mut result);
+    }
+
+    result
+}
+
+fn explicit_attack_mode(state: &GameState) -> Option<CombatMode> {
+    match state.data.combat_mode {
+        CombatMode::Melee | CombatMode::Missile => Some(state.data.combat_mode),
+        CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => {
+            match state.data.get_suggested_combat_mode() {
+                CombatMode::Melee | CombatMode::Missile => Some(state.data.get_suggested_combat_mode()),
+                CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => None,
+            }
+        }
+    }
+}
+
+fn is_explicit_attack_target(state: &GameState, target_guid: Guid) -> bool {
+    let Some(entity) = state.data.entities.get(&target_guid) else {
+        return false;
+    };
+
+    entity
+        .item_type()
+        .is_some_and(|item_type| item_type.contains(ItemType::CREATURE))
+        && entity.get_bool_prop(PropertyBool::Attackable)
 }
 
 pub(super) fn current_target_guid(state: &GameState) -> Option<Guid> {
@@ -241,6 +321,7 @@ fn combat_automation_input(
         player_position: state.data.runtime_player_position(),
         target_position,
         attack_profile,
+        attack_armed: state.data.combat_runtime.attack_queued,
         attack_sequence_active: state.data.combat_runtime.attack_sequence_active,
         force_attack,
     })

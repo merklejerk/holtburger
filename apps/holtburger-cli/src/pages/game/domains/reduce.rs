@@ -131,7 +131,8 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         | AppAction::SwearAllegiance { .. }
         | AppAction::Unswear { .. }) => Some(party::reduce_action(state, action)),
 
-        action @ (AppAction::CastSpell { .. }
+        action @ (AppAction::Attack { .. }
+        | AppAction::CastSpell { .. }
         | AppAction::CycleCombatProfileLevel
         | AppAction::CycleCombatAttackHeight
         | AppAction::SetCombatMode { .. }) => Some(combat::reduce_action(state, action)),

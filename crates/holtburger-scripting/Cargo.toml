@@ -1,0 +1,16 @@
+[package]
+name = "holtburger-scripting"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+futures.workspace = true
+holtburger-common.workspace = true
+holtburger-core.workspace = true
+holtburger-protocol.workspace = true
+serde.workspace = true
+deno_core = "0.330.0"

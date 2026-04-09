@@ -1,3 +1,4 @@
+use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::controllers::{
@@ -12,6 +13,7 @@ use holtburger_core::client::types::{
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
+use holtburger_scripting::ScriptHost;
 use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -43,10 +45,17 @@ pub struct GameState {
     pub data: GameData,
     pub dashboard: DashboardState,
     pub view: ViewState,
+    pub(crate) script: GameScriptState,
     runtime: GameRuntimeState,
     pub(super) render_state: GameRenderState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
+}
+
+#[derive(Default)]
+pub(crate) struct GameScriptState {
+    pub(crate) pending_source: Option<DeferredScriptSource>,
+    pub(crate) host: Option<ScriptHost>,
 }
 
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
@@ -97,6 +106,7 @@ impl GameState {
             data: GameData::new(guid, name, world_name),
             dashboard: DashboardState::default(),
             view: ViewState::default(),
+            script: GameScriptState::default(),
             runtime: GameRuntimeState::default(),
             render_state: GameRenderState::default(),
             chat: ChatState::new(None),

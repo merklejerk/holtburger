@@ -1,6 +1,6 @@
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
-use crate::state::TickContext;
 use crate::state::AppState;
+use crate::state::TickContext;
 use crate::types::{AppEvent, RedrawPriority, UpdateResult};
 
 impl AppState {

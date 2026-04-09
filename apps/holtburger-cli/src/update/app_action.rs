@@ -9,7 +9,7 @@ impl AppState {
         } else {
             let mut result = UpdateResult::new();
             match action {
-                AppAction::Nothing => {},
+                AppAction::Nothing => {}
                 AppAction::Log {
                     chat_tags,
                     message: text,

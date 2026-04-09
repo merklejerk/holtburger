@@ -136,11 +136,15 @@ mod tests {
             pending_exit_message: None,
         };
 
-        let _ = app_state.reduce_app_action(AppAction::Sequence {
-            actions: vec![AppAction::TransitionToGame {
-                guid: Guid(0x50000002),
-                name: "New Player".to_string(),
+        app_state.drain_actions(&mut UpdateResult {
+            actions: vec![AppAction::Sequence {
+                actions: vec![AppAction::TransitionToGame {
+                    guid: Guid(0x50000002),
+                    name: "New Player".to_string(),
+                }],
             }],
+            commands: vec![],
+            redraw_priority: RedrawPriority::None,
         });
 
         match &app_state.page {

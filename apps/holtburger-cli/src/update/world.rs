@@ -1,13 +1,11 @@
 use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
-use crate::state::EventContext;
 use crate::state::AppState;
+use crate::state::EventContext;
 use crate::types::{ChatMessageTags, Page, UpdateResult};
 use crate::utils::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
-use holtburger_core::{
-    ActionResultReason, ClientCommand, ClientState, ClientViewEvent,
-};
+use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
 
 impl AppState {
@@ -205,7 +203,10 @@ impl AppState {
 
                 // Bubble down the event so chat/logs can still get network pings if needed
                 result.merge(self.page.handle_view_event(
-                    ClientViewEvent::NetPulse { bytes_in, bytes_out },
+                    ClientViewEvent::NetPulse {
+                        bytes_in,
+                        bytes_out,
+                    },
                     &ctx,
                 ));
             }
@@ -233,15 +234,13 @@ impl AppState {
                 operation,
                 result: busy_result,
             } => {
-                result.merge(
-                    self.page.handle_view_event(
-                        ClientViewEvent::BusyOperationFinished {
-                            operation,
-                            result: busy_result,
-                        },
-                        &ctx,
-                    ),
-                );
+                result.merge(self.page.handle_view_event(
+                    ClientViewEvent::BusyOperationFinished {
+                        operation,
+                        result: busy_result,
+                    },
+                    &ctx,
+                ));
             }
             _ => {
                 // All other entity, player, trade, and combat events delegate completely!

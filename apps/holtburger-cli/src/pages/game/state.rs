@@ -30,8 +30,8 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
-use crate::state::{EventContext, TickContext};
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
+use crate::state::{EventContext, TickContext};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
     Interaction, LocalConfirmation, RedrawPriority, UpdateResult,

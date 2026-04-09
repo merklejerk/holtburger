@@ -528,7 +528,11 @@ impl Page {
         }
     }
 
-    pub fn handle_view_event(&mut self, event: ClientViewEvent, ctx: &EventContext) -> UpdateResult {
+    pub fn handle_view_event(
+        &mut self,
+        event: ClientViewEvent,
+        ctx: &EventContext,
+    ) -> UpdateResult {
         match self {
             Page::Selection(s) => s.handle_view_event_with_context(event, ctx),
             Page::Game(g) => g.handle_view_event_with_context(event, ctx),
@@ -552,7 +556,7 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
-    Nothing, 
+    Nothing,
     TransitionToGame {
         guid: Guid,
         name: String,

@@ -48,10 +48,7 @@ impl TuiScriptClientView<'_> {
         let name = entity.name().trim();
         let self_position = self.data.runtime_player_position();
         let entity_position = self.data.runtime_position_for_guid(guid);
-        let distance_to_self = match (
-            self_position,
-            self.data.distance_position_for_guid(guid),
-        ) {
+        let distance_to_self = match (self_position, self.data.distance_position_for_guid(guid)) {
             (Some(self_position), Some(entity_position)) => {
                 Some(self_position.distance_to(&entity_position))
             }
@@ -453,45 +450,6 @@ pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<Defe
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{AppState, NetStats};
-    use crate::types::{AppAction, AppEvent, Page};
-    use holtburger_common::Vector3;
-    use holtburger_common::position::WorldPosition;
-    use holtburger_core::{ClientCommand, ClientState, ClientViewEvent};
-    use holtburger_world::entity::Entity;
-
-    fn build_test_app_state(script_source: ScriptSource) -> AppState {
-        let mut game_state =
-            GameState::new(Guid(0x5000_0001), "Player".to_string(), "World".to_string());
-        game_state.data.entities.insert(
-            Guid(0x5000_0001),
-            Entity::new(
-                Guid(0x5000_0001),
-                "Player".to_string(),
-                WorldPosition::default(),
-            ),
-        );
-        game_state.script.pending_source = Some(DeferredScriptSource::Inline(script_source));
-
-        AppState {
-            account_name: "account".to_string(),
-            account_password: "password".to_string(),
-            character_preference: None,
-            chat_log: None,
-            page: Page::Game(Box::new(game_state)),
-            client_state: ClientState::InWorld,
-            net_stats: NetStats::default(),
-            world_name: "World".to_string(),
-            server_time: Some((1000.0, std::time::Instant::now())),
-            content: None,
-            spell_catalog: None,
-            skill_table: None,
-            verbosity: 0,
-            quit_on_disconnect: false,
-            disconnect_reason: None,
-            pending_exit_message: None,
-        }
-    }
 
     #[test]
     fn script_path_for_basename_uses_js_extension() {

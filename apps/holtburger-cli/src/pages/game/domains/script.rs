@@ -328,11 +328,7 @@ impl GameState {
                 result,
             );
 
-            if !should_run_after {
-                true
-            } else {
-                false
-            }
+            !should_run_after
         };
 
         if host_was_cleared {

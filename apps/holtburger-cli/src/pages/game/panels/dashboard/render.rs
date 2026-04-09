@@ -196,9 +196,9 @@ mod tests {
     #[test]
     fn visible_footer_verbs_hides_footer_hidden_verbs() {
         let verbs = vec![
-            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter")
+            Verb::new(AppAction::Nothing, 'f', "Filter")
                 .with_footer_visibility(crate::types::FooterVerbVisibility::Hidden),
-            Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
+            Verb::new(AppAction::Nothing, 'u', "Use"),
         ];
 
         let visible = visible_footer_verbs(verbs);
@@ -210,8 +210,8 @@ mod tests {
     #[test]
     fn visible_footer_verbs_keeps_footer_visible_verbs_sorted() {
         let verbs = vec![
-            Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
-            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter"),
+            Verb::new(AppAction::Nothing, 'u', "Use"),
+            Verb::new(AppAction::Nothing, 'f', "Filter"),
         ];
 
         let visible = visible_footer_verbs(verbs);

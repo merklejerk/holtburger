@@ -3,20 +3,13 @@ use crate::state::AppState;
 use crate::types::{AppAction, Page, RedrawPriority, UpdateResult};
 
 impl AppState {
-    pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
-        let mut result = self.reduce_app_action(action);
-
-        self.drain_actions(&mut result);
-
-        result
-    }
-
-    fn reduce_app_action(&mut self, action: AppAction) -> UpdateResult {
+    pub fn reduce_app_action(&mut self, action: AppAction) -> UpdateResult {
         if let Some(res) = self.page.handle_action(action.clone()) {
             res
         } else {
             let mut result = UpdateResult::new();
             match action {
+                AppAction::Nothing => {},
                 AppAction::Log {
                     chat_tags,
                     message: text,
@@ -26,9 +19,6 @@ impl AppState {
                 }
                 AppAction::SendCommands { commands: cmds } => {
                     result.commands.extend(cmds);
-                }
-                AppAction::DisplayClientInfo => {
-                    self.display_client_info();
                 }
                 AppAction::TransitionToGame { guid, name } => {
                     let mut game = GameState::new(guid, name, self.world_name.clone());
@@ -40,7 +30,7 @@ impl AppState {
                 }
                 AppAction::Sequence { actions } => {
                     for sub in actions {
-                        result.merge(self.handle_app_action(sub));
+                        result.merge(self.reduce_app_action(sub));
                     }
                 }
                 _ => unreachable!(
@@ -104,7 +94,7 @@ mod tests {
             pending_exit_message: None,
         };
 
-        let _ = app_state.handle_app_action(AppAction::TransitionToGame {
+        let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
             guid: Guid(0x50000001),
             name: "Player".to_string(),
         });
@@ -146,7 +136,7 @@ mod tests {
             pending_exit_message: None,
         };
 
-        let _ = app_state.handle_app_action(AppAction::Sequence {
+        let _ = app_state.reduce_app_action(AppAction::Sequence {
             actions: vec![AppAction::TransitionToGame {
                 guid: Guid(0x50000002),
                 name: "New Player".to_string(),

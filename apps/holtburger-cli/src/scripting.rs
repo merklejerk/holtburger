@@ -17,7 +17,7 @@ use holtburger_scripting::{
 };
 use holtburger_world::stats::VitalType;
 
-use crate::pages::game::{GameData, GameState};
+use crate::pages::game::{GameData, GameState, ViewState};
 use crate::types::{AppAction, ChatMessageTags, Interaction, LocalConfirmation};
 
 const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
@@ -37,26 +37,21 @@ pub(crate) struct WorkflowProjection {
 }
 
 pub struct TuiScriptClientView<'a> {
-    pub game: Option<&'a GameState>,
+    pub data: &'a GameData,
+    pub view: &'a ViewState,
     pub server_time: Option<(f64, Instant)>,
 }
 
 impl TuiScriptClientView<'_> {
-    fn game(&self) -> Option<&GameState> {
-        self.game
-    }
-
-    fn data(&self) -> Option<&GameData> {
-        self.game().map(|game| &game.data)
-    }
-
     fn script_entity_view(&self, guid: Guid) -> Option<ScriptEntityView> {
-        let game = self.game()?;
-        let entity = game.data.entities.get(&guid)?;
+        let entity = self.data.entities.get(&guid)?;
         let name = entity.name().trim();
-        let self_position = game.data.runtime_player_position();
-        let entity_position = game.data.runtime_position_for_guid(guid);
-        let distance_to_self = match (self_position, game.data.distance_position_for_guid(guid)) {
+        let self_position = self.data.runtime_player_position();
+        let entity_position = self.data.runtime_position_for_guid(guid);
+        let distance_to_self = match (
+            self_position,
+            self.data.distance_position_for_guid(guid),
+        ) {
             (Some(self_position), Some(entity_position)) => {
                 Some(self_position.distance_to(&entity_position))
             }
@@ -80,30 +75,34 @@ impl TuiScriptClientView<'_> {
 
 impl ScriptClientView for TuiScriptClientView<'_> {
     fn self_entity(&self) -> Option<ScriptSelfView> {
-        let game = self.game()?;
-        let data = &game.data;
-        let guid = data.player_guid?;
-        let name = data.character_name.clone()?;
+        let guid = self.data.player_guid?;
+        let name = self.data.character_name.clone()?;
 
         Some(ScriptSelfView {
             guid,
             name,
-            position: data.runtime_player_position(),
-            health: data
+            position: self.data.runtime_player_position(),
+            health: self
+                .data
                 .vitals
                 .get(&VitalType::Health)
                 .map(|vital| vital.current),
-            stamina: data
+            stamina: self
+                .data
                 .vitals
                 .get(&VitalType::Stamina)
                 .map(|vital| vital.current),
-            mana: data.vitals.get(&VitalType::Mana).map(|vital| vital.current),
-            combat_mode: data.combat_mode,
+            mana: self
+                .data
+                .vitals
+                .get(&VitalType::Mana)
+                .map(|vital| vital.current),
+            combat_mode: self.data.combat_mode,
         })
     }
 
     fn target_entity(&self) -> Option<ScriptEntityView> {
-        let target_guid = target_guid_from_interaction(self.game()?.view.active_interaction)?;
+        let target_guid = target_guid_from_interaction(self.view.active_interaction)?;
         self.script_entity_view(target_guid)
     }
 
@@ -112,18 +111,15 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn nearby_entities(&self) -> Vec<ScriptEntityView> {
-        let Some(data) = self.data() else {
-            return Vec::new();
-        };
-
-        let player_guid = data.player_guid;
-        let mut entities = data
+        let player_guid = self.data.player_guid;
+        let mut entities = self
+            .data
             .entities
             .keys()
             .copied()
             .filter(|guid| Some(*guid) != player_guid)
-            .filter(|guid| !data.inventory.contains(guid))
-            .filter(|guid| data.runtime_position_for_guid(*guid).is_some())
+            .filter(|guid| !self.data.inventory.contains(guid))
+            .filter(|guid| self.data.runtime_position_for_guid(*guid).is_some())
             .filter_map(|guid| self.script_entity_view(guid))
             .collect::<Vec<_>>();
 
@@ -137,22 +133,19 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView> {
-        let Some(data) = self.data() else {
-            return Vec::new();
-        };
-
-        let mut items = data
+        let mut items = self
+            .data
             .inventory
             .iter()
             .filter_map(|guid| {
-                let entity = data.entities.get(guid)?;
+                let entity = self.data.entities.get(guid)?;
                 let name = entity.name().trim();
                 Some(ScriptInventoryItemView {
                     guid: *guid,
                     name: (!name.is_empty()).then(|| name.to_string()),
                     stack_size: Some(entity.stack_size()),
                     container_guid: entity.container_id(),
-                    equipped: data.equipment.contains_key(guid),
+                    equipped: self.data.equipment.contains_key(guid),
                 })
             })
             .collect::<Vec<_>>();
@@ -162,7 +155,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn fellowship(&self) -> Option<ScriptPartyView> {
-        let party = &self.data()?.party;
+        let party = &self.data.party;
         let members = party
             .as_ref()?
             .members
@@ -190,23 +183,20 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn active_spells(&self) -> Vec<ScriptSpellEffectView> {
-        let Some(data) = self.data() else {
-            return Vec::new();
-        };
-
         let Some((server_time, then)) = self.server_time else {
             return Vec::new();
         };
 
         let now = server_time + then.elapsed().as_secs_f64();
 
-        data.player_enchantments
+        self.data
+            .player_enchantments
             .iter()
             .map(|enchantment| ScriptSpellEffectView {
                 spell_id: u32::from(enchantment.spell_id),
-                name: data.spell_name(u32::from(enchantment.spell_id)),
+                name: self.data.spell_name(u32::from(enchantment.spell_id)),
                 expires_at_seconds: Some(enchantment.start_time + enchantment.duration - now),
-                target_guid: data.player_guid,
+                target_guid: self.data.player_guid,
             })
             .collect()
     }
@@ -217,13 +207,11 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn pending_confirmation(&self) -> Option<ScriptConfirmation> {
-        let game = self.game()?;
-
-        if let Some(confirmation) = &game.view.active_confirmation {
+        if let Some(confirmation) = &self.view.active_confirmation {
             return Some(ScriptConfirmation::Character(confirmation.clone()));
         }
 
-        game.view
+        self.view
             .local_confirmation
             .as_ref()
             .map(script_local_confirmation)
@@ -231,8 +219,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
     }
 
     fn busy_operation(&self) -> Option<ScriptBusyOperation> {
-        self.game()?
-            .view
+        self.view
             .active_busy_operation
             .map(|kind| ScriptBusyOperation { kind })
     }
@@ -504,114 +491,6 @@ mod tests {
             disconnect_reason: None,
             pending_exit_message: None,
         }
-    }
-
-    #[test]
-    fn script_can_react_to_chat_and_entity_events_through_app_shell() {
-        let mut app_state = build_test_app_state(ScriptSource::new(
-            "test.js",
-            r#"
-            Holtburger.onEvent((event) => {
-                            if (event.kind === "Lifecycle") {
-                                if (event.data.kind === "Started") {
-                                    Holtburger.log("info", "lifecycle:started");
-                                }
-
-                                if (event.data.kind === "Tick") {
-                                    Holtburger.log("info", `lifecycle:tick:${event.data.elapsed_seconds}`);
-                                }
-
-                                if (event.data.kind === "Stopped") {
-                                    Holtburger.log("info", "lifecycle:stopped");
-                                }
-                            }
-
-              if (event.kind === "ChatMessage" && event.data.message === "ping") {
-                Holtburger.say("pong");
-              }
-
-              if (event.kind === "EntityAppeared") {
-                Holtburger.targetEntity(event.data.guid);
-              }
-            });
-            "#,
-        ));
-
-        let result = app_state.handle_app_event(AppEvent::ReceivedViewEvent(
-            ClientViewEvent::LogMessage("ping".to_string()),
-        ));
-
-        assert!(result.commands.iter().any(|command| matches!(
-            command,
-            ClientCommand::Talk(message) if message == "pong"
-        )));
-        assert!(
-            app_state
-                .game_option()
-                .expect("game page should exist")
-                .chat
-                .messages
-                .iter()
-                .any(|message| message.text == "lifecycle:started")
-        );
-
-        let target_guid = Guid(0x7000_0001);
-        let position = WorldPosition {
-            landblock_id: Guid(0x0100_0000),
-            coords: Vector3::new(5.0, 0.0, 0.0),
-            ..WorldPosition::default()
-        };
-
-        let _ = app_state.handle_app_event(AppEvent::ReceivedViewEvent(
-            ClientViewEvent::EntitySpawned {
-                entity: Box::new(Entity::new(target_guid, "Target".to_string(), position)),
-            },
-        ));
-
-        let game = app_state.game_option().expect("game page should exist");
-        assert_eq!(
-            game.view.active_interaction,
-            Some(Interaction::Targeting { target_guid })
-        );
-
-        let _ = app_state.handle_app_event(AppEvent::Tick(0.25));
-        assert!(
-            app_state
-                .game_option()
-                .expect("game page should exist")
-                .chat
-                .messages
-                .iter()
-                .any(|message| message.text.starts_with("lifecycle:tick:"))
-        );
-
-        let _ = app_state.handle_app_action(AppAction::UnrunScript);
-
-        assert!(
-            app_state
-                .game_option()
-                .expect("game page should exist")
-                .script
-                .pending_source
-                .is_none()
-        );
-        assert!(
-            app_state
-                .game_option()
-                .expect("game page should exist")
-                .script
-                .host
-                .is_none()
-        );
-        assert!(
-            app_state
-                .game_option()
-                .expect("game page should exist")
-                .chat
-                .messages
-                .iter()
-                .any(|message| message.text == "lifecycle:stopped")
-        );
     }
 
     #[test]

@@ -552,6 +552,7 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
+    Nothing, 
     TransitionToGame {
         guid: Guid,
         name: String,
@@ -687,7 +688,6 @@ pub enum AppAction {
         commands: Vec<ClientCommand>,
     },
     ClearVendor,
-    DisplayClientInfo,
     Sequence {
         actions: Vec<AppAction>,
     },

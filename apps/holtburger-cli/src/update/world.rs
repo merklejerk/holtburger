@@ -6,41 +6,9 @@ use crate::types::{ChatMessageTags, Page, UpdateResult};
 use crate::utils::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
-    ActionResultReason, BusyOperationKind, BusyOperationResult, ClientCommand, ClientState,
-    ClientViewEvent,
+    ActionResultReason, ClientCommand, ClientState, ClientViewEvent,
 };
 use holtburger_protocol::errors::CharacterError;
-
-fn log_busy_operation_result(operation: BusyOperationKind, result: &BusyOperationResult) {
-    let label = match operation {
-        BusyOperationKind::Use => "Use",
-        BusyOperationKind::UseWithTarget => "Use-with-target",
-        BusyOperationKind::Salvage => "Salvage",
-        BusyOperationKind::SpellCast => "Spell cast",
-        BusyOperationKind::Buy => "Buy",
-        BusyOperationKind::Sell => "Sell",
-    };
-
-    match result {
-        BusyOperationResult::Completed {
-            error: holtburger_protocol::errors::WeenieError::None,
-            ..
-        } => {
-            log::debug!("{} finished.", label);
-        }
-        BusyOperationResult::Completed { error, parameter } => match parameter {
-            Some(parameter) => {
-                log::warn!("{} finished with {:?} ({}).", label, error, parameter);
-            }
-            None => {
-                log::warn!("{} finished with {:?}.", label, error);
-            }
-        },
-        BusyOperationResult::TimedOut => {
-            log::warn!("{} timed out waiting for UseDone.", label);
-        }
-    }
-}
 
 impl AppState {
     fn handle_setup_event(&mut self, event: &ClientViewEvent) {
@@ -265,7 +233,6 @@ impl AppState {
                 operation,
                 result: busy_result,
             } => {
-                log_busy_operation_result(operation, &busy_result);
                 result.merge(
                     self.page.handle_view_event(
                         ClientViewEvent::BusyOperationFinished {

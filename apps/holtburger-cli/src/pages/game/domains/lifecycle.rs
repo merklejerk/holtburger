@@ -8,10 +8,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             state.view.active_confirmation = confirmation;
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::BusyStateUpdated { busy } => {
-            state.view.active_busy_operation = busy;
-            result.request_redraw(RedrawPriority::Immediate);
-        }
         ClientViewEvent::StatusUpdate {
             state: client_state,
         } => {
@@ -24,9 +20,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                     .inventory_notifications
                     .begin_quiet_period(Instant::now());
             }
-        }
-        ClientViewEvent::BusyOperationFinished { .. } => {
-            result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::BootAccount(reason) => {
             state.chat.handle_event(

@@ -23,12 +23,12 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
         | ClientViewEvent::NetPulse { .. }
         | ClientViewEvent::Disconnected
         | ClientViewEvent::ActiveCharacterConfirmationUpdated { .. }
-        | ClientViewEvent::BusyStateUpdated { .. }
-        | ClientViewEvent::BusyOperationFinished { .. }
         | ClientViewEvent::StatusUpdate { .. }) => {
             result.merge(lifecycle::reduce_view_event(state, event));
         }
         event @ (ClientViewEvent::PlayerEnchantmentsUpdated { .. }
+        | ClientViewEvent::BusyStateUpdated { .. }
+        | ClientViewEvent::BusyOperationFinished { .. }
         | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
         | ClientViewEvent::PlayerLevelInfoUpdated { .. }
         | ClientViewEvent::PlayerVitalsUpdated { .. }

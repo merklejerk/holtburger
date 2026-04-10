@@ -1,3 +1,4 @@
+use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::controllers::{
@@ -12,6 +13,7 @@ use holtburger_core::client::types::{
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
+use holtburger_scripting::ScriptHost;
 use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -29,6 +31,7 @@ use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
+use crate::state::{EventContext, TickContext};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
     Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
@@ -43,10 +46,17 @@ pub struct GameState {
     pub data: GameData,
     pub dashboard: DashboardState,
     pub view: ViewState,
+    pub(crate) script: GameScriptState,
     runtime: GameRuntimeState,
     pub(super) render_state: GameRenderState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
+}
+
+#[derive(Default)]
+pub(crate) struct GameScriptState {
+    pub(crate) pending_source: Option<DeferredScriptSource>,
+    pub(crate) host: Option<ScriptHost>,
 }
 
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
@@ -97,6 +107,7 @@ impl GameState {
             data: GameData::new(guid, name, world_name),
             dashboard: DashboardState::default(),
             view: ViewState::default(),
+            script: GameScriptState::default(),
             runtime: GameRuntimeState::default(),
             render_state: GameRenderState::default(),
             chat: ChatState::new(None),
@@ -105,7 +116,24 @@ impl GameState {
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
-        domains::reduce_view_event(self, event)
+        self.handle_view_event_with_context(event, &EventContext::default())
+    }
+
+    pub fn handle_view_event_with_context(
+        &mut self,
+        event: ClientViewEvent,
+        ctx: &EventContext,
+    ) -> UpdateResult {
+        let workflow_before = self.script_workflow_projection();
+        let script_event = event.clone();
+        let mut result = domains::reduce_view_event(self, event);
+        self.sync_script_host_for_view_event(
+            ctx.server_time,
+            &script_event,
+            &workflow_before,
+            &mut result,
+        );
+        result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
@@ -113,7 +141,13 @@ impl GameState {
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
-        domains::reduce_tick(self, elapsed)
+        self.handle_tick_with_context(elapsed, &TickContext::default())
+    }
+
+    pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
+        let mut result = domains::reduce_tick(self, elapsed);
+        self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
+        result
     }
 }
 

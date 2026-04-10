@@ -37,6 +37,12 @@ A transient struct created during the draw pass in [src/pages/render.rs](src/pag
 
 The TUI operates in `src/bin/tui.rs` using a `loop` with `tokio::mpsc` and `crossterm::event` polling to multiplex events:
 
+### Threading and Ownership
+
+The frontend shell and the core runtime are separate async tasks. `holtburger-core` owns authoritative world mutation and emits `ClientViewEvent`s, while the TUI task owns the local projection, controller state, and render state that are derived from those events.
+
+This matters for scripting and other frontend-side integrations: anything that needs on-demand reads should query the frontend-owned projection state, not `WorldState` directly. That keeps the core as the single authority and lets frontend-only runtimes such as `deno-core` live beside `AppState` without requiring shared mutable access to engine internals.
+
 ### 1. Event Sources
 - **Ticks**: Fixed intervals (default 100ms) for UI animations and network stat updates.
 - **Terminal Input**: Crossterm events (Key, Mouse).

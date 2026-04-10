@@ -1,10 +1,54 @@
 use super::inventory;
 use super::*;
 
+fn log_busy_operation_result(
+    operation: holtburger_core::BusyOperationKind,
+    result: &holtburger_core::BusyOperationResult,
+) {
+    let label = match operation {
+        holtburger_core::BusyOperationKind::Use => "Use",
+        holtburger_core::BusyOperationKind::UseWithTarget => "Use-with-target",
+        holtburger_core::BusyOperationKind::Salvage => "Salvage",
+        holtburger_core::BusyOperationKind::SpellCast => "Spell cast",
+        holtburger_core::BusyOperationKind::Buy => "Buy",
+        holtburger_core::BusyOperationKind::Sell => "Sell",
+    };
+
+    match result {
+        holtburger_core::BusyOperationResult::Completed {
+            error: holtburger_protocol::errors::WeenieError::None,
+            ..
+        } => {
+            log::debug!("{} finished.", label);
+        }
+        holtburger_core::BusyOperationResult::Completed { error, parameter } => match parameter {
+            Some(parameter) => {
+                log::warn!("{} finished with {:?} ({}).", label, error, parameter);
+            }
+            None => {
+                log::warn!("{} finished with {:?}.", label, error);
+            }
+        },
+        holtburger_core::BusyOperationResult::TimedOut => {
+            log::warn!("{} timed out waiting for UseDone.", label);
+        }
+    }
+}
+
 pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match event {
+        ClientViewEvent::BusyStateUpdated { busy } => {
+            state.view.active_busy_operation = busy;
+        }
+        ClientViewEvent::BusyOperationFinished {
+            operation,
+            result: busy_result,
+        } => {
+            log_busy_operation_result(operation, &busy_result);
+            result.request_redraw(RedrawPriority::Immediate);
+        }
         ClientViewEvent::PlayerEnchantmentsUpdated { enchantments } => {
             state.data.player_enchantments = enchantments;
         }

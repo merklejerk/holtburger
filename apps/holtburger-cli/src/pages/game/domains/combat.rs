@@ -38,12 +38,10 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         }
         AppAction::CycleCombatProfileLevel => {
             state.data.combat_controls.cycle_profile_level();
-            queue_auto_attack_for_mode(state, state.data.combat_mode, &mut result);
             result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::CycleCombatAttackHeight => {
             state.data.combat_controls.cycle_attack_height();
-            queue_auto_attack_for_mode(state, state.data.combat_mode, &mut result);
             result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::SetCombatMode { mode } => match try_enter_combat_mode(state, mode) {
@@ -52,7 +50,6 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             }
             EnterCombatModeResult::Success(res) => {
                 result.merge(res);
-                queue_auto_attack_for_mode(state, mode, &mut result);
             }
         },
         _ => unreachable!("unsupported combat action"),
@@ -90,7 +87,7 @@ pub(super) fn try_enter_combat_mode(
     }
     if mode != CombatMode::NonCombat && state.data.get_suggested_combat_mode() != mode {
         result.actions.push(AppAction::Log {
-            chat_tags: ChatMessageTags::warning(),
+            chat_tags: ChatMessageTags::warning().combat(),
             message: "Wrong weapon equipped!".to_string(),
         });
         return EnterCombatModeResult::Failed(result);
@@ -99,11 +96,7 @@ pub(super) fn try_enter_combat_mode(
     EnterCombatModeResult::Success(result)
 }
 
-pub(super) fn queue_auto_attack_for_mode(
-    state: &mut GameState,
-    mode: CombatMode,
-    result: &mut UpdateResult,
-) {
+fn queue_auto_attack_for_mode(state: &mut GameState, mode: CombatMode, result: &mut UpdateResult) {
     sync_combat_automation(state, Instant::now(), mode, true, result);
 }
 

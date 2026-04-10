@@ -192,7 +192,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             .map(|enchantment| ScriptSpellEffectView {
                 spell_id: u32::from(enchantment.spell_id),
                 name: self.data.spell_name(u32::from(enchantment.spell_id)),
-                expires_at_seconds: Some(enchantment.start_time + enchantment.duration - now),
+                remaining_seconds: Some(enchantment.start_time + enchantment.duration - now),
                 target_guid: self.data.player_guid,
             })
             .collect()

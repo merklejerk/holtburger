@@ -240,10 +240,6 @@ fn set_active_interaction(
         state.data.combat_runtime.cancel_attack();
         state.runtime.combat_automation = None;
     }
-
-    if should_resume_attack(state, previous_interaction, next_interaction) {
-        combat::queue_auto_attack_for_mode(state, state.data.combat_mode, result);
-    }
 }
 
 fn sync_target_health_query(
@@ -303,30 +299,6 @@ fn should_cancel_attack(
         ) => true,
         _ => false,
     }
-}
-
-fn should_resume_attack(
-    state: &GameState,
-    previous_interaction: Option<Interaction>,
-    next_interaction: Option<Interaction>,
-) -> bool {
-    matches!(
-        (
-            previous_interaction,
-            next_interaction,
-            state.data.combat_mode
-        ),
-        (
-            None | Some(Interaction::Moving { .. })
-                | Some(Interaction::Approaching { .. })
-                | Some(Interaction::Following { .. })
-                | Some(Interaction::Combining { .. })
-                | Some(Interaction::Salvaging)
-                | Some(Interaction::Targeting { .. }),
-            Some(Interaction::Targeting { .. }),
-            CombatMode::Melee | CombatMode::Missile
-        )
-    )
 }
 
 fn navigation_snapshot(state: &GameState, target_guid: Option<Guid>) -> NavigationSnapshot {

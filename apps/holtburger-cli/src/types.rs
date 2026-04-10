@@ -2,7 +2,7 @@ use crate::components::text_input::SingleLineTextInput;
 use crate::pages::game::GameState;
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
-use crate::state::RenderContext;
+use crate::state::{EventContext, RenderContext, TickContext};
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
@@ -528,10 +528,14 @@ impl Page {
         }
     }
 
-    pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
+    pub fn handle_view_event(
+        &mut self,
+        event: ClientViewEvent,
+        ctx: &EventContext,
+    ) -> UpdateResult {
         match self {
-            Page::Selection(s) => s.handle_view_event(event),
-            Page::Game(g) => g.handle_view_event(event),
+            Page::Selection(s) => s.handle_view_event_with_context(event, ctx),
+            Page::Game(g) => g.handle_view_event_with_context(event, ctx),
         }
     }
 
@@ -542,16 +546,17 @@ impl Page {
         }
     }
 
-    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
+    pub fn handle_tick(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         match self {
-            Page::Selection(s) => s.handle_tick(elapsed),
-            Page::Game(g) => g.handle_tick(elapsed),
+            Page::Selection(s) => s.handle_tick_with_context(elapsed, ctx),
+            Page::Game(g) => g.handle_tick_with_context(elapsed, ctx),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
+    Nothing,
     TransitionToGame {
         guid: Guid,
         name: String,
@@ -675,6 +680,10 @@ pub enum AppAction {
         chat_tags: ChatMessageTags,
         message: String,
     },
+    RunScript {
+        basename: String,
+    },
+    UnrunScript,
     BeginInteraction {
         interaction: Interaction,
     },
@@ -683,7 +692,6 @@ pub enum AppAction {
         commands: Vec<ClientCommand>,
     },
     ClearVendor,
-    DisplayClientInfo,
     Sequence {
         actions: Vec<AppAction>,
     },

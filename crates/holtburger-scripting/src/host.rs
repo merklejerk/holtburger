@@ -14,33 +14,39 @@ use crate::{
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
 const EVENT_SCRIPT_NAME: &str = "<holtburger-event>";
+const USER_SCRIPT_NAME: &str = "<holtburger-user-script>";
 static V8_PLATFORM_INIT: Once = Once::new();
 
-#[repr(C)]
 #[derive(Clone, Copy)]
 struct ScriptClientViewPtr {
     data: *const (),
-    vtable: *const (),
+    self_entity: unsafe fn(*const ()) -> Option<ScriptSelfView>,
+    nearby_entities: unsafe fn(*const ()) -> Vec<ScriptEntityView>,
 }
 
 impl ScriptClientViewPtr {
-    fn from_ref(view: &dyn ScriptClientView) -> Self {
-        // SAFETY: `ScriptClientViewPtr` is a private `#[repr(C)]` mirror of Rust's
-        // current trait-object fat pointer layout: data pointer + vtable pointer.
-        // We only create this from a live borrowed reference and keep it installed in
-        // `HostRuntimeState.current_context` for the duration of a single host call.
-        let (data, vtable): (*const (), *const ()) = unsafe { std::mem::transmute(view) };
-        Self { data, vtable }
+    fn from_ref<T: ScriptClientView>(view: &T) -> Self {
+        unsafe fn self_entity<T: ScriptClientView>(data: *const ()) -> Option<ScriptSelfView> {
+            unsafe { (&*data.cast::<T>()).self_entity() }
+        }
+
+        unsafe fn nearby_entities<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEntityView> {
+            unsafe { (&*data.cast::<T>()).nearby_entities() }
+        }
+
+        Self {
+            data: (view as *const T).cast(),
+            self_entity: self_entity::<T>,
+            nearby_entities: nearby_entities::<T>,
+        }
     }
 
-    // SAFETY: The caller must guarantee the original borrowed `ScriptClientView`
-    // is still alive and that this pointer pair was produced by `from_ref`.
-    unsafe fn as_ref<'a>(self) -> &'a dyn ScriptClientView {
-        // SAFETY: See the function contract above. We only reconstruct the trait
-        // object while `with_active_script_context` has installed a borrow-scoped
-        // context, and `ActiveScriptContextGuard` restores the previous pointer on
-        // every exit path.
-        unsafe { std::mem::transmute((self.data, self.vtable)) }
+    unsafe fn self_entity(self) -> Option<ScriptSelfView> {
+        unsafe { (self.self_entity)(self.data) }
+    }
+
+    unsafe fn nearby_entities(self) -> Vec<ScriptEntityView> {
+        unsafe { (self.nearby_entities)(self.data) }
     }
 }
 
@@ -122,9 +128,9 @@ impl Drop for ActiveScriptContextGuard {
     }
 }
 
-fn install_script_context(
+fn install_script_context<T: ScriptClientView>(
     op_state: Rc<RefCell<OpState>>,
-    context: &dyn ScriptClientView,
+    context: &T,
 ) -> ActiveScriptContextGuard {
     let previous = {
         let mut op_state_ref = op_state.borrow_mut();
@@ -139,27 +145,23 @@ fn install_script_context(
 
 fn with_current_script_client_view<T>(
     state: &mut OpState,
-    f: impl FnOnce(&dyn ScriptClientView) -> T,
+    f: impl FnOnce(ScriptClientViewPtr) -> T,
 ) -> Option<T> {
     let context_ptr = state.borrow::<HostRuntimeState>().current_context.get()?;
-    // SAFETY: `current_context` is only populated by `install_script_context`, which
-    // stores a pointer derived from a live borrowed `ScriptClientView` for the span
-    // of a single script host call. `ActiveScriptContextGuard` clears or restores it
-    // before that borrow ends.
-    let context = unsafe { context_ptr.as_ref() };
-    Some(f(context))
+    Some(f(context_ptr))
 }
 
 #[op2]
 #[serde]
 fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
-    with_current_script_client_view(state, |view| view.self_entity()).flatten()
+    with_current_script_client_view(state, |view| unsafe { view.self_entity() }).flatten()
 }
 
 #[op2]
 #[serde]
 fn op_hb_nearby_entities(state: &mut OpState) -> Vec<ScriptEntityView> {
-    with_current_script_client_view(state, |view| view.nearby_entities()).unwrap_or_default()
+    with_current_script_client_view(state, |view| unsafe { view.nearby_entities() })
+        .unwrap_or_default()
 }
 
 #[op2(fast)]
@@ -233,13 +235,36 @@ fn create_js_runtime(outputs: Rc<RefCell<Vec<ScriptIntent>>>) -> JsRuntime {
     js_runtime
 }
 
-fn run_js_script(js_runtime: &mut JsRuntime, name: &'static str, source: String) -> Result<()> {
+fn run_js_script(
+    js_runtime: &mut JsRuntime,
+    engine_name: &'static str,
+    display_name: &str,
+    source: String,
+) -> Result<()> {
     js_runtime
-        .execute_script(name, source)
-        .with_context(|| format!("failed to execute script {name}"))?;
+        .execute_script(engine_name, source)
+        .with_context(|| format!("failed to execute script {display_name}"))?;
     block_on(js_runtime.run_event_loop(Default::default()))
-        .with_context(|| format!("failed to drive script event loop for {name}"))?;
+        .with_context(|| format!("failed to drive script event loop for {display_name}"))?;
     Ok(())
+}
+
+fn build_dispatch_source(event: &ScriptEvent) -> Result<String> {
+    let event_json =
+        deno_core::serde_json::to_string(event).context("failed to serialize script event")?;
+    let event_json_literal = deno_core::serde_json::to_string(&event_json)
+        .context("failed to serialize script event JSON literal")?;
+    let event_json_literal = escape_js_string_separators(&event_json_literal);
+
+    Ok(format!(
+        "globalThis.__holtburgerDispatch(JSON.parse({event_json_literal}));"
+    ))
+}
+
+fn escape_js_string_separators(value: &str) -> String {
+    value
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
 }
 
 pub struct ScriptHost {
@@ -248,16 +273,21 @@ pub struct ScriptHost {
 }
 
 impl ScriptHost {
-    pub fn spawn(source: ScriptSource, context: &dyn ScriptClientView) -> Result<Self> {
+    pub fn spawn<T: ScriptClientView>(source: ScriptSource, context: &T) -> Result<Self> {
         ensure_v8_platform_initialized();
 
         let outputs = Rc::new(RefCell::new(Vec::new()));
         let mut js_runtime = create_js_runtime(outputs.clone());
-        let script_name: &'static str = Box::leak(source.name.into_boxed_str());
+        let ScriptSource { name, source } = source;
 
         with_active_script_context(&mut js_runtime, context, |js_runtime| {
-            run_js_script(js_runtime, BOOTSTRAP_SCRIPT_NAME, BOOTSTRAP_JS.to_string())?;
-            run_js_script(js_runtime, script_name, source.source)
+            run_js_script(
+                js_runtime,
+                BOOTSTRAP_SCRIPT_NAME,
+                BOOTSTRAP_SCRIPT_NAME,
+                BOOTSTRAP_JS.to_string(),
+            )?;
+            run_js_script(js_runtime, USER_SCRIPT_NAME, &name, source)
         })?;
 
         Ok(Self {
@@ -268,15 +298,18 @@ impl ScriptHost {
 
     pub fn dispatch_event(
         &mut self,
-        context: &dyn ScriptClientView,
+        context: &impl ScriptClientView,
         event: ScriptEvent,
     ) -> Result<()> {
-        let event_json =
-            deno_core::serde_json::to_string(&event).context("failed to serialize script event")?;
-        let dispatch_source = format!("globalThis.__holtburgerDispatch({event_json});");
+        let dispatch_source = build_dispatch_source(&event)?;
 
         with_active_script_context(&mut self.js_runtime, context, |js_runtime| {
-            run_js_script(js_runtime, EVENT_SCRIPT_NAME, dispatch_source)
+            run_js_script(
+                js_runtime,
+                EVENT_SCRIPT_NAME,
+                EVENT_SCRIPT_NAME,
+                dispatch_source,
+            )
         })
     }
 
@@ -287,12 +320,38 @@ impl ScriptHost {
     pub fn shutdown(self) {}
 }
 
-fn with_active_script_context<T>(
+fn with_active_script_context<T, V>(
     js_runtime: &mut JsRuntime,
-    context: &dyn ScriptClientView,
+    context: &V,
     f: impl FnOnce(&mut JsRuntime) -> Result<T>,
-) -> Result<T> {
+) -> Result<T>
+where
+    V: ScriptClientView,
+{
     let op_state = js_runtime.op_state();
     let _guard = install_script_context(op_state, context);
     f(js_runtime)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_dispatch_source;
+    use crate::{ScriptChatChannelKind, ScriptChatEvent, ScriptEvent};
+
+    #[test]
+    fn dispatch_source_escapes_javascript_line_separators() {
+        let event = ScriptEvent::ChatMessage(ScriptChatEvent {
+            channel: ScriptChatChannelKind::Say,
+            sender: Some("Buddy".to_string()),
+            message: "line\u{2028}para\u{2029}".to_string(),
+        });
+
+        let source = build_dispatch_source(&event).expect("dispatch source should serialize");
+
+        assert!(!source.contains('\u{2028}'));
+        assert!(!source.contains('\u{2029}'));
+        assert!(source.contains("\\u2028"));
+        assert!(source.contains("\\u2029"));
+        assert!(source.contains("JSON.parse("));
+    }
 }

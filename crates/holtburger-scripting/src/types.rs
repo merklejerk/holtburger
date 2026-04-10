@@ -86,7 +86,7 @@ pub struct ScriptPartyMemberView {
 pub struct ScriptSpellEffectView {
     pub spell_id: u32,
     pub name: Option<String>,
-    pub expires_at_seconds: Option<f64>,
+    pub remaining_seconds: Option<f64>,
     pub target_guid: Option<Guid>,
 }
 

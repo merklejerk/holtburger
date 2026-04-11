@@ -4,9 +4,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use holtburger_common::Guid;
-use holtburger_common::properties::{
-    PropertyBool, WorldObjectExt as _, WorldObjectPropertyAccessors,
-};
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_scripting::{
@@ -17,6 +15,7 @@ use holtburger_scripting::{
 };
 use holtburger_world::stats::VitalType;
 
+use crate::pages::game::panels::dashboard::tabs::classification;
 use crate::pages::game::{GameData, GameState, ViewState};
 use crate::types::{AppAction, ChatMessageTags, Interaction, LocalConfirmation};
 
@@ -55,17 +54,21 @@ impl TuiScriptClientView<'_> {
             _ => None,
         };
 
+        let is_dead = entity
+            .health_fraction
+            .is_some_and(|fraction| fraction <= 0.0)
+            || entity
+                .motion_snapshot
+                .map(|snapshot| snapshot.indicates_death_motion())
+                .unwrap_or(false);
+
         Some(ScriptEntityView {
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
+            kind: classification::classify_entity(entity).kind(),
             position: entity_position,
             distance_to_self,
-            is_player: guid.is_player(),
-            is_monster: entity.creature_profile.is_some() && !guid.is_player(),
-            is_vendor: entity.get_bool_prop(PropertyBool::VendorService),
-            is_dead: entity
-                .health_fraction
-                .is_some_and(|fraction| fraction <= 0.0),
+            is_dead,
         })
     }
 }

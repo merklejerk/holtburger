@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombatTargetStatus {
@@ -216,8 +217,8 @@ pub trait WorldContextExt: WorldContext {
         }
 
         if entity
-            .motion_snapshot
-            .is_some_and(|snapshot| snapshot.indicates_death_motion())
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
         {
             return CombatTargetStatus::DeathMotionObserved;
         }

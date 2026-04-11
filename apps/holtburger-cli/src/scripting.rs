@@ -7,13 +7,14 @@ use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
-use holtburger_world::context::WorldContextExt as _;
 use holtburger_scripting::{
-    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent,
-    ScriptClientView, ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptInventoryItemView,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptPartyMemberView,
-    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
+    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
+    ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptInventoryItemView,
+    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
+    ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
+    ScriptWorkflowEvent,
 };
+use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
 
 use crate::pages::game::panels::dashboard::tabs::classification;
@@ -49,17 +50,16 @@ impl TuiScriptClientView<'_> {
         let self_position = self.data.runtime_player_position();
         let entity_position = self.data.runtime_position_for_guid(guid);
         let distance_to_self = match (self_position, self.data.distance_position_for_guid(guid)) {
-            (Some(self_position), Some(entity_position)) => self_position.distance_to(&entity_position),
+            (Some(self_position), Some(entity_position)) => {
+                self_position.distance_to(&entity_position)
+            }
             _ => 0.0,
         };
 
-        let is_dead = entity
-            .health_fraction
-            .is_some_and(|fraction| fraction <= 0.0)
-            || entity
-                .motion_snapshot
-                .map(|snapshot| snapshot.indicates_death_motion())
-                .unwrap_or(false);
+        let motion_command = entity
+            .motion_command()
+            .map(ScriptMotionCommand::from)
+            .unwrap_or_default();
 
         Some(ScriptEntityView {
             guid,
@@ -67,7 +67,7 @@ impl TuiScriptClientView<'_> {
             kind: classification::classify_entity(entity).kind(),
             position: entity_position.unwrap_or_default(),
             distance_to_self,
-            is_dead,
+            motion_command,
         })
     }
 }
@@ -80,10 +80,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         Some(ScriptSelfView {
             guid,
             name,
-            position: self
-                .data
-                .runtime_player_position()
-                .unwrap_or_default(),
+            position: self.data.runtime_player_position().unwrap_or_default(),
             health: self
                 .data
                 .vitals
@@ -154,10 +151,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             .filter_map(|guid| self.script_entity_view(guid))
             .collect::<Vec<_>>();
 
-        entities.sort_by(|left, right| {
-            left.distance_to_self
-                .total_cmp(&right.distance_to_self)
-        });
+        entities.sort_by(|left, right| left.distance_to_self.total_cmp(&right.distance_to_self));
 
         entities
     }
@@ -486,12 +480,11 @@ pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<Defe
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{
-        PropertyInt, WorldObjectPropertyAccessorsMut,
-    };
+    use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_core::client::types::BusyOperationKind;
-    use holtburger_world::entity::Entity;
+    use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
 
     #[test]
@@ -583,8 +576,10 @@ mod tests {
         data.entities.insert(item_guid, item);
         data.inventory.insert(item_guid);
 
-        let mut view = ViewState::default();
-        view.active_busy_operation = Some(BusyOperationKind::Buy);
+        let view = ViewState {
+            active_busy_operation: Some(BusyOperationKind::Buy),
+            ..ViewState::default()
+        };
 
         let script_view = TuiScriptClientView {
             data: &data,
@@ -605,11 +600,43 @@ mod tests {
         assert_eq!(self_view.mana_max, 666);
         assert_eq!(self_view.encumbrance, 300.0);
         assert_eq!(self_view.capacity, 18_000.0);
-        assert_eq!(
-            self_view.busy_operation,
-            ScriptBusyOperation::Buy
-        );
+        assert_eq!(self_view.busy_operation, ScriptBusyOperation::Buy);
         assert!((self_view.heading - heading).abs() < 1e-6);
         assert_eq!(self_view.position, player_position);
+    }
+
+    #[test]
+    fn entity_projects_motion_command_without_derived_dead_flag() {
+        let player_guid = Guid(0x5000_0002);
+        let entity_guid = Guid(0x8000_0002);
+        let player_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(player_position);
+
+        let mut entity = Entity::new(entity_guid, "Drudge".to_string(), player_position);
+        entity.motion_snapshot = Some(EntityMotionSnapshot {
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            ..Default::default()
+        });
+        data.entities.insert(entity_guid, entity);
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let entity_view = script_view
+            .entity(entity_guid)
+            .expect("entity snapshot should be available");
+
+        assert_eq!(entity_view.motion_command, ScriptMotionCommand::Dead);
+        assert_eq!(entity_view.position, player_position);
+        assert_eq!(entity_view.distance_to_self, 0.0);
     }
 }

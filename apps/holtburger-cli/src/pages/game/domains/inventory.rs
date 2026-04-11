@@ -29,7 +29,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
 
                 if session.queued_items.is_empty() {
                     result.actions.push(AppAction::Notification {
-                        notification: AppNotification::ActiveInteractionChanged { interaction: None },
+                        notification: AppNotification::ActiveInteractionChanged {
+                            interaction: None,
+                        },
                     });
                     state.view.salvaging = None;
                 }

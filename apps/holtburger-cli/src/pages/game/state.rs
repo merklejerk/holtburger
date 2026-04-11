@@ -143,6 +143,7 @@ impl GameState {
     pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         let mut result = domains::reduce_tick(self, elapsed);
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
+        self.drain_internal_actions(&mut result);
         result
     }
 

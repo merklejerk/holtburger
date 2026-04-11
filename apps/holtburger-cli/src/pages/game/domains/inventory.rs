@@ -1,6 +1,5 @@
 use super::object_interaction;
 use super::*;
-use holtburger_core::client::controllers::Controller;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -384,15 +383,8 @@ fn handle_equip_request(
 }
 
 fn drive_weapon_swap(state: &mut GameState, input: WeaponSwapInput, result: &mut UpdateResult) {
-    let update = state.runtime.weapon_swap.handle(&input);
-    for effect in update.effects {
-        apply_weapon_swap_effect(result, effect);
-    }
-}
-
-fn apply_weapon_swap_effect(result: &mut UpdateResult, effect: WeaponSwapEffect) {
-    match effect {
-        WeaponSwapEffect::Command(command) => result.commands.push(command),
+    for command in state.runtime.weapon_swap.advance(input) {
+        result.commands.push(command);
     }
 }
 

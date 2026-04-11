@@ -8,7 +8,6 @@ use tokio::sync::{broadcast, mpsc};
 mod builder;
 mod character_selection;
 mod commands;
-pub mod controllers;
 mod messages;
 mod movement;
 pub mod movement_types;

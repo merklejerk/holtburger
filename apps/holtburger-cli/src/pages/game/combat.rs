@@ -6,12 +6,12 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ItemType, PropertyBool, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
-use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_core::ActionResultReason;
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
 use std::f32::consts::{PI, TAU};
@@ -61,7 +61,6 @@ impl DesiredAttackProfile {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesiredCombatEngagement {

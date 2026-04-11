@@ -274,7 +274,7 @@ pub enum ScriptLocalConfirmationKind {
     Other(String),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data")]
 pub enum ScriptIntent {
     Log {
@@ -290,6 +290,12 @@ pub enum ScriptIntent {
     },
     Use {
         guid: Guid,
+    },
+    SnapHeading {
+        heading: f32,
+    },
+    Scoot {
+        distance_m: f32,
     },
     Combine {
         source: Guid,

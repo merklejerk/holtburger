@@ -3,7 +3,6 @@ mod commands;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
 use holtburger_core::ClientCommand;
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
@@ -279,11 +278,9 @@ impl GameState {
                     let mut new_heading = current_heading + delta;
                     let two_pi = 2.0 * std::f32::consts::PI;
                     new_heading = (new_heading % two_pi + two_pi) % two_pi;
-                    result
-                        .commands
-                        .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
-                            heading: new_heading,
-                        }));
+                    result.actions.push(AppAction::SnapHeading {
+                        heading: new_heading,
+                    });
                     result.request_redraw(RedrawPriority::Immediate);
                 }
             }
@@ -579,10 +576,8 @@ mod tests {
 
         assert!(result.redraw_requested());
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::DriveSelf(
-                PlayerDriveIntent::SnapFacing { .. }
-            ))
+            result.actions.first(),
+            Some(AppAction::SnapHeading { .. })
         ));
     }
 

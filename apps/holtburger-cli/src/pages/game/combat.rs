@@ -296,6 +296,10 @@ impl CombatEngagementState {
                 self.last_feedback = None;
                 self.pending_server_failure = None;
             }
+            CombatFeedback::VictimNotification { .. }
+            | CombatFeedback::KillerNotification { .. } => {
+                self.in_flight = false;
+            }
             _ => {
                 let pending_failure = if matches!(feedback, CombatFeedback::AttackDone { .. }) {
                     self.pending_server_failure.take()
@@ -1042,6 +1046,23 @@ mod tests {
                 disposition: CombatFeedbackDisposition::UnrecoverableFailure,
             })
         );
+    }
+
+    #[test]
+    fn victim_notification_clears_in_flight_without_overwriting_feedback_summary() {
+        let target_guid = Guid(0x6000_0004);
+        let mut state = CombatRuntimeState::default();
+
+        state.begin_explicit_engagement(target_guid, CombatMode::Melee);
+        state.handle_feedback(&CombatFeedback::AttackCommenced);
+        assert!(state.in_flight());
+
+        state.handle_feedback(&CombatFeedback::VictimNotification {
+            death_message: "Drudge dies!".to_string(),
+        });
+
+        assert!(!state.in_flight());
+        assert_eq!(state.last_feedback(), None);
     }
 
     #[test]

@@ -6,13 +6,12 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ItemType, PropertyBool, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_core::ActionResultReason;
-use holtburger_core::client::controllers::{DesiredAttackProfile, TargetedAttackRequest};
 use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
-use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
 use std::f32::consts::{PI, TAU};
@@ -23,6 +22,46 @@ const FACING_REISSUE_INTERVAL: Duration = Duration::from_millis(150);
 const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_FACING_THRESHOLD: f32 = 0.5_f32.to_radians();
 const MISSILE_FACING_THRESHOLD: f32 = 5.0_f32.to_radians();
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DesiredAttackProfile {
+    pub mode: CombatMode,
+    pub attack_height: AttackHeight,
+    pub charge_level: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TargetedAttackRequest {
+    Melee {
+        target: Guid,
+        attack_height: AttackHeight,
+        power_level: f32,
+    },
+    Missile {
+        target: Guid,
+        attack_height: AttackHeight,
+        accuracy_level: f32,
+    },
+}
+
+impl DesiredAttackProfile {
+    pub fn to_targeted_attack_request(self, target: Guid) -> Option<TargetedAttackRequest> {
+        match self.mode {
+            CombatMode::Melee => Some(TargetedAttackRequest::Melee {
+                target,
+                attack_height: self.attack_height,
+                power_level: self.charge_level,
+            }),
+            CombatMode::Missile => Some(TargetedAttackRequest::Missile {
+                target,
+                attack_height: self.attack_height,
+                accuracy_level: self.charge_level,
+            }),
+            CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => None,
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DesiredCombatEngagement {

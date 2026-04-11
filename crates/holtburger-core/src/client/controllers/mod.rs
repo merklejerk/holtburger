@@ -1,17 +1,3 @@
-pub mod approach_target;
-pub mod combat;
-pub mod maintain_range;
-
-pub use approach_target::{
-    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
-    ApproachTargetInput, ApproachTargetIntent,
-};
-pub use combat::{DesiredAttackProfile, TargetedAttackRequest};
-pub use maintain_range::{
-    MaintainRangeConfig, MaintainRangeController, MaintainRangeEffect, MaintainRangeFinishReason,
-    MaintainRangeInput,
-};
-
 /// Shared controller kernel for reusable client-side behaviors.
 ///
 /// After landing real movement and combat controllers, the proven common kernel

@@ -2,8 +2,7 @@ use crate::Guid;
 
 use super::{
     AttunedStatus, EquipMask, HasProperties, ItemType, MaterialType, PropertyBool, PropertyDataId,
-    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString, Usable,
-    WorldObjectPropertyAccessors,
+    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString, Usable, WorldObjectPropertyAccessors,
 };
 
 pub trait WorldObjectExt: WorldObjectPropertyAccessors {

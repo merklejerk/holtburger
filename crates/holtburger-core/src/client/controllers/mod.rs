@@ -7,9 +7,7 @@ pub use approach_target::{
     ApproachTargetInput, ApproachTargetIntent,
 };
 pub use combat::{
-    CombatAutomationController, CombatAutomationEffect, CombatAutomationInput,
-    CombatFacingController, CombatFacingEffect, CombatFacingInput, DesiredAttackController,
-    DesiredAttackEffect, DesiredAttackInput, DesiredAttackProfile, TargetedAttackRequest,
+    DesiredAttackProfile, TargetedAttackRequest,
 };
 pub use maintain_range::{
     MaintainRangeConfig, MaintainRangeController, MaintainRangeEffect, MaintainRangeFinishReason,

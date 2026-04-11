@@ -11,6 +11,7 @@ use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
+use crate::pages::game::combat::can_locally_attack_entity;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, AppUiAction, DashboardTab, FilterInputSession, FooterVerbVisibility, InspectTarget,
@@ -389,7 +390,7 @@ impl TabController for NearbyTab {
                         "Talk",
                     ));
                 }
-                EntityClass::Monster => {
+                EntityClass::Monster if can_locally_attack_entity(e, data.combat_target_status(e.guid)) => {
                     verbs.push(Verb::new(
                         AppAction::Attack { guid: e.guid },
                         'k',
@@ -417,6 +418,13 @@ impl TabController for NearbyTab {
                         'd',
                         "Trade",
                     ));
+                    if can_locally_attack_entity(e, data.combat_target_status(e.guid)) {
+                        verbs.push(Verb::new(
+                            vec![AppAction::Attack { guid: e.guid }],
+                            'k',
+                            "Attack",
+                        ));
+                    }
                 }
                 _ => {
                     if data.can_use(e.guid) {
@@ -559,9 +567,11 @@ mod tests {
     use holtburger_common::math::{Quaternion, Vector3};
     use holtburger_common::position::WorldPosition;
     use holtburger_core::ClientViewEvent;
+    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::{
         ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode,
     };
+    use holtburger_world::entity::EntityMotionSnapshot;
     use std::time::Instant;
 
     fn make_entity(guid: u32, landblock_id: u32, name: &str) -> Entity {
@@ -630,6 +640,32 @@ mod tests {
             verb.shortcut == 'k'
                 && verb.label == "Talk"
                 && matches!(verb.action, AppAction::Use { guid } if guid == npc_guid)
+        }));
+    }
+
+    #[test]
+    fn nearby_attack_affordance_hides_death_motion_targets() {
+        let monster_guid = Guid(0x0200_0003);
+        let mut monster = make_entity(monster_guid.0, 0x0101_0000, "Drudge");
+        monster.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        monster.set_bool_prop(PropertyBool::Attackable, true);
+        monster.flags |= ObjectDescriptionFlag::ATTACKABLE;
+        monster.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+            ..Default::default()
+        });
+
+        let mut data = GameData::default();
+        data.entities.insert(monster_guid, monster);
+
+        let verbs = NearbyTab::default().get_verbs(&data, &ViewState::default(), &None);
+        assert!(!verbs.iter().any(|verb| {
+            verb.shortcut == 'k'
+                && verb.label == "Attack"
+                && matches!(verb.action, AppAction::Attack { guid } if guid == monster_guid)
         }));
     }
 

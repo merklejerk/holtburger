@@ -13,9 +13,15 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
         | ClientViewEvent::ChannelMessage { .. }
         | ClientViewEvent::Tell { .. }
         | ClientViewEvent::Emote { .. }) => {
+            if matches!(event, ClientViewEvent::ServerMessage { .. }) {
+                result.merge(combat::reduce_view_event(state, event.clone()));
+            }
             result.merge(chat::reduce_view_event(state, event));
         }
         event @ ClientViewEvent::CombatFeedback(_) => {
+            result.merge(combat::reduce_view_event(state, event));
+        }
+        event @ ClientViewEvent::ActionResult { .. } => {
             result.merge(combat::reduce_view_event(state, event));
         }
         event @ (ClientViewEvent::PingResponse

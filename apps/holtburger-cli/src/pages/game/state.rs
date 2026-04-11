@@ -1,16 +1,11 @@
 use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
-use holtburger_core::client::controllers::{
-    CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
-    DesiredAttackProfile, TargetedAttackRequest,
-};
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
-    ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
+    ActiveCharacterConfirmation, BusyOperationKind,
 };
-use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_scripting::ScriptHost;
@@ -24,6 +19,7 @@ use crate::navigation::{
     NavigationInput, NavigationInteractionChange, NavigationSnapshot, NavigationTick,
     NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
 };
+use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::GameData;
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
@@ -149,6 +145,30 @@ impl GameState {
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
         result
     }
+
+    pub(crate) fn clear_combat_drive(&mut self) {
+        self.runtime.combat_drive = None;
+    }
+
+    pub(crate) fn handle_combat_drive(
+        &mut self,
+        input: CombatDriveInput,
+    ) -> Option<CombatDriveEffect> {
+        self.runtime
+            .combat_drive
+            .get_or_insert_with(CombatDriveRuntime::default)
+            .handle(&input)
+    }
+
+    pub(crate) fn combat_target_position_for_drive(
+        &self,
+        target_guid: Guid,
+    ) -> Option<WorldPosition> {
+        self.runtime.navigation.automation_target_position(
+            self.data.runtime_player_position(),
+            self.data.runtime_position_for_guid(target_guid),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -180,7 +200,7 @@ struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,
-    combat_automation: Option<CombatAutomationController>,
+    combat_drive: Option<CombatDriveRuntime>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,

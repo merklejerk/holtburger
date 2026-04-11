@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use anyhow::{Context, Result};
-use deno_core::serde_json::{Value, json};
+use deno_core::serde_json::{from_value, Value, json};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
 use futures::executor::block_on;
 use holtburger_common::Guid;
@@ -13,9 +13,9 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptClientIntent, ScriptClientView, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel, ScriptSelfView,
-    ScriptSource,
+    ScriptClientIntent, ScriptClientView, ScriptEntityKind, ScriptEntityView,
+    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel,
+    ScriptSelfView, ScriptSource,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -34,7 +34,11 @@ struct ScriptClientViewPtr {
     entity_string_prop: unsafe fn(*const (), Guid, PropertyString) -> Option<String>,
     entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
-    nearby_entities: unsafe fn(*const ()) -> Vec<ScriptEntityView>,
+    nearby_entities: unsafe fn(
+        *const (),
+        Option<f32>,
+        Option<Vec<ScriptEntityKind>>,
+    ) -> Vec<ScriptEntityView>,
     get_equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
 }
 
@@ -100,8 +104,12 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).entity_instance_prop(guid, prop) }
         }
 
-        unsafe fn nearby_entities<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEntityView> {
-            unsafe { (&*data.cast::<T>()).nearby_entities() }
+        unsafe fn nearby_entities<T: ScriptClientView>(
+            data: *const (),
+            max_distance: Option<f32>,
+            classifications: Option<Vec<ScriptEntityKind>>,
+        ) -> Vec<ScriptEntityView> {
+            unsafe { (&*data.cast::<T>()).nearby_entities(max_distance, classifications) }
         }
 
         unsafe fn get_equipment<T: ScriptClientView>(
@@ -157,8 +165,12 @@ impl ScriptClientViewPtr {
         unsafe { (self.entity_instance_prop)(self.data, guid, prop) }
     }
 
-    unsafe fn nearby_entities(self) -> Vec<ScriptEntityView> {
-        unsafe { (self.nearby_entities)(self.data) }
+    unsafe fn nearby_entities(
+        self,
+        max_distance: Option<f32>,
+        classifications: Option<Vec<ScriptEntityKind>>,
+    ) -> Vec<ScriptEntityView> {
+        unsafe { (self.nearby_entities)(self.data, max_distance, classifications) }
     }
 
     unsafe fn get_equipment(self) -> Vec<ScriptEquipmentSlotView> {
@@ -179,8 +191,11 @@ globalThis.Holtburger = Object.freeze({
   selfEntity() {
     return Deno.core.ops.op_hb_self_entity();
   },
-  nearbyEntities() {
-    return Deno.core.ops.op_hb_nearby_entities();
+    nearbyEntities(maxDistance = null, classifications = null) {
+        return Deno.core.ops.op_hb_nearby_entities(
+            !maxDistance ? null : Number(maxDistance),
+            !classifications ? null : classifications.map(String),
+        );
   },
     equipment() {
         return new Map(
@@ -388,9 +403,23 @@ fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
 
 #[op2]
 #[serde]
-fn op_hb_nearby_entities(state: &mut OpState) -> Vec<ScriptEntityView> {
-    with_current_script_client_view(state, |view| unsafe { view.nearby_entities() })
-        .unwrap_or_default()
+fn op_hb_nearby_entities(
+    state: &mut OpState,
+    max_distance: Option<f64>,
+    #[serde]
+    classifications: Option<Vec<String>>,
+) -> Vec<ScriptEntityView> {
+    let classifications = classifications.map(|classifications| {
+        classifications
+            .into_iter()
+            .filter_map(parse_script_entity_kind)
+            .collect()
+    });
+
+    with_current_script_client_view(state, |view| unsafe {
+        view.nearby_entities(max_distance.map(|distance| distance as f32), classifications)
+    })
+    .unwrap_or_default()
 }
 
 #[op2]
@@ -758,6 +787,10 @@ fn parse_script_equipment_slot_kind(slot: &str) -> Option<ScriptEquipmentSlotKin
     }
 }
 
+fn parse_script_entity_kind(kind: String) -> Option<ScriptEntityKind> {
+    from_value(Value::String(kind)).ok()
+}
+
 fn ensure_v8_platform_initialized() {
     V8_PLATFORM_INIT.call_once(|| {
         JsRuntime::init_platform(None, false);
@@ -880,15 +913,15 @@ where
 mod tests {
     use super::build_dispatch_source;
     use crate::{
-        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptEntityView,
-        ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
-        ScriptSelfView, ScriptSource,
+        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptEntityKind,
+        ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
+        ScriptIntent, ScriptSelfView, ScriptSource,
     };
-    use holtburger_common::Guid;
     use holtburger_common::properties::{
         EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
         PropertyInt64, PropertyString,
     };
+    use holtburger_common::Guid;
 
     #[derive(Default)]
     struct TestView;
@@ -934,7 +967,11 @@ mod tests {
             None
         }
 
-        fn nearby_entities(&self) -> Vec<ScriptEntityView> {
+        fn nearby_entities(
+            &self,
+            _max_distance: Option<f32>,
+            _classifications: Option<Vec<ScriptEntityKind>>,
+        ) -> Vec<ScriptEntityView> {
             Vec::new()
         }
 

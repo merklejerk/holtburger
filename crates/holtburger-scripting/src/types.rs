@@ -40,7 +40,11 @@ pub trait ScriptClientView {
     fn entity_string_prop(&self, guid: Guid, prop: PropertyString) -> Option<String>;
     fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
     fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
-    fn nearby_entities(&self) -> Vec<ScriptEntityView>;
+    fn nearby_entities(
+        &self,
+        max_distance: Option<f32>,
+        classifications: Option<Vec<ScriptEntityKind>>,
+    ) -> Vec<ScriptEntityView>;
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
     fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView>;
     fn fellowship(&self) -> Option<ScriptPartyView>;

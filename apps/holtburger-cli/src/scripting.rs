@@ -8,7 +8,7 @@ use holtburger_common::properties::{
     EquipMask, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
 use holtburger_core::ClientViewEvent;
-use holtburger_core::client::types::ChatChannelKind;
+use holtburger_core::client::types::{ActionResultReason, ChatChannelKind, CombatFeedback};
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
     ScriptConfirmation, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
@@ -526,6 +526,13 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             sender: Some(sender.clone()),
             message: message.clone(),
         })),
+        ClientViewEvent::ActionResult {
+            reason: ActionResultReason::Weenie(error, _),
+            ..
+        } => Some(ScriptEvent::WeenieError { error: *error }),
+        ClientViewEvent::CombatFeedback(CombatFeedback::AttackDone { error }) => {
+            Some(ScriptEvent::WeenieError { error: *error })
+        }
         ClientViewEvent::PlayerVitalsUpdated { .. } => Some(ScriptEvent::SelfVitalsChanged),
         ClientViewEvent::EntitySpawned { entity } | ClientViewEvent::EntityReplaced { entity } => {
             Some(ScriptEvent::EntityAppeared { guid: entity.guid })
@@ -843,6 +850,35 @@ mod tests {
         assert_eq!(trade_info.partner_name.as_deref(), Some("Buddy"));
         assert_eq!(trade_info.our_items, vec![our_item]);
         assert_eq!(trade_info.their_items, vec![their_item]);
+    }
+
+    #[test]
+    fn script_event_from_view_event_projects_weenie_errors() {
+        let action_result_event = ClientViewEvent::ActionResult {
+            source: holtburger_core::client::types::ActionResultSource::Wire,
+            reason: ActionResultReason::Weenie(
+                holtburger_protocol::errors::WeenieError::YoureTooBusy,
+                Some("ignored".to_string()),
+            ),
+        };
+
+        assert!(matches!(
+            script_event_from_view_event(&action_result_event),
+            Some(ScriptEvent::WeenieError {
+                error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
+            })
+        ));
+
+        let combat_feedback_event = ClientViewEvent::CombatFeedback(CombatFeedback::AttackDone {
+            error: holtburger_protocol::errors::WeenieError::YouAreTooTiredToDoThat,
+        });
+
+        assert!(matches!(
+            script_event_from_view_event(&combat_feedback_event),
+            Some(ScriptEvent::WeenieError {
+                error: holtburger_protocol::errors::WeenieError::YouAreTooTiredToDoThat,
+            })
+        ));
     }
 
     #[test]

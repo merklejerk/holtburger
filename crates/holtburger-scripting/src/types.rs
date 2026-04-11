@@ -351,10 +351,19 @@ pub enum ScriptEvent {
     ChatMessage(ScriptChatEvent),
     Lifecycle(ScriptLifecycleEvent),
     Workflow(ScriptWorkflowEvent),
+    WeenieError {
+        error: holtburger_protocol::errors::WeenieError,
+    },
     SelfVitalsChanged,
-    EntityAppeared { guid: Guid },
-    EntityDisappeared { guid: Guid },
-    EntityUpdated { guid: Guid },
+    EntityAppeared {
+        guid: Guid,
+    },
+    EntityDisappeared {
+        guid: Guid,
+    },
+    EntityUpdated {
+        guid: Guid,
+    },
     InventoryChanged,
     SpellbookChanged,
     FellowshipChanged,

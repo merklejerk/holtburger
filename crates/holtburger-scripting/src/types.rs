@@ -51,12 +51,37 @@ pub struct ScriptSelfView {
 pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
+    pub kind: ScriptEntityKind,
     pub position: Option<WorldPosition>,
     pub distance_to_self: Option<f32>,
-    pub is_player: bool,
-    pub is_monster: bool,
-    pub is_vendor: bool,
     pub is_dead: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptEntityKind {
+    Player,
+    Npc,
+    Vendor,
+    Monster,
+    Weapon,
+    Apparel,
+    Container,
+    Item,
+    Consumable,
+    Money,
+    Key,
+    Writable,
+    HealingKit,
+    ManaStone,
+    Door,
+    Portal,
+    LifeStone,
+    Chest,
+    Wand,
+    Tool,
+    StaticObject,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

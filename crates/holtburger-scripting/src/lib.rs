@@ -23,5 +23,6 @@ pub use types::{
     ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
     ScriptInventoryItemView, ScriptLifecycleEvent, ScriptLocalConfirmation,
     ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
+    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptTradeInfo,
+    ScriptWorkflowEvent,
 };

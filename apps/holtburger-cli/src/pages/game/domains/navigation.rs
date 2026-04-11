@@ -1,5 +1,5 @@
-use super::object_interaction;
 use super::inventory;
+use super::object_interaction;
 use super::*;
 use crate::pages::game::combat as combat_model;
 
@@ -209,13 +209,16 @@ fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<
             distance_m: *distance_m,
         }),
         AppAction::CancelInteraction
-            if super::interaction::is_frontend_navigation_interaction(state.view.active_interaction) =>
+            if super::interaction::is_frontend_navigation_interaction(
+                state.view.active_interaction,
+            ) =>
         {
             Some(NavigationInput::Cancel)
         }
         AppAction::BeginInteraction { interaction }
-            if super::interaction::is_frontend_navigation_interaction(state.view.active_interaction)
-                && !super::interaction::is_frontend_navigation_interaction(Some(*interaction)) =>
+            if super::interaction::is_frontend_navigation_interaction(
+                state.view.active_interaction,
+            ) && !super::interaction::is_frontend_navigation_interaction(Some(*interaction)) =>
         {
             Some(NavigationInput::Cancel)
         }

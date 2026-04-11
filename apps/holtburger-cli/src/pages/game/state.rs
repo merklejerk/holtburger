@@ -127,6 +127,7 @@ impl GameState {
             &workflow_before,
             &mut result,
         );
+        self.drain_internal_actions(&mut result);
         result
     }
 
@@ -195,7 +196,9 @@ impl GameState {
                 let mut nested_internal_actions = Vec::new();
                 for action in internal_result.actions.drain(..) {
                     match action {
-                        AppAction::InternalAction { action } => nested_internal_actions.push(action),
+                        AppAction::InternalAction { action } => {
+                            nested_internal_actions.push(action)
+                        }
                         other => retained_actions.push(other),
                     }
                 }

@@ -609,7 +609,7 @@ fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
         | Some(ChatMessageType::AdminTell) => ChatMessageTags::tell(),
         Some(ChatMessageType::Speech)
         | Some(ChatMessageType::Channel)
-        | Some(ChatMessageType::ChannelSend) => ChatMessageTags::info(),
+        | Some(ChatMessageType::ChannelSend) => ChatMessageTags::chat(),
         Some(ChatMessageType::Combat)
         | Some(ChatMessageType::CombatEnemy)
         | Some(ChatMessageType::CombatSelf) => ChatMessageTags::COMBAT,
@@ -618,8 +618,8 @@ fn chat_message_tags(chat_type: ChatMessageTypeId) -> ChatMessageTags {
         }
         Some(ChatMessageType::Allegiance)
         | Some(ChatMessageType::Social)
-        | Some(ChatMessageType::SocialSend) => ChatMessageTags::info().guild(),
-        Some(ChatMessageType::Fellowship) => ChatMessageTags::info().party(),
+        | Some(ChatMessageType::SocialSend) => ChatMessageTags::chat().guild(),
+        Some(ChatMessageType::Fellowship) => ChatMessageTags::chat().party(),
         Some(ChatMessageType::Help) => ChatMessageTags::warning().help(),
         Some(ChatMessageType::Abuse) => ChatMessageTags::warning(),
         Some(ChatMessageType::Appraisal)

@@ -237,9 +237,9 @@ impl GameState {
                             }
                             .into(),
                         );
-                        result
-                            .commands
-                            .push(ClientCommand::Emote(emote.to_string()));
+                        result.actions.push(AppAction::Emote {
+                            message: emote.to_string(),
+                        });
                         return result;
                     }
                     result.actions.push(
@@ -778,9 +778,10 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+        assert!(result.commands.is_empty());
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::Emote(text)) if text == "waves"
+            result.actions.iter().find(|action| matches!(action, AppAction::Emote { .. })),
+            Some(AppAction::Emote { message }) if message == "waves"
         ));
     }
 
@@ -793,9 +794,10 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+        assert!(result.commands.is_empty());
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::Emote(text)) if text == " hello there"
+            result.actions.iter().find(|action| matches!(action, AppAction::Emote { .. })),
+            Some(AppAction::Emote { message }) if message == " hello there"
         ));
     }
 

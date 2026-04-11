@@ -1456,7 +1456,10 @@ mod tests {
         let mut turn = UpdateResult::new();
         run_combat_drive(&mut state, now, CombatMode::Missile, true, &mut turn);
 
-        assert!(turn.commands.iter().any(is_snap_facing_command));
+        assert!(matches!(
+            turn.actions.first(),
+            Some(AppAction::SnapHeading { .. })
+        ));
         assert!(
             !turn
                 .commands

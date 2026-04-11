@@ -196,6 +196,9 @@ globalThis.Holtburger = Object.freeze({
   say(message) {
     Deno.core.ops.op_hb_say(String(message));
   },
+    emote(message) {
+        Deno.core.ops.op_hb_emote(String(message));
+    },
     snapHeading(heading) {
         Deno.core.ops.op_hb_snap_heading(Number(heading));
     },
@@ -255,6 +258,7 @@ deno_core::extension!(
         op_hb_entity_instance_prop,
         op_hb_log,
         op_hb_say,
+        op_hb_emote,
         op_hb_snap_heading,
         op_hb_scoot,
         op_hb_combine,
@@ -427,6 +431,15 @@ fn op_hb_say(state: &mut OpState, #[string] message: String) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::Say { message });
+}
+
+#[op2(fast)]
+fn op_hb_emote(state: &mut OpState, #[string] message: String) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Emote { message });
 }
 
 #[op2(fast)]

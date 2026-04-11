@@ -20,8 +20,8 @@ pub use host::ScriptHost;
 pub use types::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
     ScriptClientView, ScriptConfirmation, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
-    ScriptEvent, ScriptIntent, ScriptInventoryItemView, ScriptLifecycleEvent,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
-    ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
-    ScriptWorkflowEvent,
+    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
+    ScriptInventoryItemView, ScriptLifecycleEvent, ScriptLocalConfirmation,
+    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
+    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
 };

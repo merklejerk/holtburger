@@ -488,41 +488,45 @@ mod tests {
 
     #[test]
     fn invalid_server_controlled_motion_skips_immediate_sync() {
-        assert!(!should_send_immediate_server_controlled_sync(&MovementEventData {
-            guid: Guid(0x5000_0001),
-            object_instance_sequence: 7,
-            movement_sequence: 20,
-            server_control_sequence: 10,
-            is_autonomous: false,
-            movement_type: MovementType::Invalid,
-            motion_flags: 0,
-            current_style: MotionStance::SwordCombat.interpreted(),
-            data: MovementTypeData::Invalid(Default::default()),
-        }));
+        assert!(!should_send_immediate_server_controlled_sync(
+            &MovementEventData {
+                guid: Guid(0x5000_0001),
+                object_instance_sequence: 7,
+                movement_sequence: 20,
+                server_control_sequence: 10,
+                is_autonomous: false,
+                movement_type: MovementType::Invalid,
+                motion_flags: 0,
+                current_style: MotionStance::SwordCombat.interpreted(),
+                data: MovementTypeData::Invalid(Default::default()),
+            }
+        ));
     }
 
     #[test]
     fn move_to_position_server_controlled_motion_keeps_immediate_sync() {
-        assert!(should_send_immediate_server_controlled_sync(&MovementEventData {
-            guid: Guid(0x5000_0001),
-            object_instance_sequence: 7,
-            movement_sequence: 20,
-            server_control_sequence: 10,
-            is_autonomous: false,
-            movement_type: MovementType::MoveToPosition,
-            motion_flags: 0,
-            current_style: MotionStance::SwordCombat.interpreted(),
-            data: MovementTypeData::MoveToPosition(MoveToPosition {
-                origin: Origin {
-                    cell_id: Guid(0x1234_0000),
-                    position: Vector3::new(32.0, 48.0, 0.0),
-                },
-                params: MoveToParameters {
-                    desired_heading: 0.0,
-                    ..Default::default()
-                },
-                run_rate: 1.0,
-            }),
-        }));
+        assert!(should_send_immediate_server_controlled_sync(
+            &MovementEventData {
+                guid: Guid(0x5000_0001),
+                object_instance_sequence: 7,
+                movement_sequence: 20,
+                server_control_sequence: 10,
+                is_autonomous: false,
+                movement_type: MovementType::MoveToPosition,
+                motion_flags: 0,
+                current_style: MotionStance::SwordCombat.interpreted(),
+                data: MovementTypeData::MoveToPosition(MoveToPosition {
+                    origin: Origin {
+                        cell_id: Guid(0x1234_0000),
+                        position: Vector3::new(32.0, 48.0, 0.0),
+                    },
+                    params: MoveToParameters {
+                        desired_heading: 0.0,
+                        ..Default::default()
+                    },
+                    run_rate: 1.0,
+                }),
+            }
+        ));
     }
 }

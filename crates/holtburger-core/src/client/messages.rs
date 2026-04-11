@@ -656,8 +656,8 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert_eq!(client.world.player.server_control_sequence, 10);
-    assert_eq!(client.session.packet_sequence, 1);
-    assert_eq!(client.session.bytes_out, 0);
+        assert_eq!(client.session.packet_sequence, 1);
+        assert_eq!(client.session.bytes_out, 0);
     }
 
     #[tokio::test]

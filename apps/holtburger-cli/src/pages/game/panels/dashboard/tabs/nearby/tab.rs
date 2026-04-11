@@ -384,18 +384,12 @@ impl TabController for NearbyTab {
                     ));
                 }
                 EntityClass::Npc => {
-                    verbs.push(Verb::new(
-                        AppAction::Use { guid: e.guid },
-                        'k',
-                        "Talk",
-                    ));
+                    verbs.push(Verb::new(AppAction::Use { guid: e.guid }, 'k', "Talk"));
                 }
-                EntityClass::Monster if can_locally_attack_entity(e, data.combat_target_status(e.guid)) => {
-                    verbs.push(Verb::new(
-                        AppAction::Attack { guid: e.guid },
-                        'k',
-                        "Attack",
-                    ));
+                EntityClass::Monster
+                    if can_locally_attack_entity(e, data.combat_target_status(e.guid)) =>
+                {
+                    verbs.push(Verb::new(AppAction::Attack { guid: e.guid }, 'k', "Attack"));
                 }
                 EntityClass::Chest | EntityClass::Container => {
                     if data.open_containers.contains(&e.guid) {
@@ -560,18 +554,18 @@ mod tests {
     use super::*;
     use crate::pages::game::panels::dashboard::tabs::classification::EntityClass;
     use crate::types::AppAction;
+    use holtburger_common::math::{Quaternion, Vector3};
+    use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt,
         WorldObjectPropertyAccessorsMut as _,
     };
-    use holtburger_common::math::{Quaternion, Vector3};
-    use holtburger_common::position::WorldPosition;
     use holtburger_core::ClientViewEvent;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+    use holtburger_world::entity::EntityMotionSnapshot;
     use holtburger_world::{
         ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode,
     };
-    use holtburger_world::entity::EntityMotionSnapshot;
     use std::time::Instant;
 
     fn make_entity(guid: u32, landblock_id: u32, name: &str) -> Entity {
@@ -621,12 +615,16 @@ mod tests {
         let mut npc = make_entity(npc_guid.0, 0x0101_0000, "Town Crier");
         npc.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
 
-        assert_eq!(classification::classify_entity(&monster), EntityClass::Monster);
+        assert_eq!(
+            classification::classify_entity(&monster),
+            EntityClass::Monster
+        );
         assert_eq!(classification::classify_entity(&npc), EntityClass::Npc);
 
         let mut monster_data = GameData::default();
         monster_data.entities.insert(monster_guid, monster);
-        let monster_verbs = NearbyTab::default().get_verbs(&monster_data, &ViewState::default(), &None);
+        let monster_verbs =
+            NearbyTab::default().get_verbs(&monster_data, &ViewState::default(), &None);
         assert!(monster_verbs.iter().any(|verb| {
             verb.shortcut == 'k'
                 && verb.label == "Attack"

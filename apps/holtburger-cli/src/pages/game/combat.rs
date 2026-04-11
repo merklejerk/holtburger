@@ -1,18 +1,18 @@
+use crate::navigation::CombatNavigationRequest;
+use crate::pages::game::GameState;
+use crate::types::{Interaction, RedrawPriority, UpdateResult};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ItemType, PropertyBool, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
-use holtburger_core::client::movement_types::PlayerDriveIntent;
-use holtburger_core::client::types::ClientCommand;
 use holtburger_core::ActionResultReason;
 use holtburger_core::client::controllers::{DesiredAttackProfile, TargetedAttackRequest};
+use holtburger_core::client::movement_types::PlayerDriveIntent;
+use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
-use crate::navigation::CombatNavigationRequest;
-use crate::pages::game::GameState;
-use crate::types::{Interaction, RedrawPriority, UpdateResult};
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
 use std::f32::consts::{PI, TAU};
@@ -44,10 +44,7 @@ pub const fn facing_requirement(mode: CombatMode) -> Option<CombatFacingRequirem
     }
 }
 
-pub fn can_locally_attack_entity(
-    entity: &Entity,
-    target_status: CombatTargetStatus,
-) -> bool {
+pub fn can_locally_attack_entity(entity: &Entity, target_status: CombatTargetStatus) -> bool {
     if !entity
         .item_type()
         .is_some_and(|item_type| item_type.contains(ItemType::CREATURE))
@@ -124,7 +121,10 @@ fn explicit_attack_target_failure_message(
 ) -> String {
     match reason {
         LocalCombatTargetDisqualifier::MissingEntity => {
-            format!("Can't attack 0x{:08X}; target is unavailable.", target_guid.0)
+            format!(
+                "Can't attack 0x{:08X}; target is unavailable.",
+                target_guid.0
+            )
         }
         LocalCombatTargetDisqualifier::NotCreature => format!(
             "Can't attack 0x{:08X}; target must be a creature.",
@@ -201,12 +201,10 @@ fn classify_weenie_error(error: WeenieError) -> CombatFeedbackSummary {
 fn pending_failure_from_action_result(reason: &ActionResultReason) -> Option<PendingCombatFailure> {
     match reason {
         ActionResultReason::Weenie(
-            error @ (
-                WeenieError::YouChargedTooFar
-                | WeenieError::MissileOutOfRange
-                | WeenieError::ObjectGone
-                | WeenieError::NoObject
-            ),
+            error @ (WeenieError::YouChargedTooFar
+            | WeenieError::MissileOutOfRange
+            | WeenieError::ObjectGone
+            | WeenieError::NoObject),
             _,
         ) => Some(PendingCombatFailure::WeenieError(*error)),
         _ => None,
@@ -338,7 +336,10 @@ impl CombatRuntimeState {
     pub fn handle_mode_updated(&mut self, mode: CombatMode) {
         self.engagement.handle_mode_updated(mode);
 
-        if matches!(mode, CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic) {
+        if matches!(
+            mode,
+            CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
+        ) {
             self.issue_state = CombatIssueState::Idle;
         }
     }
@@ -396,9 +397,10 @@ impl CombatRuntimeState {
 
     pub fn cancel_attack(&mut self) {
         self.issue_state = CombatIssueState::Idle;
-        self.engagement.handle_feedback(&CombatFeedback::AttackDone {
-            error: WeenieError::ActionCancelled,
-        });
+        self.engagement
+            .handle_feedback(&CombatFeedback::AttackDone {
+                error: WeenieError::ActionCancelled,
+            });
     }
 
     pub fn handle_feedback(&mut self, feedback: &CombatFeedback) {
@@ -434,13 +436,11 @@ impl CombatRuntimeState {
 
     pub fn attack_activity(self, mode: CombatMode) -> Option<AttackActivity> {
         match mode {
-            CombatMode::Melee | CombatMode::Missile => {
-                match self.issue_state {
-                    CombatIssueState::Idle => None,
-                    CombatIssueState::Ready => Some(AttackActivity::Ready),
-                    CombatIssueState::InFlight => Some(AttackActivity::Active),
-                }
-            }
+            CombatMode::Melee | CombatMode::Missile => match self.issue_state {
+                CombatIssueState::Idle => None,
+                CombatIssueState::Ready => Some(AttackActivity::Ready),
+                CombatIssueState::InFlight => Some(AttackActivity::Active),
+            },
             CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => None,
         }
     }
@@ -487,7 +487,8 @@ impl CombatDriveRuntime {
             force_attack,
         } = *input;
 
-        if self.current_target != Some(target_guid) || self.current_mode != Some(attack_profile.mode)
+        if self.current_target != Some(target_guid)
+            || self.current_mode != Some(attack_profile.mode)
         {
             self.current_target = Some(target_guid);
             self.current_mode = Some(attack_profile.mode);
@@ -499,7 +500,13 @@ impl CombatDriveRuntime {
             return None;
         }
 
-        if let Some(heading) = turn_heading(now, attack_profile.mode, player_position, target_position, &mut self.last_turn_at) {
+        if let Some(heading) = turn_heading(
+            now,
+            attack_profile.mode,
+            player_position,
+            target_position,
+            &mut self.last_turn_at,
+        ) {
             return Some(CombatDriveEffect::TurnTo { heading });
         }
 
@@ -609,7 +616,10 @@ pub(crate) fn is_valid_combat_target(state: &GameState, target_guid: Guid) -> bo
         return false;
     }
 
-    if state.combat_target_position_for_drive(target_guid).is_none() {
+    if state
+        .combat_target_position_for_drive(target_guid)
+        .is_none()
+    {
         return false;
     }
 
@@ -629,11 +639,7 @@ fn player_is_dead(state: &GameState) -> bool {
         .is_some_and(|snapshot| snapshot.indicates_death_motion())
 }
 
-pub(crate) fn advance_combat_drive(
-    state: &mut GameState,
-    now: Instant,
-    result: &mut UpdateResult,
-) {
+pub(crate) fn advance_combat_drive(state: &mut GameState, now: Instant, result: &mut UpdateResult) {
     run_combat_drive(state, now, state.data.combat_mode, false, result);
 }
 
@@ -666,12 +672,7 @@ fn explicit_attack_target_failure_reason(
         .is_some_and(|item_type| item_type.contains(ItemType::CREATURE));
     let attackable = entity.is_some_and(|entity| can_locally_attack_entity(entity, target_status));
 
-    explicit_attack_target_disqualifier(
-        entity_exists,
-        is_creature,
-        target_status,
-        attackable,
-    )
+    explicit_attack_target_disqualifier(entity_exists, is_creature, target_status, attackable)
 }
 
 fn queue_auto_attack_for_mode(state: &mut GameState, mode: CombatMode, result: &mut UpdateResult) {
@@ -1105,7 +1106,10 @@ mod tests {
             state.view.active_interaction,
             Some(Interaction::Targeting { target_guid })
         );
-        assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Idle
+        );
     }
 
     #[test]
@@ -1151,7 +1155,10 @@ mod tests {
                 mode: CombatMode::Melee,
             })
         );
-        assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Idle
+        );
     }
 
     #[test]
@@ -1191,7 +1198,10 @@ mod tests {
             Some(Interaction::Targeting { target_guid })
         );
         assert_eq!(state.data.combat_runtime.desired_engagement(), None);
-        assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Idle
+        );
     }
 
     #[test]
@@ -1264,7 +1274,10 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
         }));
-        assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Ready);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Ready
+        );
     }
 
     #[test]
@@ -1354,7 +1367,10 @@ mod tests {
                     | ClientCommand::TargetedMissileAttack { .. }
             ) || is_snap_facing_command(command)
         }));
-        assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Idle
+        );
     }
 
     #[test]

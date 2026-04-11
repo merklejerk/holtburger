@@ -125,10 +125,6 @@ enum LocalCombatTargetDisqualifier {
     NotAttackable,
 }
 
-pub fn classify_feedback(feedback: &CombatFeedback) -> Option<CombatFeedbackSummary> {
-    classify_feedback_with_pending(feedback, None)
-}
-
 fn explicit_attack_target_disqualifier(
     entity_exists: bool,
     is_creature: bool,
@@ -718,6 +714,7 @@ fn explicit_attack_target_failure_reason(
 }
 
 fn queue_auto_attack_for_mode(state: &mut GameState, mode: CombatMode, result: &mut UpdateResult) {
+    state.data.combat_runtime.arm_attack_drive();
     run_combat_drive(state, Instant::now(), mode, true, result);
 }
 
@@ -757,7 +754,7 @@ fn should_rearm_after_recoverable_feedback(
     had_attack_activity: bool,
 ) -> bool {
     had_attack_activity
-        && matches!(summary.reason, CombatFeedbackReason::ActionCancelled)
+        && summary.disposition == CombatFeedbackDisposition::RecoverableFailure
         && should_rearm_sticky_auto_attack(state)
 }
 
@@ -879,16 +876,6 @@ fn turn_heading(
 
     *last_turn_at = Some(now);
     Some(desired_heading)
-}
-
-pub fn combat_mode_label(mode: CombatMode) -> &'static str {
-    match mode {
-        CombatMode::Undef => "PEACE",
-        CombatMode::NonCombat => "🕊️ PEACE",
-        CombatMode::Melee => "🔪 MELEE",
-        CombatMode::Missile => "🏹 MISSILE",
-        CombatMode::Magic => "✨ MAGIC",
-    }
 }
 
 #[cfg(test)]
@@ -1465,6 +1452,55 @@ mod tests {
                 .commands
                 .iter()
                 .any(|command| matches!(command, ClientCommand::TargetedMissileAttack { .. }))
+        );
+    }
+
+    #[test]
+    fn recoverable_attack_done_rearms_sticky_attack_after_pending_failure() {
+        let player_guid = Guid(0x50000002);
+        let target_guid = Guid(0x60000002);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        });
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+        state
+            .data
+            .combat_runtime
+            .begin_explicit_engagement(target_guid, CombatMode::Melee);
+        state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(10.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let _ = state.handle_view_event(ClientViewEvent::ActionResult {
+            source: ActionResultSource::Wire,
+            reason: ActionResultReason::Weenie(
+                holtburger_protocol::errors::WeenieError::YouChargedTooFar,
+                None,
+            ),
+        });
+        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Ready
         );
     }
 }

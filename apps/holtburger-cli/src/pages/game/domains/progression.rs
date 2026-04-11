@@ -33,7 +33,7 @@ pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> Update
                 .commands
                 .push(ClientCommand::TrainSkill { skill, credits });
         }
-        _ => unreachable!("unsupported progression action"),
+        _ => {}
     }
 
     result

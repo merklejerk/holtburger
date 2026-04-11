@@ -35,22 +35,26 @@ fn log_busy_operation_result(
     }
 }
 
-pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
+    let mut handled = false;
 
     match event {
         ClientViewEvent::BusyStateUpdated { busy } => {
-            state.view.active_busy_operation = busy;
+            state.view.active_busy_operation = *busy;
+            handled = true;
         }
         ClientViewEvent::BusyOperationFinished {
             operation,
             result: busy_result,
         } => {
-            log_busy_operation_result(operation, &busy_result);
+            log_busy_operation_result(*operation, busy_result);
             result.request_redraw(RedrawPriority::Immediate);
+            handled = true;
         }
         ClientViewEvent::PlayerEnchantmentsUpdated { enchantments } => {
-            state.data.player_enchantments = enchantments;
+            state.data.player_enchantments = enchantments.clone();
+            handled = true;
         }
         ClientViewEvent::PlayerStatsSkillsUpdated {
             attributes,
@@ -59,44 +63,52 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             armor,
             vitae,
         } => {
-            state.data.attributes = attributes;
-            state.data.skills = skills;
-            state.data.resistances = resistances;
-            state.data.armor = armor;
-            state.data.vitae = vitae;
+            state.data.attributes = attributes.clone();
+            state.data.skills = skills.clone();
+            state.data.resistances = resistances.clone();
+            state.data.armor = *armor;
+            state.data.vitae = *vitae;
+            handled = true;
         }
         ClientViewEvent::PlayerLevelInfoUpdated { level_info } => {
-            state.data.level_info = Some(level_info);
+            state.data.level_info = Some(level_info.clone());
+            handled = true;
         }
         ClientViewEvent::PlayerVitalsUpdated { vitals } => {
-            for (vt, value) in vitals {
-                state.data.vitals.insert(vt, value);
+            for (vt, value) in vitals.iter() {
+                state.data.vitals.insert(*vt, value.clone());
             }
+            handled = true;
         }
         ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
-            state.data.player_spells = spell_ids;
+            state.data.player_spells = spell_ids.clone();
+            handled = true;
         }
         ClientViewEvent::PlayerOptionsUpdated { options } => {
-            state.data.player_options = Some(options);
+            state.data.player_options = Some(*options);
+            handled = true;
         }
         ClientViewEvent::CombatModeUpdated { mode } => {
-            if mode != CombatMode::NonCombat {
+            if *mode != CombatMode::NonCombat {
                 state.data.trade = None;
             }
-            state.data.combat_mode = mode;
-            state.data.combat_runtime.handle_mode_updated(mode);
+            state.data.combat_mode = *mode;
+            state.data.combat_runtime.handle_mode_updated(*mode);
             if matches!(
                 mode,
                 CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
             ) {
-                state.runtime.combat_automation = None;
+                state.clear_combat_drive();
             }
+            handled = true;
         }
         _ => {}
     }
 
     inventory::sync_weapon_swap_controller(state, Instant::now(), &mut result);
-    result.request_redraw(RedrawPriority::Immediate);
+    if handled {
+        result.request_redraw(RedrawPriority::Immediate);
+    }
     result
 }
 

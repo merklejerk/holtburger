@@ -23,6 +23,17 @@ pub struct ResolvedNavigationTarget {
     pub use_radius: Option<f32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CombatNavigationRequest {
+    pub target_guid: Guid,
+    pub mode: CombatMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CombatMovementSupport {
+    pub target_position: Option<WorldPosition>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct NavigationSyncInput {
     pub now: Instant,
@@ -71,9 +82,7 @@ pub struct NavigationSnapshot {
     pub player_position: Option<WorldPosition>,
     pub self_movement_kinematics: Option<SelfMovementKinematics>,
     pub run_rate_scalar: Option<f32>,
-    pub combat_target_guid: Option<Guid>,
-    pub combat_mode: CombatMode,
-    pub attack_sequence_active: bool,
+    pub combat_request: Option<CombatNavigationRequest>,
     pub tracked_target: Option<ResolvedNavigationTarget>,
 }
 
@@ -301,9 +310,7 @@ impl TuiNavigation {
     }
 
     pub fn tick(&mut self, tick: NavigationTick) -> NavigationUpdate {
-        let combat_target_guid = tick.snapshot.combat_target_guid;
-        let combat_mode = tick.snapshot.combat_mode;
-        let attack_sequence_active = tick.snapshot.attack_sequence_active;
+        let combat_request = tick.snapshot.combat_request;
         let mode_before = self.navigation_mode();
         let sync_input = self.sync_input(tick.now, tick.snapshot);
 
@@ -312,12 +319,7 @@ impl TuiNavigation {
             ActiveNavigation::Follow { .. } => self.sync_follow(&sync_input),
             ActiveNavigation::Scoot { .. } => self.sync_scoot(&sync_input),
             ActiveNavigation::Idle | ActiveNavigation::StickyMelee { .. } => {
-                self.sync_sticky_melee(
-                    combat_target_guid,
-                    combat_mode,
-                    attack_sequence_active,
-                    &sync_input,
-                );
+                self.sync_sticky_melee(combat_request, &sync_input);
                 None
             }
         };
@@ -627,9 +629,7 @@ impl TuiNavigation {
 
     fn sync_sticky_melee(
         &mut self,
-        target_guid: Option<Guid>,
-        combat_mode: CombatMode,
-        attack_sequence_active: bool,
+        combat_request: Option<CombatNavigationRequest>,
         input: &NavigationSyncInput,
     ) {
         if matches!(
@@ -639,19 +639,23 @@ impl TuiNavigation {
             return;
         }
 
-        let Some(target_guid) = target_guid else {
+        let Some(combat_request) = combat_request else {
             self.active = ActiveNavigation::Idle;
             return;
         };
 
-        if combat_mode != CombatMode::Melee || !attack_sequence_active {
+        if combat_request.mode != CombatMode::Melee {
             self.active = ActiveNavigation::Idle;
             return;
         }
 
+        let target_guid = combat_request.target_guid;
+        let stop_distance =
+            effective_arrival_distance(MELEE_ATTACK_DISTANCE, input.target_use_radius());
+
         let pursuing = self
             .distance_to_target(input)
-            .is_some_and(|distance| distance > MELEE_ATTACK_DISTANCE);
+            .is_some_and(|distance| distance > stop_distance);
 
         self.active = ActiveNavigation::StickyMelee {
             target_guid,
@@ -1421,8 +1425,10 @@ mod tests {
                 Some(target_sample(target_guid, near_target_position)),
                 Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
                 Some(4.5),
-                Some(target_guid),
-                true,
+                Some(CombatNavigationRequest {
+                    target_guid,
+                    mode: CombatMode::Melee,
+                }),
             ),
         });
 
@@ -1444,8 +1450,10 @@ mod tests {
                 Some(target_sample(target_guid, far_target_position)),
                 Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
                 Some(4.5),
-                Some(target_guid),
-                true,
+                Some(CombatNavigationRequest {
+                    target_guid,
+                    mode: CombatMode::Melee,
+                }),
             ),
         });
 
@@ -1458,6 +1466,43 @@ mod tests {
             ActiveNavigation::StickyMelee {
                 latched_target_guid: Some(guid),
                 pursuing: true,
+                ..
+            } if guid == target_guid
+        ));
+    }
+
+    #[test]
+    fn sticky_melee_uses_target_use_radius_as_the_stop_distance() {
+        let now = Instant::now();
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 180.0_f32.to_radians());
+        let target_guid = Guid(0x5000_0008);
+        let mut navigation = TuiNavigation::default();
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: sticky_snapshot(
+                Some(player_position),
+                Some(target_sample_with_use_radius(
+                    target_guid,
+                    world_position(0.8, 0.0, 0.0),
+                    1.25,
+                )),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+                Some(CombatNavigationRequest {
+                    target_guid,
+                    mode: CombatMode::Melee,
+                }),
+            ),
+        });
+
+        assert_eq!(update.drive_command, None);
+        assert!(matches!(
+            navigation.active,
+            ActiveNavigation::StickyMelee {
+                latched_target_guid: Some(guid),
+                pursuing: false,
                 ..
             } if guid == target_guid
         ));
@@ -1528,9 +1573,7 @@ mod tests {
             player_position,
             self_movement_kinematics,
             run_rate_scalar,
-            combat_target_guid: tracked_target.map(|target| target.guid),
-            combat_mode: CombatMode::NonCombat,
-            attack_sequence_active: false,
+            combat_request: None,
             tracked_target,
         }
     }
@@ -1540,16 +1583,13 @@ mod tests {
         tracked_target: Option<ResolvedNavigationTarget>,
         self_movement_kinematics: Option<SelfMovementKinematics>,
         run_rate_scalar: Option<f32>,
-        combat_target_guid: Option<Guid>,
-        attack_sequence_active: bool,
+        combat_request: Option<CombatNavigationRequest>,
     ) -> NavigationSnapshot {
         NavigationSnapshot {
             player_position,
             self_movement_kinematics,
             run_rate_scalar,
-            combat_target_guid,
-            combat_mode: CombatMode::Melee,
-            attack_sequence_active,
+            combat_request,
             tracked_target,
         }
     }
@@ -1585,6 +1625,26 @@ mod tests {
                 projection_mode: SpatialSampleMode::AuthoritativeOnly,
             },
             use_radius: None,
+        }
+    }
+
+    fn target_sample_with_use_radius(
+        guid: Guid,
+        target_pose: WorldPosition,
+        use_radius: f32,
+    ) -> ResolvedNavigationTarget {
+        ResolvedNavigationTarget {
+            guid,
+            sample: SpatialEntitySample {
+                guid,
+                authoritative_pose: target_pose,
+                projected_pose: target_pose,
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(),
+                motion_state: None,
+                projection_mode: SpatialSampleMode::AuthoritativeOnly,
+            },
+            use_radius: Some(use_radius),
         }
     }
 

@@ -582,6 +582,9 @@ pub enum AppAction {
     Follow {
         guid: Guid,
     },
+    Attack {
+        guid: Guid,
+    },
     Scoot {
         distance_m: f32,
     },
@@ -721,9 +724,18 @@ pub enum AppAction {
     DeclineTrade,
     ResetTrade,
     ExitTrade,
+    InternalAction {
+        action: AppInternalAction,
+    },
     UiAction {
         action: AppUiAction,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppInternalAction {
+    ClearActiveInteraction,
+    SetActiveInteraction { interaction: Option<Interaction> },
 }
 
 #[derive(Debug, Clone)]
@@ -742,6 +754,12 @@ impl From<Vec<AppAction>> for AppAction {
 impl From<AppUiAction> for AppAction {
     fn from(action: AppUiAction) -> Self {
         AppAction::UiAction { action }
+    }
+}
+
+impl From<AppInternalAction> for AppAction {
+    fn from(action: AppInternalAction) -> Self {
+        AppAction::InternalAction { action }
     }
 }
 

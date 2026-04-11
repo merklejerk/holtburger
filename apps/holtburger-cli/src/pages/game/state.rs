@@ -27,8 +27,8 @@ use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::state::{EventContext, TickContext};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
-    Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
+    AppAction, AppInternalAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
+    FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 

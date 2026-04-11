@@ -1,5 +1,4 @@
 use super::*;
-use super::interaction;
 use crate::pages::game::combat as combat_model;
 use holtburger_core::ActionResultReason;
 
@@ -133,12 +132,18 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        interaction::clear_active_interaction(state, &mut result);
+        super::reduce::dispatch_internal_action(
+            state,
+            AppInternalAction::ClearActiveInteraction,
+            &mut result,
+        );
     }
 
-    interaction::set_active_interaction(
+    super::reduce::dispatch_internal_action(
         state,
-        Some(Interaction::Targeting { target_guid }),
+        AppInternalAction::SetActiveInteraction {
+            interaction: Some(Interaction::Targeting { target_guid }),
+        },
         &mut result,
     );
 

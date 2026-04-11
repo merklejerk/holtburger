@@ -1,5 +1,4 @@
 use super::context;
-use super::interaction;
 use super::inventory;
 use super::*;
 use crate::pages::game::combat as combat_model;
@@ -28,7 +27,13 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 if let Some(input) = navigation_input {
                     apply_navigation_input(state, input, &mut result);
                 }
-                interaction::set_active_interaction(state, Some(interaction), &mut result);
+                super::reduce::dispatch_internal_action(
+                    state,
+                    AppInternalAction::SetActiveInteraction {
+                        interaction: Some(interaction),
+                    },
+                    &mut result,
+                );
             }
             result.request_redraw(RedrawPriority::Immediate);
         }
@@ -36,7 +41,11 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             if let Some(input) = navigation_input {
                 apply_navigation_input(state, input, &mut result);
             } else {
-                interaction::clear_active_interaction(state, &mut result);
+                super::reduce::dispatch_internal_action(
+                    state,
+                    AppInternalAction::ClearActiveInteraction,
+                    &mut result,
+                );
             }
             state.view.salvaging = None;
             result.request_redraw(RedrawPriority::Immediate);
@@ -133,7 +142,11 @@ pub(super) fn apply_navigation_interrupt(
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        interaction::set_active_interaction(state, None, result);
+        super::reduce::dispatch_internal_action(
+            state,
+            AppInternalAction::SetActiveInteraction { interaction: None },
+            result,
+        );
         result.request_redraw(RedrawPriority::Immediate);
     }
 
@@ -149,7 +162,11 @@ pub(super) fn apply_navigation_interrupt(
             state.data.combat_runtime.cancel_attack();
             state.clear_combat_drive();
         }
-        interaction::set_active_interaction(state, None, result);
+        super::reduce::dispatch_internal_action(
+            state,
+            AppInternalAction::SetActiveInteraction { interaction: None },
+            result,
+        );
         result.request_redraw(RedrawPriority::Immediate);
     }
 }
@@ -200,13 +217,13 @@ fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<
             distance_m: *distance_m,
         }),
         AppAction::CancelInteraction
-            if interaction::is_frontend_navigation_interaction(state.view.active_interaction) =>
+            if super::interaction::is_frontend_navigation_interaction(state.view.active_interaction) =>
         {
             Some(NavigationInput::Cancel)
         }
         AppAction::BeginInteraction { interaction }
-            if interaction::is_frontend_navigation_interaction(state.view.active_interaction)
-                && !interaction::is_frontend_navigation_interaction(Some(*interaction)) =>
+            if super::interaction::is_frontend_navigation_interaction(state.view.active_interaction)
+                && !super::interaction::is_frontend_navigation_interaction(Some(*interaction)) =>
         {
             Some(NavigationInput::Cancel)
         }
@@ -263,7 +280,13 @@ fn apply_navigation_update(
     match update.interaction_change {
         NavigationInteractionChange::Unchanged => {}
         NavigationInteractionChange::Set(next_interaction) => {
-            interaction::set_active_interaction(state, next_interaction, result);
+            super::reduce::dispatch_internal_action(
+                state,
+                AppInternalAction::SetActiveInteraction {
+                    interaction: next_interaction,
+                },
+                result,
+            );
             result.request_redraw(RedrawPriority::Immediate);
         }
     }

@@ -92,7 +92,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::ExitTrade => {
             result.commands.push(ClientCommand::CloseTrade);
         }
-        _ => unreachable!("unsupported trade/vendor action"),
+        _ => {}
     }
 
     result

@@ -57,7 +57,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 result.merge(res);
             }
         },
-        _ => unreachable!("unsupported combat action"),
+        _ => {}
     }
 
     result

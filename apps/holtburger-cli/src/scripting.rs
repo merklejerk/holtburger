@@ -11,10 +11,11 @@ use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptInventoryItemView, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
+    ScriptConfirmation, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
+    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptInventoryItemView,
+    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
+    ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
+    ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
@@ -230,7 +231,11 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         self.data.entities.get(&guid)?.get_instance_prop(prop)
     }
 
-    fn nearby_entities(&self) -> Vec<ScriptEntityView> {
+    fn nearby_entities(
+        &self,
+        max_distance: Option<f32>,
+        classifications: Option<Vec<ScriptEntityKind>>,
+    ) -> Vec<ScriptEntityView> {
         let player_guid = self.data.player_guid;
         let mut entities = self
             .data
@@ -240,7 +245,22 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             .filter(|guid| Some(*guid) != player_guid)
             .filter(|guid| !self.data.inventory.contains(guid))
             .filter(|guid| self.data.runtime_position_for_guid(*guid).is_some())
-            .filter_map(|guid| self.script_entity_view(guid))
+            .filter_map(|guid| {
+                let entity = self.script_entity_view(guid)?;
+
+                if max_distance.is_some_and(|max_distance| entity.distance_to_self > max_distance) {
+                    return None;
+                }
+
+                if classifications
+                    .as_ref()
+                    .is_some_and(|filters| !filters.contains(&entity.kind))
+                {
+                    return None;
+                }
+
+                Some(entity)
+            })
             .collect::<Vec<_>>();
 
         entities.sort_by(|left, right| left.distance_to_self.total_cmp(&right.distance_to_self));
@@ -588,8 +608,9 @@ mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
-        PropertyInt64, PropertyString, WorldObjectPropertyAccessorsMut,
+        ItemType, ObjectDescriptionFlag, PropertyBool, PropertyDataId, PropertyFloat,
+        PropertyInstanceId, PropertyInt, PropertyInt64, PropertyString,
+        WorldObjectPropertyAccessorsMut,
     };
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_core::client::types::BusyOperationKind;
@@ -758,6 +779,81 @@ mod tests {
             .expect("head wear slot should exist");
         assert_eq!(head_wear.equip_mask, EquipMask::HEAD_WEAR);
         assert_eq!(head_wear.item_guid, None);
+    }
+
+    #[test]
+    fn nearby_entities_filters_by_distance_and_classification() {
+        let player_guid = Guid(0x5000_0005);
+        let monster_guid = Guid(0x8000_0005);
+        let npc_guid = Guid(0x8000_0006);
+        let far_monster_guid = Guid(0x8000_0007);
+        let player_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(player_position);
+
+        let mut monster = Entity::new(
+            monster_guid,
+            "Monster".to_string(),
+            WorldPosition {
+                landblock_id: player_position.landblock_id,
+                coords: Vector3::new(3.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        monster.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        monster.set_bool_prop(PropertyBool::Attackable, true);
+        monster.flags |= ObjectDescriptionFlag::ATTACKABLE;
+        data.entities.insert(monster_guid, monster);
+
+        let mut npc = Entity::new(
+            npc_guid,
+            "NPC".to_string(),
+            WorldPosition {
+                landblock_id: player_position.landblock_id,
+                coords: Vector3::new(4.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        npc.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        data.entities.insert(npc_guid, npc);
+
+        let mut far_monster = Entity::new(
+            far_monster_guid,
+            "Far Monster".to_string(),
+            WorldPosition {
+                landblock_id: player_position.landblock_id,
+                coords: Vector3::new(20.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+        far_monster.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        far_monster.set_bool_prop(PropertyBool::Attackable, true);
+        far_monster.flags |= ObjectDescriptionFlag::ATTACKABLE;
+        data.entities.insert(far_monster_guid, far_monster);
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let nearby_monsters = script_view.nearby_entities(
+            Some(10.0),
+            Some(vec![ScriptEntityKind::Monster]),
+        );
+        assert_eq!(nearby_monsters.len(), 1);
+        assert_eq!(nearby_monsters[0].guid, monster_guid);
+        assert_eq!(nearby_monsters[0].kind, ScriptEntityKind::Monster);
+
+        let nearby_npcs = script_view.nearby_entities(None, Some(vec![ScriptEntityKind::Npc]));
+        assert_eq!(nearby_npcs.len(), 1);
+        assert_eq!(nearby_npcs[0].guid, npc_guid);
+        assert_eq!(nearby_npcs[0].kind, ScriptEntityKind::Npc);
     }
 
     #[test]

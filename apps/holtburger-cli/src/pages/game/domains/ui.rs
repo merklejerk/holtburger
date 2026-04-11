@@ -1,4 +1,4 @@
-use super::context;
+use super::object_interaction;
 use super::logopolis;
 use super::*;
 
@@ -93,7 +93,7 @@ pub(super) fn apply_context_view_change(state: &mut GameState, view: ContextView
     } else {
         logopolis::deactivate(state);
     }
-    context::refresh_context_buffer(state);
+    object_interaction::refresh_context_buffer(state);
     result.request_redraw(RedrawPriority::Immediate);
     result
 }

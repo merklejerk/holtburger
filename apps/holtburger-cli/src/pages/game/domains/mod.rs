@@ -2,7 +2,7 @@ use super::*;
 
 mod chat;
 pub(super) mod combat;
-pub(super) mod context;
+pub(super) mod object_interaction;
 mod entity;
 pub(super) mod interaction;
 mod inventory;
@@ -19,7 +19,7 @@ pub(super) mod ui;
 
 pub(crate) use combat::toggled_combat_mode;
 #[allow(unused_imports)]
-pub(crate) use context::{
+pub(crate) use object_interaction::{
     context_buffer, context_buffer_len, live_context_buffer, refresh_context_buffer,
 };
 pub(crate) use logopolis::{logopolis_state, logopolis_state_mut};

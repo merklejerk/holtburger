@@ -275,7 +275,7 @@ impl GameState {
                         -0.1
                     };
 
-                    let current_heading = self.data.runtime_heading();
+                    let current_heading = self.data.runtime_heading().unwrap_or(0.0);
                     let mut new_heading = current_heading + delta;
                     let two_pi = 2.0 * std::f32::consts::PI;
                     new_heading = (new_heading % two_pi + two_pi) % two_pi;

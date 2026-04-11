@@ -471,11 +471,8 @@ impl GameData {
         })
     }
 
-    pub fn runtime_heading(&self) -> f32 {
-        self.runtime_player_position()
-            .unwrap_or_default()
-            .rotation
-            .to_heading()
+    pub fn runtime_heading(&self) -> Option<f32> {
+        self.runtime_player_position().map(|position| position.rotation.to_heading())
     }
 
     pub fn track_container_opened(&mut self, guid: Guid) {

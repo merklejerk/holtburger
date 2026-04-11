@@ -1,16 +1,16 @@
 use super::*;
 
-pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+pub(crate) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
     let now = Instant::now();
-    state.data.runtime_body_cache.apply_view_event(&event, now);
-    result.merge(chat::reduce_view_event(state, event.clone()));
-    result.merge(combat::reduce_view_event(state, event.clone()));
-    result.merge(lifecycle::reduce_view_event(state, event.clone()));
-    result.merge(player::reduce_view_event(state, event.clone()));
-    result.merge(entity::reduce_view_event(state, event.clone(), now));
-    result.merge(navigation::reduce_view_event(state, event.clone()));
-    result.merge(party::reduce_view_event(state, event.clone()));
+    state.data.runtime_body_cache.apply_view_event(event, now);
+    result.merge(chat::reduce_view_event(state, event));
+    result.merge(combat::reduce_view_event(state, event));
+    result.merge(lifecycle::reduce_view_event(state, event));
+    result.merge(player::reduce_view_event(state, event));
+    result.merge(entity::reduce_view_event(state, event, now));
+    result.merge(navigation::reduce_view_event(state, event));
+    result.merge(party::reduce_view_event(state, event));
     result.merge(trade_vendor::reduce_view_event(state, event));
 
     result

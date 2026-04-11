@@ -63,27 +63,26 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     result
 }
 
-pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match event {
         ClientViewEvent::CombatFeedback(feedback) => {
-            result.merge(combat_model::handle_combat_feedback(state, &feedback));
-            state.chat.handle_event(
-                ClientViewEvent::CombatFeedback(feedback),
-                state.data.character_name.as_deref(),
-            );
+            result.merge(combat_model::handle_combat_feedback(state, feedback));
+            state
+                .chat
+                .handle_event(event, state.data.character_name.as_deref());
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::ActionResult {
             reason: ActionResultReason::Weenie(_, _),
             ..
         } if combat_model::combat_feedback_context_active(state) => {
-            if let ClientViewEvent::ActionResult { reason, .. } = &event {
+            if let ClientViewEvent::ActionResult { reason, .. } = event {
                 state.data.combat_runtime.note_action_result(reason);
             }
         }
-        ClientViewEvent::ServerMessage { ref message, .. }
+        ClientViewEvent::ServerMessage { message, .. }
             if combat_model::combat_feedback_context_active(state) =>
         {
             state.data.combat_runtime.note_server_message(message);

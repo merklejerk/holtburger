@@ -34,7 +34,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.unrun_script_command(&mut result);
             result
         }
-        _ => unreachable!("unsupported script action"),
+        _ => UpdateResult::new(),
     }
 }
 
@@ -223,9 +223,7 @@ impl GameState {
                 ScriptClientIntent::Approach { guid } => Ok(AppAction::Approach { guid }),
                 ScriptClientIntent::Follow { guid } => Ok(AppAction::Follow { guid }),
                 ScriptClientIntent::CancelInteraction => Ok(AppAction::CancelInteraction),
-                ScriptClientIntent::Attack { guid } => anyhow::bail!(
-                    "script attack intent is not wired in the TUI yet; target first and let existing combat policy drive attacks (guid {guid})"
-                ),
+                ScriptClientIntent::Attack { guid } => Ok(AppAction::Attack { guid }),
             },
         }
     }

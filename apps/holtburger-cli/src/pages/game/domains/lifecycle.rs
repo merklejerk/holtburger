@@ -1,11 +1,11 @@
 use super::*;
 
-pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match event {
         ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
-            state.view.active_confirmation = confirmation;
+            state.view.active_confirmation = confirmation.clone();
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::StatusUpdate {
@@ -21,11 +21,10 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                     .begin_quiet_period(Instant::now());
             }
         }
-        ClientViewEvent::BootAccount(reason) => {
-            state.chat.handle_event(
-                ClientViewEvent::BootAccount(reason),
-                state.data.character_name.as_deref(),
-            );
+        ClientViewEvent::BootAccount(..) => {
+            state
+                .chat
+                .handle_event(event, state.data.character_name.as_deref());
         }
         ClientViewEvent::PingResponse
         | ClientViewEvent::NetPulse { .. }

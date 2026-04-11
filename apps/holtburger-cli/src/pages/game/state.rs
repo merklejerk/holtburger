@@ -1,16 +1,9 @@
 use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
-use holtburger_core::client::controllers::{
-    CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
-    DesiredAttackProfile, TargetedAttackRequest,
-};
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::{
-    ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
-};
-use holtburger_protocol::errors::WeenieError;
+use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_scripting::ScriptHost;
@@ -25,16 +18,17 @@ use crate::navigation::{
     NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
 };
 use crate::pages::game::GameData;
+use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
-use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
+use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
 use crate::state::{EventContext, TickContext};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
-    Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
+    AppAction, AppInternalAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
+    FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -125,19 +119,21 @@ impl GameState {
         ctx: &EventContext,
     ) -> UpdateResult {
         let workflow_before = self.script_workflow_projection();
-        let script_event = event.clone();
-        let mut result = domains::reduce_view_event(self, event);
+        let mut result = domains::reduce_view_event(self, &event);
         self.sync_script_host_for_view_event(
             ctx.server_time,
-            &script_event,
+            &event,
             &workflow_before,
             &mut result,
         );
+        self.drain_internal_actions(&mut result);
         result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
-        domains::reduce_action(self, action)
+        let mut result = domains::reduce_action(self, action)?;
+        self.drain_internal_actions(&mut result);
+        Some(result)
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
@@ -147,7 +143,73 @@ impl GameState {
     pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         let mut result = domains::reduce_tick(self, elapsed);
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
+        self.drain_internal_actions(&mut result);
         result
+    }
+
+    pub(crate) fn clear_combat_drive(&mut self) {
+        self.runtime.combat_drive = None;
+    }
+
+    pub(crate) fn handle_combat_drive(
+        &mut self,
+        input: CombatDriveInput,
+    ) -> Option<CombatDriveEffect> {
+        self.runtime
+            .combat_drive
+            .get_or_insert_with(CombatDriveRuntime::default)
+            .handle(&input)
+    }
+
+    pub(crate) fn combat_target_position_for_drive(
+        &self,
+        target_guid: Guid,
+    ) -> Option<WorldPosition> {
+        self.runtime.navigation.automation_target_position(
+            self.data.runtime_player_position(),
+            self.data.runtime_position_for_guid(target_guid),
+        )
+    }
+
+    fn drain_internal_actions(&mut self, result: &mut UpdateResult) {
+        let mut pending_internal_actions = std::collections::VecDeque::new();
+        let mut retained_actions = Vec::new();
+
+        for action in result.actions.drain(..) {
+            match action {
+                AppAction::InternalAction { action } => pending_internal_actions.push_back(action),
+                other => retained_actions.push(other),
+            }
+        }
+
+        while let Some(internal_action) = pending_internal_actions.pop_front() {
+            if let Some(mut internal_result) = domains::reduce_action(
+                self,
+                AppAction::InternalAction {
+                    action: internal_action,
+                },
+            ) {
+                let internal_redraw = internal_result.effective_redraw_priority();
+                result.commands.extend(internal_result.commands);
+                result.request_redraw(internal_redraw);
+
+                let mut nested_internal_actions = Vec::new();
+                for action in internal_result.actions.drain(..) {
+                    match action {
+                        AppAction::InternalAction { action } => {
+                            nested_internal_actions.push(action)
+                        }
+                        other => retained_actions.push(other),
+                    }
+                }
+
+                for action in nested_internal_actions.into_iter().rev() {
+                    pending_internal_actions.push_front(action);
+                }
+            }
+        }
+
+        result.actions = retained_actions;
     }
 }
 
@@ -180,8 +242,8 @@ struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,
-    combat_automation: Option<CombatAutomationController>,
-    weapon_swap: WeaponSwapController,
+    combat_drive: Option<CombatDriveRuntime>,
+    weapon_swap: WeaponSwapState,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,
 }

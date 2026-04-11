@@ -327,7 +327,7 @@ mod tests {
         TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, busy_title, combat_controls_line,
         format_target_line, format_world_info, health_bar_spans, render_dynamic_pane,
     };
-    use crate::pages::game::combat::{AttackActivity, combat_mode_label};
+    use crate::pages::game::combat::{AttackActivity, CombatIssueState, combat_mode_label};
     use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
     use holtburger_common::Guid;
@@ -367,7 +367,7 @@ mod tests {
             "World".to_string(),
         );
         data.combat_mode = CombatMode::Missile;
-        data.combat_runtime.attack_queued = true;
+        data.combat_runtime.issue_state = CombatIssueState::Ready;
         data.combat_controls.attack_height = AttackHeight::High;
         let view = ViewState {
             active_interaction: Some(Interaction::Targeting {
@@ -410,14 +410,14 @@ mod tests {
     }
 
     #[test]
-    fn combat_controls_show_active_indicator_while_attack_sequence_is_active() {
+    fn combat_controls_show_active_indicator_while_attack_is_in_flight() {
         let mut data = GameData::new(
             Default::default(),
             "Player".to_string(),
             "World".to_string(),
         );
         data.combat_mode = CombatMode::Melee;
-        data.combat_runtime.attack_sequence_active = true;
+        data.combat_runtime.issue_state = CombatIssueState::InFlight;
         let view = ViewState {
             active_interaction: Some(Interaction::Targeting {
                 target_guid: Default::default(),
@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn targeting_without_queued_attack_shows_no_indicator() {
+    fn targeting_without_ready_issue_state_shows_no_indicator() {
         let mut data = GameData::new(
             Default::default(),
             "Player".to_string(),

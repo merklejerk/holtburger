@@ -1,5 +1,4 @@
-use super::context;
-use super::navigation;
+use super::object_interaction;
 use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -29,7 +28,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     .retain(|queued_guid| *queued_guid != guid);
 
                 if session.queued_items.is_empty() {
-                    navigation::clear_active_interaction(state, &mut result);
+                    result.actions.push(AppAction::InternalAction {
+                        action: AppInternalAction::ClearActiveInteraction,
+                    });
                     state.view.salvaging = None;
                 }
                 result.request_redraw(RedrawPriority::Immediate);
@@ -45,7 +46,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     items: item_guids,
                 });
             }
-            navigation::clear_active_interaction(state, &mut result);
+            result.actions.push(AppAction::InternalAction {
+                action: AppInternalAction::ClearActiveInteraction,
+            });
             state.view.salvaging = None;
             result.request_redraw(RedrawPriority::Immediate);
         }
@@ -92,7 +95,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 container,
                 placement: 0,
             });
-            navigation::clear_active_interaction(state, &mut result);
+            result.actions.push(AppAction::InternalAction {
+                action: AppInternalAction::ClearActiveInteraction,
+            });
         }
         AppAction::StackItems {
             source,
@@ -157,7 +162,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 state.view.active_interaction = None;
             }
         }
-        _ => unreachable!("unsupported inventory action"),
+        _ => {}
     }
 
     result
@@ -272,13 +277,15 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
             if target_guid == guid
     ) {
         state.view.context_view = ContextView::Default;
-        context::refresh_context_buffer(state);
+        object_interaction::refresh_context_buffer(state);
     }
     if matches!(
         state.view.active_interaction,
         Some(Interaction::Targeting { target_guid }) if target_guid == guid
     ) {
-        navigation::clear_active_interaction(state, &mut result);
+        result.actions.push(AppAction::InternalAction {
+            action: AppInternalAction::ClearActiveInteraction,
+        });
     }
     if let Some(session) = state.view.salvaging.as_mut() {
         session
@@ -287,7 +294,9 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
         if session.ust_guid == guid {
             state.view.salvaging = None;
             if state.view.active_interaction == Some(Interaction::Salvaging) {
-                navigation::clear_active_interaction(state, &mut result);
+                result.actions.push(AppAction::InternalAction {
+                    action: AppInternalAction::ClearActiveInteraction,
+                });
             }
         }
     }
@@ -299,7 +308,7 @@ pub(super) fn handle_entity_identified(state: &mut GameState, entity: &Entity) {
     let guid = entity.guid;
     state.data.entities.insert(guid, entity.clone());
     state.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
-    context::refresh_context_buffer(state);
+    object_interaction::refresh_context_buffer(state);
 }
 
 pub(super) fn refresh_entity_context_if_visible(
@@ -313,7 +322,7 @@ pub(super) fn refresh_entity_context_if_visible(
             | ContextView::Book(target_guid)
             if target_guid == guid
     ) {
-        context::refresh_context_buffer(state);
+        object_interaction::refresh_context_buffer(state);
         result.request_redraw(RedrawPriority::Immediate);
     }
 }
@@ -325,7 +334,7 @@ pub(super) fn refresh_vendor_item_context_if_visible(state: &mut GameState, guid
             | ContextView::Debug(InspectTarget::VendorItem(target_guid))
             if target_guid == guid
     ) {
-        context::refresh_context_buffer(state);
+        object_interaction::refresh_context_buffer(state);
     }
 }
 
@@ -374,15 +383,8 @@ fn handle_equip_request(
 }
 
 fn drive_weapon_swap(state: &mut GameState, input: WeaponSwapInput, result: &mut UpdateResult) {
-    let update = state.runtime.weapon_swap.handle(&input);
-    for effect in update.effects {
-        apply_weapon_swap_effect(result, effect);
-    }
-}
-
-fn apply_weapon_swap_effect(result: &mut UpdateResult, effect: WeaponSwapEffect) {
-    match effect {
-        WeaponSwapEffect::Command(command) => result.commands.push(command),
+    for command in state.runtime.weapon_swap.advance(input) {
+        result.commands.push(command);
     }
 }
 

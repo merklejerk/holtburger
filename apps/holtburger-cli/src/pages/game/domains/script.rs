@@ -7,8 +7,10 @@ use crate::scripting::{
 };
 use crate::types::{InspectTarget, Interaction};
 use anyhow::Result;
+use holtburger_core::client::types::TargetSlot;
 use holtburger_scripting::{
-    ScriptClientIntent, ScriptEvent, ScriptHost, ScriptIntent, ScriptLifecycleEvent,
+    ScriptClientIntent, ScriptEquipmentSlotKind, ScriptEvent, ScriptHost, ScriptIntent,
+    ScriptLifecycleEvent,
 };
 use std::time::Duration;
 
@@ -214,6 +216,11 @@ impl GameState {
             }),
             ScriptIntent::Drop { item } => Ok(AppAction::Drop { guid: item }),
             ScriptIntent::Pickup { item, container } => Ok(AppAction::PickUp { item, container }),
+            ScriptIntent::Equip { guid, slot } => Ok(AppAction::EquipInSlot {
+                guid,
+                slot: script_equipment_slot_to_target_slot(slot),
+            }),
+            ScriptIntent::Unequip { guid } => Ok(AppAction::Unequip { guid }),
             ScriptIntent::CastUntargetedSpell { spell_id } => Ok(AppAction::CastSpell {
                 spell_id,
                 target: None,
@@ -397,13 +404,19 @@ fn dispatch_script_event_to_host(
     GameState::drain_script_host_outputs(view.view, outputs, result);
 }
 
+fn script_equipment_slot_to_target_slot(slot: ScriptEquipmentSlotKind) -> TargetSlot {
+    TargetSlot::EquipMask(slot.equip_mask())
+}
+
 #[cfg(test)]
 mod tests {
     use super::GameState;
+    use super::ScriptEquipmentSlotKind;
     use super::ScriptIntent;
     use super::ViewState;
     use crate::types::{AppAction, InspectTarget};
     use holtburger_common::Guid;
+    use holtburger_core::client::types::TargetSlot;
 
     #[test]
     fn compile_script_intent_maps_new_item_actions() {
@@ -512,6 +525,26 @@ mod tests {
             GameState::compile_script_intent(&view, ScriptIntent::ExitTrade)
                 .expect("exit trade should compile"),
             AppAction::ExitTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Equip {
+                    guid: Guid(12),
+                    slot: ScriptEquipmentSlotKind::ChestWear,
+                },
+            )
+                .expect("equip should compile"),
+            AppAction::EquipInSlot { guid, slot }
+                if guid == Guid(12)
+                    && matches!(slot, TargetSlot::EquipMask(mask) if mask == holtburger_common::properties::EquipMask::CHEST_WEAR)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::Unequip { guid: Guid(13) })
+                .expect("unequip should compile"),
+            AppAction::Unequip { guid } if guid == Guid(13)
         ));
 
         assert!(matches!(

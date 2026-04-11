@@ -13,8 +13,9 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptClientIntent, ScriptClientView, ScriptEntityView, ScriptEvent, ScriptIntent,
-    ScriptLogLevel, ScriptSelfView, ScriptSource,
+    ScriptClientIntent, ScriptClientView, ScriptEntityView, ScriptEquipmentSlotKind,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel, ScriptSelfView,
+    ScriptSource,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -34,6 +35,7 @@ struct ScriptClientViewPtr {
     entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
     nearby_entities: unsafe fn(*const ()) -> Vec<ScriptEntityView>,
+    get_equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
 }
 
 impl ScriptClientViewPtr {
@@ -102,6 +104,12 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).nearby_entities() }
         }
 
+        unsafe fn get_equipment<T: ScriptClientView>(
+            data: *const (),
+        ) -> Vec<ScriptEquipmentSlotView> {
+            unsafe { (&*data.cast::<T>()).get_equipment() }
+        }
+
         Self {
             data: (view as *const T).cast(),
             self_entity: self_entity::<T>,
@@ -113,6 +121,7 @@ impl ScriptClientViewPtr {
             entity_data_prop: entity_data_prop::<T>,
             entity_instance_prop: entity_instance_prop::<T>,
             nearby_entities: nearby_entities::<T>,
+            get_equipment: get_equipment::<T>,
         }
     }
 
@@ -151,6 +160,10 @@ impl ScriptClientViewPtr {
     unsafe fn nearby_entities(self) -> Vec<ScriptEntityView> {
         unsafe { (self.nearby_entities)(self.data) }
     }
+
+    unsafe fn get_equipment(self) -> Vec<ScriptEquipmentSlotView> {
+        unsafe { (self.get_equipment)(self.data) }
+    }
 }
 
 const BOOTSTRAP_JS: &str = r#"
@@ -169,6 +182,23 @@ globalThis.Holtburger = Object.freeze({
   nearbyEntities() {
     return Deno.core.ops.op_hb_nearby_entities();
   },
+    equipment() {
+        return new Map(
+            Deno.core.ops.op_hb_equipment().map(({ slot, equip_mask, item_guid }) => [
+                slot,
+                {
+                    equipMask: equip_mask,
+                    itemGuid: item_guid,
+                },
+            ]),
+        );
+    },
+    equip(guid, slot) {
+        Deno.core.ops.op_hb_equip(Number(guid) >>> 0, String(slot));
+    },
+    unequip(guid) {
+        Deno.core.ops.op_hb_unequip(Number(guid) >>> 0);
+    },
     entityBoolProp(guid, prop) {
         return Deno.core.ops.op_hb_entity_bool_prop(Number(guid) >>> 0, Number(prop) >>> 0);
     },
@@ -277,6 +307,9 @@ deno_core::extension!(
         op_hb_log,
         op_hb_say,
         op_hb_emote,
+        op_hb_equipment,
+        op_hb_equip,
+        op_hb_unequip,
         op_hb_open_trade,
         op_hb_add_to_trade,
         op_hb_accept_trade,
@@ -358,6 +391,49 @@ fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
 fn op_hb_nearby_entities(state: &mut OpState) -> Vec<ScriptEntityView> {
     with_current_script_client_view(state, |view| unsafe { view.nearby_entities() })
         .unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_equipment(state: &mut OpState) -> Vec<ScriptEquipmentSlotView> {
+    with_current_script_client_view(state, |view| unsafe { view.get_equipment() })
+        .unwrap_or_default()
+}
+
+#[op2(fast)]
+fn op_hb_equip(state: &mut OpState, guid: u32, #[string] slot: String) {
+    let slot = match parse_script_equipment_slot_kind(&slot) {
+        Some(slot) => slot,
+        None => {
+            state
+                .borrow::<HostRuntimeState>()
+                .outputs
+                .borrow_mut()
+                .push(ScriptIntent::Log {
+                    level: ScriptLogLevel::Error,
+                    message: format!("invalid equipment slot for equip intent: {slot}"),
+                });
+            return;
+        }
+    };
+
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Equip {
+            guid: Guid(guid),
+            slot,
+        });
+}
+
+#[op2(fast)]
+fn op_hb_unequip(state: &mut OpState, guid: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Unequip { guid: Guid(guid) });
 }
 
 #[op2]
@@ -645,6 +721,43 @@ fn parse_script_log_level(level: &str) -> ScriptLogLevel {
     }
 }
 
+fn parse_script_equipment_slot_kind(slot: &str) -> Option<ScriptEquipmentSlotKind> {
+    match slot.trim().to_ascii_lowercase().as_str() {
+        "head_wear" => Some(ScriptEquipmentSlotKind::HeadWear),
+        "chest_wear" => Some(ScriptEquipmentSlotKind::ChestWear),
+        "abdomen_wear" => Some(ScriptEquipmentSlotKind::AbdomenWear),
+        "upper_arm_wear" => Some(ScriptEquipmentSlotKind::UpperArmWear),
+        "lower_arm_wear" => Some(ScriptEquipmentSlotKind::LowerArmWear),
+        "hand_wear" => Some(ScriptEquipmentSlotKind::HandWear),
+        "upper_leg_wear" => Some(ScriptEquipmentSlotKind::UpperLegWear),
+        "lower_leg_wear" => Some(ScriptEquipmentSlotKind::LowerLegWear),
+        "foot_wear" => Some(ScriptEquipmentSlotKind::FootWear),
+        "chest_armor" => Some(ScriptEquipmentSlotKind::ChestArmor),
+        "abdomen_armor" => Some(ScriptEquipmentSlotKind::AbdomenArmor),
+        "upper_arm_armor" => Some(ScriptEquipmentSlotKind::UpperArmArmor),
+        "lower_arm_armor" => Some(ScriptEquipmentSlotKind::LowerArmArmor),
+        "upper_leg_armor" => Some(ScriptEquipmentSlotKind::UpperLegArmor),
+        "lower_leg_armor" => Some(ScriptEquipmentSlotKind::LowerLegArmor),
+        "neck_wear" => Some(ScriptEquipmentSlotKind::NeckWear),
+        "left_wrist" => Some(ScriptEquipmentSlotKind::LeftWrist),
+        "right_wrist" => Some(ScriptEquipmentSlotKind::RightWrist),
+        "left_finger" => Some(ScriptEquipmentSlotKind::LeftFinger),
+        "right_finger" => Some(ScriptEquipmentSlotKind::RightFinger),
+        "melee_weapon" => Some(ScriptEquipmentSlotKind::MeleeWeapon),
+        "shield" => Some(ScriptEquipmentSlotKind::Shield),
+        "missile_weapon" => Some(ScriptEquipmentSlotKind::MissileWeapon),
+        "missile_ammo" => Some(ScriptEquipmentSlotKind::MissileAmmo),
+        "caster" => Some(ScriptEquipmentSlotKind::Caster),
+        "two_handed" => Some(ScriptEquipmentSlotKind::TwoHanded),
+        "trinket_one" => Some(ScriptEquipmentSlotKind::TrinketOne),
+        "cloak" => Some(ScriptEquipmentSlotKind::Cloak),
+        "sigil_one" => Some(ScriptEquipmentSlotKind::SigilOne),
+        "sigil_two" => Some(ScriptEquipmentSlotKind::SigilTwo),
+        "sigil_three" => Some(ScriptEquipmentSlotKind::SigilThree),
+        _ => None,
+    }
+}
+
 fn ensure_v8_platform_initialized() {
     V8_PLATFORM_INIT.call_once(|| {
         JsRuntime::init_platform(None, false);
@@ -766,7 +879,97 @@ where
 #[cfg(test)]
 mod tests {
     use super::build_dispatch_source;
-    use crate::{ScriptChatChannelKind, ScriptChatEvent, ScriptEvent};
+    use crate::{
+        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptEntityView,
+        ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
+        ScriptSelfView, ScriptSource,
+    };
+    use holtburger_common::Guid;
+    use holtburger_common::properties::{
+        EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
+        PropertyInt64, PropertyString,
+    };
+
+    #[derive(Default)]
+    struct TestView;
+
+    impl crate::ScriptClientView for TestView {
+        fn self_entity(&self) -> Option<ScriptSelfView> {
+            None
+        }
+
+        fn target_entity(&self) -> Option<ScriptEntityView> {
+            None
+        }
+
+        fn entity(&self, _guid: Guid) -> Option<ScriptEntityView> {
+            None
+        }
+
+        fn entity_bool_prop(&self, _guid: Guid, _prop: PropertyBool) -> Option<bool> {
+            None
+        }
+
+        fn entity_int_prop(&self, _guid: Guid, _prop: PropertyInt) -> Option<i32> {
+            None
+        }
+
+        fn entity_int64_prop(&self, _guid: Guid, _prop: PropertyInt64) -> Option<i64> {
+            None
+        }
+
+        fn entity_float_prop(&self, _guid: Guid, _prop: PropertyFloat) -> Option<f64> {
+            None
+        }
+
+        fn entity_string_prop(&self, _guid: Guid, _prop: PropertyString) -> Option<String> {
+            None
+        }
+
+        fn entity_data_prop(&self, _guid: Guid, _prop: PropertyDataId) -> Option<Guid> {
+            None
+        }
+
+        fn entity_instance_prop(&self, _guid: Guid, _prop: PropertyInstanceId) -> Option<Guid> {
+            None
+        }
+
+        fn nearby_entities(&self) -> Vec<ScriptEntityView> {
+            Vec::new()
+        }
+
+        fn inventory_items(&self) -> Vec<crate::ScriptInventoryItemView> {
+            Vec::new()
+        }
+
+        fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView> {
+            vec![ScriptEquipmentSlotView {
+                slot: ScriptEquipmentSlotKind::HeadWear,
+                equip_mask: EquipMask::HEAD_WEAR,
+                item_guid: Some(Guid(42)),
+            }]
+        }
+
+        fn fellowship(&self) -> Option<crate::ScriptPartyView> {
+            None
+        }
+
+        fn active_spells(&self) -> Vec<crate::ScriptSpellEffectView> {
+            Vec::new()
+        }
+
+        fn server_time(&self) -> Option<f64> {
+            None
+        }
+
+        fn pending_confirmation(&self) -> Option<crate::ScriptConfirmation> {
+            None
+        }
+
+        fn busy_operation(&self) -> ScriptBusyOperation {
+            ScriptBusyOperation::None
+        }
+    }
 
     #[test]
     fn dispatch_source_escapes_javascript_line_separators() {
@@ -783,5 +986,32 @@ mod tests {
         assert!(source.contains("\\u2028"));
         assert!(source.contains("\\u2029"));
         assert!(source.contains("JSON.parse("));
+    }
+
+    #[test]
+    fn equipment_helper_returns_js_map() {
+        let source = ScriptSource::new(
+            "equipment-map-test",
+            r#"
+                const equipment = Holtburger.equipment();
+                Holtburger.log(
+                    "info",
+                    JSON.stringify([
+                        equipment instanceof Map,
+                        equipment.has("head_wear"),
+                        equipment.get("head_wear").itemGuid,
+                    ]),
+                );
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[true,true,42]"
+        ));
     }
 }

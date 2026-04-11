@@ -4,15 +4,17 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use holtburger_common::Guid;
-use holtburger_common::properties::{WorldObjectExt as _, WorldObjectPropertyAccessors as _};
+use holtburger_common::properties::{
+    EquipMask, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
+};
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptEntityProfile, ScriptEntityView, ScriptEvent,
-    ScriptInventoryItemView, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
-    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource,
-    ScriptSpellEffectView, ScriptWorkflowEvent,
+    ScriptConfirmation, ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptInventoryItemView, ScriptLocalConfirmation,
+    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
+    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
@@ -90,6 +92,15 @@ impl TuiScriptClientView<'_> {
             distance_to_self,
             motion_command,
         })
+    }
+
+    fn equipped_item_for_mask(&self, equip_mask: EquipMask) -> Option<Guid> {
+        self.data
+            .equipment
+            .iter()
+            .filter(|(_, equipped_mask)| equipped_mask.intersects(equip_mask))
+            .min_by_key(|(guid, _)| guid.0)
+            .map(|(guid, _)| *guid)
     }
 }
 
@@ -257,6 +268,21 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
         items.sort_by_key(|item| item.guid.0);
         items
+    }
+
+    fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView> {
+        ScriptEquipmentSlotKind::ALL
+            .iter()
+            .copied()
+            .map(|slot| {
+                let equip_mask = slot.equip_mask();
+                ScriptEquipmentSlotView {
+                    slot,
+                    equip_mask,
+                    item_guid: self.equipped_item_for_mask(equip_mask),
+                }
+            })
+            .collect()
     }
 
     fn fellowship(&self) -> Option<ScriptPartyView> {
@@ -688,6 +714,50 @@ mod tests {
         assert_eq!(self_view.busy_operation, ScriptBusyOperation::Buy);
         assert!((self_view.heading - heading).abs() < 1e-6);
         assert_eq!(self_view.position, player_position);
+    }
+
+    #[test]
+    fn equipment_projection_exposes_slot_masks_and_guid() {
+        let player_guid = Guid(0x5000_0004);
+        let equipment_guid = Guid(0x8000_0004);
+
+        let data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        let mut data = data;
+        data.equipment.insert(
+            equipment_guid,
+            EquipMask::CHEST_WEAR | EquipMask::UPPER_ARM_WEAR,
+        );
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let equipment = script_view.get_equipment();
+
+        assert_eq!(equipment.len(), ScriptEquipmentSlotKind::ALL.len());
+
+        let chest_wear = equipment
+            .iter()
+            .find(|slot| slot.slot == ScriptEquipmentSlotKind::ChestWear)
+            .expect("chest wear slot should exist");
+        assert_eq!(chest_wear.equip_mask, EquipMask::CHEST_WEAR);
+        assert_eq!(chest_wear.item_guid, Some(equipment_guid));
+
+        let upper_arm_wear = equipment
+            .iter()
+            .find(|slot| slot.slot == ScriptEquipmentSlotKind::UpperArmWear)
+            .expect("upper arm wear slot should exist");
+        assert_eq!(upper_arm_wear.equip_mask, EquipMask::UPPER_ARM_WEAR);
+        assert_eq!(upper_arm_wear.item_guid, Some(equipment_guid));
+
+        let head_wear = equipment
+            .iter()
+            .find(|slot| slot.slot == ScriptEquipmentSlotKind::HeadWear)
+            .expect("head wear slot should exist");
+        assert_eq!(head_wear.equip_mask, EquipMask::HEAD_WEAR);
+        assert_eq!(head_wear.item_guid, None);
     }
 
     #[test]

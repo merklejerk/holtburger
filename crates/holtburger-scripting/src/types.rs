@@ -1,8 +1,8 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
-    PropertyString,
+    EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
+    PropertyInt64, PropertyString,
 };
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
@@ -42,6 +42,7 @@ pub trait ScriptClientView {
     fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
     fn nearby_entities(&self) -> Vec<ScriptEntityView>;
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
+    fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
@@ -192,6 +193,121 @@ pub struct ScriptInventoryItemView {
     pub stack_size: Option<u32>,
     pub container_guid: Option<Guid>,
     pub equipped: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptEquipmentSlotKind {
+    HeadWear,
+    ChestWear,
+    AbdomenWear,
+    UpperArmWear,
+    LowerArmWear,
+    HandWear,
+    UpperLegWear,
+    LowerLegWear,
+    FootWear,
+    ChestArmor,
+    AbdomenArmor,
+    UpperArmArmor,
+    LowerArmArmor,
+    UpperLegArmor,
+    LowerLegArmor,
+    NeckWear,
+    LeftWrist,
+    RightWrist,
+    LeftFinger,
+    RightFinger,
+    MeleeWeapon,
+    Shield,
+    MissileWeapon,
+    MissileAmmo,
+    Caster,
+    TwoHanded,
+    TrinketOne,
+    Cloak,
+    SigilOne,
+    SigilTwo,
+    SigilThree,
+}
+
+impl ScriptEquipmentSlotKind {
+    pub const ALL: [Self; 31] = [
+        Self::HeadWear,
+        Self::ChestWear,
+        Self::AbdomenWear,
+        Self::UpperArmWear,
+        Self::LowerArmWear,
+        Self::HandWear,
+        Self::UpperLegWear,
+        Self::LowerLegWear,
+        Self::FootWear,
+        Self::ChestArmor,
+        Self::AbdomenArmor,
+        Self::UpperArmArmor,
+        Self::LowerArmArmor,
+        Self::UpperLegArmor,
+        Self::LowerLegArmor,
+        Self::NeckWear,
+        Self::LeftWrist,
+        Self::RightWrist,
+        Self::LeftFinger,
+        Self::RightFinger,
+        Self::MeleeWeapon,
+        Self::Shield,
+        Self::MissileWeapon,
+        Self::MissileAmmo,
+        Self::Caster,
+        Self::TwoHanded,
+        Self::TrinketOne,
+        Self::Cloak,
+        Self::SigilOne,
+        Self::SigilTwo,
+        Self::SigilThree,
+    ];
+
+    pub const fn equip_mask(self) -> EquipMask {
+        match self {
+            Self::HeadWear => EquipMask::HEAD_WEAR,
+            Self::ChestWear => EquipMask::CHEST_WEAR,
+            Self::AbdomenWear => EquipMask::ABDOMEN_WEAR,
+            Self::UpperArmWear => EquipMask::UPPER_ARM_WEAR,
+            Self::LowerArmWear => EquipMask::LOWER_ARM_WEAR,
+            Self::HandWear => EquipMask::HAND_WEAR,
+            Self::UpperLegWear => EquipMask::UPPER_LEG_WEAR,
+            Self::LowerLegWear => EquipMask::LOWER_LEG_WEAR,
+            Self::FootWear => EquipMask::FOOT_WEAR,
+            Self::ChestArmor => EquipMask::CHEST_ARMOR,
+            Self::AbdomenArmor => EquipMask::ABDOMEN_ARMOR,
+            Self::UpperArmArmor => EquipMask::UPPER_ARM_ARMOR,
+            Self::LowerArmArmor => EquipMask::LOWER_ARM_ARMOR,
+            Self::UpperLegArmor => EquipMask::UPPER_LEG_ARMOR,
+            Self::LowerLegArmor => EquipMask::LOWER_LEG_ARMOR,
+            Self::NeckWear => EquipMask::NECK_WEAR,
+            Self::LeftWrist => EquipMask::WRIST_WEAR_LEFT,
+            Self::RightWrist => EquipMask::WRIST_WEAR_RIGHT,
+            Self::LeftFinger => EquipMask::FINGER_WEAR_LEFT,
+            Self::RightFinger => EquipMask::FINGER_WEAR_RIGHT,
+            Self::MeleeWeapon => EquipMask::MELEE_WEAPON,
+            Self::Shield => EquipMask::SHIELD,
+            Self::MissileWeapon => EquipMask::MISSILE_WEAPON,
+            Self::MissileAmmo => EquipMask::MISSILE_AMMO,
+            Self::Caster => EquipMask::CASTER,
+            Self::TwoHanded => EquipMask::TWO_HANDED,
+            Self::TrinketOne => EquipMask::TRINKET_ONE,
+            Self::Cloak => EquipMask::CLOAK,
+            Self::SigilOne => EquipMask::SIGIL_ONE,
+            Self::SigilTwo => EquipMask::SIGIL_TWO,
+            Self::SigilThree => EquipMask::SIGIL_THREE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptEquipmentSlotView {
+    pub slot: ScriptEquipmentSlotKind,
+    pub equip_mask: EquipMask,
+    pub item_guid: Option<Guid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -348,6 +464,13 @@ pub enum ScriptIntent {
     Pickup {
         item: Guid,
         container: Option<Guid>,
+    },
+    Equip {
+        guid: Guid,
+        slot: ScriptEquipmentSlotKind,
+    },
+    Unequip {
+        guid: Guid,
     },
     CastUntargetedSpell {
         spell_id: u32,

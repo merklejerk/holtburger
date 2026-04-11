@@ -7,7 +7,6 @@ use holtburger_common::properties::{
     ItemType, PropertyBool, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
 use holtburger_core::ActionResultReason;
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
@@ -15,6 +14,7 @@ use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
+use crate::types::AppAction;
 use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 
@@ -816,11 +816,7 @@ fn apply_combat_drive_effect(
         CombatDriveEffect::TurnTo { heading } => {
             state.data.combat_runtime.arm_attack_drive();
             result.request_redraw(RedrawPriority::Immediate);
-            result
-                .commands
-                .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
-                    heading,
-                }));
+            result.actions.push(AppAction::SnapHeading { heading });
         }
         CombatDriveEffect::Attack(request) => {
             state.data.combat_runtime.arm_attack_drive();
@@ -902,6 +898,7 @@ mod tests {
     use crate::types::{Interaction, UpdateResult};
     use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_core::client::movement_types::PlayerDriveIntent;
     use holtburger_core::client::types::ClientCommand;
     use holtburger_core::{ActionResultReason, ActionResultSource, ClientViewEvent};
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};

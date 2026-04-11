@@ -72,6 +72,12 @@ globalThis.Holtburger = Object.freeze({
   say(message) {
     Deno.core.ops.op_hb_say(String(message));
   },
+    snapHeading(heading) {
+        Deno.core.ops.op_hb_snap_heading(Number(heading));
+    },
+    scoot(distanceMeters) {
+        Deno.core.ops.op_hb_scoot(Number(distanceMeters));
+    },
     combine(source, dest) {
         Deno.core.ops.op_hb_combine(Number(source) >>> 0, Number(dest) >>> 0);
     },
@@ -118,6 +124,8 @@ deno_core::extension!(
         op_hb_nearby_entities,
         op_hb_log,
         op_hb_say,
+        op_hb_snap_heading,
+        op_hb_scoot,
         op_hb_combine,
         op_hb_salvage,
         op_hb_assess,
@@ -210,6 +218,28 @@ fn op_hb_say(state: &mut OpState, #[string] message: String) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::Say { message });
+}
+
+#[op2(fast)]
+fn op_hb_snap_heading(state: &mut OpState, heading: f64) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::SnapHeading {
+            heading: heading as f32,
+        });
+}
+
+#[op2(fast)]
+fn op_hb_scoot(state: &mut OpState, distance_m: f64) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Scoot {
+            distance_m: distance_m as f32,
+        });
 }
 
 #[op2(fast)]

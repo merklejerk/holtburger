@@ -3,6 +3,7 @@ use super::object_interaction;
 use super::*;
 use crate::navigation::NavigationMode;
 use crate::pages::game::combat as combat_model;
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -20,6 +21,14 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 navigation_input.expect("navigation actions should project to navigation input"),
                 &mut result,
             );
+        }
+        AppAction::SnapHeading { heading } => {
+            result
+                .commands
+                .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
+                    heading,
+                }));
+            result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::BeginInteraction { interaction } => {
             if interaction == Interaction::Salvaging {

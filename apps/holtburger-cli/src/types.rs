@@ -585,6 +585,9 @@ pub enum AppAction {
     Attack {
         guid: Guid,
     },
+    SnapHeading {
+        heading: f32,
+    },
     Scoot {
         distance_m: f32,
     },
@@ -622,6 +625,7 @@ pub enum AppAction {
     Open {
         guid: Guid,
     },
+    // TODO: Rename to CloseContainer
     Close {
         guid: Guid,
     },

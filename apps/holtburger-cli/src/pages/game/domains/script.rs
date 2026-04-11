@@ -192,6 +192,8 @@ impl GameState {
                 commands: vec![ClientCommand::Tell { target, message }],
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
+            ScriptIntent::SnapHeading { heading } => Ok(AppAction::SnapHeading { heading }),
+            ScriptIntent::Scoot { distance_m } => Ok(AppAction::Scoot { distance_m }),
             ScriptIntent::Combine { source, dest } => Ok(AppAction::UseWith {
                 item: source,
                 target: dest,
@@ -432,6 +434,24 @@ mod tests {
             )
             .expect("assess should compile"),
             AppAction::Assess { target: InspectTarget::Entity(target) } if target == Guid(6)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::SnapHeading { heading: 1.5 },
+            )
+            .expect("snap heading should compile"),
+            AppAction::SnapHeading { heading } if (heading - 1.5).abs() < f32::EPSILON
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Scoot { distance_m: 2.25 },
+            )
+            .expect("scoot should compile"),
+            AppAction::Scoot { distance_m } if (distance_m - 2.25).abs() < f32::EPSILON
         ));
 
         assert!(matches!(

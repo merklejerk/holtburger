@@ -199,6 +199,24 @@ globalThis.Holtburger = Object.freeze({
     emote(message) {
         Deno.core.ops.op_hb_emote(String(message));
     },
+        openTrade(guid) {
+            Deno.core.ops.op_hb_open_trade(Number(guid) >>> 0);
+        },
+        addToTrade(item) {
+            Deno.core.ops.op_hb_add_to_trade(Number(item) >>> 0);
+        },
+        acceptTrade() {
+            Deno.core.ops.op_hb_accept_trade();
+        },
+        declineTrade() {
+            Deno.core.ops.op_hb_decline_trade();
+        },
+        resetTrade() {
+            Deno.core.ops.op_hb_reset_trade();
+        },
+        exitTrade() {
+            Deno.core.ops.op_hb_exit_trade();
+        },
     snapHeading(heading) {
         Deno.core.ops.op_hb_snap_heading(Number(heading));
     },
@@ -259,6 +277,12 @@ deno_core::extension!(
         op_hb_log,
         op_hb_say,
         op_hb_emote,
+        op_hb_open_trade,
+        op_hb_add_to_trade,
+        op_hb_accept_trade,
+        op_hb_decline_trade,
+        op_hb_reset_trade,
+        op_hb_exit_trade,
         op_hb_snap_heading,
         op_hb_scoot,
         op_hb_combine,
@@ -440,6 +464,60 @@ fn op_hb_emote(state: &mut OpState, #[string] message: String) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::Emote { message });
+}
+
+#[op2(fast)]
+fn op_hb_open_trade(state: &mut OpState, guid: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::OpenTrade { guid: Guid(guid) });
+}
+
+#[op2(fast)]
+fn op_hb_add_to_trade(state: &mut OpState, item: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::AddToTrade { item: Guid(item) });
+}
+
+#[op2(fast)]
+fn op_hb_accept_trade(state: &mut OpState) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::AcceptTrade);
+}
+
+#[op2(fast)]
+fn op_hb_decline_trade(state: &mut OpState) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::DeclineTrade);
+}
+
+#[op2(fast)]
+fn op_hb_reset_trade(state: &mut OpState) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::ResetTrade);
+}
+
+#[op2(fast)]
+fn op_hb_exit_trade(state: &mut OpState) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::ExitTrade);
 }
 
 #[op2(fast)]

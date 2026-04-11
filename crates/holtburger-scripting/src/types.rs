@@ -315,6 +315,16 @@ pub enum ScriptIntent {
     Emote {
         message: String,
     },
+    OpenTrade {
+        guid: Guid,
+    },
+    AddToTrade {
+        item: Guid,
+    },
+    AcceptTrade,
+    DeclineTrade,
+    ResetTrade,
+    ExitTrade,
     SnapHeading {
         heading: f32,
     },

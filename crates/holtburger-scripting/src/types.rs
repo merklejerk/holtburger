@@ -1,8 +1,13 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::{
+    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyString,
+};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +33,13 @@ pub trait ScriptClientView {
     fn self_entity(&self) -> Option<ScriptSelfView>;
     fn target_entity(&self) -> Option<ScriptEntityView>;
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView>;
+    fn entity_bool_prop(&self, guid: Guid, prop: PropertyBool) -> Option<bool>;
+    fn entity_int_prop(&self, guid: Guid, prop: PropertyInt) -> Option<i32>;
+    fn entity_int64_prop(&self, guid: Guid, prop: PropertyInt64) -> Option<i64>;
+    fn entity_float_prop(&self, guid: Guid, prop: PropertyFloat) -> Option<f64>;
+    fn entity_string_prop(&self, guid: Guid, prop: PropertyString) -> Option<String>;
+    fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
+    fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
     fn nearby_entities(&self) -> Vec<ScriptEntityView>;
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
@@ -93,8 +105,17 @@ pub struct ScriptEntityView {
     pub name: Option<String>,
     pub kind: ScriptEntityKind,
     pub position: WorldPosition,
+    pub profile: Option<ScriptEntityProfile>,
     pub distance_to_self: f32,
     pub motion_command: ScriptMotionCommand,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data")]
+pub enum ScriptEntityProfile {
+    Armor(ArmorProfile),
+    Creature(CreatureProfile),
+    Weapon(WeaponProfile),
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

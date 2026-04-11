@@ -4,6 +4,7 @@ mod chat;
 pub(super) mod combat;
 pub(super) mod context;
 mod entity;
+pub(super) mod interaction;
 mod inventory;
 mod lifecycle;
 pub(super) mod logopolis;

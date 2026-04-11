@@ -1,4 +1,5 @@
 use super::context;
+use super::interaction;
 use super::inventory;
 use super::*;
 use crate::pages::game::combat as combat_model;
@@ -27,7 +28,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 if let Some(input) = navigation_input {
                     apply_navigation_input(state, input, &mut result);
                 }
-                set_active_interaction(state, Some(interaction), &mut result);
+                interaction::set_active_interaction(state, Some(interaction), &mut result);
             }
             result.request_redraw(RedrawPriority::Immediate);
         }
@@ -35,7 +36,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             if let Some(input) = navigation_input {
                 apply_navigation_input(state, input, &mut result);
             } else {
-                clear_active_interaction(state, &mut result);
+                interaction::clear_active_interaction(state, &mut result);
             }
             state.view.salvaging = None;
             result.request_redraw(RedrawPriority::Immediate);
@@ -132,7 +133,7 @@ pub(super) fn apply_navigation_interrupt(
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        set_active_interaction(state, None, result);
+        interaction::set_active_interaction(state, None, result);
         result.request_redraw(RedrawPriority::Immediate);
     }
 
@@ -148,22 +149,17 @@ pub(super) fn apply_navigation_interrupt(
             state.data.combat_runtime.cancel_attack();
             state.clear_combat_drive();
         }
-        set_active_interaction(state, None, result);
+        interaction::set_active_interaction(state, None, result);
         result.request_redraw(RedrawPriority::Immediate);
     }
 }
 
-pub(super) fn clear_active_interaction(state: &mut GameState, result: &mut UpdateResult) {
-    if is_frontend_navigation_interaction(state.view.active_interaction) {
-        let update = state.runtime.navigation.handle_input(
-            NavigationInput::Cancel,
-            navigation_snapshot(state, navigation_tick_target_guid(state)),
-        );
-        apply_navigation_update(state, update, result);
-        return;
-    }
-
-    set_active_interaction(state, None, result);
+pub(super) fn cancel_frontend_navigation(state: &mut GameState, result: &mut UpdateResult) {
+    let update = state.runtime.navigation.handle_input(
+        NavigationInput::Cancel,
+        navigation_snapshot(state, navigation_tick_target_guid(state)),
+    );
+    apply_navigation_update(state, update, result);
 }
 
 #[cfg(test)]
@@ -204,126 +200,17 @@ fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<
             distance_m: *distance_m,
         }),
         AppAction::CancelInteraction
-            if is_frontend_navigation_interaction(state.view.active_interaction) =>
+            if interaction::is_frontend_navigation_interaction(state.view.active_interaction) =>
         {
             Some(NavigationInput::Cancel)
         }
         AppAction::BeginInteraction { interaction }
-            if is_frontend_navigation_interaction(state.view.active_interaction)
-                && !is_frontend_navigation_interaction(Some(*interaction)) =>
+            if interaction::is_frontend_navigation_interaction(state.view.active_interaction)
+                && !interaction::is_frontend_navigation_interaction(Some(*interaction)) =>
         {
             Some(NavigationInput::Cancel)
         }
         _ => None,
-    }
-}
-
-fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool {
-    matches!(
-        interaction,
-        Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
-    )
-}
-
-pub(super) fn set_active_interaction(
-    state: &mut GameState,
-    next_interaction: Option<Interaction>,
-    result: &mut UpdateResult,
-) {
-    let previous_interaction = state.view.active_interaction;
-    state.view.active_interaction = next_interaction;
-
-    sync_combat_navigation_request(previous_interaction, next_interaction, state);
-    sync_target_health_query(previous_interaction, next_interaction, result);
-
-    if should_cancel_attack(state, previous_interaction, next_interaction) {
-        result.commands.push(ClientCommand::CancelAttack);
-        state.data.combat_runtime.cancel_attack();
-        state.clear_combat_drive();
-    }
-}
-
-fn sync_combat_navigation_request(
-    previous_interaction: Option<Interaction>,
-    next_interaction: Option<Interaction>,
-    state: &mut GameState,
-) {
-    let desired_target = state.data.combat_runtime.desired_engagement_target();
-    if desired_target.is_none() {
-        return;
-    }
-
-    let previous_target = target_guid_for_interaction(previous_interaction);
-    let next_target = target_guid_for_interaction(next_interaction);
-
-    if desired_target == previous_target && desired_target != next_target {
-        state.data.combat_runtime.clear_engagement();
-    }
-}
-
-fn target_guid_for_interaction(interaction: Option<Interaction>) -> Option<Guid> {
-    match interaction {
-        Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-        _ => None,
-    }
-}
-
-fn sync_target_health_query(
-    previous_interaction: Option<Interaction>,
-    next_interaction: Option<Interaction>,
-    result: &mut UpdateResult,
-) {
-    let previous_target = match previous_interaction {
-        Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-        _ => None,
-    };
-    let next_target = match next_interaction {
-        Some(Interaction::Targeting { target_guid }) => Some(target_guid),
-        _ => None,
-    };
-
-    if previous_target == next_target {
-        return;
-    }
-
-    match next_target {
-        Some(target_guid) => result
-            .commands
-            .push(ClientCommand::QueryHealth(target_guid)),
-        None if previous_target.is_some() => {
-            result.commands.push(ClientCommand::QueryHealth(Guid::NULL))
-        }
-        None => {}
-    }
-}
-
-fn should_cancel_attack(
-    state: &GameState,
-    previous_interaction: Option<Interaction>,
-    next_interaction: Option<Interaction>,
-) -> bool {
-    matches!(
-        state.data.combat_mode,
-        CombatMode::Melee | CombatMode::Missile
-    ) && match (previous_interaction, next_interaction) {
-        (
-            Some(Interaction::Targeting {
-                target_guid: previous_target,
-            }),
-            Some(Interaction::Targeting {
-                target_guid: next_target,
-            }),
-        ) => previous_target != next_target,
-        (
-            Some(Interaction::Targeting { .. }),
-            None
-            | Some(Interaction::Moving { .. })
-            | Some(Interaction::Approaching { .. })
-            | Some(Interaction::Following { .. })
-            | Some(Interaction::Combining { .. })
-            | Some(Interaction::Salvaging),
-        ) => true,
-        _ => false,
     }
 }
 
@@ -376,7 +263,7 @@ fn apply_navigation_update(
     match update.interaction_change {
         NavigationInteractionChange::Unchanged => {}
         NavigationInteractionChange::Set(next_interaction) => {
-            set_active_interaction(state, next_interaction, result);
+            interaction::set_active_interaction(state, next_interaction, result);
             result.request_redraw(RedrawPriority::Immediate);
         }
     }

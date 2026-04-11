@@ -3,7 +3,6 @@ use super::*;
 pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
     let now = Instant::now();
-    let navigation_interrupt = navigation::navigation_interrupt_for_view_event(state, &event);
     state.data.runtime_body_cache.apply_view_event(&event, now);
     result.merge(chat::reduce_view_event(state, event.clone()));
     result.merge(combat::reduce_view_event(state, event.clone()));
@@ -13,10 +12,6 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
     result.merge(navigation::reduce_view_event(state, event.clone()));
     result.merge(party::reduce_view_event(state, event.clone()));
     result.merge(trade_vendor::reduce_view_event(state, event));
-
-    if let Some(input) = navigation_interrupt {
-        navigation::apply_navigation_interrupt(state, input, &mut result);
-    }
 
     result
 }
@@ -55,14 +50,8 @@ fn broadcast_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     result.merge(party::reduce_action(state, action.clone()));
     result.merge(combat::reduce_action(state, action.clone()));
     result.merge(progression::reduce_action(state, action.clone()));
-
-    if let AppAction::InternalAction { action } = &action {
-        result.merge(interaction::reduce_action(state, *action));
-    }
-
-    if let AppAction::UiAction { action } = &action {
-        result.merge(ui::reduce_action(state, action.clone()));
-    }
+    result.merge(interaction::reduce_action(state, action.clone()));
+    result.merge(ui::reduce_action(state, action));
 
     result
 }

@@ -3,9 +3,14 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use anyhow::{Context, Result};
+use deno_core::serde_json::{Value, json};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
 use futures::executor::block_on;
 use holtburger_common::Guid;
+use holtburger_common::properties::{
+    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyString,
+};
 
 use crate::{
     ScriptClientIntent, ScriptClientView, ScriptEntityView, ScriptEvent, ScriptIntent,
@@ -21,6 +26,13 @@ static V8_PLATFORM_INIT: Once = Once::new();
 struct ScriptClientViewPtr {
     data: *const (),
     self_entity: unsafe fn(*const ()) -> Option<ScriptSelfView>,
+    entity_bool_prop: unsafe fn(*const (), Guid, PropertyBool) -> Option<bool>,
+    entity_int_prop: unsafe fn(*const (), Guid, PropertyInt) -> Option<i32>,
+    entity_int64_prop: unsafe fn(*const (), Guid, PropertyInt64) -> Option<i64>,
+    entity_float_prop: unsafe fn(*const (), Guid, PropertyFloat) -> Option<f64>,
+    entity_string_prop: unsafe fn(*const (), Guid, PropertyString) -> Option<String>,
+    entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
+    entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
     nearby_entities: unsafe fn(*const ()) -> Vec<ScriptEntityView>,
 }
 
@@ -30,6 +42,62 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).self_entity() }
         }
 
+        unsafe fn entity_bool_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyBool,
+        ) -> Option<bool> {
+            unsafe { (&*data.cast::<T>()).entity_bool_prop(guid, prop) }
+        }
+
+        unsafe fn entity_int_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyInt,
+        ) -> Option<i32> {
+            unsafe { (&*data.cast::<T>()).entity_int_prop(guid, prop) }
+        }
+
+        unsafe fn entity_int64_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyInt64,
+        ) -> Option<i64> {
+            unsafe { (&*data.cast::<T>()).entity_int64_prop(guid, prop) }
+        }
+
+        unsafe fn entity_float_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyFloat,
+        ) -> Option<f64> {
+            unsafe { (&*data.cast::<T>()).entity_float_prop(guid, prop) }
+        }
+
+        unsafe fn entity_string_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyString,
+        ) -> Option<String> {
+            unsafe { (&*data.cast::<T>()).entity_string_prop(guid, prop) }
+        }
+
+        unsafe fn entity_data_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyDataId,
+        ) -> Option<Guid> {
+            unsafe { (&*data.cast::<T>()).entity_data_prop(guid, prop) }
+        }
+
+        unsafe fn entity_instance_prop<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+            prop: PropertyInstanceId,
+        ) -> Option<Guid> {
+            unsafe { (&*data.cast::<T>()).entity_instance_prop(guid, prop) }
+        }
+
         unsafe fn nearby_entities<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEntityView> {
             unsafe { (&*data.cast::<T>()).nearby_entities() }
         }
@@ -37,12 +105,47 @@ impl ScriptClientViewPtr {
         Self {
             data: (view as *const T).cast(),
             self_entity: self_entity::<T>,
+            entity_bool_prop: entity_bool_prop::<T>,
+            entity_int_prop: entity_int_prop::<T>,
+            entity_int64_prop: entity_int64_prop::<T>,
+            entity_float_prop: entity_float_prop::<T>,
+            entity_string_prop: entity_string_prop::<T>,
+            entity_data_prop: entity_data_prop::<T>,
+            entity_instance_prop: entity_instance_prop::<T>,
             nearby_entities: nearby_entities::<T>,
         }
     }
 
     unsafe fn self_entity(self) -> Option<ScriptSelfView> {
         unsafe { (self.self_entity)(self.data) }
+    }
+
+    unsafe fn entity_bool_prop(self, guid: Guid, prop: PropertyBool) -> Option<bool> {
+        unsafe { (self.entity_bool_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn entity_int_prop(self, guid: Guid, prop: PropertyInt) -> Option<i32> {
+        unsafe { (self.entity_int_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn entity_int64_prop(self, guid: Guid, prop: PropertyInt64) -> Option<i64> {
+        unsafe { (self.entity_int64_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn entity_float_prop(self, guid: Guid, prop: PropertyFloat) -> Option<f64> {
+        unsafe { (self.entity_float_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn entity_string_prop(self, guid: Guid, prop: PropertyString) -> Option<String> {
+        unsafe { (self.entity_string_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn entity_data_prop(self, guid: Guid, prop: PropertyDataId) -> Option<Guid> {
+        unsafe { (self.entity_data_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn entity_instance_prop(self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid> {
+        unsafe { (self.entity_instance_prop)(self.data, guid, prop) }
     }
 
     unsafe fn nearby_entities(self) -> Vec<ScriptEntityView> {
@@ -66,6 +169,27 @@ globalThis.Holtburger = Object.freeze({
   nearbyEntities() {
     return Deno.core.ops.op_hb_nearby_entities();
   },
+    entityBoolProp(guid, prop) {
+        return Deno.core.ops.op_hb_entity_bool_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
+    entityIntProp(guid, prop) {
+        return Deno.core.ops.op_hb_entity_int_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
+    entityInt64Prop(guid, prop) {
+        return Deno.core.ops.op_hb_entity_int64_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
+    entityFloatProp(guid, prop) {
+        return Deno.core.ops.op_hb_entity_float_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
+    entityStringProp(guid, prop) {
+        return Deno.core.ops.op_hb_entity_string_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
+    entityDataProp(guid, prop) {
+        return Deno.core.ops.op_hb_entity_data_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
+    entityInstanceProp(guid, prop) {
+        return Deno.core.ops.op_hb_entity_instance_prop(Number(guid) >>> 0, Number(prop) >>> 0);
+    },
   log(level, message) {
     Deno.core.ops.op_hb_log(String(level), String(message));
   },
@@ -122,6 +246,13 @@ deno_core::extension!(
     ops = [
         op_hb_self_entity,
         op_hb_nearby_entities,
+        op_hb_entity_bool_prop,
+        op_hb_entity_int_prop,
+        op_hb_entity_int64_prop,
+        op_hb_entity_float_prop,
+        op_hb_entity_string_prop,
+        op_hb_entity_data_prop,
+        op_hb_entity_instance_prop,
         op_hb_log,
         op_hb_say,
         op_hb_snap_heading,
@@ -199,6 +330,84 @@ fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
 fn op_hb_nearby_entities(state: &mut OpState) -> Vec<ScriptEntityView> {
     with_current_script_client_view(state, |view| unsafe { view.nearby_entities() })
         .unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_bool_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyBool::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_bool_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .map(Value::Bool)
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_int_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyInt::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_int_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .map(|value| json!(value))
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_int64_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyInt64::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_int64_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .map(|value| json!(value))
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_float_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyFloat::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_float_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .and_then(deno_core::serde_json::Number::from_f64)
+    .map(Value::Number)
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_string_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyString::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_string_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .map(Value::String)
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_data_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyDataId::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_data_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .map(|value| json!(value.0))
+}
+
+#[op2]
+#[serde]
+fn op_hb_entity_instance_prop(state: &mut OpState, guid: u32, prop: u32) -> Option<Value> {
+    let prop = PropertyInstanceId::from_repr(prop)?;
+    with_current_script_client_view(state, |view| unsafe {
+        view.entity_instance_prop(Guid(guid), prop)
+    })
+    .flatten()
+    .map(|value| json!(value.0))
 }
 
 #[op2(fast)]

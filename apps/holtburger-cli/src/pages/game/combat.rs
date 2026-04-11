@@ -1,5 +1,6 @@
 use crate::navigation::CombatNavigationRequest;
 use crate::pages::game::GameState;
+use crate::types::AppAction;
 use crate::types::{Interaction, RedrawPriority, UpdateResult};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -14,7 +15,6 @@ use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
-use crate::types::AppAction;
 use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
 

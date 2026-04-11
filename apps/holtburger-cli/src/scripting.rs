@@ -4,15 +4,15 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 use holtburger_common::Guid;
-use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::{WorldObjectExt as _, WorldObjectPropertyAccessors as _};
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptInventoryItemView,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
-    ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
-    ScriptWorkflowEvent,
+    ScriptConfirmation, ScriptEntityProfile, ScriptEntityView, ScriptEvent,
+    ScriptInventoryItemView, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
+    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource,
+    ScriptSpellEffectView, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
@@ -61,11 +61,32 @@ impl TuiScriptClientView<'_> {
             .map(ScriptMotionCommand::from)
             .unwrap_or_default();
 
+        let profile = entity
+            .armor_profile
+            .as_ref()
+            .cloned()
+            .map(ScriptEntityProfile::Armor)
+            .or_else(|| {
+                entity
+                    .creature_profile
+                    .as_ref()
+                    .cloned()
+                    .map(ScriptEntityProfile::Creature)
+            })
+            .or_else(|| {
+                entity
+                    .weapon_profile
+                    .as_ref()
+                    .cloned()
+                    .map(ScriptEntityProfile::Weapon)
+            });
+
         Some(ScriptEntityView {
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
             kind: classification::classify_entity(entity).kind(),
             position: entity_position.unwrap_or_default(),
+            profile,
             distance_to_self,
             motion_command,
         })
@@ -136,6 +157,66 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView> {
         self.script_entity_view(guid)
+    }
+
+    fn entity_bool_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyBool,
+    ) -> Option<bool> {
+        self.data.entities.get(&guid)?.get_bool_prop_opt(prop)
+    }
+
+    fn entity_int_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyInt,
+    ) -> Option<i32> {
+        self.data.entities.get(&guid)?.get_int_prop(prop)
+    }
+
+    fn entity_int64_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyInt64,
+    ) -> Option<i64> {
+        self.data.entities.get(&guid)?.get_int64_prop(prop)
+    }
+
+    fn entity_float_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyFloat,
+    ) -> Option<f64> {
+        self.data.entities.get(&guid)?.get_float_prop(prop)
+    }
+
+    fn entity_string_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyString,
+    ) -> Option<String> {
+        self.data
+            .entities
+            .get(&guid)?
+            .get_string_prop(prop)
+            .map(str::to_string)
+    }
+
+    fn entity_data_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyDataId,
+    ) -> Option<Guid> {
+        self.data.entities.get(&guid)?.get_data_prop(prop)
+    }
+
+    fn entity_instance_prop(
+        &self,
+        guid: Guid,
+        prop: holtburger_common::properties::PropertyInstanceId,
+    ) -> Option<Guid> {
+        self.data.entities.get(&guid)?.get_instance_prop(prop)
     }
 
     fn nearby_entities(&self) -> Vec<ScriptEntityView> {
@@ -480,10 +561,14 @@ pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<Defe
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{
+        PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
+        PropertyInt64, PropertyString, WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_core::client::types::BusyOperationKind;
     use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+    use holtburger_protocol::messages::object::types::ArmorProfile;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
 
@@ -638,5 +723,91 @@ mod tests {
         assert_eq!(entity_view.motion_command, ScriptMotionCommand::Dead);
         assert_eq!(entity_view.position, player_position);
         assert_eq!(entity_view.distance_to_self, 0.0);
+    }
+
+    #[test]
+    fn entity_projects_primitive_properties_and_profile() {
+        let player_guid = Guid(0x5000_0003);
+        let entity_guid = Guid(0x8000_0003);
+        let player_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(player_position);
+
+        let mut entity = Entity::new(entity_guid, "Olthoi".to_string(), player_position);
+        entity.set_int_prop(PropertyInt::Damage, 42);
+        entity.set_bool_prop(PropertyBool::Attackable, true);
+        entity.set_int64_prop(PropertyInt64::AvailableExperience, 12_345);
+        entity.set_float_prop(PropertyFloat::DefaultScale, 1.25);
+        entity.set_string_prop(PropertyString::LongDesc, "A sturdy olthoi".to_string());
+        entity.set_did_prop(PropertyDataId::MotionTable, Guid(0x1234_5678));
+        entity.set_container_id(Some(player_guid));
+        entity.armor_profile = Some(ArmorProfile {
+            slashing: 1.0,
+            piercing: 2.0,
+            bludgeoning: 3.0,
+            cold: 4.0,
+            fire: 5.0,
+            acid: 6.0,
+            nether: 7.0,
+            lightning: 8.0,
+        });
+        data.entities.insert(entity_guid, entity);
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        assert_eq!(
+            script_view.entity_int_prop(entity_guid, PropertyInt::Damage),
+            Some(42)
+        );
+        assert_eq!(
+            script_view.entity_bool_prop(entity_guid, PropertyBool::Attackable),
+            Some(true)
+        );
+        assert!(matches!(
+            script_view.entity_int64_prop(entity_guid, PropertyInt64::AvailableExperience),
+            Some(12_345)
+        ));
+        assert_eq!(
+            script_view.entity_float_prop(entity_guid, PropertyFloat::DefaultScale),
+            Some(1.25)
+        );
+        assert_eq!(
+            script_view
+                .entity_string_prop(entity_guid, PropertyString::LongDesc)
+                .as_deref(),
+            Some("A sturdy olthoi")
+        );
+        assert_eq!(
+            script_view.entity_data_prop(entity_guid, PropertyDataId::MotionTable),
+            Some(Guid(0x1234_5678))
+        );
+        assert_eq!(
+            script_view.entity_instance_prop(entity_guid, PropertyInstanceId::Container),
+            Some(player_guid)
+        );
+        assert!(matches!(
+            script_view
+                .entity(entity_guid)
+                .and_then(|entity| entity.profile),
+            Some(ScriptEntityProfile::Armor(ArmorProfile {
+                slashing: 1.0,
+                piercing: 2.0,
+                bludgeoning: 3.0,
+                cold: 4.0,
+                fire: 5.0,
+                acid: 6.0,
+                nether: 7.0,
+                lightning: 8.0,
+            }))
+        ));
     }
 }

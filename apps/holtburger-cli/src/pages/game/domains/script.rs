@@ -193,6 +193,12 @@ impl GameState {
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
             ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),
+            ScriptIntent::OpenTrade { guid } => Ok(AppAction::OpenTrade { guid }),
+            ScriptIntent::AddToTrade { item } => Ok(AppAction::AddToTrade { guid: item }),
+            ScriptIntent::AcceptTrade => Ok(AppAction::AcceptTrade),
+            ScriptIntent::DeclineTrade => Ok(AppAction::DeclineTrade),
+            ScriptIntent::ResetTrade => Ok(AppAction::ResetTrade),
+            ScriptIntent::ExitTrade => Ok(AppAction::ExitTrade),
             ScriptIntent::SnapHeading { heading } => Ok(AppAction::SnapHeading { heading }),
             ScriptIntent::Scoot { distance_m } => Ok(AppAction::Scoot { distance_m }),
             ScriptIntent::Combine { source, dest } => Ok(AppAction::UseWith {
@@ -464,6 +470,48 @@ mod tests {
             )
             .expect("emote should compile"),
             AppAction::Emote { message } if message == "waves"
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::OpenTrade { guid: Guid(10) },
+            )
+            .expect("open trade should compile"),
+            AppAction::OpenTrade { guid } if guid == Guid(10)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::AddToTrade { item: Guid(11) },
+            )
+            .expect("add to trade should compile"),
+            AppAction::AddToTrade { guid } if guid == Guid(11)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::AcceptTrade)
+                .expect("accept trade should compile"),
+            AppAction::AcceptTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::DeclineTrade)
+                .expect("decline trade should compile"),
+            AppAction::DeclineTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::ResetTrade)
+                .expect("reset trade should compile"),
+            AppAction::ResetTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::ExitTrade)
+                .expect("exit trade should compile"),
+            AppAction::ExitTrade
         ));
 
         assert!(matches!(

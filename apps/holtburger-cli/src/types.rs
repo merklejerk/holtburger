@@ -735,9 +735,7 @@ pub enum AppAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppInternalAction {
     ClearActiveInteraction,
-    SetActiveInteraction {
-        interaction: Option<Interaction>,
-    },
+    SetActiveInteraction { interaction: Option<Interaction> },
 }
 
 #[derive(Debug, Clone)]

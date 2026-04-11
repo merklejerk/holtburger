@@ -536,7 +536,7 @@ fn retargeting_cancels_the_current_attack_drive_until_rearmed() {
 }
 
 #[test]
-fn explicit_attack_in_melee_mode_immediately_attacks_attackable_creatures() {
+fn explicit_attack_in_melee_mode_arms_a_followup_melee_swing_for_the_next_tick() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -560,7 +560,12 @@ fn explicit_attack_in_melee_mode_immediately_attacks_attackable_creatures() {
         state.view.active_interaction,
         Some(Interaction::Targeting { target_guid })
     );
-    assert!(result.commands.iter().any(|command| {
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+    }));
+
+    let tick_result = state.handle_tick(0.016);
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
     }));
 }

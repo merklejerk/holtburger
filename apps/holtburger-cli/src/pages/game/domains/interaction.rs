@@ -1,5 +1,5 @@
-use super::*;
 use super::navigation;
+use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppInternalAction) -> UpdateResult {
     let mut result = UpdateResult::new();

@@ -1,5 +1,5 @@
-use super::object_interaction;
 use super::logopolis;
+use super::object_interaction;
 use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppUiAction) -> UpdateResult {

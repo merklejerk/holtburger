@@ -9,8 +9,8 @@ use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_scripting::{
-    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptInventoryItemView,
+    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent,
+    ScriptClientView, ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptInventoryItemView,
     ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptPartyMemberView,
     ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
 };
@@ -33,7 +33,7 @@ pub enum DeferredScriptSource {
 pub(crate) struct WorkflowProjection {
     target_guid: Option<Guid>,
     confirmation: Option<ScriptConfirmation>,
-    busy_operation: Option<ScriptBusyOperation>,
+    busy_operation: ScriptBusyOperation,
 }
 
 pub struct TuiScriptClientView<'a> {
@@ -49,10 +49,8 @@ impl TuiScriptClientView<'_> {
         let self_position = self.data.runtime_player_position();
         let entity_position = self.data.runtime_position_for_guid(guid);
         let distance_to_self = match (self_position, self.data.distance_position_for_guid(guid)) {
-            (Some(self_position), Some(entity_position)) => {
-                Some(self_position.distance_to(&entity_position))
-            }
-            _ => None,
+            (Some(self_position), Some(entity_position)) => self_position.distance_to(&entity_position),
+            _ => 0.0,
         };
 
         let is_dead = entity
@@ -67,7 +65,7 @@ impl TuiScriptClientView<'_> {
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
             kind: classification::classify_entity(entity).kind(),
-            position: entity_position,
+            position: entity_position.unwrap_or_default(),
             distance_to_self,
             is_dead,
         })
@@ -82,44 +80,54 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         Some(ScriptSelfView {
             guid,
             name,
-            position: self.data.runtime_player_position(),
+            position: self
+                .data
+                .runtime_player_position()
+                .unwrap_or_default(),
             health: self
                 .data
                 .vitals
                 .get(&VitalType::Health)
-                .map(|vital| vital.current),
+                .map(|vital| vital.current)
+                .unwrap_or_default(),
             health_max: self
                 .data
                 .vitals
                 .get(&VitalType::Health)
-                .map(|vital| vital.buffed_max),
+                .map(|vital| vital.buffed_max)
+                .unwrap_or_default(),
             stamina: self
                 .data
                 .vitals
                 .get(&VitalType::Stamina)
-                .map(|vital| vital.current),
+                .map(|vital| vital.current)
+                .unwrap_or_default(),
             stamina_max: self
                 .data
                 .vitals
                 .get(&VitalType::Stamina)
-                .map(|vital| vital.buffed_max),
+                .map(|vital| vital.buffed_max)
+                .unwrap_or_default(),
             mana: self
                 .data
                 .vitals
                 .get(&VitalType::Mana)
-                .map(|vital| vital.current),
+                .map(|vital| vital.current)
+                .unwrap_or_default(),
             mana_max: self
                 .data
                 .vitals
                 .get(&VitalType::Mana)
-                .map(|vital| vital.buffed_max),
-            encumbrance: self.data.player_encumbrance(),
-            capacity: self.data.player_capacity(),
+                .map(|vital| vital.buffed_max)
+                .unwrap_or_default(),
+            encumbrance: self.data.player_encumbrance().unwrap_or_default(),
+            capacity: self.data.player_capacity().unwrap_or_default(),
             busy_operation: self
                 .view
                 .active_busy_operation
-                .map(|kind| ScriptBusyOperation { kind }),
-            heading: self.data.runtime_heading(),
+                .map(ScriptBusyOperation::from_kind)
+                .unwrap_or_default(),
+            heading: self.data.runtime_heading().unwrap_or_default(),
             combat_mode: self.data.combat_mode,
         })
     }
@@ -148,8 +156,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
         entities.sort_by(|left, right| {
             left.distance_to_self
-                .partial_cmp(&right.distance_to_self)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .total_cmp(&right.distance_to_self)
         });
 
         entities
@@ -241,10 +248,11 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             .map(ScriptConfirmation::Local)
     }
 
-    fn busy_operation(&self) -> Option<ScriptBusyOperation> {
+    fn busy_operation(&self) -> ScriptBusyOperation {
         self.view
             .active_busy_operation
-            .map(|kind| ScriptBusyOperation { kind })
+            .map(ScriptBusyOperation::from_kind)
+            .unwrap_or_default()
     }
 }
 
@@ -286,7 +294,8 @@ pub(crate) fn workflow_projection(game: Option<&GameState>) -> WorkflowProjectio
         busy_operation: game
             .view
             .active_busy_operation
-            .map(|kind| ScriptBusyOperation { kind }),
+            .map(ScriptBusyOperation::from_kind)
+            .unwrap_or_default(),
     }
 }
 
@@ -588,16 +597,19 @@ mod tests {
             .expect("player snapshot should be available");
 
         assert_eq!(self_view.guid, player_guid);
-        assert_eq!(self_view.health, Some(99));
-        assert_eq!(self_view.health_max, Some(222));
-        assert_eq!(self_view.stamina, Some(333));
-        assert_eq!(self_view.stamina_max, Some(444));
-        assert_eq!(self_view.mana, Some(444));
-        assert_eq!(self_view.mana_max, Some(666));
-        assert_eq!(self_view.encumbrance, Some(300.0));
-        assert_eq!(self_view.capacity, Some(18_000.0));
-        assert_eq!(self_view.busy_operation, Some(ScriptBusyOperation { kind: BusyOperationKind::Buy }));
-        assert!(matches!(self_view.heading, Some(value) if (value - heading).abs() < 1e-6));
-        assert_eq!(self_view.position, Some(player_position));
+        assert_eq!(self_view.health, 99);
+        assert_eq!(self_view.health_max, 222);
+        assert_eq!(self_view.stamina, 333);
+        assert_eq!(self_view.stamina_max, 444);
+        assert_eq!(self_view.mana, 444);
+        assert_eq!(self_view.mana_max, 666);
+        assert_eq!(self_view.encumbrance, 300.0);
+        assert_eq!(self_view.capacity, 18_000.0);
+        assert_eq!(
+            self_view.busy_operation,
+            ScriptBusyOperation::Buy
+        );
+        assert!((self_view.heading - heading).abs() < 1e-6);
+        assert_eq!(self_view.position, player_position);
     }
 }

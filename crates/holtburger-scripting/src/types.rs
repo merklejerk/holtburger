@@ -33,25 +33,57 @@ pub trait ScriptClientView {
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
     fn pending_confirmation(&self) -> Option<ScriptConfirmation>;
-    fn busy_operation(&self) -> Option<ScriptBusyOperation>;
+    fn busy_operation(&self) -> ScriptBusyOperation;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptSelfView {
     pub guid: Guid,
     pub name: String,
-    pub position: Option<WorldPosition>,
-    pub health: Option<u32>,
-    pub health_max: Option<u32>,
-    pub stamina: Option<u32>,
-    pub stamina_max: Option<u32>,
-    pub mana: Option<u32>,
-    pub mana_max: Option<u32>,
-    pub encumbrance: Option<f32>,
-    pub capacity: Option<f32>,
-    pub busy_operation: Option<ScriptBusyOperation>,
-    pub heading: Option<f32>,
+    pub position: WorldPosition,
+    pub health: u32,
+    pub health_max: u32,
+    pub stamina: u32,
+    pub stamina_max: u32,
+    pub mana: u32,
+    pub mana_max: u32,
+    pub encumbrance: f32,
+    pub capacity: f32,
+    pub busy_operation: ScriptBusyOperation,
+    pub heading: f32,
     pub combat_mode: CombatMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptBusyOperation {
+    #[default]
+    None,
+    Use,
+    UseWithTarget,
+    Salvage,
+    SpellCast,
+    Buy,
+    Sell,
+}
+
+impl ScriptBusyOperation {
+    pub const fn from_kind(kind: BusyOperationKind) -> Self {
+        match kind {
+            BusyOperationKind::Use => Self::Use,
+            BusyOperationKind::UseWithTarget => Self::UseWithTarget,
+            BusyOperationKind::Salvage => Self::Salvage,
+            BusyOperationKind::SpellCast => Self::SpellCast,
+            BusyOperationKind::Buy => Self::Buy,
+            BusyOperationKind::Sell => Self::Sell,
+        }
+    }
+}
+
+impl From<BusyOperationKind> for ScriptBusyOperation {
+    fn from(kind: BusyOperationKind) -> Self {
+        Self::from_kind(kind)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,8 +91,8 @@ pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
     pub kind: ScriptEntityKind,
-    pub position: Option<WorldPosition>,
-    pub distance_to_self: Option<f32>,
+    pub position: WorldPosition,
+    pub distance_to_self: f32,
     pub is_dead: bool,
 }
 
@@ -178,7 +210,7 @@ pub enum ScriptLifecycleEvent {
 pub enum ScriptWorkflowEvent {
     ConfirmationOpened { confirmation: ScriptConfirmation },
     ConfirmationClosed,
-    BusyOperationChanged { busy: Option<ScriptBusyOperation> },
+    BusyOperationChanged { busy: ScriptBusyOperation },
     TargetEntityChanged { guid: Option<Guid> },
 }
 
@@ -199,11 +231,6 @@ pub struct ScriptLocalConfirmation {
 pub enum ScriptLocalConfirmationKind {
     Unswear,
     Other(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScriptBusyOperation {
-    pub kind: BusyOperationKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

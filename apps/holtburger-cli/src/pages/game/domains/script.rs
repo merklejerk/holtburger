@@ -9,6 +9,7 @@ use anyhow::Result;
 use holtburger_scripting::{
     ScriptClientIntent, ScriptEvent, ScriptHost, ScriptIntent, ScriptLifecycleEvent,
 };
+use std::time::Duration;
 
 fn script_client_view<'a>(
     data: &'a GameData,
@@ -76,6 +77,7 @@ impl GameState {
 
         if had_host {
             self.script.host = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -311,26 +313,42 @@ impl GameState {
         }
 
         let view = script_client_view(&self.data, &self.view, server_time);
+        let mut tick_count = 0;
+
+        if self.script.host.is_some() {
+            if elapsed > 0.0 {
+                self.script.tick_accumulator += Duration::from_secs_f64(elapsed);
+            }
+
+            while self.script.tick_accumulator >= crate::pages::game::state::SCRIPT_TICK_INTERVAL {
+                self.script.tick_accumulator -= crate::pages::game::state::SCRIPT_TICK_INTERVAL;
+                tick_count += 1;
+            }
+        }
 
         let host_was_cleared = {
             let Some(host) = self.script.host.as_mut() else {
                 return;
             };
 
-            dispatch_script_event_to_host(
-                &view,
-                host,
-                ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
-                    elapsed_seconds: elapsed,
-                }),
-                result,
-            );
+            for _ in 0..tick_count {
+                dispatch_script_event_to_host(
+                    &view,
+                    host,
+                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
+                        elapsed_seconds: crate::pages::game::state::SCRIPT_TICK_INTERVAL
+                            .as_secs_f64(),
+                    }),
+                    result,
+                );
+            }
 
             !should_run_after
         };
 
         if host_was_cleared {
             self.script.host = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 

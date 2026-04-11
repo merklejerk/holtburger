@@ -1,4 +1,4 @@
-use super::context;
+use super::object_interaction;
 use super::*;
 use holtburger_core::client::controllers::Controller;
 
@@ -284,7 +284,7 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
             if target_guid == guid
     ) {
         state.view.context_view = ContextView::Default;
-        context::refresh_context_buffer(state);
+        object_interaction::refresh_context_buffer(state);
     }
     if matches!(
         state.view.active_interaction,
@@ -319,7 +319,7 @@ pub(super) fn handle_entity_identified(state: &mut GameState, entity: &Entity) {
     let guid = entity.guid;
     state.data.entities.insert(guid, entity.clone());
     state.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
-    context::refresh_context_buffer(state);
+    object_interaction::refresh_context_buffer(state);
 }
 
 pub(super) fn refresh_entity_context_if_visible(
@@ -333,7 +333,7 @@ pub(super) fn refresh_entity_context_if_visible(
             | ContextView::Book(target_guid)
             if target_guid == guid
     ) {
-        context::refresh_context_buffer(state);
+        object_interaction::refresh_context_buffer(state);
         result.request_redraw(RedrawPriority::Immediate);
     }
 }
@@ -345,7 +345,7 @@ pub(super) fn refresh_vendor_item_context_if_visible(state: &mut GameState, guid
             | ContextView::Debug(InspectTarget::VendorItem(target_guid))
             if target_guid == guid
     ) {
-        context::refresh_context_buffer(state);
+        object_interaction::refresh_context_buffer(state);
     }
 }
 

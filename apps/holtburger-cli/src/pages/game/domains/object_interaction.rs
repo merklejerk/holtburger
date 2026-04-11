@@ -81,10 +81,6 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::ViewDetails { view } => {
             return ui::apply_context_view_change(state, view);
         }
-        AppAction::ClearVendor => {
-            state.view.vendor = None;
-            result.request_redraw(RedrawPriority::Immediate);
-        }
         _ => {}
     }
 

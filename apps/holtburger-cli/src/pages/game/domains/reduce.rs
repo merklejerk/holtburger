@@ -56,7 +56,7 @@ fn dispatch_page_action(state: &mut GameState, action: AppAction) -> UpdateResul
     let mut result = UpdateResult::new();
 
     result.merge(script::reduce_action(state, action.clone()));
-    result.merge(context::reduce_action(state, action.clone()));
+    result.merge(object_interaction::reduce_action(state, action.clone()));
     result.merge(inventory::reduce_action(state, action.clone()));
     result.merge(navigation::reduce_action(state, action.clone()));
     result.merge(trade_vendor::reduce_action(state, action.clone()));

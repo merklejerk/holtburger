@@ -92,6 +92,10 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::ExitTrade => {
             result.commands.push(ClientCommand::CloseTrade);
         }
+        AppAction::ClearVendor => {
+            state.view.vendor = None;
+            result.request_redraw(RedrawPriority::Immediate);
+        }
         _ => {}
     }
 

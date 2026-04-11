@@ -1,4 +1,4 @@
-use super::context;
+use super::object_interaction;
 use super::inventory;
 use super::*;
 use crate::pages::game::combat as combat_model;
@@ -67,7 +67,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             state.data.self_movement_kinematics = kinematics;
         }
         ClientViewEvent::RuntimeBodySnapshot { .. } => {
-            context::refresh_context_buffer(state);
+            object_interaction::refresh_context_buffer(state);
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::RuntimeBodyUpserted { body } => {
@@ -83,7 +83,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::RuntimeBodiesReset { .. } => {
-            context::refresh_context_buffer(state);
+            object_interaction::refresh_context_buffer(state);
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::NoClipUpdated { enabled } => {

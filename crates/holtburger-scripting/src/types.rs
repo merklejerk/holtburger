@@ -291,6 +291,24 @@ pub enum ScriptIntent {
     Use {
         guid: Guid,
     },
+    Combine {
+        source: Guid,
+        dest: Guid,
+    },
+    Salvage {
+        tool: Guid,
+        items: Vec<Guid>,
+    },
+    Assess {
+        target: Guid,
+    },
+    Drop {
+        item: Guid,
+    },
+    Pickup {
+        item: Guid,
+        container: Option<Guid>,
+    },
     CastUntargetedSpell {
         spell_id: u32,
     },

@@ -1199,8 +1199,8 @@ mod tests {
             })
         );
         assert_eq!(
-            state.data.combat_runtime.issue_state,
-            CombatIssueState::Idle
+            state.data.combat_runtime.attack_activity(CombatMode::Melee),
+            Some(AttackActivity::Ready)
         );
     }
 

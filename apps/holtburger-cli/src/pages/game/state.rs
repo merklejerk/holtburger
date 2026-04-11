@@ -188,12 +188,9 @@ impl GameState {
         }
 
         while let Some(notification) = pending_notifications.pop_front() {
-            if let Some(mut notification_result) = domains::reduce_action(
-                self,
-                AppAction::Notification {
-                    notification,
-                },
-            ) {
+            if let Some(mut notification_result) =
+                domains::reduce_action(self, AppAction::Notification { notification })
+            {
                 let notification_redraw = notification_result.effective_redraw_priority();
                 result.commands.extend(notification_result.commands);
                 result.request_redraw(notification_redraw);

@@ -739,8 +739,8 @@ pub enum AppAction {
     DeclineTrade,
     ResetTrade,
     ExitTrade,
-    InternalAction {
-        action: AppInternalAction,
+    Notification {
+        notification: AppNotification,
     },
     UiAction {
         action: AppUiAction,
@@ -748,9 +748,8 @@ pub enum AppAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppInternalAction {
-    ClearActiveInteraction,
-    SetActiveInteraction { interaction: Option<Interaction> },
+pub enum AppNotification {
+    ActiveInteractionChanged { interaction: Option<Interaction> },
 }
 
 #[derive(Debug, Clone)]
@@ -772,9 +771,9 @@ impl From<AppUiAction> for AppAction {
     }
 }
 
-impl From<AppInternalAction> for AppAction {
-    fn from(action: AppInternalAction) -> Self {
-        AppAction::InternalAction { action }
+impl From<AppNotification> for AppAction {
+    fn from(notification: AppNotification) -> Self {
+        AppAction::Notification { notification }
     }
 }
 

@@ -4,13 +4,8 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     let mut result = UpdateResult::new();
 
     match action {
-        AppAction::InternalAction {
-            action: AppInternalAction::ClearActiveInteraction,
-        } => {
-            set_active_interaction(state, None, &mut result);
-        }
-        AppAction::InternalAction {
-            action: AppInternalAction::SetActiveInteraction { interaction },
+        AppAction::Notification {
+            notification: AppNotification::ActiveInteractionChanged { interaction },
         } => {
             set_active_interaction(state, interaction, &mut result);
         }

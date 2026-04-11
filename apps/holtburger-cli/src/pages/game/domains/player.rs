@@ -89,7 +89,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                 mode,
                 CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
             ) {
-                state.runtime.combat_automation = None;
+                state.clear_combat_drive();
             }
         }
         _ => {}

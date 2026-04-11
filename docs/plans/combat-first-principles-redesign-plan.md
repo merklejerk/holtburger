@@ -364,6 +364,18 @@ This keeps "what we want" separate from "what just happened".
 - The test suite reads like a behavioral spec rather than a list of reducer quirks.
 - The plan names the actual current seams before any architecture rewrite begins.
 
+#### Phase 1 Progress
+- Completed in [apps/holtburger-cli/src/pages/game/domains/tests/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/tests/combat.rs): existing combat-domain tests were renamed toward behavioral requirements instead of reducer-path descriptions.
+- Added an explicit server-feedback spec proving that a server attack error such as `YouChargedTooFar` cancels only the current attack drive while preserving targeting, which locks in the "do not silently blacklist the target" requirement.
+- Revalidated the focused suite with `cargo test -p holtburger-cli combat`.
+
+#### Phase 1 Decisions
+- Keep the recoverable-error retry requirement split across phases: phase 1 locks in that combat feedback ends only the current drive, but does not pretend the current navigation coupling already provides the desired retry behavior.
+- Do not add a misleading combat-only test for navigation-driven retry yet; the current sticky-melee seam still depends on `attack_sequence_active`, so a truthful retry spec belongs with the navigation/combat contract work in phase 2.
+
+#### Phase 1 Future Refinements
+- Add a navigation-facing behavioral test in phase 2 that proves a recoverable server error preserves engagement desire and allows pursuit or retry without requiring a fresh explicit attack.
+
 ### Phase 2: Extract A Narrow Navigation And Combat Contract
 
 #### Deliverables
@@ -378,6 +390,22 @@ This keeps "what we want" separate from "what just happened".
 - Navigation no longer needs to infer combat desire from `attack_sequence_active` alone.
 - Combat no longer reaches into navigation solely to ask yes or no questions that can be expressed through the new seam.
 - Sticky melee remains intact under the new handoff.
+
+#### Phase 2 Progress
+- Completed a TUI-local navigation/combat handoff in [apps/holtburger-cli/src/navigation.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/navigation.rs), [apps/holtburger-cli/src/pages/game/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/combat.rs), [apps/holtburger-cli/src/pages/game/domains/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/combat.rs), and [apps/holtburger-cli/src/pages/game/domains/navigation.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/navigation.rs).
+- Combat now publishes an explicit melee-pursuit request instead of forcing navigation to infer engagement desire from `attack_sequence_active`.
+- Navigation now reports movement support back through an explicit target-position support shape used by combat issuance and target-validity checks.
+- Sticky melee pursuit now survives transient attack-drive cancellation when explicit melee engagement is still desired.
+- Revalidated the full CLI suite with `cargo test -p holtburger-cli`.
+
+#### Phase 2 Decisions
+- Keep the new handoff intentionally narrow: phase 2 stores only the combat-owned melee pursuit target needed for movement cooperation, not a full engagement lifecycle model yet.
+- Let combat continue to own target choice, attack issuance, and cancellation policy, while navigation owns only movement execution plus movement-relevant facts such as pursuable target position.
+- Clear the melee pursuit target through shared interaction-teardown paths so passive retargeting, explicit cancel, despawn, and teleport do not leave sticky pursuit latched accidentally.
+
+#### Phase 2 Future Refinements
+- Promote the narrow melee pursuit target into broader engagement state in phase 3 so missile and melee can share the same explicit intent model without overfitting phase 2.
+- If later phases need richer movement outcomes than `target_position: Option<_>`, widen the support shape into explicit readiness and blocked outcomes instead of reintroducing boolean folklore.
 
 ### Phase 3: Introduce Engagement Runtime State Beside The Existing Bits
 
@@ -396,6 +424,23 @@ This keeps "what we want" separate from "what just happened".
 - The model does not assume a one-shot attack policy if we do not expect to support one.
 - Sticky engagement can remain desired even when no attack is currently in flight.
 
+#### Phase 3 Progress
+- Completed a TUI-local engagement runtime model in [apps/holtburger-cli/src/pages/game/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/combat.rs) with explicit desired engagement, in-flight state, facing requirement, and classified last-feedback state while keeping the old queue bits compiling.
+- Updated [apps/holtburger-cli/src/pages/game/domains/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/combat.rs) to consume that engagement model for melee navigation requests, sticky re-arm gating, and pure server-feedback classification instead of relying only on incidental queue-bit state.
+- Extracted pure local target-disqualifier logic for explicit attack entry and now reject death-motion targets up front using shared `CombatTargetStatus` plus local attackability checks.
+- Added combat specs covering passive targeting without engagement intent, explicit engagement intent capture, death-motion local rejection, recoverable feedback summaries, and facing requirement classification.
+- Revalidated the full CLI suite with `cargo test -p holtburger-cli`.
+
+#### Phase 3 Decisions
+- Keep phase 3 ownership TUI-local: the engagement model is now explicit enough to reason about, but it is still too coupled to ongoing reducer migration to justify promoting it into `holtburger-core` yet.
+- Store only target and mode in desired engagement for now. Attack height and charge level still come from the existing local combat controls so phase 3 does not overfit the first runtime model.
+- Classify `YouChargedTooFar` as recoverable and other current `AttackDone(error)` paths as unrecoverable in the local feedback summary shape, but do not yet claim that this is the final combined-feedback taxonomy; that remains phase 4 work.
+
+#### Phase 3 Future Refinements
+- Widen desired engagement to include full attack-profile intent once the queue-bit resend path is removed, so attack controls stop living half in runtime state and half in UI controls.
+- Replace the temporary `AttackDone(error)`-only classification input with the combined combat-feedback adapter in phase 4 so recoverable versus unrecoverable policy uses the same ACE-grounded signal stream described earlier in this plan.
+- Revisit whether local `cancel_attack()` should stamp a separate local-finish reason once the reducer no longer depends on queue-bit compatibility paths.
+
 ### Phase 4: Move Server Feedback And Re-Arm Policy Onto Engagement State
 
 #### Deliverables
@@ -413,6 +458,23 @@ This keeps "what we want" separate from "what just happened".
 - Recoverable failures can suspend current attack issuance without losing engagement desire.
 - Tests cover start, feedback, cancel, blocked, cooldown, and sticky re-arm flows.
 
+#### Phase 4 Progress
+- Completed a TUI-local combined combat-feedback adapter in [apps/holtburger-cli/src/pages/game/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/combat.rs) that pairs combat-relevant `ActionResult` and transient `ServerMessage` signals with the next `AttackDone`, so generic `ActionCancelled` cleanup no longer stands alone as the reason.
+- Updated [apps/holtburger-cli/src/pages/game/domains/reduce.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/reduce.rs) and [apps/holtburger-cli/src/pages/game/domains/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/combat.rs) so combat now consumes `ActionResult`, `ServerMessage`, and `CombatFeedback` together for engagement policy while existing chat and log flows remain intact.
+- Reworked feedback policy so recoverable overshoot-style failures preserve desired engagement but stop the current attack drive, while unrecoverable paired failures such as `You cannot attack <target>` and missing-target errors finish the current engagement attempt without clearing passive targeting.
+- Added combat specs covering combined feedback for `YouChargedTooFar`, transient `You cannot attack <target>`, and missing-target `WeenieError` outcomes.
+- Revalidated the full CLI suite with `cargo test -p holtburger-cli`.
+
+#### Phase 4 Decisions
+- Keep the combined-feedback adapter TUI-local for now. It is now explicit and ACE-shaped, but it still depends on page-level event routing and should not move into `holtburger-core` before phase 5 settles final ownership.
+- Treat bare `AttackDone(ActionCancelled)` as a recoverable generic cancellation signal, not as proof that the target or engagement is invalid. The paired `ActionResult` or transient server text wins when present.
+- Keep `MissileOutOfRange` on the unrecoverable-for-now side of the local taxonomy. Phase 4 still avoids inventing automatic retry policy for missile spacing beyond the ACE-grounded cases already proven.
+
+#### Phase 4 Future Refinements
+- Replace the temporary one-slot pending-failure adapter with a more explicit event correlation shape if later phases need to handle overlapping combat attempts or richer ordering guarantees.
+- Once phase 5 removes the legacy queue-bit compatibility path, move successful reissue policy fully onto explicit engagement directives instead of allowing `attack_queued` to remain as a transitional carrier.
+- Revisit whether some unrecoverable outcomes should clear passive targeting as well as engagement once the final ownership model and UI affordance rules are settled.
+
 ### Phase 5: Decide Final Ownership And Replace Queue-Bit Plumbing
 
 #### Deliverables
@@ -429,6 +491,24 @@ This keeps "what we want" separate from "what just happened".
 - No remaining public runtime concept depends on `attack_queued` as a catch-all for combat desire.
 - Shared code only owns combat behavior that is genuinely reusable; any remaining TUI-specific drive policy stays in the TUI intentionally.
 
+#### Phase 5 Progress
+- Chose the bespoke TUI combat driver end state and completed the cutover in [apps/holtburger-cli/src/pages/game/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/combat.rs), [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), and [apps/holtburger-cli/src/pages/game/domains/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/combat.rs). The TUI no longer drives combat through the shared `CombatAutomationController` shape.
+- Replaced public queue-bit runtime state with explicit `CombatIssueState` values, so the combat model now names `Idle`, `Ready`, and `InFlight` directly instead of exposing `attack_queued` and `attack_sequence_active` as the catch-all contract.
+- Kept reusable data shapes from shared code where they still make sense, but moved issuance cadence, facing reissue timing, and target or mode reset policy into the TUI-local combat driver that already owns engagement policy and page-level feedback routing.
+- Unified nearby-tab `Attack` affordances with the same local attackability rule used by explicit attack entry, including death-motion suppression, in [apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs).
+- Updated combat, navigation, dashboard, and input specs to assert against explicit issue state rather than queue folklore, and revalidated the slice with `cargo test -p holtburger-cli`.
+
+#### Phase 5 Decisions
+- Final ownership choice: keep combat drive orchestration in `holtburger-cli`. The shared controller remained shaped around `attack_armed` and `attack_sequence_active`, so preserving it would have kept the wrong abstraction alive.
+- Keep smaller shared data shapes where they still fit, but do not force a shared combat driver until a future client proves that the higher-level orchestration is actually reusable.
+- Treat explicit issue state as public combat runtime terminology for the TUI. Tests and UI rendering should talk in terms of `Idle`, `Ready`, and `InFlight`, not in terms of historical queue bits.
+- Unify nearby `Attack` affordances only around the local attackability contract proven so far: creature, attackable, and not already in death motion. Broader hostility or social policy is still a separate layer.
+
+#### Phase 5 Future Refinements
+- Phase 6 should remove or rename leftover legacy helper names such as `refresh_stale_attack_sequence` and `sync_combat_automation` so the code no longer advertises the old mental model even internally.
+- If a future 3D client wants to share more of this logic, extract from the TUI-local driver starting from the new explicit issue-state and engagement concepts rather than trying to revive the old controller API.
+- Revisit whether nearby affordances should eventually distinguish hostile, neutral, and non-attackable creatures more explicitly once layered target semantics are formalized beyond the current local attackability gate.
+
 ### Phase 6: Verification, Cleanup, And Plan Refinement Checkpoint
 
 #### Deliverables
@@ -442,6 +522,21 @@ This keeps "what we want" separate from "what just happened".
 - No remaining public APIs imply the old queued-attack mental model.
 - Behavior is preserved or intentionally improved with clear rationale.
 - The end of the phase explicitly answers whether the redesign is complete or entering another refinement loop.
+
+#### Phase 6 Progress
+- Removed the remaining queue-era helper vocabulary from [apps/holtburger-cli/src/pages/game/domains/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/combat.rs) by renaming `refresh_stale_attack_sequence` to `advance_combat_drive` and `sync_combat_automation` to `run_combat_drive`, which makes the reducer describe the current issue-state model instead of the retired sequence model.
+- Renamed the TUI-local driver types in [apps/holtburger-cli/src/pages/game/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/combat.rs) and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) from `CombatAutomation*` to `CombatDrive*`, and updated the surrounding navigation and player teardown paths so runtime state no longer advertises the old automation-controller shape.
+- Removed the dead shared combat-controller API from [crates/holtburger-core/src/client/controllers/combat.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/combat.rs) and [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs), leaving only the reusable `DesiredAttackProfile` and `TargetedAttackRequest` shapes plus a public request-conversion helper that the TUI now reuses directly.
+- Cleaned the remaining test vocabulary in [apps/holtburger-cli/src/pages/game/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/combat.rs), [apps/holtburger-cli/src/pages/game/panels/dynamic.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dynamic.rs), and [apps/holtburger-cli/src/pages/game/domains/tests/combat.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/domains/tests/combat.rs) so the suite now talks about issue state and in-flight attacks rather than queued attacks or attack sequences.
+- Revalidated the redesign end state with `cargo test -p holtburger-core` and `cargo test -p holtburger-cli`.
+
+#### Phase 6 Decisions
+- Treat the TUI-local drive vocabulary as the stable post-redesign terminology. The combat loop now talks about engagement, issue state, and combat drive progression rather than automation or queue sequencing.
+- Keep only the reusable attack-profile data shapes in `holtburger-core`. The removed controller API did not represent a proven shared abstraction, so phase 6 closes the redesign by deleting it instead of preserving a dead compatibility surface.
+- Consider the redesign complete for this plan. There is no blocking follow-on refinement required to preserve current combat behavior or to explain the runtime model.
+
+#### Phase 6 Future Refinements
+- No immediate follow-on slice is required. If a future richer client wants to share more combat logic, start from the explicit engagement and issue-state model that exists now rather than reviving the deleted controller API.
 
 ## Plan Refinement Steps
 

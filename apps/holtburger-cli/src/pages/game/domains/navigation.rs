@@ -1,7 +1,7 @@
-use super::combat;
 use super::context;
 use super::inventory;
 use super::*;
+use crate::pages::game::combat as combat_model;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
@@ -132,7 +132,7 @@ pub(super) fn apply_navigation_interrupt(
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        state.view.active_interaction = None;
+        set_active_interaction(state, None, result);
         result.request_redraw(RedrawPriority::Immediate);
     }
 
@@ -146,9 +146,9 @@ pub(super) fn apply_navigation_interrupt(
         ) {
             result.commands.push(ClientCommand::CancelAttack);
             state.data.combat_runtime.cancel_attack();
-            state.runtime.combat_automation = None;
+            state.clear_combat_drive();
         }
-        state.view.active_interaction = None;
+        set_active_interaction(state, None, result);
         result.request_redraw(RedrawPriority::Immediate);
     }
 }
@@ -233,12 +233,38 @@ pub(super) fn set_active_interaction(
     let previous_interaction = state.view.active_interaction;
     state.view.active_interaction = next_interaction;
 
+    sync_combat_navigation_request(previous_interaction, next_interaction, state);
     sync_target_health_query(previous_interaction, next_interaction, result);
 
     if should_cancel_attack(state, previous_interaction, next_interaction) {
         result.commands.push(ClientCommand::CancelAttack);
         state.data.combat_runtime.cancel_attack();
-        state.runtime.combat_automation = None;
+        state.clear_combat_drive();
+    }
+}
+
+fn sync_combat_navigation_request(
+    previous_interaction: Option<Interaction>,
+    next_interaction: Option<Interaction>,
+    state: &mut GameState,
+) {
+    let desired_target = state.data.combat_runtime.desired_engagement_target();
+    if desired_target.is_none() {
+        return;
+    }
+
+    let previous_target = target_guid_for_interaction(previous_interaction);
+    let next_target = target_guid_for_interaction(next_interaction);
+
+    if desired_target == previous_target && desired_target != next_target {
+        state.data.combat_runtime.clear_engagement();
+    }
+}
+
+fn target_guid_for_interaction(interaction: Option<Interaction>) -> Option<Guid> {
+    match interaction {
+        Some(Interaction::Targeting { target_guid }) => Some(target_guid),
+        _ => None,
     }
 }
 
@@ -311,13 +337,7 @@ fn navigation_snapshot(state: &GameState, target_guid: Option<Guid>) -> Navigati
         player_position: state.data.runtime_player_position(),
         self_movement_kinematics: state.data.self_movement_kinematics.clone(),
         run_rate_scalar: state.data.player_run_rate(),
-        combat_target_guid: combat::current_target_guid(state),
-        combat_mode: state.data.combat_mode,
-        attack_sequence_active: state
-            .data
-            .combat_runtime
-            .attack_activity(state.data.combat_mode)
-            .is_some(),
+        combat_request: combat_model::navigation_request(state),
         tracked_target: target_guid.zip(target_sample).map(|(guid, sample)| {
             ResolvedNavigationTarget {
                 guid,
@@ -338,8 +358,7 @@ fn navigation_tick(state: &GameState, now: Instant, elapsed: f64) -> NavigationT
 
 fn navigation_tick_target_guid(state: &GameState) -> Option<Guid> {
     state.runtime.navigation.tracked_target_guid().or_else(|| {
-        combat::current_target_guid(state)
-            .filter(|guid| combat::is_valid_combat_target(state, *guid))
+        combat_model::navigation_request(state).map(|request| request.target_guid)
     })
 }
 

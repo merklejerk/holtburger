@@ -1051,6 +1051,12 @@ mod tests {
     }
 
     #[test]
+    fn v8_script_tests_run_in_single_thread_to_avoid_v8_platform_teardown() {
+        dispatch_source_escapes_javascript_line_separators();
+        equipment_helper_returns_js_map();
+        current_trade_info_helper_returns_js_object();
+    }
+
     fn dispatch_source_escapes_javascript_line_separators() {
         let event = ScriptEvent::ChatMessage(ScriptChatEvent {
             channel: ScriptChatChannelKind::Say,
@@ -1067,7 +1073,6 @@ mod tests {
         assert!(source.contains("JSON.parse("));
     }
 
-    #[test]
     fn equipment_helper_returns_js_map() {
         let source = ScriptSource::new(
             "equipment-map-test",
@@ -1094,7 +1099,6 @@ mod tests {
         ));
     }
 
-    #[test]
     fn current_trade_info_helper_returns_js_object() {
         let source = ScriptSource::new(
             "current-trade-info-test",

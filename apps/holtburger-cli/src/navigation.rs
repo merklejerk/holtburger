@@ -650,10 +650,11 @@ impl TuiNavigation {
         }
 
         let target_guid = combat_request.target_guid;
+        let stop_distance = effective_arrival_distance(MELEE_ATTACK_DISTANCE, input.target_use_radius());
 
         let pursuing = self
             .distance_to_target(input)
-            .is_some_and(|distance| distance > MELEE_ATTACK_DISTANCE);
+            .is_some_and(|distance| distance > stop_distance);
 
         self.active = ActiveNavigation::StickyMelee {
             target_guid,
@@ -813,7 +814,7 @@ impl TuiNavigation {
 }
 
 fn effective_arrival_distance(arrival_distance: f32, target_use_radius: Option<f32>) -> f32 {
-    arrival_distance.max(target_use_radius.unwrap_or(0.0).max(0.0))
+    arrival_distance.max(target_use_radius.unwrap_or(0.1))
 }
 
 fn navigation_world_speed_budget(
@@ -1470,6 +1471,43 @@ mod tests {
     }
 
     #[test]
+    fn sticky_melee_uses_target_use_radius_as_the_stop_distance() {
+        let now = Instant::now();
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 180.0_f32.to_radians());
+        let target_guid = Guid(0x5000_0008);
+        let mut navigation = TuiNavigation::default();
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: sticky_snapshot(
+                Some(player_position),
+                Some(target_sample_with_use_radius(
+                    target_guid,
+                    world_position(0.8, 0.0, 0.0),
+                    1.25,
+                )),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+                Some(CombatNavigationRequest {
+                    target_guid,
+                    mode: CombatMode::Melee,
+                }),
+            ),
+        });
+
+        assert_eq!(update.drive_command, None);
+        assert!(matches!(
+            navigation.active,
+            ActiveNavigation::StickyMelee {
+                latched_target_guid: Some(guid),
+                pursuing: false,
+                ..
+            } if guid == target_guid
+        ));
+    }
+
+    #[test]
     fn tick_clears_finished_approach_interaction() {
         let now = Instant::now();
         let player_position = world_position(0.0, 0.0, 0.0);
@@ -1586,6 +1624,26 @@ mod tests {
                 projection_mode: SpatialSampleMode::AuthoritativeOnly,
             },
             use_radius: None,
+        }
+    }
+
+    fn target_sample_with_use_radius(
+        guid: Guid,
+        target_pose: WorldPosition,
+        use_radius: f32,
+    ) -> ResolvedNavigationTarget {
+        ResolvedNavigationTarget {
+            guid,
+            sample: SpatialEntitySample {
+                guid,
+                authoritative_pose: target_pose,
+                projected_pose: target_pose,
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(),
+                motion_state: None,
+                projection_mode: SpatialSampleMode::AuthoritativeOnly,
+            },
+            use_radius: Some(use_radius),
         }
     }
 

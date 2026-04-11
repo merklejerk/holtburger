@@ -204,6 +204,14 @@ impl MovementSystem {
         self.next_autonomous_position_heartbeat_at = None;
     }
 
+    pub(crate) fn arm_autonomous_position_heartbeat_schedule(
+        &mut self,
+        now: Instant,
+        world: &WorldState,
+    ) {
+        self.refresh_autonomous_position_heartbeat_schedule(now, world);
+    }
+
     fn refresh_autonomous_position_heartbeat_schedule(&mut self, now: Instant, world: &WorldState) {
         self.next_autonomous_position_heartbeat_at = has_autonomous_position_sync_target(world)
             .then_some(now + AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL);

@@ -170,14 +170,19 @@ impl ClientSimulationSystem {
         };
 
         let world_events = world.apply_solved_body_kinematics(&solved);
-        movement
-            .send_autonomous_position_sync(
-                Instant::now(),
-                world,
-                session,
-                super::movement_types::MovementPacketMetadata::default(),
-            )
-            .await?;
+        let now = Instant::now();
+        if should_send_immediate_server_controlled_sync(&data) {
+            movement
+                .send_autonomous_position_sync(
+                    now,
+                    world,
+                    session,
+                    super::movement_types::MovementPacketMetadata::default(),
+                )
+                .await?;
+        } else {
+            movement.arm_autonomous_position_heartbeat_schedule(now, world);
+        }
 
         Ok((wire_events, world_events))
     }
@@ -286,6 +291,10 @@ impl ClientSimulationSystem {
             ),
         })
     }
+}
+
+fn should_send_immediate_server_controlled_sync(data: &MovementEventData) -> bool {
+    !matches!(data.data, MovementTypeData::Invalid(_))
 }
 
 #[cfg(test)]
@@ -475,5 +484,45 @@ mod tests {
             (solved.pose.rotation.to_heading() - expected_coords.heading_to(&target.coords)).abs()
                 < 1e-5
         );
+    }
+
+    #[test]
+    fn invalid_server_controlled_motion_skips_immediate_sync() {
+        assert!(!should_send_immediate_server_controlled_sync(&MovementEventData {
+            guid: Guid(0x5000_0001),
+            object_instance_sequence: 7,
+            movement_sequence: 20,
+            server_control_sequence: 10,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::Invalid(Default::default()),
+        }));
+    }
+
+    #[test]
+    fn move_to_position_server_controlled_motion_keeps_immediate_sync() {
+        assert!(should_send_immediate_server_controlled_sync(&MovementEventData {
+            guid: Guid(0x5000_0001),
+            object_instance_sequence: 7,
+            movement_sequence: 20,
+            server_control_sequence: 10,
+            is_autonomous: false,
+            movement_type: MovementType::MoveToPosition,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::MoveToPosition(MoveToPosition {
+                origin: Origin {
+                    cell_id: Guid(0x1234_0000),
+                    position: Vector3::new(32.0, 48.0, 0.0),
+                },
+                params: MoveToParameters {
+                    desired_heading: 0.0,
+                    ..Default::default()
+                },
+                run_rate: 1.0,
+            }),
+        }));
     }
 }

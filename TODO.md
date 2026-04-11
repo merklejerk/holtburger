@@ -256,7 +256,7 @@
 - [x] Do not show recharge verb on uncharged mana stones.
 - [x] Salvaging waits for UseDone, leaving us in a busy state.
 - [x] `/version` and `--version`, seeded from commit hash env var set by build system?
-- [ ] Attack spam too verbose.
+- [x] Attack spam too verbose.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -269,7 +269,7 @@
     - When a trade is closed?
 
 ### Stretch
-- [ ] Integrate `deno-core` for scripting.
+- [x] Integrate `deno-core` for scripting.
 
 ### Investigate
 - [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)

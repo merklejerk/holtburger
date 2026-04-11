@@ -1,4 +1,3 @@
-use super::navigation;
 use super::*;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -8,7 +7,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::InternalAction {
             action: AppInternalAction::ClearActiveInteraction,
         } => {
-            clear_active_interaction(state, &mut result);
+            set_active_interaction(state, None, &mut result);
         }
         AppAction::InternalAction {
             action: AppInternalAction::SetActiveInteraction { interaction },
@@ -19,15 +18,6 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     }
 
     result
-}
-
-fn clear_active_interaction(state: &mut GameState, result: &mut UpdateResult) {
-    if is_frontend_navigation_interaction(state.view.active_interaction) {
-        navigation::cancel_frontend_navigation(state, result);
-        return;
-    }
-
-    set_active_interaction(state, None, result);
 }
 
 fn set_active_interaction(
@@ -46,13 +36,6 @@ fn set_active_interaction(
         state.data.combat_runtime.cancel_attack();
         state.clear_combat_drive();
     }
-}
-
-pub(super) fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool {
-    matches!(
-        interaction,
-        Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
-    )
 }
 
 fn sync_combat_navigation_request(

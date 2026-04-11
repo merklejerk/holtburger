@@ -15,7 +15,7 @@ use holtburger_scripting::{
     ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptInventoryItemView,
     ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
     ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
-    ScriptWorkflowEvent,
+    ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
@@ -303,6 +303,25 @@ impl ScriptClientView for TuiScriptClientView<'_> {
                 }
             })
             .collect()
+    }
+
+    fn current_trade_info(&self) -> Option<ScriptTradeInfo> {
+        let trade = self.data.trade.as_ref()?;
+        let partner_name = self
+            .data
+            .entities
+            .get(&trade.partner_guid)
+            .and_then(|entity| {
+                let name = entity.name().trim();
+                (!name.is_empty()).then(|| name.to_string())
+            });
+
+        Some(ScriptTradeInfo {
+            partner_guid: trade.partner_guid,
+            partner_name,
+            our_items: trade.self_side.items.clone(),
+            their_items: trade.partner_side.items.clone(),
+        })
     }
 
     fn fellowship(&self) -> Option<ScriptPartyView> {
@@ -617,6 +636,7 @@ mod tests {
     use holtburger_protocol::messages::movement::InterpretedMotionCommand;
     use holtburger_protocol::messages::object::types::ArmorProfile;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
+    use holtburger_world::state::{TradeSide, TradeState};
     use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
 
     #[test]
@@ -779,6 +799,50 @@ mod tests {
             .expect("head wear slot should exist");
         assert_eq!(head_wear.equip_mask, EquipMask::HEAD_WEAR);
         assert_eq!(head_wear.item_guid, None);
+    }
+
+    #[test]
+    fn current_trade_info_projection_exposes_partner_and_items() {
+        let player_guid = Guid(0x5000_0006);
+        let partner_guid = Guid(0x8000_0006);
+        let our_item = Guid(0x9000_0006);
+        let their_item = Guid(0x9000_0007);
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.entities.insert(
+            partner_guid,
+            Entity::new(partner_guid, "Buddy".to_string(), WorldPosition::default()),
+        );
+        data.trade = Some(TradeState {
+            partner_guid,
+            initiator_guid: partner_guid,
+            trade_stamp: 123.0,
+            self_side: TradeSide {
+                guid: player_guid,
+                accepted: false,
+                items: vec![our_item],
+            },
+            partner_side: TradeSide {
+                guid: partner_guid,
+                accepted: false,
+                items: vec![their_item],
+            },
+        });
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let trade_info = script_view
+            .current_trade_info()
+            .expect("trade info should be projected");
+
+        assert_eq!(trade_info.partner_guid, partner_guid);
+        assert_eq!(trade_info.partner_name.as_deref(), Some("Buddy"));
+        assert_eq!(trade_info.our_items, vec![our_item]);
+        assert_eq!(trade_info.their_items, vec![their_item]);
     }
 
     #[test]

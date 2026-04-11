@@ -15,7 +15,7 @@ use holtburger_common::properties::{
 use crate::{
     ScriptClientIntent, ScriptClientView, ScriptEntityKind, ScriptEntityView,
     ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel,
-    ScriptSelfView, ScriptSource,
+    ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -38,6 +38,8 @@ struct ScriptClientViewPtr {
     nearby_entities:
         unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
     get_equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
+    #[allow(clippy::type_complexity)]
+    current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
 }
 
 impl ScriptClientViewPtr {
@@ -116,6 +118,12 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).get_equipment() }
         }
 
+        unsafe fn current_trade_info<T: ScriptClientView>(
+            data: *const (),
+        ) -> Option<ScriptTradeInfo> {
+            unsafe { (&*data.cast::<T>()).current_trade_info() }
+        }
+
         Self {
             data: (view as *const T).cast(),
             self_entity: self_entity::<T>,
@@ -128,6 +136,7 @@ impl ScriptClientViewPtr {
             entity_instance_prop: entity_instance_prop::<T>,
             nearby_entities: nearby_entities::<T>,
             get_equipment: get_equipment::<T>,
+            current_trade_info: current_trade_info::<T>,
         }
     }
 
@@ -174,6 +183,10 @@ impl ScriptClientViewPtr {
     unsafe fn get_equipment(self) -> Vec<ScriptEquipmentSlotView> {
         unsafe { (self.get_equipment)(self.data) }
     }
+
+    unsafe fn current_trade_info(self) -> Option<ScriptTradeInfo> {
+        unsafe { (self.current_trade_info)(self.data) }
+    }
 }
 
 const BOOTSTRAP_JS: &str = r#"
@@ -191,10 +204,23 @@ globalThis.Holtburger = Object.freeze({
   },
     nearbyEntities(maxDistance = null, classifications = null) {
         return Deno.core.ops.op_hb_nearby_entities(
-            !maxDistance ? null : Number(maxDistance),
-            !classifications ? null : classifications.map(String),
+            maxDistance == null || maxDistance == undefined ? null : Number(maxDistance),
+            classifications == null || classifications == undefined ? null : classifications.map(String),
         );
   },
+    currentTradeInfo() {
+        const tradeInfo = Deno.core.ops.op_hb_current_trade_info();
+        if (tradeInfo == null) {
+            return null;
+        }
+
+        return {
+            partnerGuid: tradeInfo.partner_guid,
+            partnerName: tradeInfo.partner_name,
+            ourItems: tradeInfo.our_items,
+            theirItems: tradeInfo.their_items,
+        };
+    },
     equipment() {
         return new Map(
             Deno.core.ops.op_hb_equipment().map(({ slot, equip_mask, item_guid }) => [
@@ -320,6 +346,7 @@ deno_core::extension!(
         op_hb_log,
         op_hb_say,
         op_hb_emote,
+        op_hb_current_trade_info,
         op_hb_equipment,
         op_hb_equip,
         op_hb_unequip,
@@ -427,6 +454,12 @@ fn op_hb_nearby_entities(
 fn op_hb_equipment(state: &mut OpState) -> Vec<ScriptEquipmentSlotView> {
     with_current_script_client_view(state, |view| unsafe { view.get_equipment() })
         .unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_current_trade_info(state: &mut OpState) -> Option<ScriptTradeInfo> {
+    with_current_script_client_view(state, |view| unsafe { view.current_trade_info() }).flatten()
 }
 
 #[op2(fast)]
@@ -915,7 +948,7 @@ mod tests {
     use crate::{
         ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptEntityKind,
         ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
-        ScriptIntent, ScriptSelfView, ScriptSource,
+        ScriptIntent, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::properties::{
@@ -987,6 +1020,15 @@ mod tests {
             }]
         }
 
+        fn current_trade_info(&self) -> Option<ScriptTradeInfo> {
+            Some(ScriptTradeInfo {
+                partner_guid: Guid(7),
+                partner_name: Some("Buddy".to_string()),
+                our_items: vec![Guid(11)],
+                their_items: vec![Guid(21), Guid(22)],
+            })
+        }
+
         fn fellowship(&self) -> Option<crate::ScriptPartyView> {
             None
         }
@@ -1049,6 +1091,34 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
                 if message == "[true,true,42]"
+        ));
+    }
+
+    #[test]
+    fn current_trade_info_helper_returns_js_object() {
+        let source = ScriptSource::new(
+            "current-trade-info-test",
+            r#"
+                const trade = Holtburger.currentTradeInfo();
+                Holtburger.log(
+                    "info",
+                    JSON.stringify([
+                        trade.partnerGuid,
+                        trade.partnerName,
+                        trade.ourItems,
+                        trade.theirItems,
+                    ]),
+                );
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[7,\"Buddy\",[11],[21,22]]"
         ));
     }
 }

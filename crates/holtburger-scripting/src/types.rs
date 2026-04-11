@@ -47,6 +47,7 @@ pub trait ScriptClientView {
     ) -> Vec<ScriptEntityView>;
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
     fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView>;
+    fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
@@ -312,6 +313,14 @@ pub struct ScriptEquipmentSlotView {
     pub slot: ScriptEquipmentSlotKind,
     pub equip_mask: EquipMask,
     pub item_guid: Option<Guid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptTradeInfo {
+    pub partner_guid: Guid,
+    pub partner_name: Option<String>,
+    pub our_items: Vec<Guid>,
+    pub their_items: Vec<Guid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

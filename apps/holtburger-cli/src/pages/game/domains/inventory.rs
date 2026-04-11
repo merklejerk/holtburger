@@ -169,7 +169,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 state.view.active_interaction = None;
             }
         }
-        _ => unreachable!("unsupported inventory action"),
+        _ => {}
     }
 
     result

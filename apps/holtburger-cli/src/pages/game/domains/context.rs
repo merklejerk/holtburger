@@ -85,7 +85,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.view.vendor = None;
             result.request_redraw(RedrawPriority::Immediate);
         }
-        _ => unreachable!("unsupported context action"),
+        _ => {}
     }
 
     result

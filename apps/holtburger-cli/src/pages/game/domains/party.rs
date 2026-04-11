@@ -22,7 +22,7 @@ pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> Update
         AppAction::Unswear { target } => {
             result.commands.push(ClientCommand::Unswear { target });
         }
-        _ => unreachable!("unsupported party action"),
+        _ => {}
     }
 
     result

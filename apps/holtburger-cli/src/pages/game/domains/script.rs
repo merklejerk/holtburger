@@ -34,7 +34,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.unrun_script_command(&mut result);
             result
         }
-        _ => unreachable!("unsupported script action"),
+        _ => UpdateResult::new(),
     }
 }
 

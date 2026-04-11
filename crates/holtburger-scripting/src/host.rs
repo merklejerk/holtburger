@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use anyhow::{Context, Result};
-use deno_core::serde_json::{from_value, Value, json};
+use deno_core::serde_json::{Value, from_value, json};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
 use futures::executor::block_on;
 use holtburger_common::Guid;
@@ -34,11 +34,9 @@ struct ScriptClientViewPtr {
     entity_string_prop: unsafe fn(*const (), Guid, PropertyString) -> Option<String>,
     entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
-    nearby_entities: unsafe fn(
-        *const (),
-        Option<f32>,
-        Option<Vec<ScriptEntityKind>>,
-    ) -> Vec<ScriptEntityView>,
+    #[allow(clippy::type_complexity)]
+    nearby_entities:
+        unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
     get_equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
 }
 
@@ -406,8 +404,7 @@ fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
 fn op_hb_nearby_entities(
     state: &mut OpState,
     max_distance: Option<f64>,
-    #[serde]
-    classifications: Option<Vec<String>>,
+    #[serde] classifications: Option<Vec<String>>,
 ) -> Vec<ScriptEntityView> {
     let classifications = classifications.map(|classifications| {
         classifications
@@ -417,7 +414,10 @@ fn op_hb_nearby_entities(
     });
 
     with_current_script_client_view(state, |view| unsafe {
-        view.nearby_entities(max_distance.map(|distance| distance as f32), classifications)
+        view.nearby_entities(
+            max_distance.map(|distance| distance as f32),
+            classifications,
+        )
     })
     .unwrap_or_default()
 }
@@ -917,11 +917,11 @@ mod tests {
         ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
         ScriptIntent, ScriptSelfView, ScriptSource,
     };
+    use holtburger_common::Guid;
     use holtburger_common::properties::{
         EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
         PropertyInt64, PropertyString,
     };
-    use holtburger_common::Guid;
 
     #[derive(Default)]
     struct TestView;

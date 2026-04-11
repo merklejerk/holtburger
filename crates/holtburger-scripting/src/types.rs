@@ -42,8 +42,15 @@ pub struct ScriptSelfView {
     pub name: String,
     pub position: Option<WorldPosition>,
     pub health: Option<u32>,
+    pub health_max: Option<u32>,
     pub stamina: Option<u32>,
+    pub stamina_max: Option<u32>,
     pub mana: Option<u32>,
+    pub mana_max: Option<u32>,
+    pub encumbrance: Option<f32>,
+    pub capacity: Option<f32>,
+    pub busy_operation: Option<ScriptBusyOperation>,
+    pub heading: Option<f32>,
     pub combat_mode: CombatMode,
 }
 

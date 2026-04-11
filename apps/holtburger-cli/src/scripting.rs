@@ -7,6 +7,7 @@ use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ChatChannelKind;
+use holtburger_world::context::WorldContextExt as _;
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
     ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptInventoryItemView,
@@ -87,16 +88,38 @@ impl ScriptClientView for TuiScriptClientView<'_> {
                 .vitals
                 .get(&VitalType::Health)
                 .map(|vital| vital.current),
+            health_max: self
+                .data
+                .vitals
+                .get(&VitalType::Health)
+                .map(|vital| vital.buffed_max),
             stamina: self
                 .data
                 .vitals
                 .get(&VitalType::Stamina)
                 .map(|vital| vital.current),
+            stamina_max: self
+                .data
+                .vitals
+                .get(&VitalType::Stamina)
+                .map(|vital| vital.buffed_max),
             mana: self
                 .data
                 .vitals
                 .get(&VitalType::Mana)
                 .map(|vital| vital.current),
+            mana_max: self
+                .data
+                .vitals
+                .get(&VitalType::Mana)
+                .map(|vital| vital.buffed_max),
+            encumbrance: self.data.player_encumbrance(),
+            capacity: self.data.player_capacity(),
+            busy_operation: self
+                .view
+                .active_busy_operation
+                .map(|kind| ScriptBusyOperation { kind }),
+            heading: self.data.runtime_heading(),
             combat_mode: self.data.combat_mode,
         })
     }
@@ -453,6 +476,14 @@ pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<Defe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{
+        PropertyInt, WorldObjectPropertyAccessorsMut,
+    };
+    use holtburger_common::{Quaternion, Vector3};
+    use holtburger_core::client::types::BusyOperationKind;
+    use holtburger_world::entity::Entity;
+    use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
 
     #[test]
     fn script_path_for_basename_uses_js_extension() {
@@ -466,5 +497,107 @@ mod tests {
     fn script_path_for_basename_rejects_path_segments_and_extensions() {
         assert!(script_path_for_basename_in_dir(Path::new("scripts"), "farm/bot").is_err());
         assert!(script_path_for_basename_in_dir(Path::new("scripts"), "bot.js").is_err());
+    }
+
+    #[test]
+    fn self_entity_projects_max_vitals_burden_capacity_busy_state_and_heading() {
+        let player_guid = Guid(0x5000_0001);
+        let item_guid = Guid(0x8000_0001);
+        let heading = 1.25_f32;
+        let player_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: Quaternion::from_heading(heading),
+        };
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(player_position);
+        data.vitals.insert(
+            VitalType::Health,
+            Vital {
+                vital_type: VitalType::Health,
+                ranks: 0,
+                start: 0,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 111,
+                buffed_max: 222,
+                current: 99,
+            },
+        );
+        data.vitals.insert(
+            VitalType::Stamina,
+            Vital {
+                vital_type: VitalType::Stamina,
+                ranks: 0,
+                start: 0,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 333,
+                buffed_max: 444,
+                current: 333,
+            },
+        );
+        data.vitals.insert(
+            VitalType::Mana,
+            Vital {
+                vital_type: VitalType::Mana,
+                ranks: 0,
+                start: 0,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 555,
+                buffed_max: 666,
+                current: 444,
+            },
+        );
+        data.attributes.insert(
+            AttributeType::StrengthAttr,
+            Attribute {
+                attr_type: AttributeType::StrengthAttr,
+                ranks: 0,
+                start: 100,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 100,
+                current: 100,
+            },
+        );
+
+        let mut player = Entity::new(player_guid, "Player".to_string(), player_position);
+        player.set_int_prop(PropertyInt::AugmentationIncreasedCarryingCapacity, 1);
+        data.entities.insert(player_guid, player);
+
+        let mut item = Entity::new(item_guid, "Pack Item".to_string(), WorldPosition::default());
+        item.set_int_prop(PropertyInt::EncumbranceVal, 300);
+        item.set_container_id(Some(player_guid));
+        data.entities.insert(item_guid, item);
+        data.inventory.insert(item_guid);
+
+        let mut view = ViewState::default();
+        view.active_busy_operation = Some(BusyOperationKind::Buy);
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &view,
+            server_time: None,
+        };
+
+        let self_view = script_view
+            .self_entity()
+            .expect("player snapshot should be available");
+
+        assert_eq!(self_view.guid, player_guid);
+        assert_eq!(self_view.health, Some(99));
+        assert_eq!(self_view.health_max, Some(222));
+        assert_eq!(self_view.stamina, Some(333));
+        assert_eq!(self_view.stamina_max, Some(444));
+        assert_eq!(self_view.mana, Some(444));
+        assert_eq!(self_view.mana_max, Some(666));
+        assert_eq!(self_view.encumbrance, Some(300.0));
+        assert_eq!(self_view.capacity, Some(18_000.0));
+        assert_eq!(self_view.busy_operation, Some(ScriptBusyOperation { kind: BusyOperationKind::Buy }));
+        assert!(matches!(self_view.heading, Some(value) if (value - heading).abs() < 1e-6));
+        assert_eq!(self_view.position, Some(player_position));
     }
 }

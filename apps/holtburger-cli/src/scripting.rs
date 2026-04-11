@@ -842,10 +842,8 @@ mod tests {
             server_time: None,
         };
 
-        let nearby_monsters = script_view.nearby_entities(
-            Some(10.0),
-            Some(vec![ScriptEntityKind::Monster]),
-        );
+        let nearby_monsters =
+            script_view.nearby_entities(Some(10.0), Some(vec![ScriptEntityKind::Monster]));
         assert_eq!(nearby_monsters.len(), 1);
         assert_eq!(nearby_monsters[0].guid, monster_guid);
         assert_eq!(nearby_monsters[0].kind, ScriptEntityKind::Monster);

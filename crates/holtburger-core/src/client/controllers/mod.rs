@@ -6,9 +6,7 @@ pub use approach_target::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
     ApproachTargetInput, ApproachTargetIntent,
 };
-pub use combat::{
-    DesiredAttackProfile, TargetedAttackRequest,
-};
+pub use combat::{DesiredAttackProfile, TargetedAttackRequest};
 pub use maintain_range::{
     MaintainRangeConfig, MaintainRangeController, MaintainRangeEffect, MaintainRangeFinishReason,
     MaintainRangeInput,

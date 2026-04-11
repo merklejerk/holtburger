@@ -83,7 +83,9 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                 state.data.combat_runtime.note_action_result(reason);
             }
         }
-        ClientViewEvent::ServerMessage { ref message, .. } if combat_model::combat_feedback_context_active(state) => {
+        ClientViewEvent::ServerMessage { ref message, .. }
+            if combat_model::combat_feedback_context_active(state) =>
+        {
             state.data.combat_runtime.note_server_message(message);
         }
         _ => {}

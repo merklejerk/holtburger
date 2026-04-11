@@ -139,7 +139,8 @@ fn navigation_snapshot_includes_projected_self_movement_kinematics() {
 }
 
 #[test]
-fn sticky_melee_pursuit_survives_transient_attack_drive_cancellation_when_engagement_remains_desired() {
+fn sticky_melee_pursuit_survives_transient_attack_drive_cancellation_when_engagement_remains_desired()
+ {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());

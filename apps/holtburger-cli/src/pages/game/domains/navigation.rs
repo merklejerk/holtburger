@@ -357,9 +357,11 @@ fn navigation_tick(state: &GameState, now: Instant, elapsed: f64) -> NavigationT
 }
 
 fn navigation_tick_target_guid(state: &GameState) -> Option<Guid> {
-    state.runtime.navigation.tracked_target_guid().or_else(|| {
-        combat_model::navigation_request(state).map(|request| request.target_guid)
-    })
+    state
+        .runtime
+        .navigation
+        .tracked_target_guid()
+        .or_else(|| combat_model::navigation_request(state).map(|request| request.target_guid))
 }
 
 fn apply_navigation_update(

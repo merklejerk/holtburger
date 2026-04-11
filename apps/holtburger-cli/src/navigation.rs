@@ -650,7 +650,8 @@ impl TuiNavigation {
         }
 
         let target_guid = combat_request.target_guid;
-        let stop_distance = effective_arrival_distance(MELEE_ATTACK_DISTANCE, input.target_use_radius());
+        let stop_distance =
+            effective_arrival_distance(MELEE_ATTACK_DISTANCE, input.target_use_radius());
 
         let pursuing = self
             .distance_to_target(input)

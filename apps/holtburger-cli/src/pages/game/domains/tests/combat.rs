@@ -13,21 +13,21 @@ fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() 
         ..WorldPosition::default()
     };
 
-    state.data.entities.insert(
-        target_guid,
-        {
-            let mut target = creature_entity(target_guid, "Drudge", target_position);
-            target.set_bool_prop(PropertyBool::Attackable, true);
-            target
-        },
-    );
+    state.data.entities.insert(target_guid, {
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target
+    });
     let result = state
         .handle_action(AppAction::Attack { guid: target_guid })
         .unwrap();
 
-    assert!(result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::SetCombatMode(CombatMode::Melee))
-    }));
+    assert!(
+        result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::SetCombatMode(CombatMode::Melee)) })
+    );
     assert!(
         !result
             .commands
@@ -45,16 +45,15 @@ fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() 
             mode: CombatMode::Melee,
         })
     );
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Ready);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Ready
+    );
 
     state.data.combat_mode = CombatMode::Melee;
 
     let mut tick_result = UpdateResult::new();
-    crate::pages::game::combat::advance_combat_drive(
-        &mut state,
-        Instant::now(),
-        &mut tick_result,
-    );
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
 
     assert!(tick_result.commands.iter().any(|command| {
         matches!(
@@ -94,7 +93,10 @@ fn passive_targeting_does_not_create_engagement_intent() {
         matches!(command, ClientCommand::QueryHealth(guid) if *guid == target_guid)
     }));
     assert_eq!(state.data.combat_runtime.desired_engagement(), None);
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
     assert!(!state.data.combat_runtime.in_flight());
 }
 
@@ -113,7 +115,10 @@ fn attack_feedback_updates_only_the_current_attack_drive_state() {
     ));
 
     assert!(commenced.redraw_requested());
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::InFlight);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::InFlight
+    );
 
     let done = state.handle_view_event(ClientViewEvent::CombatFeedback(
         CombatFeedback::AttackDone {
@@ -122,7 +127,10 @@ fn attack_feedback_updates_only_the_current_attack_drive_state() {
     ));
 
     assert!(done.redraw_requested());
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Ready);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Ready
+    );
 
     let cancelled = state.handle_view_event(ClientViewEvent::CombatFeedback(
         CombatFeedback::AttackDone {
@@ -131,7 +139,10 @@ fn attack_feedback_updates_only_the_current_attack_drive_state() {
     ));
 
     assert!(cancelled.redraw_requested());
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
@@ -208,15 +219,14 @@ fn targeting_in_missile_mode_does_not_fire_without_explicit_attack_intent() {
     }));
 
     let mut tick_result = UpdateResult::new();
-    crate::pages::game::combat::advance_combat_drive(
-        &mut state,
-        Instant::now(),
-        &mut tick_result,
-    );
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
 
-    assert!(!tick_result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMissileAttack { .. })
-    }));
+    assert!(
+        !tick_result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
+    );
 }
 
 #[test]
@@ -275,11 +285,7 @@ fn changing_melee_profile_while_engaged_waits_for_tick_reissue() {
     );
 
     let mut tick_result = UpdateResult::new();
-    crate::pages::game::combat::advance_combat_drive(
-        &mut state,
-        Instant::now(),
-        &mut tick_result,
-    );
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
 
     assert!(tick_result.commands.iter().any(|command| {
         matches!(
@@ -327,11 +333,7 @@ fn changing_missile_height_while_engaged_waits_for_tick_reissue() {
     );
 
     let mut tick_result = UpdateResult::new();
-    crate::pages::game::combat::advance_combat_drive(
-        &mut state,
-        Instant::now(),
-        &mut tick_result,
-    );
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
 
     assert!(tick_result.commands.iter().any(|command| {
         matches!(
@@ -403,15 +405,14 @@ fn targeting_in_melee_mode_does_not_attack_until_explicitly_armed() {
     );
 
     let mut tick_result = UpdateResult::new();
-    crate::pages::game::combat::advance_combat_drive(
-        &mut state,
-        Instant::now(),
-        &mut tick_result,
-    );
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
 
-    assert!(!tick_result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
+    assert!(
+        !tick_result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 }
 
 #[test]
@@ -466,19 +467,24 @@ fn retargeting_cancels_the_current_attack_drive_until_rearmed() {
             .iter()
             .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
     );
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
-
-    let mut tick_result = UpdateResult::new();
-    crate::pages::game::combat::advance_combat_drive(
-        &mut state,
-        Instant::now(),
-        &mut tick_result,
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
     );
 
-    assert!(!tick_result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { .. })
-    }));
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(
+        !tick_result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
@@ -542,7 +548,10 @@ fn cancelled_attack_stays_idle_across_combat_mode_reentry_until_rearmed() {
             .iter()
             .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
     );
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 
     state.data.combat_mode = CombatMode::Melee;
 
@@ -552,7 +561,10 @@ fn cancelled_attack_stays_idle_across_combat_mode_reentry_until_rearmed() {
     assert!(!retry.commands.iter().any(|command| {
         matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
     }));
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
@@ -601,7 +613,10 @@ fn retargeting_to_a_non_creature_cancels_engagement_without_reissue() {
             ClientCommand::TargetedMeleeAttack { .. } | ClientCommand::TargetedMissileAttack { .. }
         )
     }));
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
@@ -765,7 +780,10 @@ fn despawning_target_cancels_attack_drive() {
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
     assert_eq!(state.view.active_interaction, None);
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
@@ -786,6 +804,8 @@ fn cancel_interaction_leaves_targeting_and_cancels_attack_drive() {
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
     assert_eq!(state.view.active_interaction, None);
-    assert_eq!(state.data.combat_runtime.issue_state, CombatIssueState::Idle);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
-

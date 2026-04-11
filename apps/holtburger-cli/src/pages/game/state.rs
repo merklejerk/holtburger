@@ -3,9 +3,7 @@ use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::{
-    ActiveCharacterConfirmation, BusyOperationKind,
-};
+use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_scripting::ScriptHost;
@@ -19,8 +17,8 @@ use crate::navigation::{
     NavigationInput, NavigationInteractionChange, NavigationSnapshot, NavigationTick,
     NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
 };
-use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::GameData;
+use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;

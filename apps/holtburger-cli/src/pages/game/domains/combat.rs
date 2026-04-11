@@ -132,20 +132,16 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        super::reduce::dispatch_internal_action(
-            state,
-            AppInternalAction::ClearActiveInteraction,
-            &mut result,
-        );
+        result.actions.push(AppAction::InternalAction {
+            action: AppInternalAction::ClearActiveInteraction,
+        });
     }
 
-    super::reduce::dispatch_internal_action(
-        state,
-        AppInternalAction::SetActiveInteraction {
+    result.actions.push(AppAction::InternalAction {
+        action: AppInternalAction::SetActiveInteraction {
             interaction: Some(Interaction::Targeting { target_guid }),
         },
-        &mut result,
-    );
+    });
 
     let desired_mode = combat_model::explicit_attack_mode(state);
     let Some(desired_mode) = desired_mode else {

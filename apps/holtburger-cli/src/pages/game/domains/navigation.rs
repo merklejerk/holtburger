@@ -27,13 +27,11 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 if let Some(input) = navigation_input {
                     apply_navigation_input(state, input, &mut result);
                 }
-                super::reduce::dispatch_internal_action(
-                    state,
-                    AppInternalAction::SetActiveInteraction {
+                result.actions.push(AppAction::InternalAction {
+                    action: AppInternalAction::SetActiveInteraction {
                         interaction: Some(interaction),
                     },
-                    &mut result,
-                );
+                });
             }
             result.request_redraw(RedrawPriority::Immediate);
         }
@@ -41,11 +39,9 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             if let Some(input) = navigation_input {
                 apply_navigation_input(state, input, &mut result);
             } else {
-                super::reduce::dispatch_internal_action(
-                    state,
-                    AppInternalAction::ClearActiveInteraction,
-                    &mut result,
-                );
+                result.actions.push(AppAction::InternalAction {
+                    action: AppInternalAction::ClearActiveInteraction,
+                });
             }
             state.view.salvaging = None;
             result.request_redraw(RedrawPriority::Immediate);
@@ -111,7 +107,7 @@ pub(super) fn apply_tick(
         .runtime
         .navigation
         .tick(navigation_tick(state, now, elapsed));
-    apply_navigation_update(state, update, result);
+    apply_navigation_update(update, result);
 }
 
 pub(super) fn navigation_interrupt_for_view_event(
@@ -142,11 +138,9 @@ pub(super) fn apply_navigation_interrupt(
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        super::reduce::dispatch_internal_action(
-            state,
-            AppInternalAction::SetActiveInteraction { interaction: None },
-            result,
-        );
+        result.actions.push(AppAction::InternalAction {
+            action: AppInternalAction::SetActiveInteraction { interaction: None },
+        });
         result.request_redraw(RedrawPriority::Immediate);
     }
 
@@ -162,11 +156,9 @@ pub(super) fn apply_navigation_interrupt(
             state.data.combat_runtime.cancel_attack();
             state.clear_combat_drive();
         }
-        super::reduce::dispatch_internal_action(
-            state,
-            AppInternalAction::SetActiveInteraction { interaction: None },
-            result,
-        );
+        result.actions.push(AppAction::InternalAction {
+            action: AppInternalAction::SetActiveInteraction { interaction: None },
+        });
         result.request_redraw(RedrawPriority::Immediate);
     }
 }
@@ -176,7 +168,7 @@ pub(super) fn cancel_frontend_navigation(state: &mut GameState, result: &mut Upd
         NavigationInput::Cancel,
         navigation_snapshot(state, navigation_tick_target_guid(state)),
     );
-    apply_navigation_update(state, update, result);
+    apply_navigation_update(update, result);
 }
 
 #[cfg(test)]
@@ -206,7 +198,7 @@ fn apply_navigation_input(
         .runtime
         .navigation
         .handle_input(input, navigation_snapshot(state, target_guid));
-    apply_navigation_update(state, update, result);
+    apply_navigation_update(update, result);
 }
 
 fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<NavigationInput> {
@@ -268,11 +260,7 @@ fn navigation_tick_target_guid(state: &GameState) -> Option<Guid> {
         .or_else(|| combat_model::navigation_request(state).map(|request| request.target_guid))
 }
 
-fn apply_navigation_update(
-    state: &mut GameState,
-    update: NavigationUpdate,
-    result: &mut UpdateResult,
-) {
+fn apply_navigation_update(update: NavigationUpdate, result: &mut UpdateResult) {
     if let Some(command) = update.drive_command {
         result.commands.push(ClientCommand::DriveSelf(command));
     }
@@ -280,13 +268,11 @@ fn apply_navigation_update(
     match update.interaction_change {
         NavigationInteractionChange::Unchanged => {}
         NavigationInteractionChange::Set(next_interaction) => {
-            super::reduce::dispatch_internal_action(
-                state,
-                AppInternalAction::SetActiveInteraction {
+            result.actions.push(AppAction::InternalAction {
+                action: AppInternalAction::SetActiveInteraction {
                     interaction: next_interaction,
                 },
-                result,
-            );
+            });
             result.request_redraw(RedrawPriority::Immediate);
         }
     }

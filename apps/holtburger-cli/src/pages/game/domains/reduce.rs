@@ -1,13 +1,5 @@
 use super::*;
 
-pub(super) fn dispatch_internal_action(
-    state: &mut GameState,
-    action: AppInternalAction,
-    result: &mut UpdateResult,
-) {
-    result.merge(interaction::reduce_action(state, action));
-}
-
 pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
     let now = Instant::now();
@@ -48,11 +40,11 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
             Some(result)
         }
 
-        action => Some(dispatch_page_action(state, action)),
+        action => Some(broadcast_action(state, action)),
     }
 }
 
-fn dispatch_page_action(state: &mut GameState, action: AppAction) -> UpdateResult {
+fn broadcast_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     result.merge(script::reduce_action(state, action.clone()));
@@ -64,14 +56,12 @@ fn dispatch_page_action(state: &mut GameState, action: AppAction) -> UpdateResul
     result.merge(combat::reduce_action(state, action.clone()));
     result.merge(progression::reduce_action(state, action.clone()));
 
-    match action {
-        AppAction::UiAction { action } => {
-            result.merge(ui::reduce_action(state, action));
-        }
-        AppAction::InternalAction { action } => {
-            result.merge(interaction::reduce_action(state, action));
-        }
-        _ => {}
+    if let AppAction::InternalAction { action } = &action {
+        result.merge(interaction::reduce_action(state, *action));
+    }
+
+    if let AppAction::UiAction { action } = &action {
+        result.merge(ui::reduce_action(state, action.clone()));
     }
 
     result

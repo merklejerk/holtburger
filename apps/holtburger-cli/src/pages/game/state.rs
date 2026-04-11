@@ -119,11 +119,10 @@ impl GameState {
         ctx: &EventContext,
     ) -> UpdateResult {
         let workflow_before = self.script_workflow_projection();
-        let script_event = event.clone();
-        let mut result = domains::reduce_view_event(self, event);
+        let mut result = domains::reduce_view_event(self, &event);
         self.sync_script_host_for_view_event(
             ctx.server_time,
-            &script_event,
+            &event,
             &workflow_before,
             &mut result,
         );

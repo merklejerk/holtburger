@@ -52,16 +52,16 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     result
 }
 
-pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
-    let navigation_interrupt = navigation_interrupt_for_view_event(state, &event);
+    let navigation_interrupt = navigation_interrupt_for_view_event(state, event);
 
     match event {
         ClientViewEvent::PlayerGroundedUpdated { grounded } => {
-            state.data.player_grounded = Some(grounded);
+            state.data.player_grounded = Some(*grounded);
         }
         ClientViewEvent::SelfMovementKinematicsUpdated { kinematics } => {
-            state.data.self_movement_kinematics = kinematics;
+            state.data.self_movement_kinematics = kinematics.clone();
         }
         ClientViewEvent::RuntimeBodySnapshot { .. } => {
             object_interaction::refresh_context_buffer(state);
@@ -84,8 +84,8 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::NoClipUpdated { enabled } => {
-            state.data.noclip = enabled;
-            let status = if enabled { "ENABLED" } else { "DISABLED" };
+            state.data.noclip = *enabled;
+            let status = if *enabled { "ENABLED" } else { "DISABLED" };
             result.actions.push(AppAction::Log {
                 chat_tags: ChatMessageTags::system(),
                 message: format!(">> NoClip is now {}", status),

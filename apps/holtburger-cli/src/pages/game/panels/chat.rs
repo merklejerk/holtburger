@@ -99,7 +99,7 @@ impl ChatState {
 
     pub fn handle_event(
         &mut self,
-        event: holtburger_core::ClientViewEvent,
+        event: &holtburger_core::ClientViewEvent,
         local_player_name: Option<&str>,
     ) {
         use holtburger_core::ClientViewEvent;
@@ -116,10 +116,10 @@ impl ChatState {
                 } else {
                     ChatMessageTags::system()
                 };
-                self.log(chat_tags, msg);
+                self.log(chat_tags, msg.clone());
             }
             ClientViewEvent::ServerMessage { message, chat_type } => {
-                self.log(chat_message_tags(chat_type), message);
+                self.log(chat_message_tags(*chat_type), message.clone());
             }
             ClientViewEvent::Chat {
                 sender,
@@ -127,7 +127,7 @@ impl ChatState {
                 chat_type,
             } => {
                 self.log(
-                    chat_message_tags(chat_type),
+                    chat_message_tags(*chat_type),
                     format!("{}: {}", sender, message),
                 );
             }
@@ -137,15 +137,15 @@ impl ChatState {
                 message,
             } => {
                 self.log_channel(
-                    channel,
-                    channel_tags(channel),
-                    format_channel_message(channel, &sender, &message, local_player_name),
+                    *channel,
+                    channel_tags(*channel),
+                    format_channel_message(*channel, sender, message, local_player_name),
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
                 self.log(
                     ChatMessageTags::system().party(),
-                    format_fellowship_activity(&activity),
+                    format_fellowship_activity(activity),
                 );
             }
             ClientViewEvent::Tell { sender, message } => {
@@ -159,7 +159,7 @@ impl ChatState {
                 self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
             }
             ClientViewEvent::CombatFeedback(feedback) => {
-                self.log_combat_feedback(&feedback);
+                self.log_combat_feedback(feedback);
             }
             ClientViewEvent::PingResponse
             | ClientViewEvent::NetPulse { .. }
@@ -742,7 +742,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ChannelMessage {
+            &holtburger_core::ClientViewEvent::ChannelMessage {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::Fellow.into(),
                 ),
@@ -769,7 +769,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ChannelMessage {
+            &holtburger_core::ClientViewEvent::ChannelMessage {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into(),
                 ),
@@ -796,7 +796,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ChannelMessage {
+            &holtburger_core::ClientViewEvent::ChannelMessage {
                 channel: ChatChannelInfo::turbine(
                     holtburger_protocol::messages::TurbineChatChannel::General.into(),
                     holtburger_protocol::messages::TurbineChatType::General.into(),
@@ -818,7 +818,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ChannelMessage {
+            &holtburger_core::ClientViewEvent::ChannelMessage {
                 channel: ChatChannelInfo::legacy(
                     holtburger_protocol::messages::ChatChannel::Fellow.into(),
                 ),
@@ -839,7 +839,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::FellowshipActivity {
+            &holtburger_core::ClientViewEvent::FellowshipActivity {
                 activity: FellowshipActivity::MemberJoined {
                     member_name: "Bravo".to_string(),
                 },
@@ -862,7 +862,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::FellowshipActivity {
+            &holtburger_core::ClientViewEvent::FellowshipActivity {
                 activity: FellowshipActivity::YouWereDismissed,
             },
             Some("Player"),
@@ -880,7 +880,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ServerMessage {
+            &holtburger_core::ClientViewEvent::ServerMessage {
                 message: "You enter combat.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Combat.into(),
             },
@@ -897,7 +897,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ServerMessage {
+            &holtburger_core::ClientViewEvent::ServerMessage {
                 message: "Welcome to Asheron's Call.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Broadcast.into(),
             },
@@ -916,7 +916,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::ServerMessage {
+            &holtburger_core::ClientViewEvent::ServerMessage {
                 message: "Buff Dude has granted you access to their home's storage.".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Tell.into(),
             },
@@ -938,7 +938,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::CombatFeedback(
+            &holtburger_core::ClientViewEvent::CombatFeedback(
                 CombatFeedback::AttackerNotification {
                     defender_name: "Drudge".to_string(),
                     damage_type: DamageType::SLASH,
@@ -971,7 +971,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::CombatFeedback(
+            &holtburger_core::ClientViewEvent::CombatFeedback(
                 CombatFeedback::DefenderNotification {
                     attacker_name: "Banderling".to_string(),
                     damage_type: DamageType::FIRE,
@@ -1002,7 +1002,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::CombatFeedback(CombatFeedback::PlayerKilled {
+            &holtburger_core::ClientViewEvent::CombatFeedback(CombatFeedback::PlayerKilled {
                 death_message: "A nearby player has fallen.".to_string(),
                 victim_id: holtburger_common::Guid(0x12345678),
                 killer_id: holtburger_common::Guid(0x90ABCDEF),
@@ -1022,7 +1022,7 @@ mod tests {
         let mut chat = ChatState::new(None);
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::Chat {
+            &holtburger_core::ClientViewEvent::Chat {
                 sender: "Bestie".to_string(),
                 message: "hello world".to_string(),
                 chat_type: holtburger_protocol::messages::ChatMessageType::Speech.into(),
@@ -1031,7 +1031,7 @@ mod tests {
         );
 
         chat.handle_event(
-            holtburger_core::ClientViewEvent::CombatFeedback(CombatFeedback::AttackCommenced),
+            &holtburger_core::ClientViewEvent::CombatFeedback(CombatFeedback::AttackCommenced),
             Some("Player"),
         );
 

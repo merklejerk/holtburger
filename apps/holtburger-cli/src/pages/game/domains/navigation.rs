@@ -1,6 +1,7 @@
 use super::inventory;
 use super::object_interaction;
 use super::*;
+use crate::navigation::NavigationMode;
 use crate::pages::game::combat as combat_model;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -8,6 +9,11 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     let navigation_input = navigation_input_for_action(state, &action);
 
     match action {
+        AppAction::InternalAction {
+            action: AppInternalAction::ClearActiveInteraction,
+        } => {
+            clear_active_interaction(state, &mut result);
+        }
         AppAction::Approach { .. } | AppAction::Follow { .. } | AppAction::Scoot { .. } => {
             apply_navigation_input(
                 state,
@@ -50,6 +56,15 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     }
 
     result
+}
+
+fn clear_active_interaction(state: &mut GameState, result: &mut UpdateResult) {
+    if matches!(
+        state.runtime.navigation.navigation_mode(),
+        Some(NavigationMode::Approach { .. }) | Some(NavigationMode::Follow { .. })
+    ) {
+        cancel_frontend_navigation(state, result);
+    }
 }
 
 pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
@@ -206,6 +221,13 @@ fn apply_navigation_input(
     apply_navigation_update(update, result);
 }
 
+fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool {
+    matches!(
+        interaction,
+        Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
+    )
+}
+
 fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<NavigationInput> {
     match action {
         AppAction::Approach { guid } => Some(NavigationInput::StartApproach { target: *guid }),
@@ -214,16 +236,13 @@ fn navigation_input_for_action(state: &GameState, action: &AppAction) -> Option<
             distance_m: *distance_m,
         }),
         AppAction::CancelInteraction
-            if super::interaction::is_frontend_navigation_interaction(
-                state.view.active_interaction,
-            ) =>
+            if is_frontend_navigation_interaction(state.view.active_interaction) =>
         {
             Some(NavigationInput::Cancel)
         }
         AppAction::BeginInteraction { interaction }
-            if super::interaction::is_frontend_navigation_interaction(
-                state.view.active_interaction,
-            ) && !super::interaction::is_frontend_navigation_interaction(Some(*interaction)) =>
+            if is_frontend_navigation_interaction(state.view.active_interaction)
+                && !is_frontend_navigation_interaction(Some(*interaction)) =>
         {
             Some(NavigationInput::Cancel)
         }

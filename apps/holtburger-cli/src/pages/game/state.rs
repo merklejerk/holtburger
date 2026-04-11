@@ -131,7 +131,9 @@ impl GameState {
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
-        domains::reduce_action(self, action)
+        let mut result = domains::reduce_action(self, action)?;
+        self.drain_internal_actions(&mut result);
+        Some(result)
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
@@ -166,6 +168,45 @@ impl GameState {
             self.data.runtime_player_position(),
             self.data.runtime_position_for_guid(target_guid),
         )
+    }
+
+    fn drain_internal_actions(&mut self, result: &mut UpdateResult) {
+        let mut pending_internal_actions = std::collections::VecDeque::new();
+        let mut retained_actions = Vec::new();
+
+        for action in result.actions.drain(..) {
+            match action {
+                AppAction::InternalAction { action } => pending_internal_actions.push_back(action),
+                other => retained_actions.push(other),
+            }
+        }
+
+        while let Some(internal_action) = pending_internal_actions.pop_front() {
+            if let Some(mut internal_result) = domains::reduce_action(
+                self,
+                AppAction::InternalAction {
+                    action: internal_action,
+                },
+            ) {
+                let internal_redraw = internal_result.effective_redraw_priority();
+                result.commands.extend(internal_result.commands);
+                result.request_redraw(internal_redraw);
+
+                let mut nested_internal_actions = Vec::new();
+                for action in internal_result.actions.drain(..) {
+                    match action {
+                        AppAction::InternalAction { action } => nested_internal_actions.push(action),
+                        other => retained_actions.push(other),
+                    }
+                }
+
+                for action in nested_internal_actions.into_iter().rev() {
+                    pending_internal_actions.push_front(action);
+                }
+            }
+        }
+
+        result.actions = retained_actions;
     }
 }
 

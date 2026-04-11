@@ -101,6 +101,54 @@ fn passive_targeting_does_not_create_engagement_intent() {
 }
 
 #[test]
+fn explicit_attack_clears_preexisting_follow_navigation() {
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    seed_navigation_motion_model(&mut state);
+    state.data.combat_mode = CombatMode::Melee;
+    state.data.player_pos = Some(WorldPosition {
+        landblock_id: Guid(0x01000000),
+        rotation: Quaternion::from_heading(180.0f32.to_radians()),
+        ..WorldPosition::default()
+    });
+
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(5.0, 0.0, 0.0),
+        ..WorldPosition::default()
+    };
+    state.data.entities.insert(target_guid, {
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target
+    });
+
+    let _ = state
+        .handle_action(AppAction::Follow { guid: target_guid })
+        .unwrap();
+    let driving_tick = state.handle_tick(0.1);
+
+    assert!(has_autonomous_navigation_command(&driving_tick));
+    assert_eq!(
+        state.view.active_interaction,
+        Some(Interaction::Following { target_guid })
+    );
+    assert!(state.runtime.navigation.navigation_mode().is_some());
+
+    let result = state
+        .handle_action(AppAction::Attack { guid: target_guid })
+        .unwrap();
+
+    assert!(has_stop_navigation_command(&result));
+    assert_eq!(state.runtime.navigation.navigation_mode(), None);
+    assert_eq!(
+        state.view.active_interaction,
+        Some(Interaction::Targeting { target_guid })
+    );
+}
+
+#[test]
 fn attack_feedback_updates_only_the_current_attack_drive_state() {
     let player_guid = Guid(0x50000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());

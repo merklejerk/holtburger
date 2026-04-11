@@ -128,6 +128,13 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
         return result;
     }
 
+    if matches!(
+        state.view.active_interaction,
+        Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
+    ) {
+        super::navigation::clear_active_interaction(state, &mut result);
+    }
+
     super::navigation::set_active_interaction(
         state,
         Some(Interaction::Targeting { target_guid }),

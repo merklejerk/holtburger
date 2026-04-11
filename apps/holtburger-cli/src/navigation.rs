@@ -815,7 +815,7 @@ impl TuiNavigation {
 }
 
 fn effective_arrival_distance(arrival_distance: f32, target_use_radius: Option<f32>) -> f32 {
-    arrival_distance.max(target_use_radius.unwrap_or(0.1))
+    arrival_distance.max(target_use_radius.unwrap_or(0.0).max(0.0))
 }
 
 fn navigation_world_speed_budget(

@@ -2,6 +2,7 @@ use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +94,47 @@ pub struct ScriptEntityView {
     pub kind: ScriptEntityKind,
     pub position: WorldPosition,
     pub distance_to_self: f32,
-    pub is_dead: bool,
+    pub motion_command: ScriptMotionCommand,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "data")]
+pub enum ScriptMotionCommand {
+    #[default]
+    None,
+    Stop,
+    WalkForward,
+    WalkBackwards,
+    RunForward,
+    TurnRight,
+    TurnLeft,
+    SidestepRight,
+    SidestepLeft,
+    Dead,
+    Other(u16),
+}
+
+impl ScriptMotionCommand {
+    pub fn from_command(command: InterpretedMotionCommand) -> Self {
+        match command {
+            InterpretedMotionCommand::STOP => Self::Stop,
+            InterpretedMotionCommand::WALK_FORWARD => Self::WalkForward,
+            InterpretedMotionCommand::WALK_BACKWARDS => Self::WalkBackwards,
+            InterpretedMotionCommand::RUN_FORWARD => Self::RunForward,
+            InterpretedMotionCommand::TURN_RIGHT => Self::TurnRight,
+            InterpretedMotionCommand::TURN_LEFT => Self::TurnLeft,
+            InterpretedMotionCommand::SIDESTEP_RIGHT => Self::SidestepRight,
+            InterpretedMotionCommand::SIDESTEP_LEFT => Self::SidestepLeft,
+            InterpretedMotionCommand::DEAD => Self::Dead,
+            other => Self::Other(other.raw()),
+        }
+    }
+}
+
+impl From<InterpretedMotionCommand> for ScriptMotionCommand {
+    fn from(command: InterpretedMotionCommand) -> Self {
+        Self::from_command(command)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

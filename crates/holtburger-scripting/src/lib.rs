@@ -11,9 +11,8 @@ mod types;
 pub use host::ScriptHost;
 pub use types::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-    ScriptClientView, ScriptConfirmation, ScriptEntityKind, ScriptEntityView,
-    ScriptEvent, ScriptIntent,
-    ScriptInventoryItemView, ScriptLifecycleEvent, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptPartyMemberView, ScriptPartyView,
-    ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
+    ScriptClientView, ScriptConfirmation, ScriptEntityKind, ScriptEntityView, ScriptEvent,
+    ScriptIntent, ScriptInventoryItemView, ScriptLifecycleEvent, ScriptLocalConfirmation,
+    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
+    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
 };

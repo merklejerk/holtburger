@@ -63,6 +63,12 @@ pub enum EntityMotionDirective {
 }
 
 impl EntityMotionSnapshot {
+    pub fn motion_command(self) -> Option<InterpretedMotionCommand> {
+        self.forward_command
+            .or(self.sidestep_command)
+            .or(self.turn_command)
+    }
+
     pub fn from_movement_event(data: &MovementEventData) -> Option<Self> {
         let mut snapshot = Self {
             current_style: MotionStance::from_interpreted(data.current_style),
@@ -169,7 +175,7 @@ impl EntityMotionSnapshot {
     }
 
     pub fn indicates_death_motion(self) -> bool {
-        self.forward_command
+        self.motion_command()
             .is_some_and(InterpretedMotionCommand::is_dead)
     }
 }
@@ -302,6 +308,11 @@ impl HasPropertiesMut for Entity {
 }
 
 impl Entity {
+    pub fn motion_command(&self) -> Option<InterpretedMotionCommand> {
+        self.motion_snapshot
+            .and_then(EntityMotionSnapshot::motion_command)
+    }
+
     pub fn should_accept_server_position_sequences(
         &self,
         teleport_sequence: u16,

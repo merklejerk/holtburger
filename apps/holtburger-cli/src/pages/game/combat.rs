@@ -12,6 +12,7 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
 use std::f32::consts::{PI, TAU};
@@ -673,12 +674,11 @@ fn player_is_dead(state: &GameState) -> bool {
         return false;
     };
 
-    state
-        .data
-        .entities
-        .get(&player_guid)
-        .and_then(|entity| entity.motion_snapshot)
-        .is_some_and(|snapshot| snapshot.indicates_death_motion())
+    state.data.entities.get(&player_guid).is_some_and(|entity| {
+        entity
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
+    })
 }
 
 pub(crate) fn advance_combat_drive(state: &mut GameState, now: Instant, result: &mut UpdateResult) {

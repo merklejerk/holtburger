@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn dispatch_internal_action(
+    state: &mut GameState,
+    action: AppInternalAction,
+    result: &mut UpdateResult,
+) {
+    result.merge(interaction::reduce_action(state, action));
+}
+
 pub(crate) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
     let now = Instant::now();
@@ -142,6 +150,8 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         | AppAction::CycleCombatProfileLevel
         | AppAction::CycleCombatAttackHeight
         | AppAction::SetCombatMode { .. }) => Some(combat::reduce_action(state, action)),
+
+        AppAction::InternalAction { action } => Some(interaction::reduce_action(state, action)),
 
         action @ (AppAction::LevelUpStat { .. } | AppAction::TrainSkill { .. }) => {
             Some(progression::reduce_action(state, action))

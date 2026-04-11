@@ -1,7 +1,22 @@
 use super::*;
 use super::navigation;
 
-pub(super) fn clear_active_interaction(state: &mut GameState, result: &mut UpdateResult) {
+pub(super) fn reduce_action(state: &mut GameState, action: AppInternalAction) -> UpdateResult {
+    let mut result = UpdateResult::new();
+
+    match action {
+        AppInternalAction::ClearActiveInteraction => {
+            clear_active_interaction(state, &mut result);
+        }
+        AppInternalAction::SetActiveInteraction { interaction } => {
+            set_active_interaction(state, interaction, &mut result);
+        }
+    }
+
+    result
+}
+
+fn clear_active_interaction(state: &mut GameState, result: &mut UpdateResult) {
     if is_frontend_navigation_interaction(state.view.active_interaction) {
         navigation::cancel_frontend_navigation(state, result);
         return;
@@ -10,7 +25,7 @@ pub(super) fn clear_active_interaction(state: &mut GameState, result: &mut Updat
     set_active_interaction(state, None, result);
 }
 
-pub(super) fn set_active_interaction(
+fn set_active_interaction(
     state: &mut GameState,
     next_interaction: Option<Interaction>,
     result: &mut UpdateResult,

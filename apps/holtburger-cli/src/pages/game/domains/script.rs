@@ -5,6 +5,7 @@ use crate::scripting::{
     deferred_script_source_for_basename, resolve_deferred_script_source,
     script_event_from_view_event, workflow_events, workflow_projection,
 };
+use crate::types::{InspectTarget, Interaction};
 use anyhow::Result;
 use holtburger_scripting::{
     ScriptClientIntent, ScriptEvent, ScriptHost, ScriptIntent, ScriptLifecycleEvent,
@@ -191,6 +192,19 @@ impl GameState {
                 commands: vec![ClientCommand::Tell { target, message }],
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
+            ScriptIntent::Combine { source, dest } => Ok(AppAction::UseWith {
+                item: source,
+                target: dest,
+            }),
+            ScriptIntent::Salvage { tool, items } => Ok(AppAction::SalvageItems {
+                ust_guid: tool,
+                item_guids: items,
+            }),
+            ScriptIntent::Assess { target } => Ok(AppAction::Assess {
+                target: InspectTarget::Entity(target),
+            }),
+            ScriptIntent::Drop { item } => Ok(AppAction::Drop { guid: item }),
+            ScriptIntent::Pickup { item, container } => Ok(AppAction::PickUp { item, container }),
             ScriptIntent::CastUntargetedSpell { spell_id } => Ok(AppAction::CastSpell {
                 spell_id,
                 target: None,
@@ -372,4 +386,71 @@ fn dispatch_script_event_to_host(
 
     let outputs = host.drain_outputs();
     GameState::drain_script_host_outputs(view.view, outputs, result);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GameState;
+    use super::ScriptIntent;
+    use super::ViewState;
+    use crate::types::{AppAction, InspectTarget};
+    use holtburger_common::Guid;
+
+    #[test]
+    fn compile_script_intent_maps_new_item_actions() {
+        let view = ViewState::default();
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Combine {
+                    source: Guid(1),
+                    dest: Guid(2),
+                },
+            )
+            .expect("combine should compile"),
+            AppAction::UseWith { item, target } if item == Guid(1) && target == Guid(2)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Salvage {
+                    tool: Guid(3),
+                    items: vec![Guid(4), Guid(5)],
+                },
+            )
+            .expect("salvage should compile"),
+            AppAction::SalvageItems { ust_guid, item_guids }
+                if ust_guid == Guid(3) && item_guids == vec![Guid(4), Guid(5)]
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Assess { target: Guid(6) },
+            )
+            .expect("assess should compile"),
+            AppAction::Assess { target: InspectTarget::Entity(target) } if target == Guid(6)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::Drop { item: Guid(7) })
+                .expect("drop should compile"),
+            AppAction::Drop { guid } if guid == Guid(7)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Pickup {
+                    item: Guid(8),
+                    container: Some(Guid(9)),
+                },
+            )
+            .expect("pickup should compile"),
+            AppAction::PickUp { item, container }
+                if item == Guid(8) && container == Some(Guid(9))
+        ));
+    }
 }

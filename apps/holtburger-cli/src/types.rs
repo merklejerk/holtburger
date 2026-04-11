@@ -591,6 +591,7 @@ pub enum AppAction {
     Drop {
         guid: Guid,
     },
+    // TODO: Unused.
     Equip {
         guid: Guid,
     },
@@ -601,6 +602,7 @@ pub enum AppAction {
     Unequip {
         guid: Guid,
     },
+    // TODO: Replace with Use
     TalkTo {
         guid: Guid,
     },
@@ -616,6 +618,7 @@ pub enum AppAction {
     Unswear {
         target: Guid,
     },
+    // TODO: Replace with Use
     Open {
         guid: Guid,
     },
@@ -646,9 +649,11 @@ pub enum AppAction {
         item: Guid,
         target: Guid,
     },
+    // TOODO: Move to AppUiAction.
     QueueSalvageItem {
         guid: Guid,
     },
+    // TOODO: Move to AppUiAction.
     UnqueueSalvageItem {
         guid: Guid,
     },
@@ -656,6 +661,7 @@ pub enum AppAction {
         ust_guid: Guid,
         item_guids: Vec<Guid>,
     },
+    // TODO: Move to AppUiAction.
     QueryDebugInfo {
         target: InspectTarget,
     },
@@ -676,6 +682,7 @@ pub enum AppAction {
         skill: SkillType,
         amount: u32,
     },
+    // TODO: Move to AppUiAction if purely client-side.
     ViewDetails {
         view: ContextView,
     },
@@ -694,6 +701,7 @@ pub enum AppAction {
     SendCommands {
         commands: Vec<ClientCommand>,
     },
+    // TODO: Move to AppUiAction.
     ClearVendor,
     Sequence {
         actions: Vec<AppAction>,

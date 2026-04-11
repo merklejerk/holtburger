@@ -72,6 +72,30 @@ globalThis.Holtburger = Object.freeze({
   say(message) {
     Deno.core.ops.op_hb_say(String(message));
   },
+    combine(source, dest) {
+        Deno.core.ops.op_hb_combine(Number(source) >>> 0, Number(dest) >>> 0);
+    },
+    useWith(source, dest) {
+        Deno.core.ops.op_hb_combine(Number(source) >>> 0, Number(dest) >>> 0);
+    },
+    salvage(tool, items) {
+        Deno.core.ops.op_hb_salvage(
+            Number(tool) >>> 0,
+            JSON.stringify(items.map((item) => Number(item) >>> 0)),
+        );
+    },
+    assess(target) {
+        Deno.core.ops.op_hb_assess(Number(target) >>> 0);
+    },
+    drop(item) {
+        Deno.core.ops.op_hb_drop(Number(item) >>> 0);
+    },
+    pickup(item, container = null) {
+        Deno.core.ops.op_hb_pickup(
+            Number(item) >>> 0,
+            container == null ? 0 : Number(container) >>> 0,
+        );
+    },
   targetEntity(guid) {
     Deno.core.ops.op_hb_target_entity(Number(guid) >>> 0);
   },
@@ -94,6 +118,11 @@ deno_core::extension!(
         op_hb_nearby_entities,
         op_hb_log,
         op_hb_say,
+        op_hb_combine,
+        op_hb_salvage,
+        op_hb_assess,
+        op_hb_drop,
+        op_hb_pickup,
         op_hb_target_entity,
         op_hb_approach,
     ]
@@ -181,6 +210,77 @@ fn op_hb_say(state: &mut OpState, #[string] message: String) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::Say { message });
+}
+
+#[op2(fast)]
+fn op_hb_combine(state: &mut OpState, source: u32, dest: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Combine {
+            source: Guid(source),
+            dest: Guid(dest),
+        });
+}
+
+#[op2(fast)]
+fn op_hb_salvage(state: &mut OpState, tool: u32, #[string] item_guids_json: String) {
+    let item_guids = match deno_core::serde_json::from_str::<Vec<u32>>(&item_guids_json) {
+        Ok(item_guids) => item_guids.into_iter().map(Guid).collect(),
+        Err(error) => {
+            state
+                .borrow::<HostRuntimeState>()
+                .outputs
+                .borrow_mut()
+                .push(ScriptIntent::Log {
+                    level: ScriptLogLevel::Error,
+                    message: format!("failed to parse salvage item list: {error}"),
+                });
+            return;
+        }
+    };
+
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Salvage {
+            tool: Guid(tool),
+            items: item_guids,
+        });
+}
+
+#[op2(fast)]
+fn op_hb_assess(state: &mut OpState, target: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Assess {
+            target: Guid(target),
+        });
+}
+
+#[op2(fast)]
+fn op_hb_drop(state: &mut OpState, item: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Drop { item: Guid(item) });
+}
+
+#[op2(fast)]
+fn op_hb_pickup(state: &mut OpState, item: u32, container: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Pickup {
+            item: Guid(item),
+            container: (container != 0).then_some(Guid(container)),
+        });
 }
 
 #[op2(fast)]

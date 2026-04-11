@@ -192,6 +192,7 @@ impl GameState {
                 commands: vec![ClientCommand::Tell { target, message }],
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
+            ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),
             ScriptIntent::SnapHeading { heading } => Ok(AppAction::SnapHeading { heading }),
             ScriptIntent::Scoot { distance_m } => Ok(AppAction::Scoot { distance_m }),
             ScriptIntent::Combine { source, dest } => Ok(AppAction::UseWith {
@@ -452,6 +453,17 @@ mod tests {
             )
             .expect("scoot should compile"),
             AppAction::Scoot { distance_m } if (distance_m - 2.25).abs() < f32::EPSILON
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Emote {
+                    message: "waves".to_string(),
+                },
+            )
+            .expect("emote should compile"),
+            AppAction::Emote { message } if message == "waves"
         ));
 
         assert!(matches!(

@@ -1,44 +1,54 @@
 use crate::pages::game::GameState;
 use crate::state::AppState;
-use crate::types::{AppAction, Page, RedrawPriority, UpdateResult};
+use crate::types::{AppAction, Page, UpdateResult};
 
 impl AppState {
     pub fn reduce_app_action(&mut self, action: AppAction) -> UpdateResult {
+        if let AppAction::Sequence { actions } = action {
+            let mut result = UpdateResult::new();
+            for sub in actions {
+                result.merge(self.reduce_app_action_direct(sub));
+            }
+            return result;
+        }
+
         if let Some(res) = self.page.handle_action(action.clone()) {
             res
         } else {
-            let mut result = UpdateResult::new();
-            match action {
-                AppAction::Nothing => {}
-                AppAction::Log {
-                    chat_tags,
-                    message: text,
-                } => {
-                    self.log(chat_tags, text);
-                    result.request_redraw(RedrawPriority::Immediate);
+            self.reduce_app_action_direct(action)
+        }
+    }
+
+    fn reduce_app_action_direct(&mut self, action: AppAction) -> UpdateResult {
+        match action {
+            AppAction::Sequence { actions } => {
+                let mut result = UpdateResult::new();
+                for sub in actions {
+                    result.merge(self.reduce_app_action_direct(sub));
                 }
-                AppAction::SendCommands { commands: cmds } => {
-                    result.commands.extend(cmds);
-                }
-                AppAction::TransitionToGame { guid, name } => {
-                    let mut game = GameState::new(guid, name, self.world_name.clone());
-                    game.chat.chat_log = self.chat_log.take();
-                    game.data.spell_catalog = self.spell_catalog.clone();
-                    game.data.skill_table = self.skill_table.clone();
-                    self.page = Page::Game(Box::new(game));
-                    result.request_redraw(RedrawPriority::Immediate);
-                }
-                AppAction::Sequence { actions } => {
-                    for sub in actions {
-                        result.merge(self.reduce_app_action(sub));
-                    }
-                }
-                _ => unreachable!(
-                    "AppAction should have been handled by the page: {:?}",
-                    action
-                ),
+                result
             }
-            result
+            AppAction::Nothing => UpdateResult::new(),
+            AppAction::Log {
+                chat_tags,
+                message: text,
+            } => {
+                self.log(chat_tags, text);
+                UpdateResult::redraw()
+            }
+            AppAction::SendCommands { commands: cmds } => UpdateResult {
+                commands: cmds,
+                ..UpdateResult::default()
+            },
+            AppAction::TransitionToGame { guid, name } => {
+                let mut game = GameState::new(guid, name, self.world_name.clone());
+                game.chat.chat_log = self.chat_log.take();
+                game.data.spell_catalog = self.spell_catalog.clone();
+                game.data.skill_table = self.skill_table.clone();
+                self.page = Page::Game(Box::new(game));
+                UpdateResult::redraw()
+            }
+            other => self.page.handle_action(other).unwrap_or_default(),
         }
     }
 
@@ -56,7 +66,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::state::NetStats;
-    use crate::types::Page;
+    use crate::types::{Page, RedrawPriority};
     use holtburger_common::Guid;
     use holtburger_core::ClientState;
     use std::fs::File;

@@ -312,6 +312,9 @@ pub enum ScriptIntent {
     Use {
         guid: Guid,
     },
+    Emote {
+        message: String,
+    },
     SnapHeading {
         heading: f32,
     },

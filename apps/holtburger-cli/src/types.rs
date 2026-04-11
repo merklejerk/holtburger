@@ -573,6 +573,9 @@ pub enum AppAction {
     Use {
         guid: Guid,
     },
+    Emote {
+        message: String,
+    },
     Read {
         guid: Guid,
     },

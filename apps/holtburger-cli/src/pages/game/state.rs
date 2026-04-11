@@ -27,7 +27,7 @@ use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
 use crate::state::{EventContext, TickContext};
 use crate::types::{
-    AppAction, AppInternalAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
+    AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
     FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
@@ -129,13 +129,13 @@ impl GameState {
             &workflow_before,
             &mut result,
         );
-        self.drain_internal_actions(&mut result);
+        self.drain_notifications(&mut result);
         result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = domains::reduce_action(self, action)?;
-        self.drain_internal_actions(&mut result);
+        self.drain_notifications(&mut result);
         Some(result)
     }
 
@@ -146,7 +146,7 @@ impl GameState {
     pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         let mut result = domains::reduce_tick(self, elapsed);
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
-        self.drain_internal_actions(&mut result);
+        self.drain_notifications(&mut result);
         result
     }
 
@@ -174,40 +174,42 @@ impl GameState {
         )
     }
 
-    fn drain_internal_actions(&mut self, result: &mut UpdateResult) {
-        let mut pending_internal_actions = std::collections::VecDeque::new();
+    fn drain_notifications(&mut self, result: &mut UpdateResult) {
+        let mut pending_notifications = std::collections::VecDeque::new();
         let mut retained_actions = Vec::new();
 
         for action in result.actions.drain(..) {
             match action {
-                AppAction::InternalAction { action } => pending_internal_actions.push_back(action),
+                AppAction::Notification { notification } => {
+                    pending_notifications.push_back(notification)
+                }
                 other => retained_actions.push(other),
             }
         }
 
-        while let Some(internal_action) = pending_internal_actions.pop_front() {
-            if let Some(mut internal_result) = domains::reduce_action(
+        while let Some(notification) = pending_notifications.pop_front() {
+            if let Some(mut notification_result) = domains::reduce_action(
                 self,
-                AppAction::InternalAction {
-                    action: internal_action,
+                AppAction::Notification {
+                    notification,
                 },
             ) {
-                let internal_redraw = internal_result.effective_redraw_priority();
-                result.commands.extend(internal_result.commands);
-                result.request_redraw(internal_redraw);
+                let notification_redraw = notification_result.effective_redraw_priority();
+                result.commands.extend(notification_result.commands);
+                result.request_redraw(notification_redraw);
 
-                let mut nested_internal_actions = Vec::new();
-                for action in internal_result.actions.drain(..) {
+                let mut nested_notifications = Vec::new();
+                for action in notification_result.actions.drain(..) {
                     match action {
-                        AppAction::InternalAction { action } => {
-                            nested_internal_actions.push(action)
+                        AppAction::Notification { notification } => {
+                            nested_notifications.push(notification)
                         }
                         other => retained_actions.push(other),
                     }
                 }
 
-                for action in nested_internal_actions.into_iter().rev() {
-                    pending_internal_actions.push_front(action);
+                for action in nested_notifications.into_iter().rev() {
+                    pending_notifications.push_front(action);
                 }
             }
         }

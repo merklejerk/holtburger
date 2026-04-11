@@ -1,16 +1,21 @@
 use super::navigation;
 use super::*;
 
-pub(super) fn reduce_action(state: &mut GameState, action: AppInternalAction) -> UpdateResult {
+pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match action {
-        AppInternalAction::ClearActiveInteraction => {
+        AppAction::InternalAction {
+            action: AppInternalAction::ClearActiveInteraction,
+        } => {
             clear_active_interaction(state, &mut result);
         }
-        AppInternalAction::SetActiveInteraction { interaction } => {
+        AppAction::InternalAction {
+            action: AppInternalAction::SetActiveInteraction { interaction },
+        } => {
             set_active_interaction(state, interaction, &mut result);
         }
+        _ => {}
     }
 
     result

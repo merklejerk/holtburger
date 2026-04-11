@@ -54,6 +54,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
 
 pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
+    let navigation_interrupt = navigation_interrupt_for_view_event(state, &event);
 
     match event {
         ClientViewEvent::PlayerGroundedUpdated { grounded } => {
@@ -92,6 +93,10 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
         }
         ClientViewEvent::TeleportStarted { .. } => {}
         _ => {}
+    }
+
+    if let Some(input) = navigation_interrupt {
+        apply_navigation_interrupt(state, input, &mut result);
     }
 
     result

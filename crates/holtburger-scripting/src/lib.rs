@@ -5,6 +5,8 @@
 //! - event seam: frontend adapters translate core and workflow changes into [`ScriptEvent`]
 //! - write seam: frontend adapters compile [`ScriptIntent`] back into app actions or commands
 
+pub type ScriptJsonValue = deno_core::serde_json::Value;
+
 mod host;
 mod types;
 
@@ -18,11 +20,13 @@ pub use holtburger_protocol::messages::object::types::{
 };
 pub use host::ScriptHost;
 pub use types::{
-    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-    ScriptClientView, ScriptConfirmation, ScriptContainerView, ScriptEntityKind,
+    ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
+    ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
+    ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatInfo,
+    ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
     ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
     ScriptEvent, ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
     ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptTradeInfo,
-    ScriptWorkflowEvent,
+    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
+    ScriptTradeInfo, ScriptWorkflowEvent,
 };

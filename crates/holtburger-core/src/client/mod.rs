@@ -345,6 +345,19 @@ impl ClientRuntime {
                         name: name.clone(),
                     });
             }
+            WireEvent::ItemManaResponse {
+                target,
+                mana,
+                success,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ItemManaResponse {
+                        target: *target,
+                        mana: *mana,
+                        success: *success,
+                    });
+            }
             WireEvent::GameMessage(msg) => {
                 if let holtburger_protocol::messages::GameMessage::ServerName(data) = &**msg {
                     let _ = self

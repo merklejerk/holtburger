@@ -34,9 +34,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     match event {
         ClientViewEvent::FellowshipActivity { activity } => {
             let _ = activity;
-            state
-                .chat
-                .handle_event(event, state.data.character_name.as_deref());
         }
         ClientViewEvent::FellowshipStateUpdated { fellowship } => {
             let should_open_party_tab =

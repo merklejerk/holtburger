@@ -12,15 +12,20 @@ use holtburger_common::properties::{
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::{ActionResultReason, ChatChannelKind, CombatFeedback};
 use holtburger_scripting::{
-    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptContainerView, ScriptEntityKind, ScriptEntityProfile,
+    ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
+    ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
+    ScriptClientInteraction, ScriptClientView, ScriptCombatInfo, ScriptConfirmation,
+    ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile,
     ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
-    ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
-    ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
+    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
+    ScriptSource, ScriptSpellEffectView, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
-use holtburger_world::stats::VitalType;
+use holtburger_world::stats::{TrainingLevel, VitalType};
+use std::ffi::OsStr;
+use std::fs;
+use std::io::ErrorKind;
 
 use crate::pages::game::panels::dashboard::tabs::classification;
 use crate::pages::game::{GameData, GameState, ViewState};
@@ -28,6 +33,63 @@ use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, Loc
 
 const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
 const DEFAULT_SCRIPT_DIR: &str = "scripts";
+
+fn running_script_stem(script_name: &str) -> Option<&str> {
+    Path::new(script_name).file_stem()?.to_str()
+}
+
+fn script_config_path_for_name(script_dir: &Path, script_name: &str) -> Option<PathBuf> {
+    let stem = running_script_stem(script_name)?;
+    Some(
+        script_dir
+            .join(".config")
+            .join(format!("{stem}.config.json")),
+    )
+}
+
+fn script_data_path_for_name(script_dir: &Path, script_name: &str) -> Option<PathBuf> {
+    let stem = running_script_stem(script_name)?;
+    Some(script_dir.join(format!("{stem}.data.json")))
+}
+
+fn load_json_file(path: &Path) -> Option<ScriptJsonValue> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::error!("failed to read JSON from {}: {error}", path.display());
+            return None;
+        }
+    };
+
+    match serde_json::from_str::<ScriptJsonValue>(&contents) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            log::error!("failed to parse JSON from {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+fn write_json_file(path: &Path, contents: &str) -> bool {
+    if let Some(parent) = path.parent()
+        && let Err(error) = fs::create_dir_all(parent)
+    {
+        log::error!(
+            "failed to create config directory {}: {error}",
+            parent.display()
+        );
+        return false;
+    }
+
+    match fs::write(path, contents) {
+        Ok(()) => true,
+        Err(error) => {
+            log::error!("failed to write JSON to {}: {error}", path.display());
+            false
+        }
+    }
+}
 
 #[derive(Clone)]
 pub enum DeferredScriptSource {
@@ -46,9 +108,23 @@ pub struct TuiScriptClientView<'a> {
     pub data: &'a GameData,
     pub view: &'a ViewState,
     pub server_time: Option<(f64, Instant)>,
+    pub script_name: Option<&'a str>,
 }
 
 impl TuiScriptClientView<'_> {
+    fn resolve_position_reference(&self, reference: ScriptPositionRef) -> Option<WorldPosition> {
+        match reference {
+            ScriptPositionRef::Position(position) => Some(position),
+            ScriptPositionRef::Guid(guid) => {
+                if Some(guid) == self.data.player_guid {
+                    self.data.runtime_player_position()
+                } else {
+                    self.data.entities.get(&guid).map(|entity| entity.position)
+                }
+            }
+        }
+    }
+
     fn script_entity_view(&self, guid: Guid) -> Option<ScriptEntityView> {
         let entity = self.data.entities.get(&guid)?;
         let name = entity.name().trim();
@@ -166,6 +242,167 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         })
     }
 
+    fn character_sheet(&self) -> Option<ScriptCharacterSheetView> {
+        self.data.player_guid?;
+
+        let mut attributes = self
+            .data
+            .attributes
+            .values()
+            .map(|attribute| ScriptCharacterAttributeView {
+                attribute_type: attribute.attr_type,
+                base: attribute.base,
+                effective: attribute.current,
+            })
+            .collect::<Vec<_>>();
+        attributes.sort_by(|left, right| {
+            left.attribute_type
+                .to_string()
+                .cmp(&right.attribute_type.to_string())
+        });
+
+        let mut vitals = self
+            .data
+            .vitals
+            .values()
+            .map(|vital| ScriptCharacterVitalView {
+                vital_type: vital.vital_type,
+                base: vital.base,
+                effective: vital.buffed_max,
+                current: vital.current,
+            })
+            .collect::<Vec<_>>();
+        vitals.sort_by(|left, right| {
+            left.vital_type
+                .to_string()
+                .cmp(&right.vital_type.to_string())
+        });
+
+        let mut skills = self
+            .data
+            .skills
+            .values()
+            .filter(|skill| skill.skill_type.is_eor())
+            .map(|skill| ScriptCharacterSkillView {
+                skill_type: skill.skill_type,
+                base: skill.base,
+                effective: skill.current,
+                training: skill.training,
+            })
+            .collect::<Vec<_>>();
+        skills.sort_by(|left, right| {
+            let left_trained = matches!(
+                left.training,
+                TrainingLevel::Trained | TrainingLevel::Specialized
+            );
+            let right_trained = matches!(
+                right.training,
+                TrainingLevel::Trained | TrainingLevel::Specialized
+            );
+
+            right_trained.cmp(&left_trained).then_with(|| {
+                left.skill_type
+                    .to_string()
+                    .cmp(&right.skill_type.to_string())
+            })
+        });
+
+        Some(ScriptCharacterSheetView {
+            attributes,
+            vitals,
+            skills,
+        })
+    }
+
+    fn combat_info(&self) -> ScriptCombatInfo {
+        ScriptCombatInfo {
+            combat_mode: self.data.combat_mode,
+            is_engaged: self.data.combat_runtime.desired_engagement().is_some(),
+            target: self.data.combat_runtime.desired_engagement_target(),
+            power: self.data.combat_controls.profile_level.wire_value(),
+            height: self.data.combat_controls.attack_height,
+            last_attack_time: self.server_time.and_then(|(server_time, now)| {
+                self.data.combat_runtime.last_attack_attempt_at().and_then(
+                    |last_attack_attempt_at| {
+                        now.checked_duration_since(last_attack_attempt_at)
+                            .map(|age| server_time - age.as_secs_f64())
+                    },
+                )
+            }),
+        }
+    }
+
+    fn current_interaction(&self) -> Option<ScriptClientInteraction> {
+        if let Some(target) = self.data.combat_runtime.desired_engagement_target() {
+            return Some(ScriptClientInteraction::Attack { guid: target });
+        }
+
+        match self.view.active_interaction {
+            Some(Interaction::Targeting { target_guid }) => {
+                Some(ScriptClientInteraction::TargetEntity { guid: target_guid })
+            }
+            Some(Interaction::Approaching { target_guid }) => {
+                Some(ScriptClientInteraction::Approach { guid: target_guid })
+            }
+            Some(Interaction::Following { target_guid }) => {
+                Some(ScriptClientInteraction::Follow { guid: target_guid })
+            }
+            _ => None,
+        }
+    }
+
+    fn enchantments(&self) -> Vec<ScriptEnchantmentView> {
+        let mut best_by_spell_id: BTreeMap<u32, (f64, u16, u32)> = BTreeMap::new();
+
+        for enchantment in &self.data.player_enchantments {
+            let spell_id = u32::from(enchantment.spell_id);
+            let end_time = if enchantment.duration < 0.0 {
+                f64::INFINITY
+            } else {
+                enchantment.start_time + enchantment.duration
+            };
+            let candidate = (end_time, enchantment.layer, enchantment.power_level);
+
+            best_by_spell_id
+                .entry(spell_id)
+                .and_modify(|best| {
+                    if candidate > *best {
+                        *best = candidate;
+                    }
+                })
+                .or_insert(candidate);
+        }
+
+        best_by_spell_id
+            .into_iter()
+            .map(|(spell_id, (end_time, _, _))| ScriptEnchantmentView { spell_id, end_time })
+            .collect()
+    }
+
+    fn distance(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+        let Some(from) = self.resolve_position_reference(from) else {
+            return 0.0;
+        };
+
+        let Some(to) = self.resolve_position_reference(to) else {
+            return 0.0;
+        };
+
+        from.distance_to(&to)
+    }
+
+    fn heading_to(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+        let Some(from) = self.resolve_position_reference(from) else {
+            return 0.0;
+        };
+
+        let Some(to) = self.resolve_position_reference(to) else {
+            return 0.0;
+        };
+
+        from.heading_to(&to)
+    }
+
     fn target_entity(&self) -> Option<ScriptEntityView> {
         let target_guid = target_guid_from_interaction(self.view.active_interaction)?;
         self.script_entity_view(target_guid)
@@ -233,6 +470,32 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         prop: holtburger_common::properties::PropertyInstanceId,
     ) -> Option<Guid> {
         self.data.entities.get(&guid)?.get_instance_prop(prop)
+    }
+
+    fn load_config(&self) -> Option<ScriptJsonValue> {
+        let script_name = self.script_name?;
+        let path = script_config_path_for_name(&script_directory(), script_name)?;
+        load_json_file(&path)
+    }
+
+    fn load_data(&self) -> Option<ScriptJsonValue> {
+        let script_name = self.script_name?;
+        let path = script_data_path_for_name(&script_directory(), script_name)?;
+        load_json_file(&path)
+    }
+
+    fn write_config(&self, contents: String) -> bool {
+        let Some(script_name) = self.script_name else {
+            log::error!("cannot write script config because no script is running");
+            return false;
+        };
+
+        let Some(path) = script_config_path_for_name(&script_directory(), script_name) else {
+            log::error!("cannot write script config because the running script name is invalid");
+            return false;
+        };
+
+        write_json_file(&path, &contents)
     }
 
     fn nearby_entities(
@@ -370,18 +633,13 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         self.data.player_spells.contains(&spell_id)
     }
 
-    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32 {
-        from.heading_to(&to)
-    }
-
     fn entity_exists(&self, guid: Guid) -> bool {
         self.data.entities.contains_key(&guid)
     }
 
-    fn fellowship(&self) -> Option<ScriptPartyView> {
-        let party = &self.data.party;
+    fn party(&self) -> Option<ScriptPartyView> {
+        let party = self.data.party.as_ref()?;
         let members = party
-            .as_ref()?
             .members
             .iter()
             .map(|member| {
@@ -403,7 +661,10 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             })
             .collect();
 
-        Some(ScriptPartyView { members })
+        Some(ScriptPartyView {
+            leader_guid: party.leader_guid,
+            members,
+        })
     }
 
     fn active_spells(&self) -> Vec<ScriptSpellEffectView> {
@@ -607,7 +868,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
         ClientViewEvent::PlayerSpellsUpdated { .. }
         | ClientViewEvent::PlayerEnchantmentsUpdated { .. } => Some(ScriptEvent::SpellbookChanged),
         ClientViewEvent::FellowshipStateUpdated { .. }
-        | ClientViewEvent::FellowshipActivity { .. } => Some(ScriptEvent::FellowshipChanged),
+        | ClientViewEvent::FellowshipActivity { .. } => Some(ScriptEvent::PartyChanged),
         _ => None,
     }
 }
@@ -694,6 +955,46 @@ pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<Defe
     Ok(DeferredScriptSource::Path(path))
 }
 
+fn discoverable_script_basenames_in_dir(script_dir: &Path) -> Result<Vec<String>> {
+    let entries = match fs::read_dir(script_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+
+    let mut basenames = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        let is_js_file =
+            matches!(path.extension(), Some(extension) if extension == OsStr::new("js"));
+        if !is_js_file {
+            continue;
+        }
+
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+
+        if validate_script_basename(stem).is_ok() {
+            basenames.push(stem.to_string());
+        }
+    }
+
+    basenames.sort_unstable();
+    basenames.dedup();
+    Ok(basenames)
+}
+
+pub(crate) fn discoverable_script_basenames() -> Result<Vec<String>> {
+    discoverable_script_basenames_in_dir(&script_directory())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,11 +1006,61 @@ mod tests {
     };
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_core::client::types::BusyOperationKind;
+    use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+    use holtburger_protocol::messages::magic::Enchantment;
     use holtburger_protocol::messages::movement::InterpretedMotionCommand;
     use holtburger_protocol::messages::object::types::ArmorProfile;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::state::{TradeSide, TradeState};
-    use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
+    use holtburger_world::stats::{
+        Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
+    };
+    use std::fs;
+    use std::fs::File;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn discoverable_script_basenames_reads_js_files_in_sorted_order() {
+        let unique_dir = std::env::temp_dir().join(format!(
+            "holtburger-script-discovery-{}",
+            std::process::id()
+        ));
+
+        if unique_dir.exists() {
+            fs::remove_dir_all(&unique_dir).expect("remove stale test directory");
+        }
+
+        fs::create_dir_all(unique_dir.join("nested")).expect("create test directory");
+        File::create(unique_dir.join("beta.js")).expect("create beta.js");
+        File::create(unique_dir.join("alpha.js")).expect("create alpha.js");
+        File::create(unique_dir.join("notes.txt")).expect("create notes.txt");
+        File::create(unique_dir.join("nested").join("gamma.js")).expect("create nested file");
+
+        let basenames = discoverable_script_basenames_in_dir(&unique_dir)
+            .expect("discoverable scripts should load");
+
+        assert_eq!(basenames, vec!["alpha".to_string(), "beta".to_string()]);
+
+        fs::remove_dir_all(&unique_dir).expect("clean up test directory");
+    }
+
+    #[test]
+    fn discoverable_script_basenames_treats_missing_directory_as_empty() {
+        let unique_dir = std::env::temp_dir().join(format!(
+            "holtburger-missing-script-discovery-{}",
+            std::process::id()
+        ));
+
+        if unique_dir.exists() {
+            fs::remove_dir_all(&unique_dir).expect("remove stale test directory");
+        }
+
+        let basenames = discoverable_script_basenames_in_dir(&unique_dir)
+            .expect("missing directories should be treated as empty");
+
+        assert!(basenames.is_empty());
+    }
 
     #[test]
     fn script_path_for_basename_uses_js_extension() {
@@ -723,6 +1074,45 @@ mod tests {
     fn script_path_for_basename_rejects_path_segments_and_extensions() {
         assert!(script_path_for_basename_in_dir(Path::new("scripts"), "farm/bot").is_err());
         assert!(script_path_for_basename_in_dir(Path::new("scripts"), "bot.js").is_err());
+    }
+
+    #[test]
+    fn script_persistence_paths_use_running_script_stem() {
+        let script_dir = Path::new("/tmp/holtburger-scripts");
+
+        assert_eq!(
+            script_config_path_for_name(script_dir, "fighter.js"),
+            Some(PathBuf::from(
+                "/tmp/holtburger-scripts/.config/fighter.config.json"
+            ))
+        );
+
+        assert_eq!(
+            script_data_path_for_name(script_dir, "fighter.js"),
+            Some(PathBuf::from("/tmp/holtburger-scripts/fighter.data.json"))
+        );
+    }
+
+    #[test]
+    fn json_file_helpers_round_trip_and_create_parent_directories() {
+        let unique_dir = std::env::temp_dir().join(format!(
+            "holtburger-script-persistence-{}",
+            std::process::id()
+        ));
+
+        if unique_dir.exists() {
+            fs::remove_dir_all(&unique_dir).expect("remove stale test directory");
+        }
+
+        let path = unique_dir.join(".config").join("fighter.config.json");
+
+        assert!(write_json_file(&path, r#"{"answer":42}"#));
+        assert_eq!(
+            load_json_file(&path),
+            Some(serde_json::json!({"answer": 42}))
+        );
+
+        fs::remove_dir_all(&unique_dir).expect("clean up test directory");
     }
 
     #[test]
@@ -809,6 +1199,7 @@ mod tests {
             data: &data,
             view: &view,
             server_time: None,
+            script_name: None,
         };
 
         let self_view = script_view
@@ -830,6 +1221,237 @@ mod tests {
     }
 
     #[test]
+    fn character_sheet_projection_includes_sections_and_filters_to_eor_skills() {
+        let player_guid = Guid(0x5000_0101);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+
+        data.attributes.insert(
+            AttributeType::StrengthAttr,
+            Attribute {
+                attr_type: AttributeType::StrengthAttr,
+                ranks: 7,
+                start: 100,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 100,
+                current: 110,
+            },
+        );
+        data.vitals.insert(
+            VitalType::Health,
+            Vital {
+                vital_type: VitalType::Health,
+                ranks: 4,
+                start: 50,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 150,
+                buffed_max: 175,
+                current: 160,
+            },
+        );
+        data.skills.insert(
+            SkillType::MeleeDefense,
+            Skill {
+                skill_type: SkillType::MeleeDefense,
+                ranks: 12,
+                init: 5,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 35,
+                current: 42,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+        data.skills.insert(
+            SkillType::Axe,
+            Skill {
+                skill_type: SkillType::Axe,
+                ranks: 12,
+                init: 5,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 35,
+                current: 42,
+                training: TrainingLevel::Specialized,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+            script_name: Some("fighter.js"),
+        };
+
+        let sheet = script_view
+            .character_sheet()
+            .expect("character sheet should be available");
+
+        assert_eq!(sheet.attributes.len(), 1);
+        assert_eq!(
+            sheet.attributes[0].attribute_type,
+            AttributeType::StrengthAttr
+        );
+        assert_eq!(sheet.attributes[0].base, 100);
+        assert_eq!(sheet.attributes[0].effective, 110);
+
+        assert_eq!(sheet.vitals.len(), 1);
+        assert_eq!(sheet.vitals[0].vital_type, VitalType::Health);
+        assert_eq!(sheet.vitals[0].base, 150);
+        assert_eq!(sheet.vitals[0].effective, 175);
+        assert_eq!(sheet.vitals[0].current, 160);
+
+        assert_eq!(sheet.skills.len(), 1);
+        assert_eq!(sheet.skills[0].skill_type, SkillType::MeleeDefense);
+        assert_eq!(sheet.skills[0].base, 35);
+        assert_eq!(sheet.skills[0].effective, 42);
+        assert_eq!(sheet.skills[0].training, TrainingLevel::Trained);
+    }
+
+    #[test]
+    fn combat_info_projection_exposes_current_mode_target_controls_and_timestamp() {
+        let player_guid = Guid(0x5000_0002);
+        let target_guid = Guid(0x8000_0002);
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.combat_mode = CombatMode::Melee;
+        data.combat_controls.attack_height = AttackHeight::High;
+        data.combat_runtime
+            .begin_explicit_engagement(target_guid, CombatMode::Melee);
+
+        let now = Instant::now();
+        data.combat_runtime
+            .note_attack_attempt(now - Duration::from_secs(2));
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: Some((900.0, now)),
+            script_name: None,
+        };
+
+        let combat_info = script_view.combat_info();
+
+        assert_eq!(combat_info.combat_mode, CombatMode::Melee);
+        assert!(combat_info.is_engaged);
+        assert_eq!(combat_info.target, Some(target_guid));
+        assert_eq!(combat_info.power, 0.5);
+        assert_eq!(combat_info.height, AttackHeight::High);
+        assert!((combat_info.last_attack_time.expect("timestamp") - 898.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn current_interaction_projection_maps_targeting_to_target_entity() {
+        let target_guid = Guid(0x8000_0003);
+        let data = GameData::new(Guid(0x5000_0003), "Player".to_string(), "World".to_string());
+        let view = ViewState {
+            active_interaction: Some(Interaction::Targeting { target_guid }),
+            ..ViewState::default()
+        };
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &view,
+            server_time: None,
+            script_name: None,
+        };
+
+        assert_eq!(
+            script_view.current_interaction(),
+            Some(ScriptClientInteraction::TargetEntity { guid: target_guid })
+        );
+    }
+
+    #[test]
+    fn enchantments_projection_deduplicates_spell_ids_by_latest_end_time() {
+        let mut data = GameData::new(Guid(0x5000_0004), "Player".to_string(), "World".to_string());
+        data.player_enchantments = vec![
+            Enchantment {
+                spell_id: 10,
+                layer: 1,
+                power_level: 100,
+                start_time: 100.0,
+                duration: 20.0,
+                ..Default::default()
+            },
+            Enchantment {
+                spell_id: 10,
+                layer: 2,
+                power_level: 200,
+                start_time: 120.0,
+                duration: 15.0,
+                ..Default::default()
+            },
+            Enchantment {
+                spell_id: 42,
+                layer: 1,
+                power_level: 50,
+                start_time: 300.0,
+                duration: -1.0,
+                ..Default::default()
+            },
+        ];
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+            script_name: None,
+        };
+
+        assert_eq!(
+            script_view.enchantments(),
+            vec![
+                ScriptEnchantmentView {
+                    spell_id: 10,
+                    end_time: 135.0,
+                },
+                ScriptEnchantmentView {
+                    spell_id: 42,
+                    end_time: f64::INFINITY,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn distance_and_heading_projection_accept_guid_or_position_inputs() {
+        let data = GameData::new(Guid(0x5000_0003), "Player".to_string(), "World".to_string());
+
+        let from_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(0.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+            script_name: None,
+        };
+
+        let distance = script_view.distance(from_position.into(), target_position.into());
+        let heading = script_view.heading_to(from_position.into(), target_position.into());
+
+        assert!((distance - 10.0).abs() < 1e-4, "distance was {distance}");
+        assert!(
+            (heading - 90.0_f32.to_radians()).abs() < 1e-4,
+            "heading was {heading}"
+        );
+    }
+
+    #[test]
     fn equipment_projection_exposes_slot_masks_and_guid() {
         let player_guid = Guid(0x5000_0004);
         let equipment_guid = Guid(0x8000_0004);
@@ -845,6 +1467,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let equipment = script_view.equipment();
@@ -905,6 +1528,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let trade_info = script_view
@@ -926,6 +1550,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert_eq!(script_view.spellbook(), vec![3, 1, 2]);
@@ -940,6 +1565,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert!(script_view.in_spellbook(20));
@@ -948,25 +1574,46 @@ mod tests {
 
     #[test]
     fn heading_to_projection_uses_world_position_math() {
-        let data = GameData::new(Guid(0x5000_0008), "Player".to_string(), "World".to_string());
-        let script_view = TuiScriptClientView {
-            data: &data,
-            view: &ViewState::default(),
-            server_time: None,
-        };
+        let from_guid = Guid(0x5000_0008);
+        let target_guid = Guid(0x8000_0008);
+        let mut data = GameData::new(from_guid, "Player".to_string(), "World".to_string());
 
-        let from = WorldPosition {
+        let from_position = WorldPosition {
             landblock_id: Guid(0x0100_0000),
             coords: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
             rotation: holtburger_common::Quaternion::identity(),
         };
-        let to = WorldPosition {
+        let to_position = WorldPosition {
             landblock_id: Guid(0x0100_0000),
             coords: holtburger_common::Vector3::new(0.0, 10.0, 0.0),
             rotation: holtburger_common::Quaternion::identity(),
         };
 
-        assert!((script_view.heading_to(from, to) - 90.0_f32.to_radians()).abs() < 1e-6);
+        data.entities.insert(
+            from_guid,
+            Entity::new(from_guid, "Player".to_string(), from_position),
+        );
+        data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Target".to_string(), to_position),
+        );
+        data.player_pos = Some(from_position);
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+            script_name: None,
+        };
+
+        let distance = script_view.distance(from_guid.into(), to_position.into());
+        let heading = script_view.heading_to(from_guid.into(), target_guid.into());
+
+        assert!((distance - 10.0).abs() < 1e-4, "distance was {distance}");
+        assert!(
+            (heading - 90.0_f32.to_radians()).abs() < 1e-4,
+            "heading was {heading}"
+        );
     }
 
     #[test]
@@ -983,6 +1630,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert!(script_view.entity_exists(entity_guid));
@@ -1027,6 +1675,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let inventory = script_view.inventory();
@@ -1150,6 +1799,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let nearby_monsters =
@@ -1188,6 +1838,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let entity_view = script_view
@@ -1237,6 +1888,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert_eq!(

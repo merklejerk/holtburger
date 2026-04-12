@@ -2,7 +2,7 @@ use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::state::EventContext;
-use crate::types::{ChatMessageTags, Page, UpdateResult};
+use crate::types::{Page, UpdateResult};
 use crate::utils::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
@@ -68,10 +68,7 @@ impl AppState {
                     ClientState::Disconnected => {
                         self.request_disconnect_exit();
                         if !self.should_exit_on_disconnect() && self.disconnect_reason.is_some() {
-                            self.log(
-                                ChatMessageTags::error(),
-                                self.current_disconnect_chat_message(),
-                            );
+                            log::error!("{}", self.current_disconnect_chat_message());
                         }
                     }
                     _ => {
@@ -96,24 +93,26 @@ impl AppState {
                 {
                     self.remember_disconnect_reason(message.clone());
                     self.request_disconnect_exit();
-                    self.log(ChatMessageTags::error(), format!("[!] {}", message));
+                    log::error!("{}", message);
                     return result;
                 }
 
-                let chat_kind = match &reason {
+                match &reason {
                     ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
-                        ChatMessageTags::error()
+                        log::error!("{}", message);
                     }
-                    ActionResultReason::Weenie(_, _) => ChatMessageTags::info(),
-                    ActionResultReason::InventoryServerSaveFailed { .. } => {
-                        ChatMessageTags::error()
+                    ActionResultReason::InventoryServerSaveFailed { .. }
+                    | ActionResultReason::Character(_)
+                    | ActionResultReason::General(_) => {
+                        log::error!("{}", message);
                     }
-                    ActionResultReason::Character(_) | ActionResultReason::General(_) => {
-                        ChatMessageTags::error()
+                    ActionResultReason::Weenie(_, _) => {
+                        log::info!("{}", message);
                     }
-                    ActionResultReason::Transport(_) => ChatMessageTags::warning(),
+                    ActionResultReason::Transport(_) => {
+                        log::warn!("{}", message);
+                    }
                 };
-                self.log(chat_kind, format!("[!] {}", message));
             }
             ClientViewEvent::BootAccount(reason) => {
                 let message = if reason.trim().is_empty() {
@@ -165,6 +164,7 @@ impl AppState {
                 | ClientViewEvent::ChannelMessage { .. }
                 | ClientViewEvent::Tell { .. }
                 | ClientViewEvent::Emote { .. }
+                | ClientViewEvent::ItemManaResponse { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)
                 | ClientViewEvent::NetPulse { .. }
@@ -213,10 +213,7 @@ impl AppState {
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;
                 self.request_disconnect_exit();
-                self.log(
-                    ChatMessageTags::error(),
-                    self.current_disconnect_chat_message(),
-                );
+                log::error!("{}", self.current_disconnect_chat_message());
                 // For now, staying on the Game page lets the user see the error,
                 // but we could also transition back to selection.
                 result.merge(

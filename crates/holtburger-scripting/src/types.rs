@@ -4,11 +4,14 @@ use holtburger_common::properties::{
     EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
     PropertyInt64, PropertyString,
 };
+use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
-use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use serde::{Deserialize, Serialize};
+
+use crate::ScriptJsonValue;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptSource {
@@ -29,8 +32,12 @@ impl ScriptSource {
 ///
 /// Implementations should project semantic frontend state and avoid leaking
 /// widget-local concerns such as focus or scroll position.
+/// `debug_log` is the one intentional side effect for script-side diagnostics.
 pub trait ScriptClientView {
     fn self_entity(&self) -> Option<ScriptSelfView>;
+    fn character_sheet(&self) -> Option<ScriptCharacterSheetView> {
+        None
+    }
     fn target_entity(&self) -> Option<ScriptEntityView>;
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView>;
     fn entity_bool_prop(&self, guid: Guid, prop: PropertyBool) -> Option<bool>;
@@ -40,6 +47,18 @@ pub trait ScriptClientView {
     fn entity_string_prop(&self, guid: Guid, prop: PropertyString) -> Option<String>;
     fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
     fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
+    fn load_config(&self) -> Option<ScriptJsonValue> {
+        None
+    }
+    fn load_data(&self) -> Option<ScriptJsonValue> {
+        None
+    }
+    fn write_config(&self, _contents: String) -> bool {
+        false
+    }
+    fn debug_log(&self, message: String) {
+        log::info!("{}", message);
+    }
     fn nearby_entities(
         &self,
         max_distance: Option<f32>,
@@ -48,12 +67,16 @@ pub trait ScriptClientView {
     fn inventory(&self) -> Vec<ScriptContainerView>;
     fn current_open_container(&self) -> Option<Guid>;
     fn equipment(&self) -> Vec<ScriptEquipmentSlotView>;
+    fn combat_info(&self) -> ScriptCombatInfo;
+    fn current_interaction(&self) -> Option<ScriptClientInteraction>;
+    fn enchantments(&self) -> Vec<ScriptEnchantmentView>;
     fn spellbook(&self) -> Vec<u32>;
     fn in_spellbook(&self, spell_id: u32) -> bool;
-    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32;
+    fn distance(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32;
+    fn heading_to(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32;
     fn entity_exists(&self, guid: Guid) -> bool;
     fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
-    fn fellowship(&self) -> Option<ScriptPartyView>;
+    fn party(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
     fn pending_confirmation(&self) -> Option<ScriptConfirmation>;
@@ -61,6 +84,7 @@ pub trait ScriptClientView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptSelfView {
     pub guid: Guid,
     pub name: String,
@@ -76,6 +100,99 @@ pub struct ScriptSelfView {
     pub busy_operation: ScriptBusyOperation,
     pub heading: f32,
     pub combat_mode: CombatMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterSheetView {
+    pub attributes: Vec<ScriptCharacterAttributeView>,
+    pub vitals: Vec<ScriptCharacterVitalView>,
+    pub skills: Vec<ScriptCharacterSkillView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterAttributeView {
+    pub attribute_type: AttributeType,
+    pub base: u32,
+    pub effective: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterVitalView {
+    pub vital_type: VitalType,
+    pub base: u32,
+    pub effective: u32,
+    pub current: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterSkillView {
+    pub skill_type: SkillType,
+    pub base: u32,
+    pub effective: u32,
+    pub training: TrainingLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ScriptPositionRef {
+    Position(WorldPosition),
+    Guid(Guid),
+}
+
+impl From<WorldPosition> for ScriptPositionRef {
+    fn from(position: WorldPosition) -> Self {
+        Self::Position(position)
+    }
+}
+
+impl From<Guid> for ScriptPositionRef {
+    fn from(guid: Guid) -> Self {
+        Self::Guid(guid)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCombatInfo {
+    pub combat_mode: CombatMode,
+    pub is_engaged: bool,
+    pub target: Option<Guid>,
+    pub power: f32,
+    pub height: AttackHeight,
+    pub last_attack_time: Option<f64>,
+}
+
+impl Default for ScriptCombatInfo {
+    fn default() -> Self {
+        Self {
+            combat_mode: CombatMode::NonCombat,
+            is_engaged: false,
+            target: None,
+            power: 0.0,
+            height: AttackHeight::Medium,
+            last_attack_time: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptEnchantmentView {
+    pub spell_id: u32,
+    pub end_time: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data")]
+pub enum ScriptClientInteraction {
+    TargetEntity { guid: Guid },
+    Approach { guid: Guid },
+    Follow { guid: Guid },
+    Attack { guid: Guid },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +228,7 @@ impl From<BusyOperationKind> for ScriptBusyOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
@@ -199,6 +317,7 @@ pub enum ScriptEntityKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptContainerView {
     pub container_guid: Guid,
     pub slots: u32,
@@ -314,6 +433,7 @@ impl ScriptEquipmentSlotKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptEquipmentSlotView {
     pub slot: ScriptEquipmentSlotKind,
     pub equip_mask: EquipMask,
@@ -321,6 +441,7 @@ pub struct ScriptEquipmentSlotView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptTradeInfo {
     pub partner_guid: Guid,
     pub partner_name: Option<String>,
@@ -329,11 +450,14 @@ pub struct ScriptTradeInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptPartyView {
+    pub leader_guid: Guid,
     pub members: Vec<ScriptPartyMemberView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptPartyMemberView {
     pub guid: Guid,
     pub name: Option<String>,
@@ -343,6 +467,7 @@ pub struct ScriptPartyMemberView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptSpellEffectView {
     pub spell_id: u32,
     pub name: Option<String>,
@@ -356,6 +481,9 @@ pub enum ScriptEvent {
     ChatMessage(ScriptChatEvent),
     Lifecycle(ScriptLifecycleEvent),
     Workflow(ScriptWorkflowEvent),
+    Command {
+        msg: String,
+    },
     WeenieError {
         error: holtburger_protocol::errors::WeenieError,
     },
@@ -374,7 +502,7 @@ pub enum ScriptEvent {
         removed: Vec<Guid>,
     },
     SpellbookChanged,
-    FellowshipChanged,
+    PartyChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -385,6 +513,7 @@ pub struct ScriptChatEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScriptChatChannelKind {
     Say,
     Tell,
@@ -487,6 +616,20 @@ pub enum ScriptIntent {
         source: Guid,
         dest: Guid,
     },
+    MoveItem {
+        item: Guid,
+        container: Guid,
+    },
+    StackItems {
+        source: Guid,
+        destination: Guid,
+        amount: u32,
+    },
+    SplitItem {
+        item: Guid,
+        container: Guid,
+        amount: u32,
+    },
     Salvage {
         tool: Guid,
         items: Vec<Guid>,
@@ -508,12 +651,9 @@ pub enum ScriptIntent {
     Unequip {
         guid: Guid,
     },
-    CastUntargetedSpell {
+    CastSpell {
         spell_id: u32,
-    },
-    CastTargetedSpell {
-        target: Guid,
-        spell_id: u32,
+        target: Option<Guid>,
     },
     RespondToConfirmation {
         accepted: bool,

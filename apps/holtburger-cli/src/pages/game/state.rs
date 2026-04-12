@@ -53,6 +53,7 @@ pub(crate) struct GameScriptState {
     pub(crate) pending_source: Option<DeferredScriptSource>,
     pub(crate) host: Option<ScriptHost>,
     pub(crate) tick_accumulator: Duration,
+    pub(crate) running_source_name: Option<String>,
 }
 
 pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);
@@ -167,10 +168,19 @@ impl GameState {
         &mut self,
         input: CombatDriveInput,
     ) -> Option<CombatDriveEffect> {
-        self.runtime
+        let effect = self
+            .runtime
             .combat_drive
             .get_or_insert_with(CombatDriveRuntime::default)
-            .handle(&input)
+            .handle(&input);
+
+        if let (CombatDriveInput::Tick { now, .. }, Some(CombatDriveEffect::Attack(_))) =
+            (input, effect)
+        {
+            self.data.combat_runtime.note_attack_attempt(now);
+        }
+
+        effect
     }
 
     pub(crate) fn combat_target_position_for_drive(

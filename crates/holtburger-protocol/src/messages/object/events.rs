@@ -365,6 +365,33 @@ impl ProtocolPack for UpdateHealthEventData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueryItemManaResponseEventData {
+    pub mana: f32,
+    pub success: u32,
+}
+
+impl ProtocolUnpack for QueryItemManaResponseEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+
+        let mana = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        let success = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
+
+        Some(QueryItemManaResponseEventData { mana, success })
+    }
+}
+
+impl ProtocolPack for QueryItemManaResponseEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_f32::<LittleEndian>(self.mana).unwrap();
+        buf.write_u32::<LittleEndian>(self.success).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,6 +407,24 @@ mod tests {
             target: Guid(0x50000001),
             health: 0.5,
         };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_query_item_mana_response_parity() {
+        let data = hex::decode("B0F700000600008000000000640200000000003F01000000").unwrap();
+        let expected =
+            GameMessage::GameEvent(Box::new(crate::messages::game_event::GameEventMessage {
+                target: Guid(0x80000006),
+                sequence: 0,
+                event: crate::messages::game_event::GameEvent::QueryItemManaResponse(Box::new(
+                    QueryItemManaResponseEventData {
+                        mana: 0.5,
+                        success: 1,
+                    },
+                )),
+            }));
+
         assert_pack_unpack_parity(&data, &expected);
     }
 

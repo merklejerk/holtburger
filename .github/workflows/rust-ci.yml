@@ -2,9 +2,9 @@ name: Rust CI (Fmt, Clippy, Tests)
 
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, dev, dev-staging ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ main, dev, dev-staging ]
 
 env:
   CARGO_TERM_COLOR: always

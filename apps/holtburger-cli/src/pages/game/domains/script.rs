@@ -20,11 +20,13 @@ fn script_client_view<'a>(
     data: &'a GameData,
     view: &'a ViewState,
     server_time: Option<(f64, Instant)>,
+    script_name: Option<&'a str>,
 ) -> TuiScriptClientView<'a> {
     TuiScriptClientView {
         data,
         view,
         server_time,
+        script_name,
     }
 }
 
@@ -33,6 +35,24 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::RunScript { basename } => {
             let mut result = UpdateResult::new();
             state.run_script_command(&basename, &mut result);
+            result
+        }
+        AppAction::ScriptCommand { msg } => {
+            let mut result = UpdateResult::new();
+            let Some(host) = state.script.host.as_mut() else {
+                log::error!("Ignoring /script command because no script is running: {msg}");
+                result.request_redraw(crate::types::RedrawPriority::Immediate);
+                return result;
+            };
+
+            let view = script_client_view(
+                &state.data,
+                &state.view,
+                None,
+                state.script.running_source_name.as_deref(),
+            );
+            dispatch_script_event_to_host(&view, host, ScriptEvent::Command { msg }, &mut result);
+            result.request_redraw(crate::types::RedrawPriority::Immediate);
             result
         }
         AppAction::UnrunScript => {
@@ -64,7 +84,12 @@ impl GameState {
     }
 
     fn stop_script_host(&mut self, result: &mut UpdateResult) {
-        let view = script_client_view(&self.data, &self.view, None);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            None,
+            self.script.running_source_name.as_deref(),
+        );
 
         let had_host = {
             let Some(host) = self.script.host.as_mut() else {
@@ -83,7 +108,15 @@ impl GameState {
         if had_host {
             self.script.host = None;
             self.script.tick_accumulator = Duration::ZERO;
+            self.script.running_source_name = None;
         }
+    }
+
+    fn clear_script_host_after_error(&mut self) {
+        self.set_pending_script_source(None);
+        self.script.host = None;
+        self.script.tick_accumulator = Duration::ZERO;
+        self.script.running_source_name = None;
     }
 
     pub(crate) fn run_script_command(&mut self, basename: &str, result: &mut UpdateResult) {
@@ -156,22 +189,34 @@ impl GameState {
                 self.set_pending_script_source(None);
                 result.actions.push(AppAction::Log {
                     chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] Failed to load script source: {error}"),
+                    message: format!("[script] Failed to load script source: {error:?}"),
                 });
                 return;
             }
         };
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let running_source_name = source.name.clone();
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            Some(running_source_name.as_str()),
+        );
         match ScriptHost::spawn(source, &view) {
             Ok(mut host) => {
-                dispatch_script_event_to_host(
+                let started_ok = dispatch_script_event_to_host(
                     &view,
                     &mut host,
                     ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started),
                     result,
                 );
-                self.script.host = Some(host);
+
+                if started_ok {
+                    self.script.running_source_name = Some(running_source_name);
+                    self.script.host = Some(host);
+                } else {
+                    self.clear_script_host_after_error();
+                }
             }
             Err(error) => {
                 self.set_pending_script_source(None);
@@ -211,6 +256,30 @@ impl GameState {
                 item: source,
                 target: dest,
             }),
+            ScriptIntent::CastSpell { spell_id, target } => {
+                Ok(AppAction::CastSpell { spell_id, target })
+            }
+            ScriptIntent::MoveItem { item, container } => {
+                Ok(AppAction::MoveItem { item, container })
+            }
+            ScriptIntent::StackItems {
+                source,
+                destination,
+                amount,
+            } => Ok(AppAction::StackItems {
+                source,
+                destination,
+                amount,
+            }),
+            ScriptIntent::SplitItem {
+                item,
+                container,
+                amount,
+            } => Ok(AppAction::SplitItem {
+                item,
+                container,
+                amount,
+            }),
             ScriptIntent::Salvage { tool, items } => Ok(AppAction::SalvageItems {
                 ust_guid: tool,
                 item_guids: items,
@@ -225,14 +294,6 @@ impl GameState {
                 slot: script_equipment_slot_to_target_slot(slot),
             }),
             ScriptIntent::Unequip { guid } => Ok(AppAction::Unequip { guid }),
-            ScriptIntent::CastUntargetedSpell { spell_id } => Ok(AppAction::CastSpell {
-                spell_id,
-                target: None,
-            }),
-            ScriptIntent::CastTargetedSpell { target, spell_id } => Ok(AppAction::CastSpell {
-                spell_id,
-                target: Some(target),
-            }),
             ScriptIntent::RespondToConfirmation { accepted } => {
                 if view.active_confirmation.is_some() {
                     return Ok(AppAction::SendCommands {
@@ -294,7 +355,12 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            self.script.running_source_name.as_deref(),
+        );
         let after_workflow = workflow_projection(Some(self));
 
         let host_was_cleared = {
@@ -302,20 +368,31 @@ impl GameState {
                 return;
             };
 
+            let mut dispatch_failed = false;
+
             if let Some(script_event) = script_event_from_view_event(event) {
-                dispatch_script_event_to_host(&view, host, script_event, result);
+                dispatch_failed |=
+                    !dispatch_script_event_to_host(&view, host, script_event, result);
             }
 
-            for workflow_event in workflow_events(before_workflow, &after_workflow) {
-                dispatch_script_event_to_host(
-                    &view,
-                    host,
-                    ScriptEvent::Workflow(workflow_event),
-                    result,
-                );
+            if !dispatch_failed {
+                for workflow_event in workflow_events(before_workflow, &after_workflow) {
+                    dispatch_failed |= !dispatch_script_event_to_host(
+                        &view,
+                        host,
+                        ScriptEvent::Workflow(workflow_event),
+                        result,
+                    );
+
+                    if dispatch_failed {
+                        break;
+                    }
+                }
             }
 
-            if !should_run_after {
+            if dispatch_failed {
+                true
+            } else if !should_run_after {
                 dispatch_script_event_to_host(
                     &view,
                     host,
@@ -330,6 +407,9 @@ impl GameState {
 
         if host_was_cleared {
             self.script.host = None;
+            if self.pending_script_source().is_some() {
+                self.clear_script_host_after_error();
+            }
         }
     }
 
@@ -346,14 +426,21 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            self.script.running_source_name.as_deref(),
+        );
 
         let Some(host) = self.script.host.as_mut() else {
             return;
         };
 
-        if let Some(script_event) = script_event_from_notification(notification) {
-            dispatch_script_event_to_host(&view, host, script_event, result);
+        if let Some(script_event) = script_event_from_notification(notification)
+            && !dispatch_script_event_to_host(&view, host, script_event, result)
+        {
+            self.clear_script_host_after_error();
         }
     }
 
@@ -370,7 +457,12 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            self.script.running_source_name.as_deref(),
+        );
         let mut tick_count = 0;
 
         if self.script.host.is_some() {
@@ -389,8 +481,10 @@ impl GameState {
                 return;
             };
 
+            let mut dispatch_failed = false;
+
             for _ in 0..tick_count {
-                dispatch_script_event_to_host(
+                dispatch_failed |= !dispatch_script_event_to_host(
                     &view,
                     host,
                     ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
@@ -399,14 +493,22 @@ impl GameState {
                     }),
                     result,
                 );
+
+                if dispatch_failed {
+                    break;
+                }
             }
 
-            !should_run_after
+            dispatch_failed || !should_run_after
         };
 
         if host_was_cleared {
             self.script.host = None;
-            self.script.tick_accumulator = Duration::ZERO;
+            if self.pending_script_source().is_some() {
+                self.clear_script_host_after_error();
+            } else {
+                self.script.tick_accumulator = Duration::ZERO;
+            }
         }
     }
 
@@ -420,16 +522,20 @@ fn dispatch_script_event_to_host(
     host: &mut ScriptHost,
     event: ScriptEvent,
     result: &mut UpdateResult,
-) {
-    if let Err(error) = host.dispatch_event(view, event) {
-        result.actions.push(AppAction::Log {
-            chat_tags: ChatMessageTags::error(),
-            message: format!("[script] {error}"),
-        });
-    }
-
+) -> bool {
+    let dispatch_result = host.dispatch_event(view, event);
     let outputs = host.drain_outputs();
     GameState::drain_script_host_outputs(view.view, outputs, result);
+
+    if let Err(error) = dispatch_result {
+        result.actions.push(AppAction::Log {
+            chat_tags: ChatMessageTags::error(),
+            message: format!("[script] {error:?}"),
+        });
+        return false;
+    }
+
+    true
 }
 
 fn script_equipment_slot_to_target_slot(slot: ScriptEquipmentSlotKind) -> TargetSlot {
@@ -460,6 +566,71 @@ mod tests {
             )
             .expect("combine should compile"),
             AppAction::UseWith { item, target } if item == Guid(1) && target == Guid(2)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::CastSpell {
+                    spell_id: 42,
+                    target: None,
+                },
+            )
+            .expect("untargeted cast should compile"),
+            AppAction::CastSpell { spell_id, target } if spell_id == 42 && target.is_none()
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::CastSpell {
+                    spell_id: 99,
+                    target: Some(Guid(7)),
+                },
+            )
+            .expect("targeted cast should compile"),
+            AppAction::CastSpell { spell_id, target }
+                if spell_id == 99 && target == Some(Guid(7))
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::MoveItem {
+                    item: Guid(3),
+                    container: Guid(4),
+                },
+            )
+            .expect("move item should compile"),
+            AppAction::MoveItem { item, container } if item == Guid(3) && container == Guid(4)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::StackItems {
+                    source: Guid(5),
+                    destination: Guid(6),
+                    amount: 7,
+                },
+            )
+            .expect("stack items should compile"),
+            AppAction::StackItems { source, destination, amount }
+                if source == Guid(5) && destination == Guid(6) && amount == 7
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::SplitItem {
+                    item: Guid(8),
+                    container: Guid(9),
+                    amount: 10,
+                },
+            )
+            .expect("split item should compile"),
+            AppAction::SplitItem { item, container, amount }
+                if item == Guid(8) && container == Guid(9) && amount == 10
         ));
 
         assert!(matches!(

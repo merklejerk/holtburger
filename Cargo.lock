@@ -1229,6 +1229,7 @@ dependencies = [
  "log",
  "ratatui",
  "ratatui-textarea",
+ "serde_json",
  "tokio",
  "unicode-width",
 ]
@@ -1347,6 +1348,7 @@ dependencies = [
  "holtburger-common",
  "holtburger-core",
  "holtburger-protocol",
+ "log",
  "serde",
 ]
 

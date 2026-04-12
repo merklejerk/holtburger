@@ -424,6 +424,9 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     currentOpenContainer() {
         return Deno.core.ops.op_hb_current_open_container();
     },
+    respondToConfirmation(accepted) {
+        Deno.core.ops.op_hb_respond_to_confirmation(Boolean(accepted));
+    },
     castSpell(spellId, target = null) {
         Deno.core.ops.op_hb_cast_spell(
             Number(spellId) >>> 0,
@@ -623,6 +626,7 @@ deno_core::extension!(
         op_hb_distance,
         op_hb_current_trade_info,
         op_hb_current_open_container,
+        op_hb_respond_to_confirmation,
         op_hb_cast_spell,
         op_hb_open_container,
         op_hb_close_container,
@@ -857,6 +861,15 @@ fn op_hb_close_container(state: &mut OpState, guid: u32) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::CloseContainer { guid: Guid(guid) });
+}
+
+#[op2(fast)]
+fn op_hb_respond_to_confirmation(state: &mut OpState, accepted: bool) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::RespondToConfirmation { accepted });
 }
 
 #[op2(fast)]
@@ -1691,6 +1704,7 @@ mod tests {
         party_helper_returns_js_object();
         distance_and_heading_helpers_accept_guids_and_positions();
         combat_info_helper_returns_js_object();
+        respond_to_confirmation_helper_emits_script_intent();
         spellbook_membership_helper_returns_boolean();
         heading_to_helper_returns_expected_heading();
         entity_exists_helper_returns_boolean();
@@ -1971,6 +1985,27 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
                 if message == "[\"Melee\",true,7,0.75,\"High\",123.5]"
+        ));
+    }
+
+    fn respond_to_confirmation_helper_emits_script_intent() {
+        let source = ScriptSource::new(
+            "respond-to-confirmation-test",
+            r#"
+                Holtburger.respondToConfirmation(true);
+                Holtburger.respondToConfirmation(false);
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [
+                ScriptIntent::RespondToConfirmation { accepted: true },
+                ScriptIntent::RespondToConfirmation { accepted: false },
+            ]
         ));
     }
 

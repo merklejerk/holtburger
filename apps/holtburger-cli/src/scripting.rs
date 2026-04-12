@@ -15,10 +15,10 @@ use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
     ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
     ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
-    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
-    ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptJsonValue,
+    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
+    ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
+    ScriptSpellEffectView, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
@@ -32,6 +32,63 @@ use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, Loc
 
 const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
 const DEFAULT_SCRIPT_DIR: &str = "scripts";
+
+fn running_script_stem(script_name: &str) -> Option<&str> {
+    Path::new(script_name).file_stem()?.to_str()
+}
+
+fn script_config_path_for_name(script_dir: &Path, script_name: &str) -> Option<PathBuf> {
+    let stem = running_script_stem(script_name)?;
+    Some(
+        script_dir
+            .join(".config")
+            .join(format!("{stem}.config.json")),
+    )
+}
+
+fn script_data_path_for_name(script_dir: &Path, script_name: &str) -> Option<PathBuf> {
+    let stem = running_script_stem(script_name)?;
+    Some(script_dir.join(format!("{stem}.data.json")))
+}
+
+fn load_json_file(path: &Path) -> Option<ScriptJsonValue> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == ErrorKind::NotFound => return None,
+        Err(error) => {
+            log::error!("failed to read JSON from {}: {error}", path.display());
+            return None;
+        }
+    };
+
+    match serde_json::from_str::<ScriptJsonValue>(&contents) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            log::error!("failed to parse JSON from {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+fn write_json_file(path: &Path, contents: &str) -> bool {
+    if let Some(parent) = path.parent()
+        && let Err(error) = fs::create_dir_all(parent)
+    {
+        log::error!(
+            "failed to create config directory {}: {error}",
+            parent.display()
+        );
+        return false;
+    }
+
+    match fs::write(path, contents) {
+        Ok(()) => true,
+        Err(error) => {
+            log::error!("failed to write JSON to {}: {error}", path.display());
+            false
+        }
+    }
+}
 
 #[derive(Clone)]
 pub enum DeferredScriptSource {
@@ -50,6 +107,7 @@ pub struct TuiScriptClientView<'a> {
     pub data: &'a GameData,
     pub view: &'a ViewState,
     pub server_time: Option<(f64, Instant)>,
+    pub script_name: Option<&'a str>,
 }
 
 impl TuiScriptClientView<'_> {
@@ -339,6 +397,32 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         prop: holtburger_common::properties::PropertyInstanceId,
     ) -> Option<Guid> {
         self.data.entities.get(&guid)?.get_instance_prop(prop)
+    }
+
+    fn load_config(&self) -> Option<ScriptJsonValue> {
+        let script_name = self.script_name?;
+        let path = script_config_path_for_name(&script_directory(), script_name)?;
+        load_json_file(&path)
+    }
+
+    fn load_data(&self) -> Option<ScriptJsonValue> {
+        let script_name = self.script_name?;
+        let path = script_data_path_for_name(&script_directory(), script_name)?;
+        load_json_file(&path)
+    }
+
+    fn write_config(&self, contents: String) -> bool {
+        let Some(script_name) = self.script_name else {
+            log::error!("cannot write script config because no script is running");
+            return false;
+        };
+
+        let Some(path) = script_config_path_for_name(&script_directory(), script_name) else {
+            log::error!("cannot write script config because the running script name is invalid");
+            return false;
+        };
+
+        write_json_file(&path, &contents)
     }
 
     fn nearby_entities(
@@ -858,6 +942,7 @@ mod tests {
     use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
     use std::fs;
     use std::fs::File;
+    use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -914,6 +999,45 @@ mod tests {
     fn script_path_for_basename_rejects_path_segments_and_extensions() {
         assert!(script_path_for_basename_in_dir(Path::new("scripts"), "farm/bot").is_err());
         assert!(script_path_for_basename_in_dir(Path::new("scripts"), "bot.js").is_err());
+    }
+
+    #[test]
+    fn script_persistence_paths_use_running_script_stem() {
+        let script_dir = Path::new("/tmp/holtburger-scripts");
+
+        assert_eq!(
+            script_config_path_for_name(script_dir, "fighter.js"),
+            Some(PathBuf::from(
+                "/tmp/holtburger-scripts/.config/fighter.config.json"
+            ))
+        );
+
+        assert_eq!(
+            script_data_path_for_name(script_dir, "fighter.js"),
+            Some(PathBuf::from("/tmp/holtburger-scripts/fighter.data.json"))
+        );
+    }
+
+    #[test]
+    fn json_file_helpers_round_trip_and_create_parent_directories() {
+        let unique_dir = std::env::temp_dir().join(format!(
+            "holtburger-script-persistence-{}",
+            std::process::id()
+        ));
+
+        if unique_dir.exists() {
+            fs::remove_dir_all(&unique_dir).expect("remove stale test directory");
+        }
+
+        let path = unique_dir.join(".config").join("fighter.config.json");
+
+        assert!(write_json_file(&path, r#"{"answer":42}"#));
+        assert_eq!(
+            load_json_file(&path),
+            Some(serde_json::json!({"answer": 42}))
+        );
+
+        fs::remove_dir_all(&unique_dir).expect("clean up test directory");
     }
 
     #[test]
@@ -1000,6 +1124,7 @@ mod tests {
             data: &data,
             view: &view,
             server_time: None,
+            script_name: None,
         };
 
         let self_view = script_view
@@ -1039,6 +1164,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: Some((900.0, now)),
+            script_name: None,
         };
 
         let combat_info = script_view.combat_info();
@@ -1064,6 +1190,7 @@ mod tests {
             data: &data,
             view: &view,
             server_time: None,
+            script_name: None,
         };
 
         assert_eq!(
@@ -1106,6 +1233,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert_eq!(
@@ -1142,6 +1270,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let distance = script_view.distance(from_position.into(), target_position.into());
@@ -1170,6 +1299,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let equipment = script_view.equipment();
@@ -1230,6 +1360,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let trade_info = script_view
@@ -1251,6 +1382,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert_eq!(script_view.spellbook(), vec![3, 1, 2]);
@@ -1265,6 +1397,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert!(script_view.in_spellbook(20));
@@ -1302,6 +1435,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let distance = script_view.distance(from_guid.into(), to_position.into());
@@ -1328,6 +1462,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert!(script_view.entity_exists(entity_guid));
@@ -1372,6 +1507,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let inventory = script_view.inventory();
@@ -1495,6 +1631,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let nearby_monsters =
@@ -1533,6 +1670,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         let entity_view = script_view
@@ -1582,6 +1720,7 @@ mod tests {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
+            script_name: None,
         };
 
         assert_eq!(

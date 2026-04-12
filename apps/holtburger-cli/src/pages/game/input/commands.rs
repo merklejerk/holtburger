@@ -997,6 +997,7 @@ mod tests {
                 data: &state.data,
                 view: &state.view,
                 server_time: None,
+                script_name: None,
             };
 
             holtburger_scripting::ScriptHost::spawn(

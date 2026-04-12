@@ -1229,6 +1229,7 @@ dependencies = [
  "log",
  "ratatui",
  "ratatui-textarea",
+ "serde_json",
  "tokio",
  "unicode-width",
 ]

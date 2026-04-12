@@ -5,6 +5,8 @@
 //! - event seam: frontend adapters translate core and workflow changes into [`ScriptEvent`]
 //! - write seam: frontend adapters compile [`ScriptIntent`] back into app actions or commands
 
+pub type ScriptJsonValue = deno_core::serde_json::Value;
+
 mod host;
 mod types;
 

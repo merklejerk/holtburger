@@ -53,6 +53,7 @@ pub(crate) struct GameScriptState {
     pub(crate) pending_source: Option<DeferredScriptSource>,
     pub(crate) host: Option<ScriptHost>,
     pub(crate) tick_accumulator: Duration,
+    pub(crate) running_source_name: Option<String>,
 }
 
 pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);

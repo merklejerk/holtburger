@@ -316,7 +316,8 @@ impl GameState {
             let mut dispatch_failed = false;
 
             if let Some(script_event) = script_event_from_view_event(event) {
-                dispatch_failed |= !dispatch_script_event_to_host(&view, host, script_event, result);
+                dispatch_failed |=
+                    !dispatch_script_event_to_host(&view, host, script_event, result);
             }
 
             if !dispatch_failed {
@@ -376,10 +377,10 @@ impl GameState {
             return;
         };
 
-        if let Some(script_event) = script_event_from_notification(notification) {
-            if !dispatch_script_event_to_host(&view, host, script_event, result) {
-                self.clear_script_host_after_error();
-            }
+        if let Some(script_event) = script_event_from_notification(notification)
+            && !dispatch_script_event_to_host(&view, host, script_event, result)
+        {
+            self.clear_script_host_after_error();
         }
     }
 
@@ -464,7 +465,7 @@ fn dispatch_script_event_to_host(
     if let Err(error) = dispatch_result {
         result.actions.push(AppAction::Log {
             chat_tags: ChatMessageTags::error(),
-                message: format!("[script] {error:?}"),
+            message: format!("[script] {error:?}"),
         });
         return false;
     }

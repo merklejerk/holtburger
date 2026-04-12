@@ -7,6 +7,7 @@ use deno_core::serde_json::{Value, from_value, json};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
 use futures::executor::block_on;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
     PropertyString,
@@ -39,6 +40,9 @@ struct ScriptClientViewPtr {
         unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
     equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
     spellbook: unsafe fn(*const ()) -> Vec<u32>,
+    in_spellbook: unsafe fn(*const (), u32) -> bool,
+    heading_to: unsafe fn(*const (), WorldPosition, WorldPosition) -> f32,
+    entity_exists: unsafe fn(*const (), Guid) -> bool,
     #[allow(clippy::type_complexity)]
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
 }
@@ -123,6 +127,22 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).spellbook() }
         }
 
+        unsafe fn in_spellbook<T: ScriptClientView>(data: *const (), spell_id: u32) -> bool {
+            unsafe { (&*data.cast::<T>()).in_spellbook(spell_id) }
+        }
+
+        unsafe fn heading_to<T: ScriptClientView>(
+            data: *const (),
+            from: WorldPosition,
+            to: WorldPosition,
+        ) -> f32 {
+            unsafe { (&*data.cast::<T>()).heading_to(from, to) }
+        }
+
+        unsafe fn entity_exists<T: ScriptClientView>(data: *const (), guid: Guid) -> bool {
+            unsafe { (&*data.cast::<T>()).entity_exists(guid) }
+        }
+
         unsafe fn current_trade_info<T: ScriptClientView>(
             data: *const (),
         ) -> Option<ScriptTradeInfo> {
@@ -142,6 +162,9 @@ impl ScriptClientViewPtr {
             nearby_entities: nearby_entities::<T>,
             equipment: equipment::<T>,
             spellbook: spellbook::<T>,
+            in_spellbook: in_spellbook::<T>,
+            heading_to: heading_to::<T>,
+            entity_exists: entity_exists::<T>,
             current_trade_info: current_trade_info::<T>,
         }
     }
@@ -194,6 +217,18 @@ impl ScriptClientViewPtr {
         unsafe { (self.spellbook)(self.data) }
     }
 
+    unsafe fn in_spellbook(self, spell_id: u32) -> bool {
+        unsafe { (self.in_spellbook)(self.data, spell_id) }
+    }
+
+    unsafe fn heading_to(self, from: WorldPosition, to: WorldPosition) -> f32 {
+        unsafe { (self.heading_to)(self.data, from, to) }
+    }
+
+    unsafe fn entity_exists(self, guid: Guid) -> bool {
+        unsafe { (self.entity_exists)(self.data, guid) }
+    }
+
     unsafe fn current_trade_info(self) -> Option<ScriptTradeInfo> {
         unsafe { (self.current_trade_info)(self.data) }
     }
@@ -244,6 +279,15 @@ globalThis.Holtburger = Object.freeze({
     },
     spellbook() {
         return Deno.core.ops.op_hb_spellbook();
+    },
+    inSpellbook(spellId) {
+        return Deno.core.ops.op_hb_in_spellbook(Number(spellId) >>> 0);
+    },
+    headingTo(from, to) {
+        return Deno.core.ops.op_hb_heading_to(from, to);
+    },
+    entityExists(guid) {
+        return Deno.core.ops.op_hb_entity_exists(Number(guid) >>> 0);
     },
     equip(guid, slot) {
         Deno.core.ops.op_hb_equip(Number(guid) >>> 0, String(slot));
@@ -362,6 +406,9 @@ deno_core::extension!(
         op_hb_current_trade_info,
         op_hb_equipment,
         op_hb_spellbook,
+        op_hb_in_spellbook,
+        op_hb_heading_to,
+        op_hb_entity_exists,
         op_hb_equip,
         op_hb_unequip,
         op_hb_open_trade,
@@ -474,6 +521,28 @@ fn op_hb_equipment(state: &mut OpState) -> Vec<ScriptEquipmentSlotView> {
 #[serde]
 fn op_hb_spellbook(state: &mut OpState) -> Vec<u32> {
     with_current_script_client_view(state, |view| unsafe { view.spellbook() })
+        .unwrap_or_default()
+}
+
+#[op2(fast)]
+fn op_hb_in_spellbook(state: &mut OpState, spell_id: u32) -> bool {
+    with_current_script_client_view(state, |view| unsafe { view.in_spellbook(spell_id) })
+        .unwrap_or_default()
+}
+
+#[op2]
+fn op_hb_heading_to(
+    state: &mut OpState,
+    #[serde] from: WorldPosition,
+    #[serde] to: WorldPosition,
+) -> f32 {
+    with_current_script_client_view(state, |view| unsafe { view.heading_to(from, to) })
+        .unwrap_or_default()
+}
+
+#[op2(fast)]
+fn op_hb_entity_exists(state: &mut OpState, guid: u32) -> bool {
+    with_current_script_client_view(state, |view| unsafe { view.entity_exists(Guid(guid)) })
         .unwrap_or_default()
 }
 
@@ -972,6 +1041,7 @@ mod tests {
         ScriptIntent, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
         PropertyInt64, PropertyString,
@@ -1045,6 +1115,18 @@ mod tests {
             vec![7, 11, 13]
         }
 
+        fn in_spellbook(&self, spell_id: u32) -> bool {
+            [7, 11, 13].contains(&spell_id)
+        }
+
+        fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32 {
+            from.heading_to(&to)
+        }
+
+        fn entity_exists(&self, guid: Guid) -> bool {
+            guid == Guid(42)
+        }
+
         fn current_trade_info(&self) -> Option<ScriptTradeInfo> {
             Some(ScriptTradeInfo {
                 partner_guid: Guid(7),
@@ -1080,6 +1162,9 @@ mod tests {
         dispatch_source_escapes_javascript_line_separators();
         equipment_helper_returns_js_map();
         spellbook_helper_returns_js_array();
+        spellbook_membership_helper_returns_boolean();
+        heading_to_helper_returns_expected_heading();
+        entity_exists_helper_returns_boolean();
         current_trade_info_helper_returns_js_object();
     }
 
@@ -1141,6 +1226,72 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
                 if message == "[7,11,13]"
+        ));
+    }
+
+    fn spellbook_membership_helper_returns_boolean() {
+        let source = ScriptSource::new(
+            "spellbook-membership-test",
+            r#"
+                Holtburger.log("info", JSON.stringify([
+                    Holtburger.inSpellbook(7),
+                    Holtburger.inSpellbook(99),
+                ]));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[true,false]"
+        ));
+    }
+
+    fn heading_to_helper_returns_expected_heading() {
+        let source = ScriptSource::new(
+            "heading-to-test",
+            r#"
+                const heading = Holtburger.headingTo(
+                    { landblock_id: 16777216, coords: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
+                    { landblock_id: 16777216, coords: { x: 0, y: 10, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
+                );
+                Holtburger.log("info", String(heading));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message
+                    .parse::<f64>()
+                    .is_ok_and(|heading| (heading - 90.0_f64.to_radians()).abs() < 1e-6)
+        ));
+    }
+
+    fn entity_exists_helper_returns_boolean() {
+        let source = ScriptSource::new(
+            "entity-exists-test",
+            r#"
+                Holtburger.log("info", JSON.stringify([
+                    Holtburger.entityExists(42),
+                    Holtburger.entityExists(7),
+                ]));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[true,false]"
         ));
     }
 

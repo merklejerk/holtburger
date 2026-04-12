@@ -1,4 +1,4 @@
-use crate::scripting::DeferredScriptSource;
+use crate::scripting::{DeferredScriptSource, inventory_changed_event};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
@@ -122,11 +122,14 @@ impl GameState {
         ctx: &EventContext,
     ) -> UpdateResult {
         let workflow_before = self.script_workflow_projection();
+        let inventory_before = self.data.inventory.clone();
         let mut result = domains::reduce_view_event(self, &event);
+        let inventory_event = inventory_changed_event(&inventory_before, &self.data.inventory);
         self.sync_script_host_for_view_event(
             ctx.server_time,
             &event,
             &workflow_before,
+            inventory_event,
             &mut result,
         );
         self.drain_notifications(&mut result);

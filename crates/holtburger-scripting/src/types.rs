@@ -651,12 +651,9 @@ pub enum ScriptIntent {
     Unequip {
         guid: Guid,
     },
-    CastUntargetedSpell {
+    CastSpell {
         spell_id: u32,
-    },
-    CastTargetedSpell {
-        target: Guid,
-        spell_id: u32,
+        target: Option<Guid>,
     },
     RespondToConfirmation {
         accepted: bool,

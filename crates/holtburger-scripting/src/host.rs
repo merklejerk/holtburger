@@ -424,6 +424,12 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     currentOpenContainer() {
         return Deno.core.ops.op_hb_current_open_container();
     },
+    castSpell(spellId, target = null) {
+        Deno.core.ops.op_hb_cast_spell(
+            Number(spellId) >>> 0,
+            target == null ? 0 : Number(target) >>> 0,
+        );
+    },
     openContainer(guid) {
         Deno.core.ops.op_hb_open_container(Number(guid) >>> 0);
     },
@@ -617,6 +623,7 @@ deno_core::extension!(
         op_hb_distance,
         op_hb_current_trade_info,
         op_hb_current_open_container,
+        op_hb_cast_spell,
         op_hb_open_container,
         op_hb_close_container,
         op_hb_equipment,
@@ -850,6 +857,18 @@ fn op_hb_close_container(state: &mut OpState, guid: u32) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::CloseContainer { guid: Guid(guid) });
+}
+
+#[op2(fast)]
+fn op_hb_cast_spell(state: &mut OpState, spell_id: u32, target: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::CastSpell {
+            spell_id,
+            target: (target != 0).then_some(Guid(target)),
+        });
 }
 
 #[op2(fast)]

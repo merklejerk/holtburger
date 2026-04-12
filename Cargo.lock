@@ -1347,6 +1347,7 @@ dependencies = [
  "holtburger-common",
  "holtburger-core",
  "holtburger-protocol",
+ "log",
  "serde",
 ]
 

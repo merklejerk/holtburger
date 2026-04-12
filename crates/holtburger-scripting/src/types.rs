@@ -29,6 +29,7 @@ impl ScriptSource {
 ///
 /// Implementations should project semantic frontend state and avoid leaking
 /// widget-local concerns such as focus or scroll position.
+/// `debug_log` is the one intentional side effect for script-side diagnostics.
 pub trait ScriptClientView {
     fn self_entity(&self) -> Option<ScriptSelfView>;
     fn target_entity(&self) -> Option<ScriptEntityView>;
@@ -40,6 +41,9 @@ pub trait ScriptClientView {
     fn entity_string_prop(&self, guid: Guid, prop: PropertyString) -> Option<String>;
     fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
     fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
+    fn debug_log(&self, message: String) {
+        log::debug!("{}", message);
+    }
     fn nearby_entities(
         &self,
         max_distance: Option<f32>,
@@ -65,6 +69,7 @@ pub trait ScriptClientView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptSelfView {
     pub guid: Guid,
     pub name: String,
@@ -102,6 +107,7 @@ impl From<Guid> for ScriptPositionRef {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptCombatInfo {
     pub combat_mode: CombatMode,
     pub is_engaged: bool,
@@ -125,6 +131,7 @@ impl Default for ScriptCombatInfo {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptEnchantmentView {
     pub spell_id: u32,
     pub end_time: f64,
@@ -172,6 +179,7 @@ impl From<BusyOperationKind> for ScriptBusyOperation {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
@@ -260,6 +268,7 @@ pub enum ScriptEntityKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptContainerView {
     pub container_guid: Guid,
     pub slots: u32,
@@ -375,6 +384,7 @@ impl ScriptEquipmentSlotKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptEquipmentSlotView {
     pub slot: ScriptEquipmentSlotKind,
     pub equip_mask: EquipMask,
@@ -382,6 +392,7 @@ pub struct ScriptEquipmentSlotView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptTradeInfo {
     pub partner_guid: Guid,
     pub partner_name: Option<String>,
@@ -395,6 +406,7 @@ pub struct ScriptPartyView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptPartyMemberView {
     pub guid: Guid,
     pub name: Option<String>,
@@ -404,6 +416,7 @@ pub struct ScriptPartyMemberView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptSpellEffectView {
     pub spell_id: u32,
     pub name: Option<String>,

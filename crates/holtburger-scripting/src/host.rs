@@ -16,7 +16,7 @@ use crate::{
     ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatInfo,
     ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView,
     ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel,
-    ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -35,6 +35,7 @@ struct ScriptClientViewPtr {
     entity_string_prop: unsafe fn(*const (), Guid, PropertyString) -> Option<String>,
     entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
+    debug_log: unsafe fn(*const (), String),
     #[allow(clippy::type_complexity)]
     nearby_entities:
         unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
@@ -49,8 +50,11 @@ struct ScriptClientViewPtr {
     distance: unsafe fn(*const (), ScriptPositionRef, ScriptPositionRef) -> f32,
     heading_to: unsafe fn(*const (), ScriptPositionRef, ScriptPositionRef) -> f32,
     entity_exists: unsafe fn(*const (), Guid) -> bool,
+    entity: unsafe fn(*const (), Guid) -> Option<ScriptEntityView>,
     #[allow(clippy::type_complexity)]
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
+    #[allow(clippy::type_complexity)]
+    fellowship: unsafe fn(*const ()) -> Option<ScriptPartyView>,
 }
 
 impl ScriptClientViewPtr {
@@ -115,6 +119,10 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).entity_instance_prop(guid, prop) }
         }
 
+        unsafe fn debug_log<T: ScriptClientView>(data: *const (), message: String) {
+            unsafe { (&*data.cast::<T>()).debug_log(message) }
+        }
+
         unsafe fn nearby_entities<T: ScriptClientView>(
             data: *const (),
             max_distance: Option<f32>,
@@ -177,10 +185,18 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).entity_exists(guid) }
         }
 
+        unsafe fn entity<T: ScriptClientView>(data: *const (), guid: Guid) -> Option<ScriptEntityView> {
+            unsafe { (&*data.cast::<T>()).entity(guid) }
+        }
+
         unsafe fn current_trade_info<T: ScriptClientView>(
             data: *const (),
         ) -> Option<ScriptTradeInfo> {
             unsafe { (&*data.cast::<T>()).current_trade_info() }
+        }
+
+        unsafe fn fellowship<T: ScriptClientView>(data: *const ()) -> Option<ScriptPartyView> {
+            unsafe { (&*data.cast::<T>()).fellowship() }
         }
 
         Self {
@@ -193,6 +209,7 @@ impl ScriptClientViewPtr {
             entity_string_prop: entity_string_prop::<T>,
             entity_data_prop: entity_data_prop::<T>,
             entity_instance_prop: entity_instance_prop::<T>,
+            debug_log: debug_log::<T>,
             nearby_entities: nearby_entities::<T>,
             inventory: inventory::<T>,
             current_open_container: current_open_container::<T>,
@@ -205,7 +222,9 @@ impl ScriptClientViewPtr {
             distance: distance::<T>,
             heading_to: heading_to::<T>,
             entity_exists: entity_exists::<T>,
+            entity: entity::<T>,
             current_trade_info: current_trade_info::<T>,
+            fellowship: fellowship::<T>,
         }
     }
 
@@ -239,6 +258,10 @@ impl ScriptClientViewPtr {
 
     unsafe fn entity_instance_prop(self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid> {
         unsafe { (self.entity_instance_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn debug_log(self, message: String) {
+        unsafe { (self.debug_log)(self.data, message) }
     }
 
     unsafe fn nearby_entities(
@@ -293,8 +316,16 @@ impl ScriptClientViewPtr {
         unsafe { (self.entity_exists)(self.data, guid) }
     }
 
+    unsafe fn entity(self, guid: Guid) -> Option<ScriptEntityView> {
+        unsafe { (self.entity)(self.data, guid) }
+    }
+
     unsafe fn current_trade_info(self) -> Option<ScriptTradeInfo> {
         unsafe { (self.current_trade_info)(self.data) }
+    }
+
+    unsafe fn fellowship(self) -> Option<ScriptPartyView> {
+        unsafe { (self.fellowship)(self.data) }
     }
 }
 
@@ -311,29 +342,26 @@ globalThis.Holtburger = Object.freeze({
   selfEntity() {
     return Deno.core.ops.op_hb_self_entity();
   },
+    attack(guid) {
+        Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
+    },
+    follow(guid) {
+        Deno.core.ops.op_hb_follow(Number(guid) >>> 0);
+    },
+    cancelInteraction() {
+        Deno.core.ops.op_hb_cancel_interaction();
+    },
     currentInteraction() {
         return Deno.core.ops.op_hb_current_interaction();
     },
     enchantments() {
-        return Deno.core.ops.op_hb_enchantments().map(({ spell_id, end_time }) => ({
-            spellId: spell_id,
-            endTime: end_time,
-        }));
+        return Deno.core.ops.op_hb_enchantments();
     },
     distance(from, to) {
         return Deno.core.ops.op_hb_distance(from, to);
     },
     combatInfo() {
-        const combatInfo = Deno.core.ops.op_hb_combat_info();
-
-        return {
-            combatMode: combatInfo.combat_mode,
-            isEngaged: combatInfo.is_engaged,
-            target: combatInfo.target,
-            power: combatInfo.power,
-            height: combatInfo.height,
-            lastAttackTime: combatInfo.last_attack_time,
-        };
+        return Deno.core.ops.op_hb_combat_info();
     },
     nearbyEntities(maxDistance = null, classifications = null) {
         return Deno.core.ops.op_hb_nearby_entities(
@@ -342,11 +370,7 @@ globalThis.Holtburger = Object.freeze({
         );
   },
     inventory() {
-        return Deno.core.ops.op_hb_inventory().map(({ container_guid, slots, items }) => ({
-            containerGuid: container_guid,
-            slots,
-            items,
-        }));
+        return Deno.core.ops.op_hb_inventory();
     },
     currentOpenContainer() {
         return Deno.core.ops.op_hb_current_open_container();
@@ -358,25 +382,18 @@ globalThis.Holtburger = Object.freeze({
         Deno.core.ops.op_hb_close_container(Number(guid) >>> 0);
     },
     currentTradeInfo() {
-        const tradeInfo = Deno.core.ops.op_hb_current_trade_info();
-        if (tradeInfo == null) {
-            return null;
-        }
-
-        return {
-            partnerGuid: tradeInfo.partner_guid,
-            partnerName: tradeInfo.partner_name,
-            ourItems: tradeInfo.our_items,
-            theirItems: tradeInfo.their_items,
-        };
+        return Deno.core.ops.op_hb_current_trade_info();
+    },
+    fellowship() {
+        return Deno.core.ops.op_hb_fellowship();
     },
     equipment() {
         return new Map(
-            Deno.core.ops.op_hb_equipment().map(({ slot, equip_mask, item_guid }) => [
+            Deno.core.ops.op_hb_equipment().map(({ slot, equipMask, itemGuid }) => [
                 slot,
                 {
-                    equipMask: equip_mask,
-                    itemGuid: item_guid,
+                    equipMask,
+                    itemGuid,
                 },
             ]),
         );
@@ -392,6 +409,9 @@ globalThis.Holtburger = Object.freeze({
     },
     entityExists(guid) {
         return Deno.core.ops.op_hb_entity_exists(Number(guid) >>> 0);
+    },
+    entity(guid) {
+        return Deno.core.ops.op_hb_entity(Number(guid) >>> 0);
     },
     equip(guid, slot) {
         Deno.core.ops.op_hb_equip(Number(guid) >>> 0, String(slot));
@@ -423,6 +443,12 @@ globalThis.Holtburger = Object.freeze({
   log(level, message) {
     Deno.core.ops.op_hb_log(String(level), String(message));
   },
+    debugLog(message) {
+        Deno.core.ops.op_hb_debug_log(String(message));
+    },
+    debug_log(message) {
+        Deno.core.ops.op_hb_debug_log(String(message));
+    },
   say(message) {
     Deno.core.ops.op_hb_say(String(message));
   },
@@ -505,6 +531,7 @@ deno_core::extension!(
         op_hb_entity_data_prop,
         op_hb_entity_instance_prop,
         op_hb_log,
+        op_hb_debug_log,
         op_hb_say,
         op_hb_emote,
         op_hb_combat_info,
@@ -521,6 +548,7 @@ deno_core::extension!(
         op_hb_in_spellbook,
         op_hb_heading_to,
         op_hb_entity_exists,
+        op_hb_entity,
         op_hb_equip,
         op_hb_unequip,
         op_hb_open_trade,
@@ -528,6 +556,7 @@ deno_core::extension!(
         op_hb_accept_trade,
         op_hb_decline_trade,
         op_hb_reset_trade,
+        op_hb_fellowship,
         op_hb_exit_trade,
         op_hb_snap_heading,
         op_hb_scoot,
@@ -536,6 +565,9 @@ deno_core::extension!(
         op_hb_assess,
         op_hb_drop,
         op_hb_pickup,
+        op_hb_attack,
+        op_hb_follow,
+        op_hb_cancel_interaction,
         op_hb_target_entity,
         op_hb_approach,
     ]
@@ -681,8 +713,20 @@ fn op_hb_entity_exists(state: &mut OpState, guid: u32) -> bool {
 
 #[op2]
 #[serde]
+fn op_hb_entity(state: &mut OpState, guid: u32) -> Option<ScriptEntityView> {
+    with_current_script_client_view(state, |view| unsafe { view.entity(Guid(guid)) }).flatten()
+}
+
+#[op2]
+#[serde]
 fn op_hb_current_trade_info(state: &mut OpState) -> Option<ScriptTradeInfo> {
     with_current_script_client_view(state, |view| unsafe { view.current_trade_info() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_fellowship(state: &mut OpState) -> Option<crate::ScriptPartyView> {
+    with_current_script_client_view(state, |view| unsafe { view.fellowship() }).flatten()
 }
 
 #[op2]
@@ -844,6 +888,11 @@ fn op_hb_log(state: &mut OpState, #[string] level: String, #[string] message: St
         .outputs
         .borrow_mut()
         .push(ScriptIntent::Log { level, message });
+}
+
+#[op2(fast)]
+fn op_hb_debug_log(state: &mut OpState, #[string] message: String) {
+    with_current_script_client_view(state, |view| unsafe { view.debug_log(message) });
 }
 
 #[op2(fast)]
@@ -1009,6 +1058,37 @@ fn op_hb_pickup(state: &mut OpState, item: u32, container: u32) {
             item: Guid(item),
             container: (container != 0).then_some(Guid(container)),
         });
+}
+
+#[op2(fast)]
+fn op_hb_attack(state: &mut OpState, guid: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Client(ScriptClientIntent::Attack {
+            guid: Guid(guid),
+        }));
+}
+
+#[op2(fast)]
+fn op_hb_follow(state: &mut OpState, guid: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Client(ScriptClientIntent::Follow {
+            guid: Guid(guid),
+        }));
+}
+
+#[op2(fast)]
+fn op_hb_cancel_interaction(state: &mut OpState) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::Client(ScriptClientIntent::CancelInteraction));
 }
 
 #[op2(fast)]
@@ -1207,9 +1287,10 @@ mod tests {
     use super::build_dispatch_source;
     use crate::{
         ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
-        ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
-        ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
-        ScriptIntent, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptClientIntent, ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView,
+        ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
+        ScriptEvent, ScriptIntent, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
+        ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -1276,10 +1357,6 @@ mod tests {
         }
 
         fn target_entity(&self) -> Option<ScriptEntityView> {
-            None
-        }
-
-        fn entity(&self, _guid: Guid) -> Option<ScriptEntityView> {
             None
         }
 
@@ -1375,6 +1452,20 @@ mod tests {
             guid == Guid(42)
         }
 
+        fn entity(&self, guid: Guid) -> Option<ScriptEntityView> {
+            (guid == Guid(11)).then_some(ScriptEntityView {
+                guid,
+                name: Some("Lesser Healing Kit".to_string()),
+                kind: ScriptEntityKind::HealingKit,
+                position: WorldPosition::default(),
+                profile: None,
+                container: Guid::NULL,
+                wielder: Guid::NULL,
+                distance_to_self: 0.0,
+                motion_command: Default::default(),
+            })
+        }
+
         fn current_trade_info(&self) -> Option<ScriptTradeInfo> {
             Some(ScriptTradeInfo {
                 partner_guid: Guid(7),
@@ -1385,7 +1476,24 @@ mod tests {
         }
 
         fn fellowship(&self) -> Option<crate::ScriptPartyView> {
-            None
+            Some(ScriptPartyView {
+                members: vec![
+                    ScriptPartyMemberView {
+                        guid: Guid(7),
+                        name: Some("Buddy".to_string()),
+                        health_percent: Some(0.5),
+                        stamina_percent: Some(0.75),
+                        mana_percent: Some(0.25),
+                    },
+                    ScriptPartyMemberView {
+                        guid: Guid(42),
+                        name: Some("Tank".to_string()),
+                        health_percent: Some(0.9),
+                        stamina_percent: Some(0.8),
+                        mana_percent: Some(0.1),
+                    },
+                ],
+            })
         }
 
         fn active_spells(&self) -> Vec<crate::ScriptSpellEffectView> {
@@ -1416,12 +1524,16 @@ mod tests {
         current_open_container_helper_returns_js_option();
         current_interaction_helper_returns_js_object();
         enchantments_helper_returns_js_array();
+        entity_helper_returns_js_object();
+        debug_log_helper_emits_no_script_outputs();
+        fellowship_helper_returns_js_object();
         distance_and_heading_helpers_accept_guids_and_positions();
         combat_info_helper_returns_js_object();
         spellbook_membership_helper_returns_boolean();
         heading_to_helper_returns_expected_heading();
         entity_exists_helper_returns_boolean();
         open_and_close_container_intents_are_emitted();
+        attack_follow_and_cancel_helpers_emit_client_intents();
         current_trade_info_helper_returns_js_object();
     }
 
@@ -1570,6 +1682,69 @@ mod tests {
         ));
     }
 
+    fn entity_helper_returns_js_object() {
+        let source = ScriptSource::new(
+            "entity-test",
+            r#"
+                const entity = Holtburger.entity(11);
+                Holtburger.log("info", JSON.stringify([entity.guid, entity.name, entity.kind]));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[11,\"Lesser Healing Kit\",\"healing_kit\"]"
+        ));
+    }
+
+    fn debug_log_helper_emits_no_script_outputs() {
+        let source = ScriptSource::new(
+            "debug-log-test",
+            r#"
+                Holtburger.debugLog("script diagnostics");
+                Holtburger.log("info", "after debug log");
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "after debug log"
+        ));
+    }
+
+    fn fellowship_helper_returns_js_object() {
+        let source = ScriptSource::new(
+            "fellowship-test",
+            r#"
+                const fellowship = Holtburger.fellowship();
+                Holtburger.log("info", JSON.stringify(fellowship));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message.contains("\"members\"")
+                    && message.contains("\"guid\":7")
+                    && message.contains("\"name\":\"Buddy\"")
+                    && message.contains("\"healthPercent\":0.5")
+                    && message.contains("\"guid\":42")
+                    && message.contains("\"name\":\"Tank\"")
+                    && message.contains("\"manaPercent\":0.1")
+        ));
+    }
+
     fn distance_and_heading_helpers_accept_guids_and_positions() {
         let source = ScriptSource::new(
             "distance-heading-test",
@@ -1641,6 +1816,29 @@ mod tests {
                 ScriptIntent::OpenContainer { guid },
                 ScriptIntent::CloseContainer { guid: close_guid },
             ] if *guid == Guid(17) && *close_guid == Guid(19)
+        ));
+    }
+
+    fn attack_follow_and_cancel_helpers_emit_client_intents() {
+        let source = ScriptSource::new(
+            "client-intents-test",
+            r#"
+                Holtburger.attack(7);
+                Holtburger.follow(11);
+                Holtburger.cancelInteraction();
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [
+                ScriptIntent::Client(ScriptClientIntent::Attack { guid }),
+                ScriptIntent::Client(ScriptClientIntent::Follow { guid: follow_guid }),
+                ScriptIntent::Client(ScriptClientIntent::CancelInteraction),
+            ] if *guid == Guid(7) && *follow_guid == Guid(11)
         ));
     }
 

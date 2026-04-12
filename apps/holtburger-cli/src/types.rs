@@ -700,6 +700,9 @@ pub enum AppAction {
     RunScript {
         basename: String,
     },
+    ScriptCommand {
+        msg: String,
+    },
     UnrunScript,
     BeginInteraction {
         interaction: Interaction,

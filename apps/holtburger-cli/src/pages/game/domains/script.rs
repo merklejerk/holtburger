@@ -35,6 +35,19 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.run_script_command(&basename, &mut result);
             result
         }
+        AppAction::ScriptCommand { msg } => {
+            let mut result = UpdateResult::new();
+            let Some(host) = state.script.host.as_mut() else {
+                log::error!("Ignoring /script command because no script is running: {msg}");
+                result.request_redraw(crate::types::RedrawPriority::Immediate);
+                return result;
+            };
+
+            let view = script_client_view(&state.data, &state.view, None);
+            dispatch_script_event_to_host(&view, host, ScriptEvent::Command { msg }, &mut result);
+            result.request_redraw(crate::types::RedrawPriority::Immediate);
+            result
+        }
         AppAction::UnrunScript => {
             let mut result = UpdateResult::new();
             state.unrun_script_command(&mut result);

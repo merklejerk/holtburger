@@ -432,6 +432,9 @@ pub enum ScriptEvent {
     ChatMessage(ScriptChatEvent),
     Lifecycle(ScriptLifecycleEvent),
     Workflow(ScriptWorkflowEvent),
+    Command {
+        msg: String,
+    },
     WeenieError {
         error: holtburger_protocol::errors::WeenieError,
     },

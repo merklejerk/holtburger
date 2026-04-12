@@ -105,6 +105,8 @@ There are three practical ways to get started:
 
 Nightly prebuilt archives are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives already include the bundled namespaced `assets.hba` needed for the current TUI/runtime path, so this is the fastest way to get to a running client.
 
+They also ship the bundled `scripts/` directory alongside the executable so the scripting runtime has its default on-disk payload.
+
 1. Download the archive for your platform.
 2. Extract it.
 3. Launch the binary from the extracted folder:
@@ -125,6 +127,8 @@ flatpak run io.github.merklejerk.holtburger-cli --help
 ```
 
 The Flatpak ships with the same bundled namespaced `assets.hba`, so it is ready to run immediately.
+
+It also ships the packaged `scripts/` directory, seeds a writable `SCRIPT_DIR`, and keeps per-script config under `${SCRIPT_DIR}/.config`.
 
 ### From Source
 

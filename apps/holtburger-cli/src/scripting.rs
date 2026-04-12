@@ -32,6 +32,7 @@ use crate::pages::game::{GameData, GameState, ViewState};
 use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, LocalConfirmation};
 
 const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
+const SCRIPT_BUNDLE_DIR_ENV_VAR: &str = "SCRIPT_BUNDLE_DIR";
 const DEFAULT_SCRIPT_DIR: &str = "scripts";
 
 fn running_script_stem(script_name: &str) -> Option<&str> {
@@ -924,6 +925,54 @@ fn script_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SCRIPT_DIR))
 }
 
+fn script_bundle_directory() -> Option<PathBuf> {
+    std::env::var_os(SCRIPT_BUNDLE_DIR_ENV_VAR)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn copy_missing_script_tree(source_dir: &Path, destination_dir: &Path) -> Result<()> {
+    if !source_dir.exists() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(destination_dir)?;
+
+    for entry in fs::read_dir(source_dir)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let destination_path = destination_dir.join(entry.file_name());
+        let file_type = entry.file_type()?;
+
+        if file_type.is_dir() {
+            copy_missing_script_tree(&source_path, &destination_path)?;
+            continue;
+        }
+
+        if file_type.is_file() && !destination_path.exists() {
+            if let Some(parent) = destination_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::copy(&source_path, &destination_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn seed_script_directory() -> Result<()> {
+    let Some(source_dir) = script_bundle_directory() else {
+        return Ok(());
+    };
+
+    let destination_dir = script_directory();
+    if source_dir == destination_dir {
+        return Ok(());
+    }
+
+    copy_missing_script_tree(&source_dir, &destination_dir)
+}
+
 fn validate_script_basename(basename: &str) -> Result<&str> {
     let basename = basename.trim();
     anyhow::ensure!(!basename.is_empty(), "script basename cannot be empty");
@@ -950,6 +999,7 @@ fn script_path_for_basename_in_dir(script_dir: &Path, basename: &str) -> Result<
 }
 
 pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<DeferredScriptSource> {
+    seed_script_directory()?;
     let script_dir = script_directory();
     let path = script_path_for_basename_in_dir(&script_dir, basename)?;
     Ok(DeferredScriptSource::Path(path))
@@ -992,6 +1042,7 @@ fn discoverable_script_basenames_in_dir(script_dir: &Path) -> Result<Vec<String>
 }
 
 pub(crate) fn discoverable_script_basenames() -> Result<Vec<String>> {
+    seed_script_directory()?;
     discoverable_script_basenames_in_dir(&script_directory())
 }
 

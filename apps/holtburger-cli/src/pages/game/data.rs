@@ -499,6 +499,14 @@ impl GameData {
         self.open_containers.remove(&guid);
     }
 
+    pub fn current_open_container(&self) -> Option<Guid> {
+        self.opened_container_history
+            .iter()
+            .rev()
+            .copied()
+            .find(|guid| self.open_containers.contains(guid))
+    }
+
     pub fn has_opened_container_before(&self, guid: Guid) -> bool {
         self.opened_container_history_set.contains(&guid)
     }

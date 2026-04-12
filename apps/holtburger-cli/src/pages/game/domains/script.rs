@@ -3,8 +3,10 @@ use super::*;
 use crate::scripting::{
     DeferredScriptSource, TuiScriptClientView, WorkflowProjection, chat_tags_for_level,
     deferred_script_source_for_basename, resolve_deferred_script_source,
-    script_event_from_view_event, workflow_events, workflow_projection,
+    script_event_from_notification, script_event_from_view_event, workflow_events,
+    workflow_projection,
 };
+use crate::types::AppNotification;
 use crate::types::{InspectTarget, Interaction};
 use anyhow::Result;
 use holtburger_core::client::types::TargetSlot;
@@ -201,6 +203,8 @@ impl GameState {
             ScriptIntent::DeclineTrade => Ok(AppAction::DeclineTrade),
             ScriptIntent::ResetTrade => Ok(AppAction::ResetTrade),
             ScriptIntent::ExitTrade => Ok(AppAction::ExitTrade),
+            ScriptIntent::OpenContainer { guid } => Ok(AppAction::Open { guid }),
+            ScriptIntent::CloseContainer { guid } => Ok(AppAction::Close { guid }),
             ScriptIntent::SnapHeading { heading } => Ok(AppAction::SnapHeading { heading }),
             ScriptIntent::Scoot { distance_m } => Ok(AppAction::Scoot { distance_m }),
             ScriptIntent::Combine { source, dest } => Ok(AppAction::UseWith {
@@ -281,7 +285,6 @@ impl GameState {
         server_time: Option<(f64, Instant)>,
         event: &ClientViewEvent,
         before_workflow: &WorkflowProjection,
-        inventory_event: Option<ScriptEvent>,
         result: &mut UpdateResult,
     ) {
         let host_was_running = self.script_host_is_running();
@@ -312,10 +315,6 @@ impl GameState {
                 );
             }
 
-            if let Some(inventory_event) = inventory_event {
-                dispatch_script_event_to_host(&view, host, inventory_event, result);
-            }
-
             if !should_run_after {
                 dispatch_script_event_to_host(
                     &view,
@@ -331,6 +330,30 @@ impl GameState {
 
         if host_was_cleared {
             self.script.host = None;
+        }
+    }
+
+    pub(crate) fn sync_script_host_for_notification(
+        &mut self,
+        server_time: Option<(f64, Instant)>,
+        notification: &AppNotification,
+        result: &mut UpdateResult,
+    ) {
+        let host_was_running = self.script_host_is_running();
+        let should_run_after = self.pending_script_source().is_some();
+
+        if !host_was_running && should_run_after {
+            self.start_script_host_if_needed(server_time, result);
+        }
+
+        let view = script_client_view(&self.data, &self.view, server_time);
+
+        let Some(host) = self.script.host.as_mut() else {
+            return;
+        };
+
+        if let Some(script_event) = script_event_from_notification(notification) {
+            dispatch_script_event_to_host(&view, host, script_event, result);
         }
     }
 
@@ -530,6 +553,24 @@ mod tests {
             GameState::compile_script_intent(&view, ScriptIntent::ExitTrade)
                 .expect("exit trade should compile"),
             AppAction::ExitTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::OpenContainer { guid: Guid(14) },
+            )
+            .expect("open container should compile"),
+            AppAction::Open { guid } if guid == Guid(14)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::CloseContainer { guid: Guid(15) },
+            )
+            .expect("close container should compile"),
+            AppAction::Close { guid } if guid == Guid(15)
         ));
 
         assert!(matches!(

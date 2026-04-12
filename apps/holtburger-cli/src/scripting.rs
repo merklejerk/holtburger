@@ -1,6 +1,6 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::collections::HashSet;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -13,8 +13,8 @@ use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::{ActionResultReason, ChatChannelKind, CombatFeedback};
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
-    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptInventoryItemView,
+    ScriptConfirmation, ScriptContainerView, ScriptEntityKind, ScriptEntityProfile,
+    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
     ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
     ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
     ScriptTradeInfo, ScriptWorkflowEvent,
@@ -24,7 +24,7 @@ use holtburger_world::stats::VitalType;
 
 use crate::pages::game::panels::dashboard::tabs::classification;
 use crate::pages::game::{GameData, GameState, ViewState};
-use crate::types::{AppAction, ChatMessageTags, Interaction, LocalConfirmation};
+use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, LocalConfirmation};
 
 const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
 const DEFAULT_SCRIPT_DIR: &str = "scripts";
@@ -92,6 +92,8 @@ impl TuiScriptClientView<'_> {
             kind: classification::classify_entity(entity).kind(),
             position: entity_position.unwrap_or_default(),
             profile,
+            container: entity.container_id().unwrap_or(Guid::NULL),
+            wielder: entity.wielder_id().unwrap_or(Guid::NULL),
             distance_to_self,
             motion_command,
         })
@@ -270,26 +272,60 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         entities
     }
 
-    fn inventory_items(&self) -> Vec<ScriptInventoryItemView> {
-        let mut items = self
-            .data
-            .inventory
-            .iter()
-            .filter_map(|guid| {
-                let entity = self.data.entities.get(guid)?;
-                let name = entity.name().trim();
-                Some(ScriptInventoryItemView {
-                    guid: *guid,
-                    name: (!name.is_empty()).then(|| name.to_string()),
-                    stack_size: Some(entity.stack_size()),
-                    container_guid: entity.container_id(),
-                    equipped: self.data.equipment.contains_key(guid),
-                })
-            })
-            .collect::<Vec<_>>();
+    fn inventory(&self) -> Vec<ScriptContainerView> {
+        let mut containers: BTreeMap<Guid, (u32, Vec<Guid>)> = BTreeMap::new();
 
-        items.sort_by_key(|item| item.guid.0);
-        items
+        if let Some(player_guid) = self.data.player_guid
+            && let Some(player) = self.data.entities.get(&player_guid)
+        {
+            containers.insert(
+                player_guid,
+                (player.items_capacity().unwrap_or(0), Vec::new()),
+            );
+        }
+
+        for guid in self.data.inventory.iter().copied() {
+            let Some(entity) = self.data.entities.get(&guid) else {
+                continue;
+            };
+
+            if entity.items_capacity().unwrap_or(0) > 0 {
+                containers
+                    .entry(guid)
+                    .or_insert_with(|| (entity.items_capacity().unwrap_or(0), Vec::new()));
+            }
+
+            if let Some(container_guid) = entity.container_id() {
+                let slots = self
+                    .data
+                    .entities
+                    .get(&container_guid)
+                    .and_then(|container| container.items_capacity())
+                    .unwrap_or(0);
+
+                containers
+                    .entry(container_guid)
+                    .or_insert_with(|| (slots, Vec::new()))
+                    .1
+                    .push(guid);
+            }
+        }
+
+        containers
+            .into_iter()
+            .map(|(container_guid, (slots, mut items))| {
+                items.sort_unstable();
+                ScriptContainerView {
+                    container_guid,
+                    slots,
+                    items,
+                }
+            })
+            .collect()
+    }
+
+    fn current_open_container(&self) -> Option<Guid> {
+        self.data.current_open_container()
     }
 
     fn equipment(&self) -> Vec<ScriptEquipmentSlotView> {
@@ -576,20 +612,18 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
     }
 }
 
-pub(crate) fn inventory_changed_event(
-    before: &HashSet<Guid>,
-    after: &HashSet<Guid>,
+pub(crate) fn script_event_from_notification(
+    notification: &AppNotification,
 ) -> Option<ScriptEvent> {
-    if before == after {
-        return None;
+    match notification {
+        AppNotification::InventoryChanged { removed, added } => {
+            Some(ScriptEvent::InventoryChanged {
+                added: added.clone(),
+                removed: removed.clone(),
+            })
+        }
+        AppNotification::ActiveInteractionChanged { .. } => None,
     }
-
-    let mut added: Vec<Guid> = after.difference(before).copied().collect();
-    let mut removed: Vec<Guid> = before.difference(after).copied().collect();
-    added.sort_unstable();
-    removed.sort_unstable();
-
-    Some(ScriptEvent::InventoryChanged { added, removed })
 }
 
 pub(crate) fn chat_tags_for_level(level: ScriptLogLevel) -> ChatMessageTags {
@@ -954,6 +988,64 @@ mod tests {
         assert!(script_view.entity_exists(entity_guid));
         assert!(!script_view.entity_exists(Guid(0xDEAD_BEEF)));
     }
+
+    #[test]
+    fn inventory_projection_groups_items_by_container() {
+        let player_guid = Guid(0x5000_0012);
+        let pack_guid = Guid(0x8000_0012);
+        let root_item_guid = Guid(0x8000_0013);
+        let pack_item_guid = Guid(0x8000_0014);
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let mut player = Entity::new(player_guid, "Player".to_string(), WorldPosition::default());
+        player.set_int_prop(PropertyInt::ItemsCapacity, 12);
+        data.entities.insert(player_guid, player);
+
+        let mut pack = Entity::new(pack_guid, "Pack".to_string(), WorldPosition::default());
+        pack.set_int_prop(PropertyInt::ItemsCapacity, 6);
+        pack.set_container_id(Some(player_guid));
+        data.entities.insert(pack_guid, pack);
+
+        let mut root_item = Entity::new(
+            root_item_guid,
+            "Torch".to_string(),
+            WorldPosition::default(),
+        );
+        root_item.set_container_id(Some(player_guid));
+        data.entities.insert(root_item_guid, root_item);
+
+        let mut pack_item =
+            Entity::new(pack_item_guid, "Gem".to_string(), WorldPosition::default());
+        pack_item.set_container_id(Some(pack_guid));
+        data.entities.insert(pack_item_guid, pack_item);
+
+        data.inventory =
+            std::collections::HashSet::from([pack_guid, root_item_guid, pack_item_guid]);
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let inventory = script_view.inventory();
+        assert_eq!(inventory.len(), 2);
+
+        let player_container = inventory
+            .iter()
+            .find(|container| container.container_guid == player_guid)
+            .expect("player container should exist");
+        assert_eq!(player_container.slots, 12);
+        assert_eq!(player_container.items, vec![pack_guid, root_item_guid]);
+
+        let pack_container = inventory
+            .iter()
+            .find(|container| container.container_guid == pack_guid)
+            .expect("pack container should exist");
+        assert_eq!(pack_container.slots, 6);
+        assert_eq!(pack_container.items, vec![pack_item_guid]);
+    }
     #[test]
     fn script_event_from_view_event_projects_weenie_errors() {
         let action_result_event = ClientViewEvent::ActionResult {
@@ -984,19 +1076,14 @@ mod tests {
     }
 
     #[test]
-    fn inventory_changed_event_projects_added_and_removed_items() {
-        let before = std::collections::HashSet::from([
-            Guid(0x5000_0001),
-            Guid(0x5000_0003),
-            Guid(0x5000_0002),
-        ]);
-        let after = std::collections::HashSet::from([
-            Guid(0x5000_0002),
-            Guid(0x5000_0004),
-        ]);
+    fn script_event_from_notification_projects_inventory_changes() {
+        let notification = AppNotification::InventoryChanged {
+            removed: vec![Guid(0x5000_0001), Guid(0x5000_0003)],
+            added: vec![Guid(0x5000_0004)],
+        };
 
         assert!(matches!(
-            inventory_changed_event(&before, &after),
+            script_event_from_notification(&notification),
             Some(ScriptEvent::InventoryChanged {
                 added,
                 removed,
@@ -1133,6 +1220,7 @@ mod tests {
         entity.set_string_prop(PropertyString::LongDesc, "A sturdy olthoi".to_string());
         entity.set_did_prop(PropertyDataId::MotionTable, Guid(0x1234_5678));
         entity.set_container_id(Some(player_guid));
+        entity.set_wielder_id(Some(player_guid));
         entity.armor_profile = Some(ArmorProfile {
             slashing: 1.0,
             piercing: 2.0,
@@ -1181,10 +1269,13 @@ mod tests {
             script_view.entity_instance_prop(entity_guid, PropertyInstanceId::Container),
             Some(player_guid)
         );
+        let entity_view = script_view
+            .entity(entity_guid)
+            .expect("entity view should exist");
+        assert_eq!(entity_view.container, player_guid);
+        assert_eq!(entity_view.wielder, player_guid);
         assert!(matches!(
-            script_view
-                .entity(entity_guid)
-                .and_then(|entity| entity.profile),
+            entity_view.profile,
             Some(ScriptEntityProfile::Armor(ArmorProfile {
                 slashing: 1.0,
                 piercing: 2.0,

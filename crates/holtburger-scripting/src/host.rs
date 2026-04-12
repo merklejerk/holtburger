@@ -14,7 +14,7 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptClientIntent, ScriptClientView, ScriptEntityKind, ScriptEntityView,
+    ScriptClientIntent, ScriptClientView, ScriptContainerView, ScriptEntityKind, ScriptEntityView,
     ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel,
     ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
@@ -38,6 +38,8 @@ struct ScriptClientViewPtr {
     #[allow(clippy::type_complexity)]
     nearby_entities:
         unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
+    inventory: unsafe fn(*const ()) -> Vec<ScriptContainerView>,
+    current_open_container: unsafe fn(*const ()) -> Option<Guid>,
     equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
     spellbook: unsafe fn(*const ()) -> Vec<u32>,
     in_spellbook: unsafe fn(*const (), u32) -> bool,
@@ -117,9 +119,15 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).nearby_entities(max_distance, classifications) }
         }
 
-        unsafe fn equipment<T: ScriptClientView>(
-            data: *const (),
-        ) -> Vec<ScriptEquipmentSlotView> {
+        unsafe fn inventory<T: ScriptClientView>(data: *const ()) -> Vec<ScriptContainerView> {
+            unsafe { (&*data.cast::<T>()).inventory() }
+        }
+
+        unsafe fn current_open_container<T: ScriptClientView>(data: *const ()) -> Option<Guid> {
+            unsafe { (&*data.cast::<T>()).current_open_container() }
+        }
+
+        unsafe fn equipment<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEquipmentSlotView> {
             unsafe { (&*data.cast::<T>()).equipment() }
         }
 
@@ -160,6 +168,8 @@ impl ScriptClientViewPtr {
             entity_data_prop: entity_data_prop::<T>,
             entity_instance_prop: entity_instance_prop::<T>,
             nearby_entities: nearby_entities::<T>,
+            inventory: inventory::<T>,
+            current_open_container: current_open_container::<T>,
             equipment: equipment::<T>,
             spellbook: spellbook::<T>,
             in_spellbook: in_spellbook::<T>,
@@ -209,6 +219,14 @@ impl ScriptClientViewPtr {
         unsafe { (self.nearby_entities)(self.data, max_distance, classifications) }
     }
 
+    unsafe fn inventory(self) -> Vec<ScriptContainerView> {
+        unsafe { (self.inventory)(self.data) }
+    }
+
+    unsafe fn current_open_container(self) -> Option<Guid> {
+        unsafe { (self.current_open_container)(self.data) }
+    }
+
     unsafe fn equipment(self) -> Vec<ScriptEquipmentSlotView> {
         unsafe { (self.equipment)(self.data) }
     }
@@ -253,6 +271,22 @@ globalThis.Holtburger = Object.freeze({
             classifications == null || classifications == undefined ? null : classifications.map(String),
         );
   },
+    inventory() {
+        return Deno.core.ops.op_hb_inventory().map(({ container_guid, slots, items }) => ({
+            containerGuid: container_guid,
+            slots,
+            items,
+        }));
+    },
+    currentOpenContainer() {
+        return Deno.core.ops.op_hb_current_open_container();
+    },
+    openContainer(guid) {
+        Deno.core.ops.op_hb_open_container(Number(guid) >>> 0);
+    },
+    closeContainer(guid) {
+        Deno.core.ops.op_hb_close_container(Number(guid) >>> 0);
+    },
     currentTradeInfo() {
         const tradeInfo = Deno.core.ops.op_hb_current_trade_info();
         if (tradeInfo == null) {
@@ -404,7 +438,11 @@ deno_core::extension!(
         op_hb_say,
         op_hb_emote,
         op_hb_current_trade_info,
+        op_hb_current_open_container,
+        op_hb_open_container,
+        op_hb_close_container,
         op_hb_equipment,
+        op_hb_inventory,
         op_hb_spellbook,
         op_hb_in_spellbook,
         op_hb_heading_to,
@@ -513,15 +551,26 @@ fn op_hb_nearby_entities(
 #[op2]
 #[serde]
 fn op_hb_equipment(state: &mut OpState) -> Vec<ScriptEquipmentSlotView> {
-    with_current_script_client_view(state, |view| unsafe { view.equipment() })
-        .unwrap_or_default()
+    with_current_script_client_view(state, |view| unsafe { view.equipment() }).unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_inventory(state: &mut OpState) -> Vec<ScriptContainerView> {
+    with_current_script_client_view(state, |view| unsafe { view.inventory() }).unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_current_open_container(state: &mut OpState) -> Option<Guid> {
+    with_current_script_client_view(state, |view| unsafe { view.current_open_container() })
+        .flatten()
 }
 
 #[op2]
 #[serde]
 fn op_hb_spellbook(state: &mut OpState) -> Vec<u32> {
-    with_current_script_client_view(state, |view| unsafe { view.spellbook() })
-        .unwrap_or_default()
+    with_current_script_client_view(state, |view| unsafe { view.spellbook() }).unwrap_or_default()
 }
 
 #[op2(fast)]
@@ -550,6 +599,24 @@ fn op_hb_entity_exists(state: &mut OpState, guid: u32) -> bool {
 #[serde]
 fn op_hb_current_trade_info(state: &mut OpState) -> Option<ScriptTradeInfo> {
     with_current_script_client_view(state, |view| unsafe { view.current_trade_info() }).flatten()
+}
+
+#[op2(fast)]
+fn op_hb_open_container(state: &mut OpState, guid: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::OpenContainer { guid: Guid(guid) });
+}
+
+#[op2(fast)]
+fn op_hb_close_container(state: &mut OpState, guid: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::CloseContainer { guid: Guid(guid) });
 }
 
 #[op2(fast)]
@@ -1036,9 +1103,9 @@ where
 mod tests {
     use super::build_dispatch_source;
     use crate::{
-        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptEntityKind,
-        ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
-        ScriptIntent, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptContainerView,
+        ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
+        ScriptEvent, ScriptIntent, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -1099,8 +1166,16 @@ mod tests {
             Vec::new()
         }
 
-        fn inventory_items(&self) -> Vec<crate::ScriptInventoryItemView> {
-            Vec::new()
+        fn inventory(&self) -> Vec<ScriptContainerView> {
+            vec![ScriptContainerView {
+                container_guid: Guid(17),
+                slots: 4,
+                items: vec![Guid(11), Guid(12)],
+            }]
+        }
+
+        fn current_open_container(&self) -> Option<Guid> {
+            Some(Guid(17))
         }
 
         fn equipment(&self) -> Vec<ScriptEquipmentSlotView> {
@@ -1162,9 +1237,12 @@ mod tests {
         dispatch_source_escapes_javascript_line_separators();
         equipment_helper_returns_js_map();
         spellbook_helper_returns_js_array();
+        inventory_helper_returns_js_array_of_container_views();
+        current_open_container_helper_returns_js_option();
         spellbook_membership_helper_returns_boolean();
         heading_to_helper_returns_expected_heading();
         entity_exists_helper_returns_boolean();
+        open_and_close_container_intents_are_emitted();
         current_trade_info_helper_returns_js_object();
     }
 
@@ -1226,6 +1304,73 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
                 if message == "[7,11,13]"
+        ));
+    }
+
+    fn inventory_helper_returns_js_array_of_container_views() {
+        let source = ScriptSource::new(
+            "inventory-array-test",
+            r#"
+                const inventory = Holtburger.inventory();
+                Holtburger.log(
+                    "info",
+                    JSON.stringify([
+                        Array.isArray(inventory),
+                        inventory.length,
+                        inventory[0].containerGuid,
+                        inventory[0].slots,
+                        inventory[0].items,
+                    ]),
+                );
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[true,1,17,4,[11,12]]"
+        ));
+    }
+
+    fn current_open_container_helper_returns_js_option() {
+        let source = ScriptSource::new(
+            "current-open-container-test",
+            r#"
+                Holtburger.log("info", String(Holtburger.currentOpenContainer()));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "17"
+        ));
+    }
+
+    fn open_and_close_container_intents_are_emitted() {
+        let source = ScriptSource::new(
+            "container-intents-test",
+            r#"
+                Holtburger.openContainer(17);
+                Holtburger.closeContainer(19);
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [
+                ScriptIntent::OpenContainer { guid },
+                ScriptIntent::CloseContainer { guid: close_guid },
+            ] if *guid == Guid(17) && *close_guid == Guid(19)
         ));
     }
 

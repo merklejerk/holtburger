@@ -222,22 +222,13 @@ impl ChatState {
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
-                    self.log(
-                        ChatMessageTags::debug().combat(),
-                        "Attack sequence finished.".to_string(),
-                    );
+                    log::warn!("Attack sequence finished.",);
                 } else {
-                    self.log(
-                        ChatMessageTags::warning().combat(),
-                        format!("Attack sequence finished with {:?}.", error),
-                    );
+                    log::warn!("Attack sequence finished with {:?}.", error);
                 }
             }
             CombatFeedback::AttackCommenced => {
-                self.log(
-                    ChatMessageTags::debug().combat(),
-                    "Attack sequence started.".to_string(),
-                );
+                log::info!("Attack sequence started.",);
             }
             CombatFeedback::AttackerNotification {
                 defender_name,
@@ -270,7 +261,7 @@ impl ChatState {
                 attack_conditions,
             } => {
                 self.log(
-                    ChatMessageTags::warning().combat(),
+                    ChatMessageTags::info().combat(),
                     format!(
                         "{} hit you for {} {} damage to your {} ({}).{}{}",
                         attacker_name,
@@ -296,7 +287,7 @@ impl ChatState {
                 );
             }
             CombatFeedback::VictimNotification { death_message } => {
-                self.log(ChatMessageTags::error().combat(), death_message.clone());
+                self.log(ChatMessageTags::info().combat(), death_message.clone());
             }
             CombatFeedback::KillerNotification { death_message } => {
                 self.log(ChatMessageTags::info().combat(), death_message.clone());

@@ -10,6 +10,8 @@ use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use serde::{Deserialize, Serialize};
 
+use crate::ScriptJsonValue;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScriptSource {
     pub name: String,
@@ -41,6 +43,15 @@ pub trait ScriptClientView {
     fn entity_string_prop(&self, guid: Guid, prop: PropertyString) -> Option<String>;
     fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
     fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
+    fn load_config(&self) -> Option<ScriptJsonValue> {
+        None
+    }
+    fn load_data(&self) -> Option<ScriptJsonValue> {
+        None
+    }
+    fn write_config(&self, _contents: String) -> bool {
+        false
+    }
     fn debug_log(&self, message: String) {
         log::info!("{}", message);
     }

@@ -15,8 +15,9 @@ use holtburger_common::properties::{
 use crate::{
     ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatInfo,
     ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView,
-    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel,
-    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue,
+    ScriptLogLevel, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
+    ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -35,6 +36,9 @@ struct ScriptClientViewPtr {
     entity_string_prop: unsafe fn(*const (), Guid, PropertyString) -> Option<String>,
     entity_data_prop: unsafe fn(*const (), Guid, PropertyDataId) -> Option<Guid>,
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
+    load_config: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
+    load_data: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
+    write_config: unsafe fn(*const (), String) -> bool,
     debug_log: unsafe fn(*const (), String),
     #[allow(clippy::type_complexity)]
     nearby_entities:
@@ -117,6 +121,18 @@ impl ScriptClientViewPtr {
             prop: PropertyInstanceId,
         ) -> Option<Guid> {
             unsafe { (&*data.cast::<T>()).entity_instance_prop(guid, prop) }
+        }
+
+        unsafe fn load_config<T: ScriptClientView>(data: *const ()) -> Option<ScriptJsonValue> {
+            unsafe { (&*data.cast::<T>()).load_config() }
+        }
+
+        unsafe fn load_data<T: ScriptClientView>(data: *const ()) -> Option<ScriptJsonValue> {
+            unsafe { (&*data.cast::<T>()).load_data() }
+        }
+
+        unsafe fn write_config<T: ScriptClientView>(data: *const (), contents: String) -> bool {
+            unsafe { (&*data.cast::<T>()).write_config(contents) }
         }
 
         unsafe fn debug_log<T: ScriptClientView>(data: *const (), message: String) {
@@ -212,6 +228,9 @@ impl ScriptClientViewPtr {
             entity_string_prop: entity_string_prop::<T>,
             entity_data_prop: entity_data_prop::<T>,
             entity_instance_prop: entity_instance_prop::<T>,
+            load_config: load_config::<T>,
+            load_data: load_data::<T>,
+            write_config: write_config::<T>,
             debug_log: debug_log::<T>,
             nearby_entities: nearby_entities::<T>,
             inventory: inventory::<T>,
@@ -261,6 +280,18 @@ impl ScriptClientViewPtr {
 
     unsafe fn entity_instance_prop(self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid> {
         unsafe { (self.entity_instance_prop)(self.data, guid, prop) }
+    }
+
+    unsafe fn load_config(self) -> Option<ScriptJsonValue> {
+        unsafe { (self.load_config)(self.data) }
+    }
+
+    unsafe fn load_data(self) -> Option<ScriptJsonValue> {
+        unsafe { (self.load_data)(self.data) }
+    }
+
+    unsafe fn write_config(self, contents: String) -> bool {
+        unsafe { (self.write_config)(self.data, contents) }
     }
 
     unsafe fn debug_log(self, message: String) {
@@ -341,10 +372,10 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
       throw new TypeError("Holtburger.onEvent expects a function");
     }
     __holtburgerHandlers.push(handler);
-  },
-  selfEntity() {
-    return Deno.core.ops.op_hb_self_entity();
-  },
+    },
+    selfEntity() {
+        return Deno.core.ops.op_hb_self_entity();
+    },
     attack(guid) {
         Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
     },
@@ -371,7 +402,7 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
             maxDistance == null || maxDistance == undefined ? null : Number(maxDistance),
             classifications == null || classifications == undefined ? null : classifications.map(String),
         );
-  },
+    },
     inventory() {
         return Deno.core.ops.op_hb_inventory();
     },
@@ -443,36 +474,46 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     entityInstanceProp(guid, prop) {
         return Deno.core.ops.op_hb_entity_instance_prop(Number(guid) >>> 0, Number(prop) >>> 0);
     },
-  log(level, message) {
-    Deno.core.ops.op_hb_log(String(level), String(message));
-  },
+    loadConfig() {
+        return Deno.core.ops.op_hb_load_config();
+    },
+    loadData() {
+        return Deno.core.ops.op_hb_load_data();
+    },
+    writeConfig(contents) {
+        const serialized = typeof contents === "string" ? contents : JSON.stringify(contents);
+        return Deno.core.ops.op_hb_write_config(serialized);
+    },
+    log(level, message) {
+        Deno.core.ops.op_hb_log(String(level), String(message));
+    },
     debugLog(message) {
         Deno.core.ops.op_hb_debug_log(String(message));
     },
-  say(message) {
-    Deno.core.ops.op_hb_say(String(message));
-  },
+    say(message) {
+        Deno.core.ops.op_hb_say(String(message));
+    },
     emote(message) {
         Deno.core.ops.op_hb_emote(String(message));
     },
-        openTrade(guid) {
-            Deno.core.ops.op_hb_open_trade(Number(guid) >>> 0);
-        },
-        addToTrade(item) {
-            Deno.core.ops.op_hb_add_to_trade(Number(item) >>> 0);
-        },
-        acceptTrade() {
-            Deno.core.ops.op_hb_accept_trade();
-        },
-        declineTrade() {
-            Deno.core.ops.op_hb_decline_trade();
-        },
-        resetTrade() {
-            Deno.core.ops.op_hb_reset_trade();
-        },
-        exitTrade() {
-            Deno.core.ops.op_hb_exit_trade();
-        },
+    openTrade(guid) {
+        Deno.core.ops.op_hb_open_trade(Number(guid) >>> 0);
+    },
+    addToTrade(item) {
+        Deno.core.ops.op_hb_add_to_trade(Number(item) >>> 0);
+    },
+    acceptTrade() {
+        Deno.core.ops.op_hb_accept_trade();
+    },
+    declineTrade() {
+        Deno.core.ops.op_hb_decline_trade();
+    },
+    resetTrade() {
+        Deno.core.ops.op_hb_reset_trade();
+    },
+    exitTrade() {
+        Deno.core.ops.op_hb_exit_trade();
+    },
     snapHeading(heading) {
         Deno.core.ops.op_hb_snap_heading(Number(heading));
     },
@@ -503,12 +544,12 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
             container == null ? 0 : Number(container) >>> 0,
         );
     },
-  targetEntity(guid) {
-    Deno.core.ops.op_hb_target_entity(Number(guid) >>> 0);
-  },
-  approach(guid) {
-    Deno.core.ops.op_hb_approach(Number(guid) >>> 0);
-  },
+    targetEntity(guid) {
+        Deno.core.ops.op_hb_target_entity(Number(guid) >>> 0);
+    },
+    approach(guid) {
+        Deno.core.ops.op_hb_approach(Number(guid) >>> 0);
+    },
 });
 
 globalThis.__holtburgerDispatch = (event) => {
@@ -530,6 +571,9 @@ deno_core::extension!(
         op_hb_entity_string_prop,
         op_hb_entity_data_prop,
         op_hb_entity_instance_prop,
+        op_hb_load_config,
+        op_hb_load_data,
+        op_hb_write_config,
         op_hb_log,
         op_hb_debug_log,
         op_hb_say,
@@ -878,6 +922,24 @@ fn op_hb_entity_instance_prop(state: &mut OpState, guid: u32, prop: u32) -> Opti
     })
     .flatten()
     .map(|value| json!(value.0))
+}
+
+#[op2]
+#[serde]
+fn op_hb_load_config(state: &mut OpState) -> Option<ScriptJsonValue> {
+    with_current_script_client_view(state, |view| unsafe { view.load_config() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_load_data(state: &mut OpState) -> Option<ScriptJsonValue> {
+    with_current_script_client_view(state, |view| unsafe { view.load_data() }).flatten()
+}
+
+#[op2(fast)]
+fn op_hb_write_config(state: &mut OpState, #[string] contents: String) -> bool {
+    with_current_script_client_view(state, |view| unsafe { view.write_config(contents) })
+        .unwrap_or(false)
 }
 
 #[op2(fast)]

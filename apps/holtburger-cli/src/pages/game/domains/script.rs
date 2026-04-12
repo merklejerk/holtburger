@@ -20,11 +20,13 @@ fn script_client_view<'a>(
     data: &'a GameData,
     view: &'a ViewState,
     server_time: Option<(f64, Instant)>,
+    script_name: Option<&'a str>,
 ) -> TuiScriptClientView<'a> {
     TuiScriptClientView {
         data,
         view,
         server_time,
+        script_name,
     }
 }
 
@@ -43,7 +45,12 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 return result;
             };
 
-            let view = script_client_view(&state.data, &state.view, None);
+            let view = script_client_view(
+                &state.data,
+                &state.view,
+                None,
+                state.script.running_source_name.as_deref(),
+            );
             dispatch_script_event_to_host(&view, host, ScriptEvent::Command { msg }, &mut result);
             result.request_redraw(crate::types::RedrawPriority::Immediate);
             result
@@ -77,7 +84,12 @@ impl GameState {
     }
 
     fn stop_script_host(&mut self, result: &mut UpdateResult) {
-        let view = script_client_view(&self.data, &self.view, None);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            None,
+            self.script.running_source_name.as_deref(),
+        );
 
         let had_host = {
             let Some(host) = self.script.host.as_mut() else {
@@ -96,6 +108,7 @@ impl GameState {
         if had_host {
             self.script.host = None;
             self.script.tick_accumulator = Duration::ZERO;
+            self.script.running_source_name = None;
         }
     }
 
@@ -103,6 +116,7 @@ impl GameState {
         self.set_pending_script_source(None);
         self.script.host = None;
         self.script.tick_accumulator = Duration::ZERO;
+        self.script.running_source_name = None;
     }
 
     pub(crate) fn run_script_command(&mut self, basename: &str, result: &mut UpdateResult) {
@@ -181,7 +195,13 @@ impl GameState {
             }
         };
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let running_source_name = source.name.clone();
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            Some(running_source_name.as_str()),
+        );
         match ScriptHost::spawn(source, &view) {
             Ok(mut host) => {
                 let started_ok = dispatch_script_event_to_host(
@@ -192,6 +212,7 @@ impl GameState {
                 );
 
                 if started_ok {
+                    self.script.running_source_name = Some(running_source_name);
                     self.script.host = Some(host);
                 } else {
                     self.clear_script_host_after_error();
@@ -318,7 +339,12 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            self.script.running_source_name.as_deref(),
+        );
         let after_workflow = workflow_projection(Some(self));
 
         let host_was_cleared = {
@@ -384,7 +410,12 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            self.script.running_source_name.as_deref(),
+        );
 
         let Some(host) = self.script.host.as_mut() else {
             return;
@@ -410,7 +441,12 @@ impl GameState {
             self.start_script_host_if_needed(server_time, result);
         }
 
-        let view = script_client_view(&self.data, &self.view, server_time);
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            server_time,
+            self.script.running_source_name.as_deref(),
+        );
         let mut tick_count = 0;
 
         if self.script.host.is_some() {

@@ -413,16 +413,17 @@ mod tests {
     #[test]
     fn test_query_item_mana_response_parity() {
         let data = hex::decode("B0F700000600008000000000640200000000003F01000000").unwrap();
-        let expected = GameMessage::GameEvent(Box::new(crate::messages::game_event::GameEventMessage {
-            target: Guid(0x80000006),
-            sequence: 0,
-            event: crate::messages::game_event::GameEvent::QueryItemManaResponse(Box::new(
-                QueryItemManaResponseEventData {
-                    mana: 0.5,
-                    success: 1,
-                },
-            )),
-        }));
+        let expected =
+            GameMessage::GameEvent(Box::new(crate::messages::game_event::GameEventMessage {
+                target: Guid(0x80000006),
+                sequence: 0,
+                event: crate::messages::game_event::GameEvent::QueryItemManaResponse(Box::new(
+                    QueryItemManaResponseEventData {
+                        mana: 0.5,
+                        success: 1,
+                    },
+                )),
+            }));
 
         assert_pack_unpack_parity(&data, &expected);
     }

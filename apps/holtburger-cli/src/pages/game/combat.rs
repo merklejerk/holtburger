@@ -734,13 +734,10 @@ fn clear_stale_combat_engagement(
     );
     state.data.combat_runtime.clear_engagement();
     state.clear_combat_drive();
-    result.actions.push(AppAction::Log {
-        chat_tags: crate::types::ChatMessageTags::warning().combat(),
-        message: format!(
-            "Attack sequence stalled for 0x{:08X}; clearing combat state.",
-            target_guid.0
-        ),
-    });
+    log::warn!(
+        "Attack sequence stalled for 0x{:08X}; clearing combat state.",
+        target_guid.0
+    );
     result.request_redraw(RedrawPriority::Immediate);
     true
 }
@@ -1634,13 +1631,6 @@ mod tests {
         assert!(!result.commands.iter().any(|command| {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
         }));
-        assert!(result.actions.iter().any(|action| {
-            matches!(
-                action,
-                AppAction::Log { message, .. }
-                    if message.contains("clearing combat state")
-            )
-        }));
     }
 
     #[test]
@@ -1693,12 +1683,5 @@ mod tests {
             state.data.combat_runtime.issue_state,
             CombatIssueState::Idle
         );
-        assert!(result.actions.iter().any(|action| {
-            matches!(
-                action,
-                AppAction::Log { message, .. }
-                    if message.contains("clearing combat state")
-            )
-        }));
     }
 }

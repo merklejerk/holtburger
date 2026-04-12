@@ -477,10 +477,9 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         self.data.entities.contains_key(&guid)
     }
 
-    fn fellowship(&self) -> Option<ScriptPartyView> {
-        let party = &self.data.party;
+    fn party(&self) -> Option<ScriptPartyView> {
+        let party = self.data.party.as_ref()?;
         let members = party
-            .as_ref()?
             .members
             .iter()
             .map(|member| {
@@ -502,7 +501,10 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             })
             .collect();
 
-        Some(ScriptPartyView { members })
+        Some(ScriptPartyView {
+            leader_guid: party.leader_guid,
+            members,
+        })
     }
 
     fn active_spells(&self) -> Vec<ScriptSpellEffectView> {
@@ -706,7 +708,7 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
         ClientViewEvent::PlayerSpellsUpdated { .. }
         | ClientViewEvent::PlayerEnchantmentsUpdated { .. } => Some(ScriptEvent::SpellbookChanged),
         ClientViewEvent::FellowshipStateUpdated { .. }
-        | ClientViewEvent::FellowshipActivity { .. } => Some(ScriptEvent::FellowshipChanged),
+        | ClientViewEvent::FellowshipActivity { .. } => Some(ScriptEvent::PartyChanged),
         _ => None,
     }
 }

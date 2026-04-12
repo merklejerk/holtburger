@@ -61,7 +61,7 @@ pub trait ScriptClientView {
     fn heading_to(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32;
     fn entity_exists(&self, guid: Guid) -> bool;
     fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
-    fn fellowship(&self) -> Option<ScriptPartyView>;
+    fn party(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
     fn pending_confirmation(&self) -> Option<ScriptConfirmation>;
@@ -401,7 +401,9 @@ pub struct ScriptTradeInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScriptPartyView {
+    pub leader_guid: Guid,
     pub members: Vec<ScriptPartyMemberView>,
 }
 
@@ -448,7 +450,7 @@ pub enum ScriptEvent {
         removed: Vec<Guid>,
     },
     SpellbookChanged,
-    FellowshipChanged,
+    PartyChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -459,6 +461,7 @@ pub struct ScriptChatEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ScriptChatChannelKind {
     Say,
     Tell,

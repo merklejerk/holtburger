@@ -54,7 +54,7 @@ struct ScriptClientViewPtr {
     #[allow(clippy::type_complexity)]
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
     #[allow(clippy::type_complexity)]
-    fellowship: unsafe fn(*const ()) -> Option<ScriptPartyView>,
+    party: unsafe fn(*const ()) -> Option<ScriptPartyView>,
 }
 
 impl ScriptClientViewPtr {
@@ -198,8 +198,8 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).current_trade_info() }
         }
 
-        unsafe fn fellowship<T: ScriptClientView>(data: *const ()) -> Option<ScriptPartyView> {
-            unsafe { (&*data.cast::<T>()).fellowship() }
+        unsafe fn party<T: ScriptClientView>(data: *const ()) -> Option<ScriptPartyView> {
+            unsafe { (&*data.cast::<T>()).party() }
         }
 
         Self {
@@ -227,7 +227,7 @@ impl ScriptClientViewPtr {
             entity_exists: entity_exists::<T>,
             entity: entity::<T>,
             current_trade_info: current_trade_info::<T>,
-            fellowship: fellowship::<T>,
+            party: party::<T>,
         }
     }
 
@@ -327,8 +327,8 @@ impl ScriptClientViewPtr {
         unsafe { (self.current_trade_info)(self.data) }
     }
 
-    unsafe fn fellowship(self) -> Option<ScriptPartyView> {
-        unsafe { (self.fellowship)(self.data) }
+    unsafe fn party(self) -> Option<ScriptPartyView> {
+        unsafe { (self.party)(self.data) }
     }
 }
 
@@ -387,8 +387,8 @@ globalThis.Holtburger = Object.freeze({
     currentTradeInfo() {
         return Deno.core.ops.op_hb_current_trade_info();
     },
-    fellowship() {
-        return Deno.core.ops.op_hb_fellowship();
+    party() {
+        return Deno.core.ops.op_hb_party();
     },
     equipment() {
         return new Map(
@@ -559,7 +559,7 @@ deno_core::extension!(
         op_hb_accept_trade,
         op_hb_decline_trade,
         op_hb_reset_trade,
-        op_hb_fellowship,
+        op_hb_party,
         op_hb_exit_trade,
         op_hb_snap_heading,
         op_hb_scoot,
@@ -728,8 +728,8 @@ fn op_hb_current_trade_info(state: &mut OpState) -> Option<ScriptTradeInfo> {
 
 #[op2]
 #[serde]
-fn op_hb_fellowship(state: &mut OpState) -> Option<crate::ScriptPartyView> {
-    with_current_script_client_view(state, |view| unsafe { view.fellowship() }).flatten()
+fn op_hb_party(state: &mut OpState) -> Option<crate::ScriptPartyView> {
+    with_current_script_client_view(state, |view| unsafe { view.party() }).flatten()
 }
 
 #[op2]
@@ -1478,8 +1478,9 @@ mod tests {
             })
         }
 
-        fn fellowship(&self) -> Option<crate::ScriptPartyView> {
+        fn party(&self) -> Option<crate::ScriptPartyView> {
             Some(ScriptPartyView {
+                leader_guid: Guid(7),
                 members: vec![
                     ScriptPartyMemberView {
                         guid: Guid(7),
@@ -1529,7 +1530,7 @@ mod tests {
         enchantments_helper_returns_js_array();
         entity_helper_returns_js_object();
         debug_log_helper_emits_no_script_outputs();
-        fellowship_helper_returns_js_object();
+        party_helper_returns_js_object();
         distance_and_heading_helpers_accept_guids_and_positions();
         combat_info_helper_returns_js_object();
         spellbook_membership_helper_returns_boolean();
@@ -1723,12 +1724,12 @@ mod tests {
         ));
     }
 
-    fn fellowship_helper_returns_js_object() {
+    fn party_helper_returns_js_object() {
         let source = ScriptSource::new(
-            "fellowship-test",
+            "party-test",
             r#"
-                const fellowship = Holtburger.fellowship();
-                Holtburger.log("info", JSON.stringify(fellowship));
+                const party = Holtburger.party();
+                Holtburger.log("info", JSON.stringify(party));
             "#,
         );
 
@@ -1738,7 +1739,8 @@ mod tests {
         assert!(matches!(
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
-                if message.contains("\"members\"")
+                if message.contains("\"leaderGuid\":7")
+                    && message.contains("\"members\"")
                     && message.contains("\"guid\":7")
                     && message.contains("\"name\":\"Buddy\"")
                     && message.contains("\"healthPercent\":0.5")

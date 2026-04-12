@@ -266,7 +266,11 @@ function followPartyLeader(self, partyLeader) {
 	}
 
 	const currentInteraction = HB.currentInteraction();
-	if (currentInteraction != null && currentInteraction.kind === "Follow" && currentInteraction.guid === partyLeader.guid) {
+	if (
+		currentInteraction != null &&
+		currentInteraction.kind === "Follow" &&
+		currentInteraction.data.guid === partyLeader.guid
+	) {
 		HB.debugLog(`follow already active target=${partyLeader.guid}`);
 		return true;
 	}
@@ -293,9 +297,17 @@ function attackTarget(target) {
 	const currentInteraction = HB.currentInteraction();
 	const alreadyAttackingSameTarget =
 		(combatInfo.target != null && combatInfo.target === target.guid) ||
-		(currentInteraction != null && currentInteraction.kind === "Attack" && currentInteraction.guid === target.guid);
+		(
+			currentInteraction != null &&
+			currentInteraction.kind === "Attack" &&
+			currentInteraction.data.guid === target.guid
+		);
 	const alreadyApproachingSameTarget =
-		(currentInteraction != null && currentInteraction.kind === "Approach" && currentInteraction.guid === target.guid);
+		(
+			currentInteraction != null &&
+			currentInteraction.kind === "Approach" &&
+			currentInteraction.data.guid === target.guid
+		);
 
 	if (alreadyAttackingSameTarget) {
 		state.preferredAttackTargetGuid = target.guid;

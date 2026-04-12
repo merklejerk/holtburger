@@ -177,11 +177,23 @@ impl GameState {
     }
 
     fn log_scripts_overview(&mut self) {
-        let current_source = self
-            .script
-            .pending_source
-            .as_ref()
-            .map(Self::describe_script_source);
+        let current_source = if self.script.host.is_some() {
+            self.script
+                .running_source_name
+                .as_ref()
+                .cloned()
+                .or_else(|| {
+                    self.script
+                        .pending_source
+                        .as_ref()
+                        .map(Self::describe_script_source)
+                })
+        } else {
+            self.script
+                .pending_source
+                .as_ref()
+                .map(Self::describe_script_source)
+        };
         let status = if self.script.host.is_some() {
             "running"
         } else if current_source.is_some() {
@@ -1036,6 +1048,48 @@ mod tests {
         assert!(state.chat.messages.iter().any(|message| {
             message.chat_tags.contains(ChatMessageTags::system())
                 && message.text == "Current script: none"
+        }));
+    }
+
+    #[test]
+    fn scripts_command_reports_running_script_source_when_host_is_active() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/scripts");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let host = {
+            let view = crate::scripting::TuiScriptClientView {
+                data: &state.data,
+                view: &state.view,
+                server_time: None,
+                script_name: Some("script-command-test"),
+            };
+
+            holtburger_scripting::ScriptHost::spawn(
+                holtburger_scripting::ScriptSource::new("script-command-test", ""),
+                &view,
+            )
+            .expect("script host should spawn")
+        };
+
+        state.script.host = Some(host);
+        state.script.running_source_name = Some("script-command-test".to_string());
+        state.script.pending_source = Some(DeferredScriptSource::Inline(
+            holtburger_scripting::ScriptSource::new("queued-script", ""),
+        ));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.chat_tags.contains(ChatMessageTags::system())
+                && message.text == "Script status: running"
+        }));
+        assert!(state.chat.messages.iter().any(|message| {
+            message.chat_tags.contains(ChatMessageTags::system())
+                && message.text == "Current script: script-command-test"
         }));
     }
 

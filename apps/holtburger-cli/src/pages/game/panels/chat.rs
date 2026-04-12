@@ -222,7 +222,7 @@ impl ChatState {
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
-                    log::warn!("Attack sequence finished.");
+                    log::info!("Attack sequence finished.");
                 } else {
                     log::warn!("Attack sequence finished with {:?}.", error);
                 }

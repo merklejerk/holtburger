@@ -257,6 +257,7 @@
 - [x] Salvaging waits for UseDone, leaving us in a busy state.
 - [x] `/version` and `--version`, seeded from commit hash env var set by build system?
 - [x] Attack spam too verbose.
+- [ ] `/promote <PLAYER>` - Promote new party leader.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

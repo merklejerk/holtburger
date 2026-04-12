@@ -616,6 +616,20 @@ pub enum ScriptIntent {
         source: Guid,
         dest: Guid,
     },
+    MoveItem {
+        item: Guid,
+        container: Guid,
+    },
+    StackItems {
+        source: Guid,
+        destination: Guid,
+        amount: u32,
+    },
+    SplitItem {
+        item: Guid,
+        container: Guid,
+        amount: u32,
+    },
     Salvage {
         tool: Guid,
         items: Vec<Guid>,

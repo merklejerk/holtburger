@@ -541,6 +541,23 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     useWith(source, dest) {
         Deno.core.ops.op_hb_combine(Number(source) >>> 0, Number(dest) >>> 0);
     },
+    moveItem(item, container) {
+        Deno.core.ops.op_hb_move_item(Number(item) >>> 0, Number(container) >>> 0);
+    },
+    stackItems(source, destination, amount) {
+        Deno.core.ops.op_hb_stack_items(
+            Number(source) >>> 0,
+            Number(destination) >>> 0,
+            Number(amount) >>> 0,
+        );
+    },
+    splitItem(item, container, amount) {
+        Deno.core.ops.op_hb_split_item(
+            Number(item) >>> 0,
+            Number(container) >>> 0,
+            Number(amount) >>> 0,
+        );
+    },
     salvage(tool, items) {
         Deno.core.ops.op_hb_salvage(
             Number(tool) >>> 0,
@@ -621,6 +638,9 @@ deno_core::extension!(
         op_hb_snap_heading,
         op_hb_scoot,
         op_hb_combine,
+        op_hb_move_item,
+        op_hb_stack_items,
+        op_hb_split_item,
         op_hb_salvage,
         op_hb_assess,
         op_hb_drop,
@@ -1082,6 +1102,44 @@ fn op_hb_combine(state: &mut OpState, source: u32, dest: u32) {
         .push(ScriptIntent::Combine {
             source: Guid(source),
             dest: Guid(dest),
+        });
+}
+
+#[op2(fast)]
+fn op_hb_move_item(state: &mut OpState, item: u32, container: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::MoveItem {
+            item: Guid(item),
+            container: Guid(container),
+        });
+}
+
+#[op2(fast)]
+fn op_hb_stack_items(state: &mut OpState, source: u32, destination: u32, amount: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::StackItems {
+            source: Guid(source),
+            destination: Guid(destination),
+            amount,
+        });
+}
+
+#[op2(fast)]
+fn op_hb_split_item(state: &mut OpState, item: u32, container: u32, amount: u32) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::SplitItem {
+            item: Guid(item),
+            container: Guid(container),
+            amount,
         });
 }
 

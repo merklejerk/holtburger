@@ -4,6 +4,7 @@ use holtburger_common::properties::{
     EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
     PropertyInt64, PropertyString,
 };
+use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
@@ -34,6 +35,9 @@ impl ScriptSource {
 /// `debug_log` is the one intentional side effect for script-side diagnostics.
 pub trait ScriptClientView {
     fn self_entity(&self) -> Option<ScriptSelfView>;
+    fn character_sheet(&self) -> Option<ScriptCharacterSheetView> {
+        None
+    }
     fn target_entity(&self) -> Option<ScriptEntityView>;
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView>;
     fn entity_bool_prop(&self, guid: Guid, prop: PropertyBool) -> Option<bool>;
@@ -96,6 +100,40 @@ pub struct ScriptSelfView {
     pub busy_operation: ScriptBusyOperation,
     pub heading: f32,
     pub combat_mode: CombatMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterSheetView {
+    pub attributes: Vec<ScriptCharacterAttributeView>,
+    pub vitals: Vec<ScriptCharacterVitalView>,
+    pub skills: Vec<ScriptCharacterSkillView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterAttributeView {
+    pub attribute_type: AttributeType,
+    pub base: u32,
+    pub effective: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterVitalView {
+    pub vital_type: VitalType,
+    pub base: u32,
+    pub effective: u32,
+    pub current: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptCharacterSkillView {
+    pub skill_type: SkillType,
+    pub base: u32,
+    pub effective: u32,
+    pub training: TrainingLevel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

@@ -12,16 +12,17 @@ use holtburger_common::properties::{
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::{ActionResultReason, ChatChannelKind, CombatFeedback};
 use holtburger_scripting::{
-    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
-    ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
-    ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
-    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptJsonValue,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
-    ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
-    ScriptSpellEffectView, ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
+    ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
+    ScriptClientInteraction, ScriptClientView, ScriptCombatInfo, ScriptConfirmation,
+    ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile,
+    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
+    ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
+    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
+    ScriptSource, ScriptSpellEffectView, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
-use holtburger_world::stats::VitalType;
+use holtburger_world::stats::{TrainingLevel, VitalType};
 use std::ffi::OsStr;
 use std::fs;
 use std::io::ErrorKind;
@@ -238,6 +239,78 @@ impl ScriptClientView for TuiScriptClientView<'_> {
                 .unwrap_or_default(),
             heading: self.data.runtime_heading().unwrap_or_default(),
             combat_mode: self.data.combat_mode,
+        })
+    }
+
+    fn character_sheet(&self) -> Option<ScriptCharacterSheetView> {
+        self.data.player_guid?;
+
+        let mut attributes = self
+            .data
+            .attributes
+            .values()
+            .map(|attribute| ScriptCharacterAttributeView {
+                attribute_type: attribute.attr_type,
+                base: attribute.base,
+                effective: attribute.current,
+            })
+            .collect::<Vec<_>>();
+        attributes.sort_by(|left, right| {
+            left.attribute_type
+                .to_string()
+                .cmp(&right.attribute_type.to_string())
+        });
+
+        let mut vitals = self
+            .data
+            .vitals
+            .values()
+            .map(|vital| ScriptCharacterVitalView {
+                vital_type: vital.vital_type,
+                base: vital.base,
+                effective: vital.buffed_max,
+                current: vital.current,
+            })
+            .collect::<Vec<_>>();
+        vitals.sort_by(|left, right| {
+            left.vital_type
+                .to_string()
+                .cmp(&right.vital_type.to_string())
+        });
+
+        let mut skills = self
+            .data
+            .skills
+            .values()
+            .filter(|skill| skill.skill_type.is_eor())
+            .map(|skill| ScriptCharacterSkillView {
+                skill_type: skill.skill_type,
+                base: skill.base,
+                effective: skill.current,
+                training: skill.training,
+            })
+            .collect::<Vec<_>>();
+        skills.sort_by(|left, right| {
+            let left_trained = matches!(
+                left.training,
+                TrainingLevel::Trained | TrainingLevel::Specialized
+            );
+            let right_trained = matches!(
+                right.training,
+                TrainingLevel::Trained | TrainingLevel::Specialized
+            );
+
+            right_trained.cmp(&left_trained).then_with(|| {
+                left.skill_type
+                    .to_string()
+                    .cmp(&right.skill_type.to_string())
+            })
+        });
+
+        Some(ScriptCharacterSheetView {
+            attributes,
+            vitals,
+            skills,
         })
     }
 
@@ -939,7 +1012,9 @@ mod tests {
     use holtburger_protocol::messages::object::types::ArmorProfile;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::state::{TradeSide, TradeState};
-    use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
+    use holtburger_world::stats::{
+        Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
+    };
     use std::fs;
     use std::fs::File;
     use std::path::PathBuf;
@@ -1143,6 +1218,99 @@ mod tests {
         assert_eq!(self_view.busy_operation, ScriptBusyOperation::Buy);
         assert!((self_view.heading - heading).abs() < 1e-6);
         assert_eq!(self_view.position, player_position);
+    }
+
+    #[test]
+    fn character_sheet_projection_includes_sections_and_filters_to_eor_skills() {
+        let player_guid = Guid(0x5000_0101);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+
+        data.attributes.insert(
+            AttributeType::StrengthAttr,
+            Attribute {
+                attr_type: AttributeType::StrengthAttr,
+                ranks: 7,
+                start: 100,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 100,
+                current: 110,
+            },
+        );
+        data.vitals.insert(
+            VitalType::Health,
+            Vital {
+                vital_type: VitalType::Health,
+                ranks: 4,
+                start: 50,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 150,
+                buffed_max: 175,
+                current: 160,
+            },
+        );
+        data.skills.insert(
+            SkillType::MeleeDefense,
+            Skill {
+                skill_type: SkillType::MeleeDefense,
+                ranks: 12,
+                init: 5,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 35,
+                current: 42,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+        data.skills.insert(
+            SkillType::Axe,
+            Skill {
+                skill_type: SkillType::Axe,
+                ranks: 12,
+                init: 5,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 35,
+                current: 42,
+                training: TrainingLevel::Specialized,
+                trained_cost: 0,
+                specialized_cost: 0,
+            },
+        );
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+            script_name: Some("fighter.js"),
+        };
+
+        let sheet = script_view
+            .character_sheet()
+            .expect("character sheet should be available");
+
+        assert_eq!(sheet.attributes.len(), 1);
+        assert_eq!(
+            sheet.attributes[0].attribute_type,
+            AttributeType::StrengthAttr
+        );
+        assert_eq!(sheet.attributes[0].base, 100);
+        assert_eq!(sheet.attributes[0].effective, 110);
+
+        assert_eq!(sheet.vitals.len(), 1);
+        assert_eq!(sheet.vitals[0].vital_type, VitalType::Health);
+        assert_eq!(sheet.vitals[0].base, 150);
+        assert_eq!(sheet.vitals[0].effective, 175);
+        assert_eq!(sheet.vitals[0].current, 160);
+
+        assert_eq!(sheet.skills.len(), 1);
+        assert_eq!(sheet.skills[0].skill_type, SkillType::MeleeDefense);
+        assert_eq!(sheet.skills[0].base, 35);
+        assert_eq!(sheet.skills[0].effective, 42);
+        assert_eq!(sheet.skills[0].training, TrainingLevel::Trained);
     }
 
     #[test]

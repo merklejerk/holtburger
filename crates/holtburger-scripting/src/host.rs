@@ -13,11 +13,11 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatInfo,
-    ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView,
-    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue,
-    ScriptLogLevel, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
-    ScriptTradeInfo,
+    ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction, ScriptClientView,
+    ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
+    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
+    ScriptJsonValue, ScriptLogLevel, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
+    ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -29,6 +29,7 @@ static V8_PLATFORM_INIT: Once = Once::new();
 struct ScriptClientViewPtr {
     data: *const (),
     self_entity: unsafe fn(*const ()) -> Option<ScriptSelfView>,
+    character_sheet: unsafe fn(*const ()) -> Option<ScriptCharacterSheetView>,
     entity_bool_prop: unsafe fn(*const (), Guid, PropertyBool) -> Option<bool>,
     entity_int_prop: unsafe fn(*const (), Guid, PropertyInt) -> Option<i32>,
     entity_int64_prop: unsafe fn(*const (), Guid, PropertyInt64) -> Option<i64>,
@@ -65,6 +66,12 @@ impl ScriptClientViewPtr {
     fn from_ref<T: ScriptClientView>(view: &T) -> Self {
         unsafe fn self_entity<T: ScriptClientView>(data: *const ()) -> Option<ScriptSelfView> {
             unsafe { (&*data.cast::<T>()).self_entity() }
+        }
+
+        unsafe fn character_sheet<T: ScriptClientView>(
+            data: *const (),
+        ) -> Option<ScriptCharacterSheetView> {
+            unsafe { (&*data.cast::<T>()).character_sheet() }
         }
 
         unsafe fn entity_bool_prop<T: ScriptClientView>(
@@ -221,6 +228,7 @@ impl ScriptClientViewPtr {
         Self {
             data: (view as *const T).cast(),
             self_entity: self_entity::<T>,
+            character_sheet: character_sheet::<T>,
             entity_bool_prop: entity_bool_prop::<T>,
             entity_int_prop: entity_int_prop::<T>,
             entity_int64_prop: entity_int64_prop::<T>,
@@ -252,6 +260,10 @@ impl ScriptClientViewPtr {
 
     unsafe fn self_entity(self) -> Option<ScriptSelfView> {
         unsafe { (self.self_entity)(self.data) }
+    }
+
+    unsafe fn character_sheet(self) -> Option<ScriptCharacterSheetView> {
+        unsafe { (self.character_sheet)(self.data) }
     }
 
     unsafe fn entity_bool_prop(self, guid: Guid, prop: PropertyBool) -> Option<bool> {
@@ -375,6 +387,9 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     },
     selfEntity() {
         return Deno.core.ops.op_hb_self_entity();
+    },
+    characterSheet() {
+        return Deno.core.ops.op_hb_character_sheet();
     },
     attack(guid) {
         Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
@@ -563,6 +578,7 @@ deno_core::extension!(
     holtburger_script_ext,
     ops = [
         op_hb_self_entity,
+        op_hb_character_sheet,
         op_hb_nearby_entities,
         op_hb_entity_bool_prop,
         op_hb_entity_int_prop,
@@ -673,6 +689,12 @@ fn with_current_script_client_view<T>(
 #[serde]
 fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
     with_current_script_client_view(state, |view| unsafe { view.self_entity() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_character_sheet(state: &mut OpState) -> Option<ScriptCharacterSheetView> {
+    with_current_script_client_view(state, |view| unsafe { view.character_sheet() }).flatten()
 }
 
 #[op2]

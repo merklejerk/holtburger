@@ -21,11 +21,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                     .begin_quiet_period(Instant::now());
             }
         }
-        ClientViewEvent::BootAccount(..) => {
-            state
-                .chat
-                .handle_event(event, state.data.character_name.as_deref());
-        }
+        ClientViewEvent::BootAccount(..) => {}
         ClientViewEvent::PingResponse
         | ClientViewEvent::NetPulse { .. }
         | ClientViewEvent::Disconnected => {}

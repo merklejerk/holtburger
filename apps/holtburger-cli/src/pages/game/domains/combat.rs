@@ -69,9 +69,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     match event {
         ClientViewEvent::CombatFeedback(feedback) => {
             result.merge(combat_model::handle_combat_feedback(state, feedback));
-            state
-                .chat
-                .handle_event(event, state.data.character_name.as_deref());
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::ActionResult {

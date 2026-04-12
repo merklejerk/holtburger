@@ -185,7 +185,10 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).entity_exists(guid) }
         }
 
-        unsafe fn entity<T: ScriptClientView>(data: *const (), guid: Guid) -> Option<ScriptEntityView> {
+        unsafe fn entity<T: ScriptClientView>(
+            data: *const (),
+            guid: Guid,
+        ) -> Option<ScriptEntityView> {
             unsafe { (&*data.cast::<T>()).entity(guid) }
         }
 
@@ -1286,8 +1289,8 @@ where
 mod tests {
     use super::build_dispatch_source;
     use crate::{
-        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
-        ScriptClientIntent, ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView,
+        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
+        ScriptClientInteraction, ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView,
         ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
         ScriptEvent, ScriptIntent, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
         ScriptSelfView, ScriptSource, ScriptTradeInfo,

@@ -222,13 +222,13 @@ impl ChatState {
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
-                    log::warn!("Attack sequence finished.",);
+                    log::warn!("Attack sequence finished.");
                 } else {
                     log::warn!("Attack sequence finished with {:?}.", error);
                 }
             }
             CombatFeedback::AttackCommenced => {
-                log::info!("Attack sequence started.",);
+                log::info!("Attack sequence started.");
             }
             CombatFeedback::AttackerNotification {
                 defender_name,

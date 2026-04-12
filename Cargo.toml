@@ -6,6 +6,7 @@ members = [
     "crates/holtburger-common",
     "crates/holtburger-dat",
     "crates/holtburger-protocol",
+    "crates/holtburger-scripting",
     "crates/holtburger-session",
     "crates/holtburger-world",
     "apps/holtburger-cli",
@@ -29,6 +30,7 @@ holtburger-session = { path = "crates/holtburger-session" }
 holtburger-common = { path = "crates/holtburger-common" }
 holtburger-dat = { path = "crates/holtburger-dat" }
 holtburger-protocol = { path = "crates/holtburger-protocol" }
+holtburger-scripting = { path = "crates/holtburger-scripting" }
 tokio = { version = "1", features = ["full"] }
 byteorder = "1.5"
 anyhow = "1.0"
@@ -43,6 +45,7 @@ futures = "0.3"
 binrw = "0.15"
 zstd = "0.13"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2.0"
 strum = { version = "0.28", features = ["derive"] }
 strum_macros = "0.28"
@@ -78,6 +81,7 @@ install-updater = false
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
+strip = "symbols"
 lto = "thin"
 
 [profile.profiling]

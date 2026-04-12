@@ -40,7 +40,7 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Magic System** | 🟢 | 🟢 | Spell catalog loading, spellbook/enchantment tracking, and targeted or untargeted casting are implemented. In the TUI, this is effectively the ceiling without scripting or a richer frontend. |
 | **Melee & Missile Combat** | 🟢 | 🟢 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
 | **Social Gameplay** | 🟢 | 🟡 | Basic fellowship + allegiance interactions. TUI party HUD. |
-| **Scripting / Automation** | 🟡 | 🔴 | Embedded scripting remains planned, and that is the main path for pushing combat or spellcasting beyond the current TUI ceiling. |
+| **Scripting / Automation** | 🟡 | 🟢 | Javascript scripting MVP with deno. |
 
 ## Roadmap
 
@@ -191,7 +191,7 @@ Runtime bootstrap is HBA-only now. The supported path for retail DAT inputs is t
 
 ```bash
 cargo run -p holtburger-tools --bin dat2hba -- \
-    --profile pruned \
+    --profile micro \
     eor/portal=client_portal.dat \
     eor/cell=client_cell_1.dat \
     dats/assets.hba
@@ -200,12 +200,6 @@ cargo run -p holtburger-tools --bin dat2hba -- \
 Use `--profile full` if you want an unpruned archive. The current `micro` profile is the release-oriented minimal bundle and contains the required portal tables plus the derived `holtburger/core:MotionKinematics` asset.
 
 At runtime, the frontend constructs a `holtburger-content::ContentRepository` from that HBA source, requests a parsed `WorldBootstrap` for `holtburger-core`, and may retain the repository for static reference-data lookups.
-
-### Release Maintenance
-The GitHub Actions workflows currently fetch release HBA assets from repository variables instead of committed archive files:
-
-- `HBA_MICRO_LATEST_URL`: used by CI, nightly release packaging, and Flatpak packaging to fetch the bundled `assets.hba` archive that ships with current releases.
-- `HBA_PRUNED_LATEST_URL`: reserved for workflows that need the larger pruned archive set. The current release workflows do not consume it.
 
 **Search Priority:**
 1.  `--dats <PATH>` command-line argument.

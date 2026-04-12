@@ -74,7 +74,7 @@ fn render_status_panel(
 }
 
 fn get_compass_str(data: &GameData) -> String {
-    let heading_rad = data.runtime_heading();
+    let heading_rad = data.runtime_heading().unwrap_or(0.0);
     // Normalize 0-360
     let heading_deg =
         (heading_rad.to_degrees() % DEGREES_IN_CIRCLE + DEGREES_IN_CIRCLE) % DEGREES_IN_CIRCLE;

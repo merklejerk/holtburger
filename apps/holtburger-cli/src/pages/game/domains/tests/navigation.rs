@@ -1,5 +1,6 @@
 use super::test_support::*;
 use super::*;
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 #[test]
 fn player_movement_event_does_not_immediately_redrive_approach() {
@@ -138,17 +139,22 @@ fn navigation_snapshot_includes_projected_self_movement_kinematics() {
 }
 
 #[test]
-fn handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range() {
+fn sticky_melee_pursuit_survives_transient_attack_drive_cancellation_when_engagement_remains_desired()
+ {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    seed_navigation_motion_model(&mut state);
     state.data.combat_mode = CombatMode::Melee;
     state.data.player_pos = Some(WorldPosition {
         landblock_id: Guid(0x01000000),
         rotation: Quaternion::from_heading(180.0f32.to_radians()),
         ..WorldPosition::default()
     });
-    state.data.combat_runtime.attack_sequence_active = true;
+    state
+        .data
+        .combat_runtime
+        .begin_explicit_engagement(target_guid, CombatMode::Melee);
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let target_position = WorldPosition {
@@ -161,9 +167,14 @@ fn handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range() {
         creature_entity(target_guid, "Drudge", target_position),
     );
 
-    let _result = state.handle_tick(0.016);
+    let result = state.handle_tick(0.016);
 
+    assert!(has_autonomous_navigation_command(&result));
     assert!(!has_active_approach(&state));
+    assert!(matches!(
+        state.runtime.navigation.navigation_mode(),
+        Some(NavigationMode::StickyMelee { target }) if target == target_guid
+    ));
 }
 
 #[test]
@@ -614,7 +625,11 @@ fn teleport_start_clears_sticky_melee_targeting_and_attack() {
         ..WorldPosition::default()
     });
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = crate::pages::game::combat::CombatIssueState::InFlight;
+    state
+        .data
+        .combat_runtime
+        .begin_explicit_engagement(target_guid, CombatMode::Melee);
 
     let target_position = WorldPosition {
         landblock_id: Guid(0x01000000),
@@ -640,7 +655,11 @@ fn teleport_start_clears_sticky_melee_targeting_and_attack() {
             .any(|command| { matches!(command, ClientCommand::CancelAttack) })
     );
     assert_eq!(state.view.active_interaction, None);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
+    assert_ne!(
+        state.data.combat_runtime.issue_state,
+        crate::pages::game::combat::CombatIssueState::InFlight
+    );
+    assert_eq!(state.data.combat_runtime.sticky_melee_target(), None);
 
     let post_teleport_tick = state.handle_tick(0.016);
     assert!(!has_autonomous_navigation_command(&post_teleport_tick));

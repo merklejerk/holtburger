@@ -1,45 +1,12 @@
 use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
-use crate::types::{ChatMessageTags, Page, UpdateResult};
+use crate::state::EventContext;
+use crate::types::{Page, UpdateResult};
 use crate::utils::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
-use holtburger_core::{
-    ActionResultReason, BusyOperationKind, BusyOperationResult, ClientCommand, ClientState,
-    ClientViewEvent,
-};
+use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
-
-fn log_busy_operation_result(operation: BusyOperationKind, result: &BusyOperationResult) {
-    let label = match operation {
-        BusyOperationKind::Use => "Use",
-        BusyOperationKind::UseWithTarget => "Use-with-target",
-        BusyOperationKind::Salvage => "Salvage",
-        BusyOperationKind::SpellCast => "Spell cast",
-        BusyOperationKind::Buy => "Buy",
-        BusyOperationKind::Sell => "Sell",
-    };
-
-    match result {
-        BusyOperationResult::Completed {
-            error: holtburger_protocol::errors::WeenieError::None,
-            ..
-        } => {
-            log::debug!("{} finished.", label);
-        }
-        BusyOperationResult::Completed { error, parameter } => match parameter {
-            Some(parameter) => {
-                log::warn!("{} finished with {:?} ({}).", label, error, parameter);
-            }
-            None => {
-                log::warn!("{} finished with {:?}.", label, error);
-            }
-        },
-        BusyOperationResult::TimedOut => {
-            log::warn!("{} timed out waiting for UseDone.", label);
-        }
-    }
-}
 
 impl AppState {
     fn handle_setup_event(&mut self, event: &ClientViewEvent) {
@@ -101,10 +68,7 @@ impl AppState {
                     ClientState::Disconnected => {
                         self.request_disconnect_exit();
                         if !self.should_exit_on_disconnect() && self.disconnect_reason.is_some() {
-                            self.log(
-                                ChatMessageTags::error(),
-                                self.current_disconnect_chat_message(),
-                            );
+                            log::error!("{}", self.current_disconnect_chat_message());
                         }
                     }
                     _ => {
@@ -129,24 +93,26 @@ impl AppState {
                 {
                     self.remember_disconnect_reason(message.clone());
                     self.request_disconnect_exit();
-                    self.log(ChatMessageTags::error(), format!("[!] {}", message));
+                    log::error!("{}", message);
                     return result;
                 }
 
-                let chat_kind = match &reason {
+                match &reason {
                     ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
-                        ChatMessageTags::error()
+                        log::error!("{}", message);
                     }
-                    ActionResultReason::Weenie(_, _) => ChatMessageTags::info(),
-                    ActionResultReason::InventoryServerSaveFailed { .. } => {
-                        ChatMessageTags::error()
+                    ActionResultReason::InventoryServerSaveFailed { .. }
+                    | ActionResultReason::Character(_)
+                    | ActionResultReason::General(_) => {
+                        log::error!("{}", message);
                     }
-                    ActionResultReason::Character(_) | ActionResultReason::General(_) => {
-                        ChatMessageTags::error()
+                    ActionResultReason::Weenie(_, _) => {
+                        log::info!("{}", message);
                     }
-                    ActionResultReason::Transport(_) => ChatMessageTags::warning(),
+                    ActionResultReason::Transport(_) => {
+                        log::warn!("{}", message);
+                    }
                 };
-                self.log(chat_kind, format!("[!] {}", message));
             }
             ClientViewEvent::BootAccount(reason) => {
                 let message = if reason.trim().is_empty() {
@@ -198,6 +164,7 @@ impl AppState {
                 | ClientViewEvent::ChannelMessage { .. }
                 | ClientViewEvent::Tell { .. }
                 | ClientViewEvent::Emote { .. }
+                | ClientViewEvent::ItemManaResponse { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)
                 | ClientViewEvent::NetPulse { .. }
@@ -206,6 +173,10 @@ impl AppState {
         {
             return result;
         }
+
+        let ctx = EventContext {
+            server_time: self.server_time,
+        };
 
         match event {
             ClientViewEvent::NetPulse {
@@ -231,44 +202,46 @@ impl AppState {
                 }
 
                 // Bubble down the event so chat/logs can still get network pings if needed
-                result.merge(self.page.handle_view_event(ClientViewEvent::NetPulse {
-                    bytes_in,
-                    bytes_out,
-                }));
+                result.merge(self.page.handle_view_event(
+                    ClientViewEvent::NetPulse {
+                        bytes_in,
+                        bytes_out,
+                    },
+                    &ctx,
+                ));
             }
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;
                 self.request_disconnect_exit();
-                self.log(
-                    ChatMessageTags::error(),
-                    self.current_disconnect_chat_message(),
-                );
+                log::error!("{}", self.current_disconnect_chat_message());
                 // For now, staying on the Game page lets the user see the error,
                 // but we could also transition back to selection.
-                result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));
+                result.merge(
+                    self.page
+                        .handle_view_event(ClientViewEvent::Disconnected, &ctx),
+                );
             }
             ClientViewEvent::StatusUpdate { .. }
             | ClientViewEvent::ActionResult { .. }
             | ClientViewEvent::BootAccount(_) => {
                 result.merge(self.handle_client_status_event(&event));
-                result.merge(self.page.handle_view_event(event));
+                result.merge(self.page.handle_view_event(event, &ctx));
             }
             ClientViewEvent::BusyOperationFinished {
                 operation,
                 result: busy_result,
             } => {
-                log_busy_operation_result(operation, &busy_result);
-                result.merge(
-                    self.page
-                        .handle_view_event(ClientViewEvent::BusyOperationFinished {
-                            operation,
-                            result: busy_result,
-                        }),
-                );
+                result.merge(self.page.handle_view_event(
+                    ClientViewEvent::BusyOperationFinished {
+                        operation,
+                        result: busy_result,
+                    },
+                    &ctx,
+                ));
             }
             _ => {
                 // All other entity, player, trade, and combat events delegate completely!
-                result.merge(self.page.handle_view_event(event));
+                result.merge(self.page.handle_view_event(event, &ctx));
             }
         }
         result

@@ -25,6 +25,7 @@ use holtburger_world::stats::{
 };
 use holtburger_world::vendor::VendorState;
 use holtburger_world::{RuntimeBodyResetCause, RuntimeSpatialBodyView, SpatialBodyId};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -233,6 +234,11 @@ pub enum WireEvent {
         container: Guid,
         items: Vec<ViewContentsEventItem>,
     },
+    ItemManaResponse {
+        target: Guid,
+        mana: f32,
+        success: u32,
+    },
     RawMessage(Vec<u8>),
     LogMessage(String),
     UseDone {
@@ -289,14 +295,14 @@ pub struct PlayerCharacterOptions {
     pub options2: CharacterOptions2,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveCharacterConfirmation {
     pub confirmation_type: ConfirmationType,
     pub context: u32,
     pub text: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BusyOperationKind {
     Use,
     UseWithTarget,
@@ -438,6 +444,11 @@ pub enum ClientViewEvent {
     },
     ContainerClosed {
         guid: Guid,
+    },
+    ItemManaResponse {
+        target: Guid,
+        mana: f32,
+        success: u32,
     },
     ServerMessage {
         message: String,

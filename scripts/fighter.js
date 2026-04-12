@@ -55,6 +55,10 @@ function isHealingBusy(self) {
 	return HEALING_BUSY_OPERATIONS.has(self.busyOperation);
 }
 
+function hasDeadMotionCommand(entity) {
+	return entity != null && entity.motionCommand != null && entity.motionCommand.kind === "dead";
+}
+
 // The leader is the anchor for follow behavior and party distance checks.
 function partyLeaderMember(party) {
 	if (!party) {
@@ -76,8 +80,9 @@ function distanceToPartyLeader(self, partyLeader) {
 function chooseHealingTarget(self) {
 	const candidates = [];
 	const selfHealthRatio = ratio(self.health, self.healthMax);
+	const selfEntity = Holtburger.entity(self.guid);
 
-	if (isLowHealth(selfHealthRatio)) {
+	if (isLowHealth(selfHealthRatio) && !hasDeadMotionCommand(selfEntity)) {
 		candidates.push({
 			guid: self.guid,
 			distance: 0,
@@ -93,6 +98,10 @@ function chooseHealingTarget(self) {
 			}
 
 			if (!isLowHealth(member.healthPercent)) {
+				continue;
+			}
+
+			if (hasDeadMotionCommand(Holtburger.entity(member.guid))) {
 				continue;
 			}
 
@@ -144,7 +153,9 @@ function firstHealingKit() {
 
 // Prefer monsters that keep us close to the party leader.
 function selectAttackTarget(self, partyLeader) {
-	const monsters = Holtburger.nearbyEntities(null, ["monster"]);
+	const monsters = Holtburger.nearbyEntities(null, ["monster"]).filter(
+		(monster) => !hasDeadMotionCommand(monster),
+	);
 	const withinPartyAttackRange = (monster) =>
 		!partyLeader || Holtburger.distance(partyLeader.guid, monster.guid) <= MAX_PARTY_DISTANCE;
 	const stickyMonster = state.preferredAttackTargetGuid
@@ -194,7 +205,9 @@ function selectAttackTarget(self, partyLeader) {
 		}
 	}
 
-	const aggroMonsters = Holtburger.nearbyEntities(AGGRO_DISTANCE, ["monster"]);
+	const aggroMonsters = Holtburger
+		.nearbyEntities(AGGRO_DISTANCE, ["monster"])
+		.filter((monster) => !hasDeadMotionCommand(monster));
 	if (aggroMonsters.length > 0) {
 		const aggroMonster = aggroMonsters.find((monster) => withinPartyAttackRange(monster));
 		if (!aggroMonster) {

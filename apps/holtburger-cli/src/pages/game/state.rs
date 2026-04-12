@@ -1,4 +1,4 @@
-use crate::scripting::{DeferredScriptSource, inventory_changed_event};
+use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
@@ -31,6 +31,7 @@ use crate::types::{
     FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
+use std::collections::HashSet;
 
 #[path = "domains/mod.rs"]
 pub(super) mod domains;
@@ -124,21 +125,26 @@ impl GameState {
         let workflow_before = self.script_workflow_projection();
         let inventory_before = self.data.inventory.clone();
         let mut result = domains::reduce_view_event(self, &event);
-        let inventory_event = inventory_changed_event(&inventory_before, &self.data.inventory);
+        if let Some(notification) =
+            inventory_changed_notification(&inventory_before, &self.data.inventory)
+        {
+            result
+                .actions
+                .push(AppAction::Notification { notification });
+        }
         self.sync_script_host_for_view_event(
             ctx.server_time,
             &event,
             &workflow_before,
-            inventory_event,
             &mut result,
         );
-        self.drain_notifications(&mut result);
+        self.drain_notifications(ctx.server_time, &mut result);
         result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = domains::reduce_action(self, action)?;
-        self.drain_notifications(&mut result);
+        self.drain_notifications(None, &mut result);
         Some(result)
     }
 
@@ -149,7 +155,7 @@ impl GameState {
     pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         let mut result = domains::reduce_tick(self, elapsed);
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
-        self.drain_notifications(&mut result);
+        self.drain_notifications(ctx.server_time, &mut result);
         result
     }
 
@@ -177,7 +183,11 @@ impl GameState {
         )
     }
 
-    fn drain_notifications(&mut self, result: &mut UpdateResult) {
+    fn drain_notifications(
+        &mut self,
+        server_time: Option<(f64, Instant)>,
+        result: &mut UpdateResult,
+    ) {
         let mut pending_notifications = std::collections::VecDeque::new();
         let mut retained_actions = Vec::new();
 
@@ -191,8 +201,16 @@ impl GameState {
         }
 
         while let Some(notification) = pending_notifications.pop_front() {
-            if let Some(mut notification_result) =
-                domains::reduce_action(self, AppAction::Notification { notification })
+            let mut notification_result = domains::reduce_action(
+                self,
+                AppAction::Notification {
+                    notification: notification.clone(),
+                },
+            )
+            .unwrap_or_default();
+
+            self.sync_script_host_for_notification(server_time, &notification, result);
+
             {
                 let notification_redraw = notification_result.effective_redraw_priority();
                 result.commands.extend(notification_result.commands);
@@ -215,6 +233,41 @@ impl GameState {
         }
 
         result.actions = retained_actions;
+    }
+}
+
+fn inventory_changed_notification(
+    before: &HashSet<Guid>,
+    after: &HashSet<Guid>,
+) -> Option<AppNotification> {
+    if before == after {
+        return None;
+    }
+
+    let mut removed: Vec<Guid> = before.difference(after).copied().collect();
+    let mut added: Vec<Guid> = after.difference(before).copied().collect();
+    removed.sort_unstable();
+    added.sort_unstable();
+
+    Some(AppNotification::InventoryChanged { removed, added })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inventory_changed_notification_projects_added_and_removed_items() {
+        let before = HashSet::from([Guid(0x5000_0001), Guid(0x5000_0003), Guid(0x5000_0002)]);
+        let after = HashSet::from([Guid(0x5000_0002), Guid(0x5000_0004)]);
+
+        assert!(matches!(
+            inventory_changed_notification(&before, &after),
+            Some(AppNotification::InventoryChanged {
+                removed,
+                added,
+            }) if removed == vec![Guid(0x5000_0001), Guid(0x5000_0003)] && added == vec![Guid(0x5000_0004)]
+        ));
     }
 }
 

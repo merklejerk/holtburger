@@ -45,7 +45,8 @@ pub trait ScriptClientView {
         max_distance: Option<f32>,
         classifications: Option<Vec<ScriptEntityKind>>,
     ) -> Vec<ScriptEntityView>;
-    fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
+    fn inventory(&self) -> Vec<ScriptContainerView>;
+    fn current_open_container(&self) -> Option<Guid>;
     fn equipment(&self) -> Vec<ScriptEquipmentSlotView>;
     fn spellbook(&self) -> Vec<u32>;
     fn in_spellbook(&self, spell_id: u32) -> bool;
@@ -116,6 +117,8 @@ pub struct ScriptEntityView {
     pub kind: ScriptEntityKind,
     pub position: WorldPosition,
     pub profile: Option<ScriptEntityProfile>,
+    pub container: Guid,
+    pub wielder: Guid,
     pub distance_to_self: f32,
     pub motion_command: ScriptMotionCommand,
 }
@@ -195,13 +198,11 @@ pub enum ScriptEntityKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScriptInventoryItemView {
-    pub guid: Guid,
-    pub name: Option<String>,
-    pub stack_size: Option<u32>,
-    pub container_guid: Option<Guid>,
-    pub equipped: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptContainerView {
+    pub container_guid: Guid,
+    pub slots: u32,
+    pub items: Vec<Guid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -470,6 +471,12 @@ pub enum ScriptIntent {
     DeclineTrade,
     ResetTrade,
     ExitTrade,
+    OpenContainer {
+        guid: Guid,
+    },
+    CloseContainer {
+        guid: Guid,
+    },
     SnapHeading {
         heading: f32,
     },

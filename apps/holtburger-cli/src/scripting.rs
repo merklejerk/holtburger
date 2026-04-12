@@ -12,11 +12,12 @@ use holtburger_common::properties::{
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::{ActionResultReason, ChatChannelKind, CombatFeedback};
 use holtburger_scripting::{
-    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientView,
-    ScriptConfirmation, ScriptContainerView, ScriptEntityKind, ScriptEntityProfile,
-    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
-    ScriptPartyMemberView, ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
+    ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
+    ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
+    ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile, ScriptEntityView,
+    ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptLocalConfirmation,
+    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
+    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
     ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
@@ -49,6 +50,19 @@ pub struct TuiScriptClientView<'a> {
 }
 
 impl TuiScriptClientView<'_> {
+    fn resolve_position_reference(&self, reference: ScriptPositionRef) -> Option<WorldPosition> {
+        match reference {
+            ScriptPositionRef::Position(position) => Some(position),
+            ScriptPositionRef::Guid(guid) => {
+                if Some(guid) == self.data.player_guid {
+                    self.data.runtime_player_position()
+                } else {
+                    self.data.entities.get(&guid).map(|entity| entity.position)
+                }
+            }
+        }
+    }
+
     fn script_entity_view(&self, guid: Guid) -> Option<ScriptEntityView> {
         let entity = self.data.entities.get(&guid)?;
         let name = entity.name().trim();
@@ -164,6 +178,95 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             heading: self.data.runtime_heading().unwrap_or_default(),
             combat_mode: self.data.combat_mode,
         })
+    }
+
+    fn combat_info(&self) -> ScriptCombatInfo {
+        ScriptCombatInfo {
+            combat_mode: self.data.combat_mode,
+            is_engaged: self.data.combat_runtime.desired_engagement().is_some(),
+            target: self.data.combat_runtime.desired_engagement_target(),
+            power: self.data.combat_controls.profile_level.wire_value(),
+            height: self.data.combat_controls.attack_height,
+            last_attack_time: self.server_time.and_then(|(server_time, now)| {
+                self.data.combat_runtime.last_attack_attempt_at().and_then(
+                    |last_attack_attempt_at| {
+                        now.checked_duration_since(last_attack_attempt_at)
+                            .map(|age| server_time - age.as_secs_f64())
+                    },
+                )
+            }),
+        }
+    }
+
+    fn current_interaction(&self) -> Option<ScriptClientInteraction> {
+        if let Some(target) = self.data.combat_runtime.desired_engagement_target() {
+            return Some(ScriptClientInteraction::Attack { guid: target });
+        }
+
+        match self.view.active_interaction {
+            Some(Interaction::Targeting { target_guid }) => {
+                Some(ScriptClientInteraction::TargetEntity { guid: target_guid })
+            }
+            Some(Interaction::Approaching { target_guid }) => {
+                Some(ScriptClientInteraction::Approach { guid: target_guid })
+            }
+            Some(Interaction::Following { target_guid }) => {
+                Some(ScriptClientInteraction::Follow { guid: target_guid })
+            }
+            _ => None,
+        }
+    }
+
+    fn enchantments(&self) -> Vec<ScriptEnchantmentView> {
+        let mut best_by_spell_id: BTreeMap<u32, (f64, u16, u32)> = BTreeMap::new();
+
+        for enchantment in &self.data.player_enchantments {
+            let spell_id = u32::from(enchantment.spell_id);
+            let end_time = if enchantment.duration < 0.0 {
+                f64::INFINITY
+            } else {
+                enchantment.start_time + enchantment.duration
+            };
+            let candidate = (end_time, enchantment.layer, enchantment.power_level);
+
+            best_by_spell_id
+                .entry(spell_id)
+                .and_modify(|best| {
+                    if candidate > *best {
+                        *best = candidate;
+                    }
+                })
+                .or_insert(candidate);
+        }
+
+        best_by_spell_id
+            .into_iter()
+            .map(|(spell_id, (end_time, _, _))| ScriptEnchantmentView { spell_id, end_time })
+            .collect()
+    }
+
+    fn distance(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+        let Some(from) = self.resolve_position_reference(from) else {
+            return 0.0;
+        };
+
+        let Some(to) = self.resolve_position_reference(to) else {
+            return 0.0;
+        };
+
+        from.distance_to(&to)
+    }
+
+    fn heading_to(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+        let Some(from) = self.resolve_position_reference(from) else {
+            return 0.0;
+        };
+
+        let Some(to) = self.resolve_position_reference(to) else {
+            return 0.0;
+        };
+
+        from.heading_to(&to)
     }
 
     fn target_entity(&self) -> Option<ScriptEntityView> {
@@ -368,10 +471,6 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
     fn in_spellbook(&self, spell_id: u32) -> bool {
         self.data.player_spells.contains(&spell_id)
-    }
-
-    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32 {
-        from.heading_to(&to)
     }
 
     fn entity_exists(&self, guid: Guid) -> bool {
@@ -705,11 +804,14 @@ mod tests {
     };
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_core::client::types::BusyOperationKind;
+    use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+    use holtburger_protocol::messages::magic::Enchantment;
     use holtburger_protocol::messages::movement::InterpretedMotionCommand;
     use holtburger_protocol::messages::object::types::ArmorProfile;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::state::{TradeSide, TradeState};
     use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
+    use std::time::{Duration, Instant};
 
     #[test]
     fn script_path_for_basename_uses_js_extension() {
@@ -827,6 +929,140 @@ mod tests {
         assert_eq!(self_view.busy_operation, ScriptBusyOperation::Buy);
         assert!((self_view.heading - heading).abs() < 1e-6);
         assert_eq!(self_view.position, player_position);
+    }
+
+    #[test]
+    fn combat_info_projection_exposes_current_mode_target_controls_and_timestamp() {
+        let player_guid = Guid(0x5000_0002);
+        let target_guid = Guid(0x8000_0002);
+
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.combat_mode = CombatMode::Melee;
+        data.combat_controls.attack_height = AttackHeight::High;
+        data.combat_runtime
+            .begin_explicit_engagement(target_guid, CombatMode::Melee);
+
+        let now = Instant::now();
+        data.combat_runtime
+            .note_attack_attempt(now - Duration::from_secs(2));
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: Some((900.0, now)),
+        };
+
+        let combat_info = script_view.combat_info();
+
+        assert_eq!(combat_info.combat_mode, CombatMode::Melee);
+        assert!(combat_info.is_engaged);
+        assert_eq!(combat_info.target, Some(target_guid));
+        assert_eq!(combat_info.power, 0.5);
+        assert_eq!(combat_info.height, AttackHeight::High);
+        assert!((combat_info.last_attack_time.expect("timestamp") - 898.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn current_interaction_projection_maps_targeting_to_target_entity() {
+        let target_guid = Guid(0x8000_0003);
+        let data = GameData::new(Guid(0x5000_0003), "Player".to_string(), "World".to_string());
+        let view = ViewState {
+            active_interaction: Some(Interaction::Targeting { target_guid }),
+            ..ViewState::default()
+        };
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &view,
+            server_time: None,
+        };
+
+        assert_eq!(
+            script_view.current_interaction(),
+            Some(ScriptClientInteraction::TargetEntity { guid: target_guid })
+        );
+    }
+
+    #[test]
+    fn enchantments_projection_deduplicates_spell_ids_by_latest_end_time() {
+        let mut data = GameData::new(Guid(0x5000_0004), "Player".to_string(), "World".to_string());
+        data.player_enchantments = vec![
+            Enchantment {
+                spell_id: 10,
+                layer: 1,
+                power_level: 100,
+                start_time: 100.0,
+                duration: 20.0,
+                ..Default::default()
+            },
+            Enchantment {
+                spell_id: 10,
+                layer: 2,
+                power_level: 200,
+                start_time: 120.0,
+                duration: 15.0,
+                ..Default::default()
+            },
+            Enchantment {
+                spell_id: 42,
+                layer: 1,
+                power_level: 50,
+                start_time: 300.0,
+                duration: -1.0,
+                ..Default::default()
+            },
+        ];
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        assert_eq!(
+            script_view.enchantments(),
+            vec![
+                ScriptEnchantmentView {
+                    spell_id: 10,
+                    end_time: 135.0,
+                },
+                ScriptEnchantmentView {
+                    spell_id: 42,
+                    end_time: f64::INFINITY,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn distance_and_heading_projection_accept_guid_or_position_inputs() {
+        let data = GameData::new(Guid(0x5000_0003), "Player".to_string(), "World".to_string());
+
+        let from_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(0.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let distance = script_view.distance(from_position.into(), target_position.into());
+        let heading = script_view.heading_to(from_position.into(), target_position.into());
+
+        assert!((distance - 10.0).abs() < 1e-4, "distance was {distance}");
+        assert!(
+            (heading - 90.0_f32.to_radians()).abs() < 1e-4,
+            "heading was {heading}"
+        );
     }
 
     #[test]
@@ -948,25 +1184,45 @@ mod tests {
 
     #[test]
     fn heading_to_projection_uses_world_position_math() {
-        let data = GameData::new(Guid(0x5000_0008), "Player".to_string(), "World".to_string());
+        let from_guid = Guid(0x5000_0008);
+        let target_guid = Guid(0x8000_0008);
+        let mut data = GameData::new(from_guid, "Player".to_string(), "World".to_string());
+
+        let from_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        let to_position = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: holtburger_common::Vector3::new(0.0, 10.0, 0.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+
+        data.entities.insert(
+            from_guid,
+            Entity::new(from_guid, "Player".to_string(), from_position),
+        );
+        data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Target".to_string(), to_position),
+        );
+        data.player_pos = Some(from_position);
+
         let script_view = TuiScriptClientView {
             data: &data,
             view: &ViewState::default(),
             server_time: None,
         };
 
-        let from = WorldPosition {
-            landblock_id: Guid(0x0100_0000),
-            coords: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
-            rotation: holtburger_common::Quaternion::identity(),
-        };
-        let to = WorldPosition {
-            landblock_id: Guid(0x0100_0000),
-            coords: holtburger_common::Vector3::new(0.0, 10.0, 0.0),
-            rotation: holtburger_common::Quaternion::identity(),
-        };
+        let distance = script_view.distance(from_guid.into(), to_position.into());
+        let heading = script_view.heading_to(from_guid.into(), target_guid.into());
 
-        assert!((script_view.heading_to(from, to) - 90.0_f32.to_radians()).abs() < 1e-6);
+        assert!((distance - 10.0).abs() < 1e-4, "distance was {distance}");
+        assert!(
+            (heading - 90.0_f32.to_radians()).abs() < 1e-4,
+            "heading was {heading}"
+        );
     }
 
     #[test]

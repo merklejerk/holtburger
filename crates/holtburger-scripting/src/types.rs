@@ -5,7 +5,7 @@ use holtburger_common::properties::{
     PropertyInt64, PropertyString,
 };
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
-use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use serde::{Deserialize, Serialize};
@@ -48,9 +48,13 @@ pub trait ScriptClientView {
     fn inventory(&self) -> Vec<ScriptContainerView>;
     fn current_open_container(&self) -> Option<Guid>;
     fn equipment(&self) -> Vec<ScriptEquipmentSlotView>;
+    fn combat_info(&self) -> ScriptCombatInfo;
+    fn current_interaction(&self) -> Option<ScriptClientInteraction>;
+    fn enchantments(&self) -> Vec<ScriptEnchantmentView>;
     fn spellbook(&self) -> Vec<u32>;
     fn in_spellbook(&self, spell_id: u32) -> bool;
-    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32;
+    fn distance(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32;
+    fn heading_to(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32;
     fn entity_exists(&self, guid: Guid) -> bool;
     fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
@@ -76,6 +80,63 @@ pub struct ScriptSelfView {
     pub busy_operation: ScriptBusyOperation,
     pub heading: f32,
     pub combat_mode: CombatMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ScriptPositionRef {
+    Position(WorldPosition),
+    Guid(Guid),
+}
+
+impl From<WorldPosition> for ScriptPositionRef {
+    fn from(position: WorldPosition) -> Self {
+        Self::Position(position)
+    }
+}
+
+impl From<Guid> for ScriptPositionRef {
+    fn from(guid: Guid) -> Self {
+        Self::Guid(guid)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScriptCombatInfo {
+    pub combat_mode: CombatMode,
+    pub is_engaged: bool,
+    pub target: Option<Guid>,
+    pub power: f32,
+    pub height: AttackHeight,
+    pub last_attack_time: Option<f64>,
+}
+
+impl Default for ScriptCombatInfo {
+    fn default() -> Self {
+        Self {
+            combat_mode: CombatMode::NonCombat,
+            is_engaged: false,
+            target: None,
+            power: 0.0,
+            height: AttackHeight::Medium,
+            last_attack_time: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ScriptEnchantmentView {
+    pub spell_id: u32,
+    pub end_time: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data")]
+pub enum ScriptClientInteraction {
+    TargetEntity { guid: Guid },
+    Approach { guid: Guid },
+    Follow { guid: Guid },
+    Attack { guid: Guid },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

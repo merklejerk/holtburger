@@ -19,10 +19,10 @@ pub use holtburger_protocol::messages::object::types::{
 pub use host::ScriptHost;
 pub use types::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-    ScriptClientView, ScriptConfirmation, ScriptContainerView, ScriptEntityKind,
-    ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
-    ScriptEvent, ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptTradeInfo,
-    ScriptWorkflowEvent,
+    ScriptClientInteraction, ScriptClientView, ScriptCombatInfo, ScriptConfirmation,
+    ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile,
+    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
+    ScriptLifecycleEvent, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
+    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
+    ScriptSource, ScriptSpellEffectView, ScriptTradeInfo, ScriptWorkflowEvent,
 };

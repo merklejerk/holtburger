@@ -65,10 +65,12 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pages::game::GameState;
     use crate::state::NetStats;
     use crate::types::{Page, RedrawPriority};
     use holtburger_common::Guid;
     use holtburger_core::ClientState;
+    use holtburger_core::client::types::ClientCommand;
     use std::fs::File;
     use std::sync::Mutex;
 
@@ -162,6 +164,79 @@ mod tests {
                 assert_eq!(game.data.character_name.as_deref(), Some("New Player"));
             }
             _ => panic!("expected game page after sequence transition"),
+        }
+    }
+
+    #[test]
+    fn app_level_send_commands_bubble_through_game_page() {
+        let mut app_state = AppState {
+            account_name: "account".to_string(),
+            account_password: "password".to_string(),
+            character_preference: None,
+            chat_log: None,
+            page: Page::Game(Box::new(GameState::new(
+                Guid(0x50000001),
+                "Player".to_string(),
+                "World".to_string(),
+            ))),
+            client_state: ClientState::Connected,
+            net_stats: NetStats::default(),
+            world_name: "World".to_string(),
+            server_time: None,
+            content: None,
+            spell_catalog: None,
+            skill_table: None,
+            verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
+        };
+
+        let result = app_state.reduce_app_action(AppAction::SendCommands {
+            commands: vec![ClientCommand::Talk("hello".to_string())],
+        });
+
+        assert!(matches!(
+            result.commands.as_slice(),
+            [ClientCommand::Talk(message)] if message == "hello"
+        ));
+    }
+
+    #[test]
+    fn app_level_transition_to_game_bubble_through_game_page() {
+        let mut app_state = AppState {
+            account_name: "account".to_string(),
+            account_password: "password".to_string(),
+            character_preference: None,
+            chat_log: None,
+            page: Page::Game(Box::new(GameState::new(
+                Guid(0x50000001),
+                "Old Player".to_string(),
+                "World".to_string(),
+            ))),
+            client_state: ClientState::Connected,
+            net_stats: NetStats::default(),
+            world_name: "World".to_string(),
+            server_time: None,
+            content: None,
+            spell_catalog: None,
+            skill_table: None,
+            verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
+        };
+
+        let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
+            guid: Guid(0x50000002),
+            name: "New Player".to_string(),
+        });
+
+        match &app_state.page {
+            Page::Game(game) => {
+                assert_eq!(game.data.character_name.as_deref(), Some("New Player"));
+            }
+            _ => panic!("expected game page after transition"),
         }
     }
 }

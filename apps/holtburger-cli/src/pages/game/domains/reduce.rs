@@ -18,7 +18,10 @@ pub(crate) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
 
 pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<UpdateResult> {
     match action {
-        AppAction::Nothing => None,
+        AppAction::Nothing
+        | AppAction::Log { .. }
+        | AppAction::SendCommands { .. }
+        | AppAction::TransitionToGame { .. } => None,
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();
             for inner_action in actions {

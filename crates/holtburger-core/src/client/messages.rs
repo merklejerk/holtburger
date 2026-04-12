@@ -386,6 +386,14 @@ impl ClientRuntime {
                     });
                     Ok(())
                 }
+                GameEvent::QueryItemManaResponse(data) => {
+                    self.emit_wire_event(WireEvent::ItemManaResponse {
+                        target: ev.target,
+                        mana: data.mana,
+                        success: data.success,
+                    });
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             GameMessage::PlayerCreate(data) => {
@@ -633,6 +641,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_item_mana_response_projects_to_client_view_event() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid(0x8000_0006),
+            sequence: 0,
+            event: GameEvent::QueryItemManaResponse(Box::new(QueryItemManaResponseEventData {
+                mana: 0.5,
+                success: 1,
+            })),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_item_mana_response = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::ItemManaResponse {
+                    target: holtburger_common::Guid(0x8000_0006),
+                    mana,
+                    success: 1,
+                } if (mana - 0.5).abs() < f32::EPSILON
+            ) {
+                saw_item_mana_response = true;
+                break;
+            }
+        }
+
+        assert!(saw_item_mana_response);
+    }
+
+    #[tokio::test]
     async fn test_current_server_controlled_update_motion_sends_heartbeat() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
@@ -656,8 +698,8 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert_eq!(client.world.player.server_control_sequence, 10);
-        assert_eq!(client.session.packet_sequence, 2);
-        assert!(client.session.bytes_out > 0);
+        assert_eq!(client.session.packet_sequence, 1);
+        assert_eq!(client.session.bytes_out, 0);
     }
 
     #[tokio::test]

@@ -1,17 +1,12 @@
+use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
-use holtburger_core::client::controllers::{
-    CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
-    DesiredAttackProfile, TargetedAttackRequest,
-};
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::{
-    ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
-};
-use holtburger_protocol::errors::WeenieError;
+use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
+use holtburger_scripting::ScriptHost;
 use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -23,17 +18,20 @@ use crate::navigation::{
     NavigationUpdate, ResolvedNavigationTarget, TuiNavigation,
 };
 use crate::pages::game::GameData;
+use crate::pages::game::combat::{CombatDriveEffect, CombatDriveInput, CombatDriveRuntime};
 use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
-use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
+use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
+use crate::state::{EventContext, TickContext};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab, FocusedPane, InspectTarget,
-    Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
+    AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
+    FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
+use std::collections::HashSet;
 
 #[path = "domains/mod.rs"]
 pub(super) mod domains;
@@ -43,11 +41,22 @@ pub struct GameState {
     pub data: GameData,
     pub dashboard: DashboardState,
     pub view: ViewState,
+    pub(crate) script: GameScriptState,
     runtime: GameRuntimeState,
     pub(super) render_state: GameRenderState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
 }
+
+#[derive(Default)]
+pub(crate) struct GameScriptState {
+    pub(crate) pending_source: Option<DeferredScriptSource>,
+    pub(crate) host: Option<ScriptHost>,
+    pub(crate) tick_accumulator: Duration,
+    pub(crate) running_source_name: Option<String>,
+}
+
+pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
@@ -97,6 +106,7 @@ impl GameState {
             data: GameData::new(guid, name, world_name),
             dashboard: DashboardState::default(),
             view: ViewState::default(),
+            script: GameScriptState::default(),
             runtime: GameRuntimeState::default(),
             render_state: GameRenderState::default(),
             chat: ChatState::new(None),
@@ -105,15 +115,169 @@ impl GameState {
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
-        domains::reduce_view_event(self, event)
+        self.handle_view_event_with_context(event, &EventContext::default())
+    }
+
+    pub fn handle_view_event_with_context(
+        &mut self,
+        event: ClientViewEvent,
+        ctx: &EventContext,
+    ) -> UpdateResult {
+        let workflow_before = self.script_workflow_projection();
+        let inventory_before = self.data.inventory.clone();
+        let mut result = domains::reduce_view_event(self, &event);
+        if let Some(notification) =
+            inventory_changed_notification(&inventory_before, &self.data.inventory)
+        {
+            result
+                .actions
+                .push(AppAction::Notification { notification });
+        }
+        self.sync_script_host_for_view_event(
+            ctx.server_time,
+            &event,
+            &workflow_before,
+            &mut result,
+        );
+        self.drain_notifications(ctx.server_time, &mut result);
+        result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
-        domains::reduce_action(self, action)
+        let mut result = domains::reduce_action(self, action)?;
+        self.drain_notifications(None, &mut result);
+        Some(result)
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
-        domains::reduce_tick(self, elapsed)
+        self.handle_tick_with_context(elapsed, &TickContext::default())
+    }
+
+    pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
+        let mut result = domains::reduce_tick(self, elapsed);
+        self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
+        self.drain_notifications(ctx.server_time, &mut result);
+        result
+    }
+
+    pub(crate) fn clear_combat_drive(&mut self) {
+        self.runtime.combat_drive = None;
+    }
+
+    pub(crate) fn handle_combat_drive(
+        &mut self,
+        input: CombatDriveInput,
+    ) -> Option<CombatDriveEffect> {
+        let effect = self
+            .runtime
+            .combat_drive
+            .get_or_insert_with(CombatDriveRuntime::default)
+            .handle(&input);
+
+        if let (CombatDriveInput::Tick { now, .. }, Some(CombatDriveEffect::Attack(_))) =
+            (input, effect)
+        {
+            self.data.combat_runtime.note_attack_attempt(now);
+        }
+
+        effect
+    }
+
+    pub(crate) fn combat_target_position_for_drive(
+        &self,
+        target_guid: Guid,
+    ) -> Option<WorldPosition> {
+        self.runtime.navigation.automation_target_position(
+            self.data.runtime_player_position(),
+            self.data.runtime_position_for_guid(target_guid),
+        )
+    }
+
+    fn drain_notifications(
+        &mut self,
+        server_time: Option<(f64, Instant)>,
+        result: &mut UpdateResult,
+    ) {
+        let mut pending_notifications = std::collections::VecDeque::new();
+        let mut retained_actions = Vec::new();
+
+        for action in result.actions.drain(..) {
+            match action {
+                AppAction::Notification { notification } => {
+                    pending_notifications.push_back(notification)
+                }
+                other => retained_actions.push(other),
+            }
+        }
+
+        while let Some(notification) = pending_notifications.pop_front() {
+            let mut notification_result = domains::reduce_action(
+                self,
+                AppAction::Notification {
+                    notification: notification.clone(),
+                },
+            )
+            .unwrap_or_default();
+
+            self.sync_script_host_for_notification(server_time, &notification, result);
+
+            {
+                let notification_redraw = notification_result.effective_redraw_priority();
+                result.commands.extend(notification_result.commands);
+                result.request_redraw(notification_redraw);
+
+                let mut nested_notifications = Vec::new();
+                for action in notification_result.actions.drain(..) {
+                    match action {
+                        AppAction::Notification { notification } => {
+                            nested_notifications.push(notification)
+                        }
+                        other => retained_actions.push(other),
+                    }
+                }
+
+                for action in nested_notifications.into_iter().rev() {
+                    pending_notifications.push_front(action);
+                }
+            }
+        }
+
+        result.actions = retained_actions;
+    }
+}
+
+fn inventory_changed_notification(
+    before: &HashSet<Guid>,
+    after: &HashSet<Guid>,
+) -> Option<AppNotification> {
+    if before == after {
+        return None;
+    }
+
+    let mut removed: Vec<Guid> = before.difference(after).copied().collect();
+    let mut added: Vec<Guid> = after.difference(before).copied().collect();
+    removed.sort_unstable();
+    added.sort_unstable();
+
+    Some(AppNotification::InventoryChanged { removed, added })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inventory_changed_notification_projects_added_and_removed_items() {
+        let before = HashSet::from([Guid(0x5000_0001), Guid(0x5000_0003), Guid(0x5000_0002)]);
+        let after = HashSet::from([Guid(0x5000_0002), Guid(0x5000_0004)]);
+
+        assert!(matches!(
+            inventory_changed_notification(&before, &after),
+            Some(AppNotification::InventoryChanged {
+                removed,
+                added,
+            }) if removed == vec![Guid(0x5000_0001), Guid(0x5000_0003)] && added == vec![Guid(0x5000_0004)]
+        ));
     }
 }
 
@@ -146,8 +310,8 @@ struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: TuiNavigation,
-    combat_automation: Option<CombatAutomationController>,
-    weapon_swap: WeaponSwapController,
+    combat_drive: Option<CombatDriveRuntime>,
+    weapon_swap: WeaponSwapState,
     inventory_notifications: InventoryNotificationState,
     logopolis: Option<LogopolisState>,
 }

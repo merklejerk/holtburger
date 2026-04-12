@@ -8,7 +8,6 @@ use tokio::sync::{broadcast, mpsc};
 mod builder;
 mod character_selection;
 mod commands;
-pub mod controllers;
 mod messages;
 mod movement;
 pub mod movement_types;
@@ -344,6 +343,19 @@ impl ClientRuntime {
                     .send(ClientViewEvent::PlayerEntered {
                         guid: *guid,
                         name: name.clone(),
+                    });
+            }
+            WireEvent::ItemManaResponse {
+                target,
+                mana,
+                success,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ItemManaResponse {
+                        target: *target,
+                        mana: *mana,
+                        success: *success,
                     });
             }
             WireEvent::GameMessage(msg) => {

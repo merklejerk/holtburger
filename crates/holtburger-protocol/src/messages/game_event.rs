@@ -64,6 +64,7 @@ pub enum GameEvent {
     CharacterConfirmationDone(Box<CharacterConfirmationDoneEventData>),
     CloseGroundContainer(Box<CloseGroundContainerEventData>),
     UpdateHealth(Box<UpdateHealthEventData>),
+    QueryItemManaResponse(Box<QueryItemManaResponseEventData>),
     FellowshipFullUpdate(Box<FellowshipFullUpdateEventData>),
     FellowshipDisband,
     FellowshipUpdateFellow(Box<FellowshipUpdateFellowEventData>),
@@ -247,6 +248,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthEventData::unpack(data, offset)?))
                 }
+                GameEventOpcode::QueryItemManaResponse => GameEvent::QueryItemManaResponse(
+                    Box::new(QueryItemManaResponseEventData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::FellowshipFullUpdate => GameEvent::FellowshipFullUpdate(Box::new(
                     FellowshipFullUpdateEventData::unpack(data, offset)?,
                 )),
@@ -522,6 +526,11 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::UpdateHealth(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::UpdateHealth as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::QueryItemManaResponse(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::QueryItemManaResponse as u32)
                     .unwrap();
                 data.pack(buf);
             }

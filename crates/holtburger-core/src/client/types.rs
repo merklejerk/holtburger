@@ -234,6 +234,11 @@ pub enum WireEvent {
         container: Guid,
         items: Vec<ViewContentsEventItem>,
     },
+    ItemManaResponse {
+        target: Guid,
+        mana: f32,
+        success: u32,
+    },
     RawMessage(Vec<u8>),
     LogMessage(String),
     UseDone {
@@ -439,6 +444,11 @@ pub enum ClientViewEvent {
     },
     ContainerClosed {
         guid: Guid,
+    },
+    ItemManaResponse {
+        target: Guid,
+        mana: f32,
+        success: u32,
     },
     ServerMessage {
         message: String,

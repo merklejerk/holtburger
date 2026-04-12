@@ -386,6 +386,14 @@ impl ClientRuntime {
                     });
                     Ok(())
                 }
+                GameEvent::QueryItemManaResponse(data) => {
+                    self.emit_wire_event(WireEvent::ItemManaResponse {
+                        target: ev.target,
+                        mana: data.mana,
+                        success: data.success,
+                    });
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             GameMessage::PlayerCreate(data) => {
@@ -630,6 +638,40 @@ mod tests {
         }
 
         assert!(saw_teleport_started);
+    }
+
+    #[tokio::test]
+    async fn test_item_mana_response_projects_to_client_view_event() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid(0x8000_0006),
+            sequence: 0,
+            event: GameEvent::QueryItemManaResponse(Box::new(QueryItemManaResponseEventData {
+                mana: 0.5,
+                success: 1,
+            })),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_item_mana_response = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::ItemManaResponse {
+                    target: holtburger_common::Guid(0x8000_0006),
+                    mana,
+                    success: 1,
+                } if (mana - 0.5).abs() < f32::EPSILON
+            ) {
+                saw_item_mana_response = true;
+                break;
+            }
+        }
+
+        assert!(saw_item_mana_response);
     }
 
     #[tokio::test]

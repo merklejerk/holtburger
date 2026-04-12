@@ -8,11 +8,21 @@
 mod host;
 mod types;
 
+pub use holtburger_common::properties::WorldObjectProperties;
+pub use holtburger_common::properties::{
+    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyString,
+};
+pub use holtburger_protocol::messages::object::types::{
+    ArmorProfile, CreatureProfile, WeaponProfile,
+};
 pub use host::ScriptHost;
 pub use types::{
     ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-    ScriptClientView, ScriptConfirmation, ScriptEntityView, ScriptEvent, ScriptIntent,
-    ScriptInventoryItemView, ScriptLifecycleEvent, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptPartyMemberView, ScriptPartyView,
-    ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptWorkflowEvent,
+    ScriptClientView, ScriptConfirmation, ScriptContainerView, ScriptEntityKind,
+    ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
+    ScriptEvent, ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
+    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
+    ScriptPartyView, ScriptSelfView, ScriptSource, ScriptSpellEffectView, ScriptTradeInfo,
+    ScriptWorkflowEvent,
 };

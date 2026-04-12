@@ -1,7 +1,13 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::{
+    EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
+    PropertyInt64, PropertyString,
+};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -27,45 +33,299 @@ pub trait ScriptClientView {
     fn self_entity(&self) -> Option<ScriptSelfView>;
     fn target_entity(&self) -> Option<ScriptEntityView>;
     fn entity(&self, guid: Guid) -> Option<ScriptEntityView>;
-    fn nearby_entities(&self) -> Vec<ScriptEntityView>;
-    fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
+    fn entity_bool_prop(&self, guid: Guid, prop: PropertyBool) -> Option<bool>;
+    fn entity_int_prop(&self, guid: Guid, prop: PropertyInt) -> Option<i32>;
+    fn entity_int64_prop(&self, guid: Guid, prop: PropertyInt64) -> Option<i64>;
+    fn entity_float_prop(&self, guid: Guid, prop: PropertyFloat) -> Option<f64>;
+    fn entity_string_prop(&self, guid: Guid, prop: PropertyString) -> Option<String>;
+    fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
+    fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
+    fn nearby_entities(
+        &self,
+        max_distance: Option<f32>,
+        classifications: Option<Vec<ScriptEntityKind>>,
+    ) -> Vec<ScriptEntityView>;
+    fn inventory(&self) -> Vec<ScriptContainerView>;
+    fn current_open_container(&self) -> Option<Guid>;
+    fn equipment(&self) -> Vec<ScriptEquipmentSlotView>;
+    fn spellbook(&self) -> Vec<u32>;
+    fn in_spellbook(&self, spell_id: u32) -> bool;
+    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32;
+    fn entity_exists(&self, guid: Guid) -> bool;
+    fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
     fn pending_confirmation(&self) -> Option<ScriptConfirmation>;
-    fn busy_operation(&self) -> Option<ScriptBusyOperation>;
+    fn busy_operation(&self) -> ScriptBusyOperation;
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptSelfView {
     pub guid: Guid,
     pub name: String,
-    pub position: Option<WorldPosition>,
-    pub health: Option<u32>,
-    pub stamina: Option<u32>,
-    pub mana: Option<u32>,
+    pub position: WorldPosition,
+    pub health: u32,
+    pub health_max: u32,
+    pub stamina: u32,
+    pub stamina_max: u32,
+    pub mana: u32,
+    pub mana_max: u32,
+    pub encumbrance: f32,
+    pub capacity: f32,
+    pub busy_operation: ScriptBusyOperation,
+    pub heading: f32,
     pub combat_mode: CombatMode,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptBusyOperation {
+    #[default]
+    None,
+    Use,
+    UseWithTarget,
+    Salvage,
+    SpellCast,
+    Buy,
+    Sell,
+}
+
+impl ScriptBusyOperation {
+    pub const fn from_kind(kind: BusyOperationKind) -> Self {
+        match kind {
+            BusyOperationKind::Use => Self::Use,
+            BusyOperationKind::UseWithTarget => Self::UseWithTarget,
+            BusyOperationKind::Salvage => Self::Salvage,
+            BusyOperationKind::SpellCast => Self::SpellCast,
+            BusyOperationKind::Buy => Self::Buy,
+            BusyOperationKind::Sell => Self::Sell,
+        }
+    }
+}
+
+impl From<BusyOperationKind> for ScriptBusyOperation {
+    fn from(kind: BusyOperationKind) -> Self {
+        Self::from_kind(kind)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
-    pub position: Option<WorldPosition>,
-    pub distance_to_self: Option<f32>,
-    pub is_player: bool,
-    pub is_monster: bool,
-    pub is_vendor: bool,
-    pub is_dead: bool,
+    pub kind: ScriptEntityKind,
+    pub position: WorldPosition,
+    pub profile: Option<ScriptEntityProfile>,
+    pub container: Guid,
+    pub wielder: Guid,
+    pub distance_to_self: f32,
+    pub motion_command: ScriptMotionCommand,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScriptInventoryItemView {
-    pub guid: Guid,
-    pub name: Option<String>,
-    pub stack_size: Option<u32>,
-    pub container_guid: Option<Guid>,
-    pub equipped: bool,
+#[serde(tag = "kind", content = "data")]
+pub enum ScriptEntityProfile {
+    Armor(ArmorProfile),
+    Creature(CreatureProfile),
+    Weapon(WeaponProfile),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "data")]
+pub enum ScriptMotionCommand {
+    #[default]
+    None,
+    Stop,
+    WalkForward,
+    WalkBackwards,
+    RunForward,
+    TurnRight,
+    TurnLeft,
+    SidestepRight,
+    SidestepLeft,
+    Dead,
+    Other(u16),
+}
+
+impl ScriptMotionCommand {
+    pub fn from_command(command: InterpretedMotionCommand) -> Self {
+        match command {
+            InterpretedMotionCommand::STOP => Self::Stop,
+            InterpretedMotionCommand::WALK_FORWARD => Self::WalkForward,
+            InterpretedMotionCommand::WALK_BACKWARDS => Self::WalkBackwards,
+            InterpretedMotionCommand::RUN_FORWARD => Self::RunForward,
+            InterpretedMotionCommand::TURN_RIGHT => Self::TurnRight,
+            InterpretedMotionCommand::TURN_LEFT => Self::TurnLeft,
+            InterpretedMotionCommand::SIDESTEP_RIGHT => Self::SidestepRight,
+            InterpretedMotionCommand::SIDESTEP_LEFT => Self::SidestepLeft,
+            InterpretedMotionCommand::DEAD => Self::Dead,
+            other => Self::Other(other.raw()),
+        }
+    }
+}
+
+impl From<InterpretedMotionCommand> for ScriptMotionCommand {
+    fn from(command: InterpretedMotionCommand) -> Self {
+        Self::from_command(command)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptEntityKind {
+    Player,
+    Npc,
+    Vendor,
+    Monster,
+    Weapon,
+    Apparel,
+    Container,
+    Item,
+    Consumable,
+    Money,
+    Key,
+    Writable,
+    HealingKit,
+    ManaStone,
+    Door,
+    Portal,
+    LifeStone,
+    Chest,
+    Wand,
+    Tool,
+    StaticObject,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptContainerView {
+    pub container_guid: Guid,
+    pub slots: u32,
+    pub items: Vec<Guid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptEquipmentSlotKind {
+    HeadWear,
+    ChestWear,
+    AbdomenWear,
+    UpperArmWear,
+    LowerArmWear,
+    HandWear,
+    UpperLegWear,
+    LowerLegWear,
+    FootWear,
+    ChestArmor,
+    AbdomenArmor,
+    UpperArmArmor,
+    LowerArmArmor,
+    UpperLegArmor,
+    LowerLegArmor,
+    NeckWear,
+    LeftWrist,
+    RightWrist,
+    LeftFinger,
+    RightFinger,
+    MeleeWeapon,
+    Shield,
+    MissileWeapon,
+    MissileAmmo,
+    Caster,
+    TwoHanded,
+    TrinketOne,
+    Cloak,
+    SigilOne,
+    SigilTwo,
+    SigilThree,
+}
+
+impl ScriptEquipmentSlotKind {
+    pub const ALL: [Self; 31] = [
+        Self::HeadWear,
+        Self::ChestWear,
+        Self::AbdomenWear,
+        Self::UpperArmWear,
+        Self::LowerArmWear,
+        Self::HandWear,
+        Self::UpperLegWear,
+        Self::LowerLegWear,
+        Self::FootWear,
+        Self::ChestArmor,
+        Self::AbdomenArmor,
+        Self::UpperArmArmor,
+        Self::LowerArmArmor,
+        Self::UpperLegArmor,
+        Self::LowerLegArmor,
+        Self::NeckWear,
+        Self::LeftWrist,
+        Self::RightWrist,
+        Self::LeftFinger,
+        Self::RightFinger,
+        Self::MeleeWeapon,
+        Self::Shield,
+        Self::MissileWeapon,
+        Self::MissileAmmo,
+        Self::Caster,
+        Self::TwoHanded,
+        Self::TrinketOne,
+        Self::Cloak,
+        Self::SigilOne,
+        Self::SigilTwo,
+        Self::SigilThree,
+    ];
+
+    pub const fn equip_mask(self) -> EquipMask {
+        match self {
+            Self::HeadWear => EquipMask::HEAD_WEAR,
+            Self::ChestWear => EquipMask::CHEST_WEAR,
+            Self::AbdomenWear => EquipMask::ABDOMEN_WEAR,
+            Self::UpperArmWear => EquipMask::UPPER_ARM_WEAR,
+            Self::LowerArmWear => EquipMask::LOWER_ARM_WEAR,
+            Self::HandWear => EquipMask::HAND_WEAR,
+            Self::UpperLegWear => EquipMask::UPPER_LEG_WEAR,
+            Self::LowerLegWear => EquipMask::LOWER_LEG_WEAR,
+            Self::FootWear => EquipMask::FOOT_WEAR,
+            Self::ChestArmor => EquipMask::CHEST_ARMOR,
+            Self::AbdomenArmor => EquipMask::ABDOMEN_ARMOR,
+            Self::UpperArmArmor => EquipMask::UPPER_ARM_ARMOR,
+            Self::LowerArmArmor => EquipMask::LOWER_ARM_ARMOR,
+            Self::UpperLegArmor => EquipMask::UPPER_LEG_ARMOR,
+            Self::LowerLegArmor => EquipMask::LOWER_LEG_ARMOR,
+            Self::NeckWear => EquipMask::NECK_WEAR,
+            Self::LeftWrist => EquipMask::WRIST_WEAR_LEFT,
+            Self::RightWrist => EquipMask::WRIST_WEAR_RIGHT,
+            Self::LeftFinger => EquipMask::FINGER_WEAR_LEFT,
+            Self::RightFinger => EquipMask::FINGER_WEAR_RIGHT,
+            Self::MeleeWeapon => EquipMask::MELEE_WEAPON,
+            Self::Shield => EquipMask::SHIELD,
+            Self::MissileWeapon => EquipMask::MISSILE_WEAPON,
+            Self::MissileAmmo => EquipMask::MISSILE_AMMO,
+            Self::Caster => EquipMask::CASTER,
+            Self::TwoHanded => EquipMask::TWO_HANDED,
+            Self::TrinketOne => EquipMask::TRINKET_ONE,
+            Self::Cloak => EquipMask::CLOAK,
+            Self::SigilOne => EquipMask::SIGIL_ONE,
+            Self::SigilTwo => EquipMask::SIGIL_TWO,
+            Self::SigilThree => EquipMask::SIGIL_THREE,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptEquipmentSlotView {
+    pub slot: ScriptEquipmentSlotKind,
+    pub equip_mask: EquipMask,
+    pub item_guid: Option<Guid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptTradeInfo {
+    pub partner_guid: Guid,
+    pub partner_name: Option<String>,
+    pub our_items: Vec<Guid>,
+    pub their_items: Vec<Guid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,11 +356,23 @@ pub enum ScriptEvent {
     ChatMessage(ScriptChatEvent),
     Lifecycle(ScriptLifecycleEvent),
     Workflow(ScriptWorkflowEvent),
+    WeenieError {
+        error: holtburger_protocol::errors::WeenieError,
+    },
     SelfVitalsChanged,
-    EntityAppeared { guid: Guid },
-    EntityDisappeared { guid: Guid },
-    EntityUpdated { guid: Guid },
-    InventoryChanged,
+    EntityAppeared {
+        guid: Guid,
+    },
+    EntityDisappeared {
+        guid: Guid,
+    },
+    EntityUpdated {
+        guid: Guid,
+    },
+    InventoryChanged {
+        added: Vec<Guid>,
+        removed: Vec<Guid>,
+    },
     SpellbookChanged,
     FellowshipChanged,
 }
@@ -146,7 +418,7 @@ pub enum ScriptLifecycleEvent {
 pub enum ScriptWorkflowEvent {
     ConfirmationOpened { confirmation: ScriptConfirmation },
     ConfirmationClosed,
-    BusyOperationChanged { busy: Option<ScriptBusyOperation> },
+    BusyOperationChanged { busy: ScriptBusyOperation },
     TargetEntityChanged { guid: Option<Guid> },
 }
 
@@ -169,12 +441,7 @@ pub enum ScriptLocalConfirmationKind {
     Other(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScriptBusyOperation {
-    pub kind: BusyOperationKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data")]
 pub enum ScriptIntent {
     Log {
@@ -189,6 +456,56 @@ pub enum ScriptIntent {
         message: String,
     },
     Use {
+        guid: Guid,
+    },
+    Emote {
+        message: String,
+    },
+    OpenTrade {
+        guid: Guid,
+    },
+    AddToTrade {
+        item: Guid,
+    },
+    AcceptTrade,
+    DeclineTrade,
+    ResetTrade,
+    ExitTrade,
+    OpenContainer {
+        guid: Guid,
+    },
+    CloseContainer {
+        guid: Guid,
+    },
+    SnapHeading {
+        heading: f32,
+    },
+    Scoot {
+        distance_m: f32,
+    },
+    Combine {
+        source: Guid,
+        dest: Guid,
+    },
+    Salvage {
+        tool: Guid,
+        items: Vec<Guid>,
+    },
+    Assess {
+        target: Guid,
+    },
+    Drop {
+        item: Guid,
+    },
+    Pickup {
+        item: Guid,
+        container: Option<Guid>,
+    },
+    Equip {
+        guid: Guid,
+        slot: ScriptEquipmentSlotKind,
+    },
+    Unequip {
         guid: Guid,
     },
     CastUntargetedSpell {

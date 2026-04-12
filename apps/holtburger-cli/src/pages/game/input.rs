@@ -3,7 +3,6 @@ mod commands;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::ConfirmationType;
 use holtburger_core::ClientCommand;
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_protocol::messages::combat::CombatMode;
 
 use crate::pages::game::GameState;
@@ -238,9 +237,9 @@ impl GameState {
                             }
                             .into(),
                         );
-                        result
-                            .commands
-                            .push(ClientCommand::Emote(emote.to_string()));
+                        result.actions.push(AppAction::Emote {
+                            message: emote.to_string(),
+                        });
                         return result;
                     }
                     result.actions.push(
@@ -275,15 +274,13 @@ impl GameState {
                         -0.1
                     };
 
-                    let current_heading = self.data.runtime_heading();
+                    let current_heading = self.data.runtime_heading().unwrap_or(0.0);
                     let mut new_heading = current_heading + delta;
                     let two_pi = 2.0 * std::f32::consts::PI;
                     new_heading = (new_heading % two_pi + two_pi) % two_pi;
-                    result
-                        .commands
-                        .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
-                            heading: new_heading,
-                        }));
+                    result.actions.push(AppAction::SnapHeading {
+                        heading: new_heading,
+                    });
                     result.request_redraw(RedrawPriority::Immediate);
                 }
             }
@@ -579,10 +576,8 @@ mod tests {
 
         assert!(result.redraw_requested());
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::DriveSelf(
-                PlayerDriveIntent::SnapFacing { .. }
-            ))
+            result.actions.first(),
+            Some(AppAction::SnapHeading { .. })
         ));
     }
 
@@ -783,9 +778,10 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+        assert!(result.commands.is_empty());
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::Emote(text)) if text == "waves"
+            result.actions.iter().find(|action| matches!(action, AppAction::Emote { .. })),
+            Some(AppAction::Emote { message }) if message == "waves"
         ));
     }
 
@@ -798,9 +794,10 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
+        assert!(result.commands.is_empty());
         assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::Emote(text)) if text == " hello there"
+            result.actions.iter().find(|action| matches!(action, AppAction::Emote { .. })),
+            Some(AppAction::Emote { message }) if message == " hello there"
         ));
     }
 

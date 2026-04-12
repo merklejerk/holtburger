@@ -80,6 +80,7 @@ install-updater = false
 # The profile that 'cargo dist' will build with
 [profile.dist]
 inherits = "release"
+strip = "symbols"
 lto = "thin"
 
 [profile.profiling]

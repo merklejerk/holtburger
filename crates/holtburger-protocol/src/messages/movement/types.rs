@@ -124,19 +124,19 @@ impl InterpretedMotionCommand {
     pub const SIDESTEP_LEFT: Self = Self(0x0010);
     pub const DEAD: Self = Self(0x0011);
 
-    pub const fn raw(self) -> u16 {
+    pub fn raw(self) -> u16 {
         self.0
     }
 
-    pub const fn is_dead(self) -> bool {
+    pub fn is_dead(self) -> bool {
         self.0 == Self::DEAD.0
     }
 
-    pub const fn is_forward_locomotion(self) -> bool {
+    pub fn is_forward_locomotion(self) -> bool {
         self.0 == Self::WALK_FORWARD.0 || self.0 == Self::RUN_FORWARD.0
     }
 
-    pub const fn is_locomotion(self) -> bool {
+    pub fn is_locomotion(self) -> bool {
         self.0 == Self::WALK_FORWARD.0
             || self.0 == Self::WALK_BACKWARDS.0
             || self.0 == Self::RUN_FORWARD.0

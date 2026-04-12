@@ -684,7 +684,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         WorldEvent::EntityMotionUpdated { guid: target, snapshot }
             if *target == guid
             && snapshot.as_ref().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
-            && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_command == Some(InterpretedMotionCommand::DEAD))
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.motion_command() == Some(InterpretedMotionCommand::DEAD))
     )));
     assert!(events.iter().any(|event| matches!(
         event,

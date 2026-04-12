@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 const ATTACK_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const FACING_REISSUE_INTERVAL: Duration = Duration::from_millis(150);
+const STALE_COMBAT_FEEDBACK_TIMEOUT: Duration = Duration::from_secs(3);
 const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_FACING_THRESHOLD: f32 = 0.5_f32.to_radians();
 const MISSILE_FACING_THRESHOLD: f32 = 5.0_f32.to_radians();
@@ -356,6 +357,7 @@ pub struct CombatRuntimeState {
     pub issue_state: CombatIssueState,
     pub engagement: CombatEngagementState,
     last_attack_attempt_at: Option<Instant>,
+    pending_feedback_since: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -387,12 +389,14 @@ impl CombatRuntimeState {
     pub fn begin_explicit_engagement(&mut self, target_guid: Guid, mode: CombatMode) {
         self.engagement.begin_explicit_engagement(target_guid, mode);
         self.last_attack_attempt_at = None;
+        self.pending_feedback_since = None;
     }
 
     pub fn clear_engagement(&mut self) {
         self.engagement.clear_engagement();
         self.issue_state = CombatIssueState::Idle;
         self.last_attack_attempt_at = None;
+        self.pending_feedback_since = None;
     }
 
     pub fn desired_engagement(self) -> Option<DesiredCombatEngagement> {
@@ -439,14 +443,20 @@ impl CombatRuntimeState {
 
     pub fn note_attack_attempt(&mut self, now: Instant) {
         self.last_attack_attempt_at = Some(now);
+        self.pending_feedback_since.get_or_insert(now);
     }
 
     pub fn last_attack_attempt_at(self) -> Option<Instant> {
         self.last_attack_attempt_at
     }
 
+    pub fn pending_feedback_since(self) -> Option<Instant> {
+        self.pending_feedback_since
+    }
+
     pub fn cancel_attack(&mut self) {
         self.issue_state = CombatIssueState::Idle;
+        self.pending_feedback_since = None;
         self.engagement
             .handle_feedback(&CombatFeedback::AttackDone {
                 error: WeenieError::ActionCancelled,
@@ -463,6 +473,7 @@ impl CombatRuntimeState {
             CombatFeedback::AttackDone {
                 error: WeenieError::None,
             } => {
+                self.pending_feedback_since = None;
                 self.issue_state = if self.engagement.desired().is_some() {
                     CombatIssueState::Ready
                 } else {
@@ -472,6 +483,7 @@ impl CombatRuntimeState {
             CombatFeedback::AttackDone { .. }
             | CombatFeedback::VictimNotification { .. }
             | CombatFeedback::KillerNotification { .. } => {
+                self.pending_feedback_since = None;
                 self.issue_state = CombatIssueState::Idle;
             }
             // PlayerKilled notifies when any nearby player is killed, so it may
@@ -689,7 +701,48 @@ fn player_is_dead(state: &GameState) -> bool {
 }
 
 pub(crate) fn advance_combat_drive(state: &mut GameState, now: Instant, result: &mut UpdateResult) {
+    if clear_stale_combat_engagement(state, now, result) {
+        return;
+    }
+
     run_combat_drive(state, now, state.data.combat_mode, false, result);
+}
+
+fn clear_stale_combat_engagement(
+    state: &mut GameState,
+    now: Instant,
+    result: &mut UpdateResult,
+) -> bool {
+    let Some(stalled_since) = state.data.combat_runtime.pending_feedback_since() else {
+        return false;
+    };
+
+    if now.duration_since(stalled_since) < STALE_COMBAT_FEEDBACK_TIMEOUT {
+        return false;
+    }
+
+    let Some(target_guid) = state.data.combat_runtime.desired_engagement_target() else {
+        state.data.combat_runtime.clear_engagement();
+        state.clear_combat_drive();
+        result.request_redraw(RedrawPriority::Immediate);
+        return true;
+    };
+
+    log::warn!(
+        "combat engagement timed out waiting for feedback for target 0x{:08X}; clearing attack state",
+        target_guid.0
+    );
+    state.data.combat_runtime.clear_engagement();
+    state.clear_combat_drive();
+    result.actions.push(AppAction::Log {
+        chat_tags: crate::types::ChatMessageTags::warning().combat(),
+        message: format!(
+            "Attack sequence stalled for 0x{:08X}; clearing combat state.",
+            target_guid.0
+        ),
+    });
+    result.request_redraw(RedrawPriority::Immediate);
+    true
 }
 
 pub(crate) fn run_combat_drive(
@@ -1017,6 +1070,22 @@ mod tests {
         });
 
         assert_eq!(state.attack_activity(CombatMode::Melee), None);
+    }
+
+    #[test]
+    fn attack_done_clears_pending_feedback_watchdog() {
+        let mut state = CombatRuntimeState::default();
+        let now = Instant::now();
+
+        state.begin_explicit_engagement(Guid(0x1234), CombatMode::Melee);
+        state.note_attack_attempt(now);
+        assert_eq!(state.pending_feedback_since(), Some(now));
+
+        state.handle_feedback(&CombatFeedback::AttackDone {
+            error: WeenieError::None,
+        });
+
+        assert_eq!(state.pending_feedback_since(), None);
     }
 
     #[test]
@@ -1478,7 +1547,7 @@ mod tests {
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
             coords: Vector3::new(0.0, 0.0, 0.0),
-            ..WorldPosition::default()
+            rotation: Quaternion::from_heading(180.0_f32.to_radians()),
         });
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
         state
@@ -1516,5 +1585,120 @@ mod tests {
             state.data.combat_runtime.issue_state,
             CombatIssueState::Ready
         );
+    }
+
+    #[test]
+    fn silent_ready_attack_loop_times_out_and_clears_engagement() {
+        let player_guid = Guid(0x50000003);
+        let target_guid = Guid(0x60000003);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::from_heading(180.0_f32.to_radians()),
+        });
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let now = Instant::now();
+        let mut seeded = UpdateResult::new();
+        state
+            .data
+            .combat_runtime
+            .begin_explicit_engagement(target_guid, CombatMode::Melee);
+        state.data.combat_runtime.arm_attack_drive();
+        run_combat_drive(&mut state, now, CombatMode::Melee, true, &mut seeded);
+        assert!(state.data.combat_runtime.pending_feedback_since().is_some());
+
+        let mut result = UpdateResult::new();
+        advance_combat_drive(
+            &mut state,
+            now + STALE_COMBAT_FEEDBACK_TIMEOUT + Duration::from_millis(1),
+            &mut result,
+        );
+
+        assert_eq!(state.data.combat_runtime.desired_engagement(), None);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Idle
+        );
+        assert!(!result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
+        assert!(result.actions.iter().any(|action| {
+            matches!(
+                action,
+                AppAction::Log { message, .. }
+                    if message.contains("clearing combat state")
+            )
+        }));
+    }
+
+    #[test]
+    fn silent_in_flight_attack_times_out_and_clears_engagement() {
+        let player_guid = Guid(0x50000004);
+        let target_guid = Guid(0x60000004);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Quaternion::from_heading(180.0_f32.to_radians()),
+        });
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let now = Instant::now();
+        let mut seeded = UpdateResult::new();
+        state
+            .data
+            .combat_runtime
+            .begin_explicit_engagement(target_guid, CombatMode::Melee);
+        state.data.combat_runtime.arm_attack_drive();
+        run_combat_drive(&mut state, now, CombatMode::Melee, true, &mut seeded);
+        assert!(state.data.combat_runtime.pending_feedback_since().is_some());
+        state
+            .data
+            .combat_runtime
+            .handle_feedback(&CombatFeedback::AttackCommenced);
+        assert!(state.data.combat_runtime.pending_feedback_since().is_some());
+
+        let mut result = UpdateResult::new();
+        let cleared = clear_stale_combat_engagement(
+            &mut state,
+            now + STALE_COMBAT_FEEDBACK_TIMEOUT + Duration::from_millis(1),
+            &mut result,
+        );
+        assert!(cleared);
+
+        assert_eq!(state.data.combat_runtime.desired_engagement(), None);
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Idle
+        );
+        assert!(result.actions.iter().any(|action| {
+            matches!(
+                action,
+                AppAction::Log { message, .. }
+                    if message.contains("clearing combat state")
+            )
+        }));
     }
 }

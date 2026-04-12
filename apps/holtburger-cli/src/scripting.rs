@@ -1,9 +1,11 @@
 use std::path::Path;
 use std::path::PathBuf;
+use std::collections::HashSet;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EquipMask, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
@@ -328,6 +330,18 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         self.data.player_spells.clone()
     }
 
+    fn in_spellbook(&self, spell_id: u32) -> bool {
+        self.data.player_spells.contains(&spell_id)
+    }
+
+    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32 {
+        from.heading_to(&to)
+    }
+
+    fn entity_exists(&self, guid: Guid) -> bool {
+        self.data.entities.contains_key(&guid)
+    }
+
     fn fellowship(&self) -> Option<ScriptPartyView> {
         let party = &self.data.party;
         let members = party
@@ -558,11 +572,24 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
         | ClientViewEvent::PlayerEnchantmentsUpdated { .. } => Some(ScriptEvent::SpellbookChanged),
         ClientViewEvent::FellowshipStateUpdated { .. }
         | ClientViewEvent::FellowshipActivity { .. } => Some(ScriptEvent::FellowshipChanged),
-        ClientViewEvent::ContainerOpened { .. } | ClientViewEvent::ContainerClosed { .. } => {
-            Some(ScriptEvent::InventoryChanged)
-        }
         _ => None,
     }
+}
+
+pub(crate) fn inventory_changed_event(
+    before: &HashSet<Guid>,
+    after: &HashSet<Guid>,
+) -> Option<ScriptEvent> {
+    if before == after {
+        return None;
+    }
+
+    let mut added: Vec<Guid> = after.difference(before).copied().collect();
+    let mut removed: Vec<Guid> = before.difference(after).copied().collect();
+    added.sort_unstable();
+    removed.sort_unstable();
+
+    Some(ScriptEvent::InventoryChanged { added, removed })
 }
 
 pub(crate) fn chat_tags_for_level(level: ScriptLogLevel) -> ChatMessageTags {
@@ -871,6 +898,63 @@ mod tests {
     }
 
     #[test]
+    fn spellbook_membership_projection_checks_membership() {
+        let mut data = GameData::new(Guid(0x5000_0009), "Player".to_string(), "World".to_string());
+        data.player_spells = vec![10, 20, 30];
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        assert!(script_view.in_spellbook(20));
+        assert!(!script_view.in_spellbook(99));
+    }
+
+    #[test]
+    fn heading_to_projection_uses_world_position_math() {
+        let data = GameData::new(Guid(0x5000_0008), "Player".to_string(), "World".to_string());
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        let from = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+        let to = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: holtburger_common::Vector3::new(0.0, 10.0, 0.0),
+            rotation: holtburger_common::Quaternion::identity(),
+        };
+
+        assert!((script_view.heading_to(from, to) - 90.0_f32.to_radians()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn entity_exists_projection_checks_known_entities() {
+        let player_guid = Guid(0x5000_0010);
+        let entity_guid = Guid(0x5000_0011);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.entities.insert(
+            entity_guid,
+            Entity::new(entity_guid, "Goblin".to_string(), WorldPosition::default()),
+        );
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        assert!(script_view.entity_exists(entity_guid));
+        assert!(!script_view.entity_exists(Guid(0xDEAD_BEEF)));
+    }
+    #[test]
     fn script_event_from_view_event_projects_weenie_errors() {
         let action_result_event = ClientViewEvent::ActionResult {
             source: holtburger_core::client::types::ActionResultSource::Wire,
@@ -896,6 +980,27 @@ mod tests {
             Some(ScriptEvent::WeenieError {
                 error: holtburger_protocol::errors::WeenieError::YouAreTooTiredToDoThat,
             })
+        ));
+    }
+
+    #[test]
+    fn inventory_changed_event_projects_added_and_removed_items() {
+        let before = std::collections::HashSet::from([
+            Guid(0x5000_0001),
+            Guid(0x5000_0003),
+            Guid(0x5000_0002),
+        ]);
+        let after = std::collections::HashSet::from([
+            Guid(0x5000_0002),
+            Guid(0x5000_0004),
+        ]);
+
+        assert!(matches!(
+            inventory_changed_event(&before, &after),
+            Some(ScriptEvent::InventoryChanged {
+                added,
+                removed,
+            }) if added == vec![Guid(0x5000_0004)] && removed == vec![Guid(0x5000_0001), Guid(0x5000_0003)]
         ));
     }
 

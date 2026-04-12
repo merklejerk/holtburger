@@ -281,6 +281,7 @@ impl GameState {
         server_time: Option<(f64, Instant)>,
         event: &ClientViewEvent,
         before_workflow: &WorkflowProjection,
+        inventory_event: Option<ScriptEvent>,
         result: &mut UpdateResult,
     ) {
         let host_was_running = self.script_host_is_running();
@@ -309,6 +310,10 @@ impl GameState {
                     ScriptEvent::Workflow(workflow_event),
                     result,
                 );
+            }
+
+            if let Some(inventory_event) = inventory_event {
+                dispatch_script_event_to_host(&view, host, inventory_event, result);
             }
 
             if !should_run_after {

@@ -48,6 +48,9 @@ pub trait ScriptClientView {
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
     fn equipment(&self) -> Vec<ScriptEquipmentSlotView>;
     fn spellbook(&self) -> Vec<u32>;
+    fn in_spellbook(&self, spell_id: u32) -> bool;
+    fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32;
+    fn entity_exists(&self, guid: Guid) -> bool;
     fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
@@ -365,7 +368,10 @@ pub enum ScriptEvent {
     EntityUpdated {
         guid: Guid,
     },
-    InventoryChanged,
+    InventoryChanged {
+        added: Vec<Guid>,
+        removed: Vec<Guid>,
+    },
     SpellbookChanged,
     FellowshipChanged,
 }

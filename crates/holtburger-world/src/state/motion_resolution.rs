@@ -187,7 +187,10 @@ impl WorldState {
         guid: Guid,
         snapshot: EntityMotionSnapshot,
     ) -> Option<SolveProjectionBasis> {
-        if snapshot.indicates_death_motion() {
+        if snapshot
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
+        {
             return None;
         }
 

@@ -83,7 +83,7 @@ The primary engine orchestrator. It ties networking (`session`) and authority (`
 - **Provides**: Handshake coordination, primitive movement execution and prediction, protocol-to-world orchestration, optional reusable controllers, and `ClientViewEvent` streams for applications to consume.
 
 ### 8. The Frontend: [`holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
-The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, owns frontend-specific control policy such as when to drive optional navigation or combat helpers, and currently keeps mirrored read caches for presentation and app-thread decisions. It also retains frontend-owned lookup caches derived from content or runtime state. Those caches are frontend-owned views only; they must not become a second runtime body authority.
+The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, owns frontend-specific control policy such as when to drive optional navigation or combat helpers, and currently keeps mirrored read caches for presentation and app-thread decisions. The core runtime runs separately and feeds the frontend through events and commands; the TUI owns the local projection, not the authority. It also retains frontend-owned lookup caches derived from content or runtime state. Those caches are frontend-owned views only; they must not become a second runtime body authority.
 - **Provides**: Real-time ratatui screens, input mapping, mirrored read caches and modal state, frontend orchestration around shared core controllers, and frontend-owned content queries.
 
 ---

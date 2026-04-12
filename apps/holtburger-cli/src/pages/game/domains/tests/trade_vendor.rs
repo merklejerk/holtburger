@@ -91,3 +91,28 @@ fn oversize_vendor_amounts_are_rejected() {
         Some(AppAction::Log { message, .. }) if message.contains("too large")
     ));
 }
+
+#[test]
+fn clear_vendor_clears_trade_panel_vendor_state() {
+    let player_guid = Guid(0x50000001);
+    let vendor_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+    state.view.vendor = Some(VendorState {
+        vendor_guid,
+        items: vec![],
+        buy_multiplier: 1.0,
+        sell_multiplier: 1.0,
+        merchandise_item_types: 0,
+        alternate_currency_wcid: 0,
+        alternate_currency_amount: 0,
+        alternate_currency_name: String::new(),
+    });
+
+    let result = state
+        .handle_action(AppAction::ClearVendor)
+        .expect("clear vendor should be handled by the trade/vendor reducer");
+
+    assert!(state.view.vendor.is_none());
+    assert!(result.redraw_requested());
+}

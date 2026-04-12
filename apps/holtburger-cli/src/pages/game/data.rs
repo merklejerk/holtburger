@@ -471,11 +471,9 @@ impl GameData {
         })
     }
 
-    pub fn runtime_heading(&self) -> f32 {
+    pub fn runtime_heading(&self) -> Option<f32> {
         self.runtime_player_position()
-            .unwrap_or_default()
-            .rotation
-            .to_heading()
+            .map(|position| position.rotation.to_heading())
     }
 
     pub fn track_container_opened(&mut self, guid: Guid) {
@@ -499,6 +497,14 @@ impl GameData {
 
     pub fn track_container_closed(&mut self, guid: Guid) {
         self.open_containers.remove(&guid);
+    }
+
+    pub fn current_open_container(&self) -> Option<Guid> {
+        self.opened_container_history
+            .iter()
+            .rev()
+            .copied()
+            .find(|guid| self.open_containers.contains(guid))
     }
 
     pub fn has_opened_container_before(&self, guid: Guid) -> bool {

@@ -92,13 +92,17 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
         AppAction::ExitTrade => {
             result.commands.push(ClientCommand::CloseTrade);
         }
-        _ => unreachable!("unsupported trade/vendor action"),
+        AppAction::ClearVendor => {
+            state.view.vendor = None;
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        _ => {}
     }
 
     result
 }
 
-pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -> UpdateResult {
+pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
     let mut result = UpdateResult::new();
 
     match event {
@@ -107,7 +111,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
                 return result;
             }
             let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
-            state.view.vendor = vendor;
+            state.view.vendor = vendor.clone();
             if let Some(v_guid) = vendor_guid
                 && let Some((last_time, target_guid)) = state.runtime.last_trade_initiation
                 && target_guid == v_guid
@@ -130,7 +134,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: ClientViewEvent) -
         ClientViewEvent::TradeStateUpdated { trade } => {
             let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
             state.view.vendor = None;
-            state.data.trade = trade;
+            state.data.trade = trade.clone();
             if let Some(p_guid) = partner_guid
                 && let Some((last_time, target_guid)) = state.runtime.last_trade_initiation
                 && target_guid == p_guid

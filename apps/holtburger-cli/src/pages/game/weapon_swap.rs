@@ -1,5 +1,4 @@
 use holtburger_common::Guid;
-use holtburger_core::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
@@ -40,17 +39,12 @@ pub(crate) enum WeaponSwapInput {
     },
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum WeaponSwapEffect {
-    Command(ClientCommand),
-}
-
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WeaponSwapController {
+pub(crate) struct WeaponSwapState {
     pending: Option<PendingWeaponSwap>,
 }
 
-impl WeaponSwapController {
+impl WeaponSwapState {
     pub(crate) fn is_active(&self) -> bool {
         self.pending.is_some()
     }
@@ -79,14 +73,8 @@ impl WeaponSwapController {
                 .unwrap_or(current_mode)
         }
     }
-}
-
-impl Controller for WeaponSwapController {
-    type Input = WeaponSwapInput;
-    type Effect = WeaponSwapEffect;
-
-    fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
-        match *input {
+    pub(crate) fn advance(&mut self, input: WeaponSwapInput) -> Vec<ClientCommand> {
+        match input {
             WeaponSwapInput::Start {
                 now,
                 item_guid,
@@ -96,12 +84,10 @@ impl Controller for WeaponSwapController {
             } => {
                 let Some(item_mask) = item_mask else {
                     self.pending = None;
-                    return ControllerUpdate::new(ControllerStatus::Completed).with_effect(
-                        WeaponSwapEffect::Command(ClientCommand::GetAndWield {
-                            item: item_guid,
-                            slot,
-                        }),
-                    );
+                    return vec![ClientCommand::GetAndWield {
+                        item: item_guid,
+                        slot,
+                    }];
                 };
 
                 let fallback_mode = self.effective_fallback_mode(current_mode);
@@ -123,31 +109,25 @@ impl Controller for WeaponSwapController {
                     });
 
                     return match stage {
-                        PendingWeaponSwapStage::AwaitPeace => ControllerUpdate::new(
-                            ControllerStatus::Active,
-                        )
-                        .with_effect(WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                            CombatMode::NonCombat,
-                        ))),
-                        PendingWeaponSwapStage::AwaitEquip => ControllerUpdate::new(
-                            ControllerStatus::Active,
-                        )
-                        .with_effect(WeaponSwapEffect::Command(ClientCommand::GetAndWield {
-                            item: item_guid,
-                            slot,
-                        })),
+                        PendingWeaponSwapStage::AwaitPeace => {
+                            vec![ClientCommand::SetCombatMode(CombatMode::NonCombat)]
+                        }
+                        PendingWeaponSwapStage::AwaitEquip => {
+                            vec![ClientCommand::GetAndWield {
+                                item: item_guid,
+                                slot,
+                            }]
+                        }
                     };
                 }
 
                 if current_mode == CombatMode::NonCombat
                     || !should_stage_weapon_swap(current_mode, item_mask, slot)
                 {
-                    return ControllerUpdate::new(ControllerStatus::Completed).with_effect(
-                        WeaponSwapEffect::Command(ClientCommand::GetAndWield {
-                            item: item_guid,
-                            slot,
-                        }),
-                    );
+                    return vec![ClientCommand::GetAndWield {
+                        item: item_guid,
+                        slot,
+                    }];
                 }
 
                 self.pending = Some(PendingWeaponSwap {
@@ -159,9 +139,7 @@ impl Controller for WeaponSwapController {
                     stage: PendingWeaponSwapStage::AwaitPeace,
                 });
 
-                ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                    WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::NonCombat)),
-                )
+                vec![ClientCommand::SetCombatMode(CombatMode::NonCombat)]
             }
             WeaponSwapInput::Tick {
                 now,
@@ -170,55 +148,49 @@ impl Controller for WeaponSwapController {
                 suggested_mode,
             } => {
                 let Some(mut pending) = self.pending else {
-                    return ControllerUpdate::new(ControllerStatus::Idle);
+                    return Vec::new();
                 };
 
                 if now.duration_since(pending.started_at) >= WEAPON_SWAP_TIMEOUT {
                     self.pending = None;
 
-                    let mut update = ControllerUpdate::new(ControllerStatus::Completed);
                     let resume_mode =
                         Self::resume_mode_after_timeout(pending.fallback_mode, suggested_mode);
                     if combat_mode == CombatMode::NonCombat && resume_mode != CombatMode::NonCombat
                     {
-                        update.push_effect(WeaponSwapEffect::Command(
-                            ClientCommand::SetCombatMode(resume_mode),
-                        ));
+                        return vec![ClientCommand::SetCombatMode(resume_mode)];
                     }
-                    return update;
+
+                    return Vec::new();
                 }
 
                 match pending.stage {
                     PendingWeaponSwapStage::AwaitPeace => {
                         if combat_mode != CombatMode::NonCombat {
-                            return ControllerUpdate::new(ControllerStatus::Active);
+                            return Vec::new();
                         }
 
                         pending.stage = PendingWeaponSwapStage::AwaitEquip;
                         self.pending = Some(pending);
 
-                        ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                            WeaponSwapEffect::Command(ClientCommand::GetAndWield {
-                                item: pending.item_guid,
-                                slot: pending.slot,
-                            }),
-                        )
+                        vec![ClientCommand::GetAndWield {
+                            item: pending.item_guid,
+                            slot: pending.slot,
+                        }]
                     }
                     PendingWeaponSwapStage::AwaitEquip => {
                         if !equipped_mask.intersects(pending.target_mask) {
                             self.pending = Some(pending);
-                            return ControllerUpdate::new(ControllerStatus::Active);
+                            return Vec::new();
                         }
 
                         self.pending = None;
 
-                        let mut update = ControllerUpdate::new(ControllerStatus::Completed);
                         if suggested_mode != CombatMode::NonCombat {
-                            update.push_effect(WeaponSwapEffect::Command(
-                                ClientCommand::SetCombatMode(suggested_mode),
-                            ));
+                            vec![ClientCommand::SetCombatMode(suggested_mode)]
+                        } else {
+                            Vec::new()
                         }
-                        update
                     }
                 }
             }
@@ -265,10 +237,10 @@ mod tests {
 
     #[test]
     fn start_requests_peace_mode_and_tracks_pending_swap() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
         let now = Instant::now();
 
-        let update = controller.handle(&WeaponSwapInput::Start {
+        let commands = weapon_swap.advance(WeaponSwapInput::Start {
             now,
             item_guid: Guid(0x60000001),
             slot: None,
@@ -276,23 +248,20 @@ mod tests {
             item_mask: Some(EquipMask::MELEE_WEAPON),
         });
 
-        assert_eq!(update.status, ControllerStatus::Active);
-        assert!(controller.is_active());
+        assert!(weapon_swap.is_active());
         assert!(matches!(
-            update.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                CombatMode::NonCombat
-            ))]
+            commands.as_slice(),
+            [ClientCommand::SetCombatMode(CombatMode::NonCombat)]
         ));
     }
 
     #[test]
     fn peace_then_equip_reenters_suggested_mode() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
         let now = Instant::now();
         let item_guid = Guid(0x60000001);
 
-        let _ = controller.handle(&WeaponSwapInput::Start {
+        let _ = weapon_swap.advance(WeaponSwapInput::Start {
             now,
             item_guid,
             slot: None,
@@ -300,44 +269,40 @@ mod tests {
             item_mask: Some(EquipMask::MELEE_WEAPON),
         });
 
-        let equip = controller.handle(&WeaponSwapInput::Tick {
+        let equip = weapon_swap.advance(WeaponSwapInput::Tick {
             now,
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::NONE,
             suggested_mode: CombatMode::Melee,
         });
 
-        assert_eq!(equip.status, ControllerStatus::Active);
+        assert!(weapon_swap.is_active());
         assert!(matches!(
-            equip.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::GetAndWield { item, slot: None })]
+            equip.as_slice(),
+            [ClientCommand::GetAndWield { item, slot: None }]
                 if *item == item_guid
         ));
-        assert!(controller.is_active());
 
-        let resume = controller.handle(&WeaponSwapInput::Tick {
+        let resume = weapon_swap.advance(WeaponSwapInput::Tick {
             now,
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::MELEE_WEAPON,
             suggested_mode: CombatMode::Melee,
         });
 
-        assert_eq!(resume.status, ControllerStatus::Completed);
+        assert!(!weapon_swap.is_active());
         assert!(matches!(
-            resume.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                CombatMode::Melee
-            ))]
+            resume.as_slice(),
+            [ClientCommand::SetCombatMode(CombatMode::Melee)]
         ));
-        assert!(!controller.is_active());
     }
 
     #[test]
     fn timeout_restores_fallback_mode_when_stuck_in_peace() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
         let started_at = Instant::now();
 
-        let _ = controller.handle(&WeaponSwapInput::Start {
+        let _ = weapon_swap.advance(WeaponSwapInput::Start {
             now: started_at,
             item_guid: Guid(0x60000001),
             slot: None,
@@ -345,29 +310,26 @@ mod tests {
             item_mask: Some(EquipMask::MISSILE_WEAPON),
         });
 
-        let timeout = controller.handle(&WeaponSwapInput::Tick {
+        let timeout = weapon_swap.advance(WeaponSwapInput::Tick {
             now: started_at + Duration::from_secs(4),
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::NONE,
             suggested_mode: CombatMode::NonCombat,
         });
 
-        assert_eq!(timeout.status, ControllerStatus::Completed);
+        assert!(!weapon_swap.is_active());
         assert!(matches!(
-            timeout.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                CombatMode::Missile
-            ))]
+            timeout.as_slice(),
+            [ClientCommand::SetCombatMode(CombatMode::Missile)]
         ));
-        assert!(!controller.is_active());
     }
 
     #[test]
     fn timeout_prefers_newly_suggested_mode_over_fallback_mode() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
         let started_at = Instant::now();
 
-        let _ = controller.handle(&WeaponSwapInput::Start {
+        let _ = weapon_swap.advance(WeaponSwapInput::Start {
             now: started_at,
             item_guid: Guid(0x60000001),
             slot: None,
@@ -375,28 +337,25 @@ mod tests {
             item_mask: Some(EquipMask::CASTER),
         });
 
-        let timeout = controller.handle(&WeaponSwapInput::Tick {
+        let timeout = weapon_swap.advance(WeaponSwapInput::Tick {
             now: started_at + Duration::from_secs(4),
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::NONE,
             suggested_mode: CombatMode::Magic,
         });
 
-        assert_eq!(timeout.status, ControllerStatus::Completed);
+        assert!(!weapon_swap.is_active());
         assert!(matches!(
-            timeout.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                CombatMode::Magic
-            ))]
+            timeout.as_slice(),
+            [ClientCommand::SetCombatMode(CombatMode::Magic)]
         ));
-        assert!(!controller.is_active());
     }
 
     #[test]
     fn start_outside_combat_directly_equips_without_pending_swap() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
 
-        let update = controller.handle(&WeaponSwapInput::Start {
+        let commands = weapon_swap.advance(WeaponSwapInput::Start {
             now: Instant::now(),
             item_guid: Guid(0x60000001),
             slot: None,
@@ -404,20 +363,19 @@ mod tests {
             item_mask: Some(EquipMask::MELEE_WEAPON),
         });
 
-        assert_eq!(update.status, ControllerStatus::Completed);
+        assert!(!weapon_swap.is_active());
         assert!(matches!(
-            update.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::GetAndWield { item, slot: None })]
+            commands.as_slice(),
+            [ClientCommand::GetAndWield { item, slot: None }]
                 if *item == Guid(0x60000001)
         ));
-        assert!(!controller.is_active());
     }
 
     #[test]
     fn non_weapon_items_directly_equip_without_pending_swap() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
 
-        let update = controller.handle(&WeaponSwapInput::Start {
+        let commands = weapon_swap.advance(WeaponSwapInput::Start {
             now: Instant::now(),
             item_guid: Guid(0x60000001),
             slot: None,
@@ -425,22 +383,21 @@ mod tests {
             item_mask: Some(EquipMask::HEAD_WEAR),
         });
 
-        assert_eq!(update.status, ControllerStatus::Completed);
+        assert!(!weapon_swap.is_active());
         assert!(matches!(
-            update.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::GetAndWield { item, slot: None })]
+            commands.as_slice(),
+            [ClientCommand::GetAndWield { item, slot: None }]
                 if *item == Guid(0x60000001)
         ));
-        assert!(!controller.is_active());
     }
 
     #[test]
     fn replacement_while_waiting_for_peace_retargets_pending_swap() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
         let now = Instant::now();
         let replacement_guid = Guid(0x60000002);
 
-        let _ = controller.handle(&WeaponSwapInput::Start {
+        let _ = weapon_swap.advance(WeaponSwapInput::Start {
             now,
             item_guid: Guid(0x60000001),
             slot: None,
@@ -448,7 +405,7 @@ mod tests {
             item_mask: Some(EquipMask::MELEE_WEAPON),
         });
 
-        let replacement = controller.handle(&WeaponSwapInput::Start {
+        let replacement = weapon_swap.advance(WeaponSwapInput::Start {
             now,
             item_guid: replacement_guid,
             slot: None,
@@ -456,15 +413,13 @@ mod tests {
             item_mask: Some(EquipMask::MISSILE_WEAPON),
         });
 
-        assert_eq!(replacement.status, ControllerStatus::Active);
+        assert!(weapon_swap.is_active());
         assert!(matches!(
-            replacement.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                CombatMode::NonCombat
-            ))]
+            replacement.as_slice(),
+            [ClientCommand::SetCombatMode(CombatMode::NonCombat)]
         ));
 
-        let equip = controller.handle(&WeaponSwapInput::Tick {
+        let equip = weapon_swap.advance(WeaponSwapInput::Tick {
             now,
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::NONE,
@@ -472,33 +427,33 @@ mod tests {
         });
 
         assert!(matches!(
-            equip.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::GetAndWield { item, slot: None })]
+            equip.as_slice(),
+            [ClientCommand::GetAndWield { item, slot: None }]
                 if *item == replacement_guid
         ));
     }
 
     #[test]
     fn replacement_while_waiting_for_equip_reissues_new_target() {
-        let mut controller = WeaponSwapController::default();
+        let mut weapon_swap = WeaponSwapState::default();
         let now = Instant::now();
         let replacement_guid = Guid(0x60000002);
 
-        let _ = controller.handle(&WeaponSwapInput::Start {
+        let _ = weapon_swap.advance(WeaponSwapInput::Start {
             now,
             item_guid: Guid(0x60000001),
             slot: None,
             current_mode: CombatMode::Melee,
             item_mask: Some(EquipMask::MELEE_WEAPON),
         });
-        let _ = controller.handle(&WeaponSwapInput::Tick {
+        let _ = weapon_swap.advance(WeaponSwapInput::Tick {
             now,
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::NONE,
             suggested_mode: CombatMode::Melee,
         });
 
-        let replacement = controller.handle(&WeaponSwapInput::Start {
+        let replacement = weapon_swap.advance(WeaponSwapInput::Start {
             now,
             item_guid: replacement_guid,
             slot: None,
@@ -506,14 +461,14 @@ mod tests {
             item_mask: Some(EquipMask::CASTER),
         });
 
-        assert_eq!(replacement.status, ControllerStatus::Active);
+        assert!(weapon_swap.is_active());
         assert!(matches!(
-            replacement.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::GetAndWield { item, slot: None })]
+            replacement.as_slice(),
+            [ClientCommand::GetAndWield { item, slot: None }]
                 if *item == replacement_guid
         ));
 
-        let finish = controller.handle(&WeaponSwapInput::Tick {
+        let finish = weapon_swap.advance(WeaponSwapInput::Tick {
             now,
             combat_mode: CombatMode::NonCombat,
             equipped_mask: EquipMask::CASTER,
@@ -521,11 +476,9 @@ mod tests {
         });
 
         assert!(matches!(
-            finish.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                CombatMode::Magic
-            ))]
+            finish.as_slice(),
+            [ClientCommand::SetCombatMode(CombatMode::Magic)]
         ));
-        assert!(!controller.is_active());
+        assert!(!weapon_swap.is_active());
     }
 }

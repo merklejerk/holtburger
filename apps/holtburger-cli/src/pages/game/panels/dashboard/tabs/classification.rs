@@ -3,6 +3,7 @@ use holtburger_common::properties::{
     WorldObjectProperties, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::object::messages::PublicWeenieDescription;
+use holtburger_scripting::ScriptEntityKind;
 use holtburger_world::entity::Entity;
 use holtburger_world::vendor::CoreVendorItem;
 use ratatui::style::Color;
@@ -85,6 +86,33 @@ impl EntityClass {
             EntityClass::HealingKit => "Healing Kit",
             EntityClass::ManaStone => "Mana Stone",
             EntityClass::Unknown => "?",
+        }
+    }
+
+    pub fn kind(&self) -> ScriptEntityKind {
+        match self {
+            EntityClass::Player => ScriptEntityKind::Player,
+            EntityClass::Npc => ScriptEntityKind::Npc,
+            EntityClass::Vendor => ScriptEntityKind::Vendor,
+            EntityClass::Monster => ScriptEntityKind::Monster,
+            EntityClass::Weapon => ScriptEntityKind::Weapon,
+            EntityClass::Wand => ScriptEntityKind::Wand,
+            EntityClass::Apparel => ScriptEntityKind::Apparel,
+            EntityClass::Container => ScriptEntityKind::Container,
+            EntityClass::Item => ScriptEntityKind::Item,
+            EntityClass::Consumable => ScriptEntityKind::Consumable,
+            EntityClass::Money => ScriptEntityKind::Money,
+            EntityClass::Key => ScriptEntityKind::Key,
+            EntityClass::Writable => ScriptEntityKind::Writable,
+            EntityClass::HealingKit => ScriptEntityKind::HealingKit,
+            EntityClass::ManaStone => ScriptEntityKind::ManaStone,
+            EntityClass::Door => ScriptEntityKind::Door,
+            EntityClass::Portal => ScriptEntityKind::Portal,
+            EntityClass::LifeStone => ScriptEntityKind::LifeStone,
+            EntityClass::Chest => ScriptEntityKind::Chest,
+            EntityClass::Tool => ScriptEntityKind::Tool,
+            EntityClass::StaticObject => ScriptEntityKind::StaticObject,
+            EntityClass::Unknown => ScriptEntityKind::Unknown,
         }
     }
 
@@ -266,4 +294,21 @@ fn classify_world_object<T: WorldObjectExt>(
     object: &T,
 ) -> EntityClass {
     classify_raw(flags, object.item_type())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EntityClass;
+    use holtburger_scripting::ScriptEntityKind;
+
+    #[test]
+    fn entity_class_kind_returns_stable_machine_readable_ids() {
+        assert_eq!(EntityClass::Player.kind(), ScriptEntityKind::Player);
+        assert_eq!(EntityClass::Monster.kind(), ScriptEntityKind::Monster);
+        assert_eq!(
+            EntityClass::StaticObject.kind(),
+            ScriptEntityKind::StaticObject
+        );
+        assert_eq!(EntityClass::HealingKit.kind(), ScriptEntityKind::HealingKit);
+    }
 }

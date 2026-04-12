@@ -1,7 +1,6 @@
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use holtburger_common::Guid;
 use holtburger_content::ContentRepository;
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
@@ -59,6 +58,16 @@ pub struct RenderContext<'a> {
     pub server_time: Option<(f64, Instant)>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EventContext {
+    pub server_time: Option<(f64, Instant)>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TickContext {
+    pub server_time: Option<(f64, Instant)>,
+}
+
 impl AppState {
     pub const DEFAULT_DISCONNECT_MESSAGE: &str = "Lost connection to server.";
 
@@ -86,94 +95,6 @@ impl AppState {
         match &mut self.page {
             Page::Game(game) => Some(game),
             _ => None,
-        }
-    }
-
-    pub fn display_client_info(&mut self) {
-        let mut logs = Vec::new();
-        logs.push((
-            ChatMessageTags::system(),
-            "═══ CLIENT DEBUG INFO ═══".to_string(),
-        ));
-        logs.push((
-            ChatMessageTags::system(),
-            format!("Account: {}", self.account_name),
-        ));
-
-        if let Some(game) = self.game_option() {
-            if let Some(name) = &game.data.character_name {
-                logs.push((ChatMessageTags::system(), format!("Character: {}", name)));
-            }
-            if let Some(guid) = game.data.player_guid {
-                logs.push((ChatMessageTags::system(), format!("GUID: {:#010X}", guid.0)));
-            }
-        }
-
-        let state_str = match &self.client_state {
-            ClientState::Connected => "Connected",
-            ClientState::CharacterSelection(_) => "Character Dashboard",
-            ClientState::EnteringWorld => "Entering World",
-            ClientState::InWorld => "In World",
-            ClientState::Disconnected => "Disconnected",
-        };
-        logs.push((ChatMessageTags::system(), format!("State: {}", state_str)));
-
-        if let Some(game) = self.game_option() {
-            if let Some(pos) = game.data.runtime_player_position() {
-                logs.push((ChatMessageTags::system(), "".to_string()));
-                logs.push((ChatMessageTags::system(), "═══ POSITION ═══".to_string()));
-                logs.push((
-                    ChatMessageTags::system(),
-                    format!("Landblock: {:#010X}", pos.landblock_id),
-                ));
-                logs.push((
-                    ChatMessageTags::system(),
-                    format!(
-                        "Euclidean: ({:.2}, {:.2}, {:.2})",
-                        pos.coords.x, pos.coords.y, pos.coords.z
-                    ),
-                ));
-                logs.push((
-                    ChatMessageTags::system(),
-                    format!("Geographic: {}", pos.to_world_coords()),
-                ));
-            }
-
-            // Entity counts
-            logs.push((ChatMessageTags::system(), "".to_string()));
-            logs.push((ChatMessageTags::system(), "═══ ENTITIES ═══".to_string()));
-            let world_entities = game
-                .data
-                .entities
-                .values()
-                .filter(|e| e.position.landblock_id != Guid::NULL)
-                .count();
-            let inventory_items = game
-                .data
-                .entities
-                .values()
-                .filter(|e| e.position.landblock_id == Guid::NULL)
-                .count();
-            logs.push((
-                ChatMessageTags::system(),
-                format!("World Entities: {}", world_entities),
-            ));
-            logs.push((
-                ChatMessageTags::system(),
-                format!("Inventory Items: {}", inventory_items),
-            ));
-            logs.push((
-                ChatMessageTags::system(),
-                format!("Total Entities: {}", game.data.entities.len()),
-            ));
-        }
-
-        logs.push((
-            ChatMessageTags::system(),
-            "══════════════════════════".to_string(),
-        ));
-        for (chat_tags, msg) in logs {
-            self.log(chat_tags, msg);
         }
     }
 

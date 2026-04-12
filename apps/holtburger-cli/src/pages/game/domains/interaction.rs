@@ -3,18 +3,11 @@ use super::*;
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
-    match action {
-        AppAction::InternalAction {
-            action: AppInternalAction::ClearActiveInteraction,
-        } => {
-            set_active_interaction(state, None, &mut result);
-        }
-        AppAction::InternalAction {
-            action: AppInternalAction::SetActiveInteraction { interaction },
-        } => {
-            set_active_interaction(state, interaction, &mut result);
-        }
-        _ => {}
+    if let AppAction::Notification {
+        notification: AppNotification::ActiveInteractionChanged { interaction },
+    } = action
+    {
+        set_active_interaction(state, interaction, &mut result);
     }
 
     result

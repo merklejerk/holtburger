@@ -28,8 +28,10 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     .retain(|queued_guid| *queued_guid != guid);
 
                 if session.queued_items.is_empty() {
-                    result.actions.push(AppAction::InternalAction {
-                        action: AppInternalAction::ClearActiveInteraction,
+                    result.actions.push(AppAction::Notification {
+                        notification: AppNotification::ActiveInteractionChanged {
+                            interaction: None,
+                        },
                     });
                     state.view.salvaging = None;
                 }
@@ -46,8 +48,8 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     items: item_guids,
                 });
             }
-            result.actions.push(AppAction::InternalAction {
-                action: AppInternalAction::ClearActiveInteraction,
+            result.actions.push(AppAction::Notification {
+                notification: AppNotification::ActiveInteractionChanged { interaction: None },
             });
             state.view.salvaging = None;
             result.request_redraw(RedrawPriority::Immediate);
@@ -95,8 +97,8 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 container,
                 placement: 0,
             });
-            result.actions.push(AppAction::InternalAction {
-                action: AppInternalAction::ClearActiveInteraction,
+            result.actions.push(AppAction::Notification {
+                notification: AppNotification::ActiveInteractionChanged { interaction: None },
             });
         }
         AppAction::StackItems {
@@ -283,8 +285,8 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
         state.view.active_interaction,
         Some(Interaction::Targeting { target_guid }) if target_guid == guid
     ) {
-        result.actions.push(AppAction::InternalAction {
-            action: AppInternalAction::ClearActiveInteraction,
+        result.actions.push(AppAction::Notification {
+            notification: AppNotification::ActiveInteractionChanged { interaction: None },
         });
     }
     if let Some(session) = state.view.salvaging.as_mut() {
@@ -294,8 +296,8 @@ pub(super) fn handle_entity_removed(state: &mut GameState, guid: Guid) -> Update
         if session.ust_guid == guid {
             state.view.salvaging = None;
             if state.view.active_interaction == Some(Interaction::Salvaging) {
-                result.actions.push(AppAction::InternalAction {
-                    action: AppInternalAction::ClearActiveInteraction,
+                result.actions.push(AppAction::Notification {
+                    notification: AppNotification::ActiveInteractionChanged { interaction: None },
                 });
             }
         }

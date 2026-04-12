@@ -27,10 +27,11 @@ use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
 use crate::state::{EventContext, TickContext};
 use crate::types::{
-    AppAction, AppInternalAction, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
+    AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
     FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
+use std::collections::HashSet;
 
 #[path = "domains/mod.rs"]
 pub(super) mod domains;
@@ -51,7 +52,10 @@ pub struct GameState {
 pub(crate) struct GameScriptState {
     pub(crate) pending_source: Option<DeferredScriptSource>,
     pub(crate) host: Option<ScriptHost>,
+    pub(crate) tick_accumulator: Duration,
 }
+
+pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);
 
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
@@ -119,20 +123,28 @@ impl GameState {
         ctx: &EventContext,
     ) -> UpdateResult {
         let workflow_before = self.script_workflow_projection();
+        let inventory_before = self.data.inventory.clone();
         let mut result = domains::reduce_view_event(self, &event);
+        if let Some(notification) =
+            inventory_changed_notification(&inventory_before, &self.data.inventory)
+        {
+            result
+                .actions
+                .push(AppAction::Notification { notification });
+        }
         self.sync_script_host_for_view_event(
             ctx.server_time,
             &event,
             &workflow_before,
             &mut result,
         );
-        self.drain_internal_actions(&mut result);
+        self.drain_notifications(ctx.server_time, &mut result);
         result
     }
 
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = domains::reduce_action(self, action)?;
-        self.drain_internal_actions(&mut result);
+        self.drain_notifications(None, &mut result);
         Some(result)
     }
 
@@ -143,7 +155,7 @@ impl GameState {
     pub fn handle_tick_with_context(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         let mut result = domains::reduce_tick(self, elapsed);
         self.sync_script_host_for_tick(ctx.server_time, elapsed, &mut result);
-        self.drain_internal_actions(&mut result);
+        self.drain_notifications(ctx.server_time, &mut result);
         result
     }
 
@@ -171,45 +183,91 @@ impl GameState {
         )
     }
 
-    fn drain_internal_actions(&mut self, result: &mut UpdateResult) {
-        let mut pending_internal_actions = std::collections::VecDeque::new();
+    fn drain_notifications(
+        &mut self,
+        server_time: Option<(f64, Instant)>,
+        result: &mut UpdateResult,
+    ) {
+        let mut pending_notifications = std::collections::VecDeque::new();
         let mut retained_actions = Vec::new();
 
         for action in result.actions.drain(..) {
             match action {
-                AppAction::InternalAction { action } => pending_internal_actions.push_back(action),
+                AppAction::Notification { notification } => {
+                    pending_notifications.push_back(notification)
+                }
                 other => retained_actions.push(other),
             }
         }
 
-        while let Some(internal_action) = pending_internal_actions.pop_front() {
-            if let Some(mut internal_result) = domains::reduce_action(
+        while let Some(notification) = pending_notifications.pop_front() {
+            let mut notification_result = domains::reduce_action(
                 self,
-                AppAction::InternalAction {
-                    action: internal_action,
+                AppAction::Notification {
+                    notification: notification.clone(),
                 },
-            ) {
-                let internal_redraw = internal_result.effective_redraw_priority();
-                result.commands.extend(internal_result.commands);
-                result.request_redraw(internal_redraw);
+            )
+            .unwrap_or_default();
 
-                let mut nested_internal_actions = Vec::new();
-                for action in internal_result.actions.drain(..) {
+            self.sync_script_host_for_notification(server_time, &notification, result);
+
+            {
+                let notification_redraw = notification_result.effective_redraw_priority();
+                result.commands.extend(notification_result.commands);
+                result.request_redraw(notification_redraw);
+
+                let mut nested_notifications = Vec::new();
+                for action in notification_result.actions.drain(..) {
                     match action {
-                        AppAction::InternalAction { action } => {
-                            nested_internal_actions.push(action)
+                        AppAction::Notification { notification } => {
+                            nested_notifications.push(notification)
                         }
                         other => retained_actions.push(other),
                     }
                 }
 
-                for action in nested_internal_actions.into_iter().rev() {
-                    pending_internal_actions.push_front(action);
+                for action in nested_notifications.into_iter().rev() {
+                    pending_notifications.push_front(action);
                 }
             }
         }
 
         result.actions = retained_actions;
+    }
+}
+
+fn inventory_changed_notification(
+    before: &HashSet<Guid>,
+    after: &HashSet<Guid>,
+) -> Option<AppNotification> {
+    if before == after {
+        return None;
+    }
+
+    let mut removed: Vec<Guid> = before.difference(after).copied().collect();
+    let mut added: Vec<Guid> = after.difference(before).copied().collect();
+    removed.sort_unstable();
+    added.sort_unstable();
+
+    Some(AppNotification::InventoryChanged { removed, added })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inventory_changed_notification_projects_added_and_removed_items() {
+        let before = HashSet::from([Guid(0x5000_0001), Guid(0x5000_0003), Guid(0x5000_0002)]);
+        let after = HashSet::from([Guid(0x5000_0002), Guid(0x5000_0004)]);
+
+        assert!(matches!(
+            inventory_changed_notification(&before, &after),
+            Some(AppNotification::InventoryChanged {
+                removed,
+                added,
+            }) if removed == vec![Guid(0x5000_0001), Guid(0x5000_0003)] && added == vec![Guid(0x5000_0004)]
+        ));
     }
 }
 

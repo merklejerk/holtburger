@@ -1,4 +1,4 @@
-use crate::pages::game::combat::{AttackActivity, combat_mode_label};
+use crate::pages::game::combat::AttackActivity;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
@@ -144,6 +144,16 @@ pub fn render_dynamic_pane(
         && control_width > 0
     {
         f.render_widget(Paragraph::new(control_line).right_aligned(), chunks[1]);
+    }
+}
+
+fn combat_mode_label(mode: CombatMode) -> &'static str {
+    match mode {
+        CombatMode::Undef => "PEACE",
+        CombatMode::NonCombat => "🕊️ PEACE",
+        CombatMode::Melee => "🔪 MELEE",
+        CombatMode::Missile => "🏹 MISSILE",
+        CombatMode::Magic => "✨ MAGIC",
     }
 }
 
@@ -327,7 +337,7 @@ mod tests {
         TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, busy_title, combat_controls_line,
         format_target_line, format_world_info, health_bar_spans, render_dynamic_pane,
     };
-    use crate::pages::game::combat::{AttackActivity, CombatIssueState, combat_mode_label};
+    use crate::pages::game::combat::{AttackActivity, CombatIssueState};
     use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
     use holtburger_common::Guid;
@@ -462,11 +472,6 @@ mod tests {
 
         assert!(!text.contains(" 😠 "));
         assert!(!text.contains(" 😡 "));
-    }
-
-    #[test]
-    fn combat_mode_title_uses_peace_label() {
-        assert_eq!(combat_mode_label(CombatMode::NonCombat), "🕊️ PEACE");
     }
 
     #[test]

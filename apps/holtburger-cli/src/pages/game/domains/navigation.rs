@@ -3,14 +3,15 @@ use super::object_interaction;
 use super::*;
 use crate::navigation::NavigationMode;
 use crate::pages::game::combat as combat_model;
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
     let navigation_input = navigation_input_for_action(state, &action);
 
     match action {
-        AppAction::InternalAction {
-            action: AppInternalAction::ClearActiveInteraction,
+        AppAction::Notification {
+            notification: AppNotification::ActiveInteractionChanged { interaction: None },
         } => {
             clear_active_interaction(state, &mut result);
         }
@@ -20,6 +21,14 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 navigation_input.expect("navigation actions should project to navigation input"),
                 &mut result,
             );
+        }
+        AppAction::SnapHeading { heading } => {
+            result
+                .commands
+                .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
+                    heading,
+                }));
+            result.request_redraw(RedrawPriority::Immediate);
         }
         AppAction::BeginInteraction { interaction } => {
             if interaction == Interaction::Salvaging {
@@ -33,8 +42,8 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 if let Some(input) = navigation_input {
                     apply_navigation_input(state, input, &mut result);
                 }
-                result.actions.push(AppAction::InternalAction {
-                    action: AppInternalAction::SetActiveInteraction {
+                result.actions.push(AppAction::Notification {
+                    notification: AppNotification::ActiveInteractionChanged {
                         interaction: Some(interaction),
                     },
                 });
@@ -45,8 +54,8 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             if let Some(input) = navigation_input {
                 apply_navigation_input(state, input, &mut result);
             } else {
-                result.actions.push(AppAction::InternalAction {
-                    action: AppInternalAction::ClearActiveInteraction,
+                result.actions.push(AppAction::Notification {
+                    notification: AppNotification::ActiveInteractionChanged { interaction: None },
                 });
             }
             state.view.salvaging = None;
@@ -158,8 +167,8 @@ pub(super) fn apply_navigation_interrupt(
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        result.actions.push(AppAction::InternalAction {
-            action: AppInternalAction::SetActiveInteraction { interaction: None },
+        result.actions.push(AppAction::Notification {
+            notification: AppNotification::ActiveInteractionChanged { interaction: None },
         });
         result.request_redraw(RedrawPriority::Immediate);
     }
@@ -176,8 +185,8 @@ pub(super) fn apply_navigation_interrupt(
             state.data.combat_runtime.cancel_attack();
             state.clear_combat_drive();
         }
-        result.actions.push(AppAction::InternalAction {
-            action: AppInternalAction::SetActiveInteraction { interaction: None },
+        result.actions.push(AppAction::Notification {
+            notification: AppNotification::ActiveInteractionChanged { interaction: None },
         });
         result.request_redraw(RedrawPriority::Immediate);
     }
@@ -295,8 +304,8 @@ fn apply_navigation_update(update: NavigationUpdate, result: &mut UpdateResult) 
     match update.interaction_change {
         NavigationInteractionChange::Unchanged => {}
         NavigationInteractionChange::Set(next_interaction) => {
-            result.actions.push(AppAction::InternalAction {
-                action: AppInternalAction::SetActiveInteraction {
+            result.actions.push(AppAction::Notification {
+                notification: AppNotification::ActiveInteractionChanged {
                     interaction: next_interaction,
                 },
             });

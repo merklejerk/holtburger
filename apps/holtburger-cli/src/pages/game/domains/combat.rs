@@ -131,13 +131,13 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
         state.view.active_interaction,
         Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
     ) {
-        result.actions.push(AppAction::InternalAction {
-            action: AppInternalAction::ClearActiveInteraction,
+        result.actions.push(AppAction::Notification {
+            notification: AppNotification::ActiveInteractionChanged { interaction: None },
         });
     }
 
-    result.actions.push(AppAction::InternalAction {
-        action: AppInternalAction::SetActiveInteraction {
+    result.actions.push(AppAction::Notification {
+        notification: AppNotification::ActiveInteractionChanged {
             interaction: Some(Interaction::Targeting { target_guid }),
         },
     });

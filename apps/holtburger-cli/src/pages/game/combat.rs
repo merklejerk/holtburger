@@ -1,5 +1,6 @@
 use crate::navigation::CombatNavigationRequest;
 use crate::pages::game::GameState;
+use crate::types::AppAction;
 use crate::types::{Interaction, RedrawPriority, UpdateResult};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -7,11 +8,11 @@ use holtburger_common::properties::{
     ItemType, PropertyBool, WorldObjectExt as _, WorldObjectPropertyAccessors as _,
 };
 use holtburger_core::ActionResultReason;
-use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
 use std::f32::consts::{PI, TAU};
@@ -122,10 +123,6 @@ enum LocalCombatTargetDisqualifier {
     NotCreature,
     DeathMotionObserved,
     NotAttackable,
-}
-
-pub fn classify_feedback(feedback: &CombatFeedback) -> Option<CombatFeedbackSummary> {
-    classify_feedback_with_pending(feedback, None)
 }
 
 fn explicit_attack_target_disqualifier(
@@ -673,12 +670,11 @@ fn player_is_dead(state: &GameState) -> bool {
         return false;
     };
 
-    state
-        .data
-        .entities
-        .get(&player_guid)
-        .and_then(|entity| entity.motion_snapshot)
-        .is_some_and(|snapshot| snapshot.indicates_death_motion())
+    state.data.entities.get(&player_guid).is_some_and(|entity| {
+        entity
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
+    })
 }
 
 pub(crate) fn advance_combat_drive(state: &mut GameState, now: Instant, result: &mut UpdateResult) {
@@ -718,6 +714,7 @@ fn explicit_attack_target_failure_reason(
 }
 
 fn queue_auto_attack_for_mode(state: &mut GameState, mode: CombatMode, result: &mut UpdateResult) {
+    state.data.combat_runtime.arm_attack_drive();
     run_combat_drive(state, Instant::now(), mode, true, result);
 }
 
@@ -757,7 +754,7 @@ fn should_rearm_after_recoverable_feedback(
     had_attack_activity: bool,
 ) -> bool {
     had_attack_activity
-        && matches!(summary.reason, CombatFeedbackReason::ActionCancelled)
+        && summary.disposition == CombatFeedbackDisposition::RecoverableFailure
         && should_rearm_sticky_auto_attack(state)
 }
 
@@ -816,11 +813,7 @@ fn apply_combat_drive_effect(
         CombatDriveEffect::TurnTo { heading } => {
             state.data.combat_runtime.arm_attack_drive();
             result.request_redraw(RedrawPriority::Immediate);
-            result
-                .commands
-                .push(ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing {
-                    heading,
-                }));
+            result.actions.push(AppAction::SnapHeading { heading });
         }
         CombatDriveEffect::Attack(request) => {
             state.data.combat_runtime.arm_attack_drive();
@@ -885,16 +878,6 @@ fn turn_heading(
     Some(desired_heading)
 }
 
-pub fn combat_mode_label(mode: CombatMode) -> &'static str {
-    match mode {
-        CombatMode::Undef => "PEACE",
-        CombatMode::NonCombat => "🕊️ PEACE",
-        CombatMode::Melee => "🔪 MELEE",
-        CombatMode::Missile => "🏹 MISSILE",
-        CombatMode::Magic => "✨ MAGIC",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,6 +885,7 @@ mod tests {
     use crate::types::{Interaction, UpdateResult};
     use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_core::client::movement_types::PlayerDriveIntent;
     use holtburger_core::client::types::ClientCommand;
     use holtburger_core::{ActionResultReason, ActionResultSource, ClientViewEvent};
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
@@ -1215,8 +1199,8 @@ mod tests {
             })
         );
         assert_eq!(
-            state.data.combat_runtime.issue_state,
-            CombatIssueState::Idle
+            state.data.combat_runtime.attack_activity(CombatMode::Melee),
+            Some(AttackActivity::Ready)
         );
     }
 
@@ -1459,12 +1443,64 @@ mod tests {
         let mut turn = UpdateResult::new();
         run_combat_drive(&mut state, now, CombatMode::Missile, true, &mut turn);
 
-        assert!(turn.commands.iter().any(is_snap_facing_command));
+        assert!(matches!(
+            turn.actions.first(),
+            Some(AppAction::SnapHeading { .. })
+        ));
         assert!(
             !turn
                 .commands
                 .iter()
                 .any(|command| matches!(command, ClientCommand::TargetedMissileAttack { .. }))
+        );
+    }
+
+    #[test]
+    fn recoverable_attack_done_rearms_sticky_attack_after_pending_failure() {
+        let player_guid = Guid(0x50000002);
+        let target_guid = Guid(0x60000002);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        });
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+        state
+            .data
+            .combat_runtime
+            .begin_explicit_engagement(target_guid, CombatMode::Melee);
+        state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(10.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let _ = state.handle_view_event(ClientViewEvent::ActionResult {
+            source: ActionResultSource::Wire,
+            reason: ActionResultReason::Weenie(
+                holtburger_protocol::errors::WeenieError::YouChargedTooFar,
+                None,
+            ),
+        });
+        let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
+        assert_eq!(
+            state.data.combat_runtime.issue_state,
+            CombatIssueState::Ready
         );
     }
 }

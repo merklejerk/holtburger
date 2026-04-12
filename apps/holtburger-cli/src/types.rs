@@ -573,6 +573,9 @@ pub enum AppAction {
     Use {
         guid: Guid,
     },
+    Emote {
+        message: String,
+    },
     Read {
         guid: Guid,
     },
@@ -585,12 +588,16 @@ pub enum AppAction {
     Attack {
         guid: Guid,
     },
+    SnapHeading {
+        heading: f32,
+    },
     Scoot {
         distance_m: f32,
     },
     Drop {
         guid: Guid,
     },
+    // TODO: Unused.
     Equip {
         guid: Guid,
     },
@@ -601,6 +608,7 @@ pub enum AppAction {
     Unequip {
         guid: Guid,
     },
+    // TODO: Replace with Use
     TalkTo {
         guid: Guid,
     },
@@ -616,9 +624,11 @@ pub enum AppAction {
     Unswear {
         target: Guid,
     },
+    // TODO: Replace with Use
     Open {
         guid: Guid,
     },
+    // TODO: Rename to CloseContainer
     Close {
         guid: Guid,
     },
@@ -646,9 +656,11 @@ pub enum AppAction {
         item: Guid,
         target: Guid,
     },
+    // TOODO: Move to AppUiAction.
     QueueSalvageItem {
         guid: Guid,
     },
+    // TOODO: Move to AppUiAction.
     UnqueueSalvageItem {
         guid: Guid,
     },
@@ -656,6 +668,7 @@ pub enum AppAction {
         ust_guid: Guid,
         item_guids: Vec<Guid>,
     },
+    // TODO: Move to AppUiAction.
     QueryDebugInfo {
         target: InspectTarget,
     },
@@ -676,6 +689,7 @@ pub enum AppAction {
         skill: SkillType,
         amount: u32,
     },
+    // TODO: Move to AppUiAction if purely client-side.
     ViewDetails {
         view: ContextView,
     },
@@ -694,6 +708,7 @@ pub enum AppAction {
     SendCommands {
         commands: Vec<ClientCommand>,
     },
+    // TODO: Move to AppUiAction.
     ClearVendor,
     Sequence {
         actions: Vec<AppAction>,
@@ -724,18 +739,23 @@ pub enum AppAction {
     DeclineTrade,
     ResetTrade,
     ExitTrade,
-    InternalAction {
-        action: AppInternalAction,
+    Notification {
+        notification: AppNotification,
     },
     UiAction {
         action: AppUiAction,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppInternalAction {
-    ClearActiveInteraction,
-    SetActiveInteraction { interaction: Option<Interaction> },
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppNotification {
+    ActiveInteractionChanged {
+        interaction: Option<Interaction>,
+    },
+    InventoryChanged {
+        removed: Vec<Guid>,
+        added: Vec<Guid>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -757,9 +777,9 @@ impl From<AppUiAction> for AppAction {
     }
 }
 
-impl From<AppInternalAction> for AppAction {
-    fn from(action: AppInternalAction) -> Self {
-        AppAction::InternalAction { action }
+impl From<AppNotification> for AppAction {
+    fn from(notification: AppNotification) -> Self {
+        AppAction::Notification { notification }
     }
 }
 

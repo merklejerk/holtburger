@@ -3,12 +3,18 @@ use super::*;
 use crate::scripting::{
     DeferredScriptSource, TuiScriptClientView, WorkflowProjection, chat_tags_for_level,
     deferred_script_source_for_basename, resolve_deferred_script_source,
-    script_event_from_view_event, workflow_events, workflow_projection,
+    script_event_from_notification, script_event_from_view_event, workflow_events,
+    workflow_projection,
 };
+use crate::types::AppNotification;
+use crate::types::{InspectTarget, Interaction};
 use anyhow::Result;
+use holtburger_core::client::types::TargetSlot;
 use holtburger_scripting::{
-    ScriptClientIntent, ScriptEvent, ScriptHost, ScriptIntent, ScriptLifecycleEvent,
+    ScriptClientIntent, ScriptEquipmentSlotKind, ScriptEvent, ScriptHost, ScriptIntent,
+    ScriptLifecycleEvent,
 };
+use std::time::Duration;
 
 fn script_client_view<'a>(
     data: &'a GameData,
@@ -76,6 +82,7 @@ impl GameState {
 
         if had_host {
             self.script.host = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -189,6 +196,35 @@ impl GameState {
                 commands: vec![ClientCommand::Tell { target, message }],
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
+            ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),
+            ScriptIntent::OpenTrade { guid } => Ok(AppAction::OpenTrade { guid }),
+            ScriptIntent::AddToTrade { item } => Ok(AppAction::AddToTrade { guid: item }),
+            ScriptIntent::AcceptTrade => Ok(AppAction::AcceptTrade),
+            ScriptIntent::DeclineTrade => Ok(AppAction::DeclineTrade),
+            ScriptIntent::ResetTrade => Ok(AppAction::ResetTrade),
+            ScriptIntent::ExitTrade => Ok(AppAction::ExitTrade),
+            ScriptIntent::OpenContainer { guid } => Ok(AppAction::Open { guid }),
+            ScriptIntent::CloseContainer { guid } => Ok(AppAction::Close { guid }),
+            ScriptIntent::SnapHeading { heading } => Ok(AppAction::SnapHeading { heading }),
+            ScriptIntent::Scoot { distance_m } => Ok(AppAction::Scoot { distance_m }),
+            ScriptIntent::Combine { source, dest } => Ok(AppAction::UseWith {
+                item: source,
+                target: dest,
+            }),
+            ScriptIntent::Salvage { tool, items } => Ok(AppAction::SalvageItems {
+                ust_guid: tool,
+                item_guids: items,
+            }),
+            ScriptIntent::Assess { target } => Ok(AppAction::Assess {
+                target: InspectTarget::Entity(target),
+            }),
+            ScriptIntent::Drop { item } => Ok(AppAction::Drop { guid: item }),
+            ScriptIntent::Pickup { item, container } => Ok(AppAction::PickUp { item, container }),
+            ScriptIntent::Equip { guid, slot } => Ok(AppAction::EquipInSlot {
+                guid,
+                slot: script_equipment_slot_to_target_slot(slot),
+            }),
+            ScriptIntent::Unequip { guid } => Ok(AppAction::Unequip { guid }),
             ScriptIntent::CastUntargetedSpell { spell_id } => Ok(AppAction::CastSpell {
                 spell_id,
                 target: None,
@@ -297,6 +333,30 @@ impl GameState {
         }
     }
 
+    pub(crate) fn sync_script_host_for_notification(
+        &mut self,
+        server_time: Option<(f64, Instant)>,
+        notification: &AppNotification,
+        result: &mut UpdateResult,
+    ) {
+        let host_was_running = self.script_host_is_running();
+        let should_run_after = self.pending_script_source().is_some();
+
+        if !host_was_running && should_run_after {
+            self.start_script_host_if_needed(server_time, result);
+        }
+
+        let view = script_client_view(&self.data, &self.view, server_time);
+
+        let Some(host) = self.script.host.as_mut() else {
+            return;
+        };
+
+        if let Some(script_event) = script_event_from_notification(notification) {
+            dispatch_script_event_to_host(&view, host, script_event, result);
+        }
+    }
+
     pub(crate) fn sync_script_host_for_tick(
         &mut self,
         server_time: Option<(f64, Instant)>,
@@ -311,26 +371,42 @@ impl GameState {
         }
 
         let view = script_client_view(&self.data, &self.view, server_time);
+        let mut tick_count = 0;
+
+        if self.script.host.is_some() {
+            if elapsed > 0.0 {
+                self.script.tick_accumulator += Duration::from_secs_f64(elapsed);
+            }
+
+            while self.script.tick_accumulator >= crate::pages::game::state::SCRIPT_TICK_INTERVAL {
+                self.script.tick_accumulator -= crate::pages::game::state::SCRIPT_TICK_INTERVAL;
+                tick_count += 1;
+            }
+        }
 
         let host_was_cleared = {
             let Some(host) = self.script.host.as_mut() else {
                 return;
             };
 
-            dispatch_script_event_to_host(
-                &view,
-                host,
-                ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
-                    elapsed_seconds: elapsed,
-                }),
-                result,
-            );
+            for _ in 0..tick_count {
+                dispatch_script_event_to_host(
+                    &view,
+                    host,
+                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
+                        elapsed_seconds: crate::pages::game::state::SCRIPT_TICK_INTERVAL
+                            .as_secs_f64(),
+                    }),
+                    result,
+                );
+            }
 
             !should_run_after
         };
 
         if host_was_cleared {
             self.script.host = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -354,4 +430,186 @@ fn dispatch_script_event_to_host(
 
     let outputs = host.drain_outputs();
     GameState::drain_script_host_outputs(view.view, outputs, result);
+}
+
+fn script_equipment_slot_to_target_slot(slot: ScriptEquipmentSlotKind) -> TargetSlot {
+    TargetSlot::EquipMask(slot.equip_mask())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GameState;
+    use super::ScriptEquipmentSlotKind;
+    use super::ScriptIntent;
+    use super::ViewState;
+    use crate::types::{AppAction, InspectTarget};
+    use holtburger_common::Guid;
+    use holtburger_core::client::types::TargetSlot;
+
+    #[test]
+    fn compile_script_intent_maps_new_item_actions() {
+        let view = ViewState::default();
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Combine {
+                    source: Guid(1),
+                    dest: Guid(2),
+                },
+            )
+            .expect("combine should compile"),
+            AppAction::UseWith { item, target } if item == Guid(1) && target == Guid(2)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Salvage {
+                    tool: Guid(3),
+                    items: vec![Guid(4), Guid(5)],
+                },
+            )
+            .expect("salvage should compile"),
+            AppAction::SalvageItems { ust_guid, item_guids }
+                if ust_guid == Guid(3) && item_guids == vec![Guid(4), Guid(5)]
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Assess { target: Guid(6) },
+            )
+            .expect("assess should compile"),
+            AppAction::Assess { target: InspectTarget::Entity(target) } if target == Guid(6)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::SnapHeading { heading: 1.5 },
+            )
+            .expect("snap heading should compile"),
+            AppAction::SnapHeading { heading } if (heading - 1.5).abs() < f32::EPSILON
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Scoot { distance_m: 2.25 },
+            )
+            .expect("scoot should compile"),
+            AppAction::Scoot { distance_m } if (distance_m - 2.25).abs() < f32::EPSILON
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Emote {
+                    message: "waves".to_string(),
+                },
+            )
+            .expect("emote should compile"),
+            AppAction::Emote { message } if message == "waves"
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::OpenTrade { guid: Guid(10) },
+            )
+            .expect("open trade should compile"),
+            AppAction::OpenTrade { guid } if guid == Guid(10)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::AddToTrade { item: Guid(11) },
+            )
+            .expect("add to trade should compile"),
+            AppAction::AddToTrade { guid } if guid == Guid(11)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::AcceptTrade)
+                .expect("accept trade should compile"),
+            AppAction::AcceptTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::DeclineTrade)
+                .expect("decline trade should compile"),
+            AppAction::DeclineTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::ResetTrade)
+                .expect("reset trade should compile"),
+            AppAction::ResetTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::ExitTrade)
+                .expect("exit trade should compile"),
+            AppAction::ExitTrade
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::OpenContainer { guid: Guid(14) },
+            )
+            .expect("open container should compile"),
+            AppAction::Open { guid } if guid == Guid(14)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::CloseContainer { guid: Guid(15) },
+            )
+            .expect("close container should compile"),
+            AppAction::Close { guid } if guid == Guid(15)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Equip {
+                    guid: Guid(12),
+                    slot: ScriptEquipmentSlotKind::ChestWear,
+                },
+            )
+                .expect("equip should compile"),
+            AppAction::EquipInSlot { guid, slot }
+                if guid == Guid(12)
+                    && matches!(slot, TargetSlot::EquipMask(mask) if mask == holtburger_common::properties::EquipMask::CHEST_WEAR)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::Unequip { guid: Guid(13) })
+                .expect("unequip should compile"),
+            AppAction::Unequip { guid } if guid == Guid(13)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::Drop { item: Guid(7) })
+                .expect("drop should compile"),
+            AppAction::Drop { guid } if guid == Guid(7)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::Pickup {
+                    item: Guid(8),
+                    container: Some(Guid(9)),
+                },
+            )
+            .expect("pickup should compile"),
+            AppAction::PickUp { item, container }
+                if item == Guid(8) && container == Some(Guid(9))
+        ));
+    }
 }

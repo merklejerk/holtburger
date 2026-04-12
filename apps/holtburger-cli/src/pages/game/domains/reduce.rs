@@ -22,7 +22,6 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         | AppAction::Log { .. }
         | AppAction::SendCommands { .. }
         | AppAction::TransitionToGame { .. } => None,
-
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();
             for inner_action in actions {
@@ -42,6 +41,7 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
 fn broadcast_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     let mut result = UpdateResult::new();
 
+    result.merge(chat::reduce_action(state, action.clone()));
     result.merge(script::reduce_action(state, action.clone()));
     result.merge(object_interaction::reduce_action(state, action.clone()));
     result.merge(inventory::reduce_action(state, action.clone()));

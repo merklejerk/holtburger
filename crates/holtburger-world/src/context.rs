@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EquipMask, ItemType, PropertyInt, Usable, WorldObjectExt, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CombatTargetStatus {
@@ -150,8 +151,8 @@ pub trait WorldContextExt: WorldContext {
         self.get_entity(player_guid)?.monarch_id()
     }
 
-    fn player_burden(&self) -> Option<f32> {
-        self.get_player_guid()?;
+    fn player_encumbrance(&self) -> Option<f32> {
+        let player_guid = self.get_player_guid()?;
 
         let mut encumbrance = 0.0;
         for guid in self.iter_inventory() {
@@ -159,7 +160,7 @@ pub trait WorldContextExt: WorldContext {
 
             if let Some(container_id) = item.container_id()
                 && self.is_in_player_inventory(container_id)
-                && Some(container_id) != self.get_player_guid()
+                && container_id != player_guid
             {
                 continue;
             }
@@ -167,20 +168,32 @@ pub trait WorldContextExt: WorldContext {
             encumbrance += item.get_int_prop(PropertyInt::EncumbranceVal).unwrap_or(0) as f32;
         }
 
+        Some(encumbrance)
+    }
+
+    fn player_capacity(&self) -> Option<f32> {
+        self.get_player_guid()?;
+
         let strength = self.get_player_attribute_current(AttributeType::StrengthAttr)? as f32;
         if strength <= 0.0 {
-            return Some(3.0);
+            return Some(0.0);
         }
 
         let num_augs = self
             .get_player_int_property(PropertyInt::AugmentationIncreasedCarryingCapacity)
             .unwrap_or(0)
             .max(0) as f32;
-        let capacity = (150.0 * strength) + (num_augs * 30.0 * strength);
+        Some((150.0 * strength) + (num_augs * 30.0 * strength))
+    }
+
+    fn player_burden(&self) -> Option<f32> {
+        let encumbrance = self.player_encumbrance()?;
+        let capacity = self.player_capacity()?;
 
         if capacity <= 0.0 {
             return Some(3.0);
         }
+
         Some(encumbrance / capacity)
     }
 
@@ -204,8 +217,8 @@ pub trait WorldContextExt: WorldContext {
         }
 
         if entity
-            .motion_snapshot
-            .is_some_and(|snapshot| snapshot.indicates_death_motion())
+            .motion_command()
+            .is_some_and(InterpretedMotionCommand::is_dead)
         {
             return CombatTargetStatus::DeathMotionObserved;
         }
@@ -761,6 +774,8 @@ mod tests {
         world.entities.insert(equipped_item_guid, equipped_item);
 
         let expected_burden = 300.0 / 18000.0;
+        assert_eq!(world.player_encumbrance(), Some(300.0));
+        assert_eq!(world.player_capacity(), Some(18_000.0));
         assert_eq!(world.player_burden(), Some(expected_burden));
         assert_eq!(
             world.player_run_rate(),

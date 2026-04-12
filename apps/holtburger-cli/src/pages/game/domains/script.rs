@@ -256,6 +256,27 @@ impl GameState {
                 item: source,
                 target: dest,
             }),
+            ScriptIntent::MoveItem { item, container } => {
+                Ok(AppAction::MoveItem { item, container })
+            }
+            ScriptIntent::StackItems {
+                source,
+                destination,
+                amount,
+            } => Ok(AppAction::StackItems {
+                source,
+                destination,
+                amount,
+            }),
+            ScriptIntent::SplitItem {
+                item,
+                container,
+                amount,
+            } => Ok(AppAction::SplitItem {
+                item,
+                container,
+                amount,
+            }),
             ScriptIntent::Salvage { tool, items } => Ok(AppAction::SalvageItems {
                 ust_guid: tool,
                 item_guids: items,
@@ -550,6 +571,46 @@ mod tests {
             )
             .expect("combine should compile"),
             AppAction::UseWith { item, target } if item == Guid(1) && target == Guid(2)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::MoveItem {
+                    item: Guid(3),
+                    container: Guid(4),
+                },
+            )
+            .expect("move item should compile"),
+            AppAction::MoveItem { item, container } if item == Guid(3) && container == Guid(4)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::StackItems {
+                    source: Guid(5),
+                    destination: Guid(6),
+                    amount: 7,
+                },
+            )
+            .expect("stack items should compile"),
+            AppAction::StackItems { source, destination, amount }
+                if source == Guid(5) && destination == Guid(6) && amount == 7
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::SplitItem {
+                    item: Guid(8),
+                    container: Guid(9),
+                    amount: 10,
+                },
+            )
+            .expect("split item should compile"),
+            AppAction::SplitItem { item, container, amount }
+                if item == Guid(8) && container == Guid(9) && amount == 10
         ));
 
         assert!(matches!(

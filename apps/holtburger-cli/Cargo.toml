@@ -14,6 +14,7 @@ holtburger-core = { workspace = true }
 holtburger-common = { workspace = true }
 holtburger-dat = { workspace = true }
 holtburger-protocol = { workspace = true }
+holtburger-scripting = { workspace = true }
 tokio.workspace = true
 anyhow.workspace = true
 log.workspace = true
@@ -28,3 +29,4 @@ ratatui-textarea.workspace = true
 holtburger-world.workspace = true
 holtburger-session.workspace = true
 bitflags.workspace = true
+serde_json.workspace = true

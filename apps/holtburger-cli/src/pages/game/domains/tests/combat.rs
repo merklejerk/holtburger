@@ -1,11 +1,78 @@
 use super::test_support::*;
 use super::*;
+use crate::pages::game::combat::{CombatIssueState, DesiredCombatEngagement};
+use holtburger_core::client::types::CombatFeedback;
 
 #[test]
-fn set_combat_mode_with_valid_target_queues_melee_attack() {
+fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        ..WorldPosition::default()
+    };
+
+    state.data.entities.insert(target_guid, {
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target
+    });
+    let result = state
+        .handle_action(AppAction::Attack { guid: target_guid })
+        .unwrap();
+
+    assert!(
+        result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::SetCombatMode(CombatMode::Melee)) })
+    );
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
+    assert_eq!(
+        state.view.active_interaction,
+        Some(Interaction::Targeting { target_guid })
+    );
+    assert_eq!(
+        state.data.combat_runtime.desired_engagement(),
+        Some(DesiredCombatEngagement {
+            target_guid,
+            mode: CombatMode::Melee,
+        })
+    );
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Ready
+    );
+
+    state.data.combat_mode = CombatMode::Melee;
+
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(tick_result.commands.iter().any(|command| {
+        matches!(
+            command,
+            ClientCommand::TargetedMeleeAttack {
+                target,
+                attack_height: AttackHeight::Medium,
+                power_level,
+            } if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
+        )
+    }));
+}
+
+#[test]
+fn passive_targeting_does_not_create_engagement_intent() {
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    state.data.combat_mode = CombatMode::Melee;
     let target_position = WorldPosition {
         landblock_id: Guid(0x01000000),
         ..WorldPosition::default()
@@ -15,40 +82,91 @@ fn set_combat_mode_with_valid_target_queues_melee_attack() {
         target_guid,
         creature_entity(target_guid, "Drudge", target_position),
     );
-    state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let result = state
-        .handle_action(AppAction::SetCombatMode {
-            mode: CombatMode::Melee,
+        .handle_action(AppAction::BeginInteraction {
+            interaction: Interaction::Targeting { target_guid },
         })
         .unwrap();
 
-    assert!(matches!(
-        result.commands.first(),
-        Some(ClientCommand::SetCombatMode(CombatMode::Melee))
-    ));
-    assert!(matches!(
-        result.commands.get(1),
-        Some(ClientCommand::TargetedMeleeAttack {
-            target,
-            attack_height: AttackHeight::Medium,
-            power_level,
-        }) if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
-    ));
+    assert!(result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::QueryHealth(guid) if *guid == target_guid)
+    }));
+    assert_eq!(state.data.combat_runtime.desired_engagement(), None);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
+    assert!(!state.data.combat_runtime.in_flight());
 }
 
 #[test]
-fn combat_feedback_updates_auto_attack_runtime_state() {
+fn explicit_attack_clears_preexisting_follow_navigation() {
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    seed_navigation_motion_model(&mut state);
+    state.data.combat_mode = CombatMode::Melee;
+    state.data.player_pos = Some(WorldPosition {
+        landblock_id: Guid(0x01000000),
+        rotation: Quaternion::from_heading(180.0f32.to_radians()),
+        ..WorldPosition::default()
+    });
+
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(5.0, 0.0, 0.0),
+        ..WorldPosition::default()
+    };
+    state.data.entities.insert(target_guid, {
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target
+    });
+
+    let _ = state
+        .handle_action(AppAction::Follow { guid: target_guid })
+        .unwrap();
+    let driving_tick = state.handle_tick(0.1);
+
+    assert!(has_autonomous_navigation_command(&driving_tick));
+    assert_eq!(
+        state.view.active_interaction,
+        Some(Interaction::Following { target_guid })
+    );
+    assert!(state.runtime.navigation.navigation_mode().is_some());
+
+    let result = state
+        .handle_action(AppAction::Attack { guid: target_guid })
+        .unwrap();
+
+    assert!(has_stop_navigation_command(&result));
+    assert_eq!(state.runtime.navigation.navigation_mode(), None);
+    assert_eq!(
+        state.view.active_interaction,
+        Some(Interaction::Targeting { target_guid })
+    );
+}
+
+#[test]
+fn attack_feedback_updates_only_the_current_attack_drive_state() {
     let player_guid = Guid(0x50000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    state
+        .data
+        .combat_runtime
+        .begin_explicit_engagement(Guid(0x60000001), CombatMode::Melee);
+    state.data.combat_runtime.arm_attack_drive();
 
     let commenced = state.handle_view_event(ClientViewEvent::CombatFeedback(
         CombatFeedback::AttackCommenced,
     ));
 
     assert!(commenced.redraw_requested());
-    assert!(!state.data.combat_runtime.attack_queued);
-    assert!(state.data.combat_runtime.attack_sequence_active);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::InFlight
+    );
 
     let done = state.handle_view_event(ClientViewEvent::CombatFeedback(
         CombatFeedback::AttackDone {
@@ -57,8 +175,10 @@ fn combat_feedback_updates_auto_attack_runtime_state() {
     ));
 
     assert!(done.redraw_requested());
-    assert!(state.data.combat_runtime.attack_queued);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Ready
+    );
 
     let cancelled = state.handle_view_event(ClientViewEvent::CombatFeedback(
         CombatFeedback::AttackDone {
@@ -67,12 +187,54 @@ fn combat_feedback_updates_auto_attack_runtime_state() {
     ));
 
     assert!(cancelled.redraw_requested());
-    assert!(!state.data.combat_runtime.attack_queued);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
-fn begin_targeting_in_missile_mode_queues_missile_attack() {
+fn explicit_attack_rejects_targets_already_in_death_motion() {
+    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+    use holtburger_world::entity::EntityMotionSnapshot;
+
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        ..WorldPosition::default()
+    };
+    let mut target = creature_entity(target_guid, "Drudge", target_position);
+    target.set_bool_prop(PropertyBool::Attackable, true);
+    target.motion_snapshot = Some(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::DEAD),
+        sidestep_command: None,
+        turn_command: None,
+        ..Default::default()
+    });
+    state.data.entities.insert(target_guid, target);
+
+    let result = state
+        .handle_action(AppAction::Attack { guid: target_guid })
+        .unwrap();
+
+    assert!(result.commands.is_empty());
+    assert_eq!(state.view.active_interaction, None);
+    assert_eq!(state.data.combat_runtime.desired_engagement(), None);
+    assert!(result.actions.iter().any(|action| {
+        matches!(
+            action,
+            AppAction::Log { message, .. }
+                if message.contains("death animation")
+        )
+    }));
+}
+
+#[test]
+fn targeting_in_missile_mode_does_not_fire_without_explicit_attack_intent() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -93,9 +255,7 @@ fn begin_targeting_in_missile_mode_queues_missile_attack() {
         })
         .unwrap();
 
-    assert!(state.data.combat_runtime.attack_queued);
-
-    assert!(result.commands.iter().any(|command| {
+    assert!(!result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMissileAttack {
@@ -105,6 +265,16 @@ fn begin_targeting_in_missile_mode_queues_missile_attack() {
             } if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
         )
     }));
+
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(
+        !tick_result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
+    );
 }
 
 #[test]
@@ -130,7 +300,7 @@ fn combat_control_actions_cycle_defaults() {
 }
 
 #[test]
-fn cycling_profile_while_targeting_resends_melee_attack_with_new_power() {
+fn changing_melee_profile_while_engaged_waits_for_tick_reissue() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -145,14 +315,27 @@ fn cycling_profile_while_targeting_resends_melee_attack_with_new_power() {
         target_guid,
         creature_entity(target_guid, "Drudge", target_position),
     );
+    state
+        .data
+        .combat_runtime
+        .begin_explicit_engagement(target_guid, CombatMode::Melee);
+    state.data.combat_runtime.arm_attack_drive();
 
     let result = state
         .handle_action(AppAction::CycleCombatProfileLevel)
         .unwrap();
 
-    assert!(state.data.combat_runtime.attack_queued);
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 
-    assert!(result.commands.iter().any(|command| {
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMeleeAttack {
@@ -165,7 +348,7 @@ fn cycling_profile_while_targeting_resends_melee_attack_with_new_power() {
 }
 
 #[test]
-fn cycling_height_while_targeting_resends_missile_attack_with_new_height() {
+fn changing_missile_height_while_engaged_waits_for_tick_reissue() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -180,14 +363,27 @@ fn cycling_height_while_targeting_resends_missile_attack_with_new_height() {
         target_guid,
         creature_entity(target_guid, "Tusker", target_position),
     );
+    state
+        .data
+        .combat_runtime
+        .begin_explicit_engagement(target_guid, CombatMode::Missile);
+    state.data.combat_runtime.arm_attack_drive();
 
     let result = state
         .handle_action(AppAction::CycleCombatAttackHeight)
         .unwrap();
 
-    assert!(state.data.combat_runtime.attack_queued);
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
+    );
 
-    assert!(result.commands.iter().any(|command| {
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(
             command,
             ClientCommand::TargetedMissileAttack {
@@ -200,7 +396,7 @@ fn cycling_height_while_targeting_resends_missile_attack_with_new_height() {
 }
 
 #[test]
-fn switching_from_targeting_to_non_targeting_cancels_attack() {
+fn leaving_targeting_cancels_the_current_attack_drive() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -228,7 +424,7 @@ fn switching_from_targeting_to_non_targeting_cancels_attack() {
 }
 
 #[test]
-fn switching_to_targeting_in_combat_mode_resumes_attack() {
+fn targeting_in_melee_mode_does_not_attack_until_explicitly_armed() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -249,26 +445,32 @@ fn switching_to_targeting_in_combat_mode_resumes_attack() {
         })
         .unwrap();
 
-    assert!(result.commands.iter().any(|command| {
-        matches!(
-            command,
-            ClientCommand::TargetedMeleeAttack {
-                target,
-                attack_height: AttackHeight::Medium,
-                power_level,
-            } if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
-        )
-    }));
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
+
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(
+        !tick_result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
 }
 
 #[test]
-fn switching_targets_retargets_attack_sequence() {
+fn retargeting_cancels_the_current_attack_drive_until_rearmed() {
     let player_guid = Guid(0x50000001);
     let first_target_guid = Guid(0x60000001);
     let second_target_guid = Guid(0x60000002);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting {
         target_guid: first_target_guid,
     });
@@ -301,18 +503,40 @@ fn switching_targets_retargets_attack_sequence() {
             .iter()
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
-    assert!(result.commands.iter().any(|command| {
-        matches!(
-            command,
-            ClientCommand::TargetedMeleeAttack { target, .. } if *target == second_target_guid
-        )
-    }));
-    assert!(state.data.combat_runtime.attack_queued);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
+    assert!(
+        result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::CancelAttack) })
+    );
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
+
+    let mut tick_result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut tick_result);
+
+    assert!(
+        !tick_result
+            .commands
+            .iter()
+            .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
+    );
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
-fn targeting_creature_item_type_without_profile_still_starts_attack() {
+fn explicit_attack_in_melee_mode_arms_a_followup_melee_swing_for_the_next_tick() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -329,60 +553,25 @@ fn targeting_creature_item_type_without_profile_still_starts_attack() {
     state.data.entities.insert(target_guid, target);
 
     let result = state
-        .handle_action(AppAction::BeginInteraction {
-            interaction: Interaction::Targeting { target_guid },
-        })
+        .handle_action(AppAction::Attack { guid: target_guid })
         .unwrap();
 
-    assert!(result.commands.iter().any(|command| {
+    assert_eq!(
+        state.view.active_interaction,
+        Some(Interaction::Targeting { target_guid })
+    );
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+    }));
+
+    let tick_result = state.handle_tick(0.016);
+    assert!(tick_result.commands.iter().any(|command| {
         matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
     }));
 }
 
 #[test]
-fn handle_tick_refreshes_stale_queued_attack_sequence() {
-    let player_guid = Guid(0x50000001);
-    let target_guid = Guid(0x60000001);
-    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-    state.data.combat_mode = CombatMode::Melee;
-    state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-
-    let target_position = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        ..WorldPosition::default()
-    };
-    let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-    target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
-    target.set_bool_prop(PropertyBool::Attackable, true);
-    state.data.entities.insert(target_guid, target);
-
-    let now = Instant::now();
-    let mut seeded = UpdateResult::new();
-    super::super::combat::sync_combat_automation(
-        &mut state,
-        now,
-        CombatMode::Melee,
-        true,
-        &mut seeded,
-    );
-    state.data.combat_runtime.attack_queued = true;
-    state.data.combat_runtime.attack_sequence_active = false;
-
-    let mut result = UpdateResult::new();
-    super::super::combat::refresh_stale_attack_sequence(
-        &mut state,
-        now + Duration::from_secs(1) + Duration::from_millis(1),
-        &mut result,
-    );
-
-    assert!(result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
-    }));
-    assert!(state.data.combat_runtime.attack_queued);
-}
-
-#[test]
-fn handle_tick_retries_cancelled_attack_after_combat_mode_reentry() {
+fn cancelled_attack_stays_idle_across_combat_mode_reentry_until_rearmed() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -398,7 +587,7 @@ fn handle_tick_retries_cancelled_attack_after_combat_mode_reentry() {
     target.set_bool_prop(PropertyBool::Attackable, true);
     state.data.entities.insert(target_guid, target);
 
-    state.data.combat_runtime.queue_attack();
+    state.data.combat_runtime.issue_state = CombatIssueState::Ready;
 
     let cancelled = state.handle_view_event(ClientViewEvent::CombatFeedback(
         CombatFeedback::AttackDone {
@@ -412,82 +601,33 @@ fn handle_tick_retries_cancelled_attack_after_combat_mode_reentry() {
             .iter()
             .any(|command| { matches!(command, ClientCommand::TargetedMeleeAttack { .. }) })
     );
-    assert!(!state.data.combat_runtime.attack_queued);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 
     state.data.combat_mode = CombatMode::Melee;
 
     let mut retry = UpdateResult::new();
-    super::super::combat::refresh_stale_attack_sequence(&mut state, Instant::now(), &mut retry);
+    crate::pages::game::combat::advance_combat_drive(&mut state, Instant::now(), &mut retry);
 
-    assert!(retry.commands.iter().any(|command| {
+    assert!(!retry.commands.iter().any(|command| {
         matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
     }));
-    assert!(state.data.combat_runtime.attack_queued);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
-fn death_motion_blocks_stale_attack_refresh_for_targeted_creature() {
-    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
-    use holtburger_world::entity::EntityMotionSnapshot;
-
-    let player_guid = Guid(0x50000001);
-    let target_guid = Guid(0x60000001);
-    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-    state.data.combat_mode = CombatMode::Melee;
-    state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-
-    let target_position = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        ..WorldPosition::default()
-    };
-    let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-    target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
-    target.set_bool_prop(PropertyBool::Attackable, true);
-    state.data.entities.insert(target_guid, target);
-
-    let now = Instant::now();
-    let mut seeded = UpdateResult::new();
-    super::super::combat::sync_combat_automation(
-        &mut state,
-        now,
-        CombatMode::Melee,
-        true,
-        &mut seeded,
-    );
-    state.data.combat_runtime.attack_queued = true;
-    state.data.combat_runtime.attack_sequence_active = false;
-
-    let _ = state.handle_view_event(ClientViewEvent::EntityMotionUpdated {
-        guid: target_guid,
-        snapshot: Some(EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            forward_command: Some(InterpretedMotionCommand::DEAD),
-            sidestep_command: None,
-            turn_command: None,
-            ..Default::default()
-        }),
-    });
-
-    let mut result = UpdateResult::new();
-    super::super::combat::refresh_stale_attack_sequence(
-        &mut state,
-        now + Duration::from_secs(1) + Duration::from_millis(1),
-        &mut result,
-    );
-
-    assert!(!result.commands.iter().any(|command| {
-        matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
-    }));
-}
-
-#[test]
-fn switching_to_non_creature_target_cancels_attack_sequence() {
+fn retargeting_to_a_non_creature_cancels_engagement_without_reissue() {
     let player_guid = Guid(0x50000001);
     let creature_guid = Guid(0x60000001);
     let non_creature_guid = Guid(0x70000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting {
         target_guid: creature_guid,
     });
@@ -526,57 +666,19 @@ fn switching_to_non_creature_target_cancels_attack_sequence() {
             ClientCommand::TargetedMeleeAttack { .. } | ClientCommand::TargetedMissileAttack { .. }
         )
     }));
-    assert!(!state.data.combat_runtime.attack_queued);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
-fn far_target_does_not_start_attack_automation() {
+fn explicit_player_cancel_prevents_sticky_rearm() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.player_pos = Some(WorldPosition {
-        landblock_id: Guid(0x01000000),
-        ..WorldPosition::default()
-    });
-    state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-
-    let target_position = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        coords: Vector3::new(385.0, 0.0, 0.0),
-        ..WorldPosition::default()
-    };
-    state.data.entities.insert(
-        target_guid,
-        creature_entity(target_guid, "Drudge", target_position),
-    );
-
-    let mut result = UpdateResult::new();
-    super::super::combat::sync_combat_automation(
-        &mut state,
-        Instant::now(),
-        CombatMode::Melee,
-        true,
-        &mut result,
-    );
-
-    assert!(!result.commands.iter().any(|command| {
-        matches!(
-            command,
-            ClientCommand::TargetedMeleeAttack { .. } | ClientCommand::TargetedMissileAttack { .. }
-        ) || is_snap_facing_command(command)
-    }));
-    assert!(!state.data.combat_runtime.attack_queued);
-}
-
-#[test]
-fn cancelled_attack_does_not_rearm_after_explicit_cancel() {
-    let player_guid = Guid(0x50000001);
-    let target_guid = Guid(0x60000001);
-    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-    state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let target_position = WorldPosition {
@@ -605,7 +707,7 @@ fn cancelled_attack_does_not_rearm_after_explicit_cancel() {
 }
 
 #[test]
-fn cancelled_attack_does_not_rearm_after_target_death_motion() {
+fn target_death_motion_prevents_sticky_rearm_after_cancel() {
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::entity::EntityMotionSnapshot;
 
@@ -613,7 +715,7 @@ fn cancelled_attack_does_not_rearm_after_target_death_motion() {
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let target_position = WorldPosition {
@@ -645,7 +747,7 @@ fn cancelled_attack_does_not_rearm_after_target_death_motion() {
     }));
 
     let mut stale = UpdateResult::new();
-    super::super::combat::refresh_stale_attack_sequence(
+    crate::pages::game::combat::advance_combat_drive(
         &mut state,
         Instant::now() + Duration::from_secs(2),
         &mut stale,
@@ -658,7 +760,7 @@ fn cancelled_attack_does_not_rearm_after_target_death_motion() {
 }
 
 #[test]
-fn cancelled_attack_does_not_rearm_after_player_death_motion() {
+fn player_death_motion_prevents_sticky_rearm_after_cancel() {
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::entity::EntityMotionSnapshot;
 
@@ -666,7 +768,7 @@ fn cancelled_attack_does_not_rearm_after_player_death_motion() {
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let target_position = WorldPosition {
@@ -702,7 +804,7 @@ fn cancelled_attack_does_not_rearm_after_player_death_motion() {
 }
 
 #[test]
-fn despawning_target_clears_targeting_interaction() {
+fn despawning_target_clears_targeting() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -714,13 +816,12 @@ fn despawning_target_clears_targeting_interaction() {
 }
 
 #[test]
-fn despawning_target_sends_cancel_attack_when_targeting_it() {
+fn despawning_target_cancels_attack_drive() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_queued = true;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let result = state.handle_view_event(ClientViewEvent::EntityDespawned { guid: target_guid });
@@ -732,18 +833,19 @@ fn despawning_target_sends_cancel_attack_when_targeting_it() {
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
     assert_eq!(state.view.active_interaction, None);
-    assert!(!state.data.combat_runtime.attack_queued);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
+    );
 }
 
 #[test]
-fn cancel_interaction_sends_cancel_attack_when_leaving_targeting() {
+fn cancel_interaction_leaves_targeting_and_cancels_attack_drive() {
     let player_guid = Guid(0x50000001);
     let target_guid = Guid(0x60000001);
     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
     state.data.combat_mode = CombatMode::Melee;
-    state.data.combat_runtime.attack_queued = true;
-    state.data.combat_runtime.attack_sequence_active = true;
+    state.data.combat_runtime.issue_state = CombatIssueState::InFlight;
     state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
     let result = state.handle_action(AppAction::CancelInteraction).unwrap();
@@ -755,48 +857,8 @@ fn cancel_interaction_sends_cancel_attack_when_leaving_targeting() {
             .any(|command| matches!(command, ClientCommand::CancelAttack))
     );
     assert_eq!(state.view.active_interaction, None);
-    assert!(!state.data.combat_runtime.attack_queued);
-    assert!(!state.data.combat_runtime.attack_sequence_active);
-}
-
-#[test]
-fn missile_targeting_turns_before_reissuing_attack_when_not_facing() {
-    let player_guid = Guid(0x50000001);
-    let target_guid = Guid(0x60000001);
-    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-    state.data.combat_mode = CombatMode::Missile;
-    state.data.player_pos = Some(WorldPosition {
-        landblock_id: Guid(0x01000000),
-        rotation: Quaternion::from_heading(0.0),
-        ..WorldPosition::default()
-    });
-    state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-
-    let target_position = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        coords: Vector3::new(0.0, 10.0, 0.0),
-        ..WorldPosition::default()
-    };
-    state.data.entities.insert(
-        target_guid,
-        creature_entity(target_guid, "Tusker", target_position),
-    );
-
-    let now = Instant::now();
-    let mut turn = UpdateResult::new();
-    super::super::combat::sync_combat_automation(
-        &mut state,
-        now,
-        CombatMode::Missile,
-        true,
-        &mut turn,
-    );
-
-    assert!(turn.commands.iter().any(is_snap_facing_command));
-    assert!(
-        !turn
-            .commands
-            .iter()
-            .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
+    assert_eq!(
+        state.data.combat_runtime.issue_state,
+        CombatIssueState::Idle
     );
 }

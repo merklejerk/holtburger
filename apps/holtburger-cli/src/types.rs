@@ -2,7 +2,7 @@ use crate::components::text_input::SingleLineTextInput;
 use crate::pages::game::GameState;
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
-use crate::state::RenderContext;
+use crate::state::{EventContext, RenderContext, TickContext};
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
@@ -528,10 +528,14 @@ impl Page {
         }
     }
 
-    pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
+    pub fn handle_view_event(
+        &mut self,
+        event: ClientViewEvent,
+        ctx: &EventContext,
+    ) -> UpdateResult {
         match self {
-            Page::Selection(s) => s.handle_view_event(event),
-            Page::Game(g) => g.handle_view_event(event),
+            Page::Selection(s) => s.handle_view_event_with_context(event, ctx),
+            Page::Game(g) => g.handle_view_event_with_context(event, ctx),
         }
     }
 
@@ -542,16 +546,17 @@ impl Page {
         }
     }
 
-    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
+    pub fn handle_tick(&mut self, elapsed: f64, ctx: &TickContext) -> UpdateResult {
         match self {
-            Page::Selection(s) => s.handle_tick(elapsed),
-            Page::Game(g) => g.handle_tick(elapsed),
+            Page::Selection(s) => s.handle_tick_with_context(elapsed, ctx),
+            Page::Game(g) => g.handle_tick_with_context(elapsed, ctx),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
+    Nothing,
     TransitionToGame {
         guid: Guid,
         name: String,
@@ -568,6 +573,9 @@ pub enum AppAction {
     Use {
         guid: Guid,
     },
+    Emote {
+        message: String,
+    },
     Read {
         guid: Guid,
     },
@@ -577,12 +585,19 @@ pub enum AppAction {
     Follow {
         guid: Guid,
     },
+    Attack {
+        guid: Guid,
+    },
+    SnapHeading {
+        heading: f32,
+    },
     Scoot {
         distance_m: f32,
     },
     Drop {
         guid: Guid,
     },
+    // TODO: Unused.
     Equip {
         guid: Guid,
     },
@@ -593,6 +608,7 @@ pub enum AppAction {
     Unequip {
         guid: Guid,
     },
+    // TODO: Replace with Use
     TalkTo {
         guid: Guid,
     },
@@ -608,9 +624,11 @@ pub enum AppAction {
     Unswear {
         target: Guid,
     },
+    // TODO: Replace with Use
     Open {
         guid: Guid,
     },
+    // TODO: Rename to CloseContainer
     Close {
         guid: Guid,
     },
@@ -638,9 +656,11 @@ pub enum AppAction {
         item: Guid,
         target: Guid,
     },
+    // TOODO: Move to AppUiAction.
     QueueSalvageItem {
         guid: Guid,
     },
+    // TOODO: Move to AppUiAction.
     UnqueueSalvageItem {
         guid: Guid,
     },
@@ -648,6 +668,7 @@ pub enum AppAction {
         ust_guid: Guid,
         item_guids: Vec<Guid>,
     },
+    // TODO: Move to AppUiAction.
     QueryDebugInfo {
         target: InspectTarget,
     },
@@ -668,6 +689,7 @@ pub enum AppAction {
         skill: SkillType,
         amount: u32,
     },
+    // TODO: Move to AppUiAction if purely client-side.
     ViewDetails {
         view: ContextView,
     },
@@ -675,6 +697,13 @@ pub enum AppAction {
         chat_tags: ChatMessageTags,
         message: String,
     },
+    RunScript {
+        basename: String,
+    },
+    ScriptCommand {
+        msg: String,
+    },
+    UnrunScript,
     BeginInteraction {
         interaction: Interaction,
     },
@@ -682,8 +711,8 @@ pub enum AppAction {
     SendCommands {
         commands: Vec<ClientCommand>,
     },
+    // TODO: Move to AppUiAction.
     ClearVendor,
-    DisplayClientInfo,
     Sequence {
         actions: Vec<AppAction>,
     },
@@ -713,8 +742,22 @@ pub enum AppAction {
     DeclineTrade,
     ResetTrade,
     ExitTrade,
+    Notification {
+        notification: AppNotification,
+    },
     UiAction {
         action: AppUiAction,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppNotification {
+    ActiveInteractionChanged {
+        interaction: Option<Interaction>,
+    },
+    InventoryChanged {
+        removed: Vec<Guid>,
+        added: Vec<Guid>,
     },
 }
 
@@ -734,6 +777,12 @@ impl From<Vec<AppAction>> for AppAction {
 impl From<AppUiAction> for AppAction {
     fn from(action: AppUiAction) -> Self {
         AppAction::UiAction { action }
+    }
+}
+
+impl From<AppNotification> for AppAction {
+    fn from(notification: AppNotification) -> Self {
+        AppAction::Notification { notification }
     }
 }
 

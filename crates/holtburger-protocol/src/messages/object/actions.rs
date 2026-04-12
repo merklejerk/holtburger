@@ -1,6 +1,27 @@
+use crate::traits::{ProtocolPack, ProtocolUnpack};
+use holtburger_common::Guid;
+
 pub use crate::messages::object::types::{
     IdentifyObjectActionData, UseActionData, UseWithTargetActionData,
 };
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryItemManaActionData {
+    pub target_guid: Guid,
+}
+
+impl ProtocolUnpack for QueryItemManaActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target_guid = Guid::unpack(data, offset)?;
+        Some(Self { target_guid })
+    }
+}
+
+impl ProtocolPack for QueryItemManaActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.target_guid.pack(writer);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -32,5 +53,18 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &action);
+    }
+
+    #[test]
+    fn test_query_item_mana_parity() {
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 0,
+            action: GameAction::QueryItemMana(Box::new(QueryItemManaActionData {
+                target_guid: Guid(0x80000004),
+            })),
+        }));
+
+        let fixture = hex::decode("B1F70000000000006302000004000080").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
     }
 }

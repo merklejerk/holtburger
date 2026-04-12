@@ -7,8 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::pages;
-use holtburger_cli::state::AppState;
-use holtburger_cli::state::NetStats;
+use holtburger_cli::state::{AppState, NetStats};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_cli::utils::format_action_result_message;
 use holtburger_content::ContentRepository;
@@ -753,7 +752,7 @@ async fn run() -> Result<()> {
 
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
-            let res = app_state.handle_app_action(holtburger_cli::types::AppAction::Log {
+            let res = app_state.reduce_app_action(holtburger_cli::types::AppAction::Log {
                 chat_tags: log.chat_tags,
                 message: log.text,
             });

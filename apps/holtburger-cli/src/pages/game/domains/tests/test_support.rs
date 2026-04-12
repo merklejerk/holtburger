@@ -1,4 +1,5 @@
 use super::*;
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) fn apply_queued_ui_action(state: &mut GameState, action: AppUiAction) -> UpdateResult {
     let mut result = state
@@ -91,13 +92,6 @@ pub(super) fn has_arrival_navigation_command(result: &UpdateResult) -> bool {
             ClientCommand::DriveSelf(PlayerDriveIntent::ArriveAtPose { .. })
         )
     })
-}
-
-pub(super) fn is_snap_facing_command(command: &ClientCommand) -> bool {
-    matches!(
-        command,
-        ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { .. })
-    )
 }
 
 pub(super) fn runtime_body_view(

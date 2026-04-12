@@ -307,8 +307,8 @@ pub enum GameActionOpcode {
     NoLongerViewingContents = 0x0195,
     /// C2S: Salvage items using an Ust.
     SalvageItemsWith = 0x027D,
-    // /// C2S: Query current mana levels of an item.
-    // QueryItemMana = 0x0263,
+    /// C2S: Query current mana levels of an item.
+    QueryItemMana = 0x0263,
     /// C2S: Attempt to give an item to another player.
     GiveObjectRequest = 0x00CD,
 
@@ -625,6 +625,8 @@ pub enum GameEventOpcode {
     WeenieErrorWithString = 0x028B,
     /// S2C: Update the health of an entity.
     UpdateHealth = 0x01C0,
+    /// S2C: Response to an item mana query.
+    QueryItemManaResponse = 0x0264,
 
     // --- Fellowship ---
     /// S2C: Complete fellowship update.

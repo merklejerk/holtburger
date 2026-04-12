@@ -37,7 +37,8 @@ struct ScriptClientViewPtr {
     #[allow(clippy::type_complexity)]
     nearby_entities:
         unsafe fn(*const (), Option<f32>, Option<Vec<ScriptEntityKind>>) -> Vec<ScriptEntityView>,
-    get_equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
+    equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
+    spellbook: unsafe fn(*const ()) -> Vec<u32>,
     #[allow(clippy::type_complexity)]
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
 }
@@ -112,10 +113,14 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).nearby_entities(max_distance, classifications) }
         }
 
-        unsafe fn get_equipment<T: ScriptClientView>(
+        unsafe fn equipment<T: ScriptClientView>(
             data: *const (),
         ) -> Vec<ScriptEquipmentSlotView> {
-            unsafe { (&*data.cast::<T>()).get_equipment() }
+            unsafe { (&*data.cast::<T>()).equipment() }
+        }
+
+        unsafe fn spellbook<T: ScriptClientView>(data: *const ()) -> Vec<u32> {
+            unsafe { (&*data.cast::<T>()).spellbook() }
         }
 
         unsafe fn current_trade_info<T: ScriptClientView>(
@@ -135,7 +140,8 @@ impl ScriptClientViewPtr {
             entity_data_prop: entity_data_prop::<T>,
             entity_instance_prop: entity_instance_prop::<T>,
             nearby_entities: nearby_entities::<T>,
-            get_equipment: get_equipment::<T>,
+            equipment: equipment::<T>,
+            spellbook: spellbook::<T>,
             current_trade_info: current_trade_info::<T>,
         }
     }
@@ -180,8 +186,12 @@ impl ScriptClientViewPtr {
         unsafe { (self.nearby_entities)(self.data, max_distance, classifications) }
     }
 
-    unsafe fn get_equipment(self) -> Vec<ScriptEquipmentSlotView> {
-        unsafe { (self.get_equipment)(self.data) }
+    unsafe fn equipment(self) -> Vec<ScriptEquipmentSlotView> {
+        unsafe { (self.equipment)(self.data) }
+    }
+
+    unsafe fn spellbook(self) -> Vec<u32> {
+        unsafe { (self.spellbook)(self.data) }
     }
 
     unsafe fn current_trade_info(self) -> Option<ScriptTradeInfo> {
@@ -231,6 +241,9 @@ globalThis.Holtburger = Object.freeze({
                 },
             ]),
         );
+    },
+    spellbook() {
+        return Deno.core.ops.op_hb_spellbook();
     },
     equip(guid, slot) {
         Deno.core.ops.op_hb_equip(Number(guid) >>> 0, String(slot));
@@ -348,6 +361,7 @@ deno_core::extension!(
         op_hb_emote,
         op_hb_current_trade_info,
         op_hb_equipment,
+        op_hb_spellbook,
         op_hb_equip,
         op_hb_unequip,
         op_hb_open_trade,
@@ -452,7 +466,14 @@ fn op_hb_nearby_entities(
 #[op2]
 #[serde]
 fn op_hb_equipment(state: &mut OpState) -> Vec<ScriptEquipmentSlotView> {
-    with_current_script_client_view(state, |view| unsafe { view.get_equipment() })
+    with_current_script_client_view(state, |view| unsafe { view.equipment() })
+        .unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_spellbook(state: &mut OpState) -> Vec<u32> {
+    with_current_script_client_view(state, |view| unsafe { view.spellbook() })
         .unwrap_or_default()
 }
 
@@ -1012,12 +1033,16 @@ mod tests {
             Vec::new()
         }
 
-        fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView> {
+        fn equipment(&self) -> Vec<ScriptEquipmentSlotView> {
             vec![ScriptEquipmentSlotView {
                 slot: ScriptEquipmentSlotKind::HeadWear,
                 equip_mask: EquipMask::HEAD_WEAR,
                 item_guid: Some(Guid(42)),
             }]
+        }
+
+        fn spellbook(&self) -> Vec<u32> {
+            vec![7, 11, 13]
         }
 
         fn current_trade_info(&self) -> Option<ScriptTradeInfo> {
@@ -1054,6 +1079,7 @@ mod tests {
     fn v8_script_tests_run_in_single_thread_to_avoid_v8_platform_teardown() {
         dispatch_source_escapes_javascript_line_separators();
         equipment_helper_returns_js_map();
+        spellbook_helper_returns_js_array();
         current_trade_info_helper_returns_js_object();
     }
 
@@ -1096,6 +1122,25 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
                 if message == "[true,true,42]"
+        ));
+    }
+
+    fn spellbook_helper_returns_js_array() {
+        let source = ScriptSource::new(
+            "spellbook-array-test",
+            r#"
+                const spellbook = Holtburger.spellbook();
+                Holtburger.log("info", JSON.stringify(spellbook));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[7,11,13]"
         ));
     }
 

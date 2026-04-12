@@ -46,7 +46,8 @@ pub trait ScriptClientView {
         classifications: Option<Vec<ScriptEntityKind>>,
     ) -> Vec<ScriptEntityView>;
     fn inventory_items(&self) -> Vec<ScriptInventoryItemView>;
-    fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView>;
+    fn equipment(&self) -> Vec<ScriptEquipmentSlotView>;
+    fn spellbook(&self) -> Vec<u32>;
     fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
     fn fellowship(&self) -> Option<ScriptPartyView>;
     fn active_spells(&self) -> Vec<ScriptSpellEffectView>;

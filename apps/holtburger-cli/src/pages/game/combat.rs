@@ -355,6 +355,7 @@ impl CombatEngagementState {
 pub struct CombatRuntimeState {
     pub issue_state: CombatIssueState,
     pub engagement: CombatEngagementState,
+    last_attack_attempt_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -385,11 +386,13 @@ impl CombatRuntimeState {
 
     pub fn begin_explicit_engagement(&mut self, target_guid: Guid, mode: CombatMode) {
         self.engagement.begin_explicit_engagement(target_guid, mode);
+        self.last_attack_attempt_at = None;
     }
 
     pub fn clear_engagement(&mut self) {
         self.engagement.clear_engagement();
         self.issue_state = CombatIssueState::Idle;
+        self.last_attack_attempt_at = None;
     }
 
     pub fn desired_engagement(self) -> Option<DesiredCombatEngagement> {
@@ -432,6 +435,14 @@ impl CombatRuntimeState {
 
     pub fn attack_is_ready(self) -> bool {
         self.issue_state == CombatIssueState::Ready
+    }
+
+    pub fn note_attack_attempt(&mut self, now: Instant) {
+        self.last_attack_attempt_at = Some(now);
+    }
+
+    pub fn last_attack_attempt_at(self) -> Option<Instant> {
+        self.last_attack_attempt_at
     }
 
     pub fn cancel_attack(&mut self) {
@@ -944,6 +955,7 @@ mod tests {
         let mut state = CombatRuntimeState {
             issue_state: CombatIssueState::InFlight,
             engagement: CombatEngagementState::default(),
+            ..Default::default()
         };
 
         state.handle_mode_updated(CombatMode::NonCombat);
@@ -971,6 +983,7 @@ mod tests {
         let mut state = CombatRuntimeState {
             issue_state: CombatIssueState::InFlight,
             engagement: CombatEngagementState::default(),
+            ..Default::default()
         };
 
         state.cancel_attack();
@@ -996,6 +1009,7 @@ mod tests {
         let mut state = CombatRuntimeState {
             issue_state: CombatIssueState::InFlight,
             engagement: CombatEngagementState::default(),
+            ..Default::default()
         };
 
         state.handle_feedback(&CombatFeedback::AttackDone {

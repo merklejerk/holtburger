@@ -7,16 +7,16 @@ use deno_core::serde_json::{Value, from_value, json};
 use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
 use futures::executor::block_on;
 use holtburger_common::Guid;
-use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
     PropertyString,
 };
 
 use crate::{
-    ScriptClientIntent, ScriptClientView, ScriptContainerView, ScriptEntityKind, ScriptEntityView,
+    ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatInfo,
+    ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView,
     ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLogLevel,
-    ScriptSelfView, ScriptSource, ScriptTradeInfo,
+    ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -41,9 +41,13 @@ struct ScriptClientViewPtr {
     inventory: unsafe fn(*const ()) -> Vec<ScriptContainerView>,
     current_open_container: unsafe fn(*const ()) -> Option<Guid>,
     equipment: unsafe fn(*const ()) -> Vec<ScriptEquipmentSlotView>,
+    combat_info: unsafe fn(*const ()) -> ScriptCombatInfo,
+    current_interaction: unsafe fn(*const ()) -> Option<ScriptClientInteraction>,
+    enchantments: unsafe fn(*const ()) -> Vec<ScriptEnchantmentView>,
     spellbook: unsafe fn(*const ()) -> Vec<u32>,
     in_spellbook: unsafe fn(*const (), u32) -> bool,
-    heading_to: unsafe fn(*const (), WorldPosition, WorldPosition) -> f32,
+    distance: unsafe fn(*const (), ScriptPositionRef, ScriptPositionRef) -> f32,
+    heading_to: unsafe fn(*const (), ScriptPositionRef, ScriptPositionRef) -> f32,
     entity_exists: unsafe fn(*const (), Guid) -> bool,
     #[allow(clippy::type_complexity)]
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
@@ -131,6 +135,28 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).equipment() }
         }
 
+        unsafe fn combat_info<T: ScriptClientView>(data: *const ()) -> ScriptCombatInfo {
+            unsafe { (&*data.cast::<T>()).combat_info() }
+        }
+
+        unsafe fn current_interaction<T: ScriptClientView>(
+            data: *const (),
+        ) -> Option<ScriptClientInteraction> {
+            unsafe { (&*data.cast::<T>()).current_interaction() }
+        }
+
+        unsafe fn enchantments<T: ScriptClientView>(data: *const ()) -> Vec<ScriptEnchantmentView> {
+            unsafe { (&*data.cast::<T>()).enchantments() }
+        }
+
+        unsafe fn distance<T: ScriptClientView>(
+            data: *const (),
+            from: ScriptPositionRef,
+            to: ScriptPositionRef,
+        ) -> f32 {
+            unsafe { (&*data.cast::<T>()).distance(from, to) }
+        }
+
         unsafe fn spellbook<T: ScriptClientView>(data: *const ()) -> Vec<u32> {
             unsafe { (&*data.cast::<T>()).spellbook() }
         }
@@ -141,8 +167,8 @@ impl ScriptClientViewPtr {
 
         unsafe fn heading_to<T: ScriptClientView>(
             data: *const (),
-            from: WorldPosition,
-            to: WorldPosition,
+            from: ScriptPositionRef,
+            to: ScriptPositionRef,
         ) -> f32 {
             unsafe { (&*data.cast::<T>()).heading_to(from, to) }
         }
@@ -171,8 +197,12 @@ impl ScriptClientViewPtr {
             inventory: inventory::<T>,
             current_open_container: current_open_container::<T>,
             equipment: equipment::<T>,
+            combat_info: combat_info::<T>,
+            current_interaction: current_interaction::<T>,
+            enchantments: enchantments::<T>,
             spellbook: spellbook::<T>,
             in_spellbook: in_spellbook::<T>,
+            distance: distance::<T>,
             heading_to: heading_to::<T>,
             entity_exists: entity_exists::<T>,
             current_trade_info: current_trade_info::<T>,
@@ -231,16 +261,32 @@ impl ScriptClientViewPtr {
         unsafe { (self.equipment)(self.data) }
     }
 
+    unsafe fn combat_info(self) -> ScriptCombatInfo {
+        unsafe { (self.combat_info)(self.data) }
+    }
+
+    unsafe fn current_interaction(self) -> Option<ScriptClientInteraction> {
+        unsafe { (self.current_interaction)(self.data) }
+    }
+
+    unsafe fn enchantments(self) -> Vec<ScriptEnchantmentView> {
+        unsafe { (self.enchantments)(self.data) }
+    }
+
+    unsafe fn distance(self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+        unsafe { (self.distance)(self.data, from, to) }
+    }
+
+    unsafe fn heading_to(self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+        unsafe { (self.heading_to)(self.data, from, to) }
+    }
+
     unsafe fn spellbook(self) -> Vec<u32> {
         unsafe { (self.spellbook)(self.data) }
     }
 
     unsafe fn in_spellbook(self, spell_id: u32) -> bool {
         unsafe { (self.in_spellbook)(self.data, spell_id) }
-    }
-
-    unsafe fn heading_to(self, from: WorldPosition, to: WorldPosition) -> f32 {
-        unsafe { (self.heading_to)(self.data, from, to) }
     }
 
     unsafe fn entity_exists(self, guid: Guid) -> bool {
@@ -265,6 +311,30 @@ globalThis.Holtburger = Object.freeze({
   selfEntity() {
     return Deno.core.ops.op_hb_self_entity();
   },
+    currentInteraction() {
+        return Deno.core.ops.op_hb_current_interaction();
+    },
+    enchantments() {
+        return Deno.core.ops.op_hb_enchantments().map(({ spell_id, end_time }) => ({
+            spellId: spell_id,
+            endTime: end_time,
+        }));
+    },
+    distance(from, to) {
+        return Deno.core.ops.op_hb_distance(from, to);
+    },
+    combatInfo() {
+        const combatInfo = Deno.core.ops.op_hb_combat_info();
+
+        return {
+            combatMode: combatInfo.combat_mode,
+            isEngaged: combatInfo.is_engaged,
+            target: combatInfo.target,
+            power: combatInfo.power,
+            height: combatInfo.height,
+            lastAttackTime: combatInfo.last_attack_time,
+        };
+    },
     nearbyEntities(maxDistance = null, classifications = null) {
         return Deno.core.ops.op_hb_nearby_entities(
             maxDistance == null || maxDistance == undefined ? null : Number(maxDistance),
@@ -437,6 +507,10 @@ deno_core::extension!(
         op_hb_log,
         op_hb_say,
         op_hb_emote,
+        op_hb_combat_info,
+        op_hb_current_interaction,
+        op_hb_enchantments,
+        op_hb_distance,
         op_hb_current_trade_info,
         op_hb_current_open_container,
         op_hb_open_container,
@@ -580,10 +654,20 @@ fn op_hb_in_spellbook(state: &mut OpState, spell_id: u32) -> bool {
 }
 
 #[op2]
+fn op_hb_distance(
+    state: &mut OpState,
+    #[serde] from: ScriptPositionRef,
+    #[serde] to: ScriptPositionRef,
+) -> f32 {
+    with_current_script_client_view(state, |view| unsafe { view.distance(from, to) })
+        .unwrap_or_default()
+}
+
+#[op2]
 fn op_hb_heading_to(
     state: &mut OpState,
-    #[serde] from: WorldPosition,
-    #[serde] to: WorldPosition,
+    #[serde] from: ScriptPositionRef,
+    #[serde] to: ScriptPositionRef,
 ) -> f32 {
     with_current_script_client_view(state, |view| unsafe { view.heading_to(from, to) })
         .unwrap_or_default()
@@ -599,6 +683,25 @@ fn op_hb_entity_exists(state: &mut OpState, guid: u32) -> bool {
 #[serde]
 fn op_hb_current_trade_info(state: &mut OpState) -> Option<ScriptTradeInfo> {
     with_current_script_client_view(state, |view| unsafe { view.current_trade_info() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_combat_info(state: &mut OpState) -> ScriptCombatInfo {
+    with_current_script_client_view(state, |view| unsafe { view.combat_info() }).unwrap_or_default()
+}
+
+#[op2]
+#[serde]
+fn op_hb_current_interaction(state: &mut OpState) -> Option<ScriptClientInteraction> {
+    with_current_script_client_view(state, |view| unsafe { view.current_interaction() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_enchantments(state: &mut OpState) -> Vec<ScriptEnchantmentView> {
+    with_current_script_client_view(state, |view| unsafe { view.enchantments() })
+        .unwrap_or_default()
 }
 
 #[op2(fast)]
@@ -1103,9 +1206,10 @@ where
 mod tests {
     use super::build_dispatch_source;
     use crate::{
-        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptContainerView,
-        ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
-        ScriptEvent, ScriptIntent, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientInteraction,
+        ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
+        ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
+        ScriptIntent, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -1113,13 +1217,62 @@ mod tests {
         EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
         PropertyInt64, PropertyString,
     };
+    use holtburger_common::{Quaternion, Vector3};
+    use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 
     #[derive(Default)]
     struct TestView;
 
+    fn resolve_position(reference: ScriptPositionRef) -> Option<WorldPosition> {
+        match reference {
+            ScriptPositionRef::Position(position) => Some(position),
+            ScriptPositionRef::Guid(guid) => match guid {
+                Guid(7) => Some(WorldPosition {
+                    landblock_id: Guid(0x0100_0000),
+                    coords: Vector3::new(0.0, 0.0, 0.0),
+                    rotation: Quaternion::identity(),
+                }),
+                Guid(42) => Some(WorldPosition {
+                    landblock_id: Guid(0x0100_0000),
+                    coords: Vector3::new(0.0, 10.0, 0.0),
+                    rotation: Quaternion::identity(),
+                }),
+                _ => None,
+            },
+        }
+    }
+
     impl crate::ScriptClientView for TestView {
         fn self_entity(&self) -> Option<ScriptSelfView> {
             None
+        }
+
+        fn combat_info(&self) -> ScriptCombatInfo {
+            ScriptCombatInfo {
+                combat_mode: CombatMode::Melee,
+                is_engaged: true,
+                target: Some(Guid(7)),
+                power: 0.75,
+                height: AttackHeight::High,
+                last_attack_time: Some(123.5),
+            }
+        }
+
+        fn current_interaction(&self) -> Option<ScriptClientInteraction> {
+            Some(ScriptClientInteraction::Attack { guid: Guid(7) })
+        }
+
+        fn enchantments(&self) -> Vec<ScriptEnchantmentView> {
+            vec![
+                ScriptEnchantmentView {
+                    spell_id: 7,
+                    end_time: 123.5,
+                },
+                ScriptEnchantmentView {
+                    spell_id: 11,
+                    end_time: 222.25,
+                },
+            ]
         }
 
         fn target_entity(&self) -> Option<ScriptEntityView> {
@@ -1194,7 +1347,27 @@ mod tests {
             [7, 11, 13].contains(&spell_id)
         }
 
-        fn heading_to(&self, from: WorldPosition, to: WorldPosition) -> f32 {
+        fn distance(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+            let Some(from) = resolve_position(from) else {
+                return 0.0;
+            };
+
+            let Some(to) = resolve_position(to) else {
+                return 0.0;
+            };
+
+            from.distance_to(&to)
+        }
+
+        fn heading_to(&self, from: ScriptPositionRef, to: ScriptPositionRef) -> f32 {
+            let Some(from) = resolve_position(from) else {
+                return 0.0;
+            };
+
+            let Some(to) = resolve_position(to) else {
+                return 0.0;
+            };
+
             from.heading_to(&to)
         }
 
@@ -1233,12 +1406,18 @@ mod tests {
     }
 
     #[test]
+    // Keep all V8-backed host checks inside this single test.
+    // Adding separate #[test] functions here can run them in parallel and trigger V8 platform teardown races.
     fn v8_script_tests_run_in_single_thread_to_avoid_v8_platform_teardown() {
         dispatch_source_escapes_javascript_line_separators();
         equipment_helper_returns_js_map();
         spellbook_helper_returns_js_array();
         inventory_helper_returns_js_array_of_container_views();
         current_open_container_helper_returns_js_option();
+        current_interaction_helper_returns_js_object();
+        enchantments_helper_returns_js_array();
+        distance_and_heading_helpers_accept_guids_and_positions();
+        combat_info_helper_returns_js_object();
         spellbook_membership_helper_returns_boolean();
         heading_to_helper_returns_expected_heading();
         entity_exists_helper_returns_boolean();
@@ -1350,6 +1529,97 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Log { message, .. }]
                 if message == "17"
+        ));
+    }
+
+    fn current_interaction_helper_returns_js_object() {
+        let source = ScriptSource::new(
+            "current-interaction-test",
+            r#"
+                const interaction = Holtburger.currentInteraction();
+                Holtburger.log("info", JSON.stringify(interaction));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "{\"kind\":\"Attack\",\"data\":{\"guid\":7}}"
+        ));
+    }
+
+    fn enchantments_helper_returns_js_array() {
+        let source = ScriptSource::new(
+            "enchantments-test",
+            r#"
+                const enchantments = Holtburger.enchantments();
+                Holtburger.log("info", JSON.stringify(enchantments));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[{\"spellId\":7,\"endTime\":123.5},{\"spellId\":11,\"endTime\":222.25}]"
+        ));
+    }
+
+    fn distance_and_heading_helpers_accept_guids_and_positions() {
+        let source = ScriptSource::new(
+            "distance-heading-test",
+            r#"
+                const distance = Holtburger.distance(7, 42);
+                const heading = Holtburger.headingTo(7, 42);
+                Holtburger.log("info", JSON.stringify([distance, heading]));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if deno_core::serde_json::from_str::<Vec<f64>>(message).is_ok_and(|values| {
+                    values.len() == 2
+                        && (values[0] - 10.0).abs() < 1e-6
+                        && (values[1] - 90.0_f64.to_radians()).abs() < 1e-6
+                })
+        ));
+    }
+
+    fn combat_info_helper_returns_js_object() {
+        let source = ScriptSource::new(
+            "combat-info-test",
+            r#"
+                const combatInfo = Holtburger.combatInfo();
+                Holtburger.log(
+                    "info",
+                    JSON.stringify([
+                        combatInfo.combatMode,
+                        combatInfo.isEngaged,
+                        combatInfo.target,
+                        combatInfo.power,
+                        combatInfo.height,
+                        combatInfo.lastAttackTime,
+                    ]),
+                );
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Log { message, .. }]
+                if message == "[\"Melee\",true,7,0.75,\"High\",123.5]"
         ));
     }
 

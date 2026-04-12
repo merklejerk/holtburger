@@ -54,6 +54,7 @@ pub enum GameAction {
     UseWithTarget(Box<UseWithTargetActionData>),
     IdentifyObject(Box<IdentifyObjectActionData>),
     QueryHealth(Box<QueryHealthActionData>),
+    QueryItemMana(Box<QueryItemManaActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
     TeleToLifestone(Box<TeleToLifestoneActionData>),
     TeleToPklArena(Box<TeleToPklArenaActionData>),
@@ -195,6 +196,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::QueryHealth => {
                     GameAction::QueryHealth(Box::new(QueryHealthActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::QueryItemMana => GameAction::QueryItemMana(Box::new(
+                    QueryItemManaActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
                     LoginCompleteActionData::unpack(data, offset)?,
                 )),
@@ -453,6 +457,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::QueryHealth(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::QueryHealth as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::QueryItemMana(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::QueryItemMana as u32)
                     .unwrap();
                 data.pack(buf);
             }

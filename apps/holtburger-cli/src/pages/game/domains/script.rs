@@ -86,13 +86,19 @@ impl GameState {
         }
     }
 
+    fn clear_script_host_after_error(&mut self) {
+        self.set_pending_script_source(None);
+        self.script.host = None;
+        self.script.tick_accumulator = Duration::ZERO;
+    }
+
     pub(crate) fn run_script_command(&mut self, basename: &str, result: &mut UpdateResult) {
         let source = match deferred_script_source_for_basename(basename) {
             Ok(source) => source,
             Err(error) => {
                 result.actions.push(AppAction::Log {
                     chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] {error}"),
+                    message: format!("[script] {error:?}"),
                 });
                 result.request_redraw(crate::types::RedrawPriority::Immediate);
                 return;
@@ -156,7 +162,7 @@ impl GameState {
                 self.set_pending_script_source(None);
                 result.actions.push(AppAction::Log {
                     chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] Failed to load script source: {error}"),
+                    message: format!("[script] Failed to load script source: {error:?}"),
                 });
                 return;
             }
@@ -165,13 +171,18 @@ impl GameState {
         let view = script_client_view(&self.data, &self.view, server_time);
         match ScriptHost::spawn(source, &view) {
             Ok(mut host) => {
-                dispatch_script_event_to_host(
+                let started_ok = dispatch_script_event_to_host(
                     &view,
                     &mut host,
                     ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started),
                     result,
                 );
-                self.script.host = Some(host);
+
+                if started_ok {
+                    self.script.host = Some(host);
+                } else {
+                    self.clear_script_host_after_error();
+                }
             }
             Err(error) => {
                 self.set_pending_script_source(None);
@@ -302,20 +313,30 @@ impl GameState {
                 return;
             };
 
+            let mut dispatch_failed = false;
+
             if let Some(script_event) = script_event_from_view_event(event) {
-                dispatch_script_event_to_host(&view, host, script_event, result);
+                dispatch_failed |= !dispatch_script_event_to_host(&view, host, script_event, result);
             }
 
-            for workflow_event in workflow_events(before_workflow, &after_workflow) {
-                dispatch_script_event_to_host(
-                    &view,
-                    host,
-                    ScriptEvent::Workflow(workflow_event),
-                    result,
-                );
+            if !dispatch_failed {
+                for workflow_event in workflow_events(before_workflow, &after_workflow) {
+                    dispatch_failed |= !dispatch_script_event_to_host(
+                        &view,
+                        host,
+                        ScriptEvent::Workflow(workflow_event),
+                        result,
+                    );
+
+                    if dispatch_failed {
+                        break;
+                    }
+                }
             }
 
-            if !should_run_after {
+            if dispatch_failed {
+                true
+            } else if !should_run_after {
                 dispatch_script_event_to_host(
                     &view,
                     host,
@@ -330,6 +351,9 @@ impl GameState {
 
         if host_was_cleared {
             self.script.host = None;
+            if self.pending_script_source().is_some() {
+                self.clear_script_host_after_error();
+            }
         }
     }
 
@@ -353,7 +377,9 @@ impl GameState {
         };
 
         if let Some(script_event) = script_event_from_notification(notification) {
-            dispatch_script_event_to_host(&view, host, script_event, result);
+            if !dispatch_script_event_to_host(&view, host, script_event, result) {
+                self.clear_script_host_after_error();
+            }
         }
     }
 
@@ -389,8 +415,10 @@ impl GameState {
                 return;
             };
 
+            let mut dispatch_failed = false;
+
             for _ in 0..tick_count {
-                dispatch_script_event_to_host(
+                dispatch_failed |= !dispatch_script_event_to_host(
                     &view,
                     host,
                     ScriptEvent::Lifecycle(ScriptLifecycleEvent::Tick {
@@ -399,14 +427,22 @@ impl GameState {
                     }),
                     result,
                 );
+
+                if dispatch_failed {
+                    break;
+                }
             }
 
-            !should_run_after
+            dispatch_failed || !should_run_after
         };
 
         if host_was_cleared {
             self.script.host = None;
-            self.script.tick_accumulator = Duration::ZERO;
+            if self.pending_script_source().is_some() {
+                self.clear_script_host_after_error();
+            } else {
+                self.script.tick_accumulator = Duration::ZERO;
+            }
         }
     }
 
@@ -420,16 +456,20 @@ fn dispatch_script_event_to_host(
     host: &mut ScriptHost,
     event: ScriptEvent,
     result: &mut UpdateResult,
-) {
-    if let Err(error) = host.dispatch_event(view, event) {
-        result.actions.push(AppAction::Log {
-            chat_tags: ChatMessageTags::error(),
-            message: format!("[script] {error}"),
-        });
-    }
-
+) -> bool {
+    let dispatch_result = host.dispatch_event(view, event);
     let outputs = host.drain_outputs();
     GameState::drain_script_host_outputs(view.view, outputs, result);
+
+    if let Err(error) = dispatch_result {
+        result.actions.push(AppAction::Log {
+            chat_tags: ChatMessageTags::error(),
+                message: format!("[script] {error:?}"),
+        });
+        return false;
+    }
+
+    true
 }
 
 fn script_equipment_slot_to_target_slot(slot: ScriptEquipmentSlotKind) -> TargetSlot {

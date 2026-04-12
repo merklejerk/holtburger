@@ -77,3 +77,51 @@ Holtburger.onEvent((event) => {
     let fourth_tick = state.handle_tick(0.01);
     assert_eq!(script_tick_log_count(&fourth_tick.actions), 1);
 }
+
+#[test]
+fn crashing_script_is_stopped_after_tick_error() {
+    let player_guid = Guid(0x50000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    state.data.entities.insert(
+        player_guid,
+        creature_entity(player_guid, "Player", WorldPosition::default()),
+    );
+    state.script.pending_source = Some(DeferredScriptSource::Inline(
+        holtburger_scripting::ScriptSource::new(
+            "crashing-tick-script",
+            r#"
+Holtburger.onEvent((event) => {
+  if (event.kind === "Lifecycle" && event.data.kind === "Tick") {
+    throw new Error("boom");
+  }
+});
+"#,
+        ),
+    ));
+
+    let first_tick = state.handle_tick(0.05);
+    assert!(state.script.host.is_some());
+    assert_eq!(script_tick_log_count(&first_tick.actions), 0);
+
+    let second_tick = state.handle_tick(0.05);
+    assert!(state.script.host.is_none());
+    assert!(state.script.pending_source.is_none());
+    assert!(second_tick.actions.iter().any(|action| {
+        matches!(
+            action,
+            AppAction::Log { message, .. }
+                if message.contains("failed to execute script <holtburger-event>")
+                    && message.contains("boom")
+        )
+    }));
+
+    let third_tick = state.handle_tick(0.1);
+    assert_eq!(script_tick_log_count(&third_tick.actions), 0);
+    assert!(!third_tick.actions.iter().any(|action| {
+        matches!(
+            action,
+            AppAction::Log { message, .. }
+                if message.contains("failed to execute script <holtburger-event>")
+        )
+    }));
+}

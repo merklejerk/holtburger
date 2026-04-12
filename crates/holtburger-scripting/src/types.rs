@@ -42,7 +42,7 @@ pub trait ScriptClientView {
     fn entity_data_prop(&self, guid: Guid, prop: PropertyDataId) -> Option<Guid>;
     fn entity_instance_prop(&self, guid: Guid, prop: PropertyInstanceId) -> Option<Guid>;
     fn debug_log(&self, message: String) {
-        log::debug!("{}", message);
+        log::info!("{}", message);
     }
     fn nearby_entities(
         &self,

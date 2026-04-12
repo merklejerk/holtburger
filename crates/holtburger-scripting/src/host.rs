@@ -335,7 +335,7 @@ impl ScriptClientViewPtr {
 const BOOTSTRAP_JS: &str = r#"
 const __holtburgerHandlers = [];
 
-globalThis.Holtburger = Object.freeze({
+globalThis.Holtburger = globalThis.HB = Object.freeze({
   onEvent(handler) {
     if (typeof handler !== "function") {
       throw new TypeError("Holtburger.onEvent expects a function");
@@ -447,9 +447,6 @@ globalThis.Holtburger = Object.freeze({
     Deno.core.ops.op_hb_log(String(level), String(message));
   },
     debugLog(message) {
-        Deno.core.ops.op_hb_debug_log(String(message));
-    },
-    debug_log(message) {
         Deno.core.ops.op_hb_debug_log(String(message));
     },
   say(message) {

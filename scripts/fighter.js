@@ -55,8 +55,16 @@ function isHealingBusy(self) {
 	return HEALING_BUSY_OPERATIONS.has(self.busyOperation);
 }
 
-function hasDeadMotionCommand(entity) {
-	return entity != null && entity.motionCommand != null && entity.motionCommand.kind === "dead";
+function isDefeated(entity) {
+	if (entity == null) {
+		return false;
+	}
+   
+	if (entity.motionCommand != null && entity.motionCommand.kind === "dead") {
+		return true;
+	}
+
+	return entity.profile != null && entity.profile.kind === "creature" && entity.profile.data.health === 0;
 }
 
 // The leader is the anchor for follow behavior and party distance checks.
@@ -67,22 +75,22 @@ function partyLeaderMember(party) {
 
 	return (
 		party.members.find(
-			(member) => member.guid === party.leaderGuid && Holtburger.entityExists(member.guid),
+			(member) => member.guid === party.leaderGuid && HB.entityExists(member.guid),
 		) ?? null
 	);
 }
 
 function distanceToPartyLeader(self, partyLeader) {
-	return partyLeader ? Holtburger.distance(self.guid, partyLeader.guid) : null;
+	return partyLeader ? HB.distance(self.guid, partyLeader.guid) : null;
 }
 
 // Pick the most urgent nearby heal target, including self.
 function chooseHealingTarget(self) {
 	const candidates = [];
 	const selfHealthRatio = ratio(self.health, self.healthMax);
-	const selfEntity = Holtburger.entity(self.guid);
+	const selfEntity = HB.entity(self.guid);
 
-	if (isLowHealth(selfHealthRatio) && !hasDeadMotionCommand(selfEntity)) {
+	if (isLowHealth(selfHealthRatio) && !isDefeated(selfEntity)) {
 		candidates.push({
 			guid: self.guid,
 			distance: 0,
@@ -90,7 +98,7 @@ function chooseHealingTarget(self) {
 		});
 	}
 
-	const party = Holtburger.party();
+	const party = HB.party();
 	if (party) {
 		for (const member of party.members) {
 			if (member.guid === self.guid) {
@@ -101,11 +109,11 @@ function chooseHealingTarget(self) {
 				continue;
 			}
 
-			if (hasDeadMotionCommand(Holtburger.entity(member.guid))) {
+			if (isDefeated(HB.entity(member.guid))) {
 				continue;
 			}
 
-			const distance = Holtburger.distance(self.guid, member.guid);
+			const distance = HB.distance(self.guid, member.guid);
 			if (distance > HEALING_DISTANCE) {
 				continue;
 			}
@@ -139,9 +147,9 @@ function chooseHealingTarget(self) {
 
 // Use the first healing kit we can find.
 function firstHealingKit() {
-	for (const container of Holtburger.inventory()) {
+	for (const container of HB.inventory()) {
 		for (const itemGuid of container.items) {
-			const item = Holtburger.entity(itemGuid);
+			const item = HB.entity(itemGuid);
 			if (item && item.kind === "healing_kit") {
 				return item.guid;
 			}
@@ -153,11 +161,9 @@ function firstHealingKit() {
 
 // Prefer monsters that keep us close to the party leader.
 function selectAttackTarget(self, partyLeader) {
-	const monsters = Holtburger.nearbyEntities(null, ["monster"]).filter(
-		(monster) => !hasDeadMotionCommand(monster),
-	);
+	const monsters = HB.nearbyEntities(null, ["monster"]).filter((monster) => !isDefeated(monster));
 	const withinPartyAttackRange = (monster) =>
-		!partyLeader || Holtburger.distance(partyLeader.guid, monster.guid) <= MAX_PARTY_DISTANCE;
+		!partyLeader || HB.distance(partyLeader.guid, monster.guid) <= MAX_PARTY_DISTANCE;
 	const stickyMonster = state.preferredAttackTargetGuid
 		? monsters.find(
 			(monster) => monster.guid === state.preferredAttackTargetGuid && withinPartyAttackRange(monster),
@@ -184,7 +190,7 @@ function selectAttackTarget(self, partyLeader) {
 				continue;
 			}
 
-			const distanceToParty = Holtburger.distance(partyLeader.guid, monster.guid);
+			const distanceToParty = HB.distance(partyLeader.guid, monster.guid);
 
 			if (
 				bestMonster == null ||
@@ -205,9 +211,9 @@ function selectAttackTarget(self, partyLeader) {
 		}
 	}
 
-	const aggroMonsters = Holtburger
+	const aggroMonsters = HB
 		.nearbyEntities(AGGRO_DISTANCE, ["monster"])
-		.filter((monster) => !hasDeadMotionCommand(monster));
+		.filter((monster) => !isDefeated(monster));
 	if (aggroMonsters.length > 0) {
 		const aggroMonster = aggroMonsters.find((monster) => withinPartyAttackRange(monster));
 		if (!aggroMonster) {
@@ -233,7 +239,7 @@ function healIfNeeded(self) {
 	}
 
 	if (isHealingBusy(self)) {
-		Holtburger.debugLog(
+		HB.debugLog(
 			`healing already in progress target=${healTarget.guid} busy=${self.busyOperation}`,
 		);
 		return true;
@@ -246,10 +252,10 @@ function healIfNeeded(self) {
 
 	const key = `heal:${healingKit}:${healTarget.guid}`;
 	return issuePrimaryAction(key, () => {
-		Holtburger.debugLog(
+		HB.debugLog(
 			`healing target=${healTarget.guid} health=${Math.round(healTarget.healthRatio * 100)}% kit=${healingKit}`,
 		);
-		Holtburger.useWith(healingKit, healTarget.guid);
+		HB.useWith(healingKit, healTarget.guid);
 	});
 }
 
@@ -259,21 +265,21 @@ function followPartyLeader(self, partyLeader) {
 		return false;
 	}
 
-	const currentInteraction = Holtburger.currentInteraction();
+	const currentInteraction = HB.currentInteraction();
 	if (currentInteraction != null && currentInteraction.kind === "Follow" && currentInteraction.guid === partyLeader.guid) {
-		Holtburger.debugLog(`follow already active target=${partyLeader.guid}`);
+		HB.debugLog(`follow already active target=${partyLeader.guid}`);
 		return true;
 	}
 
 	const key = `follow:${partyLeader.guid}`;
 	return issuePrimaryAction(key, () => {
 		if (currentInteraction != null) {
-			Holtburger.debugLog(
+			HB.debugLog(
 				`restarting follow target=${partyLeader.guid} previous=${currentInteraction.kind}`,
 			);
 		}
-		Holtburger.cancelInteraction();
-		Holtburger.follow(partyLeader.guid);
+		HB.cancelInteraction();
+		HB.follow(partyLeader.guid);
 	});
 }
 
@@ -283,8 +289,8 @@ function attackTarget(target) {
 		return false;
 	}
 
-	const combatInfo = Holtburger.combatInfo();
-	const currentInteraction = Holtburger.currentInteraction();
+	const combatInfo = HB.combatInfo();
+	const currentInteraction = HB.currentInteraction();
 	const alreadyAttackingSameTarget =
 		(combatInfo.target != null && combatInfo.target === target.guid) ||
 		(currentInteraction != null && currentInteraction.kind === "Attack" && currentInteraction.guid === target.guid);
@@ -293,20 +299,20 @@ function attackTarget(target) {
 
 	if (alreadyAttackingSameTarget) {
 		state.preferredAttackTargetGuid = target.guid;
-		Holtburger.debugLog(`attack already active target=${target.guid} reason=${target.reason}`);
+		HB.debugLog(`attack already active target=${target.guid} reason=${target.reason}`);
 		return true;
 	}
 
 	if (alreadyApproachingSameTarget) {
 		state.preferredAttackTargetGuid = target.guid;
-		Holtburger.debugLog(`attack pending approach target=${target.guid} reason=${target.reason}`);
+		HB.debugLog(`attack pending approach target=${target.guid} reason=${target.reason}`);
 		return true;
 	}
 
 	state.preferredAttackTargetGuid = target.guid;
 	return issuePrimaryAction(target.key, () => {
-		Holtburger.debugLog(`attacking target=${target.guid} reason=${target.reason}`);
-		Holtburger.attack(target.guid);
+		HB.debugLog(`attacking target=${target.guid} reason=${target.reason}`);
+		HB.attack(target.guid);
 	});
 }
 
@@ -314,7 +320,7 @@ function attackTarget(target) {
 function updatePartySeparationLatch(self, partyLeader) {
 	if (!partyLeader) {
 		if (state.partySeparationLatched) {
-			Holtburger.debugLog("party separation cleared party=n/a");
+			HB.debugLog("party separation cleared party=n/a");
 		}
 
 		state.partySeparationLatched = false;
@@ -326,7 +332,7 @@ function updatePartySeparationLatch(self, partyLeader) {
 
 	if (isSeparated) {
 		if (!state.partySeparationLatched) {
-			Holtburger.debugLog(
+			HB.debugLog(
 				`party separation latched distance=${distance.toFixed(2)} party=${partyLeader.guid}`,
 			);
 		}
@@ -337,7 +343,7 @@ function updatePartySeparationLatch(self, partyLeader) {
 	}
 
 	if (state.partySeparationLatched && (distance == null || distance <= PARTY_RESUME_DISTANCE)) {
-		Holtburger.debugLog(
+		HB.debugLog(
 			`party separation cleared distance=${distance == null ? "n/a" : distance.toFixed(2)} party=${partyLeader ? partyLeader.guid : "n/a"}`,
 		);
 		state.partySeparationLatched = false;
@@ -348,17 +354,17 @@ function updatePartySeparationLatch(self, partyLeader) {
 
 // Main priority loop for each lifecycle tick.
 function runFighter() {
-	const self = Holtburger.selfEntity();
+	const self = HB.selfEntity();
 	if (!self) {
 		return;
 	}
 
-	const combatInfo = Holtburger.combatInfo();
+	const combatInfo = HB.combatInfo();
 	const lowStamina = isLowStamina(self);
 
 	if (lowStamina) {
 		if (!state.wasLowStamina) {
-			Holtburger.say("I'm tired");
+			HB.say("I'm tired");
 			state.wasLowStamina = true;
 		}
 
@@ -367,7 +373,7 @@ function runFighter() {
 		if (combatInfo.isEngaged && !state.lowStaminaCancelIssued) {
 			state.lowStaminaCancelIssued = true;
 			emittedAction = issuePrimaryAction("low-stamina-cancel", () => {
-				Holtburger.cancelInteraction();
+				HB.cancelInteraction();
 			});
 		}
 
@@ -393,7 +399,7 @@ function runFighter() {
 		return;
 	}
 
-	const party = Holtburger.party();
+	const party = HB.party();
 	const partyLeader = partyLeaderMember(party);
 	const separation = updatePartySeparationLatch(self, partyLeader);
 
@@ -406,8 +412,17 @@ function runFighter() {
 		state.partySeparationLatched = false;
 	}
 
-	if (combatInfo.isEngaged) {
+	const combatTarget = combatInfo.target != null ? HB.entity(combatInfo.target) : null;
+	const combatTargetDefeated = isDefeated(combatTarget);
+
+	if (combatInfo.isEngaged && !combatTargetDefeated) {
 		return;
+	}
+
+	if (combatInfo.isEngaged && combatTargetDefeated) {
+		state.preferredAttackTargetGuid = null;
+		HB.debugLog(`combat target defeated target=${combatInfo.target}; retargeting`);
+		HB.cancelInteraction();
 	}
 
 	if (attackTarget(selectAttackTarget(self, partyLeader))) {
@@ -417,7 +432,7 @@ function runFighter() {
 	followPartyLeader(self, partyLeader);
 }
 
-Holtburger.onEvent((event) => {
+HB.onEvent((event) => {
 	if (event.kind !== "Lifecycle") {
 		return;
 	}

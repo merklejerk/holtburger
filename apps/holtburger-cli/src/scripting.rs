@@ -290,7 +290,7 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         items
     }
 
-    fn get_equipment(&self) -> Vec<ScriptEquipmentSlotView> {
+    fn equipment(&self) -> Vec<ScriptEquipmentSlotView> {
         ScriptEquipmentSlotKind::ALL
             .iter()
             .copied()
@@ -322,6 +322,10 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             our_items: trade.self_side.items.clone(),
             their_items: trade.partner_side.items.clone(),
         })
+    }
+
+    fn spellbook(&self) -> Vec<u32> {
+        self.data.player_spells.clone()
     }
 
     fn fellowship(&self) -> Option<ScriptPartyView> {
@@ -782,7 +786,7 @@ mod tests {
             server_time: None,
         };
 
-        let equipment = script_view.get_equipment();
+        let equipment = script_view.equipment();
 
         assert_eq!(equipment.len(), ScriptEquipmentSlotKind::ALL.len());
 
@@ -850,6 +854,20 @@ mod tests {
         assert_eq!(trade_info.partner_name.as_deref(), Some("Buddy"));
         assert_eq!(trade_info.our_items, vec![our_item]);
         assert_eq!(trade_info.their_items, vec![their_item]);
+    }
+
+    #[test]
+    fn spellbook_projection_returns_player_spell_ids() {
+        let mut data = GameData::new(Guid(0x5000_0007), "Player".to_string(), "World".to_string());
+        data.player_spells = vec![3, 1, 2];
+
+        let script_view = TuiScriptClientView {
+            data: &data,
+            view: &ViewState::default(),
+            server_time: None,
+        };
+
+        assert_eq!(script_view.spellbook(), vec![3, 1, 2]);
     }
 
     #[test]

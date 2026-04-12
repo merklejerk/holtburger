@@ -1557,6 +1557,19 @@ mod tests {
         assert!(source.contains("JSON.parse("));
     }
 
+    #[test]
+    fn dispatch_source_serializes_command_event() {
+        let event = ScriptEvent::Command {
+            msg: "ping the script".to_string(),
+        };
+
+        let source = build_dispatch_source(&event).expect("dispatch source should serialize");
+
+        assert!(source.contains("\\\"kind\\\":\\\"Command\\\""));
+        assert!(source.contains("\\\"msg\\\":\\\"ping the script\\\""));
+        assert!(source.contains("JSON.parse("));
+    }
+
     fn equipment_helper_returns_js_map() {
         let source = ScriptSource::new(
             "equipment-map-test",

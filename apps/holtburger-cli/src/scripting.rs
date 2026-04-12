@@ -22,6 +22,9 @@ use holtburger_scripting::{
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::VitalType;
+use std::ffi::OsStr;
+use std::fs;
+use std::io::ErrorKind;
 
 use crate::pages::game::panels::dashboard::tabs::classification;
 use crate::pages::game::{GameData, GameState, ViewState};
@@ -795,6 +798,46 @@ pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<Defe
     Ok(DeferredScriptSource::Path(path))
 }
 
+fn discoverable_script_basenames_in_dir(script_dir: &Path) -> Result<Vec<String>> {
+    let entries = match fs::read_dir(script_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+
+    let mut basenames = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        let is_js_file =
+            matches!(path.extension(), Some(extension) if extension == OsStr::new("js"));
+        if !is_js_file {
+            continue;
+        }
+
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+
+        if validate_script_basename(stem).is_ok() {
+            basenames.push(stem.to_string());
+        }
+    }
+
+    basenames.sort_unstable();
+    basenames.dedup();
+    Ok(basenames)
+}
+
+pub(crate) fn discoverable_script_basenames() -> Result<Vec<String>> {
+    discoverable_script_basenames_in_dir(&script_directory())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,7 +856,51 @@ mod tests {
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::state::{TradeSide, TradeState};
     use holtburger_world::stats::{Attribute, AttributeType, Vital, VitalType};
+    use std::fs;
+    use std::fs::File;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn discoverable_script_basenames_reads_js_files_in_sorted_order() {
+        let unique_dir = std::env::temp_dir().join(format!(
+            "holtburger-script-discovery-{}",
+            std::process::id()
+        ));
+
+        if unique_dir.exists() {
+            fs::remove_dir_all(&unique_dir).expect("remove stale test directory");
+        }
+
+        fs::create_dir_all(unique_dir.join("nested")).expect("create test directory");
+        File::create(unique_dir.join("beta.js")).expect("create beta.js");
+        File::create(unique_dir.join("alpha.js")).expect("create alpha.js");
+        File::create(unique_dir.join("notes.txt")).expect("create notes.txt");
+        File::create(unique_dir.join("nested").join("gamma.js")).expect("create nested file");
+
+        let basenames = discoverable_script_basenames_in_dir(&unique_dir)
+            .expect("discoverable scripts should load");
+
+        assert_eq!(basenames, vec!["alpha".to_string(), "beta".to_string()]);
+
+        fs::remove_dir_all(&unique_dir).expect("clean up test directory");
+    }
+
+    #[test]
+    fn discoverable_script_basenames_treats_missing_directory_as_empty() {
+        let unique_dir = std::env::temp_dir().join(format!(
+            "holtburger-missing-script-discovery-{}",
+            std::process::id()
+        ));
+
+        if unique_dir.exists() {
+            fs::remove_dir_all(&unique_dir).expect("remove stale test directory");
+        }
+
+        let basenames = discoverable_script_basenames_in_dir(&unique_dir)
+            .expect("missing directories should be treated as empty");
+
+        assert!(basenames.is_empty());
+    }
 
     #[test]
     fn script_path_for_basename_uses_js_extension() {

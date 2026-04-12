@@ -256,6 +256,9 @@ impl GameState {
                 item: source,
                 target: dest,
             }),
+            ScriptIntent::CastSpell { spell_id, target } => {
+                Ok(AppAction::CastSpell { spell_id, target })
+            }
             ScriptIntent::MoveItem { item, container } => {
                 Ok(AppAction::MoveItem { item, container })
             }
@@ -291,14 +294,6 @@ impl GameState {
                 slot: script_equipment_slot_to_target_slot(slot),
             }),
             ScriptIntent::Unequip { guid } => Ok(AppAction::Unequip { guid }),
-            ScriptIntent::CastUntargetedSpell { spell_id } => Ok(AppAction::CastSpell {
-                spell_id,
-                target: None,
-            }),
-            ScriptIntent::CastTargetedSpell { target, spell_id } => Ok(AppAction::CastSpell {
-                spell_id,
-                target: Some(target),
-            }),
             ScriptIntent::RespondToConfirmation { accepted } => {
                 if view.active_confirmation.is_some() {
                     return Ok(AppAction::SendCommands {
@@ -571,6 +566,31 @@ mod tests {
             )
             .expect("combine should compile"),
             AppAction::UseWith { item, target } if item == Guid(1) && target == Guid(2)
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::CastSpell {
+                    spell_id: 42,
+                    target: None,
+                },
+            )
+            .expect("untargeted cast should compile"),
+            AppAction::CastSpell { spell_id, target } if spell_id == 42 && target.is_none()
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::CastSpell {
+                    spell_id: 99,
+                    target: Some(Guid(7)),
+                },
+            )
+            .expect("targeted cast should compile"),
+            AppAction::CastSpell { spell_id, target }
+                if spell_id == 99 && target == Some(Guid(7))
         ));
 
         assert!(matches!(

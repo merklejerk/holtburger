@@ -729,15 +729,11 @@ fn clear_stale_combat_engagement(
     };
 
     log::warn!(
-        "combat engagement timed out waiting for feedback for target 0x{:08X}; clearing attack state",
+        "combat engagement timed out waiting for feedback for target 0x{:08X}; clearing combat state",
         target_guid.0
     );
     state.data.combat_runtime.clear_engagement();
     state.clear_combat_drive();
-    log::warn!(
-        "Attack sequence stalled for 0x{:08X}; clearing combat state.",
-        target_guid.0
-    );
     result.request_redraw(RedrawPriority::Immediate);
     true
 }

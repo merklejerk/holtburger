@@ -17,6 +17,7 @@ Holtburger is comprised of several specialized crates:
 - **[`holtburger-session`](crates/holtburger-session)**: The pure networking layer. Handles UDP fragment reassembly, packet sequencing, and stream encryption.
 - **[`holtburger-world`](crates/holtburger-world)**: The state authority. Tracks the live data graph of the 3D world, entity locations, and physics in memory.
 - **[`holtburger-core`](crates/holtburger-core)**: The primary engine orchestrator. Manages client state, translates network messages into authoritative states, and broadcasts UI-safe delta streams.
+- **[`holtburger-scripting`](crates/holtburger-scripting)**: The scripting runtime. Owns the Deno-based host, shared script boundary types, and the frontend-owned projection seam used by automation.
 - **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for interaction, automation, and power users.
 - **[`holtburger-tools`](apps/holtburger-tools)**: A collection of auxiliary command-line utilities for data extraction and protocol analysis.
 
@@ -40,7 +41,7 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Magic System** | 🟢 | 🟢 | Spell catalog loading, spellbook/enchantment tracking, and targeted or untargeted casting are implemented. In the TUI, this is effectively the ceiling without scripting or a richer frontend. |
 | **Melee & Missile Combat** | 🟢 | 🟢 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
 | **Social Gameplay** | 🟢 | 🟡 | Basic fellowship + allegiance interactions. TUI party HUD. |
-| **Scripting / Automation** | 🟡 | 🟢 | Javascript scripting MVP with deno. |
+| **Scripting / Automation** | 🟡 | 🟢 | JavaScript scripting runtime built on Deno Core and the `holtburger-scripting` crate. |
 
 ## Roadmap
 
@@ -50,6 +51,8 @@ Holtburger is being built in phases, and the current TUI client is intentionally
 - It is the proving ground for the shared protocol, session, world, and core layers that a future 3D client will rely on.
 
 The long-term goal is not to stop at a terminal client. The TUI is how we validate the full client stack quickly, iterate on gameplay and automation semantics, and de-risk the architecture before investing in a richer frontend.
+
+Current focus: Phase 2.
 
 ### Phase 1: TUI and Stack Buildout
 
@@ -63,7 +66,13 @@ That includes work such as:
 - combat helpers and automation-oriented control surfaces
 - shared client abstractions that will still make sense for a future 3D frontend
 
-### Phase 2: Consolidation
+### Phase 2: Scripting Runtime
+
+This is the current phase of work. The runtime already exists as the `holtburger-scripting` crate; the remaining work is expanding host APIs, tightening integration with the CLI, and smoothing the authoring workflow.
+
+That should turn the TUI into a lightweight alternative to hosting bots while still sitting on the same shared client foundation. It also creates a much better environment for automation, experimentation, and custom workflows before the 3D client arrives.
+
+### Phase 3: Consolidation
 
 Once the TUI and shared stack are sufficiently built out, the focus shifts to consolidation:
 
@@ -73,12 +82,6 @@ Once the TUI and shared stack are sufficiently built out, the focus shifts to co
 - improving maintainability, testability, and architectural clarity
 
 This phase matters because the TUI is not the end state, but the underlying stack needs to be clean and stable enough to support multiple frontends without dragging terminal-specific assumptions forward.
-
-### Phase 3: Scripting Engine
-
-After consolidation, embedded scripting is the next major milestone. The expectation is that scripting will become the primary value add of the TUI client beyond manual play.
-
-That should turn the TUI into a lightweight alternative to hosting bots while still sitting on the same shared client foundation. It also creates a much better environment for automation, experimentation, and custom workflows before the 3D client arrives.
 
 ### Phase 4: 3D Client
 

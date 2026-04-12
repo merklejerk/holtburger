@@ -125,7 +125,7 @@ impl GameState {
             Err(error) => {
                 result.actions.push(AppAction::Log {
                     chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] {error:?}"),
+                    message: format!("[script] {error}"),
                 });
                 result.request_redraw(crate::types::RedrawPriority::Immediate);
                 return;

@@ -17,7 +17,7 @@ Holtburger is comprised of several specialized crates:
 - **[`holtburger-session`](crates/holtburger-session)**: The pure networking layer. Handles UDP fragment reassembly, packet sequencing, and stream encryption.
 - **[`holtburger-world`](crates/holtburger-world)**: The state authority. Tracks the live data graph of the 3D world, entity locations, and physics in memory.
 - **[`holtburger-core`](crates/holtburger-core)**: The primary engine orchestrator. Manages client state, translates network messages into authoritative states, and broadcasts UI-safe delta streams.
-- **[`holtburger-scripting`](crates/holtburger-scripting)**: The scripting runtime. Owns the Deno-based host, shared script boundary types, and the frontend-owned projection seam used by automation.
+- **[`holtburger-scripting`](crates/holtburger-scripting)**: The scripting runtime. Owns the Deno-based host, shared script boundary types, and the frontend-owned projection seam used by automation. See the [Scripting Guide](crates/holtburger-scripting/SCRIPTING_GUIDE.md) for a quickstart and API reference.
 - **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for interaction, automation, and power users.
 - **[`holtburger-tools`](apps/holtburger-tools)**: A collection of auxiliary command-line utilities for data extraction and protocol analysis.
 
@@ -95,17 +95,23 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 
 ## Installation and First Run
 
-There are three practical ways to get started:
+Nightly builds and archives for Windows, Mac, and Linux are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. All bundles ship with a minimal (`micro`) assets file, `assets.hba`, so they're ready to run immediately.
 
-- **Binary release**: best for most users on Windows, macOS, and Linux.
-- **Flatpak**: best for Linux users who want a packaged install.
-- **From source**: best if you are developing on Holtburger itself.
+### Windows Install
 
-### Binary Releases (Recommended)
+1. Download the Windows archive.
+2. Extract it.
+3. Launch the executable from the extracted folder:
 
-Nightly prebuilt archives are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives already include the bundled namespaced `assets.hba` needed for the current TUI/runtime path, so this is the fastest way to get to a running client.
+```powershell
+holtburger-cli.exe --help
+```
 
-1. Download the archive for your platform.
+Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
+
+### MacOS Install
+
+1. Download the MacOS archive.
 2. Extract it.
 3. Launch the binary from the extracted folder:
 
@@ -113,20 +119,31 @@ Nightly prebuilt archives are available on the [Releases](https://github.com/mer
 ./holtburger-cli --help
 ```
 
-On Windows, run `holtburger-cli.exe --help` instead.
+Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 
-### Flatpak (Linux)
+### Linux Flatpak (recommended)
 
-A nightly Flatpak bundle is also produced for Linux. Install it, then launch the app directly:
+Download the flatpak from releases then run `flatpak install ./holtburger-cli.flatpak`.
 
 ```bash
-flatpak install ./holtburger-cli.flatpak
 flatpak run io.github.merklejerk.holtburger-cli --help
 ```
 
-The Flatpak ships with the same bundled namespaced `assets.hba`, so it is ready to run immediately.
+By default the Flatpak bundle sets `SCRIPT_DIR` to the writable per-app data tree inside the sandbox (`/var/data/holtburger/scripts`, which Flatpak maps to `~/.var/app/$FLATPAK_ID/data/holtburger/scripts` on the host). You can store custom scripts there.
 
-### From Source
+### Linux Tarball
+
+1. Download the Linux archive.
+2. Extract it.
+3. Launch the binary from the extracted folder:
+
+```bash
+./holtburger-cli --help
+```
+
+Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
+
+### Source / Local Development
 
 Building from source is mainly for local development.
 
@@ -144,7 +161,16 @@ For day-to-day development, run the TUI through Cargo:
 cargo run --bin tui -- --help
 ```
 
-Unlike the release archive and Flatpak, source builds do **not** bundle client data automatically. See [Data File Configuration](#data-file-configuration).
+The source tree uses `./scripts/` as the local script directory by default. Local scripts, script data, and per-script config live under that writable directory unless you override `SCRIPT_DIR`.
+
+Script storage:
+
+- Default local script directory: `./scripts/`
+- Custom scripts: `<SCRIPT_DIR>/<BASENAME>.js`
+- Script data: `<SCRIPT_DIR>/<BASENAME>.data.json`
+- Script config: `<SCRIPT_DIR>/.config/<BASENAME>.config.json`
+
+Unlike the release builds and Flatpak, source builds do **not** bundle client data automatically. See [Data File Configuration](#data-file-configuration).
 
 ## Running the TUI Client
 
@@ -210,7 +236,7 @@ At runtime, the frontend constructs a `holtburger-content::ContentRepository` fr
 3.  Local `./dats/` directory relative to the binary.
 4.  Standard OS Data Directory:
     *   **Linux**: `~/.local/share/holtburger/dats/`
-    *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
+    *   **MacOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
 > **Note:** Official DAT files no longer need to be renamed when passed to tooling. Runtime startup no longer scans raw DAT files; use `dat2hba` to produce a namespaced `assets.hba` bundle first.

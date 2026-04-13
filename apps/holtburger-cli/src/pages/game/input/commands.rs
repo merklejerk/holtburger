@@ -1,6 +1,8 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::scripting::{DeferredScriptSource, discoverable_script_basenames};
+use crate::scripting::{
+    DeferredScriptSource, DiscoverableScriptSource, discoverable_scripts, script_directory,
+};
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
@@ -204,29 +206,47 @@ impl GameState {
 
         self.chat.log(
             ChatMessageTags::system(),
-            format!("Script status: {status}"),
+            format!(
+                "Current script: {} ({})",
+                current_source.unwrap_or_else(|| "none".to_string()),
+                status
+            ),
         );
         self.chat.log(
             ChatMessageTags::system(),
             format!(
-                "Current script: {}",
-                current_source.unwrap_or_else(|| "none".to_string())
+                "Local script dir: {}",
+                script_directory()
+                    .canonicalize()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|_| "?".to_string())
             ),
         );
 
-        match discoverable_script_basenames() {
-            Ok(basenames) if basenames.is_empty() => self.chat.log(
+        match discoverable_scripts() {
+            Ok(entries) if entries.is_empty() => self.chat.log(
                 ChatMessageTags::system(),
                 "Discovered scripts: none found.".to_string(),
             ),
-            Ok(basenames) => self.chat.log(
-                ChatMessageTags::system(),
-                format!(
-                    "Discovered scripts ({}): {}",
-                    basenames.len(),
-                    basenames.join(", ")
-                ),
-            ),
+            Ok(entries) => {
+                self.chat.log(
+                    ChatMessageTags::system(),
+                    format!("Discovered scripts ({}):", entries.len()),
+                );
+
+                for entry in entries {
+                    let system_suffix = if entry.source == DiscoverableScriptSource::System {
+                        " (SYSTEM)"
+                    } else {
+                        ""
+                    };
+
+                    self.chat.log(
+                        ChatMessageTags::system(),
+                        format!("- {}{}", entry.basename, system_suffix),
+                    );
+                }
+            }
             Err(error) => log::error!("Unable to list discovered scripts: {error:?}"),
         }
     }
@@ -273,7 +293,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> loads SCRIPT_DIR/<BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
+            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> loads <BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -417,8 +437,6 @@ impl GameState {
             "run" => vec![
                 "Usage: /run <BASENAME>".to_string(),
                 "Load or replace the active long-running script for this session.".to_string(),
-                "The client loads SCRIPT_DIR/<BASENAME>.js, where SCRIPT_DIR defaults to scripts/."
-                    .to_string(),
                 "Example: /run loot-bot".to_string(),
             ],
             "script" => vec![
@@ -429,7 +447,8 @@ impl GameState {
             ],
             "scripts" => vec![
                 "Usage: /scripts".to_string(),
-                "Show the current script status and discoverable script basenames.".to_string(),
+                "Show the current script status, local script dir, and discovered scripts."
+                    .to_string(),
                 "Use /run <BASENAME> to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
                     .to_string(),
             ],
@@ -1043,11 +1062,7 @@ mod tests {
         assert!(result.commands.is_empty());
         assert!(state.chat.messages.iter().any(|message| {
             message.chat_tags.contains(ChatMessageTags::system())
-                && message.text == "Script status: idle"
-        }));
-        assert!(state.chat.messages.iter().any(|message| {
-            message.chat_tags.contains(ChatMessageTags::system())
-                && message.text == "Current script: none"
+                && message.text == "Current script: none (idle)"
         }));
     }
 
@@ -1084,10 +1099,6 @@ mod tests {
     //     let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     //     assert!(result.commands.is_empty());
-    //     assert!(state.chat.messages.iter().any(|message| {
-    //         message.chat_tags.contains(ChatMessageTags::system())
-    //             && message.text == "Script status: running"
-    //     }));
     //     assert!(state.chat.messages.iter().any(|message| {
     //         message.chat_tags.contains(ChatMessageTags::system())
     //             && message.text == "Current script: script-command-test"

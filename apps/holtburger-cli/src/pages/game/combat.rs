@@ -299,6 +299,12 @@ impl CombatEngagementState {
         self.pending_server_failure = None;
     }
 
+    pub fn recover_stalled_attack(&mut self) {
+        self.in_flight = false;
+        self.last_feedback = None;
+        self.pending_server_failure = None;
+    }
+
     pub fn handle_mode_updated(&mut self, mode: CombatMode) {
         match mode {
             CombatMode::Melee | CombatMode::Missile => {
@@ -395,6 +401,17 @@ impl CombatRuntimeState {
     pub fn clear_engagement(&mut self) {
         self.engagement.clear_engagement();
         self.issue_state = CombatIssueState::Idle;
+        self.last_attack_attempt_at = None;
+        self.pending_feedback_since = None;
+    }
+
+    pub fn recover_stalled_attack(&mut self) {
+        self.engagement.recover_stalled_attack();
+        self.issue_state = if self.engagement.desired().is_some() {
+            CombatIssueState::Ready
+        } else {
+            CombatIssueState::Idle
+        };
         self.last_attack_attempt_at = None;
         self.pending_feedback_since = None;
     }
@@ -727,6 +744,17 @@ fn clear_stale_combat_engagement(
         result.request_redraw(RedrawPriority::Immediate);
         return true;
     };
+
+    if should_rearm_sticky_auto_attack(state) {
+        log::warn!(
+            "combat engagement timed out waiting for feedback for target 0x{:08X}; recovering combat state",
+            target_guid.0
+        );
+        state.data.combat_runtime.recover_stalled_attack();
+        state.clear_combat_drive();
+        result.request_redraw(RedrawPriority::Immediate);
+        return true;
+    }
 
     log::warn!(
         "combat engagement timed out waiting for feedback for target 0x{:08X}; clearing combat state",
@@ -1581,7 +1609,7 @@ mod tests {
     }
 
     #[test]
-    fn silent_ready_attack_loop_times_out_and_clears_engagement() {
+    fn silent_ready_attack_loop_times_out_and_recovers_when_target_remains_available() {
         let player_guid = Guid(0x50000003);
         let target_guid = Guid(0x60000003);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -1619,18 +1647,25 @@ mod tests {
             &mut result,
         );
 
-        assert_eq!(state.data.combat_runtime.desired_engagement(), None);
+        assert_eq!(
+            state.data.combat_runtime.desired_engagement(),
+            Some(DesiredCombatEngagement {
+                target_guid,
+                mode: CombatMode::Melee,
+            })
+        );
         assert_eq!(
             state.data.combat_runtime.issue_state,
-            CombatIssueState::Idle
+            CombatIssueState::Ready
         );
+        assert_eq!(state.data.combat_runtime.pending_feedback_since(), None);
         assert!(!result.commands.iter().any(|command| {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
         }));
     }
 
     #[test]
-    fn silent_in_flight_attack_times_out_and_clears_engagement() {
+    fn silent_in_flight_attack_times_out_and_clears_engagement_when_target_is_unavailable() {
         let player_guid = Guid(0x50000004);
         let target_guid = Guid(0x60000004);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -1665,6 +1700,8 @@ mod tests {
             .combat_runtime
             .handle_feedback(&CombatFeedback::AttackCommenced);
         assert!(state.data.combat_runtime.pending_feedback_since().is_some());
+
+        state.data.entities.remove(&target_guid);
 
         let mut result = UpdateResult::new();
         let cleared = clear_stale_combat_engagement(

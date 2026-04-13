@@ -32,6 +32,7 @@ use crate::pages::game::{GameData, GameState, ViewState};
 use crate::types::{AppAction, AppNotification, ChatMessageTags, Interaction, LocalConfirmation};
 
 const SCRIPT_DIR_ENV_VAR: &str = "SCRIPT_DIR";
+const SCRIPT_BUNDLE_DIR_ENV_VAR: &str = "SCRIPT_BUNDLE_DIR";
 const DEFAULT_SCRIPT_DIR: &str = "scripts";
 
 fn running_script_stem(script_name: &str) -> Option<&str> {
@@ -52,6 +53,18 @@ fn script_data_path_for_name(script_dir: &Path, script_name: &str) -> Option<Pat
     Some(script_dir.join(format!("{stem}.data.json")))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiscoverableScriptSource {
+    Local,
+    System,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiscoverableScript {
+    pub basename: String,
+    pub source: DiscoverableScriptSource,
+}
+
 fn load_json_file(path: &Path) -> Option<ScriptJsonValue> {
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
@@ -69,6 +82,10 @@ fn load_json_file(path: &Path) -> Option<ScriptJsonValue> {
             None
         }
     }
+}
+
+fn first_existing_path(paths: impl IntoIterator<Item = Option<PathBuf>>) -> Option<PathBuf> {
+    paths.into_iter().flatten().find(|path| path.exists())
 }
 
 fn write_json_file(path: &Path, contents: &str) -> bool {
@@ -480,7 +497,11 @@ impl ScriptClientView for TuiScriptClientView<'_> {
 
     fn load_data(&self) -> Option<ScriptJsonValue> {
         let script_name = self.script_name?;
-        let path = script_data_path_for_name(&script_directory(), script_name)?;
+        let path = resolve_script_data_path_for_name_in_dirs(
+            &script_directory(),
+            script_bundle_directory().as_deref(),
+            script_name,
+        )?;
         load_json_file(&path)
     }
 
@@ -917,11 +938,50 @@ pub(crate) fn resolve_deferred_script_source(
     }
 }
 
-fn script_directory() -> PathBuf {
+pub(crate) fn script_directory() -> PathBuf {
     std::env::var_os(SCRIPT_DIR_ENV_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(DEFAULT_SCRIPT_DIR))
+}
+
+fn script_bundle_directory() -> Option<PathBuf> {
+    std::env::var_os(SCRIPT_BUNDLE_DIR_ENV_VAR)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn resolve_script_source_path_for_basename_in_dirs(
+    local_script_dir: &Path,
+    system_script_dir: Option<&Path>,
+    basename: &str,
+) -> Result<PathBuf> {
+    let local_script_path = script_path_for_basename_in_dir(local_script_dir, basename)?;
+    if local_script_path.exists() {
+        return Ok(local_script_path);
+    }
+
+    if let Some(script_dir) = system_script_dir {
+        let system_script_path = script_path_for_basename_in_dir(script_dir, basename)?;
+        if system_script_path.exists() {
+            return Ok(system_script_path);
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "script {basename} was not found in the local or system scripts directories"
+    ))
+}
+
+fn resolve_script_data_path_for_name_in_dirs(
+    local_script_dir: &Path,
+    system_script_dir: Option<&Path>,
+    script_name: &str,
+) -> Option<PathBuf> {
+    first_existing_path([
+        script_data_path_for_name(local_script_dir, script_name),
+        system_script_dir.and_then(|script_dir| script_data_path_for_name(script_dir, script_name)),
+    ])
 }
 
 fn validate_script_basename(basename: &str) -> Result<&str> {
@@ -950,8 +1010,11 @@ fn script_path_for_basename_in_dir(script_dir: &Path, basename: &str) -> Result<
 }
 
 pub(crate) fn deferred_script_source_for_basename(basename: &str) -> Result<DeferredScriptSource> {
-    let script_dir = script_directory();
-    let path = script_path_for_basename_in_dir(&script_dir, basename)?;
+    let path = resolve_script_source_path_for_basename_in_dirs(
+        &script_directory(),
+        script_bundle_directory().as_deref(),
+        basename,
+    )?;
     Ok(DeferredScriptSource::Path(path))
 }
 
@@ -991,8 +1054,34 @@ fn discoverable_script_basenames_in_dir(script_dir: &Path) -> Result<Vec<String>
     Ok(basenames)
 }
 
-pub(crate) fn discoverable_script_basenames() -> Result<Vec<String>> {
-    discoverable_script_basenames_in_dir(&script_directory())
+fn discoverable_script_entries_in_dir(
+    script_dir: &Path,
+    source: DiscoverableScriptSource,
+) -> Result<Vec<DiscoverableScript>> {
+    Ok(discoverable_script_basenames_in_dir(script_dir)?
+        .into_iter()
+        .map(|basename| DiscoverableScript { basename, source })
+        .collect())
+}
+
+pub(crate) fn discoverable_scripts() -> Result<Vec<DiscoverableScript>> {
+    let mut entries = BTreeMap::new();
+
+    for entry in
+        discoverable_script_entries_in_dir(&script_directory(), DiscoverableScriptSource::Local)?
+    {
+        entries.insert(entry.basename.clone(), entry);
+    }
+
+    if let Some(script_dir) = script_bundle_directory() {
+        for entry in
+            discoverable_script_entries_in_dir(&script_dir, DiscoverableScriptSource::System)?
+        {
+            entries.entry(entry.basename.clone()).or_insert(entry);
+        }
+    }
+
+    Ok(entries.into_values().collect())
 }
 
 #[cfg(test)]
@@ -1091,6 +1180,50 @@ mod tests {
             script_data_path_for_name(script_dir, "fighter.js"),
             Some(PathBuf::from("/tmp/holtburger-scripts/fighter.data.json"))
         );
+    }
+
+    #[test]
+    fn script_resolution_prefers_local_roots_over_system_roots() {
+        let local_dir = std::env::temp_dir().join(format!(
+            "holtburger-local-script-resolution-{}",
+            std::process::id()
+        ));
+        let system_dir = std::env::temp_dir().join(format!(
+            "holtburger-system-script-resolution-{}",
+            std::process::id()
+        ));
+
+        if local_dir.exists() {
+            fs::remove_dir_all(&local_dir).expect("remove stale local test directory");
+        }
+        if system_dir.exists() {
+            fs::remove_dir_all(&system_dir).expect("remove stale system test directory");
+        }
+
+        fs::create_dir_all(&local_dir).expect("create local test directory");
+        fs::create_dir_all(&system_dir).expect("create system test directory");
+
+        File::create(local_dir.join("fighter.js")).expect("create local fighter.js");
+        File::create(local_dir.join("fighter.data.json")).expect("create local fighter.data.json");
+        File::create(system_dir.join("fighter.js")).expect("create system fighter.js");
+        File::create(system_dir.join("fighter.data.json"))
+            .expect("create system fighter.data.json");
+
+        let script_path = resolve_script_source_path_for_basename_in_dirs(
+            &local_dir,
+            Some(&system_dir),
+            "fighter",
+        )
+        .expect("script path should resolve");
+        let data_path =
+            resolve_script_data_path_for_name_in_dirs(&local_dir, Some(&system_dir), "fighter.js")
+                .expect("data path should resolve");
+
+        assert_eq!(script_path, local_dir.join("fighter.js"));
+        assert_eq!(data_path, local_dir.join("fighter.data.json"));
+
+        fs::remove_dir_all(&local_dir).expect("clean up local test directory");
+        fs::remove_dir_all(&system_dir).expect("clean up system test directory");
     }
 
     #[test]

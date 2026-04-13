@@ -19,7 +19,7 @@ use holtburger_scripting::{
     ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
     ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
     ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
-    ScriptSource, ScriptSpellEffectView, ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::{TrainingLevel, VitalType};
@@ -131,7 +131,7 @@ pub struct TuiScriptClientView<'a> {
 impl TuiScriptClientView<'_> {
     fn resolve_position_reference(&self, reference: ScriptPositionRef) -> Option<WorldPosition> {
         match reference {
-            ScriptPositionRef::Position(position) => Some(position),
+            ScriptPositionRef::Position(position) => Some(WorldPosition::from(position)),
             ScriptPositionRef::Guid(guid) => {
                 if Some(guid) == self.data.player_guid {
                     self.data.runtime_player_position()
@@ -183,7 +183,7 @@ impl TuiScriptClientView<'_> {
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
             kind: classification::classify_entity(entity).kind(),
-            position: entity_position.unwrap_or_default(),
+            position: entity_position.unwrap_or_default().into(),
             profile,
             container: entity.container_id().unwrap_or(Guid::NULL),
             wielder: entity.wielder_id().unwrap_or(Guid::NULL),
@@ -210,7 +210,11 @@ impl ScriptClientView for TuiScriptClientView<'_> {
         Some(ScriptSelfView {
             guid,
             name,
-            position: self.data.runtime_player_position().unwrap_or_default(),
+            position: self
+                .data
+                .runtime_player_position()
+                .unwrap_or_default()
+                .into(),
             health: self
                 .data
                 .vitals
@@ -686,25 +690,6 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             leader_guid: party.leader_guid,
             members,
         })
-    }
-
-    fn active_spells(&self) -> Vec<ScriptSpellEffectView> {
-        let Some((server_time, then)) = self.server_time else {
-            return Vec::new();
-        };
-
-        let now = server_time + then.elapsed().as_secs_f64();
-
-        self.data
-            .player_enchantments
-            .iter()
-            .map(|enchantment| ScriptSpellEffectView {
-                spell_id: u32::from(enchantment.spell_id),
-                name: self.data.spell_name(u32::from(enchantment.spell_id)),
-                remaining_seconds: Some(enchantment.start_time + enchantment.duration - now),
-                target_guid: self.data.player_guid,
-            })
-            .collect()
     }
 
     fn server_time(&self) -> Option<f64> {
@@ -1350,7 +1335,7 @@ mod tests {
         assert_eq!(self_view.capacity, 18_000.0);
         assert_eq!(self_view.busy_operation, ScriptBusyOperation::Buy);
         assert!((self_view.heading - heading).abs() < 1e-6);
-        assert_eq!(self_view.position, player_position);
+        assert_eq!(self_view.position, player_position.into());
     }
 
     #[test]
@@ -1979,7 +1964,7 @@ mod tests {
             .expect("entity snapshot should be available");
 
         assert_eq!(entity_view.motion_command, ScriptMotionCommand::Dead);
-        assert_eq!(entity_view.position, player_position);
+        assert_eq!(entity_view.position, player_position.into());
         assert_eq!(entity_view.distance_to_self, 0.0);
     }
 

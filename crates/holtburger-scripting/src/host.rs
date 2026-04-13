@@ -13,11 +13,11 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction, ScriptClientView,
-    ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
-    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
-    ScriptJsonValue, ScriptLogLevel, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
-    ScriptSource, ScriptTradeInfo,
+    ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
+    ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
+    ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue, ScriptLogLevel,
+    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -60,6 +60,9 @@ struct ScriptClientViewPtr {
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
     #[allow(clippy::type_complexity)]
     party: unsafe fn(*const ()) -> Option<ScriptPartyView>,
+    server_time: unsafe fn(*const ()) -> Option<f64>,
+    pending_confirmation: unsafe fn(*const ()) -> Option<ScriptConfirmation>,
+    busy_operation: unsafe fn(*const ()) -> ScriptBusyOperation,
 }
 
 impl ScriptClientViewPtr {
@@ -225,6 +228,20 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).party() }
         }
 
+        unsafe fn server_time<T: ScriptClientView>(data: *const ()) -> Option<f64> {
+            unsafe { (&*data.cast::<T>()).server_time() }
+        }
+
+        unsafe fn pending_confirmation<T: ScriptClientView>(
+            data: *const (),
+        ) -> Option<ScriptConfirmation> {
+            unsafe { (&*data.cast::<T>()).pending_confirmation() }
+        }
+
+        unsafe fn busy_operation<T: ScriptClientView>(data: *const ()) -> ScriptBusyOperation {
+            unsafe { (&*data.cast::<T>()).busy_operation() }
+        }
+
         Self {
             data: (view as *const T).cast(),
             self_entity: self_entity::<T>,
@@ -255,6 +272,9 @@ impl ScriptClientViewPtr {
             entity: entity::<T>,
             current_trade_info: current_trade_info::<T>,
             party: party::<T>,
+            server_time: server_time::<T>,
+            pending_confirmation: pending_confirmation::<T>,
+            busy_operation: busy_operation::<T>,
         }
     }
 
@@ -373,6 +393,18 @@ impl ScriptClientViewPtr {
     unsafe fn party(self) -> Option<ScriptPartyView> {
         unsafe { (self.party)(self.data) }
     }
+
+    unsafe fn server_time(self) -> Option<f64> {
+        unsafe { (self.server_time)(self.data) }
+    }
+
+    unsafe fn pending_confirmation(self) -> Option<ScriptConfirmation> {
+        unsafe { (self.pending_confirmation)(self.data) }
+    }
+
+    unsafe fn busy_operation(self) -> ScriptBusyOperation {
+        unsafe { (self.busy_operation)(self.data) }
+    }
 }
 
 const BOOTSTRAP_JS: &str = r#"
@@ -423,6 +455,15 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     },
     currentOpenContainer() {
         return Deno.core.ops.op_hb_current_open_container();
+    },
+    serverTime() {
+        return Deno.core.ops.op_hb_server_time();
+    },
+    pendingConfirmation() {
+        return Deno.core.ops.op_hb_pending_confirmation();
+    },
+    busyOperation() {
+        return Deno.core.ops.op_hb_busy_operation();
     },
     respondToConfirmation(accepted) {
         Deno.core.ops.op_hb_respond_to_confirmation(Boolean(accepted));
@@ -626,6 +667,9 @@ deno_core::extension!(
         op_hb_distance,
         op_hb_current_trade_info,
         op_hb_current_open_container,
+        op_hb_server_time,
+        op_hb_pending_confirmation,
+        op_hb_busy_operation,
         op_hb_respond_to_confirmation,
         op_hb_cast_spell,
         op_hb_open_container,
@@ -768,6 +812,29 @@ fn op_hb_inventory(state: &mut OpState) -> Vec<ScriptContainerView> {
 fn op_hb_current_open_container(state: &mut OpState) -> Option<Guid> {
     with_current_script_client_view(state, |view| unsafe { view.current_open_container() })
         .flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_server_time(state: &mut OpState) -> Option<Value> {
+    let server_time = with_current_script_client_view(state, |view| unsafe { view.server_time() })
+        .flatten()
+        .unwrap_or_default();
+
+    Some(json!(server_time))
+}
+
+#[op2]
+#[serde]
+fn op_hb_pending_confirmation(state: &mut OpState) -> Option<ScriptConfirmation> {
+    with_current_script_client_view(state, |view| unsafe { view.pending_confirmation() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_busy_operation(state: &mut OpState) -> ScriptBusyOperation {
+    with_current_script_client_view(state, |view| unsafe { view.busy_operation() })
+        .unwrap_or_default()
 }
 
 #[op2]
@@ -1461,9 +1528,10 @@ mod tests {
     use super::build_dispatch_source;
     use crate::{
         ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-        ScriptClientInteraction, ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView,
-        ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
-        ScriptEvent, ScriptIntent, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
+        ScriptClientInteraction, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
+        ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
+        ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLocalConfirmation,
+        ScriptLocalConfirmationKind, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
         ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
@@ -1480,7 +1548,7 @@ mod tests {
 
     fn resolve_position(reference: ScriptPositionRef) -> Option<WorldPosition> {
         match reference {
-            ScriptPositionRef::Position(position) => Some(position),
+            ScriptPositionRef::Position(position) => Some(position.into()),
             ScriptPositionRef::Guid(guid) => match guid {
                 Guid(7) => Some(WorldPosition {
                     landblock_id: Guid(0x0100_0000),
@@ -1582,6 +1650,21 @@ mod tests {
             Some(Guid(17))
         }
 
+        fn server_time(&self) -> Option<f64> {
+            Some(123.5)
+        }
+
+        fn pending_confirmation(&self) -> Option<ScriptConfirmation> {
+            Some(ScriptConfirmation::Local(ScriptLocalConfirmation {
+                kind: ScriptLocalConfirmationKind::Unswear,
+                text: "Please unswear first".to_string(),
+            }))
+        }
+
+        fn busy_operation(&self) -> ScriptBusyOperation {
+            ScriptBusyOperation::Sell
+        }
+
         fn equipment(&self) -> Vec<ScriptEquipmentSlotView> {
             vec![ScriptEquipmentSlotView {
                 slot: ScriptEquipmentSlotKind::HeadWear,
@@ -1631,7 +1714,7 @@ mod tests {
                 guid,
                 name: Some("Lesser Healing Kit".to_string()),
                 kind: ScriptEntityKind::HealingKit,
-                position: WorldPosition::default(),
+                position: WorldPosition::default().into(),
                 profile: None,
                 container: Guid::NULL,
                 wielder: Guid::NULL,
@@ -1670,22 +1753,6 @@ mod tests {
                 ],
             })
         }
-
-        fn active_spells(&self) -> Vec<crate::ScriptSpellEffectView> {
-            Vec::new()
-        }
-
-        fn server_time(&self) -> Option<f64> {
-            None
-        }
-
-        fn pending_confirmation(&self) -> Option<crate::ScriptConfirmation> {
-            None
-        }
-
-        fn busy_operation(&self) -> ScriptBusyOperation {
-            ScriptBusyOperation::None
-        }
     }
 
     #[test]
@@ -1702,6 +1769,7 @@ mod tests {
         entity_helper_returns_js_object();
         debug_log_helper_emits_no_script_outputs();
         party_helper_returns_js_object();
+        server_time_pending_confirmation_and_busy_operation_helpers_return_js_values();
         distance_and_heading_helpers_accept_guids_and_positions();
         combat_info_helper_returns_js_object();
         respond_to_confirmation_helper_emits_script_intent();
@@ -1737,7 +1805,7 @@ mod tests {
 
         let source = build_dispatch_source(&event).expect("dispatch source should serialize");
 
-        assert!(source.contains("\\\"kind\\\":\\\"Command\\\""));
+        assert!(source.contains("\\\"kind\\\":\\\"command\\\""));
         assert!(source.contains("\\\"msg\\\":\\\"ping the script\\\""));
         assert!(source.contains("JSON.parse("));
     }
@@ -1935,6 +2003,32 @@ mod tests {
         ));
     }
 
+    fn server_time_pending_confirmation_and_busy_operation_helpers_return_js_values() {
+        let source = ScriptSource::new(
+            "script-state-test",
+            r#"
+                const values = [
+                    Holtburger.serverTime(),
+                    Holtburger.pendingConfirmation(),
+                    Holtburger.busyOperation(),
+                ];
+                Holtburger.log("info", JSON.stringify(values));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        match outputs.as_slice() {
+            [ScriptIntent::Log { message, .. }]
+                if message == "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]" => {}
+            [ScriptIntent::Log { message, .. }] => {
+                panic!("unexpected script-state output: {message}")
+            }
+            other => panic!("unexpected outputs: {other:?}"),
+        }
+    }
+
     fn distance_and_heading_helpers_accept_guids_and_positions() {
         let source = ScriptSource::new(
             "distance-heading-test",
@@ -2079,8 +2173,8 @@ mod tests {
             "heading-to-test",
             r#"
                 const heading = Holtburger.headingTo(
-                    { landblock_id: 16777216, coords: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
-                    { landblock_id: 16777216, coords: { x: 0, y: 10, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
+                    { landblockId: 16777216, coords: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
+                    { landblockId: 16777216, coords: { x: 0, y: 10, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
                 );
                 Holtburger.log("info", String(heading));
             "#,

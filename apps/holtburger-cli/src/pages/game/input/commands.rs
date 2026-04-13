@@ -119,6 +119,16 @@ fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a
     None
 }
 
+fn display_absolute_path(path: &std::path::Path) -> String {
+    if path.is_absolute() {
+        return path.display().to_string();
+    }
+
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path).display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
+}
+
 impl GameState {
     fn default_party_name(&self) -> String {
         self.data
@@ -216,10 +226,7 @@ impl GameState {
             ChatMessageTags::system(),
             format!(
                 "Local script dir: {}",
-                script_directory()
-                    .canonicalize()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|_| "?".to_string())
+                display_absolute_path(&script_directory())
             ),
         );
 
@@ -1064,6 +1071,20 @@ mod tests {
             message.chat_tags.contains(ChatMessageTags::system())
                 && message.text == "Current script: none (idle)"
         }));
+    }
+
+    #[test]
+    fn script_directory_display_is_absolute_without_exists_check() {
+        let relative = std::path::PathBuf::from("scripts");
+
+        let displayed = display_absolute_path(&relative);
+        let expected = std::env::current_dir()
+            .expect("current directory should be available")
+            .join(&relative)
+            .display()
+            .to_string();
+
+        assert_eq!(displayed, expected);
     }
 
     // Disabled due to V8 threading issues.

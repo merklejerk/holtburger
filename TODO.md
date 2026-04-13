@@ -258,6 +258,7 @@
 - [x] `/version` and `--version`, seeded from commit hash env var set by build system?
 - [x] Attack spam too verbose.
 - [ ] `/promote <PLAYER>` - Promote new party leader.
+- [ ] Show "creature type" in assessment.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

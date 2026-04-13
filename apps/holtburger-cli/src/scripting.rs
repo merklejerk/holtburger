@@ -949,16 +949,6 @@ fn script_bundle_directory() -> Option<PathBuf> {
     std::env::var_os(SCRIPT_BUNDLE_DIR_ENV_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|path| path.parent().map(|dir| dir.join(DEFAULT_SCRIPT_DIR)))
-                .filter(|path| path.exists())
-        })
-        .or_else(|| {
-            let local_scripts = PathBuf::from("./").join(DEFAULT_SCRIPT_DIR);
-            local_scripts.exists().then_some(local_scripts)
-        })
 }
 
 fn resolve_script_source_path_for_basename_in_dirs(

@@ -293,7 +293,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> loads SCRIPT_DIR/<BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
+            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> loads <BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -437,8 +437,6 @@ impl GameState {
             "run" => vec![
                 "Usage: /run <BASENAME>".to_string(),
                 "Load or replace the active long-running script for this session.".to_string(),
-                "The client loads SCRIPT_DIR/<BASENAME>.js, where SCRIPT_DIR defaults to scripts/."
-                    .to_string(),
                 "Example: /run loot-bot".to_string(),
             ],
             "script" => vec![

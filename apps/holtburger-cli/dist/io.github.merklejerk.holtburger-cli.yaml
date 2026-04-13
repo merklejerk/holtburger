@@ -22,6 +22,7 @@ modules:
         path: ../../../dats/assets.hba
       - type: dir
         path: ../../../scripts
+        dest: scripts
       - type: file
         path: io.github.merklejerk.holtburger-cli.desktop
       - type: file

@@ -174,6 +174,9 @@ Use the read helpers to inspect the current client snapshot.
 - `HB.currentTradeInfo()` returns the active trade state, including the trade partner and both item lists, or `null` if no trade is active.
 - `HB.party()` returns the current party snapshot, or `null` if the client is not in a party.
 - `HB.currentOpenContainer()` returns the guid of the currently open container, or `null`.
+- `HB.serverTime()` returns the current server time as a number, or `0` if the client has not synced yet.
+- `HB.pendingConfirmation()` returns the active confirmation dialog snapshot, or `null` if no confirmation is open.
+- `HB.busyOperation()` returns the current busy operation state as a snake_case string, or `none` when the client is idle.
 - `HB.inventory()` returns container views for the current inventory, or an empty array if the client snapshot is not ready.
 - `HB.equipment()` returns a JavaScript `Map` keyed by snake_case equipment slot name, with values containing `equipMask` and `itemGuid`; if no snapshot is available, it returns an empty map.
 

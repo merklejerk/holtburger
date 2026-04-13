@@ -107,11 +107,11 @@ Nightly builds and archives for Windows, Mac, and Linux are available on the [Re
 holtburger-cli.exe --help
 ```
 
-Custom scripts can stored in `EXTRACT_DIR/scripts/` (must be writeable).
+Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 
 ### MacOS Install
 
-1. Download the macOS archive.
+1. Download the MacOS archive.
 2. Extract it.
 3. Launch the binary from the extracted folder:
 
@@ -119,7 +119,7 @@ Custom scripts can stored in `EXTRACT_DIR/scripts/` (must be writeable).
 ./holtburger-cli --help
 ```
 
-Custom scripts can stored in `EXTRACT_DIR/scripts/` (must be writeable).
+Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 
 ### Linux Flatpak (recommended)
 
@@ -141,7 +141,7 @@ By default the Flatpak bundle sets `SCRIPT_DIR` to the writable per-app data tre
 ./holtburger-cli --help
 ```
 
-Custom scripts can stored in `EXTRACT_DIR/scripts/` (must be writeable).
+Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 
 ### Source / Local Development
 
@@ -236,7 +236,7 @@ At runtime, the frontend constructs a `holtburger-content::ContentRepository` fr
 3.  Local `./dats/` directory relative to the binary.
 4.  Standard OS Data Directory:
     *   **Linux**: `~/.local/share/holtburger/dats/`
-    *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
+    *   **MacOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
 > **Note:** Official DAT files no longer need to be renamed when passed to tooling. Runtime startup no longer scans raw DAT files; use `dat2hba` to produce a namespaced `assets.hba` bundle first.

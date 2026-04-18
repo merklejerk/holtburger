@@ -44,6 +44,7 @@ pub enum GameAction {
     FellowshipQuit(Box<FellowshipQuitActionData>),
     FellowshipDismiss(Box<FellowshipDismissActionData>),
     FellowshipRecruit(Box<FellowshipRecruitActionData>),
+    FellowshipAssignNewLeader(Box<FellowshipAssignNewLeaderActionData>),
     FellowshipUpdateRequest(Box<FellowshipUpdateRequestActionData>),
     PingRequest(Box<PingRequestActionData>),
     DropItem(Box<DropItemActionData>),
@@ -166,6 +167,11 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::FellowshipRecruit => GameAction::FellowshipRecruit(Box::new(
                     FellowshipRecruitActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::FellowshipAssignNewLeader => {
+                    GameAction::FellowshipAssignNewLeader(Box::new(
+                        FellowshipAssignNewLeaderActionData::unpack(data, offset)?,
+                    ))
+                }
                 GameActionOpcode::FellowshipUpdateRequest => GameAction::FellowshipUpdateRequest(
                     Box::new(FellowshipUpdateRequestActionData::unpack(data, offset)?),
                 ),
@@ -407,6 +413,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::FellowshipRecruit(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipRecruit as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipAssignNewLeader(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipAssignNewLeader as u32)
                     .unwrap();
                 data.pack(buf);
             }

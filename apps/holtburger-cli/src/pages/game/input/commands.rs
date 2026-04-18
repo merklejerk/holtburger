@@ -5,6 +5,7 @@ use crate::scripting::{
 };
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
+use holtburger_world::context::normalize_name_for_lookup;
 use holtburger_world::context::WorldContextExt;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
@@ -261,7 +262,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
+            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /promote, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -278,7 +279,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /leave, /uninvite <PLAYER>"
+            "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /promote <NAME>, /leave, /uninvite <PLAYER>"
                 .to_string(),
         );
         self.chat.log(
@@ -380,6 +381,10 @@ impl GameState {
             "invite" => vec![
                 "Usage: /invite <PLAYER>".to_string(),
                 "Invite a nearby or known player to your party.".to_string(),
+            ],
+            "promote" => vec![
+                "Usage: /promote <NAME>".to_string(),
+                "Promote a party member to become the fellowship leader.".to_string(),
             ],
             "leave" => vec![
                 "Usage: /leave".to_string(),
@@ -782,6 +787,44 @@ impl GameState {
 
         if command == "/invite" {
             self.log_command_usage("Usage: /invite <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(player_name) = parse_single_argument_command(command, &["/promote"]) {
+            let Some(party) = self.data.party.as_ref() else {
+                self.chat.log(
+                    ChatMessageTags::warning(),
+                    "You are not currently in a party.".to_string(),
+                );
+                return result.with_redraw(true);
+            };
+
+            let requested_name = normalize_name_for_lookup(player_name);
+            let Some(member) = party
+                .members
+                .iter()
+                .find(|member| normalize_name_for_lookup(&member.name) == requested_name)
+            else {
+                self.chat.log(
+                    ChatMessageTags::warning(),
+                    format!("Unable to find party member '{}' to promote.", player_name),
+                );
+                return result.with_redraw(true);
+            };
+
+            result.commands.push(ClientCommand::PromotePartyLeader {
+                target: member.guid,
+            });
+            self.chat.log(
+                ChatMessageTags::system(),
+                format!("Promoting {} to party leader...", member.name),
+            );
+            result.merge(self.finish_input_command_submission(command));
+            return result.with_redraw(true);
+        }
+
+        if command == "/promote" {
+            self.log_command_usage("Usage: /promote <NAME>");
             return result.with_redraw(true);
         }
 
@@ -1606,6 +1649,73 @@ mod tests {
             Some(AppAction::InviteToParty { target }) if *target == Guid(0x50000042)
         ));
         assert!(result.commands.is_empty());
+    }
+
+    #[test]
+    fn promote_command_dispatches_party_leader_change() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.data.party = Some(holtburger_world::state::FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: vec![
+                holtburger_world::state::FellowshipMemberState {
+                    guid: Guid(0x50000001),
+                    name: "Player".to_string(),
+                    level: 42,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 200,
+                    max_stamina: 180,
+                    max_mana: 160,
+                    current_health: 190,
+                    current_stamina: 170,
+                    current_mana: 150,
+                    share_loot: true,
+                },
+                holtburger_world::state::FellowshipMemberState {
+                    guid: Guid(0x50000042),
+                    name: "Bestie".to_string(),
+                    level: 37,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 180,
+                    max_stamina: 160,
+                    max_mana: 140,
+                    current_health: 175,
+                    current_stamina: 155,
+                    current_mana: 135,
+                    share_loot: true,
+                },
+            ],
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+        state.chat_input.input.set_text("/promote Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::PromotePartyLeader { target }) if *target == Guid(0x50000042)
+        ));
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/promote Bestie"
+        ));
+        assert!(state
+            .chat
+            .messages
+            .iter()
+            .any(|message| message.text == "Promoting Bestie to party leader..."));
     }
 
     #[test]

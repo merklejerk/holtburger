@@ -98,6 +98,31 @@ impl ProtocolPack for FellowshipDismissActionData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct FellowshipAssignNewLeaderActionData {
+    pub new_leader_guid: Guid,
+}
+
+impl ProtocolUnpack for FellowshipAssignNewLeaderActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+
+        let new_leader_guid = Guid(u32::from_le_bytes(
+            data[*offset..*offset + 4].try_into().ok()?,
+        ));
+        *offset += 4;
+        Some(Self { new_leader_guid })
+    }
+}
+
+impl ProtocolPack for FellowshipAssignNewLeaderActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.new_leader_guid.0.to_le_bytes());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct FellowshipUpdateRequestActionData {
     pub panel_open: bool,
 }
@@ -176,6 +201,21 @@ mod tests {
         };
 
         let fixture = hex::decode("CCBBAA99A400000099000050").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_fellowship_assign_new_leader_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x01020304,
+            action: GameAction::FellowshipAssignNewLeader(Box::new(
+                FellowshipAssignNewLeaderActionData {
+                    new_leader_guid: Guid(0x50000042),
+                },
+            )),
+        };
+
+        let fixture = hex::decode("040302019002000042000050").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 

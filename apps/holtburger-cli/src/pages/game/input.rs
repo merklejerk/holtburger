@@ -255,13 +255,12 @@ impl GameState {
                     return result;
                 }
             }
-            KeyCode::Backspace | KeyCode::Delete => {
+            KeyCode::Backspace | KeyCode::Delete
                 if self.view.focused_pane == FocusedPane::Input
                     && self.chat_input.input.apply_key(key)
-                {
+                => {
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
             KeyCode::Left | KeyCode::Right => {
                 if self.view.focused_pane == FocusedPane::Input {
                     if self.chat_input.input.apply_key(key) {
@@ -285,8 +284,8 @@ impl GameState {
                 }
             }
             KeyCode::Up => match self.view.focused_pane {
-                FocusedPane::Input => {
-                    if !self.chat_input.input_history.is_empty() {
+                FocusedPane::Input
+                    if !self.chat_input.input_history.is_empty() => {
                         let idx = self
                             .chat_input
                             .history_index
@@ -298,7 +297,6 @@ impl GameState {
                             .set_text(&self.chat_input.input_history[idx]);
                         result.request_redraw(RedrawPriority::Immediate);
                     }
-                }
                 FocusedPane::Chat => {
                     *self.chat.active_scroll_offset_mut() =
                         self.chat.active_scroll_offset().saturating_add(1);
@@ -412,11 +410,10 @@ impl GameState {
                 }
             }
             KeyCode::Home => match self.view.focused_pane {
-                FocusedPane::Input => {
-                    if self.chat_input.input.apply_key(key) {
+                FocusedPane::Input
+                    if self.chat_input.input.apply_key(key) => {
                         result.request_redraw(RedrawPriority::Immediate);
                     }
-                }
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     *self.chat.active_scroll_offset_mut() =
@@ -430,11 +427,10 @@ impl GameState {
                 _ => {}
             },
             KeyCode::End => match self.view.focused_pane {
-                FocusedPane::Input => {
-                    if self.chat_input.input.apply_key(key) {
+                FocusedPane::Input
+                    if self.chat_input.input.apply_key(key) => {
                         result.request_redraw(RedrawPriority::Immediate);
                     }
-                }
                 FocusedPane::Chat => {
                     *self.chat.active_scroll_offset_mut() = 0;
                     result.request_redraw(RedrawPriority::Immediate);

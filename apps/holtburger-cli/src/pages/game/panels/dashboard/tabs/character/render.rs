@@ -369,7 +369,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     }
 
     let sort_enchants = |list: &mut Vec<Enchantment>| {
-        list.sort_by(|a, b| a.spell_id.cmp(&b.spell_id));
+        list.sort_by_key(|a| a.spell_id);
     };
     for v in vital_enchants.values_mut() {
         sort_enchants(v);
@@ -418,7 +418,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     }
 
     let mut vitals: Vec<_> = data.vitals.values().collect();
-    vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
+    vitals.sort_by_key(|a| a.vital_type.to_string());
     for v in vitals {
         let val = format!("{} / {}", v.current, v.buffed_max);
         let xp_cost = v
@@ -453,7 +453,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     // 2. Attributes
     lines.push(CharTabLine::Header("ATTRIBUTES"));
     let mut attrs: Vec<_> = data.attributes.values().collect();
-    attrs.sort_by(|a, b| a.attr_type.to_string().cmp(&b.attr_type.to_string()));
+    attrs.sort_by_key(|a| a.attr_type.to_string());
     for a in attrs {
         let val = if a.current != a.base {
             format!("{} ({})", a.base, a.current)
@@ -596,7 +596,7 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             (PropertyFloat::ResistElectric, data.resistances.electric),
             (PropertyFloat::ResistNether, data.resistances.nether),
         ];
-        resists.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
+        resists.sort_by_key(|a| a.0.to_string());
 
         for (prop, val) in resists {
             lines.push(CharTabLine::Stat {

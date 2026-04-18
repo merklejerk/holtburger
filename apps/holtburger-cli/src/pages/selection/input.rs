@@ -17,46 +17,40 @@ impl SelectionState {
 
         let mut result = UpdateResult::new();
         match key.code {
-            KeyCode::Up => {
-                if self.selected_character_index > 0 {
+            KeyCode::Up
+                if self.selected_character_index > 0 => {
                     self.selected_character_index -= 1;
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
-            KeyCode::Down => {
+            KeyCode::Down
                 if !self.characters.is_empty()
                     && self.selected_character_index + 1 < self.characters.len()
-                {
+                => {
                     self.selected_character_index += 1;
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
-            KeyCode::Home => {
-                if !self.characters.is_empty() {
+            KeyCode::Home
+                if !self.characters.is_empty() => {
                     self.selected_character_index = 0;
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
-            KeyCode::End => {
-                if !self.characters.is_empty() {
+            KeyCode::End
+                if !self.characters.is_empty() => {
                     self.selected_character_index = self.characters.len() - 1;
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
-            KeyCode::PageUp => {
-                if !self.characters.is_empty() {
+            KeyCode::PageUp
+                if !self.characters.is_empty() => {
                     self.selected_character_index =
                         self.selected_character_index.saturating_sub(10);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
-            KeyCode::PageDown => {
-                if !self.characters.is_empty() {
+            KeyCode::PageDown
+                if !self.characters.is_empty() => {
                     self.selected_character_index =
                         (self.selected_character_index + 10).min(self.characters.len() - 1);
                     result.request_redraw(RedrawPriority::Immediate);
                 }
-            }
             KeyCode::Enter => {
                 if let Some(verb) = dashboard_verbs(self)
                     .into_iter()
@@ -185,16 +179,14 @@ impl SelectionState {
                     }
                 }
                 CharacterCreationFocus::Attributes => match key.code {
-                    KeyCode::Up => {
-                        if creation.move_attribute_selection(-1) {
+                    KeyCode::Up
+                        if creation.move_attribute_selection(-1) => {
                             result.request_redraw(RedrawPriority::Immediate);
                         }
-                    }
-                    KeyCode::Down => {
-                        if creation.move_attribute_selection(1) {
+                    KeyCode::Down
+                        if creation.move_attribute_selection(1) => {
                             result.request_redraw(RedrawPriority::Immediate);
                         }
-                    }
                     KeyCode::Left => {
                         let changed = if key.modifiers.contains(KeyModifiers::CONTROL) {
                             creation.minimize_selected_attribute()
@@ -224,16 +216,14 @@ impl SelectionState {
                     _ => {}
                 },
                 CharacterCreationFocus::Skills => match key.code {
-                    KeyCode::Up => {
-                        if creation.move_skill_selection(-1) {
+                    KeyCode::Up
+                        if creation.move_skill_selection(-1) => {
                             result.request_redraw(RedrawPriority::Immediate);
                         }
-                    }
-                    KeyCode::Down => {
-                        if creation.move_skill_selection(1) {
+                    KeyCode::Down
+                        if creation.move_skill_selection(1) => {
                             result.request_redraw(RedrawPriority::Immediate);
                         }
-                    }
                     KeyCode::Left => {
                         result.actions.push(
                             crate::types::AppUiAction::LowerSelectedCharacterCreationSkill.into(),

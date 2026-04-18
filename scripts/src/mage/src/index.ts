@@ -1,4 +1,5 @@
 import { runMage } from "./engine";
+import { loadMageConfig } from "./runtime-config";
 import { loadMageDataWithStatus } from "./runtime-data";
 import { createInitialState, resetState } from "./state";
 import {
@@ -88,6 +89,7 @@ HB.onEvent((event) => {
       switch (event.data.kind) {
         case "started": {
           resetState(state);
+          state.config = loadMageConfig();
           const loadStatus = loadMageDataWithStatus();
           state.data = loadStatus.data;
           logMageInfo("started");

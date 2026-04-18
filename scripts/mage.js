@@ -1,8 +1,8 @@
 "use strict";
 (() => {
   // src/constants.ts
-  var MAX_AGGRO_DISTANCE = 32;
-  var MAX_PARTY_DISTANCE = 15;
+  var MAX_AGGRO_DISTANCE = 30;
+  var MAX_PARTY_DISTANCE = 10;
   var PARTY_RESUME_FACTOR = 0.9;
   var PARTY_RESUME_DISTANCE = MAX_PARTY_DISTANCE * PARTY_RESUME_FACTOR;
   var HEALING_DISTANCE = 15;
@@ -10,6 +10,7 @@
   var SELF_HEALTH_THRESHOLD = 0.6;
   var SELF_STAMINA_THRESHOLD = 0.6;
   var PARTY_HEAL_THRESHOLD = 0.75;
+  var SPELL_SKILL_HEADROOM = 15;
   var SPELL_REPEAT_SECONDS = 1.1;
   var PENDING_SPELL_BUSY_GRACE_SECONDS = 1;
   var VULN_REPEAT_SECONDS = 10 * 60;
@@ -83,7 +84,7 @@
       if (skill == null || !isSkillUsable(skill)) {
         return false;
       }
-      return skill.effective >= spell.difficulty + 10;
+      return skill.effective >= spell.difficulty + SPELL_SKILL_HEADROOM;
     });
   }
   function canTargetSpell(spell, targetGuid, selfGuid) {
@@ -100,6 +101,7 @@
   }
   function chooseBestSpell(spells, options, distanceBetween) {
     const preferredDamageTypes = options.preferredDamageTypes ?? EMPTY_DAMAGE_TYPES;
+    const preferredSpellIds = options.preferredSpellIds ?? [];
     const candidates = spells.filter((spell) => {
       if (options.school != null && spell.school !== options.school) {
         return false;
@@ -127,6 +129,17 @@
       return null;
     }
     candidates.sort((left, right) => {
+      const leftPreferredSpell = preferredSpellIdIndex(
+        preferredSpellIds,
+        left.spellId
+      );
+      const rightPreferredSpell = preferredSpellIdIndex(
+        preferredSpellIds,
+        right.spellId
+      );
+      if (leftPreferredSpell !== rightPreferredSpell) {
+        return leftPreferredSpell - rightPreferredSpell;
+      }
       const leftPreferred = preferredDamageTypeIndex(
         preferredDamageTypes,
         left.damageType
@@ -179,6 +192,10 @@
       return Number.POSITIVE_INFINITY;
     }
     const index = preferredDamageTypes.indexOf(damageType);
+    return index === -1 ? Number.POSITIVE_INFINITY : index;
+  }
+  function preferredSpellIdIndex(preferredSpellIds, spellId) {
+    const index = preferredSpellIds.indexOf(spellId);
     return index === -1 ? Number.POSITIVE_INFINITY : index;
   }
   function findResistWord(weenieResists, weenieId) {
@@ -923,7 +940,8 @@
           type: "stamina-to-mana",
           targetKind: "self",
           targetGuid: self.guid,
-          selfGuid: self.guid
+          selfGuid: self.guid,
+          preferredSpellIds: state2.config.preferredSpellIds
         },
         HB.distance
       );
@@ -938,7 +956,8 @@
         type: "revitalize",
         targetKind: "self",
         targetGuid: self.guid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -955,10 +974,11 @@
       spells,
       {
         school: "life",
-        type: "mana-to-stamina",
+        type: "revitalize",
         targetKind: "self",
         targetGuid: self.guid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -972,7 +992,8 @@
         type: "health-to-stamina",
         targetKind: "self",
         targetGuid: self.guid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -986,7 +1007,8 @@
         type: "revitalize",
         targetKind: "self",
         targetGuid: self.guid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -1009,7 +1031,8 @@
         type: "stamina-to-health",
         targetKind: "self",
         targetGuid: self.guid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -1023,7 +1046,8 @@
         type: "revitalize",
         targetKind: "self",
         targetGuid: self.guid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -1047,7 +1071,8 @@
         type: "heal",
         targetKind: "other",
         targetGuid: healTargetGuid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -1061,7 +1086,8 @@
         type: "revitalize",
         targetKind: "other",
         targetGuid: healTargetGuid,
-        selfGuid: self.guid
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
       },
       HB.distance
     );
@@ -1087,6 +1113,7 @@
           targetKind: "other",
           targetGuid: target.guid,
           selfGuid: self.guid,
+          preferredSpellIds: state2.config.preferredSpellIds,
           preferredDamageTypes
         },
         HB.distance
@@ -1104,6 +1131,7 @@
               targetKind: "other",
               targetGuid: target.guid,
               selfGuid: self.guid,
+              preferredSpellIds: state2.config.preferredSpellIds,
               exactDamageType: warSpell.damageType
             },
             HB.distance
@@ -1138,7 +1166,8 @@
           type: "attack",
           targetKind: "other",
           targetGuid: target.guid,
-          selfGuid: self.guid
+          selfGuid: self.guid,
+          preferredSpellIds: state2.config.preferredSpellIds
         },
         HB.distance
       );
@@ -1295,6 +1324,41 @@
     return `${target.guid}${target.weenieId == null ? "" : `:${target.weenieId}`}:${target.reason}`;
   }
 
+  // src/runtime-config.ts
+  function loadMageConfig() {
+    const rawConfig = HB.loadConfig();
+    if (rawConfig == null) {
+      HB.writeConfig({});
+    }
+    return normalizeMageConfig(rawConfig);
+  }
+  function normalizeMageConfig(rawConfig) {
+    if (rawConfig == null || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
+      return {
+        preferredSpellIds: []
+      };
+    }
+    const config = rawConfig;
+    return {
+      preferredSpellIds: normalizePreferredSpellIds(config.preferredSpellIds)
+    };
+  }
+  function normalizePreferredSpellIds(value) {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    const preferredSpellIds = [];
+    const seenSpellIds = /* @__PURE__ */ new Set();
+    for (const entry of value) {
+      if (!Number.isInteger(entry) || entry <= 0 || seenSpellIds.has(entry)) {
+        continue;
+      }
+      seenSpellIds.add(entry);
+      preferredSpellIds.push(entry);
+    }
+    return preferredSpellIds;
+  }
+
   // src/runtime-data.ts
   function loadMageDataWithStatus() {
     const rawData = HB.loadData();
@@ -1380,6 +1444,9 @@
   function createInitialState() {
     return {
       data: null,
+      config: {
+        preferredSpellIds: []
+      },
       elapsedSeconds: 0,
       combatTargetGuid: null,
       spellcast: { phase: "idle" },
@@ -1468,6 +1535,7 @@
         switch (event.data.kind) {
           case "started": {
             resetState(state);
+            state.config = loadMageConfig();
             const loadStatus = loadMageDataWithStatus();
             state.data = loadStatus.data;
             logMageInfo("started");

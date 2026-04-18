@@ -3,6 +3,9 @@ import type { AttackMissRecord, MageRuntimeState } from "./types";
 export function createInitialState(): MageRuntimeState {
   return {
     data: null,
+    config: {
+      preferredSpellIds: [],
+    },
     elapsedSeconds: 0,
     combatTargetGuid: null,
     spellcast: { phase: "idle" },

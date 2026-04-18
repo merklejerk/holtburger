@@ -173,11 +173,6 @@ export function runMage(state: MageRuntimeState): void {
 		return;
 	}
 
-	if (partyLeader != null && separation.shouldFollow) {
-		followPartyLeader(state, self, partyLeader);
-		return;
-	}
-
 	if (target != null) {
 		if (maybeCastAttackSpell(state, self, data, spells, skills, target)) {
 			return;

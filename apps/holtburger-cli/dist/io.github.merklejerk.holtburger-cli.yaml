@@ -11,7 +11,7 @@ modules:
       - install -D holtburger-cli /app/bin/holtburger-cli
       - install -D assets.hba /app/share/holtburger/dats/assets.hba
       - install -d /app/share/holtburger/scripts
-      - cp -R scripts/. /app/share/holtburger/scripts/
+      - cp scripts/*.js scripts/*.data.json scripts/*.data.bin /app/share/holtburger/scripts/
       - install -D io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
       - install -D io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
       - install -D io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli.svg

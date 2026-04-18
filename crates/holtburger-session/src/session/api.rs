@@ -3,12 +3,18 @@ use anyhow::Result;
 use socket2::SockRef;
 use std::collections::{BTreeMap, HashMap};
 
-const UDP_RECV_BUFFER_SIZE_BYTES: usize = 4 * 1024 * 1024;
+const UDP_RECV_BUFFER_SIZE_BYTES: usize = 2 * 1024 * 1024;
 
 impl Session {
     pub async fn new(server_addr: std::net::SocketAddr) -> Result<Self> {
         let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
-        SockRef::from(&socket).set_recv_buffer_size(UDP_RECV_BUFFER_SIZE_BYTES)?;
+        if let Err(err) = SockRef::from(&socket).set_recv_buffer_size(UDP_RECV_BUFFER_SIZE_BYTES) {
+            log::warn!(
+                "failed to set UDP receive buffer size to {} bytes: {}",
+                UDP_RECV_BUFFER_SIZE_BYTES,
+                err
+            );
+        }
         Ok(Self {
             transport: Box::new(socket),
             server_addr,

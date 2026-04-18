@@ -262,7 +262,7 @@ async fn test_multi_fragment_packet_unaligned() {
             }
             let data = q.remove(0);
             buf[..data.len()].copy_from_slice(&data);
-            Ok((data.len(), "127.0.0.1:9001".parse().unwrap()))
+            Ok((data.len(), "127.0.0.1:9000".parse().unwrap()))
         }
     }
 
@@ -313,7 +313,7 @@ async fn test_ack_sequence_prunes_cached_packets() {
             },
             &6u32.to_le_bytes(),
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
 
     let mut session = Session::new_test();
@@ -372,7 +372,7 @@ async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
         },
         &payload,
     );
-    let transport = ScriptedTransport::new(vec![packet], "127.0.0.1:9001".parse().unwrap());
+    let transport = ScriptedTransport::new(vec![packet], "127.0.0.1:9000".parse().unwrap());
     let sent_handle = transport.clone();
 
     let mut session = Session::new_test();
@@ -442,7 +442,7 @@ async fn test_request_retransmit_replays_cached_packet() {
             },
             &retransmit_payload,
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -528,7 +528,7 @@ async fn test_connect_response_parses_cookie_from_optional_header_offset() {
     let client_id = 0x345u16;
     let transport = ScriptedTransport::new(
         vec![build_connect_response_packet(cookie, client_id)],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
 
     let mut session = Session::new_test();
@@ -544,7 +544,7 @@ async fn test_connect_response_parses_cookie_from_optional_header_offset() {
 async fn test_wrapped_server_sequence_zero_is_processed_as_expected() {
     let transport = ScriptedTransport::new(
         vec![build_single_fragment_packet(0, &[0xAA, 0xBB, 0xCC])],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
 
     let mut session = Session::new_test();
@@ -577,7 +577,7 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
                 &[],
             ),
         ],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -621,7 +621,7 @@ async fn test_single_packet_gap_requests_retransmit() {
             },
             &[],
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -647,7 +647,7 @@ async fn test_single_packet_gap_requests_retransmit() {
 
 #[tokio::test]
 async fn test_send_request_retransmit_wraps_sequence_window() {
-    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9001".parse().unwrap());
+    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9000".parse().unwrap());
     let sent_handle = transport.clone();
 
     let mut session = Session::new_test();
@@ -670,7 +670,7 @@ async fn test_send_request_retransmit_wraps_sequence_window() {
 
 #[tokio::test]
 async fn test_queued_ack_uses_latest_client_sequence_when_flushed() {
-    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9001".parse().unwrap());
+    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9000".parse().unwrap());
     let sent_handle = transport.clone();
 
     let mut session = Session::new_test();
@@ -785,7 +785,7 @@ async fn test_first_server_packet_sequence_two_does_not_request_retransmit() {
             },
             &0.0f64.to_le_bytes(),
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -818,7 +818,7 @@ async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
             },
             &retransmit_payload,
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 

@@ -18,6 +18,7 @@ impl Session {
         Ok(Self {
             transport: Box::new(socket),
             server_addr,
+            server_source_addr: server_addr,
             isaac_c2s: None,
             isaac_s2c: None,
             packet_sequence: 0,
@@ -50,6 +51,7 @@ impl Session {
         Self {
             transport: Box::new(MockTransport),
             server_addr: "127.0.0.1:9000".parse().unwrap(),
+            server_source_addr: "127.0.0.1:9000".parse().unwrap(),
             isaac_c2s: None,
             isaac_s2c: None,
             packet_sequence: 1,

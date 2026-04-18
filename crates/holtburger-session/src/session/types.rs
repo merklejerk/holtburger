@@ -89,6 +89,7 @@ pub enum SessionEvent {
 pub struct Session {
     pub(crate) transport: Box<dyn Transport>,
     pub server_addr: SocketAddr,
+    pub(crate) server_source_addr: SocketAddr,
     pub isaac_c2s: Option<Isaac>,
     pub isaac_s2c: Option<Isaac>,
     pub packet_sequence: u32,

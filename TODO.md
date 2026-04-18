@@ -264,9 +264,10 @@
 - [x] Client sending duplicate packets to server.
 - [x] Add all spells causes a sequence error.
 - [x] Add `/run <ARGS>` command.
-- [ ] Mage script improvements:
-    - [ ] Add preferred spell IDs.
-    - [ ] Snap to target heading before casting?
+- [~] Mage script improvements:
+    - [x] Add preferred spell IDs.
+    - [x] Fix not using revitalize.
+    - [x] Snap to target heading before casting?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

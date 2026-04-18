@@ -11,4 +11,6 @@ This package contains the TypeScript source for the `mage` TUI script.
 - `npm run build` type-checks first, then bundles directly with esbuild
 - `npm run watch` keeps rebuilding on source changes
 
+The script also reads local user preferences from `.config/mage.config.json`. The supported setting is `preferredSpellIds`, an ordered list of spell IDs that the chooser should prefer when multiple candidates are otherwise valid.
+
 Run `npm install` once inside this directory, then use `npm run build`.

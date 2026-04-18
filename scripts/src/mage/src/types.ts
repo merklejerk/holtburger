@@ -43,6 +43,10 @@ export type MageData = {
   weenieResists: Uint8Array;
 };
 
+export type MageConfig = {
+  preferredSpellIds: number[];
+};
+
 export type MonsterCandidate = {
   guid: Guid;
   weenieId: number | null;
@@ -138,6 +142,7 @@ export type AttackMissRecord = {
 
 export type MageRuntimeState = {
   data: MageData | null;
+  config: MageConfig;
   elapsedSeconds: number;
   combatTargetGuid: Guid | null;
   spellcast: MageSpellcastState;
@@ -159,6 +164,7 @@ export type ChooseSpellOptions = {
   targetKind?: MageTargetKind;
   targetGuid?: Guid | null;
   selfGuid: Guid;
+  preferredSpellIds?: number[];
   preferredDamageTypes?: MageDamageType[];
   exactDamageType?: MageDamageType | null;
 };

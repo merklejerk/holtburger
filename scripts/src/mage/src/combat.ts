@@ -75,6 +75,7 @@ export function maybeRestoreMana(
         targetKind: "self",
         targetGuid: self.guid,
         selfGuid: self.guid,
+        preferredSpellIds: state.config.preferredSpellIds,
       },
       HB.distance,
     );
@@ -91,6 +92,7 @@ export function maybeRestoreMana(
       targetKind: "self",
       targetGuid: self.guid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -114,10 +116,11 @@ export function maybeRestoreStamina(
     spells,
     {
       school: "life",
-      type: "mana-to-stamina",
+      type: "revitalize",
       targetKind: "self",
       targetGuid: self.guid,
       selfGuid: self.guid,
+        preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -133,6 +136,7 @@ export function maybeRestoreStamina(
       targetKind: "self",
       targetGuid: self.guid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -148,6 +152,7 @@ export function maybeRestoreStamina(
       targetKind: "self",
       targetGuid: self.guid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -183,6 +188,7 @@ export function maybeRestoreHealth(
       targetKind: "self",
       targetGuid: self.guid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -198,6 +204,7 @@ export function maybeRestoreHealth(
       targetKind: "self",
       targetGuid: self.guid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -234,6 +241,7 @@ export function maybeHealPartyMember(
       targetKind: "other",
       targetGuid: healTargetGuid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -249,6 +257,7 @@ export function maybeHealPartyMember(
       targetKind: "other",
       targetGuid: healTargetGuid,
       selfGuid: self.guid,
+      preferredSpellIds: state.config.preferredSpellIds,
     },
     HB.distance,
   );
@@ -285,6 +294,7 @@ export function maybeCastAttackSpell(
         targetKind: "other",
         targetGuid: target.guid,
         selfGuid: self.guid,
+        preferredSpellIds: state.config.preferredSpellIds,
         preferredDamageTypes,
       },
       HB.distance,
@@ -306,6 +316,7 @@ export function maybeCastAttackSpell(
             targetKind: "other",
             targetGuid: target.guid,
             selfGuid: self.guid,
+            preferredSpellIds: state.config.preferredSpellIds,
             exactDamageType: warSpell.damageType,
           },
           HB.distance,
@@ -348,6 +359,7 @@ export function maybeCastAttackSpell(
         targetKind: "other",
         targetGuid: target.guid,
         selfGuid: self.guid,
+        preferredSpellIds: state.config.preferredSpellIds,
       },
       HB.distance,
     );

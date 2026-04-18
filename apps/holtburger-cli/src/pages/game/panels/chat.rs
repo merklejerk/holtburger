@@ -657,6 +657,20 @@ fn color_for_tags(chat_tags: ChatMessageTags) -> Color {
         Color::Indexed(242)
     } else if chat_tags.contains(ChatMessageTags::SYSTEM) {
         Color::LightBlue
+    } else if chat_tags.contains(ChatMessageTags::COMBAT) {
+        Color::LightRed
+    } else if chat_tags.contains(ChatMessageTags::MAGIC) {
+        Color::LightMagenta
+    } else if chat_tags.contains(ChatMessageTags::PARTY) {
+        Color::LightGreen
+    } else if chat_tags.contains(ChatMessageTags::GUILD) {
+        Color::LightCyan
+    } else if chat_tags.contains(ChatMessageTags::TRADE) {
+        Color::LightYellow
+    } else if chat_tags.contains(ChatMessageTags::HELP) {
+        Color::Yellow
+    } else if chat_tags.contains(ChatMessageTags::SOCIETY) {
+        Color::Blue
     } else {
         Color::White
     }

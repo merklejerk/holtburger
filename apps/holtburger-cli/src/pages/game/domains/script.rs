@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::scripting::{
-    TuiScriptClientView, WorkflowProjection, chat_tags_for_level,
+    TuiScriptClientView, WorkflowProjection, chat_tags_for_style,
     deferred_script_source_for_basename, resolve_deferred_script_source,
     script_event_from_notification, script_event_from_view_event, workflow_events,
     workflow_projection,
@@ -147,6 +147,11 @@ impl GameState {
 
         let loaded_path = source.name.clone();
         let running_source_name = source.name.clone();
+
+        if self.script_host_is_running() {
+            self.stop_script_host(result);
+        }
+
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -164,10 +169,6 @@ impl GameState {
                 );
 
                 if started_ok {
-                    if self.script_host_is_running() {
-                        self.stop_script_host(result);
-                    }
-
                     self.script.running_source_name = Some(running_source_name);
                     self.script.host = Some(host);
                     self.script.tick_accumulator = Duration::ZERO;
@@ -207,8 +208,8 @@ impl GameState {
 
     fn compile_script_intent(view: &ViewState, intent: ScriptIntent) -> Result<AppAction> {
         match intent {
-            ScriptIntent::Log { level, message } => Ok(AppAction::Log {
-                chat_tags: chat_tags_for_level(level),
+            ScriptIntent::Print { style, message } => Ok(AppAction::Log {
+                chat_tags: chat_tags_for_style(style),
                 message,
             }),
             ScriptIntent::Say { message } => Ok(AppAction::SendCommands {

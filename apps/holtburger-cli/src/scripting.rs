@@ -18,8 +18,8 @@ use holtburger_scripting::{
     ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
     ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
     ScriptEvent, ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind,
-    ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
-    ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptMessageStyle, ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView,
+    ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::{TrainingLevel, VitalType};
@@ -1011,12 +1011,23 @@ pub(crate) fn script_event_from_notification(
     }
 }
 
-pub(crate) fn chat_tags_for_level(level: ScriptLogLevel) -> ChatMessageTags {
-    match level {
-        ScriptLogLevel::Trace | ScriptLogLevel::Debug => ChatMessageTags::debug(),
-        ScriptLogLevel::Info => ChatMessageTags::info(),
-        ScriptLogLevel::Warn => ChatMessageTags::warning(),
-        ScriptLogLevel::Error => ChatMessageTags::error(),
+pub(crate) fn chat_tags_for_style(style: ScriptMessageStyle) -> ChatMessageTags {
+    match style {
+        ScriptMessageStyle::Trace | ScriptMessageStyle::Debug => ChatMessageTags::debug(),
+        ScriptMessageStyle::Info => ChatMessageTags::info(),
+        ScriptMessageStyle::Warn => ChatMessageTags::warning(),
+        ScriptMessageStyle::Error => ChatMessageTags::error(),
+        ScriptMessageStyle::System => ChatMessageTags::system(),
+        ScriptMessageStyle::Chat => ChatMessageTags::chat(),
+        ScriptMessageStyle::Combat => ChatMessageTags::COMBAT,
+        ScriptMessageStyle::Tell => ChatMessageTags::tell(),
+        ScriptMessageStyle::Emote => ChatMessageTags::emote(),
+        ScriptMessageStyle::Party => ChatMessageTags::PARTY,
+        ScriptMessageStyle::Guild => ChatMessageTags::GUILD,
+        ScriptMessageStyle::Trade => ChatMessageTags::TRADE,
+        ScriptMessageStyle::Help => ChatMessageTags::HELP,
+        ScriptMessageStyle::Society => ChatMessageTags::SOCIETY,
+        ScriptMessageStyle::Magic => ChatMessageTags::MAGIC,
     }
 }
 

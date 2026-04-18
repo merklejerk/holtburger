@@ -41,7 +41,7 @@ const config = HB.loadConfig() ?? { enabled: true };
 HB.onEvent((event) => {
   if (event.kind === "lifecycle" && event.data.kind === "started") {
     HB.debugLog(`started with args: ${event.data.args}`);
-    HB.log("info", "hello from Holtburger");
+    HB.print("info", "hello from Holtburger");
     return;
   }
 
@@ -220,7 +220,7 @@ The write side of the API emits frontend intents or direct client actions.
 
 ### Logging and Chat
 
-- `HB.log(level, message)` emits a script log. Accepted levels are `trace`, `debug`, `info`, `warn`, `warning`, and `error`; unknown values fall back to `info`.
+- `HB.print(style, message)` emits a script message into the chat buffer. Accepted styles include `trace`, `debug`, `info`, `warn`, `warning`, `error`, `system`, `chat`, `combat`, `tell`, `emote`, `party`, `guild`, `trade`, `help`, `society`, and `magic`; unknown values fall back to `info`.
 - `HB.debugLog(message)` sends a message to the frontend debug log.
 - `HB.say(message)` sends in-game chat text.
 - `HB.emote(message)` sends an emote message.

@@ -3,462 +3,504 @@
 // and picks fights that stay compatible with party movement.
 // When nothing else needs attention, it stays with the party leader.
 
-const AGGRO_DISTANCE = 26;
-const MAX_PARTY_DISTANCE = 32;
+const DEFAULT_AGGRO_DISTANCE = 15;
+const DEFAULT_MAX_PARTY_DISTANCE = 20;
 const PARTY_RESUME_FACTOR = 0.9;
-const PARTY_RESUME_DISTANCE = MAX_PARTY_DISTANCE * PARTY_RESUME_FACTOR;
 const HEALING_DISTANCE = 15;
 const LOW_STAMINA_RATIO = 0.1;
 const LOW_HEALTH_RATIO = 0.6;
 const HEALING_BUSY_OPERATIONS = new Set(["use", "use_with_target"]);
 
+let aggroDistance = DEFAULT_AGGRO_DISTANCE;
+let maxPartyDistance = DEFAULT_MAX_PARTY_DISTANCE;
+
 // Sticky state for debouncing repeated actions across ticks.
 const state = {
-	wasLowStamina: false,
-	lowStaminaCancelIssued: false,
-	lastPrimaryActionKey: null,
-	preferredAttackTargetGuid: null,
-	partySeparationLatched: false,
+  wasLowStamina: false,
+  lowStaminaCancelIssued: false,
+  lastPrimaryActionKey: null,
+  preferredAttackTargetGuid: null,
+  partySeparationLatched: false,
 };
 
 function ratio(current, max) {
-	return max > 0 ? current / max : 0;
+  return max > 0 ? current / max : 0;
 }
 
 function resetState() {
-	state.wasLowStamina = false;
-	state.lowStaminaCancelIssued = false;
-	state.lastPrimaryActionKey = null;
-	state.preferredAttackTargetGuid = null;
-	state.partySeparationLatched = false;
+  state.wasLowStamina = false;
+  state.lowStaminaCancelIssued = false;
+  state.lastPrimaryActionKey = null;
+  state.preferredAttackTargetGuid = null;
+  state.partySeparationLatched = false;
+  aggroDistance = DEFAULT_AGGRO_DISTANCE;
+  maxPartyDistance = DEFAULT_MAX_PARTY_DISTANCE;
+}
+
+function parsePositiveNumberArg(args, flagName) {
+  const prefix = `${flagName}=`;
+  const token = args
+    .trim()
+    .split(/\s+/)
+    .find((candidate) => candidate.startsWith(prefix));
+  if (token == null) {
+    return null;
+  }
+
+  const parsed = Number(token.slice(prefix.length));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function issuePrimaryAction(key, emit) {
-	if (state.lastPrimaryActionKey === key) {
-		return false;
-	}
+  if (state.lastPrimaryActionKey === key) {
+    return false;
+  }
 
-	state.lastPrimaryActionKey = key;
-	emit();
-	return true;
+  state.lastPrimaryActionKey = key;
+  emit();
+  return true;
 }
 
 function isLowHealth(percent) {
-	return percent != null && percent < LOW_HEALTH_RATIO;
+  return percent != null && percent < LOW_HEALTH_RATIO;
 }
 
 function isLowStamina(self) {
-	return ratio(self.stamina, self.staminaMax) < LOW_STAMINA_RATIO;
+  return ratio(self.stamina, self.staminaMax) < LOW_STAMINA_RATIO;
 }
 
 function isHealingBusy(self) {
-	return HEALING_BUSY_OPERATIONS.has(self.busyOperation);
+  return HEALING_BUSY_OPERATIONS.has(self.busyOperation);
 }
 
 function isDefeated(entity) {
-	if (entity == null) {
-		return false;
-	}
-   
-	if (entity.motionCommand != null && entity.motionCommand.kind === "dead") {
-		return true;
-	}
+  if (entity == null) {
+    return false;
+  }
 
-	return entity.profile != null && entity.profile.kind === "creature" && entity.profile.data.health === 0;
+  if (entity.motionCommand != null && entity.motionCommand.kind === "dead") {
+    return true;
+  }
+
+  return (
+    entity.profile != null &&
+    entity.profile.kind === "creature" &&
+    entity.profile.data.health === 0
+  );
 }
 
 // The leader is the anchor for follow behavior and party distance checks.
 function partyLeaderMember(party) {
-	if (!party) {
-		return null;
-	}
+  if (!party) {
+    return null;
+  }
 
-	return (
-		party.members.find(
-			(member) => member.guid === party.leaderGuid && HB.entityExists(member.guid),
-		) ?? null
-	);
+  return (
+    party.members.find(
+      (member) =>
+        member.guid === party.leaderGuid && HB.entityExists(member.guid),
+    ) ?? null
+  );
 }
 
 function distanceToPartyLeader(self, partyLeader) {
-	return partyLeader ? HB.distance(self.guid, partyLeader.guid) : null;
+  return partyLeader ? HB.distance(self.guid, partyLeader.guid) : null;
 }
 
 // Pick the most urgent nearby heal target, including self.
 function chooseHealingTarget(self) {
-	const candidates = [];
-	const selfHealthRatio = ratio(self.health, self.healthMax);
-	const selfEntity = HB.entity(self.guid);
+  const candidates = [];
+  const selfHealthRatio = ratio(self.health, self.healthMax);
+  const selfEntity = HB.entity(self.guid);
 
-	if (isLowHealth(selfHealthRatio) && !isDefeated(selfEntity)) {
-		candidates.push({
-			guid: self.guid,
-			distance: 0,
-			healthRatio: selfHealthRatio,
-		});
-	}
+  if (isLowHealth(selfHealthRatio) && !isDefeated(selfEntity)) {
+    candidates.push({
+      guid: self.guid,
+      distance: 0,
+      healthRatio: selfHealthRatio,
+    });
+  }
 
-	const party = HB.party();
-	if (party) {
-		for (const member of party.members) {
-			if (member.guid === self.guid) {
-				continue;
-			}
+  const party = HB.party();
+  if (party) {
+    for (const member of party.members) {
+      if (member.guid === self.guid) {
+        continue;
+      }
 
-			if (!isLowHealth(member.healthPercent)) {
-				continue;
-			}
+      if (!isLowHealth(member.healthPercent)) {
+        continue;
+      }
 
-			if (isDefeated(HB.entity(member.guid))) {
-				continue;
-			}
+      if (isDefeated(HB.entity(member.guid))) {
+        continue;
+      }
 
-			const distance = HB.distance(self.guid, member.guid);
-			if (distance > HEALING_DISTANCE) {
-				continue;
-			}
+      const distance = HB.distance(self.guid, member.guid);
+      if (distance > HEALING_DISTANCE) {
+        continue;
+      }
 
-			candidates.push({
-				guid: member.guid,
-				distance,
-				healthRatio: member.healthPercent,
-			});
-		}
-	}
+      candidates.push({
+        guid: member.guid,
+        distance,
+        healthRatio: member.healthPercent,
+      });
+    }
+  }
 
-	if (candidates.length === 0) {
-		return null;
-	}
+  if (candidates.length === 0) {
+    return null;
+  }
 
-	candidates.sort((left, right) => {
-		if (left.distance !== right.distance) {
-			return left.distance - right.distance;
-		}
+  candidates.sort((left, right) => {
+    if (left.distance !== right.distance) {
+      return left.distance - right.distance;
+    }
 
-		if (left.healthRatio !== right.healthRatio) {
-			return left.healthRatio - right.healthRatio;
-		}
+    if (left.healthRatio !== right.healthRatio) {
+      return left.healthRatio - right.healthRatio;
+    }
 
-		return left.guid - right.guid;
-	});
+    return left.guid - right.guid;
+  });
 
-	return candidates[0];
+  return candidates[0];
 }
 
 // Use the first healing kit we can find.
 function firstHealingKit() {
-	for (const container of HB.inventory()) {
-		for (const itemGuid of container.items) {
-			const item = HB.entity(itemGuid);
-			if (item && item.kind === "healing_kit") {
-				return item.guid;
-			}
-		}
-	}
+  for (const container of HB.inventory()) {
+    for (const itemGuid of container.items) {
+      const item = HB.entity(itemGuid);
+      if (item && item.kind === "healing_kit") {
+        return item.guid;
+      }
+    }
+  }
 
-	return null;
+  return null;
 }
 
 // Prefer monsters that keep us close to the party leader.
 function selectAttackTarget(self, partyLeader) {
-	const monsters = HB.nearbyEntities(null, ["monster"]).filter((monster) => !isDefeated(monster));
-	const withinPartyAttackRange = (monster) =>
-		!partyLeader || HB.distance(partyLeader.guid, monster.guid) <= MAX_PARTY_DISTANCE;
-	const stickyMonster = state.preferredAttackTargetGuid
-		? monsters.find(
-			(monster) => monster.guid === state.preferredAttackTargetGuid && withinPartyAttackRange(monster),
-		)
-		: null;
+  const monsters = HB.nearbyEntities(aggroDistance, ["monster"]).filter(
+    (monster) => !isDefeated(monster),
+  );
+  const withinPartyAttackRange = (monster) =>
+    !partyLeader || HB.distance(partyLeader.guid, monster.guid) <= maxPartyDistance;
+  const stickyMonster = state.preferredAttackTargetGuid
+    ? monsters.find(
+        (monster) =>
+          monster.guid === state.preferredAttackTargetGuid &&
+          withinPartyAttackRange(monster),
+      )
+    : null;
 
-	if (stickyMonster) {
-		return {
-			guid: stickyMonster.guid,
-			key: `attack-sticky:${stickyMonster.guid}`,
-			reason: "sticky",
-		};
-	}
+  if (stickyMonster) {
+    return {
+      guid: stickyMonster.guid,
+      key: `attack-sticky:${stickyMonster.guid}`,
+      reason: "sticky",
+    };
+  }
 
-	if (state.preferredAttackTargetGuid != null) {
-		state.preferredAttackTargetGuid = null;
-	}
+  if (state.preferredAttackTargetGuid != null) {
+    state.preferredAttackTargetGuid = null;
+  }
 
-	if (partyLeader) {
-		let bestMonster = null;
+  if (partyLeader) {
+    let bestMonster = null;
 
-		for (const monster of monsters) {
-			if (!withinPartyAttackRange(monster)) {
-				continue;
-			}
+    for (const monster of monsters) {
+      if (!withinPartyAttackRange(monster)) {
+        continue;
+      }
 
-			const distanceToParty = HB.distance(partyLeader.guid, monster.guid);
+      const distanceToParty = HB.distance(partyLeader.guid, monster.guid);
 
-			if (
-				bestMonster == null ||
-				distanceToParty < bestMonster.distanceToParty ||
-				(distanceToParty === bestMonster.distanceToParty && monster.guid < bestMonster.monster.guid)
-			) {
-				bestMonster = { monster, distanceToParty };
-			}
-		}
+      if (
+        bestMonster == null ||
+        distanceToParty < bestMonster.distanceToParty ||
+        (distanceToParty === bestMonster.distanceToParty &&
+          monster.guid < bestMonster.monster.guid)
+      ) {
+        bestMonster = { monster, distanceToParty };
+      }
+    }
 
-		if (bestMonster) {
-			state.preferredAttackTargetGuid = bestMonster.monster.guid;
-			return {
-				guid: bestMonster.monster.guid,
-				key: `attack-party:${partyLeader.guid}:${bestMonster.monster.guid}`,
-				reason: "party-nearest-monster",
-			};
-		}
-	}
+    if (bestMonster) {
+      state.preferredAttackTargetGuid = bestMonster.monster.guid;
+      return {
+        guid: bestMonster.monster.guid,
+        key: `attack-party:${partyLeader.guid}:${bestMonster.monster.guid}`,
+        reason: "party-nearest-monster",
+      };
+    }
+  }
 
-	const aggroMonsters = HB
-		.nearbyEntities(AGGRO_DISTANCE, ["monster"])
-		.filter((monster) => !isDefeated(monster));
-	if (aggroMonsters.length > 0) {
-		const aggroMonster = aggroMonsters.find((monster) => withinPartyAttackRange(monster));
-		if (!aggroMonster) {
-			return null;
-		}
+  const aggroMonsters = HB.nearbyEntities(aggroDistance, ["monster"]).filter(
+    (monster) => !isDefeated(monster),
+  );
+  if (aggroMonsters.length > 0) {
+    const aggroMonster = aggroMonsters.find((monster) =>
+      withinPartyAttackRange(monster),
+    );
+    if (!aggroMonster) {
+      return null;
+    }
 
-		state.preferredAttackTargetGuid = aggroMonster.guid;
-		return {
-			guid: aggroMonster.guid,
-			key: `attack-aggro:${aggroMonster.guid}`,
-			reason: "local-aggro",
-		};
-	}
+    state.preferredAttackTargetGuid = aggroMonster.guid;
+    return {
+      guid: aggroMonster.guid,
+      key: `attack-aggro:${aggroMonster.guid}`,
+      reason: "local-aggro",
+    };
+  }
 
-	return null;
+  return null;
 }
 
 // Suppress repeated heal commands while one is already in flight.
 function healIfNeeded(self) {
-	const healTarget = chooseHealingTarget(self);
-	if (!healTarget) {
-		return false;
-	}
+  const healTarget = chooseHealingTarget(self);
+  if (!healTarget) {
+    return false;
+  }
 
-	if (isHealingBusy(self)) {
-		HB.debugLog(
-			`healing already in progress target=${healTarget.guid} busy=${self.busyOperation}`,
-		);
-		return true;
-	}
+  if (isHealingBusy(self)) {
+    HB.debugLog(
+      `healing already in progress target=${healTarget.guid} busy=${self.busyOperation}`,
+    );
+    return true;
+  }
 
-	const healingKit = firstHealingKit();
-	if (healingKit == null) {
-		return false;
-	}
+  const healingKit = firstHealingKit();
+  if (healingKit == null) {
+    return false;
+  }
 
-	const key = `heal:${healingKit}:${healTarget.guid}`;
-	return issuePrimaryAction(key, () => {
-		HB.debugLog(
-			`healing target=${healTarget.guid} health=${Math.round(healTarget.healthRatio * 100)}% kit=${healingKit}`,
-		);
-		HB.useWith(healingKit, healTarget.guid);
-	});
+  const key = `heal:${healingKit}:${healTarget.guid}`;
+  return issuePrimaryAction(key, () => {
+    HB.debugLog(
+      `healing target=${healTarget.guid} health=${Math.round(healTarget.healthRatio * 100)}% kit=${healingKit}`,
+    );
+    HB.useWith(healingKit, healTarget.guid);
+  });
 }
 
 // Follow only the party leader, never a random nearby member.
 function followPartyLeader(self, partyLeader) {
-	if (!partyLeader || partyLeader.guid === self.guid) {
-		return false;
-	}
+  if (!partyLeader || partyLeader.guid === self.guid) {
+    return false;
+  }
 
-	const currentInteraction = HB.currentInteraction();
-	if (
-		currentInteraction != null &&
-		currentInteraction.kind === "Follow" &&
-		currentInteraction.data.guid === partyLeader.guid
-	) {
-		HB.debugLog(`follow already active target=${partyLeader.guid}`);
-		return true;
-	}
+  const currentInteraction = HB.currentInteraction();
+  if (
+    currentInteraction != null &&
+    currentInteraction.kind === "Follow" &&
+    currentInteraction.data.guid === partyLeader.guid
+  ) {
+    HB.debugLog(`follow already active target=${partyLeader.guid}`);
+    return true;
+  }
 
-	const key = `follow:${partyLeader.guid}`;
-	return issuePrimaryAction(key, () => {
-		if (currentInteraction != null) {
-			HB.debugLog(
-				`restarting follow target=${partyLeader.guid} previous=${currentInteraction.kind}`,
-			);
-		}
-		HB.cancelInteraction();
-		HB.follow(partyLeader.guid);
-	});
+  const key = `follow:${partyLeader.guid}`;
+  return issuePrimaryAction(key, () => {
+    if (currentInteraction != null) {
+      HB.debugLog(
+        `restarting follow target=${partyLeader.guid} previous=${currentInteraction.kind}`,
+      );
+    }
+    HB.cancelInteraction();
+    HB.follow(partyLeader.guid);
+  });
 }
 
 // Reuse combat and interaction state so we do not spam attack commands.
 function attackTarget(target) {
-	if (!target) {
-		return false;
-	}
+  if (!target) {
+    return false;
+  }
 
-	const combatInfo = HB.combatInfo();
-	const currentInteraction = HB.currentInteraction();
-	const alreadyAttackingSameTarget =
-		(combatInfo.target != null && combatInfo.target === target.guid) ||
-		(
-			currentInteraction != null &&
-			currentInteraction.kind === "attack" &&
-			currentInteraction.data.guid === target.guid
-		);
-	const alreadyApproachingSameTarget =
-		(
-			currentInteraction != null &&
-			currentInteraction.kind === "approach" &&
-			currentInteraction.data.guid === target.guid
-		);
+  const combatInfo = HB.combatInfo();
+  const currentInteraction = HB.currentInteraction();
+  const alreadyAttackingSameTarget =
+    (combatInfo.target != null && combatInfo.target === target.guid) ||
+    (currentInteraction != null &&
+      currentInteraction.kind === "attack" &&
+      currentInteraction.data.guid === target.guid);
+  const alreadyApproachingSameTarget =
+    currentInteraction != null &&
+    currentInteraction.kind === "approach" &&
+    currentInteraction.data.guid === target.guid;
 
-	if (alreadyAttackingSameTarget) {
-		state.preferredAttackTargetGuid = target.guid;
-		HB.debugLog(`attack already active target=${target.guid} reason=${target.reason}`);
-		return true;
-	}
+  if (alreadyAttackingSameTarget) {
+    state.preferredAttackTargetGuid = target.guid;
+    HB.debugLog(
+      `attack already active target=${target.guid} reason=${target.reason}`,
+    );
+    return true;
+  }
 
-	if (alreadyApproachingSameTarget) {
-		state.preferredAttackTargetGuid = target.guid;
-		HB.debugLog(`attack pending approach target=${target.guid} reason=${target.reason}`);
-		return true;
-	}
+  if (alreadyApproachingSameTarget) {
+    state.preferredAttackTargetGuid = target.guid;
+    HB.debugLog(
+      `attack pending approach target=${target.guid} reason=${target.reason}`,
+    );
+    return true;
+  }
 
-	state.preferredAttackTargetGuid = target.guid;
-	return issuePrimaryAction(target.key, () => {
-		HB.debugLog(`attacking target=${target.guid} reason=${target.reason}`);
-		HB.attack(target.guid);
-	});
+  state.preferredAttackTargetGuid = target.guid;
+  return issuePrimaryAction(target.key, () => {
+    HB.debugLog(`attacking target=${target.guid} reason=${target.reason}`);
+    HB.attack(target.guid);
+  });
 }
 
 // Once separated, stay latched until we are safely back in range of the leader.
 function updatePartySeparationLatch(self, partyLeader) {
-	if (!partyLeader) {
-		if (state.partySeparationLatched) {
-			HB.debugLog("party separation cleared party=n/a");
-		}
+  if (!partyLeader) {
+    if (state.partySeparationLatched) {
+      HB.debugLog("party separation cleared party=n/a");
+    }
 
-		state.partySeparationLatched = false;
-		return { shouldFollow: false, distance: null };
-	}
+    state.partySeparationLatched = false;
+    return { shouldFollow: false, distance: null };
+  }
 
-	const distance = distanceToPartyLeader(self, partyLeader);
-	const isSeparated = distance != null && distance > MAX_PARTY_DISTANCE;
+  const distance = distanceToPartyLeader(self, partyLeader);
+  const isSeparated = distance != null && distance > maxPartyDistance;
 
-	if (isSeparated) {
-		if (!state.partySeparationLatched) {
-			HB.debugLog(
-				`party separation latched distance=${distance.toFixed(2)} party=${partyLeader.guid}`,
-			);
-		}
+  if (isSeparated) {
+    if (!state.partySeparationLatched) {
+      HB.debugLog(
+        `party separation latched distance=${distance.toFixed(2)} party=${partyLeader.guid}`,
+      );
+    }
 
-		state.partySeparationLatched = true;
-		state.preferredAttackTargetGuid = null;
-		return { shouldFollow: true, distance };
-	}
+    state.partySeparationLatched = true;
+    state.preferredAttackTargetGuid = null;
+    return { shouldFollow: true, distance };
+  }
 
-	if (state.partySeparationLatched && (distance == null || distance <= PARTY_RESUME_DISTANCE)) {
-		HB.debugLog(
-			`party separation cleared distance=${distance == null ? "n/a" : distance.toFixed(2)} party=${partyLeader ? partyLeader.guid : "n/a"}`,
-		);
-		state.partySeparationLatched = false;
-	}
+  if (
+    state.partySeparationLatched &&
+    (distance == null || distance <= maxPartyDistance * PARTY_RESUME_FACTOR)
+  ) {
+    HB.debugLog(
+      `party separation cleared distance=${distance == null ? "n/a" : distance.toFixed(2)} party=${partyLeader ? partyLeader.guid : "n/a"}`,
+    );
+    state.partySeparationLatched = false;
+  }
 
-	return { shouldFollow: state.partySeparationLatched, distance };
+  return { shouldFollow: state.partySeparationLatched, distance };
 }
 
 // Main priority loop for each lifecycle tick.
 function runFighter() {
-	const self = HB.selfEntity();
-	if (!self) {
-		return;
-	}
+  const self = HB.selfEntity();
+  if (!self) {
+    return;
+  }
 
-	const combatInfo = HB.combatInfo();
-	const lowStamina = isLowStamina(self);
+  const combatInfo = HB.combatInfo();
+  const lowStamina = isLowStamina(self);
 
-	if (lowStamina) {
-		if (!state.wasLowStamina) {
-			HB.say("I'm tired");
-			state.wasLowStamina = true;
-		}
+  if (lowStamina) {
+    if (!state.wasLowStamina) {
+      HB.say("I'm tired");
+      state.wasLowStamina = true;
+    }
 
-		let emittedAction = false;
+    let emittedAction = false;
 
-		if (combatInfo.isEngaged && !state.lowStaminaCancelIssued) {
-			state.lowStaminaCancelIssued = true;
-			emittedAction = issuePrimaryAction("low-stamina-cancel", () => {
-				HB.cancelInteraction();
-			});
-		}
+    if (combatInfo.isEngaged && !state.lowStaminaCancelIssued) {
+      state.lowStaminaCancelIssued = true;
+      emittedAction = issuePrimaryAction("low-stamina-cancel", () => {
+        HB.cancelInteraction();
+      });
+    }
 
-		if (healIfNeeded(self)) {
-			return;
-		}
+    if (healIfNeeded(self)) {
+      return;
+    }
 
-		if (!emittedAction) {
-			state.lastPrimaryActionKey = "low-stamina";
-		}
+    if (!emittedAction) {
+      state.lastPrimaryActionKey = "low-stamina";
+    }
 
-		return;
-	}
+    return;
+  }
 
-	state.wasLowStamina = false;
-	state.lowStaminaCancelIssued = false;
+  state.wasLowStamina = false;
+  state.lowStaminaCancelIssued = false;
 
-	if (self.busyOperation !== "none") {
-		return;
-	}
+  if (self.busyOperation !== "none") {
+    return;
+  }
 
-	if (healIfNeeded(self)) {
-		return;
-	}
+  if (healIfNeeded(self)) {
+    return;
+  }
 
-	const party = HB.party();
-	const partyLeader = partyLeaderMember(party);
-	const separation = updatePartySeparationLatch(self, partyLeader);
+  const party = HB.party();
+  const partyLeader = partyLeaderMember(party);
+  const separation = updatePartySeparationLatch(self, partyLeader);
 
-	if (separation.shouldFollow) {
-		if (partyLeader) {
-			followPartyLeader(self, partyLeader);
-			return;
-		}
+  if (separation.shouldFollow) {
+    if (partyLeader) {
+      followPartyLeader(self, partyLeader);
+      return;
+    }
 
-		state.partySeparationLatched = false;
-	}
+    state.partySeparationLatched = false;
+  }
 
-	const combatTarget = combatInfo.target != null ? HB.entity(combatInfo.target) : null;
-	const combatTargetDefeated = isDefeated(combatTarget);
+  const combatTarget =
+    combatInfo.target != null ? HB.entity(combatInfo.target) : null;
+  const combatTargetDefeated = isDefeated(combatTarget);
 
-	if (combatInfo.isEngaged && !combatTargetDefeated) {
-		return;
-	}
+  if (combatInfo.isEngaged && !combatTargetDefeated) {
+    return;
+  }
 
-	if (combatInfo.isEngaged && combatTargetDefeated) {
-		state.preferredAttackTargetGuid = null;
-		HB.debugLog(`combat target defeated target=${combatInfo.target}; retargeting`);
-		HB.cancelInteraction();
-	}
+  if (combatInfo.isEngaged && combatTargetDefeated) {
+    state.preferredAttackTargetGuid = null;
+    HB.debugLog(
+      `combat target defeated target=${combatInfo.target}; retargeting`,
+    );
+    HB.cancelInteraction();
+  }
 
-	if (attackTarget(selectAttackTarget(self, partyLeader))) {
-		return;
-	}
+  if (attackTarget(selectAttackTarget(self, partyLeader))) {
+    return;
+  }
 
-	followPartyLeader(self, partyLeader);
+  followPartyLeader(self, partyLeader);
 }
 
 HB.onEvent((event) => {
-	if (event.kind !== "lifecycle") {
-		return;
-	}
+  if (event.kind !== "lifecycle") {
+    return;
+  }
 
-	switch (event.data.kind) {
-		case "started":
-			resetState();
-			runFighter();
-			break;
-		case "stopped":
-			resetState();
-			break;
-		case "tick":
-			runFighter();
-			break;
-	}
+  switch (event.data.kind) {
+    case "started":
+      resetState();
+      aggroDistance =
+        parsePositiveNumberArg(event.data.data.args, "aggro-dist") ??
+        DEFAULT_AGGRO_DISTANCE;
+      maxPartyDistance =
+        parsePositiveNumberArg(event.data.data.args, "max-party-dist") ??
+        DEFAULT_MAX_PARTY_DISTANCE;
+      runFighter();
+      break;
+    case "stopped":
+      resetState();
+      break;
+    case "tick":
+      runFighter();
+      break;
+  }
 });

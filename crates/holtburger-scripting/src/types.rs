@@ -1,10 +1,10 @@
-use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     DamageType, EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
     PropertyInt, PropertyInt64, PropertyString,
 };
 use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
+use holtburger_common::Guid;
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -911,8 +911,8 @@ pub enum ScriptLocalConfirmationKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data")]
 pub enum ScriptIntent {
-    Log {
-        level: ScriptLogLevel,
+    Print {
+        style: ScriptMessageStyle,
         message: String,
     },
     Say {
@@ -1009,19 +1009,31 @@ pub enum ScriptClientIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ScriptLogLevel {
+#[serde(rename_all = "snake_case")]
+pub enum ScriptMessageStyle {
     Trace,
     Debug,
     Info,
     Warn,
     Error,
+    System,
+    Chat,
+    Combat,
+    Tell,
+    Emote,
+    Party,
+    Guild,
+    Trade,
+    Help,
+    Society,
+    Magic,
 }
 
 #[cfg(test)]
 mod tests {
     use super::ScriptEntityProfile;
     use crate::ScriptCombatFeedback;
-    use deno_core::serde_json::{Value, from_value, json, to_value};
+    use deno_core::serde_json::{from_value, json, to_value, Value};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::DamageType;
     use holtburger_common::{Quaternion, Vector3};

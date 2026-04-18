@@ -26,7 +26,7 @@ pub use types::{
     ScriptCombatInfo, ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView,
     ScriptEntityKind, ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind,
     ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLifecycleEvent,
-    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand,
+    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptMessageStyle, ScriptMotionCommand,
     ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
     ScriptTradeInfo, ScriptWorkflowEvent, ScriptWorldPosition,
 };

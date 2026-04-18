@@ -37,6 +37,22 @@ test("updatePartySeparation latches when the leader gets too far away", () => {
 	});
 });
 
+test("updatePartySeparation respects the runtime max party distance", () => {
+	const withinCustomDistance = updatePartySeparation(false, 15, 20);
+	const clearsAtCustomResumeDistance = updatePartySeparation(true, 18, 20);
+
+	assert.deepEqual(withinCustomDistance, {
+		shouldFollow: false,
+		distance: 15,
+		nextLatched: false,
+	});
+	assert.deepEqual(clearsAtCustomResumeDistance, {
+		shouldFollow: false,
+		distance: 18,
+		nextLatched: false,
+	});
+});
+
 test("selectAttackTarget prefers party proximity when grouped", () => {
 	const selection = selectAttackTarget(
 		[
@@ -61,6 +77,7 @@ test("isMonsterCandidateInCombatRange matches acquisition and retention rules", 
 				distanceToParty: 20,
 			}),
 			withinAggroDistance,
+			withinAggroDistance,
 		),
 		false,
 	);
@@ -71,6 +88,7 @@ test("isMonsterCandidateInCombatRange matches acquisition and retention rules", 
 				distanceToParty: 20,
 			}),
 			withinAggroDistance,
+			withinAggroDistance,
 		),
 		false,
 	);
@@ -80,6 +98,7 @@ test("isMonsterCandidateInCombatRange matches acquisition and retention rules", 
 				distanceToSelf: withinAggroDistance,
 				distanceToParty: 33,
 			}),
+			withinAggroDistance,
 			withinAggroDistance,
 		),
 		true,
@@ -98,6 +117,7 @@ test("isMonsterCandidateInCombatRange caps aggro distance before attack range", 
 				distanceToParty: 20,
 			}),
 			maxAttackRange,
+			MAX_AGGRO_DISTANCE,
 		),
 		false,
 	);
@@ -108,6 +128,7 @@ test("isMonsterCandidateInCombatRange caps aggro distance before attack range", 
 				distanceToParty: 20,
 			}),
 			maxAttackRange,
+			MAX_AGGRO_DISTANCE,
 		),
 		true,
 	);

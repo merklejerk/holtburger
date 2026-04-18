@@ -4,7 +4,6 @@ use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
 use byteorder::{ByteOrder, LittleEndian};
 use holtburger_protocol::messages::transport::{self, packet_flags, queues};
-use holtburger_protocol::messages::utils::align_offset;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
 use std::time::Instant;
@@ -52,8 +51,6 @@ impl Session {
                     total_payload_checksum = total_payload_checksum.wrapping_add(dh);
                     offset += frag_data_size;
                 }
-
-                align_offset(&mut offset, 4);
             }
         }
 

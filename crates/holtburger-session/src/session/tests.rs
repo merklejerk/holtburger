@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 
 #[derive(Clone)]
 struct ScriptedTransport {
-    sent: Arc<Mutex<Vec<Vec<u8>>>>,
+    sent: Arc<Mutex<Vec<(SocketAddr, Vec<u8>)>>>,
     recv: Arc<Mutex<Vec<Vec<u8>>>>,
     recv_addr: SocketAddr,
 }
@@ -26,14 +26,23 @@ impl ScriptedTransport {
     }
 
     async fn sent_packets(&self) -> Vec<Vec<u8>> {
+        self.sent
+            .lock()
+            .await
+            .iter()
+            .map(|(_, bytes)| bytes.clone())
+            .collect()
+    }
+
+    async fn sent_entries(&self) -> Vec<(SocketAddr, Vec<u8>)> {
         self.sent.lock().await.clone()
     }
 }
 
 #[async_trait]
 impl Transport for ScriptedTransport {
-    async fn send_to(&self, buf: &[u8], _addr: SocketAddr) -> Result<usize> {
-        self.sent.lock().await.push(buf.to_vec());
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize> {
+        self.sent.lock().await.push((addr, buf.to_vec()));
         Ok(buf.len())
     }
 
@@ -50,6 +59,15 @@ impl Transport for ScriptedTransport {
 }
 
 fn build_transport_packet(header: PacketHeader, payload: &[u8]) -> Vec<u8> {
+    let session = Session::new_test();
+    let mut header = header;
+    header.size = payload.len() as u16;
+
+    let payload_hash = session
+        .calculate_payload_hash(header.flags, payload)
+        .unwrap();
+    header.checksum = header.calculate_checksum().wrapping_add(payload_hash);
+
     let mut packet = Vec::new();
     header.pack(&mut packet);
     packet.extend_from_slice(payload);
@@ -248,8 +266,11 @@ async fn test_multi_fragment_packet_unaligned() {
 
     let hex = "71000000060000003C8E48C70B0029B157000100AD0000000000008001001D0000000900E9020000000200000001000000AE0000000000008001001D0000000900E9020000000400000001000000AF0000000000008001001D0000000900E9020000000600000001000000";
     let data = hex::decode(hex).unwrap();
+    let mut header = unpack_header(&data);
+    header.flags &= !packet_flags::ENCRYPTED_CHECKSUM;
+    let packet = build_transport_packet(header, &data[transport::HEADER_SIZE..]);
 
-    let q = Arc::new(Mutex::new(vec![data]));
+    let q = Arc::new(Mutex::new(vec![packet]));
     let mut session = Session::new_test();
     session.transport = Box::new(MultiFragMock(q));
     session.last_server_seq = 112;
@@ -367,6 +388,33 @@ async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
             .iter()
             .any(|packet| unpack_header(packet).flags == packet_flags::ACK_SEQUENCE)
     );
+
+    let sent_entries = sent_handle.sent_entries().await;
+    assert!(sent_entries.iter().any(|(addr, packet)| {
+        *addr == session.server_addr
+            && unpack_header(packet).flags == packet_flags::ACK_SEQUENCE
+    }));
+}
+
+#[test]
+fn test_payload_hash_multi_fragment_unaligned_matches_wire_layout() {
+    let session = Session::new_test();
+    let hex = "71000000060000003C8E48C70B0029B157000100AD0000000000008001001D0000000900E9020000000200000001000000AE0000000000008001001D0000000900E9020000000400000001000000AF0000000000008001001D0000000900E9020000000600000001000000";
+    let packet = hex::decode(hex).unwrap();
+    let payload = &packet[transport::HEADER_SIZE..];
+
+    let hash = session
+        .calculate_payload_hash(packet_flags::BLOB_FRAGMENTS, payload)
+        .unwrap();
+
+    let expected = holtburger_protocol::crypto::Hash32::compute(&payload[0..16])
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[16..29]))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[29..45]))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[45..58]))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[58..74]))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[74..87]));
+
+    assert_eq!(hash, expected);
 }
 
 #[tokio::test]
@@ -539,6 +587,12 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
     let retransmit_header = unpack_header(retransmit_packet);
     assert_eq!(retransmit_header.sequence, 4);
     assert_eq!(retransmit_header.flags, packet_flags::REQUEST_RETRANSMIT);
+
+    let sent_entries = sent_handle.sent_entries().await;
+    assert!(sent_entries.iter().any(|(addr, packet)| {
+        *addr == session.server_addr
+            && (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0
+    }));
 
     let payload = &retransmit_packet[transport::HEADER_SIZE..];
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 2);

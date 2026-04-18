@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 #[allow(dead_code)]
 pub struct Hash32;
 
@@ -32,10 +34,13 @@ pub struct Isaac {
     c: u32,
     mm: [u32; 256],
     rand_rsl: [u32; 256],
+    xors: HashSet<u32>,
     pub current_key: u32,
 }
 
 impl Isaac {
+    const MAXIMUM_EFFORT_LEVEL: usize = 256;
+
     pub fn new(seed: u32) -> Self {
         let mut isaac = Isaac {
             offset: 255,
@@ -44,6 +49,7 @@ impl Isaac {
             c: 0,
             mm: [0; 256],
             rand_rsl: [0; 256],
+            xors: HashSet::new(),
             current_key: 0,
         };
         isaac.initialize(seed);
@@ -54,6 +60,36 @@ impl Isaac {
 
     pub fn consume_key(&mut self) {
         self.current_key = self.next();
+    }
+
+    pub fn consume_key_value(&mut self, key: u32) {
+        if self.current_key == key {
+            self.current_key = self.next();
+        } else {
+            self.xors.remove(&key);
+        }
+    }
+
+    pub fn search(&mut self, key: u32) -> bool {
+        if self.current_key == key {
+            return true;
+        }
+
+        if self.xors.contains(&key) {
+            return true;
+        }
+
+        let effort_level = Self::MAXIMUM_EFFORT_LEVEL.saturating_sub(self.xors.len());
+        for _ in 0..effort_level {
+            self.xors.insert(self.current_key);
+            self.consume_key();
+
+            if self.current_key == key {
+                return true;
+            }
+        }
+
+        false
     }
 
     #[allow(clippy::should_implement_trait)]
@@ -178,6 +214,27 @@ mod tests {
         let first = isaac.next();
         let second = isaac.next();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn test_isaac_search_handles_out_of_order_keys() {
+        let seed = 0xC83824AB;
+
+        let mut expected = Isaac::new(seed);
+        let first = expected.current_key;
+        expected.consume_key();
+        let second = expected.current_key;
+        expected.consume_key();
+        let third = expected.current_key;
+
+        let mut actual = Isaac::new(seed);
+        assert!(actual.search(second));
+        actual.consume_key_value(second);
+        assert_eq!(actual.current_key, third);
+
+        assert!(actual.search(first));
+        actual.consume_key_value(first);
+        assert_eq!(actual.current_key, third);
     }
 
     #[test]

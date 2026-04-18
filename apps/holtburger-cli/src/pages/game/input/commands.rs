@@ -5,8 +5,8 @@ use crate::scripting::{
 };
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
-use holtburger_world::context::normalize_name_for_lookup;
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::context::normalize_name_for_lookup;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
     match raw {
@@ -1711,11 +1711,13 @@ mod tests {
                 action: AppUiAction::FinishInputCommandSubmission { command }
             }) if command == "/promote Bestie"
         ));
-        assert!(state
-            .chat
-            .messages
-            .iter()
-            .any(|message| message.text == "Promoting Bestie to party leader..."));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Promoting Bestie to party leader...")
+        );
     }
 
     #[test]

@@ -625,10 +625,12 @@ mod tests {
     use crate::pages::game::data::GameData;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{
+        PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut,
+    };
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::entity::Entity;
     use holtburger_world::inspect::InspectableObject;
-    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
 
     #[test]
     fn assess_output_shows_open_and_locked_status() {
@@ -659,7 +661,10 @@ mod tests {
             "Test Creature".to_string(),
             WorldPosition::default(),
         );
-        entity.set_int_prop(PropertyInt::CreatureType, holtburger_common::stats::CreatureType::Olthoi as i32);
+        entity.set_int_prop(
+            PropertyInt::CreatureType,
+            holtburger_common::stats::CreatureType::Olthoi as i32,
+        );
         entity.creature_profile = Some(CreatureProfile {
             flags: CreatureProfileFlags::empty(),
             health: 50,

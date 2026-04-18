@@ -260,6 +260,7 @@
 - [x] `/promote <PLAYER>` - Promote new party leader.
 - [x] Can't specialize then unspecialize a skill in character creator.
 - [x] Show "creature type" in assessment.
+- [x] Fix rare follow teleporting.
 - [ ] Add all spells causes a sequence error.
 - [ ] Add `/run <ARGS>` command.
 - [ ] Mage script improvements:

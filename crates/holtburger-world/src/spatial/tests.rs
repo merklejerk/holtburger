@@ -146,10 +146,29 @@ fn project_pose_forward_distance_projects_outdoor_heading() {
 
     let projected = project_pose_forward_distance(authoritative, 5.0);
 
-    assert_eq!(projected.landblock_id, authoritative.landblock_id);
+    assert_eq!(
+        projected.landblock_id,
+        Guid((0x016C_u32 << 24) | (0x0171_u32 << 16) | 0x001D)
+    );
     assert!((projected.coords.x - 84.0).abs() < 1e-4);
     assert!((projected.coords.y - 113.0).abs() < 1e-4);
     assert!((projected.coords.z - 1.5).abs() < 1e-4);
+}
+
+#[test]
+fn project_pose_by_velocity_normalizes_outdoor_cell_after_projection() {
+    let authoritative = WorldPosition {
+        landblock_id: Guid(0x3419_0039),
+        coords: Vector3::new(6.0, 57.93994, 12.770115),
+        rotation: Quaternion::identity(),
+    };
+
+    let projected = project_pose_by_velocity(authoritative, Vector3::new(1.0, 0.0, 0.0), 1.0, None);
+
+    assert_eq!(projected.landblock_id, Guid(0x3419_0003));
+    assert!((projected.coords.x - 7.0).abs() < 1e-4);
+    assert!((projected.coords.y - 57.93994).abs() < 1e-4);
+    assert!((projected.coords.z - 12.770115).abs() < 1e-4);
 }
 
 #[test]

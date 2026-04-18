@@ -1,8 +1,4 @@
-import {
-	MAX_AGGRO_DISTANCE,
-	MAX_PARTY_DISTANCE,
-	PARTY_RESUME_DISTANCE,
-} from "../constants";
+import { MAX_PARTY_DISTANCE, PARTY_RESUME_FACTOR } from "../constants";
 import type {
 	AttackTargetSelection,
 	MonsterCandidate,
@@ -12,16 +8,18 @@ import type {
 export function isMonsterCandidateInCombatRange(
 	candidate: MonsterCandidate,
 	maxAttackRange: number,
+	maxAggroDistance: number,
 ): boolean {
-	return (
-		candidate.distanceToSelf <= Math.min(MAX_AGGRO_DISTANCE, maxAttackRange)
-	);
+	return candidate.distanceToSelf <= Math.min(maxAggroDistance, maxAttackRange);
 }
 
 export function updatePartySeparation(
 	currentLatched: boolean,
 	distanceToLeader: number | null,
+	maxPartyDistance: number = MAX_PARTY_DISTANCE,
 ): PartySeparation {
+	const partyResumeDistance = maxPartyDistance * PARTY_RESUME_FACTOR;
+
 	if (distanceToLeader == null) {
 		return {
 			shouldFollow: false,
@@ -30,7 +28,7 @@ export function updatePartySeparation(
 		};
 	}
 
-	if (distanceToLeader > MAX_PARTY_DISTANCE) {
+	if (distanceToLeader > maxPartyDistance) {
 		return {
 			shouldFollow: true,
 			distance: distanceToLeader,
@@ -38,7 +36,7 @@ export function updatePartySeparation(
 		};
 	}
 
-	if (currentLatched && distanceToLeader <= PARTY_RESUME_DISTANCE) {
+	if (currentLatched && distanceToLeader <= partyResumeDistance) {
 		return {
 			shouldFollow: false,
 			distance: distanceToLeader,

@@ -83,10 +83,32 @@ test("chooseBestSpell prefers vulnerability-aligned spells before raw difficulty
 	assert.equal(chosen?.spellId, 200);
 });
 
-test("chooseBestSpell prefers configured spell ids before other candidates", () => {
+test("chooseBestSpell prefers higher difficulty before configured spell ids", () => {
 	const spells = [
 		makeSpell({ spellId: 100, difficulty: 150, damageType: "fire" }),
-		makeSpell({ spellId: 200, difficulty: 175, damageType: "cold" }),
+		makeSpell({ spellId: 200, difficulty: 175, damageType: "fire" }),
+	];
+
+	const chosen = chooseBestSpell(
+		spells,
+		{
+			school: "war",
+			type: "attack",
+			targetKind: "other",
+			targetGuid: 222 as Guid,
+			selfGuid: 111 as Guid,
+			preferredSpellIds: [100],
+		},
+		() => 10,
+	);
+
+	assert.equal(chosen?.spellId, 200);
+});
+
+test("chooseBestSpell falls back to configured spell ids after damage and difficulty tie", () => {
+	const spells = [
+		makeSpell({ spellId: 100, difficulty: 150, damageType: "fire" }),
+		makeSpell({ spellId: 200, difficulty: 150, damageType: "fire" }),
 	];
 
 	const chosen = chooseBestSpell(

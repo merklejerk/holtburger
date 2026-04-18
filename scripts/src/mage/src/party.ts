@@ -1,44 +1,100 @@
-import { HEALING_DISTANCE, PARTY_HEAL_THRESHOLD } from "./constants";
+import {
+	HEALING_DISTANCE,
+	PARTY_HEAL_THRESHOLD,
+	PARTY_REVITALIZE_THRESHOLD,
+} from "./constants";
 import { isDefeated } from "./runtime-helpers";
 
-export function partyLeaderMember(
-  party: ScriptPartyView | null,
-): ScriptPartyMemberView | null {
-  if (party == null) {
-    return null;
-  }
+type PartyPercentTarget = {
+	guid: Guid;
+	percent: number;
+	distance: number;
+};
 
-  return (
-    party.members.find(
-      (member) =>
-        member.guid === party.leaderGuid && HB.entityExists(member.guid),
-    ) ?? null
-  );
+export function partyLeaderMember(
+	party: ScriptPartyView | null,
+): ScriptPartyMemberView | null {
+	if (party == null) {
+		return null;
+	}
+
+	return (
+		party.members.find(
+			(member) =>
+				member.guid === party.leaderGuid && HB.entityExists(member.guid),
+		) ?? null
+	);
 }
 
 export function choosePartyHealTarget(self: ScriptSelfView): Guid | null {
-  const party = HB.party();
-  if (!party) {
-    return null;
-  }
+	return choosePartyMemberBelowThreshold(
+		self,
+		PARTY_HEAL_THRESHOLD,
+		(member) => member.healthPercent,
+	);
+}
 
-  const members = party.members
-    .filter((member) => member.guid !== self.guid)
-    .filter((member) => member.healthPercent != null)
-    .filter((member) => (member.healthPercent ?? 1) < PARTY_HEAL_THRESHOLD)
-    .filter((member) => HB.distance(self.guid, member.guid) <= HEALING_DISTANCE)
-    .filter((member) => !isDefeated(HB.entity(member.guid)));
+export function choosePartyRevitalizeTarget(self: ScriptSelfView): Guid | null {
+	return choosePartyMemberBelowThreshold(
+		self,
+		PARTY_REVITALIZE_THRESHOLD,
+		(member) => member.staminaPercent,
+	);
+}
 
-  members.sort((left, right) => {
-    const leftHealth = left.healthPercent ?? 1;
-    const rightHealth = right.healthPercent ?? 1;
-    if (leftHealth !== rightHealth) {
-      return leftHealth - rightHealth;
-    }
-    return (
-      HB.distance(self.guid, left.guid) - HB.distance(self.guid, right.guid)
-    );
-  });
+function choosePartyMemberBelowThreshold(
+	self: ScriptSelfView,
+	threshold: number,
+	percentForMember: (member: ScriptPartyMemberView) => number | null,
+): Guid | null {
+	const party = HB.party();
+	if (!party) {
+		return null;
+	}
 
-  return members[0]?.guid ?? null;
+	const candidates: PartyPercentTarget[] = [];
+
+	for (const member of party.members) {
+		if (member.guid === self.guid) {
+			continue;
+		}
+
+		const percent = percentForMember(member);
+		if (percent == null || percent >= threshold) {
+			continue;
+		}
+
+		const distance = HB.distance(self.guid, member.guid);
+		if (distance > HEALING_DISTANCE) {
+			continue;
+		}
+
+		if (isDefeated(HB.entity(member.guid))) {
+			continue;
+		}
+
+		candidates.push({
+			guid: member.guid,
+			percent,
+			distance,
+		});
+	}
+
+	if (candidates.length === 0) {
+		return null;
+	}
+
+	candidates.sort((left, right) => {
+		if (left.percent !== right.percent) {
+			return left.percent - right.percent;
+		}
+
+		if (left.distance !== right.distance) {
+			return left.distance - right.distance;
+		}
+
+		return left.guid - right.guid;
+	});
+
+	return candidates[0]?.guid ?? null;
 }

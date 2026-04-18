@@ -1,16 +1,16 @@
 "use strict";
 (() => {
   // src/constants.ts
-  var MAX_AGGRO_DISTANCE = 30;
+  var MAX_AGGRO_DISTANCE = 25;
   var MAX_PARTY_DISTANCE = 10;
   var PARTY_RESUME_FACTOR = 0.9;
-  var PARTY_RESUME_DISTANCE = MAX_PARTY_DISTANCE * PARTY_RESUME_FACTOR;
   var HEALING_DISTANCE = 15;
   var SELF_MANA_THRESHOLD = 0.4;
   var SELF_HEALTH_THRESHOLD = 0.6;
   var SELF_STAMINA_THRESHOLD = 0.6;
-  var PARTY_HEAL_THRESHOLD = 0.75;
-  var SPELL_SKILL_HEADROOM = 15;
+  var PARTY_HEAL_THRESHOLD = 0.6;
+  var PARTY_REVITALIZE_THRESHOLD = 0.4;
+  var SPELL_SKILL_HEADROOM = 16;
   var SPELL_REPEAT_SECONDS = 1.1;
   var PENDING_SPELL_BUSY_GRACE_SECONDS = 1;
   var VULN_REPEAT_SECONDS = 10 * 60;
@@ -129,17 +129,6 @@
       return null;
     }
     candidates.sort((left, right) => {
-      const leftPreferredSpell = preferredSpellIdIndex(
-        preferredSpellIds,
-        left.spellId
-      );
-      const rightPreferredSpell = preferredSpellIdIndex(
-        preferredSpellIds,
-        right.spellId
-      );
-      if (leftPreferredSpell !== rightPreferredSpell) {
-        return leftPreferredSpell - rightPreferredSpell;
-      }
       const leftPreferred = preferredDamageTypeIndex(
         preferredDamageTypes,
         left.damageType
@@ -153,6 +142,17 @@
       }
       if (left.difficulty !== right.difficulty) {
         return right.difficulty - left.difficulty;
+      }
+      const leftPreferredSpell = preferredSpellIdIndex(
+        preferredSpellIds,
+        left.spellId
+      );
+      const rightPreferredSpell = preferredSpellIdIndex(
+        preferredSpellIds,
+        right.spellId
+      );
+      if (leftPreferredSpell !== rightPreferredSpell) {
+        return leftPreferredSpell - rightPreferredSpell;
       }
       return left.spellId - right.spellId;
     });
@@ -249,10 +249,11 @@
   }
 
   // src/domain/targeting.ts
-  function isMonsterCandidateInCombatRange(candidate, maxAttackRange) {
-    return candidate.distanceToSelf <= Math.min(MAX_AGGRO_DISTANCE, maxAttackRange);
+  function isMonsterCandidateInCombatRange(candidate, maxAttackRange, maxAggroDistance) {
+    return candidate.distanceToSelf <= Math.min(maxAggroDistance, maxAttackRange);
   }
-  function updatePartySeparation(currentLatched, distanceToLeader) {
+  function updatePartySeparation(currentLatched, distanceToLeader, maxPartyDistance = MAX_PARTY_DISTANCE) {
+    const partyResumeDistance = maxPartyDistance * PARTY_RESUME_FACTOR;
     if (distanceToLeader == null) {
       return {
         shouldFollow: false,
@@ -260,14 +261,14 @@
         nextLatched: false
       };
     }
-    if (distanceToLeader > MAX_PARTY_DISTANCE) {
+    if (distanceToLeader > maxPartyDistance) {
       return {
         shouldFollow: true,
         distance: distanceToLeader,
         nextLatched: true
       };
     }
-    if (currentLatched && distanceToLeader <= PARTY_RESUME_DISTANCE) {
+    if (currentLatched && distanceToLeader <= partyResumeDistance) {
       return {
         shouldFollow: false,
         distance: distanceToLeader,
@@ -332,25 +333,64 @@
     ) ?? null;
   }
   function choosePartyHealTarget(self) {
+    return choosePartyMemberBelowThreshold(
+      self,
+      PARTY_HEAL_THRESHOLD,
+      (member) => member.healthPercent
+    );
+  }
+  function choosePartyRevitalizeTarget(self) {
+    return choosePartyMemberBelowThreshold(
+      self,
+      PARTY_REVITALIZE_THRESHOLD,
+      (member) => member.staminaPercent
+    );
+  }
+  function choosePartyMemberBelowThreshold(self, threshold, percentForMember) {
     const party = HB.party();
     if (!party) {
       return null;
     }
-    const members = party.members.filter((member) => member.guid !== self.guid).filter((member) => member.healthPercent != null).filter((member) => (member.healthPercent ?? 1) < PARTY_HEAL_THRESHOLD).filter((member) => HB.distance(self.guid, member.guid) <= HEALING_DISTANCE).filter((member) => !isDefeated(HB.entity(member.guid)));
-    members.sort((left, right) => {
-      const leftHealth = left.healthPercent ?? 1;
-      const rightHealth = right.healthPercent ?? 1;
-      if (leftHealth !== rightHealth) {
-        return leftHealth - rightHealth;
+    const candidates = [];
+    for (const member of party.members) {
+      if (member.guid === self.guid) {
+        continue;
       }
-      return HB.distance(self.guid, left.guid) - HB.distance(self.guid, right.guid);
+      const percent = percentForMember(member);
+      if (percent == null || percent >= threshold) {
+        continue;
+      }
+      const distance = HB.distance(self.guid, member.guid);
+      if (distance > HEALING_DISTANCE) {
+        continue;
+      }
+      if (isDefeated(HB.entity(member.guid))) {
+        continue;
+      }
+      candidates.push({
+        guid: member.guid,
+        percent,
+        distance
+      });
+    }
+    if (candidates.length === 0) {
+      return null;
+    }
+    candidates.sort((left, right) => {
+      if (left.percent !== right.percent) {
+        return left.percent - right.percent;
+      }
+      if (left.distance !== right.distance) {
+        return left.distance - right.distance;
+      }
+      return left.guid - right.guid;
     });
-    return members[0]?.guid ?? null;
+    return candidates[0]?.guid ?? null;
   }
 
   // src/runtime-actions.ts
   function logMageInfo(message) {
-    HB.log("info", `mage: ${message}`);
+    HB.debugLog(`mage: ${message}`);
   }
   function issueAction(state2, key, minIntervalSeconds, action) {
     const lastIssuedAt = state2.actionTimes.get(key);
@@ -565,7 +605,8 @@
     };
     if (!isMonsterCandidateInCombatRange(
       candidate,
-      maxAttackRange
+      maxAttackRange,
+      state2.maxAggroDistance
     )) {
       clearCombatTarget(state2);
       return null;
@@ -644,9 +685,7 @@
   function createSpellcastRequest(state2, spell, targetGuid) {
     const self = HB.selfEntity();
     const target = targetGuid == null ? null : HB.entity(targetGuid);
-    const targetName = normalizeCastName(
-      target?.name?.trim() ?? null
-    );
+    const targetName = normalizeCastName(target?.name?.trim() ?? null);
     return {
       spellName: normalizeCastName(spell.name ?? null),
       targetName,
@@ -734,7 +773,10 @@
   }
   function incrementVulnerabilityAttempt(state2, targetGuid) {
     const nextAttemptCount = failedVulnAttemptCount(state2, targetGuid) + 1;
-    state2.vulnerabilityPolicy.failedVulnAttemptsByTarget.set(targetGuid, nextAttemptCount);
+    state2.vulnerabilityPolicy.failedVulnAttemptsByTarget.set(
+      targetGuid,
+      nextAttemptCount
+    );
     return nextAttemptCount;
   }
   function logSpellcastResolution(state2, resolution) {
@@ -799,7 +841,9 @@
     return message.startsWith(expectedPrefix);
   }
   function isAttackLandingMessage(request, chatEvent, targetName) {
-    logMageInfo(`checking attack landing -> message="${chatEvent.message}" targetName="${targetName}" spellName="${request.spellName}"`);
+    logMageInfo(
+      `checking attack landing -> message="${chatEvent.message}" targetName="${targetName}" spellName="${request.spellName}"`
+    );
     if (targetName == null || request.spellName == null) {
       return false;
     }
@@ -871,7 +915,9 @@
     };
   }
   function vectorLength(vector) {
-    return Math.sqrt(vector.x * vector.x + vector.y * vector.y + vector.z * vector.z);
+    return Math.sqrt(
+      vector.x * vector.x + vector.y * vector.y + vector.z * vector.z
+    );
   }
   function normalizeVector(vector, length) {
     if (length === 0) {
@@ -910,8 +956,8 @@
   }
 
   // src/combat.ts
-  function collectMonsterCandidates(self, partyLeader, maxAttackRange) {
-    const searchRange = Math.min(MAX_AGGRO_DISTANCE, maxAttackRange);
+  function collectMonsterCandidates(self, partyLeader, maxAttackRange, maxAggroDistance) {
+    const searchRange = Math.min(maxAggroDistance, maxAttackRange);
     const monsters = HB.nearbyEntities(searchRange, ["monster"]).filter(
       (monster) => !isDefeated(monster)
     );
@@ -924,7 +970,8 @@
     })).filter(
       (candidate) => isMonsterCandidateInCombatRange(
         candidate,
-        maxAttackRange
+        maxAttackRange,
+        maxAggroDistance
       )
     );
   }
@@ -1096,10 +1143,35 @@
     }
     return false;
   }
+  function maybeRevitalizePartyMember(state2, self, spells) {
+    const revitalizationTargetGuid = choosePartyRevitalizeTarget(self);
+    if (revitalizationTargetGuid == null) {
+      return false;
+    }
+    const revitalizeSpell = chooseBestSpell(
+      spells,
+      {
+        school: "life",
+        type: "revitalize",
+        targetKind: "other",
+        targetGuid: revitalizationTargetGuid,
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
+      },
+      HB.distance
+    );
+    if (revitalizeSpell && castSpell(state2, revitalizeSpell, revitalizationTargetGuid)) {
+      return true;
+    }
+    return false;
+  }
   function maybeCastAttackSpell(state2, self, data, spells, skills, target) {
     const warAttackSpells = knownAttackSpells(spells, "war");
     const voidAttackSpells = knownAttackSpells(spells, "void");
-    const preferredDamageTypes = preferredDamageTypesForWeenie(data, target.weenieId);
+    const preferredDamageTypes = preferredDamageTypesForWeenie(
+      data,
+      target.weenieId
+    );
     const vulnerabilityPolicy = vulnerabilityPolicyForTarget(state2, target.guid);
     logMageInfo(
       `combat decision -> target=${describeAttackTarget(target)} war=${warAttackSpells.length} void=${voidAttackSpells.length} life=${isSkillUsable(skills.get("life")) ? "yes" : "no"} failedVulnAttempts=${vulnerabilityPolicy.failedVulnAttemptCount} preferred=${preferredDamageTypes.join(",")}`
@@ -1207,7 +1279,8 @@
     const partyLeader = partyLeaderMember(party);
     const separation = updatePartySeparation(
       state2.partySeparationLatched,
-      partyLeader == null ? null : HB.distance(self.guid, partyLeader.guid)
+      partyLeader == null ? null : HB.distance(self.guid, partyLeader.guid),
+      state2.maxPartyDistance
     );
     state2.partySeparationLatched = separation.nextLatched;
     if (partyLeader != null && separation.shouldFollow) {
@@ -1257,6 +1330,9 @@
     if (maybeHealPartyMember(state2, self, spells, skills)) {
       return;
     }
+    if (maybeRevitalizePartyMember(state2, self, spells)) {
+      return;
+    }
     const currentInteraction = HB.currentInteraction();
     let target = null;
     const activeCombatTarget = resolveCombatTarget(
@@ -1271,11 +1347,14 @@
         reason: "combat-target",
         weenieId: activeCombatTarget.weenieId
       };
-      logMageInfo(
-        `combat target resolved -> ${describeAttackTarget2(target)}`
-      );
+      logMageInfo(`combat target resolved -> ${describeAttackTarget2(target)}`);
     } else {
-      const candidates = collectMonsterCandidates(self, partyLeader, attackRange);
+      const candidates = collectMonsterCandidates(
+        self,
+        partyLeader,
+        attackRange,
+        state2.maxAggroDistance
+      );
       const availableCandidates = candidates.filter(
         (candidate) => !hasRecentMissedAttack(state2, self, candidate)
       );
@@ -1325,14 +1404,14 @@
   }
 
   // src/runtime-config.ts
-  function loadMageConfig() {
+  function loadMageConfig(data) {
     const rawConfig = HB.loadConfig();
     if (rawConfig == null) {
-      HB.writeConfig({});
+      HB.writeConfig({ preferredSpells: [] });
     }
-    return normalizeMageConfig(rawConfig);
+    return normalizeMageConfig(rawConfig, data);
   }
-  function normalizeMageConfig(rawConfig) {
+  function normalizeMageConfig(rawConfig, data) {
     if (rawConfig == null || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
       return {
         preferredSpellIds: []
@@ -1340,23 +1419,38 @@
     }
     const config = rawConfig;
     return {
-      preferredSpellIds: normalizePreferredSpellIds(config.preferredSpellIds)
+      preferredSpellIds: normalizePreferredSpells(config.preferredSpells, data)
     };
   }
-  function normalizePreferredSpellIds(value) {
+  function normalizePreferredSpells(value, data) {
     if (!Array.isArray(value)) {
       return [];
     }
     const preferredSpellIds = [];
     const seenSpellIds = /* @__PURE__ */ new Set();
     for (const entry of value) {
-      if (!Number.isInteger(entry) || entry <= 0 || seenSpellIds.has(entry)) {
+      const preferredSpellId = resolvePreferredSpellId(entry, data);
+      if (preferredSpellId == null || seenSpellIds.has(preferredSpellId)) {
         continue;
       }
-      seenSpellIds.add(entry);
-      preferredSpellIds.push(entry);
+      seenSpellIds.add(preferredSpellId);
+      preferredSpellIds.push(preferredSpellId);
     }
     return preferredSpellIds;
+  }
+  function resolvePreferredSpellId(entry, data) {
+    if (typeof entry === "number" && Number.isInteger(entry) && entry > 0) {
+      return entry;
+    }
+    if (typeof entry !== "string") {
+      return null;
+    }
+    const preferredSpellKey = entry.trim();
+    if (preferredSpellKey.length === 0 || data == null) {
+      return null;
+    }
+    const spell = data.spells[preferredSpellKey];
+    return spell?.spellId ?? null;
   }
 
   // src/runtime-data.ts
@@ -1451,6 +1545,8 @@
       combatTargetGuid: null,
       spellcast: { phase: "idle" },
       partySeparationLatched: false,
+      maxPartyDistance: MAX_PARTY_DISTANCE,
+      maxAggroDistance: MAX_AGGRO_DISTANCE,
       actionTimes: /* @__PURE__ */ new Map(),
       attackPolicy: {
         lastMissedAttackByTarget: /* @__PURE__ */ new Map()
@@ -1466,6 +1562,8 @@
     state2.combatTargetGuid = null;
     state2.spellcast = { phase: "idle" };
     state2.partySeparationLatched = false;
+    state2.maxPartyDistance = MAX_PARTY_DISTANCE;
+    state2.maxAggroDistance = MAX_AGGRO_DISTANCE;
     state2.actionTimes.clear();
     state2.attackPolicy.lastMissedAttackByTarget.clear();
     state2.vulnerabilityPolicy.failedVulnAttemptsByTarget.clear();
@@ -1474,13 +1572,26 @@
 
   // src/index.ts
   var state = createInitialState();
+  function parsePositiveNumberArg(args, flagName) {
+    const prefix = `${flagName}=`;
+    const token = args.trim().split(/\s+/).find((candidate) => candidate.startsWith(prefix));
+    if (token == null) {
+      return null;
+    }
+    const parsed = Number(token.slice(prefix.length));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
   function handleMessageEvent(message, sourceLabel) {
     const spellcastRequest = currentSpellcastRequest(state);
     const pendingTargetName = spellcastRequest?.targetName ?? (spellcastRequest?.targetGuid == null ? null : HB.entity(spellcastRequest.targetGuid)?.name?.trim() ?? null);
     logMageInfo(
       `${sourceLabel} received: message="${message}" pendingTargetName="${pendingTargetName}"`
     );
-    if (resolveSpellcastFromChatMessage(state, { sender: null, message }, pendingTargetName)) {
+    if (resolveSpellcastFromChatMessage(
+      state,
+      { sender: null, message },
+      pendingTargetName
+    )) {
       runMage(state);
     }
   }
@@ -1513,7 +1624,6 @@
         if (event.data.kind === "busy_operation_changed") {
           if (event.data.data.busy === "spell_cast") {
             observeSpellCastBusy(state);
-            return;
           }
           if (event.data.data.busy === "none") {
             resolveSpellcastFromIdle(state);
@@ -1535,12 +1645,14 @@
         switch (event.data.kind) {
           case "started": {
             resetState(state);
-            state.config = loadMageConfig();
             const loadStatus = loadMageDataWithStatus();
             state.data = loadStatus.data;
+            state.config = loadMageConfig(state.data);
+            state.maxPartyDistance = parsePositiveNumberArg(event.data.data.args, "max-party-dist") ?? MAX_PARTY_DISTANCE;
+            state.maxAggroDistance = parsePositiveNumberArg(event.data.data.args, "aggro-dist") ?? state.maxAggroDistance;
             logMageInfo("started");
             if (state.data == null) {
-              HB.log(
+              HB.print(
                 "warn",
                 `mage script started without usable mage data (json=${loadStatus.hasJson}, bin=${loadStatus.hasBin})`
               );

@@ -104,18 +104,6 @@ export function chooseBestSpell(
 	}
 
 	candidates.sort((left, right) => {
-		const leftPreferredSpell = preferredSpellIdIndex(
-			preferredSpellIds,
-			left.spellId,
-		);
-		const rightPreferredSpell = preferredSpellIdIndex(
-			preferredSpellIds,
-			right.spellId,
-		);
-		if (leftPreferredSpell !== rightPreferredSpell) {
-			return leftPreferredSpell - rightPreferredSpell;
-		}
-
 		const leftPreferred = preferredDamageTypeIndex(
 			preferredDamageTypes,
 			left.damageType,
@@ -130,6 +118,19 @@ export function chooseBestSpell(
 		if (left.difficulty !== right.difficulty) {
 			return right.difficulty - left.difficulty;
 		}
+
+		const leftPreferredSpell = preferredSpellIdIndex(
+			preferredSpellIds,
+			left.spellId,
+		);
+		const rightPreferredSpell = preferredSpellIdIndex(
+			preferredSpellIds,
+			right.spellId,
+		);
+		if (leftPreferredSpell !== rightPreferredSpell) {
+			return leftPreferredSpell - rightPreferredSpell;
+		}
+
 		return left.spellId - right.spellId;
 	});
 

@@ -15,7 +15,24 @@ type PropertyString = number;
 type PropertyDataId = number;
 type PropertyInstanceId = number;
 
-type ScriptLogLevelInput = "trace" | "debug" | "info" | "warn" | "warning" | "error";
+type ScriptMessageStyleInput =
+  | "trace"
+  | "debug"
+  | "info"
+  | "warn"
+  | "warning"
+  | "error"
+  | "system"
+  | "chat"
+  | "combat"
+  | "tell"
+  | "emote"
+  | "party"
+  | "guild"
+  | "trade"
+  | "help"
+  | "society"
+  | "magic";
 type ScriptEntityKind =
   | "player"
   | "npc"
@@ -781,7 +798,7 @@ interface HoltburgerApi {
   loadDataBin(): Uint8Array | null;
   writeConfig(contents: string | JsonValue): boolean;
 
-  log(level: string, message: string): void;
+  print(style: ScriptMessageStyleInput, message: string): void;
   debugLog(message: string): void;
   say(message: string): void;
   emote(message: string): void;

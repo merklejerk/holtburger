@@ -3,20 +3,20 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use anyhow::{Context, Result};
-use deno_core::serde_json::{Value, from_value, json};
-use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
+use deno_core::serde_json::{from_value, json, Value};
+use deno_core::{op2, JsRuntime, OpState, RuntimeOptions};
 use futures::executor::block_on;
-use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
     PropertyString,
 };
+use holtburger_common::Guid;
 
 use crate::{
     ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
     ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
     ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue, ScriptLogLevel,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue, ScriptMessageStyle,
     ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
@@ -562,8 +562,8 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
         const serialized = typeof contents === "string" ? contents : JSON.stringify(contents);
         return Deno.core.ops.op_hb_write_config(serialized);
     },
-    log(level, message) {
-        Deno.core.ops.op_hb_log(String(level), String(message));
+    print(style, message) {
+        Deno.core.ops.op_hb_print(String(style), String(message));
     },
     debugLog(message) {
         Deno.core.ops.op_hb_debug_log(String(message));
@@ -671,7 +671,7 @@ deno_core::extension!(
         op_hb_load_data,
         op_hb_load_data_bin,
         op_hb_write_config,
-        op_hb_log,
+        op_hb_print,
         op_hb_debug_log,
         op_hb_say,
         op_hb_emote,
@@ -974,8 +974,8 @@ fn op_hb_equip(state: &mut OpState, guid: u32, #[string] slot: String) {
                 .borrow::<HostRuntimeState>()
                 .outputs
                 .borrow_mut()
-                .push(ScriptIntent::Log {
-                    level: ScriptLogLevel::Error,
+                .push(ScriptIntent::Print {
+                    style: ScriptMessageStyle::Error,
                     message: format!("invalid equipment slot for equip intent: {slot}"),
                 });
             return;
@@ -1104,13 +1104,13 @@ fn op_hb_write_config(state: &mut OpState, #[string] contents: String) -> bool {
 }
 
 #[op2(fast)]
-fn op_hb_log(state: &mut OpState, #[string] level: String, #[string] message: String) {
-    let level = parse_script_log_level(&level);
+fn op_hb_print(state: &mut OpState, #[string] style: String, #[string] message: String) {
+    let style = parse_script_message_style(&style);
     state
         .borrow::<HostRuntimeState>()
         .outputs
         .borrow_mut()
-        .push(ScriptIntent::Log { level, message });
+        .push(ScriptIntent::Print { style, message });
 }
 
 #[op2(fast)]
@@ -1271,8 +1271,8 @@ fn op_hb_salvage(state: &mut OpState, tool: u32, #[string] item_guids_json: Stri
                 .borrow::<HostRuntimeState>()
                 .outputs
                 .borrow_mut()
-                .push(ScriptIntent::Log {
-                    level: ScriptLogLevel::Error,
+                .push(ScriptIntent::Print {
+                    style: ScriptMessageStyle::Error,
                     message: format!("failed to parse salvage item list: {error}"),
                 });
             return;
@@ -1374,13 +1374,26 @@ fn op_hb_approach(state: &mut OpState, guid: u32) {
         }));
 }
 
-fn parse_script_log_level(level: &str) -> ScriptLogLevel {
-    match level.trim().to_ascii_lowercase().as_str() {
-        "trace" => ScriptLogLevel::Trace,
-        "debug" => ScriptLogLevel::Debug,
-        "warn" | "warning" => ScriptLogLevel::Warn,
-        "error" => ScriptLogLevel::Error,
-        _ => ScriptLogLevel::Info,
+fn parse_script_message_style(style: &str) -> ScriptMessageStyle {
+    match style.trim().to_ascii_lowercase().as_str() {
+        "trace" => ScriptMessageStyle::Trace,
+        "debug" => ScriptMessageStyle::Debug,
+        "system" => ScriptMessageStyle::System,
+        "chat" => ScriptMessageStyle::Chat,
+        "combat" => ScriptMessageStyle::Combat,
+        "tell" => ScriptMessageStyle::Tell,
+        "emote" => ScriptMessageStyle::Emote,
+        "party" | "fellowship" => ScriptMessageStyle::Party,
+        "guild" | "allegiance" | "vassals" | "patron" | "monarch" | "covassals" => {
+            ScriptMessageStyle::Guild
+        }
+        "trade" => ScriptMessageStyle::Trade,
+        "help" => ScriptMessageStyle::Help,
+        "society" => ScriptMessageStyle::Society,
+        "magic" => ScriptMessageStyle::Magic,
+        "warn" | "warning" => ScriptMessageStyle::Warn,
+        "error" => ScriptMessageStyle::Error,
+        _ => ScriptMessageStyle::Info,
     }
 }
 
@@ -1554,12 +1567,12 @@ mod tests {
         ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptPartyMemberView,
         ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
-    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
         PropertyInt64, PropertyString,
     };
+    use holtburger_common::Guid;
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 
@@ -1849,7 +1862,7 @@ mod tests {
             "equipment-map-test",
             r#"
                 const equipment = Holtburger.equipment();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         equipment instanceof Map,
@@ -1865,7 +1878,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,true,42]"
         ));
     }
@@ -1875,7 +1888,7 @@ mod tests {
             "spellbook-array-test",
             r#"
                 const spellbook = Holtburger.spellbook();
-                Holtburger.log("info", JSON.stringify(spellbook));
+                Holtburger.print("info", JSON.stringify(spellbook));
             "#,
         );
 
@@ -1884,7 +1897,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[7,11,13]"
         ));
     }
@@ -1894,7 +1907,7 @@ mod tests {
             "inventory-array-test",
             r#"
                 const inventory = Holtburger.inventory();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         Array.isArray(inventory),
@@ -1912,7 +1925,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,1,17,4,[11,12]]"
         ));
     }
@@ -1921,7 +1934,7 @@ mod tests {
         let source = ScriptSource::new(
             "current-open-container-test",
             r#"
-                Holtburger.log("info", String(Holtburger.currentOpenContainer()));
+                Holtburger.print("info", String(Holtburger.currentOpenContainer()));
             "#,
         );
 
@@ -1930,7 +1943,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "17"
         ));
     }
@@ -1940,7 +1953,7 @@ mod tests {
             "current-interaction-test",
             r#"
                 const interaction = Holtburger.currentInteraction();
-                Holtburger.log("info", JSON.stringify(interaction));
+                Holtburger.print("info", JSON.stringify(interaction));
             "#,
         );
 
@@ -1949,7 +1962,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "{\"kind\":\"Attack\",\"data\":{\"guid\":7}}"
         ));
     }
@@ -1959,7 +1972,7 @@ mod tests {
             "enchantments-test",
             r#"
                 const enchantments = Holtburger.enchantments();
-                Holtburger.log("info", JSON.stringify(enchantments));
+                Holtburger.print("info", JSON.stringify(enchantments));
             "#,
         );
 
@@ -1968,7 +1981,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[{\"spellId\":7,\"endTime\":123.5},{\"spellId\":11,\"endTime\":222.25}]"
         ));
     }
@@ -1978,7 +1991,7 @@ mod tests {
             "entity-test",
             r#"
                 const entity = Holtburger.entity(11);
-                Holtburger.log("info", JSON.stringify([entity.guid, entity.name, entity.kind]));
+                Holtburger.print("info", JSON.stringify([entity.guid, entity.name, entity.kind]));
             "#,
         );
 
@@ -1987,7 +2000,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[11,\"Lesser Healing Kit\",\"healing_kit\"]"
         ));
     }
@@ -1997,7 +2010,7 @@ mod tests {
             "debug-log-test",
             r#"
                 Holtburger.debugLog("script diagnostics");
-                Holtburger.log("info", "after debug log");
+                Holtburger.print("info", "after debug log");
             "#,
         );
 
@@ -2006,7 +2019,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "after debug log"
         ));
     }
@@ -2016,7 +2029,7 @@ mod tests {
             "party-test",
             r#"
                 const party = Holtburger.party();
-                Holtburger.log("info", JSON.stringify(party));
+                Holtburger.print("info", JSON.stringify(party));
             "#,
         );
 
@@ -2025,7 +2038,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message.contains("\"leaderGuid\":7")
                     && message.contains("\"members\"")
                     && message.contains("\"guid\":7")
@@ -2046,7 +2059,7 @@ mod tests {
                     Holtburger.pendingConfirmation(),
                     Holtburger.busyOperation(),
                 ];
-                Holtburger.log("info", JSON.stringify(values));
+                Holtburger.print("info", JSON.stringify(values));
             "#,
         );
 
@@ -2054,11 +2067,11 @@ mod tests {
         let outputs = host.drain_outputs();
 
         match outputs.as_slice() {
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message
                     == "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]" =>
                 {}
-            [ScriptIntent::Log { message, .. }] => {
+            [ScriptIntent::Print { message, .. }] => {
                 panic!("unexpected script-state output: {message}")
             }
             other => panic!("unexpected outputs: {other:?}"),
@@ -2071,7 +2084,7 @@ mod tests {
             r#"
                 const distance = Holtburger.distance(7, 42);
                 const heading = Holtburger.headingTo(7, 42);
-                Holtburger.log("info", JSON.stringify([distance, heading]));
+                Holtburger.print("info", JSON.stringify([distance, heading]));
             "#,
         );
 
@@ -2080,7 +2093,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if deno_core::serde_json::from_str::<Vec<f64>>(message).is_ok_and(|values| {
                     values.len() == 2
                         && (values[0] - 10.0).abs() < 1e-6
@@ -2094,7 +2107,7 @@ mod tests {
             "combat-info-test",
             r#"
                 const combatInfo = Holtburger.combatInfo();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         combatInfo.combatMode,
@@ -2113,7 +2126,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[\"Melee\",true,7,0.75,\"High\",123.5]"
         ));
     }
@@ -2187,7 +2200,7 @@ mod tests {
         let source = ScriptSource::new(
             "spellbook-membership-test",
             r#"
-                Holtburger.log("info", JSON.stringify([
+                Holtburger.print("info", JSON.stringify([
                     Holtburger.inSpellbook(7),
                     Holtburger.inSpellbook(99),
                 ]));
@@ -2199,7 +2212,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,false]"
         ));
     }
@@ -2212,7 +2225,7 @@ mod tests {
                     { landblockId: 16777216, coords: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
                     { landblockId: 16777216, coords: { x: 0, y: 10, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
                 );
-                Holtburger.log("info", String(heading));
+                Holtburger.print("info", String(heading));
             "#,
         );
 
@@ -2221,7 +2234,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message
                     .parse::<f64>()
                     .is_ok_and(|heading| (heading - 90.0_f64.to_radians()).abs() < 1e-6)
@@ -2232,7 +2245,7 @@ mod tests {
         let source = ScriptSource::new(
             "entity-exists-test",
             r#"
-                Holtburger.log("info", JSON.stringify([
+                Holtburger.print("info", JSON.stringify([
                     Holtburger.entityExists(42),
                     Holtburger.entityExists(7),
                 ]));
@@ -2244,7 +2257,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,false]"
         ));
     }
@@ -2254,7 +2267,7 @@ mod tests {
             "current-trade-info-test",
             r#"
                 const trade = Holtburger.currentTradeInfo();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         trade.partnerGuid,
@@ -2271,7 +2284,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[7,\"Buddy\",[11],[21,22]]"
         ));
     }

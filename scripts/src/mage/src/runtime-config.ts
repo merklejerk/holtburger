@@ -1,51 +1,78 @@
-import type { MageConfig } from "./types";
+import type { MageConfig, MageData } from "./types";
 
 type MageConfigFile = {
-  preferredSpellIds?: unknown;
+	preferredSpells?: unknown;
 };
 
-export function loadMageConfig(): MageConfig {
-  const rawConfig = HB.loadConfig();
-  if (rawConfig == null) {
-    HB.writeConfig({});
-  }
+export function loadMageConfig(data: MageData | null): MageConfig {
+	const rawConfig = HB.loadConfig();
+	if (rawConfig == null) {
+		HB.writeConfig({ preferredSpells: [] });
+	}
 
-  return normalizeMageConfig(rawConfig);
+	return normalizeMageConfig(rawConfig, data);
 }
 
-export function normalizeMageConfig(rawConfig: unknown): MageConfig {
-  if (
-    rawConfig == null ||
-    typeof rawConfig !== "object" ||
-    Array.isArray(rawConfig)
-  ) {
-    return {
-      preferredSpellIds: [],
-    };
-  }
+export function normalizeMageConfig(
+	rawConfig: unknown,
+	data: MageData | null,
+): MageConfig {
+	if (
+		rawConfig == null ||
+		typeof rawConfig !== "object" ||
+		Array.isArray(rawConfig)
+	) {
+		return {
+			preferredSpellIds: [],
+		};
+	}
 
-  const config = rawConfig as MageConfigFile;
-  return {
-    preferredSpellIds: normalizePreferredSpellIds(config.preferredSpellIds),
-  };
+	const config = rawConfig as MageConfigFile;
+	return {
+		preferredSpellIds: normalizePreferredSpells(config.preferredSpells, data),
+	};
 }
 
-function normalizePreferredSpellIds(value: unknown): number[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
+function normalizePreferredSpells(
+	value: unknown,
+	data: MageData | null,
+): number[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
 
-  const preferredSpellIds: number[] = [];
-  const seenSpellIds = new Set<number>();
+	const preferredSpellIds: number[] = [];
+	const seenSpellIds = new Set<number>();
 
-  for (const entry of value) {
-    if (!Number.isInteger(entry) || entry <= 0 || seenSpellIds.has(entry)) {
-      continue;
-    }
+	for (const entry of value) {
+		const preferredSpellId = resolvePreferredSpellId(entry, data);
+		if (preferredSpellId == null || seenSpellIds.has(preferredSpellId)) {
+			continue;
+		}
 
-    seenSpellIds.add(entry);
-    preferredSpellIds.push(entry);
-  }
+		seenSpellIds.add(preferredSpellId);
+		preferredSpellIds.push(preferredSpellId);
+	}
+	return preferredSpellIds;
+}
 
-  return preferredSpellIds;
+function resolvePreferredSpellId(
+	entry: unknown,
+	data: MageData | null,
+): number | null {
+	if (typeof entry === "number" && Number.isInteger(entry) && entry > 0) {
+		return entry;
+	}
+
+	if (typeof entry !== "string") {
+		return null;
+	}
+
+	const preferredSpellKey = entry.trim();
+	if (preferredSpellKey.length === 0 || data == null) {
+		return null;
+	}
+
+	const spell = data.spells[preferredSpellKey];
+	return spell?.spellId ?? null;
 }

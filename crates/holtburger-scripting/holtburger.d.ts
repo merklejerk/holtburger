@@ -184,6 +184,9 @@ type SkillType =
   | "Summoning";
 
 type WeenieError = string;
+type DamageType = number;
+type AttackConditions = number;
+type DamageLocation = number;
 
 type ScriptLocalConfirmationKind = { kind: "unswear" } | { kind: "other"; data: string };
 
@@ -432,6 +435,7 @@ interface ScriptEntityView {
   guid: Guid;
   name: string | null;
   kind: ScriptEntityKind;
+  weenieId: number | null;
   position: WorldPosition;
   profile: ScriptEntityProfile | null;
   container: Guid;
@@ -556,6 +560,85 @@ interface ScriptChatMessageEvent {
   data: ScriptChatEvent;
 }
 
+interface ScriptCombatFeedbackAttackDone {
+  kind: "attack_done";
+  data: {
+    error: WeenieError;
+  };
+}
+
+interface ScriptCombatFeedbackAttackCommenced {
+  kind: "attack_commenced";
+}
+
+interface ScriptCombatFeedbackAttackerNotification {
+  kind: "attacker_notification";
+  data: {
+    defender_name: string;
+    damage_type: DamageType;
+    health_percent: number;
+    damage: number;
+    critical_hit: boolean;
+    attack_conditions: AttackConditions;
+  };
+}
+
+interface ScriptCombatFeedbackDefenderNotification {
+  kind: "defender_notification";
+  data: {
+    attacker_name: string;
+    damage_type: DamageType;
+    health_percent: number;
+    damage: number;
+    damage_location: DamageLocation;
+    critical_hit: boolean;
+    attack_conditions: AttackConditions;
+  };
+}
+
+interface ScriptCombatFeedbackEvasionAttackerNotification {
+  kind: "evasion_attacker_notification";
+  data: {
+    defender_name: string;
+  };
+}
+
+interface ScriptCombatFeedbackEvasionDefenderNotification {
+  kind: "evasion_defender_notification";
+  data: {
+    attacker_name: string;
+  };
+}
+
+interface ScriptCombatFeedbackVictimNotification {
+  kind: "victim_notification";
+  data: {
+    death_message: string;
+  };
+}
+
+interface ScriptCombatFeedbackKillerNotification {
+  kind: "killer_notification";
+  data: {
+    death_message: string;
+  };
+}
+
+type ScriptCombatFeedback =
+  | ScriptCombatFeedbackAttackDone
+  | ScriptCombatFeedbackAttackCommenced
+  | ScriptCombatFeedbackAttackerNotification
+  | ScriptCombatFeedbackDefenderNotification
+  | ScriptCombatFeedbackEvasionAttackerNotification
+  | ScriptCombatFeedbackEvasionDefenderNotification
+  | ScriptCombatFeedbackVictimNotification
+  | ScriptCombatFeedbackKillerNotification;
+
+interface ScriptCombatFeedbackEvent {
+  kind: "combat_feedback";
+  data: ScriptCombatFeedback;
+}
+
 interface ScriptEventLifecycle {
   kind: "lifecycle";
   data: ScriptLifecycleEvent;
@@ -605,6 +688,22 @@ interface ScriptEventEntityUpdated {
   };
 }
 
+interface ScriptEventTeleportStarted {
+  kind: "teleport_started";
+  data: {
+    sequence: number;
+  };
+}
+
+interface ScriptEventPlayerKilled {
+  kind: "player_killed";
+  data: {
+    death_message: string;
+    victim_id: Guid;
+    killer_id: Guid;
+  };
+}
+
 interface ScriptEventInventoryChanged {
   kind: "inventory_changed";
   data: {
@@ -623,6 +722,7 @@ interface ScriptEventPartyChanged {
 
 type ScriptEvent =
   | ScriptChatMessageEvent
+  | ScriptCombatFeedbackEvent
   | ScriptEventLifecycle
   | ScriptEventWorkflow
   | ScriptEventCommand
@@ -631,6 +731,8 @@ type ScriptEvent =
   | ScriptEventEntityAppeared
   | ScriptEventEntityDisappeared
   | ScriptEventEntityUpdated
+  | ScriptEventTeleportStarted
+  | ScriptEventPlayerKilled
   | ScriptEventInventoryChanged
   | ScriptEventSpellbookChanged
   | ScriptEventPartyChanged;
@@ -673,6 +775,7 @@ interface HoltburgerApi {
 
   loadConfig(): JsonValue | null;
   loadData(): JsonValue | null;
+  loadDataBin(): Uint8Array | null;
   writeConfig(contents: string | JsonValue): boolean;
 
   log(level: string, message: string): void;

@@ -1,0 +1,122 @@
+import { runMage } from "./engine";
+import { loadMageDataWithStatus } from "./runtime-data";
+import { createInitialState, resetState } from "./state";
+import {
+  cancelCombatPlanning,
+  clearAttackHistory,
+  clearCombatTarget,
+  clearVulnerabilityHistory,
+  currentSpellcastRequest,
+  observeSpellCastBusy,
+  logMageInfo,
+  resolveSpellcastFromCombatFeedback,
+  resolveSpellcastFromChatMessage,
+  resolveSpellcastFromIdle,
+  resolveSpellcastFromWeenieError,
+} from "./runtime-actions";
+
+const state = createInitialState();
+
+function handleMessageEvent(message: string, sourceLabel: string): void {
+  const spellcastRequest = currentSpellcastRequest(state);
+  const pendingTargetName =
+    spellcastRequest?.targetName ??
+    (spellcastRequest?.targetGuid == null
+      ? null
+      : HB.entity(spellcastRequest.targetGuid)?.name?.trim() ?? null);
+
+  logMageInfo(
+    `${sourceLabel} received: message="${message}" pendingTargetName="${pendingTargetName}"`,
+  );
+  if (
+    resolveSpellcastFromChatMessage(state, { sender: null, message }, pendingTargetName)
+  ) {
+    runMage(state);
+  }
+}
+
+function handleCombatFeedbackEvent(feedback: ScriptCombatFeedback): void {
+  if (resolveSpellcastFromCombatFeedback(state, feedback)) {
+    runMage(state);
+  }
+}
+
+HB.onEvent((event) => {
+  switch (event.kind) {
+    case "chat_message": {
+      handleMessageEvent(event.data.message, "chat_message");
+      return;
+    }
+    case "combat_feedback": {
+      handleCombatFeedbackEvent(event.data);
+      return;
+    }
+    case "teleport_started": {
+      cancelCombatPlanning(state);
+      return;
+    }
+    case "weenie_error": {
+      if (resolveSpellcastFromWeenieError(state)) {
+        runMage(state);
+      }
+      return;
+    }
+    case "workflow": {
+      if (event.data.kind === "busy_operation_changed") {
+        if (event.data.data.busy === "spell_cast") {
+          observeSpellCastBusy(state);
+          return;
+        }
+
+        if (event.data.data.busy === "none") {
+          resolveSpellcastFromIdle(state);
+          runMage(state);
+          return;
+        }
+      }
+      return;
+    }
+    case "entity_disappeared": {
+      if (state.combatTargetGuid === event.data.guid) {
+        clearCombatTarget(state);
+      }
+      clearAttackHistory(state, event.data.guid);
+      clearVulnerabilityHistory(state, event.data.guid);
+      return;
+    }
+    case "lifecycle": {
+      switch (event.data.kind) {
+        case "started": {
+          resetState(state);
+          const loadStatus = loadMageDataWithStatus();
+          state.data = loadStatus.data;
+          logMageInfo("started");
+          if (state.data == null) {
+            HB.log(
+              "warn",
+              `mage script started without usable mage data (json=${loadStatus.hasJson}, bin=${loadStatus.hasBin})`,
+            );
+          } else {
+            logMageInfo(
+              `loaded mage data: ${Object.keys(state.data.spells).length} spells, ${Object.keys(state.data.skills).length} skills`,
+            );
+          }
+          runMage(state);
+          return;
+        }
+        case "stopped": {
+          resetState(state);
+          return;
+        }
+        case "tick": {
+          state.elapsedSeconds += event.data.data.elapsedSeconds;
+          runMage(state);
+          return;
+        }
+      }
+      return;
+    }
+    default:
+      return;
+  }
+});

@@ -5,6 +5,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl ClientRuntime {
+    fn should_send_keepalive_ping(&self, now: Instant) -> bool {
+        matches!(self.state, ClientState::InWorld)
+            && now.duration_since(self.session.last_send_time) > Duration::from_secs(5)
+    }
+
     fn sync_remote_body_tracking(&mut self, body_id: SpatialBodyId) {
         let Some(guid) = body_id.authoritative_guid() else {
             return;
@@ -116,7 +121,7 @@ impl ClientRuntime {
                         break;
                     }
 
-                    if now.duration_since(self.session.last_send_time) > Duration::from_secs(5) {
+                    if self.should_send_keepalive_ping(now) {
                         use holtburger_protocol::messages::misc::actions::PingRequestActionData;
                         self.session
                             .send_action(holtburger_protocol::messages::GameAction::PingRequest(
@@ -196,5 +201,28 @@ impl ClientRuntime {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::builder;
+
+    #[test]
+    fn keepalive_ping_requires_in_world_state() {
+        let now = Instant::now();
+
+        let mut connected = builder::build_test_client(ClientState::Connected);
+        connected.session.last_send_time = now - Duration::from_secs(6);
+        assert!(!connected.should_send_keepalive_ping(now));
+
+        let mut entering_world = builder::build_test_client(ClientState::EnteringWorld);
+        entering_world.session.last_send_time = now - Duration::from_secs(6);
+        assert!(!entering_world.should_send_keepalive_ping(now));
+
+        let mut in_world = builder::build_test_client(ClientState::InWorld);
+        in_world.session.last_send_time = now - Duration::from_secs(6);
+        assert!(in_world.should_send_keepalive_ping(now));
     }
 }

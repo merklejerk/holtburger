@@ -10,7 +10,7 @@ use holtburger_protocol::traits::ProtocolUnpack;
 use std::time::Instant;
 
 impl Session {
-    async fn recv_packet_with_addr(
+    async fn recv_raw_packet_with_addr(
         &mut self,
         buf: &mut [u8],
     ) -> Result<(PacketHeader, Vec<u8>, std::net::SocketAddr)> {
@@ -40,6 +40,15 @@ impl Session {
             len,
             &buf[..len]
         );
+
+        Ok((header, data, addr))
+    }
+
+    async fn recv_packet_with_addr(
+        &mut self,
+        buf: &mut [u8],
+    ) -> Result<(PacketHeader, Vec<u8>, std::net::SocketAddr)> {
+        let (header, data, addr) = self.recv_raw_packet_with_addr(buf).await?;
 
         if (header.flags & packet_flags::ACK_SEQUENCE) != 0
             && let Some(sequence) = self.read_ack_sequence(header.flags, &data)
@@ -71,6 +80,88 @@ impl Session {
         }
 
         Ok((header, data, addr))
+    }
+
+    fn process_received_packet_metadata(
+        &mut self,
+        header: &PacketHeader,
+        data: &[u8],
+    ) -> Result<()> {
+
+        if (header.flags & packet_flags::ACK_SEQUENCE) != 0
+            && let Some(sequence) = self.read_ack_sequence(header.flags, data)
+        {
+            self.acknowledge_sequence(sequence);
+        }
+
+        if (header.flags & packet_flags::REQUEST_RETRANSMIT) != 0
+            && let Some(sequences) =
+                self.read_sequence_list(header.flags, data, packet_flags::REQUEST_RETRANSMIT)
+        {
+            self.retransmit_sequences(&sequences)?;
+        }
+
+        if (header.flags & packet_flags::REJECT_RETRANSMIT) != 0
+            && let Some(sequences) =
+                self.read_sequence_list(header.flags, data, packet_flags::REJECT_RETRANSMIT)
+        {
+            log::warn!(
+                "Server rejected retransmit for S2C sequences: {:?}",
+                sequences
+            );
+        }
+
+        Ok(())
+    }
+
+    fn validate_received_packet_checksum(
+        &mut self,
+        header: &PacketHeader,
+        data: &[u8],
+    ) -> Result<bool> {
+        let header_checksum = header.calculate_checksum();
+        let payload_checksum = match self.calculate_payload_hash(header.flags, data) {
+            Ok(checksum) => checksum,
+            Err(err) => {
+                log::debug!(
+                    "Inbound packet checksum failed while hashing payload: Seq={} ID={} Flags={:X}: {}",
+                    header.sequence,
+                    header.id,
+                    header.flags,
+                    err
+                );
+                return Ok(false);
+            }
+        };
+
+        if header.flags & packet_flags::ENCRYPTED_CHECKSUM != 0 {
+            let Some(isaac) = self.isaac_s2c.as_mut() else {
+                log::warn!(
+                    "Inbound encrypted packet received before S2C ISAAC was initialized: Seq={} ID={} Flags={:X}",
+                    header.sequence,
+                    header.id,
+                    header.flags
+                );
+                return Ok(false);
+            };
+
+            let key = header.checksum.wrapping_sub(header_checksum) ^ payload_checksum;
+            if isaac.search(key) {
+                isaac.consume_key_value(key);
+                return Ok(true);
+            }
+        } else if header_checksum.wrapping_add(payload_checksum) == header.checksum {
+            return Ok(true);
+        }
+
+        log::debug!(
+            "Inbound packet checksum failed: Seq={} ID={} Flags={:X} Checksum={:08X}",
+            header.sequence,
+            header.id,
+            header.flags,
+            header.checksum,
+        );
+        Ok(false)
     }
 
     pub async fn recv_packet(&mut self, buf: &mut [u8]) -> Result<(PacketHeader, Vec<u8>)> {
@@ -105,7 +196,7 @@ impl Session {
         if packet.header.flags & packet_flags::ECHO_REQUEST != 0 {
             let mut resp = packet.header.clone();
             resp.flags = packet_flags::ECHO_RESPONSE;
-            self.queue_packet_to_addr(resp, &[], packet.addr, Instant::now())?;
+            self.queue_packet_to_addr(resp, &[], self.server_addr, Instant::now())?;
         }
 
         Ok(())
@@ -129,10 +220,17 @@ impl Session {
                     }
                     result = async {
                         let mut buf = [0u8; 1024 * 128];
-                        self.recv_packet_with_addr(&mut buf).await
+                        self.recv_raw_packet_with_addr(&mut buf).await
                     } => {
-                        let (header, data, addr) = result?;
-                        let packet = ReceivedPacket { header, data, addr };
+                        let (header, data, _) = result?;
+
+                        if !self.validate_received_packet_checksum(&header, &data)? {
+                            continue;
+                        }
+
+                        self.process_received_packet_metadata(&header, &data)?;
+
+                        let packet = ReceivedPacket { header, data };
 
                         if !self.should_order_server_packet(&packet.header) {
                             self.finalize_ordered_server_packet(&packet)?;
@@ -178,8 +276,15 @@ impl Session {
             }
 
             let mut buf = [0u8; 1024 * 128];
-            let (header, data, addr) = self.recv_packet_with_addr(&mut buf).await?;
-            let packet = ReceivedPacket { header, data, addr };
+            let (header, data, _) = self.recv_raw_packet_with_addr(&mut buf).await?;
+
+            if !self.validate_received_packet_checksum(&header, &data)? {
+                continue;
+            }
+
+            self.process_received_packet_metadata(&header, &data)?;
+
+            let packet = ReceivedPacket { header, data };
 
             if !self.should_order_server_packet(&packet.header) {
                 self.finalize_ordered_server_packet(&packet)?;

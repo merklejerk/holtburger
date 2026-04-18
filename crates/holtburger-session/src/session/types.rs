@@ -61,7 +61,6 @@ pub(crate) struct CachedPacket {
 pub(crate) struct ReceivedPacket {
     pub(crate) header: PacketHeader,
     pub(crate) data: Vec<u8>,
-    pub(crate) addr: SocketAddr,
 }
 
 #[derive(Clone, Debug)]

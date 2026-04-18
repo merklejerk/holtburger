@@ -262,7 +262,7 @@
 - [x] Show "creature type" in assessment.
 - [x] Fix rare follow teleporting.
 - [x] Client sending duplicate packets to server.
-- [ ] Add all spells causes a sequence error.
+- [x] Add all spells causes a sequence error.
 - [ ] Add `/run <ARGS>` command.
 - [ ] Mage script improvements:
     - [ ] Add preferred spell IDs.

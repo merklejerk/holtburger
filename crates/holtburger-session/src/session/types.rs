@@ -64,10 +64,20 @@ pub(crate) struct ReceivedPacket {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) enum PendingControlPacketData {
+    Prebuilt(Vec<u8>),
+    DeferredCleartext {
+        header: PacketHeader,
+        payload: Vec<u8>,
+        use_current_sequence: bool,
+    },
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct PendingControlPacket {
     pub(crate) addr: SocketAddr,
     pub(crate) ready_at: Instant,
-    pub(crate) bytes: Vec<u8>,
+    pub(crate) data: PendingControlPacketData,
 }
 
 #[derive(Debug)]

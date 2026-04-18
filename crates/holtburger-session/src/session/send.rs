@@ -1,4 +1,4 @@
-use super::types::{PendingControlPacket, PendingMessage, Session};
+use super::types::{PendingControlPacket, PendingControlPacketData, PendingMessage, Session};
 use crate::capture::Direction;
 use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
@@ -140,8 +140,36 @@ impl Session {
         self.pending_control_packets.push(PendingControlPacket {
             addr,
             ready_at,
-            bytes: packet,
+            data: PendingControlPacketData::Prebuilt(packet),
         });
+    }
+
+    pub(crate) fn queue_deferred_cleartext_control_packet(
+        &mut self,
+        header: PacketHeader,
+        payload: &[u8],
+        addr: std::net::SocketAddr,
+        ready_at: Instant,
+        use_current_sequence: bool,
+    ) -> Result<()> {
+        if payload.len() > u16::MAX as usize {
+            return Err(anyhow!(
+                "packet payload too large: {} bytes exceeds u16::MAX",
+                payload.len()
+            ));
+        }
+
+        self.pending_control_packets.push(PendingControlPacket {
+            addr,
+            ready_at,
+            data: PendingControlPacketData::DeferredCleartext {
+                header,
+                payload: payload.to_vec(),
+                use_current_sequence,
+            },
+        });
+
+        Ok(())
     }
 
     pub(crate) fn queue_packet_to_addr(
@@ -152,18 +180,6 @@ impl Session {
         ready_at: Instant,
     ) -> Result<()> {
         let packet = self.build_packet_bytes(header, payload)?;
-        self.queue_prebuilt_control_packet(packet, addr, ready_at);
-        Ok(())
-    }
-
-    pub(crate) fn queue_cleartext_control_packet(
-        &mut self,
-        header: PacketHeader,
-        payload: &[u8],
-        addr: std::net::SocketAddr,
-        ready_at: Instant,
-    ) -> Result<()> {
-        let packet = self.build_cleartext_control_packet_bytes(header, payload)?;
         self.queue_prebuilt_control_packet(packet, addr, ready_at);
         Ok(())
     }
@@ -189,10 +205,24 @@ impl Session {
             };
 
             let pending = self.pending_control_packets[index].clone();
-            self.send_raw_packet(&pending.bytes, pending.addr).await?;
+            let packet = match pending.data {
+                PendingControlPacketData::Prebuilt(bytes) => bytes,
+                PendingControlPacketData::DeferredCleartext {
+                    mut header,
+                    payload,
+                    use_current_sequence,
+                } => {
+                    if use_current_sequence {
+                        header.sequence = self.current_client_sequence();
+                    }
+                    self.build_cleartext_control_packet_bytes(header, &payload)?
+                }
+            };
 
-            let header = Self::unpack_packet_header(&pending.bytes)?;
-            self.maybe_cache_packet(&header, &pending.bytes, pending.addr);
+            self.send_raw_packet(&packet, pending.addr).await?;
+
+            let header = Self::unpack_packet_header(&packet)?;
+            self.maybe_cache_packet(&header, &packet, pending.addr);
             self.pending_control_packets.remove(index);
             flushed_any = true;
         }
@@ -319,16 +349,16 @@ impl Session {
         let mut payload = vec![0u8; 4];
         LittleEndian::write_u32(&mut payload[0..4], sequence);
 
-        self.queue_cleartext_control_packet(
+        self.queue_deferred_cleartext_control_packet(
             PacketHeader {
                 flags: packet_flags::ACK_SEQUENCE,
-                sequence: self.current_client_sequence(),
                 id: self.client_id,
                 ..Default::default()
             },
             &payload,
             self.server_addr,
             Instant::now(),
+            true,
         )
     }
 

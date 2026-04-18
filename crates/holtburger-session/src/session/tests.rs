@@ -657,6 +657,38 @@ async fn test_send_request_retransmit_wraps_sequence_window() {
     assert_eq!(LittleEndian::read_u32(&payload[4..8]), 0);
 }
 
+#[tokio::test]
+async fn test_queued_ack_uses_latest_client_sequence_when_flushed() {
+    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9001".parse().unwrap());
+    let sent_handle = transport.clone();
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.packet_sequence = 2;
+    session.client_id = 0x123;
+
+    session.queue_ack(0x55).unwrap();
+
+    let header = PacketHeader {
+        sequence: session.packet_sequence,
+        flags: packet_flags::BLOB_FRAGMENTS,
+        id: session.client_id,
+        ..Default::default()
+    };
+    session.packet_sequence += 1;
+    session.send_packet(header, &[]).await.unwrap();
+
+    assert!(session.flush_pending_control_packets().await.unwrap());
+
+    let sent_packets = sent_handle.sent_packets().await;
+    assert_eq!(sent_packets.len(), 2);
+    assert_eq!(unpack_header(&sent_packets[0]).sequence, 2);
+
+    let ack_header = unpack_header(&sent_packets[1]);
+    assert_eq!(ack_header.flags, packet_flags::ACK_SEQUENCE);
+    assert_eq!(ack_header.sequence, 2);
+}
+
 #[test]
 fn test_read_sequence_list_rejects_oversized_count() {
     let session = Session::new_test();
@@ -697,7 +729,7 @@ fn test_build_cleartext_control_packet_rejects_payloads_larger_than_u16() {
     let payload = vec![0u8; u16::MAX as usize + 1];
 
     let err = session
-        .queue_cleartext_control_packet(
+        .queue_deferred_cleartext_control_packet(
             PacketHeader {
                 flags: packet_flags::ACK_SEQUENCE,
                 ..Default::default()
@@ -705,6 +737,7 @@ fn test_build_cleartext_control_packet_rejects_payloads_larger_than_u16() {
             &payload,
             session.server_addr,
             std::time::Instant::now(),
+            false,
         )
         .unwrap_err();
 

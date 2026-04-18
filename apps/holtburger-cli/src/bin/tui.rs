@@ -764,6 +764,7 @@ async fn run() -> Result<()> {
             match server_event_rx.try_recv() {
                 Ok(event) => {
                     requested_initial_view_state = false;
+
                     let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
                     update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();

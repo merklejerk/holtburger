@@ -87,7 +87,6 @@ impl Session {
         header: &PacketHeader,
         data: &[u8],
     ) -> Result<()> {
-
         if (header.flags & packet_flags::ACK_SEQUENCE) != 0
             && let Some(sequence) = self.read_ack_sequence(header.flags, data)
         {

@@ -879,7 +879,9 @@ mod tests {
     use crate::entity::Entity;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{
+        PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut,
+    };
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
 
     #[test]
@@ -916,6 +918,9 @@ mod tests {
 
         let assessment = Assessment::from_entity(&entity);
 
-        assert_eq!(assessment.creature.unwrap().creature_type, Some(CreatureType::Olthoi));
+        assert_eq!(
+            assessment.creature.unwrap().creature_type,
+            Some(CreatureType::Olthoi)
+        );
     }
 }

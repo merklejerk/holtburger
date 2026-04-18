@@ -1046,7 +1046,10 @@ impl ClientRuntime {
                     return Ok(());
                 };
 
-                let Some(member) = fellowship.members.iter().find(|member| member.guid == target)
+                let Some(member) = fellowship
+                    .members
+                    .iter()
+                    .find(|member| member.guid == target)
                 else {
                     log::warn!(
                         ">>> Ignoring promote request for 0x{:08X} because the player is not in the fellowship",

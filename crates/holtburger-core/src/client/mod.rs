@@ -678,15 +678,14 @@ impl ClientRuntime {
                         fellowship: fellowship.clone(),
                     });
             }
-            WorldEvent::FellowshipActivity(activity) => {
-                if self.state == ClientState::InWorld {
+            WorldEvent::FellowshipActivity(activity)
+                if self.state == ClientState::InWorld => {
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::FellowshipActivity {
                             activity: activity.clone(),
                         });
                 }
-            }
             WorldEvent::TradeStateUpdated(trade) => {
                 let _ = self
                     .client_view_event_tx

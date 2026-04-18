@@ -77,11 +77,10 @@ impl ClientRuntime {
             WorldEvent::RuntimeBodyChanged { body_id } => {
                 self.sync_remote_body_tracking(*body_id);
             }
-            WorldEvent::RuntimeBodyRemoved { body_id } => {
-                if body_id.authoritative_guid().is_some() {
+            WorldEvent::RuntimeBodyRemoved { body_id }
+                if body_id.authoritative_guid().is_some() => {
                     self.simulation.untrack_body(*body_id);
                 }
-            }
             WorldEvent::RuntimeBodiesReset { .. } => {}
             _ => {}
         }

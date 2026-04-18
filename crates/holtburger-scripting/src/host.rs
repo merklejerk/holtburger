@@ -1550,9 +1550,9 @@ mod tests {
         ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
         ScriptClientInteraction, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
         ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-        ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLocalConfirmation,
-        ScriptLocalConfirmationKind, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
-        ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLifecycleEvent,
+        ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptPartyMemberView,
+        ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -1828,6 +1828,19 @@ mod tests {
 
         assert!(source.contains("\\\"kind\\\":\\\"command\\\""));
         assert!(source.contains("\\\"msg\\\":\\\"ping the script\\\""));
+        assert!(source.contains("JSON.parse("));
+    }
+
+    #[test]
+    fn dispatch_source_serializes_started_lifecycle_args() {
+        let event = ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started {
+            args: "loot now".to_string(),
+        });
+
+        let source = build_dispatch_source(&event).expect("dispatch source should serialize");
+
+        assert!(source.contains("\\\"kind\\\":\\\"started\\\""));
+        assert!(source.contains("\\\"args\\\":\\\"loot now\\\""));
         assert!(source.contains("JSON.parse("));
     }
 

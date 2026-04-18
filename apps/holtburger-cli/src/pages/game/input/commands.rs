@@ -1,8 +1,6 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::scripting::{
-    DeferredScriptSource, DiscoverableScriptSource, discoverable_scripts, script_directory,
-};
+use crate::scripting::{DiscoverableScriptSource, discoverable_scripts, script_directory};
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
@@ -95,6 +93,25 @@ fn parse_float_argument_command(command: &str, aliases: &[&str]) -> Option<f32> 
     value.is_finite().then_some(value)
 }
 
+fn parse_run_command(command: &str) -> Option<(&str, &str)> {
+    let rest = command.strip_prefix("/run")?;
+    let first = rest.chars().next()?;
+    if !first.is_whitespace() {
+        return None;
+    }
+
+    let trimmed = rest.trim_start();
+    let (basename, args) = trimmed
+        .split_once(char::is_whitespace)
+        .unwrap_or((trimmed, ""));
+
+    if basename.is_empty() {
+        return None;
+    }
+
+    Some((basename, args.trim_start()))
+}
+
 fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a str>> {
     for alias in aliases {
         if command == *alias {
@@ -182,35 +199,10 @@ impl GameState {
         self.chat.log(ChatMessageTags::system(), usage.to_string());
     }
 
-    fn describe_script_source(source: &DeferredScriptSource) -> String {
-        match source {
-            DeferredScriptSource::Path(path) => path.display().to_string(),
-            DeferredScriptSource::Inline(source) => source.name.clone(),
-        }
-    }
-
     fn log_scripts_overview(&mut self) {
-        let current_source = if self.script.host.is_some() {
-            self.script
-                .running_source_name
-                .as_ref()
-                .cloned()
-                .or_else(|| {
-                    self.script
-                        .pending_source
-                        .as_ref()
-                        .map(Self::describe_script_source)
-                })
-        } else {
-            self.script
-                .pending_source
-                .as_ref()
-                .map(Self::describe_script_source)
-        };
+        let current_source = self.script.running_source_name.as_ref().cloned();
         let status = if self.script.host.is_some() {
             "running"
-        } else if current_source.is_some() {
-            "queued"
         } else {
             "idle"
         };
@@ -301,7 +293,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> loads <BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
+            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> [ARGS...] loads <BASENAME>.js and passes ARGS to the start event; /unrun stops the active script".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -447,8 +439,10 @@ impl GameState {
                 "Some doors open only after the right name is spoken.".to_string(),
             ],
             "run" => vec![
-                "Usage: /run <BASENAME>".to_string(),
+                "Usage: /run <BASENAME> [ARGS...]".to_string(),
                 "Load or replace the active long-running script for this session.".to_string(),
+                "If the client is not ready yet, the command is ignored with a warning.".to_string(),
+                "Any extra text after the basename is passed to the script in the started lifecycle event.".to_string(),
                 "Example: /run loot-bot".to_string(),
             ],
             "script" => vec![
@@ -461,7 +455,7 @@ impl GameState {
                 "Usage: /scripts".to_string(),
                 "Show the current script status, local script dir, and discovered scripts."
                     .to_string(),
-                "Use /run <BASENAME> to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
+                "Use /run <BASENAME> [ARGS...] to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
                     .to_string(),
             ],
             "unrun" => vec![
@@ -576,16 +570,17 @@ impl GameState {
             return result;
         }
 
-        if let Some(basename) = parse_single_argument_command(command, &["/run"]) {
+        if let Some((basename, args)) = parse_run_command(command) {
             result.actions.push(crate::types::AppAction::RunScript {
                 basename: basename.to_string(),
+                args: args.to_string(),
             });
             result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
         if command == "/run" {
-            self.log_command_usage("Usage: /run <BASENAME>");
+            self.log_command_usage("Usage: /run <BASENAME> [ARGS...]");
             return result.with_redraw(true);
         }
 
@@ -1061,7 +1056,24 @@ mod tests {
 
         assert!(matches!(
             result.actions.first(),
-            Some(AppAction::RunScript { basename }) if basename == "farmer"
+            Some(AppAction::RunScript { basename, args }) if basename == "farmer" && args.is_empty()
+        ));
+    }
+
+    #[test]
+    fn run_command_dispatches_run_script_action_with_args() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/run farmer pick up loot");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::RunScript { basename, args })
+                if basename == "farmer" && args == "pick up loot"
         ));
     }
 
@@ -1129,45 +1141,6 @@ mod tests {
 
         assert_eq!(displayed, expected);
     }
-
-    // Disabled due to V8 threading issues.
-    // #[test]
-    // fn scripts_command_reports_running_script_source_when_host_is_active() {
-    //     let player_guid = Guid(0x50000001);
-    //     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-    //     state.view.focused_pane = FocusedPane::Input;
-    //     state.chat_input.input.set_text("/scripts");
-    //     state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
-
-    //     let host = {
-    //         let view = crate::scripting::TuiScriptClientView {
-    //             data: &state.data,
-    //             view: &state.view,
-    //             server_time: None,
-    //             script_name: Some("script-command-test"),
-    //         };
-
-    //         holtburger_scripting::ScriptHost::spawn(
-    //             holtburger_scripting::ScriptSource::new("script-command-test", ""),
-    //             &view,
-    //         )
-    //         .expect("script host should spawn")
-    //     };
-
-    //     state.script.host = Some(host);
-    //     state.script.running_source_name = Some("script-command-test".to_string());
-    //     state.script.pending_source = Some(DeferredScriptSource::Inline(
-    //         holtburger_scripting::ScriptSource::new("queued-script", ""),
-    //     ));
-
-    //     let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    //     assert!(result.commands.is_empty());
-    //     assert!(state.chat.messages.iter().any(|message| {
-    //         message.chat_tags.contains(ChatMessageTags::system())
-    //             && message.text == "Current script: script-command-test"
-    //     }));
-    // }
 
     #[test]
     fn unrun_command_dispatches_unrun_script_action() {

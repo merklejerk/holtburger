@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::scripting::{
-    DeferredScriptSource, TuiScriptClientView, WorkflowProjection, chat_tags_for_level,
+    TuiScriptClientView, WorkflowProjection, chat_tags_for_level,
     deferred_script_source_for_basename, resolve_deferred_script_source,
     script_event_from_notification, script_event_from_view_event, workflow_events,
     workflow_projection,
@@ -32,9 +32,9 @@ fn script_client_view<'a>(
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     match action {
-        AppAction::RunScript { basename } => {
+        AppAction::RunScript { basename, args } => {
             let mut result = UpdateResult::new();
-            state.run_script_command(&basename, &mut result);
+            state.run_script_command(&basename, args, &mut result);
             result
         }
         AppAction::ScriptCommand { msg } => {
@@ -65,14 +65,6 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
 }
 
 impl GameState {
-    fn pending_script_source(&self) -> Option<&DeferredScriptSource> {
-        self.script.pending_source.as_ref()
-    }
-
-    fn set_pending_script_source(&mut self, source: Option<DeferredScriptSource>) {
-        self.script.pending_source = source;
-    }
-
     fn script_host_is_running(&self) -> bool {
         self.script.host.is_some()
     }
@@ -112,14 +104,23 @@ impl GameState {
         }
     }
 
-    fn clear_script_host_after_error(&mut self) {
-        self.set_pending_script_source(None);
-        self.script.host = None;
-        self.script.tick_accumulator = Duration::ZERO;
-        self.script.running_source_name = None;
-    }
+    pub(crate) fn run_script_command(
+        &mut self,
+        basename: &str,
+        args: String,
+        result: &mut UpdateResult,
+    ) {
+        if !self.script_player_entity_is_ready() {
+            result.actions.push(AppAction::Log {
+                chat_tags: ChatMessageTags::warning(),
+                message: format!(
+                    "[script] Ignoring /run {basename} because the client is not ready yet"
+                ),
+            });
+            result.request_redraw(crate::types::RedrawPriority::Immediate);
+            return;
+        }
 
-    pub(crate) fn run_script_command(&mut self, basename: &str, result: &mut UpdateResult) {
         let source = match deferred_script_source_for_basename(basename) {
             Ok(source) => source,
             Err(error) => {
@@ -132,35 +133,69 @@ impl GameState {
             }
         };
 
-        let loaded_path = match &source {
-            DeferredScriptSource::Path(path) => path.display().to_string(),
-            DeferredScriptSource::Inline(source) => source.name.clone(),
+        let source = match resolve_deferred_script_source(&source) {
+            Ok(source) => source,
+            Err(error) => {
+                result.actions.push(AppAction::Log {
+                    chat_tags: ChatMessageTags::error(),
+                    message: format!("[script] Failed to load script source: {error:?}"),
+                });
+                result.request_redraw(crate::types::RedrawPriority::Immediate);
+                return;
+            }
         };
 
-        self.set_pending_script_source(Some(source));
-        self.stop_script_host(result);
-        self.start_script_host_if_needed(None, result);
+        let loaded_path = source.name.clone();
+        let running_source_name = source.name.clone();
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            None,
+            Some(running_source_name.as_str()),
+        );
 
-        if self.script_host_is_running() {
-            result.actions.push(AppAction::Log {
-                chat_tags: ChatMessageTags::info(),
-                message: format!("[script] Loaded {loaded_path}"),
-            });
+        match ScriptHost::spawn(source, &view) {
+            Ok(mut host) => {
+                let started_ok = dispatch_script_event_to_host(
+                    &view,
+                    &mut host,
+                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started { args }),
+                    result,
+                );
+
+                if started_ok {
+                    if self.script_host_is_running() {
+                        self.stop_script_host(result);
+                    }
+
+                    self.script.running_source_name = Some(running_source_name);
+                    self.script.host = Some(host);
+                    self.script.tick_accumulator = Duration::ZERO;
+                    result.actions.push(AppAction::Log {
+                        chat_tags: ChatMessageTags::info(),
+                        message: format!("[script] Loaded {loaded_path}"),
+                    });
+                }
+            }
+            Err(error) => {
+                result.actions.push(AppAction::Log {
+                    chat_tags: ChatMessageTags::error(),
+                    message: format!("[script] Failed to start script host: {error}"),
+                });
+            }
         }
 
         result.request_redraw(crate::types::RedrawPriority::Immediate);
     }
 
     pub(crate) fn unrun_script_command(&mut self, result: &mut UpdateResult) {
-        let had_pending = self.pending_script_source().is_some();
-        self.set_pending_script_source(None);
         let had_running = self.script_host_is_running();
         self.stop_script_host(result);
 
-        let message = if had_running || had_pending {
+        let message = if had_running {
             "[script] Stopped active script"
         } else {
-            "[script] No active or queued script to stop"
+            "[script] No active script to stop"
         };
 
         result.actions.push(AppAction::Log {
@@ -168,64 +203,6 @@ impl GameState {
             message: message.to_string(),
         });
         result.request_redraw(crate::types::RedrawPriority::Immediate);
-    }
-
-    fn start_script_host_if_needed(
-        &mut self,
-        server_time: Option<(f64, Instant)>,
-        result: &mut UpdateResult,
-    ) {
-        if self.script_host_is_running() || !self.script_player_entity_is_ready() {
-            return;
-        }
-
-        let Some(source) = self.pending_script_source().cloned() else {
-            return;
-        };
-
-        let source = match resolve_deferred_script_source(&source) {
-            Ok(source) => source,
-            Err(error) => {
-                self.set_pending_script_source(None);
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] Failed to load script source: {error:?}"),
-                });
-                return;
-            }
-        };
-
-        let running_source_name = source.name.clone();
-        let view = script_client_view(
-            &self.data,
-            &self.view,
-            server_time,
-            Some(running_source_name.as_str()),
-        );
-        match ScriptHost::spawn(source, &view) {
-            Ok(mut host) => {
-                let started_ok = dispatch_script_event_to_host(
-                    &view,
-                    &mut host,
-                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started),
-                    result,
-                );
-
-                if started_ok {
-                    self.script.running_source_name = Some(running_source_name);
-                    self.script.host = Some(host);
-                } else {
-                    self.clear_script_host_after_error();
-                }
-            }
-            Err(error) => {
-                self.set_pending_script_source(None);
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] Failed to start script host: {error}"),
-                });
-            }
-        }
     }
 
     fn compile_script_intent(view: &ViewState, intent: ScriptIntent) -> Result<AppAction> {
@@ -348,13 +325,6 @@ impl GameState {
         before_workflow: &WorkflowProjection,
         result: &mut UpdateResult,
     ) {
-        let host_was_running = self.script_host_is_running();
-        let should_run_after = self.pending_script_source().is_some();
-
-        if !host_was_running && should_run_after {
-            self.start_script_host_if_needed(server_time, result);
-        }
-
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -363,53 +333,35 @@ impl GameState {
         );
         let after_workflow = workflow_projection(Some(self));
 
-        let host_was_cleared = {
-            let Some(host) = self.script.host.as_mut() else {
-                return;
-            };
-
-            let mut dispatch_failed = false;
-
-            if let Some(script_event) = script_event_from_view_event(event) {
-                dispatch_failed |=
-                    !dispatch_script_event_to_host(&view, host, script_event, result);
-            }
-
-            if !dispatch_failed {
-                for workflow_event in workflow_events(before_workflow, &after_workflow) {
-                    dispatch_failed |= !dispatch_script_event_to_host(
-                        &view,
-                        host,
-                        ScriptEvent::Workflow(workflow_event),
-                        result,
-                    );
-
-                    if dispatch_failed {
-                        break;
-                    }
-                }
-            }
-
-            if dispatch_failed {
-                true
-            } else if !should_run_after {
-                dispatch_script_event_to_host(
-                    &view,
-                    host,
-                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Stopped),
-                    result,
-                );
-                true
-            } else {
-                false
-            }
+        let Some(host) = self.script.host.as_mut() else {
+            return;
         };
 
-        if host_was_cleared {
-            self.script.host = None;
-            if self.pending_script_source().is_some() {
-                self.clear_script_host_after_error();
+        let mut dispatch_failed = false;
+
+        if let Some(script_event) = script_event_from_view_event(event) {
+            dispatch_failed |= !dispatch_script_event_to_host(&view, host, script_event, result);
+        }
+
+        if !dispatch_failed {
+            for workflow_event in workflow_events(before_workflow, &after_workflow) {
+                dispatch_failed |= !dispatch_script_event_to_host(
+                    &view,
+                    host,
+                    ScriptEvent::Workflow(workflow_event),
+                    result,
+                );
+
+                if dispatch_failed {
+                    break;
+                }
             }
+        }
+
+        if dispatch_failed {
+            self.script.host = None;
+            self.script.running_source_name = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -419,13 +371,6 @@ impl GameState {
         notification: &AppNotification,
         result: &mut UpdateResult,
     ) {
-        let host_was_running = self.script_host_is_running();
-        let should_run_after = self.pending_script_source().is_some();
-
-        if !host_was_running && should_run_after {
-            self.start_script_host_if_needed(server_time, result);
-        }
-
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -440,7 +385,9 @@ impl GameState {
         if let Some(script_event) = script_event_from_notification(notification)
             && !dispatch_script_event_to_host(&view, host, script_event, result)
         {
-            self.clear_script_host_after_error();
+            self.script.host = None;
+            self.script.running_source_name = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -450,13 +397,6 @@ impl GameState {
         elapsed: f64,
         result: &mut UpdateResult,
     ) {
-        let host_was_running = self.script_host_is_running();
-        let should_run_after = self.pending_script_source().is_some();
-
-        if !host_was_running && should_run_after {
-            self.start_script_host_if_needed(server_time, result);
-        }
-
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -499,16 +439,13 @@ impl GameState {
                 }
             }
 
-            dispatch_failed || !should_run_after
+            dispatch_failed
         };
 
         if host_was_cleared {
             self.script.host = None;
-            if self.pending_script_source().is_some() {
-                self.clear_script_host_after_error();
-            } else {
-                self.script.tick_accumulator = Duration::ZERO;
-            }
+            self.script.running_source_name = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 

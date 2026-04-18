@@ -1,4 +1,3 @@
-use crate::scripting::DeferredScriptSource;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::ClientViewEvent;
@@ -50,7 +49,6 @@ pub struct GameState {
 
 #[derive(Default)]
 pub(crate) struct GameScriptState {
-    pub(crate) pending_source: Option<DeferredScriptSource>,
     pub(crate) host: Option<ScriptHost>,
     pub(crate) tick_accumulator: Duration,
     pub(crate) running_source_name: Option<String>,

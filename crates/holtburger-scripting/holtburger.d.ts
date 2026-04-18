@@ -506,6 +506,9 @@ type ScriptConfirmation = ScriptCharacterConfirmation | ScriptLocalConfirmationW
 
 interface ScriptLifecycleStartedEvent {
   kind: "started";
+  data: {
+    args: string;
+  };
 }
 
 interface ScriptLifecycleStoppedEvent {

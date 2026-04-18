@@ -699,6 +699,7 @@ pub enum AppAction {
     },
     RunScript {
         basename: String,
+        args: String,
     },
     ScriptCommand {
         msg: String,

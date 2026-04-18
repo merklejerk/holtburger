@@ -85,22 +85,6 @@ export function maybeRestoreMana(
 		}
 	}
 
-	const revitalizeSpell = chooseBestSpell(
-		spells,
-		{
-			school: "life",
-			type: "revitalize",
-			targetKind: "self",
-			targetGuid: self.guid,
-			selfGuid: self.guid,
-			preferredSpellIds: state.config.preferredSpellIds,
-		},
-		HB.distance,
-	);
-	if (revitalizeSpell) {
-		return castSpell(state, revitalizeSpell, self.guid);
-	}
-
 	return false;
 }
 
@@ -111,38 +95,6 @@ export function maybeRestoreStamina(
 ): boolean {
 	if (ratio(self.stamina, self.staminaMax) >= SELF_STAMINA_THRESHOLD) {
 		return false;
-	}
-
-	const manaSpell = chooseBestSpell(
-		spells,
-		{
-			school: "life",
-			type: "revitalize",
-			targetKind: "self",
-			targetGuid: self.guid,
-			selfGuid: self.guid,
-			preferredSpellIds: state.config.preferredSpellIds,
-		},
-		HB.distance,
-	);
-	if (manaSpell && castSpell(state, manaSpell, self.guid)) {
-		return true;
-	}
-
-	const healthSpell = chooseBestSpell(
-		spells,
-		{
-			school: "life",
-			type: "health-to-stamina",
-			targetKind: "self",
-			targetGuid: self.guid,
-			selfGuid: self.guid,
-			preferredSpellIds: state.config.preferredSpellIds,
-		},
-		HB.distance,
-	);
-	if (healthSpell && castSpell(state, healthSpell, self.guid)) {
-		return true;
 	}
 
 	const revitalizeSpell = chooseBestSpell(
@@ -181,6 +133,22 @@ export function maybeRestoreHealth(
 		return true;
 	}
 
+	const revitalizeSpell = chooseBestSpell(
+		spells,
+		{
+			school: "life",
+			type: "heal",
+			targetKind: "self",
+			targetGuid: self.guid,
+			selfGuid: self.guid,
+			preferredSpellIds: state.config.preferredSpellIds,
+		},
+		HB.distance,
+	);
+	if (revitalizeSpell) {
+		return castSpell(state, revitalizeSpell, self.guid);
+	}
+
 	const transferSpell = chooseBestSpell(
 		spells,
 		{
@@ -195,22 +163,6 @@ export function maybeRestoreHealth(
 	);
 	if (transferSpell && castSpell(state, transferSpell, self.guid)) {
 		return true;
-	}
-
-	const revitalizeSpell = chooseBestSpell(
-		spells,
-		{
-			school: "life",
-			type: "revitalize",
-			targetKind: "self",
-			targetGuid: self.guid,
-			selfGuid: self.guid,
-			preferredSpellIds: state.config.preferredSpellIds,
-		},
-		HB.distance,
-	);
-	if (revitalizeSpell) {
-		return castSpell(state, revitalizeSpell, self.guid);
 	}
 
 	return false;
@@ -248,22 +200,6 @@ export function maybeHealPartyMember(
 	);
 	if (healSpell && castSpell(state, healSpell, healTargetGuid)) {
 		return true;
-	}
-
-	const revitalizeSpell = chooseBestSpell(
-		spells,
-		{
-			school: "life",
-			type: "revitalize",
-			targetKind: "other",
-			targetGuid: healTargetGuid,
-			selfGuid: self.guid,
-			preferredSpellIds: state.config.preferredSpellIds,
-		},
-		HB.distance,
-	);
-	if (revitalizeSpell) {
-		return castSpell(state, revitalizeSpell, healTargetGuid);
 	}
 
 	return false;

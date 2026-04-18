@@ -996,56 +996,11 @@
         return true;
       }
     }
-    const revitalizeSpell = chooseBestSpell(
-      spells,
-      {
-        school: "life",
-        type: "revitalize",
-        targetKind: "self",
-        targetGuid: self.guid,
-        selfGuid: self.guid,
-        preferredSpellIds: state2.config.preferredSpellIds
-      },
-      HB.distance
-    );
-    if (revitalizeSpell) {
-      return castSpell(state2, revitalizeSpell, self.guid);
-    }
     return false;
   }
   function maybeRestoreStamina(state2, self, spells) {
     if (ratio(self.stamina, self.staminaMax) >= SELF_STAMINA_THRESHOLD) {
       return false;
-    }
-    const manaSpell = chooseBestSpell(
-      spells,
-      {
-        school: "life",
-        type: "revitalize",
-        targetKind: "self",
-        targetGuid: self.guid,
-        selfGuid: self.guid,
-        preferredSpellIds: state2.config.preferredSpellIds
-      },
-      HB.distance
-    );
-    if (manaSpell && castSpell(state2, manaSpell, self.guid)) {
-      return true;
-    }
-    const healthSpell = chooseBestSpell(
-      spells,
-      {
-        school: "life",
-        type: "health-to-stamina",
-        targetKind: "self",
-        targetGuid: self.guid,
-        selfGuid: self.guid,
-        preferredSpellIds: state2.config.preferredSpellIds
-      },
-      HB.distance
-    );
-    if (healthSpell && castSpell(state2, healthSpell, self.guid)) {
-      return true;
     }
     const revitalizeSpell = chooseBestSpell(
       spells,
@@ -1071,6 +1026,21 @@
     if (isSkillUsable(skills.get("healing")) && useHealingKitOnTarget(state2, self.guid)) {
       return true;
     }
+    const revitalizeSpell = chooseBestSpell(
+      spells,
+      {
+        school: "life",
+        type: "heal",
+        targetKind: "self",
+        targetGuid: self.guid,
+        selfGuid: self.guid,
+        preferredSpellIds: state2.config.preferredSpellIds
+      },
+      HB.distance
+    );
+    if (revitalizeSpell) {
+      return castSpell(state2, revitalizeSpell, self.guid);
+    }
     const transferSpell = chooseBestSpell(
       spells,
       {
@@ -1085,21 +1055,6 @@
     );
     if (transferSpell && castSpell(state2, transferSpell, self.guid)) {
       return true;
-    }
-    const revitalizeSpell = chooseBestSpell(
-      spells,
-      {
-        school: "life",
-        type: "revitalize",
-        targetKind: "self",
-        targetGuid: self.guid,
-        selfGuid: self.guid,
-        preferredSpellIds: state2.config.preferredSpellIds
-      },
-      HB.distance
-    );
-    if (revitalizeSpell) {
-      return castSpell(state2, revitalizeSpell, self.guid);
     }
     return false;
   }
@@ -1125,21 +1080,6 @@
     );
     if (healSpell && castSpell(state2, healSpell, healTargetGuid)) {
       return true;
-    }
-    const revitalizeSpell = chooseBestSpell(
-      spells,
-      {
-        school: "life",
-        type: "revitalize",
-        targetKind: "other",
-        targetGuid: healTargetGuid,
-        selfGuid: self.guid,
-        preferredSpellIds: state2.config.preferredSpellIds
-      },
-      HB.distance
-    );
-    if (revitalizeSpell) {
-      return castSpell(state2, revitalizeSpell, healTargetGuid);
     }
     return false;
   }
@@ -1383,10 +1323,6 @@
     if (target != null && currentInteraction?.kind === "Follow") {
       logMageInfo(`follow -> combat-target ${target.guid}`);
       HB.cancelInteraction();
-      return;
-    }
-    if (partyLeader != null && separation.shouldFollow) {
-      followPartyLeader(state2, self, partyLeader);
       return;
     }
     if (target != null) {

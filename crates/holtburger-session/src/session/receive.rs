@@ -14,34 +14,46 @@ impl Session {
         &mut self,
         buf: &mut [u8],
     ) -> Result<(PacketHeader, Vec<u8>, std::net::SocketAddr)> {
-        let (len, addr) = self.transport.recv_from(buf).await?;
-        if len < transport::HEADER_SIZE {
-            return Err(anyhow!("Packet too short"));
+        loop {
+            let (len, addr) = self.transport.recv_from(buf).await?;
+
+            if addr != self.server_addr {
+                log::warn!(
+                    "Ignoring inbound packet from unexpected source {}; expected {}",
+                    addr,
+                    self.server_addr
+                );
+                continue;
+            }
+
+            if len < transport::HEADER_SIZE {
+                return Err(anyhow!("Packet too short"));
+            }
+
+            self.bytes_in = self.bytes_in.wrapping_add(len as u64);
+            self.last_recv_time = std::time::Instant::now();
+
+            if let Some(ref mut capture) = self.capture {
+                let _ = capture.write_entry(Direction::Inbound, addr, &buf[..len]);
+            }
+
+            let mut offset = 0;
+            let header = PacketHeader::unpack(&buf[..transport::HEADER_SIZE], &mut offset)
+                .ok_or_else(|| anyhow!("Failed to unpack packet header"))?;
+            let data = buf[transport::HEADER_SIZE..len].to_vec();
+
+            log::trace!(
+                "<<< Inbound from {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
+                addr,
+                header.sequence,
+                header.id,
+                header.flags,
+                len,
+                &buf[..len]
+            );
+
+            return Ok((header, data, addr));
         }
-
-        self.bytes_in = self.bytes_in.wrapping_add(len as u64);
-        self.last_recv_time = std::time::Instant::now();
-
-        if let Some(ref mut capture) = self.capture {
-            let _ = capture.write_entry(Direction::Inbound, addr, &buf[..len]);
-        }
-
-        let mut offset = 0;
-        let header = PacketHeader::unpack(&buf[..transport::HEADER_SIZE], &mut offset)
-            .ok_or_else(|| anyhow!("Failed to unpack packet header"))?;
-        let data = buf[transport::HEADER_SIZE..len].to_vec();
-
-        log::trace!(
-            "<<< Inbound from {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
-            addr,
-            header.sequence,
-            header.id,
-            header.flags,
-            len,
-            &buf[..len]
-        );
-
-        Ok((header, data, addr))
     }
 
     async fn recv_packet_with_addr(

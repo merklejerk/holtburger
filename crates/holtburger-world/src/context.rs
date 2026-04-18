@@ -63,7 +63,7 @@ pub fn run_rate_from_skill_and_burden(run_skill: f32, burden: f32) -> f32 {
     }
 }
 
-fn normalize_name_for_lookup(name: &str) -> String {
+pub fn normalize_name_for_lookup(name: &str) -> String {
     name.chars()
         .filter(|character| character.is_alphanumeric())
         .map(|character| character.to_ascii_lowercase())

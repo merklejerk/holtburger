@@ -616,6 +616,9 @@ pub enum ClientCommand {
     InviteToParty {
         target: Guid,
     },
+    PromotePartyLeader {
+        target: Guid,
+    },
     LeaveParty,
     UninviteFromParty {
         target: Guid,

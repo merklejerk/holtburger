@@ -14,12 +14,12 @@ use holtburger_core::client::types::{ActionResultReason, ChatChannelKind, Combat
 use holtburger_scripting::{
     ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
     ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
-    ScriptClientInteraction, ScriptClientView, ScriptCombatInfo, ScriptConfirmation,
-    ScriptCombatFeedback, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
-    ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
-    ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
-    ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
-    ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptClientInteraction, ScriptClientView, ScriptCombatFeedback, ScriptCombatInfo,
+    ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
+    ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
+    ScriptEvent, ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind,
+    ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
+    ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
 };
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::stats::{TrainingLevel, VitalType};
@@ -94,7 +94,10 @@ fn load_binary_file(path: &Path) -> Option<Vec<u8>> {
         Ok(contents) => Some(contents),
         Err(error) if error.kind() == ErrorKind::NotFound => None,
         Err(error) => {
-            log::error!("failed to read binary data from {}: {error}", path.display());
+            log::error!(
+                "failed to read binary data from {}: {error}",
+                path.display()
+            );
             None
         }
     }
@@ -887,12 +890,12 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             reason: ActionResultReason::Weenie(error, _),
             ..
         } => Some(ScriptEvent::WeenieError { error: *error }),
-        ClientViewEvent::CombatFeedback(CombatFeedback::AttackDone { error }) => {
-            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackDone { error: *error }))
-        }
-        ClientViewEvent::CombatFeedback(CombatFeedback::AttackCommenced) => {
-            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackCommenced))
-        }
+        ClientViewEvent::CombatFeedback(CombatFeedback::AttackDone { error }) => Some(
+            ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackDone { error: *error }),
+        ),
+        ClientViewEvent::CombatFeedback(CombatFeedback::AttackCommenced) => Some(
+            ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackCommenced),
+        ),
         ClientViewEvent::CombatFeedback(CombatFeedback::AttackerNotification {
             defender_name,
             damage_type,
@@ -1956,9 +1959,10 @@ mod tests {
             })) if error == holtburger_protocol::errors::WeenieError::YouAreTooTiredToDoThat
         ));
 
-        let victim_notification = ClientViewEvent::CombatFeedback(CombatFeedback::VictimNotification {
-            death_message: "Olthoi Noble is shattered by your assault!".to_string(),
-        });
+        let victim_notification =
+            ClientViewEvent::CombatFeedback(CombatFeedback::VictimNotification {
+                death_message: "Olthoi Noble is shattered by your assault!".to_string(),
+            });
 
         assert!(matches!(
             script_event_from_view_event(&victim_notification),
@@ -1967,9 +1971,10 @@ mod tests {
             })) if death_message == "Olthoi Noble is shattered by your assault!"
         ));
 
-        let killer_notification = ClientViewEvent::CombatFeedback(CombatFeedback::KillerNotification {
-            death_message: "Olthoi Noble is shattered by your assault!".to_string(),
-        });
+        let killer_notification =
+            ClientViewEvent::CombatFeedback(CombatFeedback::KillerNotification {
+                death_message: "Olthoi Noble is shattered by your assault!".to_string(),
+            });
 
         assert!(matches!(
             script_event_from_view_event(&killer_notification),

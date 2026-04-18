@@ -1,4 +1,4 @@
-use holtburger_dat::file_type::{spell_table::SpellBase, SpellTable};
+use holtburger_dat::file_type::{SpellTable, spell_table::SpellBase};
 use serde::Serialize;
 use serde_json::{Map, Number, Value};
 use std::collections::BTreeMap;

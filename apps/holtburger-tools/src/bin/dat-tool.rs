@@ -1,11 +1,18 @@
 use anyhow::{Context, Result};
+use binrw::BinRead;
 use clap::{Parser, Subcommand};
 use holtburger_dat::archive::HbaEntry;
 use holtburger_dat::{
     DatDatabase, DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaReader, HbaWriter,
     ResourceProvider,
 };
+use holtburger_tools::spell_export::{
+    export_spell_table, SpellExportField, SpellExportPreset, SpellExportRequest,
+    SpellExportSchool,
+};
 use std::collections::BTreeMap;
+use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -122,6 +129,18 @@ fn parse_id_auto(raw: &str) -> Result<u32> {
     Ok(u32::from_str_radix(trimmed, 16)?)
 }
 
+fn read_spell_table(
+    provider: &Provider,
+    namespace: Option<&str>,
+) -> Result<holtburger_dat::file_type::SpellTable> {
+    let bytes = provider.get_file_in_namespace(
+        namespace,
+        holtburger_dat::file_type::SpellTable::FILE_ID,
+    )?;
+    let mut cursor = Cursor::new(bytes);
+    Ok(holtburger_dat::file_type::SpellTable::read_le(&mut cursor)?)
+}
+
 #[derive(Subcommand)]
 enum Commands {
     /// List meta info about the HBA/DAT file itself
@@ -153,6 +172,29 @@ enum Commands {
         /// Namespace label for multi-namespace HBA archives
         #[arg(long)]
         namespace: Option<String>,
+        #[arg(short, long, value_name = "OUT")]
+        output: Option<PathBuf>,
+    },
+    /// Export the spell table to JSON
+    SpellExport {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
+        /// Namespace label for multi-namespace HBA archives
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Spell schools to include in the export
+        #[arg(long, value_enum, value_delimiter = ',')]
+        schools: Vec<SpellExportSchool>,
+        /// Spell category IDs to include in the export
+        #[arg(long, value_delimiter = ',')]
+        categories: Vec<u32>,
+        /// Spell fields to include in the export
+        #[arg(long, value_enum, value_delimiter = ',')]
+        fields: Vec<SpellExportField>,
+        /// Field preset to use when no explicit fields are provided
+        #[arg(long, value_enum, default_value_t = SpellExportPreset::Base)]
+        preset: SpellExportPreset,
+        /// Output JSON file; prints to stdout when omitted
         #[arg(short, long, value_name = "OUT")]
         output: Option<PathBuf>,
     },
@@ -402,6 +444,47 @@ fn main() -> Result<()> {
             });
             std::fs::write(&out_path, data)?;
             println!("Exported {:08X} to {:?}", id_val, out_path);
+            Ok(())
+        }
+        Commands::SpellExport {
+            path,
+            namespace,
+            schools,
+            categories,
+            fields,
+            preset,
+            output,
+        } => {
+            let provider = Provider::open(&path)?;
+            let spell_table = read_spell_table(&provider, namespace.as_deref())?;
+            let request = SpellExportRequest {
+                fields,
+                preset,
+                schools,
+                categories,
+            };
+            let export = export_spell_table(&spell_table, &request);
+            let serialized = serde_json::to_string_pretty(&export)
+                .context("could not serialize spell export")?;
+
+            if let Some(output) = output {
+                if let Some(parent) = output.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("could not create {}", parent.display()))?;
+                }
+
+                fs::write(&output, format!("{serialized}\n"))
+                    .with_context(|| format!("could not write {}", output.display()))?;
+                println!(
+                    "wrote {} spells with {} fields to {}",
+                    export.spells.len(),
+                    export.fields.len(),
+                    output.display()
+                );
+            } else {
+                println!("{serialized}");
+            }
+
             Ok(())
         }
         Commands::Extract {

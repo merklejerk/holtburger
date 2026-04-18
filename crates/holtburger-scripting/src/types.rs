@@ -2,11 +2,11 @@ use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
-    PropertyInt64, PropertyString,
+    PropertyInt64, PropertyString, DamageType,
 };
 use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
-use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+use holtburger_protocol::messages::combat::{AttackConditions, AttackHeight, CombatMode, DamageLocation};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_protocol::messages::object::types::{
     ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
@@ -54,6 +54,9 @@ pub trait ScriptClientView {
         None
     }
     fn load_data(&self) -> Option<ScriptJsonValue> {
+        None
+    }
+    fn load_data_bin(&self) -> Option<Vec<u8>> {
         None
     }
     fn write_config(&self, _contents: String) -> bool {
@@ -269,6 +272,7 @@ pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
     pub kind: ScriptEntityKind,
+    pub weenie_id: Option<u32>,
     pub position: ScriptWorldPosition,
     pub profile: Option<ScriptEntityProfile>,
     pub container: Guid,
@@ -751,6 +755,7 @@ pub struct ScriptPartyMemberView {
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptEvent {
     ChatMessage(ScriptChatEvent),
+    CombatFeedback(ScriptCombatFeedback),
     Lifecycle(ScriptLifecycleEvent),
     Workflow(ScriptWorkflowEvent),
     Command {
@@ -769,6 +774,14 @@ pub enum ScriptEvent {
     EntityUpdated {
         guid: Guid,
     },
+    TeleportStarted {
+        sequence: u16,
+    },
+    PlayerKilled {
+        death_message: String,
+        victim_id: Guid,
+        killer_id: Guid,
+    },
     InventoryChanged {
         added: Vec<Guid>,
         removed: Vec<Guid>,
@@ -782,6 +795,51 @@ pub struct ScriptChatEvent {
     pub channel: ScriptChatChannelKind,
     pub sender: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum ScriptCombatFeedback {
+    #[serde(rename_all = "camelCase")]
+    AttackDone {
+        error: holtburger_protocol::errors::WeenieError,
+    },
+    AttackCommenced,
+    #[serde(rename_all = "camelCase")]
+    AttackerNotification {
+        defender_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    #[serde(rename_all = "camelCase")]
+    DefenderNotification {
+        attacker_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        damage_location: DamageLocation,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    #[serde(rename_all = "camelCase")]
+    EvasionAttackerNotification {
+        defender_name: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    EvasionDefenderNotification {
+        attacker_name: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    VictimNotification {
+        death_message: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    KillerNotification {
+        death_message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -961,10 +1019,13 @@ mod tests {
     use deno_core::serde_json::{Value, from_value, json, to_value};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_common::properties::DamageType;
+    use holtburger_protocol::messages::combat::AttackConditions;
     use holtburger_protocol::messages::object::types::{
         ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
         WeaponProfile,
     };
+    use crate::ScriptCombatFeedback;
 
     fn assert_roundtrip(profile: ScriptEntityProfile, expected: Value) {
         let actual = to_value(&profile).unwrap();
@@ -1101,5 +1162,34 @@ mod tests {
             from_value::<super::ScriptWorldPosition>(actual).unwrap(),
             position
         );
+    }
+
+    #[test]
+    fn script_combat_feedback_serializes_fields_as_camel_case() {
+        let feedback = ScriptCombatFeedback::AttackerNotification {
+            defender_name: "Defender".to_owned(),
+            damage_type: DamageType::FIRE,
+            health_percent: 42.5,
+            damage: 17,
+            critical_hit: true,
+            attack_conditions: AttackConditions::RECKLESSNESS,
+        };
+
+        let actual = to_value(&feedback).unwrap();
+        assert_eq!(
+            actual,
+            json!({
+                "kind": "attacker_notification",
+                "data": {
+                    "defenderName": "Defender",
+                    "damageType": "FIRE",
+                    "healthPercent": 42.5,
+                    "damage": 17,
+                    "criticalHit": true,
+                    "attackConditions": "RECKLESSNESS",
+                }
+            })
+        );
+        assert_eq!(from_value::<ScriptCombatFeedback>(actual).unwrap(), feedback);
     }
 }

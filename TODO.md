@@ -259,6 +259,8 @@
 - [x] Attack spam too verbose.
 - [ ] `/promote <PLAYER>` - Promote new party leader.
 - [ ] Show "creature type" in assessment.
+- [ ] Can't specialize then unspecialize a skill in character creator.
+- [ ] Add all spells causes a sequence error.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

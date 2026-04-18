@@ -299,13 +299,13 @@ function attackTarget(target) {
 		(combatInfo.target != null && combatInfo.target === target.guid) ||
 		(
 			currentInteraction != null &&
-			currentInteraction.kind === "Attack" &&
+			currentInteraction.kind === "attack" &&
 			currentInteraction.data.guid === target.guid
 		);
 	const alreadyApproachingSameTarget =
 		(
 			currentInteraction != null &&
-			currentInteraction.kind === "Approach" &&
+			currentInteraction.kind === "approach" &&
 			currentInteraction.data.guid === target.guid
 		);
 
@@ -445,19 +445,19 @@ function runFighter() {
 }
 
 HB.onEvent((event) => {
-	if (event.kind !== "Lifecycle") {
+	if (event.kind !== "lifecycle") {
 		return;
 	}
 
 	switch (event.data.kind) {
-		case "Started":
+		case "started":
 			resetState();
 			runFighter();
 			break;
-		case "Stopped":
+		case "stopped":
 			resetState();
 			break;
-		case "Tick":
+		case "tick":
 			runFighter();
 			break;
 	}

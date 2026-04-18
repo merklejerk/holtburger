@@ -59,6 +59,9 @@ indicatif = "0.18"
 directories = "6.0"
 unicode-width = "0.2"
 hex = "0.4.3"
+reqwest = { version = "0.13", features = ["blocking", "json"] }
+zip = "8.5"
+regex = "1.12"
 ratatui-textarea = "0.8"
 
 # Config for 'cargo dist'

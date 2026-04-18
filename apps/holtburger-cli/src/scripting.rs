@@ -15,8 +15,8 @@ use holtburger_scripting::{
     ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
     ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
     ScriptClientInteraction, ScriptClientView, ScriptCombatInfo, ScriptConfirmation,
-    ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind, ScriptEntityProfile,
-    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
+    ScriptCombatFeedback, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
+    ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent,
     ScriptJsonValue, ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptLogLevel,
     ScriptMotionCommand, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
     ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
@@ -53,6 +53,11 @@ fn script_data_path_for_name(script_dir: &Path, script_name: &str) -> Option<Pat
     Some(script_dir.join(format!("{stem}.data.json")))
 }
 
+fn script_data_bin_path_for_name(script_dir: &Path, script_name: &str) -> Option<PathBuf> {
+    let stem = running_script_stem(script_name)?;
+    Some(script_dir.join(format!("{stem}.data.bin")))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiscoverableScriptSource {
     Local,
@@ -79,6 +84,17 @@ fn load_json_file(path: &Path) -> Option<ScriptJsonValue> {
         Ok(value) => Some(value),
         Err(error) => {
             log::error!("failed to parse JSON from {}: {error}", path.display());
+            None
+        }
+    }
+}
+
+fn load_binary_file(path: &Path) -> Option<Vec<u8>> {
+    match fs::read(path) {
+        Ok(contents) => Some(contents),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => {
+            log::error!("failed to read binary data from {}: {error}", path.display());
             None
         }
     }
@@ -183,6 +199,7 @@ impl TuiScriptClientView<'_> {
             guid,
             name: (!name.is_empty()).then(|| name.to_string()),
             kind: classification::classify_entity(entity).kind(),
+            weenie_id: entity.wcid,
             position: entity_position.unwrap_or_default().into(),
             profile,
             container: entity.container_id().unwrap_or(Guid::NULL),
@@ -505,8 +522,27 @@ impl ScriptClientView for TuiScriptClientView<'_> {
             &script_directory(),
             script_bundle_directory().as_deref(),
             script_name,
-        )?;
+        );
+        let Some(path) = path else {
+            log::warn!("missing script data for {script_name}");
+            return None;
+        };
         load_json_file(&path)
+    }
+
+    fn load_data_bin(&self) -> Option<Vec<u8>> {
+        let script_name = self.script_name?;
+        let path = first_existing_path([
+            script_data_bin_path_for_name(&script_directory(), script_name),
+            script_bundle_directory()
+                .as_deref()
+                .and_then(|script_dir| script_data_bin_path_for_name(script_dir, script_name)),
+        ]);
+        let Some(path) = path else {
+            log::warn!("missing script binary data for {script_name}");
+            return None;
+        };
+        load_binary_file(&path)
     }
 
     fn write_config(&self, contents: String) -> bool {
@@ -852,8 +888,87 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
             ..
         } => Some(ScriptEvent::WeenieError { error: *error }),
         ClientViewEvent::CombatFeedback(CombatFeedback::AttackDone { error }) => {
-            Some(ScriptEvent::WeenieError { error: *error })
+            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackDone { error: *error }))
         }
+        ClientViewEvent::CombatFeedback(CombatFeedback::AttackCommenced) => {
+            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackCommenced))
+        }
+        ClientViewEvent::CombatFeedback(CombatFeedback::AttackerNotification {
+            defender_name,
+            damage_type,
+            health_percent,
+            damage,
+            critical_hit,
+            attack_conditions,
+        }) => Some(ScriptEvent::CombatFeedback(
+            ScriptCombatFeedback::AttackerNotification {
+                defender_name: defender_name.clone(),
+                damage_type: *damage_type,
+                health_percent: *health_percent,
+                damage: *damage,
+                critical_hit: *critical_hit,
+                attack_conditions: *attack_conditions,
+            },
+        )),
+        ClientViewEvent::CombatFeedback(CombatFeedback::DefenderNotification {
+            attacker_name,
+            damage_type,
+            health_percent,
+            damage,
+            damage_location,
+            critical_hit,
+            attack_conditions,
+        }) => Some(ScriptEvent::CombatFeedback(
+            ScriptCombatFeedback::DefenderNotification {
+                attacker_name: attacker_name.clone(),
+                damage_type: *damage_type,
+                health_percent: *health_percent,
+                damage: *damage,
+                damage_location: *damage_location,
+                critical_hit: *critical_hit,
+                attack_conditions: *attack_conditions,
+            },
+        )),
+        ClientViewEvent::CombatFeedback(CombatFeedback::EvasionAttackerNotification {
+            defender_name,
+        }) => Some(ScriptEvent::CombatFeedback(
+            ScriptCombatFeedback::EvasionAttackerNotification {
+                defender_name: defender_name.clone(),
+            },
+        )),
+        ClientViewEvent::CombatFeedback(CombatFeedback::EvasionDefenderNotification {
+            attacker_name,
+        }) => Some(ScriptEvent::CombatFeedback(
+            ScriptCombatFeedback::EvasionDefenderNotification {
+                attacker_name: attacker_name.clone(),
+            },
+        )),
+        ClientViewEvent::CombatFeedback(CombatFeedback::VictimNotification { death_message }) => {
+            Some(ScriptEvent::CombatFeedback(
+                ScriptCombatFeedback::VictimNotification {
+                    death_message: death_message.clone(),
+                },
+            ))
+        }
+        ClientViewEvent::CombatFeedback(CombatFeedback::KillerNotification { death_message }) => {
+            Some(ScriptEvent::CombatFeedback(
+                ScriptCombatFeedback::KillerNotification {
+                    death_message: death_message.clone(),
+                },
+            ))
+        }
+        ClientViewEvent::CombatFeedback(CombatFeedback::PlayerKilled {
+            death_message,
+            victim_id,
+            killer_id,
+        }) => Some(ScriptEvent::PlayerKilled {
+            death_message: death_message.clone(),
+            victim_id: *victim_id,
+            killer_id: *killer_id,
+        }),
+        ClientViewEvent::TeleportStarted { sequence } => Some(ScriptEvent::TeleportStarted {
+            sequence: *sequence,
+        }),
         ClientViewEvent::PlayerVitalsUpdated { .. } => Some(ScriptEvent::SelfVitalsChanged),
         ClientViewEvent::EntitySpawned { entity } | ClientViewEvent::EntityReplaced { entity } => {
             Some(ScriptEvent::EntityAppeared { guid: entity.guid })
@@ -1836,9 +1951,53 @@ mod tests {
 
         assert!(matches!(
             script_event_from_view_event(&combat_feedback_event),
-            Some(ScriptEvent::WeenieError {
-                error: holtburger_protocol::errors::WeenieError::YouAreTooTiredToDoThat,
-            })
+            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::AttackDone {
+                error,
+            })) if error == holtburger_protocol::errors::WeenieError::YouAreTooTiredToDoThat
+        ));
+
+        let victim_notification = ClientViewEvent::CombatFeedback(CombatFeedback::VictimNotification {
+            death_message: "Olthoi Noble is shattered by your assault!".to_string(),
+        });
+
+        assert!(matches!(
+            script_event_from_view_event(&victim_notification),
+            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::VictimNotification {
+                death_message,
+            })) if death_message == "Olthoi Noble is shattered by your assault!"
+        ));
+
+        let killer_notification = ClientViewEvent::CombatFeedback(CombatFeedback::KillerNotification {
+            death_message: "Olthoi Noble is shattered by your assault!".to_string(),
+        });
+
+        assert!(matches!(
+            script_event_from_view_event(&killer_notification),
+            Some(ScriptEvent::CombatFeedback(ScriptCombatFeedback::KillerNotification {
+                death_message,
+            })) if death_message == "Olthoi Noble is shattered by your assault!"
+        ));
+
+        let player_killed = ClientViewEvent::CombatFeedback(CombatFeedback::PlayerKilled {
+            death_message: "A nearby player has fallen.".to_string(),
+            victim_id: Guid(0x1234_5678),
+            killer_id: Guid(0x90AB_CDEF),
+        });
+
+        assert!(matches!(
+            script_event_from_view_event(&player_killed),
+            Some(ScriptEvent::PlayerKilled {
+                death_message,
+                victim_id: Guid(0x1234_5678),
+                killer_id: Guid(0x90AB_CDEF),
+            }) if death_message == "A nearby player has fallen."
+        ));
+
+        let teleport_started = ClientViewEvent::TeleportStarted { sequence: 42 };
+
+        assert!(matches!(
+            script_event_from_view_event(&teleport_started),
+            Some(ScriptEvent::TeleportStarted { sequence: 42 })
         ));
     }
 

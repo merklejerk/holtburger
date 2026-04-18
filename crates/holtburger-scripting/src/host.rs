@@ -39,6 +39,7 @@ struct ScriptClientViewPtr {
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
     load_config: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
     load_data: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
+    load_data_bin: unsafe fn(*const ()) -> Option<Vec<u8>>,
     write_config: unsafe fn(*const (), String) -> bool,
     debug_log: unsafe fn(*const (), String),
     #[allow(clippy::type_complexity)]
@@ -139,6 +140,10 @@ impl ScriptClientViewPtr {
 
         unsafe fn load_data<T: ScriptClientView>(data: *const ()) -> Option<ScriptJsonValue> {
             unsafe { (&*data.cast::<T>()).load_data() }
+        }
+
+        unsafe fn load_data_bin<T: ScriptClientView>(data: *const ()) -> Option<Vec<u8>> {
+            unsafe { (&*data.cast::<T>()).load_data_bin() }
         }
 
         unsafe fn write_config<T: ScriptClientView>(data: *const (), contents: String) -> bool {
@@ -255,6 +260,7 @@ impl ScriptClientViewPtr {
             entity_instance_prop: entity_instance_prop::<T>,
             load_config: load_config::<T>,
             load_data: load_data::<T>,
+            load_data_bin: load_data_bin::<T>,
             write_config: write_config::<T>,
             debug_log: debug_log::<T>,
             nearby_entities: nearby_entities::<T>,
@@ -320,6 +326,10 @@ impl ScriptClientViewPtr {
 
     unsafe fn load_data(self) -> Option<ScriptJsonValue> {
         unsafe { (self.load_data)(self.data) }
+    }
+
+    unsafe fn load_data_bin(self) -> Option<Vec<u8>> {
+        unsafe { (self.load_data_bin)(self.data) }
     }
 
     unsafe fn write_config(self, contents: String) -> bool {
@@ -545,6 +555,9 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     loadData() {
         return Deno.core.ops.op_hb_load_data();
     },
+    loadDataBin() {
+        return Deno.core.ops.op_hb_load_data_bin();
+    },
     writeConfig(contents) {
         const serialized = typeof contents === "string" ? contents : JSON.stringify(contents);
         return Deno.core.ops.op_hb_write_config(serialized);
@@ -656,6 +669,7 @@ deno_core::extension!(
         op_hb_entity_instance_prop,
         op_hb_load_config,
         op_hb_load_data,
+        op_hb_load_data_bin,
         op_hb_write_config,
         op_hb_log,
         op_hb_debug_log,
@@ -1075,6 +1089,12 @@ fn op_hb_load_config(state: &mut OpState) -> Option<ScriptJsonValue> {
 #[serde]
 fn op_hb_load_data(state: &mut OpState) -> Option<ScriptJsonValue> {
     with_current_script_client_view(state, |view| unsafe { view.load_data() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_load_data_bin(state: &mut OpState) -> Option<Vec<u8>> {
+    with_current_script_client_view(state, |view| unsafe { view.load_data_bin() }).flatten()
 }
 
 #[op2(fast)]
@@ -1714,6 +1734,7 @@ mod tests {
                 guid,
                 name: Some("Lesser Healing Kit".to_string()),
                 kind: ScriptEntityKind::HealingKit,
+                weenie_id: None,
                 position: WorldPosition::default().into(),
                 profile: None,
                 container: Guid::NULL,

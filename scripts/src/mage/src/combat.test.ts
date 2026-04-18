@@ -46,7 +46,7 @@ test("maybeRestoreStamina casts a stamina recovery spell when stamina is low", (
 		mana: 80,
 		manaMax: 100,
 	});
-	const spells = [makeSpell({ spellId: 10, type: "mana-to-stamina" })];
+	const spells = [makeSpell({ spellId: 10, type: "revitalize" })];
 
 	const restored = maybeRestoreStamina(state, self, spells);
 

@@ -5,11 +5,14 @@ use byteorder::{ByteOrder, LittleEndian};
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 type SentPacket = (SocketAddr, Vec<u8>);
+type RecvPacket = (Vec<u8>, SocketAddr);
+type RecvQueue = Arc<Mutex<VecDeque<RecvPacket>>>;
 
 #[derive(Clone)]
 struct ScriptedTransport {
@@ -57,6 +60,39 @@ impl Transport for ScriptedTransport {
         let data = recv.remove(0);
         buf[..data.len()].copy_from_slice(&data);
         Ok((data.len(), self.recv_addr))
+    }
+}
+
+#[derive(Clone)]
+struct SequencedTransport {
+    sent: Arc<Mutex<Vec<SentPacket>>>,
+    recv: RecvQueue,
+}
+
+impl SequencedTransport {
+    fn new(recv_packets: Vec<(Vec<u8>, SocketAddr)>) -> Self {
+        Self {
+            sent: Arc::new(Mutex::new(Vec::new())),
+            recv: Arc::new(Mutex::new(recv_packets.into_iter().collect())),
+        }
+    }
+}
+
+#[async_trait]
+impl Transport for SequencedTransport {
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize> {
+        self.sent.lock().await.push((addr, buf.to_vec()));
+        Ok(buf.len())
+    }
+
+    async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        let mut recv = self.recv.lock().await;
+        if let Some((data, addr)) = recv.pop_front() {
+            buf[..data.len()].copy_from_slice(&data);
+            Ok((data.len(), addr))
+        } else {
+            Err(anyhow!("Empty"))
+        }
     }
 }
 
@@ -502,6 +538,10 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
     let events = session.recv_message().await.unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], SessionEvent::TimeSync(time) if time == connect_request.time));
+    assert_eq!(
+        session.server_source_addr,
+        "127.0.0.1:9001".parse().unwrap()
+    );
     assert_eq!(session.pending_control_packets.len(), 1);
     assert!(sent_handle.sent_packets().await.is_empty());
 
@@ -520,6 +560,49 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
     assert_eq!(header.sequence, 1);
     assert_eq!(header.id, 0);
     assert_eq!(header.size, transport::CONNECT_RESPONSE_SIZE as u16);
+}
+
+#[tokio::test]
+async fn test_packets_from_activation_port_are_accepted_after_handshake_request() {
+    let connect_request = ConnectRequestData {
+        time: 123.5,
+        cookie: 0x1122_3344_5566_7788,
+        client_id: 0x345,
+        server_seed: 0x1234_5678,
+        client_seed: 0x9ABC_DEF0,
+    };
+    let transport = SequencedTransport::new(vec![
+        (
+            build_connect_request_packet(connect_request),
+            "127.0.0.1:9000".parse().unwrap(),
+        ),
+        (
+            build_transport_packet(
+                PacketHeader {
+                    flags: packet_flags::TIME_SYNC,
+                    size: 8,
+                    ..Default::default()
+                },
+                &1.25f64.to_le_bytes(),
+            ),
+            "127.0.0.1:9001".parse().unwrap(),
+        ),
+    ]);
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+
+    let first_events = session.recv_message().await.unwrap();
+    assert_eq!(first_events.len(), 1);
+    assert!(matches!(first_events[0], SessionEvent::TimeSync(time) if time == 123.5));
+    assert_eq!(
+        session.server_source_addr,
+        "127.0.0.1:9001".parse().unwrap()
+    );
+
+    let second_events = session.recv_message().await.unwrap();
+    assert_eq!(second_events.len(), 1);
+    assert!(matches!(second_events[0], SessionEvent::TimeSync(time) if time == 1.25));
 }
 
 #[tokio::test]

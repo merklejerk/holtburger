@@ -17,11 +17,11 @@ impl Session {
         loop {
             let (len, addr) = self.transport.recv_from(buf).await?;
 
-            if addr != self.server_addr {
+            if addr != self.server_source_addr {
                 log::warn!(
                     "Ignoring inbound packet from unexpected source {}; expected {}",
                     addr,
-                    self.server_addr
+                    self.server_source_addr
                 );
                 continue;
             }

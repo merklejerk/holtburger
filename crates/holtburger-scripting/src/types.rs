@@ -1,10 +1,10 @@
+use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     DamageType, EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
     PropertyInt, PropertyInt64, PropertyString,
 };
 use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
-use holtburger_common::Guid;
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -1033,7 +1033,7 @@ pub enum ScriptMessageStyle {
 mod tests {
     use super::ScriptEntityProfile;
     use crate::ScriptCombatFeedback;
-    use deno_core::serde_json::{from_value, json, to_value, Value};
+    use deno_core::serde_json::{Value, from_value, json, to_value};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::DamageType;
     use holtburger_common::{Quaternion, Vector3};

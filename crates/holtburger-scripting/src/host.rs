@@ -3,14 +3,14 @@ use std::rc::Rc;
 use std::sync::Once;
 
 use anyhow::{Context, Result};
-use deno_core::serde_json::{from_value, json, Value};
-use deno_core::{op2, JsRuntime, OpState, RuntimeOptions};
+use deno_core::serde_json::{Value, from_value, json};
+use deno_core::{JsRuntime, OpState, RuntimeOptions, op2};
 use futures::executor::block_on;
+use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
     PropertyString,
 };
-use holtburger_common::Guid;
 
 use crate::{
     ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
@@ -1567,12 +1567,12 @@ mod tests {
         ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptPartyMemberView,
         ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
+    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
         PropertyInt64, PropertyString,
     };
-    use holtburger_common::Guid;
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 

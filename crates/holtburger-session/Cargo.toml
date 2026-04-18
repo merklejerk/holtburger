@@ -15,6 +15,7 @@ serde = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 byteorder = { workspace = true }
+socket2 = { workspace = true }
 
 [dev-dependencies]
 hex.workspace = true

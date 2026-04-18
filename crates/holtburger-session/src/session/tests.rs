@@ -9,9 +9,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+type SentPacket = (SocketAddr, Vec<u8>);
+
 #[derive(Clone)]
 struct ScriptedTransport {
-    sent: Arc<Mutex<Vec<(SocketAddr, Vec<u8>)>>>,
+    sent: Arc<Mutex<Vec<SentPacket>>>,
     recv: Arc<Mutex<Vec<Vec<u8>>>>,
     recv_addr: SocketAddr,
 }
@@ -391,8 +393,7 @@ async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
 
     let sent_entries = sent_handle.sent_entries().await;
     assert!(sent_entries.iter().any(|(addr, packet)| {
-        *addr == session.server_addr
-            && unpack_header(packet).flags == packet_flags::ACK_SEQUENCE
+        *addr == session.server_addr && unpack_header(packet).flags == packet_flags::ACK_SEQUENCE
     }));
 }
 
@@ -408,11 +409,21 @@ fn test_payload_hash_multi_fragment_unaligned_matches_wire_layout() {
         .unwrap();
 
     let expected = holtburger_protocol::crypto::Hash32::compute(&payload[0..16])
-        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[16..29]))
-        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[29..45]))
-        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[45..58]))
-        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[58..74]))
-        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(&payload[74..87]));
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[16..29],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[29..45],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[45..58],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[58..74],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[74..87],
+        ));
 
     assert_eq!(hash, expected);
 }

@@ -263,7 +263,7 @@
 - [x] Fix rare follow teleporting.
 - [x] Client sending duplicate packets to server.
 - [x] Add all spells causes a sequence error.
-- [ ] Add `/run <ARGS>` command.
+- [x] Add `/run <ARGS>` command.
 - [ ] Mage script improvements:
     - [ ] Add preferred spell IDs.
     - [ ] Snap to target heading before casting?

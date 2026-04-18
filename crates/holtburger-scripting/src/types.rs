@@ -869,7 +869,9 @@ pub enum ScriptChatChannelKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptLifecycleEvent {
-    Started,
+    Started {
+        args: String,
+    },
     Stopped,
     #[serde(rename_all = "camelCase")]
     Tick {

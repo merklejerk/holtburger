@@ -1,6 +1,6 @@
 import type { MageDamageType } from "./types";
 
-export const MAX_AGGRO_DISTANCE = 40;
+export const MAX_AGGRO_DISTANCE = 30;
 export const MAX_PARTY_DISTANCE = 15;
 export const PARTY_RESUME_FACTOR = 0.9;
 export const PARTY_RESUME_DISTANCE = MAX_PARTY_DISTANCE * PARTY_RESUME_FACTOR;

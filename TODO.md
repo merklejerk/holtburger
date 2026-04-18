@@ -259,8 +259,11 @@
 - [x] Attack spam too verbose.
 - [x] `/promote <PLAYER>` - Promote new party leader.
 - [x] Can't specialize then unspecialize a skill in character creator.
-- [ ] Show "creature type" in assessment.
+- [x] Show "creature type" in assessment.
 - [ ] Add all spells causes a sequence error.
+- [ ] Add `/run <ARGS>` command.
+- [ ] Mage script improvements:
+    - [ ] Add preferred spell IDs.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

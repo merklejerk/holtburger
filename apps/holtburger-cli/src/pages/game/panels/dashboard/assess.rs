@@ -81,10 +81,23 @@ pub fn get_assess_info(
             ),
         ]));
     }
-    if let Some(level) = assess.level {
+    if assess.level.is_some() || assess.creature.is_some() {
+        let level_display = assess
+            .level
+            .map_or_else(|| "?".to_string(), |level| level.to_string());
+        let level_display = if let Some(creature_type) = assess
+            .creature
+            .as_ref()
+            .and_then(|creature| creature.creature_type)
+        {
+            format!("{} ({})", level_display, creature_type)
+        } else {
+            level_display
+        };
+
         lines.push(Line::from(vec![
             Span::styled("Level:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}", level), Style::default().fg(Color::White)),
+            Span::styled(level_display, Style::default().fg(Color::White)),
         ]));
     }
     if let Some(burden) = assess.burden {
@@ -612,9 +625,10 @@ mod tests {
     use crate::pages::game::data::GameData;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_world::entity::Entity;
     use holtburger_world::inspect::InspectableObject;
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
 
     #[test]
     fn assess_output_shows_open_and_locked_status() {
@@ -636,5 +650,35 @@ mod tests {
                 .iter()
                 .any(|line| line.to_string().contains("Unlocked"))
         );
+    }
+
+    #[test]
+    fn assess_output_shows_creature_type_for_creatures() {
+        let mut entity = Entity::new(
+            Guid(0x60000003),
+            "Test Creature".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_int_prop(PropertyInt::CreatureType, holtburger_common::stats::CreatureType::Olthoi as i32);
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 50,
+            health_max: 50,
+            attributes: None,
+            buffs: None,
+        });
+
+        let data = GameData::new(Guid::NULL, "Player".to_string(), "World".to_string());
+        let object = InspectableObject::from_entity(&entity);
+        let lines = get_assess_info(&data, &object, None);
+
+        let level_line = lines
+            .iter()
+            .find(|line| line.to_string().contains("Level:"))
+            .expect("expected level line for creature assessment");
+        let level_text = level_line.to_string();
+
+        assert!(level_text.contains("?"));
+        assert!(level_text.contains("Olthoi"));
     }
 }

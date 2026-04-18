@@ -2042,7 +2042,9 @@ mod tests {
 
         match outputs.as_slice() {
             [ScriptIntent::Log { message, .. }]
-                if message == "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]" => {}
+                if message
+                    == "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]" =>
+                {}
             [ScriptIntent::Log { message, .. }] => {
                 panic!("unexpected script-state output: {message}")
             }

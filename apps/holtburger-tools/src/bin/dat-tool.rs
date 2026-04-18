@@ -7,8 +7,7 @@ use holtburger_dat::{
     ResourceProvider,
 };
 use holtburger_tools::spell_export::{
-    export_spell_table, SpellExportField, SpellExportPreset, SpellExportRequest,
-    SpellExportSchool,
+    SpellExportField, SpellExportPreset, SpellExportRequest, SpellExportSchool, export_spell_table,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -133,10 +132,8 @@ fn read_spell_table(
     provider: &Provider,
     namespace: Option<&str>,
 ) -> Result<holtburger_dat::file_type::SpellTable> {
-    let bytes = provider.get_file_in_namespace(
-        namespace,
-        holtburger_dat::file_type::SpellTable::FILE_ID,
-    )?;
+    let bytes = provider
+        .get_file_in_namespace(namespace, holtburger_dat::file_type::SpellTable::FILE_ID)?;
     let mut cursor = Cursor::new(bytes);
     Ok(holtburger_dat::file_type::SpellTable::read_le(&mut cursor)?)
 }

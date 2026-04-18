@@ -90,7 +90,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     let sql_path = if let Some(ref input) = args.input {
-        if input.extension().map_or(false, |ext| ext == "zip") {
+        if input.extension().is_some_and(|ext| ext == "zip") {
             extract_zip(input)?
         } else {
             input.clone()
@@ -265,13 +265,15 @@ fn parse_sql(sql_path: &std::path::Path) -> Result<HashMap<u32, CreatureResists>
     );
 
     let reader = BufReader::new(file);
-    
+
     // Regex for: INSERT INTO `weenie` VALUES (123, 'Name', 10, ...)
     // ACE format: (class_id, name, type, last_modified)
     let weenie_row_re = Regex::new(r"\((\d+)\s*,\s*'(.*?)'\s*,\s*(\d+)\s*,\s*'.*?'\)")?;
-    
+
     // Regex for: INSERT INTO `weenie_properties_float` VALUES (id, object_id, type, value)
-    let float_row_re = Regex::new(r"\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)\s*\)")?;
+    let float_row_re = Regex::new(
+        r"\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)\s*\)",
+    )?;
 
     // Regex for: INSERT INTO `weenie_properties_int` VALUES (id, object_id, type, value)
     let int_row_re = Regex::new(r"\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)")?;
@@ -292,11 +294,14 @@ fn parse_sql(sql_path: &std::path::Path) -> Result<HashMap<u32, CreatureResists>
 
                 if weenie_type == WEENIE_TYPE_CREATURE {
                     creature_ids.insert(class_id);
-                    creatures.insert(class_id, CreatureResists {
-                        name,
-                        creature_type: 0, // Default to Invalid
-                        resists: HashMap::new(),
-                    });
+                    creatures.insert(
+                        class_id,
+                        CreatureResists {
+                            name,
+                            creature_type: 0, // Default to Invalid
+                            resists: HashMap::new(),
+                        },
+                    );
                 }
             }
         } else if lower.contains("insert into `weenie_properties_float` ") {
@@ -318,10 +323,10 @@ fn parse_sql(sql_path: &std::path::Path) -> Result<HashMap<u32, CreatureResists>
                         _ => None,
                     };
 
-                    if let Some(name) = resist_name {
-                        if let Some(creature) = creatures.get_mut(&object_id) {
-                            creature.resists.insert(name.to_string(), value);
-                        }
+                    if let Some(name) = resist_name
+                        && let Some(creature) = creatures.get_mut(&object_id)
+                    {
+                        creature.resists.insert(name.to_string(), value);
                     }
                 }
             }
@@ -331,10 +336,11 @@ fn parse_sql(sql_path: &std::path::Path) -> Result<HashMap<u32, CreatureResists>
                 let prop_type: u32 = caps[3].parse()?;
                 let value: u32 = caps[4].parse()?;
 
-                if creature_ids.contains(&object_id) && prop_type == PROP_CREATURE_TYPE {
-                    if let Some(creature) = creatures.get_mut(&object_id) {
-                        creature.creature_type = value;
-                    }
+                if creature_ids.contains(&object_id)
+                    && prop_type == PROP_CREATURE_TYPE
+                    && let Some(creature) = creatures.get_mut(&object_id)
+                {
+                    creature.creature_type = value;
                 }
             }
         }

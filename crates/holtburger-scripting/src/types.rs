@@ -1,12 +1,14 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
-    PropertyInt64, PropertyString, DamageType,
+    DamageType, EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
+    PropertyInt, PropertyInt64, PropertyString,
 };
 use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
-use holtburger_protocol::messages::combat::{AttackConditions, AttackHeight, CombatMode, DamageLocation};
+use holtburger_protocol::messages::combat::{
+    AttackConditions, AttackHeight, CombatMode, DamageLocation,
+};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_protocol::messages::object::types::{
     ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
@@ -1016,16 +1018,16 @@ pub enum ScriptLogLevel {
 #[cfg(test)]
 mod tests {
     use super::ScriptEntityProfile;
+    use crate::ScriptCombatFeedback;
     use deno_core::serde_json::{Value, from_value, json, to_value};
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::{Quaternion, Vector3};
     use holtburger_common::properties::DamageType;
+    use holtburger_common::{Quaternion, Vector3};
     use holtburger_protocol::messages::combat::AttackConditions;
     use holtburger_protocol::messages::object::types::{
         ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
         WeaponProfile,
     };
-    use crate::ScriptCombatFeedback;
 
     fn assert_roundtrip(profile: ScriptEntityProfile, expected: Value) {
         let actual = to_value(&profile).unwrap();
@@ -1190,6 +1192,9 @@ mod tests {
                 }
             })
         );
-        assert_eq!(from_value::<ScriptCombatFeedback>(actual).unwrap(), feedback);
+        assert_eq!(
+            from_value::<ScriptCombatFeedback>(actual).unwrap(),
+            feedback
+        );
     }
 }

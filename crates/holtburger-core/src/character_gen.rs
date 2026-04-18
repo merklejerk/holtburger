@@ -1017,4 +1017,67 @@ mod tests {
             SkillAdvancementClass::Specialized
         );
     }
+
+    #[test]
+    fn minimum_skill_advancement_for_template_prefers_primary_normal_and_zero_cost_floor() {
+        let template = CharacterGenTemplate {
+            template_option: 0,
+            name: "Custom".to_string(),
+            icon_image: 0,
+            title_id: 0,
+            strength: 0,
+            endurance: 0,
+            coordination: 0,
+            quickness: 0,
+            focus: 0,
+            self_stat: 0,
+            normal_skills: vec![1],
+            primary_skills: vec![2],
+        };
+
+        assert_eq!(
+            minimum_skill_advancement_for_template(
+                &template,
+                Some(CharacterGenSkillCosts {
+                    trained_cost: 6,
+                    specialized_cost: 4,
+                }),
+                2,
+            ),
+            SkillAdvancementClass::Specialized
+        );
+        assert_eq!(
+            minimum_skill_advancement_for_template(
+                &template,
+                Some(CharacterGenSkillCosts {
+                    trained_cost: 6,
+                    specialized_cost: 4,
+                }),
+                1,
+            ),
+            SkillAdvancementClass::Trained
+        );
+        assert_eq!(
+            minimum_skill_advancement_for_template(
+                &template,
+                Some(CharacterGenSkillCosts {
+                    trained_cost: 0,
+                    specialized_cost: 4,
+                }),
+                3,
+            ),
+            SkillAdvancementClass::Trained
+        );
+        assert_eq!(
+            minimum_skill_advancement_for_template(
+                &template,
+                Some(CharacterGenSkillCosts {
+                    trained_cost: 6,
+                    specialized_cost: 4,
+                }),
+                4,
+            ),
+            SkillAdvancementClass::Untrained
+        );
+    }
 }

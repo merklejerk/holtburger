@@ -258,9 +258,8 @@
 - [x] `/version` and `--version`, seeded from commit hash env var set by build system?
 - [x] Attack spam too verbose.
 - [x] `/promote <PLAYER>` - Promote new party leader.
+- [x] Can't specialize then unspecialize a skill in character creator.
 - [ ] Show "creature type" in assessment.
-- [ ] Can't specialize then unspecialize a skill in character creator.
-- [ ] Incorrect number of attribute points to allocate during creation?
 - [ ] Add all spells causes a sequence error.
 
 ### Critical

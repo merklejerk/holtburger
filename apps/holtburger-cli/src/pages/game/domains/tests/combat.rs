@@ -1,6 +1,7 @@
 use super::test_support::*;
 use super::*;
 use crate::pages::game::combat::{CombatIssueState, DesiredCombatEngagement};
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::CombatFeedback;
 
 #[test]
@@ -18,6 +19,7 @@ fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() 
         target.set_bool_prop(PropertyBool::Attackable, true);
         target
     });
+
     let result = state
         .handle_action(AppAction::Attack { guid: target_guid })
         .unwrap();
@@ -65,6 +67,50 @@ fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() 
             } if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
         )
     }));
+}
+
+#[test]
+fn targeted_spell_cast_snaps_facing_before_casting() {
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    state.data.combat_mode = CombatMode::Magic;
+
+    let player_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(12.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+
+    state.data.player_pos = Some(player_position);
+    state.data.entities.insert(
+        target_guid,
+        creature_entity(target_guid, "Drudge", target_position),
+    );
+
+    let result = state
+        .handle_action(AppAction::CastSpell {
+            spell_id: 42,
+            target: Some(target_guid),
+        })
+        .unwrap();
+
+    assert_eq!(result.commands.len(), 2);
+    assert!(matches!(
+        result.commands[0],
+        ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { heading })
+            if (heading - player_position.heading_to(&target_position)).abs() < f32::EPSILON
+    ));
+    assert!(matches!(
+        result.commands[1],
+        ClientCommand::CastTargetedSpell { target, spell_id }
+            if target == target_guid && spell_id == 42
+    ));
 }
 
 #[test]

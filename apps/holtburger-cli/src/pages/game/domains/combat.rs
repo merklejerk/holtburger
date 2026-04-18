@@ -1,6 +1,7 @@
 use super::*;
 use crate::pages::game::combat as combat_model;
 use holtburger_core::ActionResultReason;
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) enum EnterCombatModeResult {
     Success(UpdateResult),
@@ -30,6 +31,11 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 EnterCombatModeResult::Success(res) => {
                     result.merge(res);
                     if let Some(target) = target {
+                        if let Some(heading) = targeted_spell_heading(state, target) {
+                            result.commands.push(ClientCommand::DriveSelf(
+                                PlayerDriveIntent::SnapFacing { heading },
+                            ));
+                        }
                         result
                             .commands
                             .push(ClientCommand::CastTargetedSpell { spell_id, target });
@@ -61,6 +67,17 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
     }
 
     result
+}
+
+fn targeted_spell_heading(state: &GameState, target_guid: Guid) -> Option<f32> {
+    if Some(target_guid) == state.data.player_guid {
+        return None;
+    }
+
+    let player_position = state.data.runtime_player_position()?;
+    let target_position = state.data.runtime_position_for_guid(target_guid)?;
+
+    Some(player_position.heading_to(&target_position))
 }
 
 pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {

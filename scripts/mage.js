@@ -1,7 +1,7 @@
 "use strict";
 (() => {
   // src/constants.ts
-  var MAX_AGGRO_DISTANCE = 40;
+  var MAX_AGGRO_DISTANCE = 32;
   var MAX_PARTY_DISTANCE = 15;
   var PARTY_RESUME_FACTOR = 0.9;
   var PARTY_RESUME_DISTANCE = MAX_PARTY_DISTANCE * PARTY_RESUME_FACTOR;

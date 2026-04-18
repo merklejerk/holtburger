@@ -265,6 +265,7 @@
 - [ ] Add `/run <ARGS>` command.
 - [ ] Mage script improvements:
     - [ ] Add preferred spell IDs.
+    - [ ] Snap to target heading before casting?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

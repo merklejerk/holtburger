@@ -2,6 +2,7 @@ import type { MageConfig, MageData } from "./types";
 
 type MageConfigFile = {
 	preferredSpells?: unknown;
+	bannedSpells?: unknown;
 };
 
 export function loadMageConfig(data: MageData | null): MageConfig {
@@ -24,12 +25,14 @@ export function normalizeMageConfig(
 	) {
 		return {
 			preferredSpellIds: [],
+			bannedSpellIds: [],
 		};
 	}
 
 	const config = rawConfig as MageConfigFile;
 	return {
 		preferredSpellIds: normalizePreferredSpells(config.preferredSpells, data),
+		bannedSpellIds: normalizePreferredSpells(config.bannedSpells, data),
 	};
 }
 

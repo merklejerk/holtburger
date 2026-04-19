@@ -1350,12 +1350,14 @@
   function normalizeMageConfig(rawConfig, data) {
     if (rawConfig == null || typeof rawConfig !== "object" || Array.isArray(rawConfig)) {
       return {
-        preferredSpellIds: []
+        preferredSpellIds: [],
+        bannedSpellIds: []
       };
     }
     const config = rawConfig;
     return {
-      preferredSpellIds: normalizePreferredSpells(config.preferredSpells, data)
+      preferredSpellIds: normalizePreferredSpells(config.preferredSpells, data),
+      bannedSpellIds: normalizePreferredSpells(config.bannedSpells, data)
     };
   }
   function normalizePreferredSpells(value, data) {
@@ -1438,6 +1440,27 @@
       weenieResists: rawResistData
     };
   }
+  function filterMageDataSpells(data, bannedSpellIds) {
+    if (data == null || bannedSpellIds.length === 0) {
+      return data;
+    }
+    const bannedSpellIdSet = new Set(bannedSpellIds);
+    if (bannedSpellIdSet.size === 0) {
+      return data;
+    }
+    const filteredSpells = Object.fromEntries(
+      Object.entries(data.spells).filter(
+        ([, spell]) => !bannedSpellIdSet.has(spell.spellId)
+      )
+    );
+    if (Object.keys(filteredSpells).length === Object.keys(data.spells).length) {
+      return data;
+    }
+    return {
+      ...data,
+      spells: filteredSpells
+    };
+  }
   function isUint8Array(value) {
     return value instanceof Uint8Array;
   }
@@ -1475,7 +1498,8 @@
     return {
       data: null,
       config: {
-        preferredSpellIds: []
+        preferredSpellIds: [],
+        bannedSpellIds: []
       },
       elapsedSeconds: 0,
       combatTargetGuid: null,
@@ -1582,8 +1606,11 @@
           case "started": {
             resetState(state);
             const loadStatus = loadMageDataWithStatus();
-            state.data = loadStatus.data;
-            state.config = loadMageConfig(state.data);
+            state.config = loadMageConfig(loadStatus.data);
+            state.data = filterMageDataSpells(
+              loadStatus.data,
+              state.config.bannedSpellIds
+            );
             state.maxPartyDistance = parsePositiveNumberArg(event.data.data.args, "max-party-dist") ?? MAX_PARTY_DISTANCE;
             state.maxAggroDistance = parsePositiveNumberArg(event.data.data.args, "aggro-dist") ?? state.maxAggroDistance;
             logMageInfo("started");

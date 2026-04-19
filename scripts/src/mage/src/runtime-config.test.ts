@@ -7,46 +7,43 @@ import { loadMageConfig, normalizeMageConfig } from "./runtime-config";
 const testGlobal = globalThis as typeof globalThis & {
 	HB: {
 		loadConfig: () => unknown;
-		writeConfig: (contents: unknown) => boolean;
 	};
 };
 
-test("normalizeMageConfig resolves preferred spells by id and key", () => {
+test("normalizeMageConfig resolves preferred and banned spells by id and key", () => {
 	const data = makeMageData();
 
 	assert.deepEqual(
 		normalizeMageConfig(
 			{
 				preferredSpells: ["flame-bolt-i", 28, "missing", 27, "flame-bolt-ii"],
+				bannedSpells: [28, "flame-bolt-i", "missing", 27, 28],
 			},
 			data,
 		),
 		{
 			preferredSpellIds: [27, 28],
+			bannedSpellIds: [28, 27],
 		},
 	);
 });
 
-test("normalizeMageConfig defaults missing config to empty preferences", () => {
+test("normalizeMageConfig defaults missing config to empty spell lists", () => {
 	assert.deepEqual(normalizeMageConfig(null, makeMageData()), {
 		preferredSpellIds: [],
+		bannedSpellIds: [],
 	});
 });
 
-test("loadMageConfig writes an empty config when none exists", () => {
-	const writes: unknown[] = [];
+test("loadMageConfig returns an empty config when none exists", () => {
 	testGlobal.HB = {
 		loadConfig: () => null,
-		writeConfig: (contents) => {
-			writes.push(contents);
-			return true;
-		},
 	};
 
 	assert.deepEqual(loadMageConfig(makeMageData()), {
 		preferredSpellIds: [],
+		bannedSpellIds: [],
 	});
-	assert.deepEqual(writes, [{ preferredSpells: [] }]);
 });
 
 function makeMageData(): MageData {

@@ -45,6 +45,7 @@ export type MageData = {
 
 export type MageConfig = {
 	preferredSpellIds: number[];
+	bannedSpellIds: number[];
 };
 
 export type MonsterCandidate = {

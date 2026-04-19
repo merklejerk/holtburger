@@ -759,6 +759,9 @@ pub enum AppNotification {
         removed: Vec<Guid>,
         added: Vec<Guid>,
     },
+    PlayerEntityReady {
+        guid: Guid,
+    },
 }
 
 #[derive(Debug, Clone)]

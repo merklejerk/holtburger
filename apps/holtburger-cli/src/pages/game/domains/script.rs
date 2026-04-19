@@ -60,19 +60,29 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.unrun_script_command(&mut result);
             result
         }
+        AppAction::Notification {
+            notification: AppNotification::PlayerEntityReady { .. },
+        } => {
+            let mut result = UpdateResult::new();
+            state.maybe_start_queued_script_startup(&mut result);
+            result
+        }
         _ => UpdateResult::new(),
     }
 }
 
 impl GameState {
-    fn script_host_is_running(&self) -> bool {
-        self.script.host.is_some()
+    pub(crate) fn set_queued_script_startup(
+        &mut self,
+        queued_script_startup: Option<crate::state::QueuedScriptStartup>,
+        result: &mut UpdateResult,
+    ) {
+        self.script.queued_script_startup = queued_script_startup;
+        self.maybe_start_queued_script_startup(result);
     }
 
-    fn script_player_entity_is_ready(&self) -> bool {
-        self.data
-            .player_guid
-            .is_some_and(|guid| self.data.entities.contains_key(&guid))
+    fn script_host_is_running(&self) -> bool {
+        self.script.host.is_some()
     }
 
     fn stop_script_host(&mut self, result: &mut UpdateResult) {
@@ -104,13 +114,29 @@ impl GameState {
         }
     }
 
+    pub(crate) fn maybe_start_queued_script_startup(&mut self, result: &mut UpdateResult) {
+        if !self.player_entity_is_ready() {
+            return;
+        }
+
+        let Some(queued_script_startup) = self.script.queued_script_startup.take() else {
+            return;
+        };
+
+        self.run_script_command(
+            &queued_script_startup.basename,
+            queued_script_startup.args,
+            result,
+        );
+    }
+
     pub(crate) fn run_script_command(
         &mut self,
         basename: &str,
         args: String,
         result: &mut UpdateResult,
     ) {
-        if !self.script_player_entity_is_ready() {
+        if !self.player_entity_is_ready() {
             result.actions.push(AppAction::Log {
                 chat_tags: ChatMessageTags::warning(),
                 message: format!(
@@ -190,13 +216,15 @@ impl GameState {
     }
 
     pub(crate) fn unrun_script_command(&mut self, result: &mut UpdateResult) {
+        let had_queued_startup = self.script.queued_script_startup.take().is_some();
         let had_running = self.script_host_is_running();
         self.stop_script_host(result);
 
-        let message = if had_running {
-            "[script] Stopped active script"
-        } else {
-            "[script] No active script to stop"
+        let message = match (had_running, had_queued_startup) {
+            (true, true) => "[script] Stopped active script and cleared queued startup",
+            (true, false) => "[script] Stopped active script",
+            (false, true) => "[script] Cleared queued script startup",
+            (false, false) => "[script] No active script to stop",
         };
 
         result.actions.push(AppAction::Log {
@@ -373,6 +401,10 @@ impl GameState {
         notification: &AppNotification,
         result: &mut UpdateResult,
     ) {
+        if matches!(notification, AppNotification::PlayerEntityReady { .. }) {
+            self.maybe_start_queued_script_startup(result);
+        }
+
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -487,9 +519,14 @@ mod tests {
     use super::ScriptEquipmentSlotKind;
     use super::ScriptIntent;
     use super::ViewState;
+    use crate::state::QueuedScriptStartup;
+    use crate::types::AppNotification;
     use crate::types::{AppAction, InspectTarget};
+    use crate::types::UpdateResult;
+    use holtburger_common::position::WorldPosition;
     use holtburger_common::Guid;
     use holtburger_core::client::types::TargetSlot;
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn compile_script_intent_maps_new_item_actions() {
@@ -732,5 +769,42 @@ mod tests {
             AppAction::PickUp { item, container }
                 if item == Guid(8) && container == Some(Guid(9))
         ));
+    }
+
+    #[test]
+    fn queued_script_startup_runs_once_player_entity_is_ready() {
+        let player_guid = Guid(0x5000_0001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        let script_dir = std::env::current_dir().expect("current directory should exist").join("scripts");
+        let script_basename = format!("queued-startup-test-{}", std::process::id());
+        let script_path = script_dir.join(format!("{script_basename}.js"));
+
+        std::fs::create_dir_all(&script_dir).expect("script directory should be creatable");
+        std::fs::write(&script_path, "HB.onEvent(() => {});").expect("script fixture should be writable");
+
+        state.data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), WorldPosition::default()),
+        );
+        state.script.queued_script_startup = Some(QueuedScriptStartup::new(
+            &script_basename,
+            "pick up loot",
+        ));
+
+        let mut result = UpdateResult::new();
+        state.sync_script_host_for_notification(
+            None,
+            &AppNotification::PlayerEntityReady { guid: player_guid },
+            &mut result,
+        );
+
+        assert!(state.script.queued_script_startup.is_none());
+        assert!(state.script.host.is_some());
+        assert!(result.actions.iter().any(|action| matches!(
+            action,
+            AppAction::Log { message, .. } if message.contains("Loaded")
+        )));
+
+        let _ = std::fs::remove_file(&script_path);
     }
 }

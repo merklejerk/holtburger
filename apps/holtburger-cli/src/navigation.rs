@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::types::Interaction;
 
-const MELEE_ATTACK_DISTANCE: f32 = 0.6;
+const MELEE_ATTACK_DISTANCE: f32 = 1.0;
 const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 const DEFAULT_APPROACH_DISTANCE: f32 = 1.0;
 const DEFAULT_FOLLOW_DISTANCE: f32 = 0.1;

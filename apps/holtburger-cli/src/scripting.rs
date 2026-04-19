@@ -1008,6 +1008,7 @@ pub(crate) fn script_event_from_notification(
             })
         }
         AppNotification::ActiveInteractionChanged { .. } => None,
+        AppNotification::PlayerEntityReady { .. } => None,
     }
 }
 

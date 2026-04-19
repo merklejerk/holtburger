@@ -521,10 +521,10 @@ mod tests {
     use super::ViewState;
     use crate::state::QueuedScriptStartup;
     use crate::types::AppNotification;
-    use crate::types::{AppAction, InspectTarget};
     use crate::types::UpdateResult;
-    use holtburger_common::position::WorldPosition;
+    use crate::types::{AppAction, InspectTarget};
     use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
     use holtburger_core::client::types::TargetSlot;
     use holtburger_world::entity::Entity;
 
@@ -650,13 +650,8 @@ mod tests {
         ));
 
         assert!(matches!(
-            GameState::compile_script_intent(
-                &view,
-                ScriptIntent::SetCombatMode {
-                    on: true,
-                },
-            )
-            .expect("set combat mode should compile"),
+            GameState::compile_script_intent(&view, ScriptIntent::SetCombatMode { on: true },)
+                .expect("set combat mode should compile"),
             AppAction::SetCombatMode { on: true }
         ));
 
@@ -781,10 +776,8 @@ mod tests {
             player_guid,
             Entity::new(player_guid, "Player".to_string(), WorldPosition::default()),
         );
-        state.script.queued_script_startup = Some(QueuedScriptStartup::new(
-            &script_basename,
-            "pick up loot",
-        ));
+        state.script.queued_script_startup =
+            Some(QueuedScriptStartup::new(&script_basename, "pick up loot"));
 
         let mut result = UpdateResult::new();
         state.sync_script_host_for_notification(

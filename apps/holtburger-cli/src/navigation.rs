@@ -1570,7 +1570,7 @@ mod tests {
                 Some(player_position),
                 Some(target_sample_with_use_radius(
                     target_guid,
-                    world_position(0.6, 0.0, 0.0),
+                    world_position(1.0, 0.0, 0.0),
                     0.5,
                 )),
                 Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),

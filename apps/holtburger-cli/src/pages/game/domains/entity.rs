@@ -1,44 +1,6 @@
 use super::inventory;
 use super::*;
 
-#[cfg(test)]
-mod tests {
-    use super::GameState;
-    use super::reduce_view_event;
-    use crate::types::{AppAction, AppNotification};
-    use holtburger_common::position::WorldPosition;
-    use holtburger_common::Guid;
-    use holtburger_core::ClientViewEvent;
-    use holtburger_world::entity::Entity;
-    use std::time::Instant;
-
-    #[test]
-    fn entity_spawn_emits_player_ready_notification_when_player_appears() {
-        let player_guid = Guid(0x5000_0004);
-        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-
-        let result = reduce_view_event(
-            &mut state,
-            &ClientViewEvent::EntitySpawned {
-                entity: Box::new(Entity::new(
-                    player_guid,
-                    "Player".to_string(),
-                    WorldPosition::default(),
-                )),
-            },
-            Instant::now(),
-        );
-
-        assert!(matches!(
-            result.actions.as_slice(),
-            [AppAction::Notification {
-                notification: AppNotification::PlayerEntityReady { guid }
-            }] if *guid == player_guid
-        ));
-        assert!(state.data.entities.contains_key(&player_guid));
-    }
-}
-
 pub(super) fn reduce_view_event(
     state: &mut GameState,
     event: &ClientViewEvent,
@@ -165,4 +127,42 @@ pub(super) fn reduce_view_event(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GameState;
+    use super::reduce_view_event;
+    use crate::types::{AppAction, AppNotification};
+    use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_core::ClientViewEvent;
+    use holtburger_world::entity::Entity;
+    use std::time::Instant;
+
+    #[test]
+    fn entity_spawn_emits_player_ready_notification_when_player_appears() {
+        let player_guid = Guid(0x5000_0004);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = reduce_view_event(
+            &mut state,
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(Entity::new(
+                    player_guid,
+                    "Player".to_string(),
+                    WorldPosition::default(),
+                )),
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            result.actions.as_slice(),
+            [AppAction::Notification {
+                notification: AppNotification::PlayerEntityReady { guid }
+            }] if *guid == player_guid
+        ));
+        assert!(state.data.entities.contains_key(&player_guid));
+    }
 }

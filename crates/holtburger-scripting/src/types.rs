@@ -6,7 +6,9 @@ use holtburger_common::properties::{
 };
 use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
-use holtburger_protocol::messages::combat::{AttackConditions, AttackHeight, CombatMode, DamageLocation};
+use holtburger_protocol::messages::combat::{
+    AttackConditions, AttackHeight, CombatMode, DamageLocation,
+};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use holtburger_protocol::messages::object::types::{
     ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,

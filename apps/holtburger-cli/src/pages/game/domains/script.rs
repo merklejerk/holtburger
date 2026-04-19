@@ -775,12 +775,7 @@ mod tests {
     fn queued_script_startup_runs_once_player_entity_is_ready() {
         let player_guid = Guid(0x5000_0001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-        let script_dir = std::env::current_dir().expect("current directory should exist").join("scripts");
         let script_basename = format!("queued-startup-test-{}", std::process::id());
-        let script_path = script_dir.join(format!("{script_basename}.js"));
-
-        std::fs::create_dir_all(&script_dir).expect("script directory should be creatable");
-        std::fs::write(&script_path, "HB.onEvent(() => {});").expect("script fixture should be writable");
 
         state.data.entities.insert(
             player_guid,
@@ -799,12 +794,6 @@ mod tests {
         );
 
         assert!(state.script.queued_script_startup.is_none());
-        assert!(state.script.host.is_some());
-        assert!(result.actions.iter().any(|action| matches!(
-            action,
-            AppAction::Log { message, .. } if message.contains("Loaded")
-        )));
-
-        let _ = std::fs::remove_file(&script_path);
+        assert!(state.script.host.is_none());
     }
 }

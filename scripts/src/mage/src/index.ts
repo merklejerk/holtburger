@@ -126,7 +126,8 @@ HB.onEvent((event) => {
 							`mage script started without usable mage data (json=${loadStatus.hasJson}, bin=${loadStatus.hasBin})`,
 						);
 					} else {
-						logMageInfo(
+						HB.print(
+							"info",
 							`loaded mage data: ${Object.keys(state.data.spells).length} spells, ${Object.keys(state.data.skills).length} skills`,
 						);
 					}

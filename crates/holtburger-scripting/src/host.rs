@@ -436,6 +436,9 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     attack(guid) {
         Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
     },
+    setCombatMode(on) {
+        Deno.core.ops.op_hb_set_combat_mode(Boolean(on));
+    },
     follow(guid) {
         Deno.core.ops.op_hb_follow(Number(guid) >>> 0);
     },
@@ -686,6 +689,7 @@ deno_core::extension!(
         op_hb_busy_operation,
         op_hb_respond_to_confirmation,
         op_hb_cast_spell,
+        op_hb_set_combat_mode,
         op_hb_open_container,
         op_hb_close_container,
         op_hb_equipment,
@@ -1330,6 +1334,15 @@ fn op_hb_attack(state: &mut OpState, guid: u32) {
         .push(ScriptIntent::Client(ScriptClientIntent::Attack {
             guid: Guid(guid),
         }));
+}
+
+#[op2(fast)]
+fn op_hb_set_combat_mode(state: &mut OpState, on: bool) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::SetCombatMode { on });
 }
 
 #[op2(fast)]
@@ -2128,6 +2141,28 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Print { message, .. }]
                 if message == "[\"Melee\",true,7,0.75,\"High\",123.5]"
+        ));
+    }
+
+    #[test]
+    fn set_combat_mode_helper_emits_script_intent() {
+        let source = ScriptSource::new(
+            "set-combat-mode-test",
+            r#"
+                Holtburger.setCombatMode(false);
+                Holtburger.setCombatMode(true);
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [
+                ScriptIntent::SetCombatMode { on: false },
+                ScriptIntent::SetCombatMode { on: true },
+            ]
         ));
     }
 

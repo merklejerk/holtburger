@@ -7,7 +7,6 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
-use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::Frame;
@@ -679,7 +678,7 @@ pub enum AppAction {
     CycleCombatProfileLevel,
     CycleCombatAttackHeight,
     SetCombatMode {
-        mode: CombatMode,
+        on: bool,
     },
     LevelUpStat {
         stat: StatType,

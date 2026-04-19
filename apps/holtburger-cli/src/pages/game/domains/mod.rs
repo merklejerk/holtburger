@@ -17,7 +17,7 @@ mod script;
 mod trade_vendor;
 pub(super) mod ui;
 
-pub(crate) use combat::toggled_combat_mode;
+pub(crate) use combat::is_in_combat_mode;
 pub(crate) use logopolis::{logopolis_state, logopolis_state_mut};
 #[allow(unused_imports)]
 pub(crate) use object_interaction::{

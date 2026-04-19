@@ -8,12 +8,8 @@ pub(super) enum EnterCombatModeResult {
     Failed(UpdateResult),
 }
 
-pub(crate) fn toggled_combat_mode(state: &GameState) -> CombatMode {
-    if state.data.combat_mode != CombatMode::NonCombat {
-        CombatMode::NonCombat
-    } else {
-        state.data.get_suggested_combat_mode()
-    }
+pub(crate) fn is_in_combat_mode(state: &GameState) -> bool {
+    state.data.combat_mode != CombatMode::NonCombat
 }
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -55,14 +51,28 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.data.combat_controls.cycle_attack_height();
             result.request_redraw(RedrawPriority::Immediate);
         }
-        AppAction::SetCombatMode { mode } => match try_enter_combat_mode(state, mode) {
-            EnterCombatModeResult::Failed(res) => {
-                result.merge(res);
+        AppAction::SetCombatMode { on } => {
+            let desired_mode = if on {
+                if state.data.combat_mode != CombatMode::NonCombat {
+                    None
+                } else {
+                    Some(state.data.get_suggested_combat_mode())
+                }
+            } else {
+                Some(CombatMode::NonCombat)
+            };
+
+            if let Some(mode) = desired_mode {
+                match try_enter_combat_mode(state, mode) {
+                    EnterCombatModeResult::Failed(res) => {
+                        result.merge(res);
+                    }
+                    EnterCombatModeResult::Success(res) => {
+                        result.merge(res);
+                    }
+                }
             }
-            EnterCombatModeResult::Success(res) => {
-                result.merge(res);
-            }
-        },
+        }
         _ => {}
     }
 

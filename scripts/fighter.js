@@ -29,15 +29,22 @@ function ratio(current, max) {
   return max > 0 ? current / max : 0;
 }
 
-function resetState() {
+function initializeSessionConfig() {
+  aggroDistance = DEFAULT_AGGRO_DISTANCE;
+  maxPartyDistance = DEFAULT_MAX_PARTY_DISTANCE;
+}
+
+function resetTransientState() {
   state.wasLowStamina = false;
+  clearTransientState();
+}
+
+function clearTransientState() {
   state.lowStaminaCancelIssued = false;
   state.lastPrimaryActionKey = null;
   state.preferredAttackTargetGuid = null;
   state.partySeparationLatched = false;
   state.meleeStallRecovery = null;
-  aggroDistance = DEFAULT_AGGRO_DISTANCE;
-  maxPartyDistance = DEFAULT_MAX_PARTY_DISTANCE;
 }
 
 function parsePositiveNumberArg(args, flagName) {
@@ -544,7 +551,8 @@ HB.onEvent((event) => {
 
   switch (event.data.kind) {
     case "started":
-      resetState();
+      resetTransientState();
+      initializeSessionConfig();
       aggroDistance =
         parsePositiveNumberArg(event.data.data.args, "aggro-dist") ??
         DEFAULT_AGGRO_DISTANCE;
@@ -553,8 +561,11 @@ HB.onEvent((event) => {
         DEFAULT_MAX_PARTY_DISTANCE;
       runFighter();
       break;
+    case "teleport_started":
+      clearTransientState();
+      break;
     case "stopped":
-      resetState();
+      resetTransientState();
       break;
     case "tick":
       runFighter();

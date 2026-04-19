@@ -6,6 +6,7 @@ export function createInitialState(): MageRuntimeState {
 		data: null,
 		config: {
 			preferredSpellIds: [],
+			bannedSpellIds: [],
 		},
 		elapsedSeconds: 0,
 		combatTargetGuid: null,

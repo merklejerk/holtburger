@@ -11,6 +11,6 @@ This package contains the TypeScript source for the `mage` TUI script.
 - `npm run build` type-checks first, then bundles directly with esbuild
 - `npm run watch` keeps rebuilding on source changes
 
-The script also reads local user preferences from `.config/mage.config.json`. The supported setting is `preferredSpells`, an ordered list of spell IDs or spell key names that the chooser should prefer when multiple candidates are otherwise valid.
+The script also reads local user preferences from `.config/mage.config.json`. The supported settings are `preferredSpells` and `bannedSpells`, ordered lists of spell IDs or spell key names. Preferred spells are ranked ahead of other valid candidates, and banned spells are removed from the runtime spell database before spell selection runs.
 
 Run `npm install` once inside this directory, then use `npm run build`.

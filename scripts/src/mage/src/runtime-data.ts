@@ -101,6 +101,35 @@ export function normalizeMageData(
 	};
 }
 
+export function filterMageDataSpells(
+	data: MageData | null,
+	bannedSpellIds: number[],
+): MageData | null {
+	if (data == null || bannedSpellIds.length === 0) {
+		return data;
+	}
+
+	const bannedSpellIdSet = new Set(bannedSpellIds);
+	if (bannedSpellIdSet.size === 0) {
+		return data;
+	}
+
+	const filteredSpells = Object.fromEntries(
+		Object.entries(data.spells).filter(
+			([, spell]) => !bannedSpellIdSet.has(spell.spellId),
+		),
+	);
+
+	if (Object.keys(filteredSpells).length === Object.keys(data.spells).length) {
+		return data;
+	}
+
+	return {
+		...data,
+		spells: filteredSpells,
+	};
+}
+
 function isUint8Array(value: unknown): value is Uint8Array {
 	return value instanceof Uint8Array;
 }

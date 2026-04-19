@@ -1,7 +1,7 @@
 import { runMage } from "./engine";
 import { MAX_PARTY_DISTANCE } from "./constants";
 import { loadMageConfig } from "./runtime-config";
-import { loadMageDataWithStatus } from "./runtime-data";
+import { filterMageDataSpells, loadMageDataWithStatus } from "./runtime-data";
 import { createInitialState, resetState } from "./state";
 import {
 	cancelCombatPlanning,
@@ -108,8 +108,11 @@ HB.onEvent((event) => {
 				case "started": {
 					resetState(state);
 					const loadStatus = loadMageDataWithStatus();
-					state.data = loadStatus.data;
-					state.config = loadMageConfig(state.data);
+					state.config = loadMageConfig(loadStatus.data);
+					state.data = filterMageDataSpells(
+						loadStatus.data,
+						state.config.bannedSpellIds,
+					);
 					state.maxPartyDistance =
 						parsePositiveNumberArg(event.data.data.args, "max-party-dist") ??
 						MAX_PARTY_DISTANCE;

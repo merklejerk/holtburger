@@ -897,10 +897,9 @@ impl GameState {
                 result.with_redraw(true)
             }
             "/combat" => {
-                let mode = crate::pages::game::state::domains::toggled_combat_mode(self);
-                result
-                    .actions
-                    .push(crate::types::AppAction::SetCombatMode { mode });
+                result.actions.push(crate::types::AppAction::SetCombatMode {
+                    on: !crate::pages::game::state::domains::is_in_combat_mode(self),
+                });
                 result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }

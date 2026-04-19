@@ -231,6 +231,7 @@ The write side of the API emits frontend intents or direct client actions.
 - `HB.approach(guid)` requests movement toward the given entity.
 - `HB.follow(guid)` requests following the given entity.
 - `HB.attack(guid)` requests attacking the given entity.
+- `HB.setCombatMode(on)` requests combat mode on (`true`) or off (`false`).
 - `HB.cancelInteraction()` cancels the current client interaction workflow.
 
 ### Movement and Combat

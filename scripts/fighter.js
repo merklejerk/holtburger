@@ -7,6 +7,7 @@ const DEFAULT_AGGRO_DISTANCE = 15;
 const DEFAULT_MAX_PARTY_DISTANCE = 20;
 const PARTY_RESUME_FACTOR = 0.9;
 const HEALING_DISTANCE = 15;
+const MELEE_STALL_TIMEOUT_SECONDS = 3;
 const LOW_STAMINA_RATIO = 0.1;
 const LOW_HEALTH_RATIO = 0.6;
 const HEALING_BUSY_OPERATIONS = new Set(["use", "use_with_target"]);
@@ -21,6 +22,7 @@ const state = {
   lastPrimaryActionKey: null,
   preferredAttackTargetGuid: null,
   partySeparationLatched: false,
+  meleeStallRecovery: null,
 };
 
 function ratio(current, max) {
@@ -33,6 +35,7 @@ function resetState() {
   state.lastPrimaryActionKey = null;
   state.preferredAttackTargetGuid = null;
   state.partySeparationLatched = false;
+  state.meleeStallRecovery = null;
   aggroDistance = DEFAULT_AGGRO_DISTANCE;
   maxPartyDistance = DEFAULT_MAX_PARTY_DISTANCE;
 }
@@ -59,6 +62,12 @@ function issuePrimaryAction(key, emit) {
   state.lastPrimaryActionKey = key;
   emit();
   return true;
+}
+
+function toggleCombatMode(on) {
+  return issuePrimaryAction(`combat-mode:${on}`, () => {
+    HB.setCombatMode(on);
+  });
 }
 
 function isLowHealth(percent) {
@@ -305,11 +314,12 @@ function followPartyLeader(self, partyLeader) {
   });
 }
 
-// Reuse combat and interaction state so we do not spam attack commands.
-function attackTarget(target) {
+function attackTarget(target, options = {}) {
   if (!target) {
     return false;
   }
+
+  const force = options.force === true;
 
   const combatInfo = HB.combatInfo();
   const currentInteraction = HB.currentInteraction();
@@ -323,20 +333,98 @@ function attackTarget(target) {
     currentInteraction.kind === "approach" &&
     currentInteraction.data.guid === target.guid;
 
-  if (alreadyAttackingSameTarget) {
+  if (!force && alreadyAttackingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
     return true;
   }
 
-  if (alreadyApproachingSameTarget) {
+  if (!force && alreadyApproachingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
     return true;
   }
 
   state.preferredAttackTargetGuid = target.guid;
-  return issuePrimaryAction(target.key, () => {
+  const key = force ? `attack-recover:${target.guid}` : target.key;
+  return issuePrimaryAction(key, () => {
     HB.attack(target.guid);
   });
+}
+
+function shouldRecoverMeleeStall(combatInfo) {
+  if (combatInfo.combatMode !== "Melee" || !combatInfo.isEngaged) {
+    return false;
+  }
+
+  if (combatInfo.target == null || combatInfo.lastAttackTime == null) {
+    return false;
+  }
+
+  const serverTime = HB.serverTime();
+  if (serverTime <= 0) {
+    return false;
+  }
+
+  return serverTime - combatInfo.lastAttackTime >= MELEE_STALL_TIMEOUT_SECONDS;
+}
+
+function clearMeleeStallRecovery() {
+  state.meleeStallRecovery = null;
+}
+
+function handleMeleeStallRecovery(combatInfo) {
+  if (state.meleeStallRecovery == null) {
+    if (!shouldRecoverMeleeStall(combatInfo)) {
+      return false;
+    }
+
+    state.meleeStallRecovery = {
+      phase: "drop",
+      targetGuid: combatInfo.target,
+    };
+  }
+
+  const recovery = state.meleeStallRecovery;
+  if (
+    recovery == null ||
+    combatInfo.target == null ||
+    combatInfo.target !== recovery.targetGuid
+  ) {
+    clearMeleeStallRecovery();
+    return false;
+  }
+
+  if (recovery.phase === "drop") {
+    if (combatInfo.combatMode !== "NonCombat") {
+      return toggleCombatMode(false);
+    }
+
+    recovery.phase = "raise";
+    return true;
+  }
+
+  if (recovery.phase === "raise") {
+    if (combatInfo.combatMode !== "Melee") {
+      return toggleCombatMode(true);
+    }
+
+    const attacked = attackTarget(
+      {
+        guid: recovery.targetGuid,
+        key: `attack-recover:${recovery.targetGuid}`,
+        reason: "melee-stall-recovery",
+      },
+      { force: true },
+    );
+
+    if (attacked) {
+      clearMeleeStallRecovery();
+    }
+
+    return attacked;
+  }
+
+  clearMeleeStallRecovery();
+  return false;
 }
 
 // Once separated, stay latched until we are safely back in range of the leader.
@@ -409,6 +497,10 @@ function runFighter() {
   }
 
   if (healIfNeeded(self)) {
+    return;
+  }
+
+  if (handleMeleeStallRecovery(combatInfo)) {
     return;
   }
 

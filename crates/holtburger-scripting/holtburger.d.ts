@@ -806,6 +806,7 @@ interface HoltburgerApi {
   targetEntity(guid: Guid): void;
   approach(guid: Guid): void;
   follow(guid: Guid): void;
+  setCombatMode(on: boolean): void;
   attack(guid: Guid): void;
   cancelInteraction(): void;
 

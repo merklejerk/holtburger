@@ -379,7 +379,7 @@ impl GameState {
                     }
                 } else if c == '`' {
                     result.actions.push(crate::types::AppAction::SetCombatMode {
-                        mode: crate::pages::game::state::domains::toggled_combat_mode(self),
+                        on: !crate::pages::game::state::domains::is_in_combat_mode(self),
                     });
                     result.request_redraw(RedrawPriority::Immediate);
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
@@ -515,7 +515,7 @@ mod tests {
         assert!(matches!(
             result.actions.first(),
             Some(AppAction::SetCombatMode {
-                mode: CombatMode::Melee
+                on: true
             })
         ));
         assert!(matches!(
@@ -542,7 +542,7 @@ mod tests {
         assert!(matches!(
             result.actions.first(),
             Some(AppAction::SetCombatMode {
-                mode: CombatMode::NonCombat
+                on: false
             })
         ));
         assert!(matches!(
@@ -624,7 +624,7 @@ mod tests {
         assert!(matches!(
             result.actions.first(),
             Some(AppAction::SetCombatMode {
-                mode: CombatMode::Melee
+                on: true
             })
         ));
     }

@@ -291,6 +291,7 @@ impl GameState {
 
                 anyhow::bail!("no active confirmation to respond to")
             }
+            ScriptIntent::SetCombatMode { on } => Ok(AppAction::SetCombatMode { on }),
             ScriptIntent::Client(intent) => match intent {
                 ScriptClientIntent::TargetEntity { guid } => Ok(AppAction::BeginInteraction {
                     interaction: Interaction::Targeting { target_guid: guid },
@@ -609,6 +610,17 @@ mod tests {
             )
             .expect("scoot should compile"),
             AppAction::Scoot { distance_m } if (distance_m - 2.25).abs() < f32::EPSILON
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::SetCombatMode {
+                    on: true,
+                },
+            )
+            .expect("set combat mode should compile"),
+            AppAction::SetCombatMode { on: true }
         ));
 
         assert!(matches!(

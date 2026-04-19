@@ -652,10 +652,9 @@ impl TuiNavigation {
         let target_guid = combat_request.target_guid;
         let stop_distance =
             effective_arrival_distance(MELEE_ATTACK_DISTANCE, input.target_use_radius());
+        let distance_to_target = self.distance_to_target(input);
 
-        let pursuing = self
-            .distance_to_target(input)
-            .is_some_and(|distance| distance > stop_distance);
+        let pursuing = distance_to_target.is_some_and(|distance| distance >= stop_distance);
 
         self.active = ActiveNavigation::StickyMelee {
             target_guid,
@@ -1552,6 +1551,46 @@ mod tests {
             ActiveNavigation::StickyMelee {
                 latched_target_guid: Some(guid),
                 pursuing: false,
+                ..
+            } if guid == target_guid
+        ));
+    }
+
+    #[test]
+    fn sticky_melee_keeps_pursuing_at_exact_stop_distance() {
+        let now = Instant::now();
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 180.0_f32.to_radians());
+        let target_guid = Guid(0x5000_0009);
+        let mut navigation = TuiNavigation::default();
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: sticky_snapshot(
+                Some(player_position),
+                Some(target_sample_with_use_radius(
+                    target_guid,
+                    world_position(0.6, 0.0, 0.0),
+                    0.5,
+                )),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+                Some(CombatNavigationRequest {
+                    target_guid,
+                    mode: CombatMode::Melee,
+                }),
+            ),
+        });
+
+        assert!(matches!(
+            update.drive_command,
+            Some(PlayerDriveIntent::Autonomous(_)) | Some(PlayerDriveIntent::SnapFacing { .. })
+        ));
+        assert!(matches!(
+            navigation.active,
+            ActiveNavigation::StickyMelee {
+                latched_target_guid: Some(guid),
+                pursuing: true,
                 ..
             } if guid == target_guid
         ));

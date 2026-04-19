@@ -611,6 +611,11 @@ impl ClientRuntime {
                         grounded: *grounded,
                     });
             }
+            WorldEvent::SelfServerControlledMotion(data) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::SelfServerControlledMotion { data: data.clone() });
+            }
             WorldEvent::ForcedReposition {
                 guid,
                 pos,

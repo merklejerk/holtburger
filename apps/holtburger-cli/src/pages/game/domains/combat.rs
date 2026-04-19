@@ -101,6 +101,15 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         {
             state.data.combat_runtime.note_server_message(message);
         }
+        ClientViewEvent::SelfServerControlledMotion { data }
+            if state.data.combat_mode == CombatMode::Melee
+                && combat_model::combat_feedback_context_active(state) =>
+        {
+            state
+                .data
+                .combat_runtime
+                .note_self_server_controlled_motion(data);
+        }
         _ => {}
     }
 

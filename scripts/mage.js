@@ -1343,7 +1343,7 @@
   function loadMageConfig(data) {
     const rawConfig = HB.loadConfig();
     if (rawConfig == null) {
-      HB.writeConfig({ preferredSpells: [] });
+      HB.print("warn", `No mage config found. Using default spells.`);
     }
     return normalizeMageConfig(rawConfig, data);
   }

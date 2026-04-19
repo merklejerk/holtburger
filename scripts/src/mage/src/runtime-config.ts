@@ -7,7 +7,7 @@ type MageConfigFile = {
 export function loadMageConfig(data: MageData | null): MageConfig {
 	const rawConfig = HB.loadConfig();
 	if (rawConfig == null) {
-		HB.writeConfig({ preferredSpells: [] });
+		HB.print("warn", `No mage config found. Using default spells.`);
 	}
 
 	return normalizeMageConfig(rawConfig, data);

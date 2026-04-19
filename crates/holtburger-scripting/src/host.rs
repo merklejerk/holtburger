@@ -1826,6 +1826,7 @@ mod tests {
         open_and_close_container_intents_are_emitted();
         attack_follow_and_cancel_helpers_emit_client_intents();
         current_trade_info_helper_returns_js_object();
+        set_combat_mode_helper_emits_script_intent();
     }
 
     fn dispatch_source_escapes_javascript_line_separators() {
@@ -2144,7 +2145,6 @@ mod tests {
         ));
     }
 
-    #[test]
     fn set_combat_mode_helper_emits_script_intent() {
         let source = ScriptSource::new(
             "set-combat-mode-test",

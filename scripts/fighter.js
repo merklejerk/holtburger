@@ -269,9 +269,6 @@ function healIfNeeded(self) {
   }
 
   if (isHealingBusy(self)) {
-    HB.debugLog(
-      `healing already in progress target=${healTarget.guid} busy=${self.busyOperation}`,
-    );
     return true;
   }
 
@@ -282,9 +279,6 @@ function healIfNeeded(self) {
 
   const key = `heal:${healingKit}:${healTarget.guid}`;
   return issuePrimaryAction(key, () => {
-    HB.debugLog(
-      `healing target=${healTarget.guid} health=${Math.round(healTarget.healthRatio * 100)}% kit=${healingKit}`,
-    );
     HB.useWith(healingKit, healTarget.guid);
   });
 }
@@ -301,17 +295,11 @@ function followPartyLeader(self, partyLeader) {
     currentInteraction.kind === "Follow" &&
     currentInteraction.data.guid === partyLeader.guid
   ) {
-    HB.debugLog(`follow already active target=${partyLeader.guid}`);
     return true;
   }
 
   const key = `follow:${partyLeader.guid}`;
   return issuePrimaryAction(key, () => {
-    if (currentInteraction != null) {
-      HB.debugLog(
-        `restarting follow target=${partyLeader.guid} previous=${currentInteraction.kind}`,
-      );
-    }
     HB.cancelInteraction();
     HB.follow(partyLeader.guid);
   });
@@ -337,23 +325,16 @@ function attackTarget(target) {
 
   if (alreadyAttackingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
-    HB.debugLog(
-      `attack already active target=${target.guid} reason=${target.reason}`,
-    );
     return true;
   }
 
   if (alreadyApproachingSameTarget) {
     state.preferredAttackTargetGuid = target.guid;
-    HB.debugLog(
-      `attack pending approach target=${target.guid} reason=${target.reason}`,
-    );
     return true;
   }
 
   state.preferredAttackTargetGuid = target.guid;
   return issuePrimaryAction(target.key, () => {
-    HB.debugLog(`attacking target=${target.guid} reason=${target.reason}`);
     HB.attack(target.guid);
   });
 }
@@ -361,10 +342,6 @@ function attackTarget(target) {
 // Once separated, stay latched until we are safely back in range of the leader.
 function updatePartySeparationLatch(self, partyLeader) {
   if (!partyLeader) {
-    if (state.partySeparationLatched) {
-      HB.debugLog("party separation cleared party=n/a");
-    }
-
     state.partySeparationLatched = false;
     return { shouldFollow: false, distance: null };
   }
@@ -373,12 +350,6 @@ function updatePartySeparationLatch(self, partyLeader) {
   const isSeparated = distance != null && distance > maxPartyDistance;
 
   if (isSeparated) {
-    if (!state.partySeparationLatched) {
-      HB.debugLog(
-        `party separation latched distance=${distance.toFixed(2)} party=${partyLeader.guid}`,
-      );
-    }
-
     state.partySeparationLatched = true;
     state.preferredAttackTargetGuid = null;
     return { shouldFollow: true, distance };
@@ -388,9 +359,6 @@ function updatePartySeparationLatch(self, partyLeader) {
     state.partySeparationLatched &&
     (distance == null || distance <= maxPartyDistance * PARTY_RESUME_FACTOR)
   ) {
-    HB.debugLog(
-      `party separation cleared distance=${distance == null ? "n/a" : distance.toFixed(2)} party=${partyLeader ? partyLeader.guid : "n/a"}`,
-    );
     state.partySeparationLatched = false;
   }
 
@@ -467,9 +435,6 @@ function runFighter() {
 
   if (combatInfo.isEngaged && combatTargetDefeated) {
     state.preferredAttackTargetGuid = null;
-    HB.debugLog(
-      `combat target defeated target=${combatInfo.target}; retargeting`,
-    );
     HB.cancelInteraction();
   }
 

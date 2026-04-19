@@ -183,9 +183,18 @@ struct Args {
     password: String,
     #[arg(short, long)]
     character: Option<String>,
-    #[arg(long, value_name = "SCRIPT_NAME", help = "Queue a script to start as soon as the client is ready")]
+    #[arg(
+        long,
+        value_name = "SCRIPT_NAME",
+        help = "Queue a script to start as soon as the client is ready"
+    )]
     run: Option<String>,
-    #[arg(long = "run-args", value_name = "SCRIPT_ARGS", requires = "run", help = "Arguments passed to the queued script's Started lifecycle event")]
+    #[arg(
+        long = "run-args",
+        value_name = "SCRIPT_ARGS",
+        requires = "run",
+        help = "Arguments passed to the queued script's Started lifecycle event"
+    )]
     run_args: Option<String>,
     #[arg(long)]
     capture: Option<String>,

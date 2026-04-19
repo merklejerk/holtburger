@@ -404,5 +404,4 @@ mod tests {
             "Disconnected: Booted from server: Server maintenance"
         );
     }
-
 }

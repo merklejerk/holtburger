@@ -514,9 +514,7 @@ mod tests {
         assert!(result.commands.is_empty());
         assert!(matches!(
             result.actions.first(),
-            Some(AppAction::SetCombatMode {
-                on: true
-            })
+            Some(AppAction::SetCombatMode { on: true })
         ));
         assert!(matches!(
             result.actions.get(1),
@@ -541,9 +539,7 @@ mod tests {
 
         assert!(matches!(
             result.actions.first(),
-            Some(AppAction::SetCombatMode {
-                on: false
-            })
+            Some(AppAction::SetCombatMode { on: false })
         ));
         assert!(matches!(
             result.actions.get(1),
@@ -623,9 +619,7 @@ mod tests {
 
         assert!(matches!(
             result.actions.first(),
-            Some(AppAction::SetCombatMode {
-                on: true
-            })
+            Some(AppAction::SetCombatMode { on: true })
         ));
     }
 

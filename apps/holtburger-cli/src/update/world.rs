@@ -2,14 +2,14 @@ use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::state::EventContext;
-use crate::types::{Page, UpdateResult};
+use crate::types::{AppAction, AppNotification, Page, UpdateResult};
 use crate::utils::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
 
 impl AppState {
-    fn handle_setup_event(&mut self, event: &ClientViewEvent) {
+    fn handle_setup_event(&mut self, event: &ClientViewEvent, result: &mut UpdateResult) {
         match event {
             ClientViewEvent::WorldNameUpdated(name) => {
                 self.world_name = name.clone();
@@ -45,9 +45,16 @@ impl AppState {
             }
             ClientViewEvent::PlayerEntered { guid, name } => {
                 if let Page::Game(game) = &mut self.page {
+                    let was_ready = game.player_entity_is_ready();
                     game.data.player_guid = Some(*guid);
                     game.data.character_name = Some(name.clone());
                     game.data.world_name = self.world_name.clone();
+
+                    if !was_ready && game.player_entity_is_ready() {
+                        result.actions.push(AppAction::Notification {
+                            notification: AppNotification::PlayerEntityReady { guid: *guid },
+                        });
+                    }
                 }
             }
             ClientViewEvent::ServerTimeUpdated { time } => {
@@ -141,7 +148,7 @@ impl AppState {
             | ClientViewEvent::PlayerEntered { .. }
             | ClientViewEvent::ServerTimeUpdated { .. }
             | ClientViewEvent::WorldNameUpdated(_) => {
-                self.handle_setup_event(&event);
+                self.handle_setup_event(&event, &mut result);
             }
 
             _ => {}
@@ -272,6 +279,7 @@ mod tests {
             quit_on_disconnect: false,
             disconnect_reason: None,
             pending_exit_message: None,
+            queued_script_startup: None,
         }
     }
 
@@ -396,4 +404,5 @@ mod tests {
             "Disconnected: Booted from server: Server maintenance"
         );
     }
+
 }

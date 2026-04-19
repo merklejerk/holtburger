@@ -2,6 +2,9 @@
 
 Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. The TUI client already covers a meaningful set of gameplay, automation, and data-projection workflows, and the stack keeps expanding.
 
+> [!IMPORTANT]
+> Holtburger is being developed against the ACE server implementation, not GDLE. It will likely be very unstable on GDLE servers.
+
 ![tui client screenshot](screenshot.png)
 
 ## The Ecosystem

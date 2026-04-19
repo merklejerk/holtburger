@@ -22,6 +22,11 @@ pub(crate) fn reduce_action(state: &mut GameState, action: AppAction) -> Option<
         | AppAction::Log { .. }
         | AppAction::SendCommands { .. }
         | AppAction::TransitionToGame { .. } => None,
+        AppAction::Notification { notification } => {
+            let mut result = UpdateResult::new();
+            result.actions.push(AppAction::Notification { notification });
+            Some(result)
+        }
         AppAction::Sequence { actions } => {
             let mut result = UpdateResult::new();
             for inner_action in actions {

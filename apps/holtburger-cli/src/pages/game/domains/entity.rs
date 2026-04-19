@@ -1,6 +1,44 @@
 use super::inventory;
 use super::*;
 
+#[cfg(test)]
+mod tests {
+    use super::GameState;
+    use super::reduce_view_event;
+    use crate::types::{AppAction, AppNotification};
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::Guid;
+    use holtburger_core::ClientViewEvent;
+    use holtburger_world::entity::Entity;
+    use std::time::Instant;
+
+    #[test]
+    fn entity_spawn_emits_player_ready_notification_when_player_appears() {
+        let player_guid = Guid(0x5000_0004);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = reduce_view_event(
+            &mut state,
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(Entity::new(
+                    player_guid,
+                    "Player".to_string(),
+                    WorldPosition::default(),
+                )),
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            result.actions.as_slice(),
+            [AppAction::Notification {
+                notification: AppNotification::PlayerEntityReady { guid }
+            }] if *guid == player_guid
+        ));
+        assert!(state.data.entities.contains_key(&player_guid));
+    }
+}
+
 pub(super) fn reduce_view_event(
     state: &mut GameState,
     event: &ClientViewEvent,
@@ -10,19 +48,35 @@ pub(super) fn reduce_view_event(
 
     match event {
         ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
+            let was_ready = state.player_entity_is_ready();
             let entity_ref = entity.as_ref();
             state
                 .data
                 .entities
                 .insert(entity_ref.guid, entity_ref.clone());
+            if !was_ready && state.player_entity_is_ready() {
+                result.actions.push(AppAction::Notification {
+                    notification: AppNotification::PlayerEntityReady {
+                        guid: entity_ref.guid,
+                    },
+                });
+            }
         }
         ClientViewEvent::EntitySpawned { entity } | ClientViewEvent::EntityReplaced { entity } => {
+            let was_ready = state.player_entity_is_ready();
             let entity_ref = entity.as_ref();
             if inventory::update_inventory_and_equipment(state, entity_ref) {
                 result.request_redraw(RedrawPriority::Immediate);
             }
             inventory::refresh_entity_context_if_visible(state, entity_ref.guid, &mut result);
             inventory::sync_weapon_swap_controller(state, now, &mut result);
+            if !was_ready && state.player_entity_is_ready() {
+                result.actions.push(AppAction::Notification {
+                    notification: AppNotification::PlayerEntityReady {
+                        guid: entity_ref.guid,
+                    },
+                });
+            }
         }
         ClientViewEvent::EntityPropertiesUpdated { guid, updates } => {
             let mut needs_update = false;
@@ -85,12 +139,20 @@ pub(super) fn reduce_view_event(
             result.merge(inventory::handle_entity_removed(state, *guid));
         }
         ClientViewEvent::EntityIdentified { entity } => {
+            let was_ready = state.player_entity_is_ready();
             let entity_ref = entity.as_ref();
             if inventory::update_inventory_and_equipment(state, entity_ref) {
                 result.request_redraw(RedrawPriority::Immediate);
             }
             inventory::handle_entity_identified(state, entity_ref);
             inventory::sync_weapon_swap_controller(state, now, &mut result);
+            if !was_ready && state.player_entity_is_ready() {
+                result.actions.push(AppAction::Notification {
+                    notification: AppNotification::PlayerEntityReady {
+                        guid: entity_ref.guid,
+                    },
+                });
+            }
             result.request_redraw(RedrawPriority::Immediate);
         }
         ClientViewEvent::ContainerOpened { guid } => {

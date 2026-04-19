@@ -215,6 +215,20 @@ impl GameState {
                 status
             ),
         );
+        if let Some(queued_script_startup) = &self.script.queued_script_startup {
+            self.chat.log(
+                ChatMessageTags::system(),
+                format!(
+                    "Queued script startup: {}{}",
+                    queued_script_startup.basename,
+                    if queued_script_startup.args.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(" {}", queued_script_startup.args)
+                    }
+                ),
+            );
+        }
         self.chat.log(
             ChatMessageTags::system(),
             format!(
@@ -453,7 +467,7 @@ impl GameState {
             ],
             "scripts" => vec![
                 "Usage: /scripts".to_string(),
-                "Show the current script status, local script dir, and discovered scripts."
+                "Show the current script status, queued startup, local script dir, and discovered scripts."
                     .to_string(),
                 "Use /run <BASENAME> [ARGS...] to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
                     .to_string(),

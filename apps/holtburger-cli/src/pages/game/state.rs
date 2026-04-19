@@ -24,7 +24,7 @@ use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::panels::logopolis::LogopolisState;
 use crate::pages::game::weapon_swap::{WeaponSwapInput, WeaponSwapState};
-use crate::state::{EventContext, TickContext};
+use crate::state::{EventContext, QueuedScriptStartup, TickContext};
 use crate::types::{
     AppAction, AppNotification, AppUiAction, ChatMessageTags, ContextView, DashboardTab,
     FocusedPane, InspectTarget, Interaction, LocalConfirmation, RedrawPriority, UpdateResult,
@@ -52,6 +52,7 @@ pub(crate) struct GameScriptState {
     pub(crate) host: Option<ScriptHost>,
     pub(crate) tick_accumulator: Duration,
     pub(crate) running_source_name: Option<String>,
+    pub(crate) queued_script_startup: Option<QueuedScriptStartup>,
 }
 
 pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);
@@ -97,6 +98,12 @@ pub struct SalvagingState {
 impl GameState {
     pub(super) fn mark_fellowship_invite_accepted(&mut self) {
         self.runtime.open_party_tab_on_next_fellowship_update = true;
+    }
+
+    pub(crate) fn player_entity_is_ready(&self) -> bool {
+        self.data
+            .player_guid
+            .is_some_and(|guid| self.data.entities.contains_key(&guid))
     }
 
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {

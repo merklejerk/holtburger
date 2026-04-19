@@ -12,6 +12,21 @@ use crate::types::{ChatMessageTags, Page};
 use crate::pages::game::GameState;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueuedScriptStartup {
+    pub basename: String,
+    pub args: String,
+}
+
+impl QueuedScriptStartup {
+    pub fn new(basename: impl Into<String>, args: impl Into<String>) -> Self {
+        Self {
+            basename: basename.into(),
+            args: args.into(),
+        }
+    }
+}
+
 pub struct NetStats {
     pub bytes_in: u64,
     pub bytes_out: u64,
@@ -49,6 +64,7 @@ pub struct AppState {
     pub quit_on_disconnect: bool,
     pub disconnect_reason: Option<String>,
     pub pending_exit_message: Option<String>,
+    pub queued_script_startup: Option<QueuedScriptStartup>,
 }
 
 pub struct RenderContext<'a> {

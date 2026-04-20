@@ -7,19 +7,26 @@ import {
 } from "./constants";
 import {
 	clearAttackHistory,
+	clearHealingKitHistory,
+	clearVulnerabilityAttemptHistory,
 	followPartyLeader,
+	hasRecentHealingKitSuccess,
 	hasRecentMissedAttack,
 	clearVulnerabilityHistory,
 	hasRecentVulnerabilityCast,
 	cancelCombatPlanning,
 	interruptSpellcast,
 	isCombatTargetAlive,
+	healingKitUseBlocksPlanning,
 	observeSpellCastBusy,
 	resolveSpellcastFromCombatFeedback,
 	resolveSpellcastFromChatMessage,
 	resolveSpellcastFromIdle,
 	resolveSpellcastFromTimeout,
 	resolveSpellcastFromWeenieError,
+	resolveHealingKitUseFromChatMessage,
+	resolveHealingKitUseFromTimeout,
+	useHealingKitOnTarget,
 	spellcastBlocksPlanning,
 	failedVulnAttemptCount,
 } from "./runtime-actions";
@@ -34,11 +41,23 @@ import type {
 const testGlobal = globalThis as typeof globalThis & {
 	HB: {
 		log: () => void;
+		debugLog: () => void;
+		selfEntity?: () => ScriptSelfView | null;
+		inventory?: () => Array<{ items: Guid[] }>;
+		entity?: (guid?: Guid) => ScriptEntityView | ScriptSelfView | null;
+		useWith?: (itemGuid: Guid, targetGuid: Guid) => void;
+		currentInteraction?: () => { kind: string; data: { guid: Guid } } | null;
+		cancelInteraction?: () => void;
+		follow?: (guid: Guid) => void;
+		distance?: (left: Guid, right: Guid) => number;
+		party?: () => ScriptPartyView | null;
+		entityExists?: (guid: Guid) => boolean;
 	};
 };
 
 testGlobal.HB = {
 	log: () => undefined,
+	debugLog: () => undefined,
 };
 
 test("vulnerability history tracks successful casts per monster", () => {
@@ -62,10 +81,22 @@ test("vulnerability history can be cleared when a monster disappears", () => {
 	state.vulnerabilityPolicy.failedVulnAttemptsByTarget.set(targetGuid, 1);
 	assert.equal(hasRecentVulnerabilityCast(state, targetGuid), true);
 	assert.equal(failedVulnAttemptCount(state, targetGuid), 1);
-
 	clearVulnerabilityHistory(state, targetGuid);
 
 	assert.equal(hasRecentVulnerabilityCast(state, targetGuid), false);
+	assert.equal(failedVulnAttemptCount(state, targetGuid), 0);
+});
+
+test("vulnerability success history survives disappearance while failed attempts clear", () => {
+	const state = createInitialState();
+	const targetGuid = 203 as Guid;
+
+	state.vulnerabilityPolicy.lastSuccessfulVulnAtByTarget.set(targetGuid, 0);
+	state.vulnerabilityPolicy.failedVulnAttemptsByTarget.set(targetGuid, 2);
+
+	clearVulnerabilityAttemptHistory(state, targetGuid);
+
+	assert.equal(hasRecentVulnerabilityCast(state, targetGuid), true);
 	assert.equal(failedVulnAttemptCount(state, targetGuid), 0);
 });
 
@@ -293,11 +324,13 @@ test("stale follow is canceled when the player becomes the leader", () => {
 
 	const hb: {
 		log: () => void;
+		debugLog: () => void;
 		currentInteraction: () => { kind: "Follow"; data: { guid: Guid } } | null;
 		cancelInteraction: () => void;
 		follow: () => void;
 	} = {
 		log: () => undefined,
+		debugLog: () => undefined,
 		currentInteraction: () => ({
 			kind: "Follow",
 			data: { guid: followTarget },
@@ -394,6 +427,147 @@ test("weenie errors resolve casts and consume vulnerability attempt budget", () 
 	assert.equal(resolveSpellcastFromWeenieError(state), true);
 	assert.equal(spellcastBlocksPlanning(state), false);
 	assert.equal(failedVulnAttemptCount(state, targetGuid), 1);
+});
+
+test("healing kits resolve from chat and block immediate retries until health catches up", () => {
+	const state = createInitialState();
+	const targetGuid = 9090 as Guid;
+	let useWithCount = 0;
+
+	testGlobal.HB = {
+		...testGlobal.HB,
+		selfEntity: () => sampleSelfEntity(),
+		inventory: () => [
+			{
+				items: [101 as Guid],
+			},
+		],
+		entity: (guid?: Guid) => {
+			if (guid === (101 as Guid)) {
+				return { kind: "healing_kit", guid } as unknown as ScriptEntityView;
+			}
+			if (guid === targetGuid) {
+				return {
+					guid,
+					name: "Ally",
+					kind: "player",
+					weenieId: null,
+					position: makePosition(1, 0, 0),
+					motionCommand: { kind: "walking" },
+					profile: null,
+				} as unknown as ScriptEntityView;
+			}
+			return null;
+		},
+		useWith: () => {
+			useWithCount += 1;
+		},
+	};
+
+	state.elapsedSeconds = 0;
+	assert.equal(useHealingKitOnTarget(state, targetGuid), true);
+	assert.equal(useWithCount, 1);
+	assert.equal(healingKitUseBlocksPlanning(state), true);
+
+	assert.equal(
+		resolveHealingKitUseFromChatMessage(
+			state,
+			{
+				sender: "Self",
+				message: "You heal Ally for 50 Health points.",
+			},
+			"Ally",
+		),
+		true,
+	);
+	assert.equal(healingKitUseBlocksPlanning(state), false);
+	assert.equal(hasRecentHealingKitSuccess(state, targetGuid), true);
+
+	state.elapsedSeconds = 1;
+	assert.equal(useHealingKitOnTarget(state, targetGuid), false);
+	assert.equal(useWithCount, 1);
+
+	state.elapsedSeconds = 4;
+	assert.equal(hasRecentHealingKitSuccess(state, targetGuid), false);
+	assert.equal(useHealingKitOnTarget(state, targetGuid), true);
+	assert.equal(useWithCount, 2);
+});
+
+test("healing kit failure chat clears the pending use", () => {
+	const state = createInitialState();
+	const targetGuid = 9091 as Guid;
+
+	testGlobal.HB = {
+		...testGlobal.HB,
+		selfEntity: () => sampleSelfEntity(),
+		entity: (guid?: Guid) =>
+			guid === targetGuid
+				? ({
+						guid,
+						name: "Ally",
+						kind: "player",
+						weenieId: null,
+						position: makePosition(1, 0, 0),
+						motionCommand: { kind: "walking" },
+						profile: null,
+					} as unknown as ScriptEntityView)
+				: null,
+	};
+
+	state.healingKitPolicy.pendingUse = {
+		targetGuid,
+		targetName: "Ally",
+		kitGuid: 101 as Guid,
+		issuedAt: 0,
+	};
+
+	assert.equal(
+		resolveHealingKitUseFromChatMessage(
+			state,
+			{
+				sender: "Self",
+				message: "You fail to heal Ally.",
+			},
+			"Ally",
+		),
+		true,
+	);
+	assert.equal(healingKitUseBlocksPlanning(state), false);
+	assert.equal(hasRecentHealingKitSuccess(state, targetGuid), false);
+});
+
+test("healing kit pending use times out if no chat arrives", () => {
+	const state = createInitialState();
+	const targetGuid = 9092 as Guid;
+
+	state.healingKitPolicy.pendingUse = {
+		targetGuid,
+		targetName: "Ally",
+		kitGuid: 101 as Guid,
+		issuedAt: 0,
+	};
+	state.elapsedSeconds = 9;
+
+	assert.equal(resolveHealingKitUseFromTimeout(state), true);
+	assert.equal(healingKitUseBlocksPlanning(state), false);
+});
+
+test("healing kit history clears when a target disappears", () => {
+	const state = createInitialState();
+	const targetGuid = 9093 as Guid;
+
+	state.healingKitPolicy.pendingUse = {
+		targetGuid,
+		targetName: "Ally",
+		kitGuid: 101 as Guid,
+		issuedAt: 0,
+	};
+	state.healingKitPolicy.lastSuccessfulUseAtByTarget.set(targetGuid, 0);
+
+	clearHealingKitHistory(state, targetGuid);
+
+	assert.equal(healingKitUseBlocksPlanning(state), false);
+	assert.equal(hasRecentHealingKitSuccess(state, targetGuid), false);
 });
 
 test("intentional follow interruptions do not consume vulnerability attempt budget", () => {

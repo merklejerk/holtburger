@@ -1,10 +1,11 @@
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectExt as _,
-    WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
+    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
+    WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
+use holtburger_protocol::messages::combat::CombatMode;
 use std::sync::Arc;
 
 use crate::entity::{Entity, EntityManager};
@@ -30,16 +31,17 @@ pub struct ServerTimeSync {
 /// together. Protocol routing itself lives in `crate::handlers`; `WorldState::handle_message()` is
 /// just the stable facade used by callers such as `holtburger-core`.
 ///
-/// NOTE: The player's authoritative state is partially mirrored between `self.player`
-/// (session sequence data plus authoritative snapshots) and the `Entity` map.
+/// NOTE: The player `Entity` is the authoritative holder of player world/object state.
+/// `self.player` only owns local-player/session overlays such as sequencing, stat caches,
+/// enchantments, inventory/equipment indices, and related derived-state bookkeeping.
 /// Live local runtime motion is world-owned through `SpatialScene`, which composes
 /// shared body-sampling state without exposing it as an app-facing projection surface.
 ///
 /// !!! CRITICAL !!!
 /// Use `set_player_*` and related authoritative world mutation helpers for server-confirmed
 /// player updates and reconciliation. Use the runtime-body helpers for routine local simulation.
-/// Hand-writing to `self.player.position`, `self.entities`, or scene body state directly will
-/// break the authority/runtime split and is not allowed.
+/// Hand-writing to `self.entities` or scene body state directly will break the
+/// authority/runtime split and is not allowed.
 pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
@@ -73,9 +75,7 @@ impl WorldState {
     }
 
     pub fn player_position(&self) -> Option<holtburger_common::position::WorldPosition> {
-        self.player_entity()
-            .map(|entity| entity.position)
-            .or_else(|| (self.player.guid != Guid::NULL).then_some(self.player.position))
+        self.player_entity().map(|entity| entity.position)
     }
 
     pub fn player_landblock(&self) -> Option<Guid> {
@@ -84,10 +84,10 @@ impl WorldState {
             .filter(|landblock| *landblock != Guid::NULL)
     }
 
-    pub fn player_properties(&self) -> Option<&holtburger_common::properties::WorldObjectProperties> {
-        self.player_entity()
-            .map(|entity| &entity.properties)
-            .or_else(|| (self.player.guid != Guid::NULL).then_some(&self.player.properties))
+    pub fn player_properties(
+        &self,
+    ) -> Option<&holtburger_common::properties::WorldObjectProperties> {
+        self.player_entity().map(|entity| &entity.properties)
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -98,8 +98,155 @@ impl WorldState {
         position: holtburger_common::position::WorldPosition,
     ) {
         self.player.guid = guid;
-        self.player.position = position;
         self.add_entity(Entity::new(guid, name.into(), position));
+    }
+
+    pub fn player_int_property(&self, property: PropertyInt) -> Option<i32> {
+        self.player_properties()
+            .and_then(|properties| properties.get_int_prop(property))
+    }
+
+    pub fn player_int64_property(&self, property: PropertyInt64) -> Option<i64> {
+        self.player_properties()
+            .and_then(|properties| properties.get_int64_prop(property))
+    }
+
+    pub fn player_float_property(&self, property: PropertyFloat) -> Option<f64> {
+        self.player_properties()
+            .and_then(|properties| properties.get_float_prop(property))
+    }
+
+    pub fn player_string_property(&self, property: PropertyString) -> Option<&str> {
+        self.player_properties()
+            .and_then(|properties| properties.get_string_prop(property))
+    }
+
+    pub fn player_level(&self) -> u32 {
+        self.player_int_property(PropertyInt::Level).unwrap_or(0) as u32
+    }
+
+    pub fn player_total_experience(&self) -> u64 {
+        self.player_int64_property(PropertyInt64::TotalExperience)
+            .unwrap_or(0) as u64
+    }
+
+    pub fn player_available_experience(&self) -> u64 {
+        self.player_int64_property(PropertyInt64::AvailableExperience)
+            .unwrap_or(0) as u64
+    }
+
+    pub fn player_unspent_skill_points(&self) -> u32 {
+        self.player_int_property(PropertyInt::AvailableSkillCredits)
+            .unwrap_or(0) as u32
+    }
+
+    pub fn player_available_luminance(&self) -> u64 {
+        self.player_int64_property(PropertyInt64::AvailableLuminance)
+            .unwrap_or(0) as u64
+    }
+
+    pub fn player_combat_mode(&self) -> CombatMode {
+        let value = self
+            .player_int_property(PropertyInt::CombatMode)
+            .unwrap_or(0);
+        CombatMode::from_repr(value as u32).unwrap_or(CombatMode::NonCombat)
+    }
+
+    pub fn player_name(&self) -> &str {
+        self.player_string_property(PropertyString::Name)
+            .unwrap_or("Unknown")
+    }
+
+    pub fn player_armor(&self) -> i32 {
+        let base_armor = self
+            .player_int_property(PropertyInt::ArmorLevel)
+            .unwrap_or(0);
+        i32::max(
+            -400,
+            crate::magic::get_enchanted_armor(base_armor, &self.player.enchantments),
+        )
+    }
+
+    pub fn player_vitae(&self) -> f32 {
+        self.player.vitae()
+    }
+
+    fn player_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {
+        let augmentation_prop = match prop {
+            PropertyFloat::ResistSlash => PropertyInt::AugmentationResistanceSlash,
+            PropertyFloat::ResistPierce => PropertyInt::AugmentationResistancePierce,
+            PropertyFloat::ResistBludgeon => PropertyInt::AugmentationResistanceBlunt,
+            PropertyFloat::ResistFire => PropertyInt::AugmentationResistanceFire,
+            PropertyFloat::ResistCold => PropertyInt::AugmentationResistanceFrost,
+            PropertyFloat::ResistAcid => PropertyInt::AugmentationResistanceAcid,
+            PropertyFloat::ResistElectric => PropertyInt::AugmentationResistanceLightning,
+            PropertyFloat::ResistNether => PropertyInt::AugmentationResistanceNether,
+            _ => return 0,
+        };
+
+        self.player_int_property(augmentation_prop).unwrap_or(0)
+    }
+
+    pub fn player_resistance_current(&self, prop: PropertyFloat) -> f32 {
+        let base = self.player_float_property(prop).unwrap_or(1.0) as f32;
+        let strength_base = self
+            .player
+            .get_attribute_base(crate::stats::AttributeType::StrengthAttr);
+        let endurance_base = self
+            .player
+            .get_attribute_base(crate::stats::AttributeType::EnduranceAttr);
+        let augmentation_resistance = self.player_resistance_augmentation(prop);
+
+        crate::magic::get_player_enchanted_resistance(
+            base,
+            &self.player.enchantments,
+            prop as u32,
+            strength_base,
+            endurance_base,
+            augmentation_resistance,
+        )
+    }
+
+    pub fn player_resistances(&self) -> stats::Resistances {
+        stats::Resistances {
+            slash: self.player_resistance_current(PropertyFloat::ResistSlash),
+            pierce: self.player_resistance_current(PropertyFloat::ResistPierce),
+            bludgeon: self.player_resistance_current(PropertyFloat::ResistBludgeon),
+            fire: self.player_resistance_current(PropertyFloat::ResistFire),
+            cold: self.player_resistance_current(PropertyFloat::ResistCold),
+            acid: self.player_resistance_current(PropertyFloat::ResistAcid),
+            electric: self.player_resistance_current(PropertyFloat::ResistElectric),
+            nether: self.player_resistance_current(PropertyFloat::ResistNether),
+        }
+    }
+
+    pub(crate) fn emit_player_derived_stats(&mut self, events: &mut Vec<WorldEvent>) {
+        self.player.refresh_cached_derived_stat_inputs();
+
+        let current = crate::player::types::LastSentStats {
+            attributes: self.player.get_attributes(),
+            vitals: self.player.get_vitals(),
+            skills: self.player.get_skills(),
+            resistances: self.player_resistances(),
+            armor: self.player_armor(),
+            vitae: self.player_vitae(),
+        };
+
+        if self.player.last_sent_stats.as_ref() == Some(&current) {
+            return;
+        }
+
+        self.player.last_sent_stats = Some(current.clone());
+        events.push(WorldEvent::DerivedStatsUpdated(Box::new(
+            crate::DerivedStatsData {
+                attributes: current.attributes,
+                vitals: current.vitals,
+                skills: current.skills,
+                resistances: current.resistances,
+                armor: current.armor,
+                vitae: current.vitae,
+            },
+        )));
     }
 
     /// Stable public entry point for applying a decoded game message to world state.
@@ -126,9 +273,9 @@ impl WorldState {
 
     pub fn get_level_info(&self) -> stats::CharacterLevelInfo {
         let table = &self.xp_table;
-        let level = self.player.level();
-        let total_xp = self.player.total_experience();
-        let unspent_xp = self.player.available_experience();
+        let level = self.player_level();
+        let total_xp = self.player_total_experience();
+        let unspent_xp = self.player_available_experience();
 
         let level_idx = level as usize;
         let next_level_idx = level_idx + 1;
@@ -140,8 +287,8 @@ impl WorldState {
                 level,
                 current_xp: total_xp,
                 unspent_xp,
-                unspent_skill_points: self.player.unspent_skill_points(),
-                available_luminance: self.player.available_luminance(),
+                unspent_skill_points: self.player_unspent_skill_points(),
+                available_luminance: self.player_available_luminance(),
                 next_level_xp: level_xp,
                 xp_into_level: total_xp.saturating_sub(level_xp),
                 xp_for_next_level: 0,
@@ -155,8 +302,8 @@ impl WorldState {
             level,
             current_xp: total_xp,
             unspent_xp,
-            unspent_skill_points: self.player.unspent_skill_points(),
-            available_luminance: self.player.available_luminance(),
+            unspent_skill_points: self.player_unspent_skill_points(),
+            available_luminance: self.player_available_luminance(),
             next_level_xp,
             xp_into_level: total_xp.saturating_sub(level_xp),
             xp_for_next_level: next_level_xp.saturating_sub(level_xp),
@@ -208,7 +355,7 @@ impl WorldState {
                 | PropertyFloat::ResistElectric
                 | PropertyFloat::ResistNether
         ) {
-            return self.player.get_resistance_current(key);
+            return self.player_resistance_current(key);
         }
 
         let base = self

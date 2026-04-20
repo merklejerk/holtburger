@@ -44,11 +44,7 @@ fn health_update_event_updates_cached_entity_state() {
 
     state.data.entities.insert(
         entity_guid,
-        Entity::new(
-            entity_guid,
-            "Drudge".to_string(),
-            WorldPosition::default(),
-        ),
+        Entity::new(entity_guid, "Drudge".to_string(), WorldPosition::default()),
     );
 
     let result = state.handle_view_event(ClientViewEvent::EntityHealthUpdated {

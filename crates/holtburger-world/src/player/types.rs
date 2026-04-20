@@ -1,12 +1,6 @@
 use crate::stats;
-use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
-    PropertyUpdate, WorldObjectProperties, WorldObjectPropertyAccessors,
-};
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
 use holtburger_protocol::messages::EquipMask;
-use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
@@ -214,9 +208,6 @@ fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
 /// handlers under `crate::handlers` orchestrate message flows and call into focused mutation
 /// methods on `PlayerState` and `WorldState`.
 ///
-/// NOTE: physical player location/velocity is mirrored in `WorldState.entities`. Mutations that
-/// affect the mirrored physical state should go through `WorldState` helper methods so the entity
-/// graph and spatial index stay in sync.
 #[derive(Debug, Clone)]
 pub struct PlayerState {
     /// Unique identifier for the player's character.
@@ -231,8 +222,6 @@ pub struct PlayerState {
     pub skills: HashMap<stats::SkillType, stats::Skill>,
     /// Stores the raw ranks and init for skills so they can be recalculated during stat updates.
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
-    /// Current position in the world (Landcell + local coordinates).
-    pub position: WorldPosition,
     /// Sequence for object instantiation/removal.
     pub instance_sequence: u16,
     /// Sequence for server-controlled movement/actions.
@@ -250,7 +239,7 @@ pub struct PlayerState {
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
     /// Sparse authoritative storage for non-live position properties keyed by packet `PositionType`.
-    pub position_properties: HashMap<PositionType, WorldPosition>,
+    pub position_properties: HashMap<PositionType, holtburger_common::position::WorldPosition>,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
     pub enchantments: Vec<Enchantment>,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
@@ -267,9 +256,6 @@ pub struct PlayerState {
     pub spellbook_filters: u32,
     /// Opaque gameplay options blob retained from PlayerDescription.
     pub gameplay_options: Vec<u8>,
-    /// All server-sent properties for the player.
-    pub properties: WorldObjectProperties,
-
     /// Whether collision detection is disabled for movement.
     pub noclip: bool,
 
@@ -297,7 +283,6 @@ impl PlayerState {
             vital_bases: HashMap::new(),
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
-            position: WorldPosition::default(),
             instance_sequence: 0,
             server_control_sequence: 0,
             last_server_motion_style: None,
@@ -315,7 +300,6 @@ impl PlayerState {
             desired_comps: Vec::new(),
             spellbook_filters: 0,
             gameplay_options: Vec::new(),
-            properties: WorldObjectProperties::default(),
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
@@ -323,126 +307,27 @@ impl PlayerState {
         }
     }
 
-    pub fn level(&self) -> u32 {
-        self.get_int_prop_default(PropertyInt::Level) as u32
-    }
-
-    pub fn total_experience(&self) -> u64 {
-        self.get_int64_prop(PropertyInt64::TotalExperience)
-            .unwrap_or(0) as u64
-    }
-
-    pub fn available_experience(&self) -> u64 {
-        self.get_int64_prop(PropertyInt64::AvailableExperience)
-            .unwrap_or(0) as u64
-    }
-
-    pub fn unspent_skill_points(&self) -> u32 {
-        self.get_int_prop_default(PropertyInt::AvailableSkillCredits) as u32
-    }
-
-    pub fn available_luminance(&self) -> u64 {
-        self.get_int64_prop(PropertyInt64::AvailableLuminance)
-            .unwrap_or(0) as u64
-    }
-
-    pub fn combat_mode(&self) -> CombatMode {
-        let val = self.get_int_prop_default(PropertyInt::CombatMode);
-        CombatMode::from_repr(val as u32).unwrap_or(CombatMode::NonCombat)
-    }
-
-    pub fn name(&self) -> &str {
-        self.get_string_prop(PropertyString::Name)
-            .unwrap_or("Unknown")
-    }
-
-    pub fn armor(&self) -> i32 {
-        let base_armor = self.get_int_prop_default(PropertyInt::ArmorLevel);
-        i32::max(
-            -400,
-            crate::magic::get_enchanted_armor(base_armor, &self.enchantments),
-        )
-    }
-
     pub fn vitae(&self) -> f32 {
         crate::magic::get_total_vitae(&self.enchantments)
     }
 
-    pub fn position_property(&self, position_type: PositionType) -> Option<WorldPosition> {
+    pub fn position_property(
+        &self,
+        position_type: PositionType,
+    ) -> Option<holtburger_common::position::WorldPosition> {
         self.position_properties.get(&position_type).copied()
     }
 
-    pub fn set_position_property(&mut self, position_type: PositionType, position: WorldPosition) {
+    pub fn set_position_property(
+        &mut self,
+        position_type: PositionType,
+        position: holtburger_common::position::WorldPosition,
+    ) {
         self.position_properties.insert(position_type, position);
-    }
-
-    pub(crate) fn get_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {
-        let augmentation_prop = match prop {
-            PropertyFloat::ResistSlash => PropertyInt::AugmentationResistanceSlash,
-            PropertyFloat::ResistPierce => PropertyInt::AugmentationResistancePierce,
-            PropertyFloat::ResistBludgeon => PropertyInt::AugmentationResistanceBlunt,
-            PropertyFloat::ResistFire => PropertyInt::AugmentationResistanceFire,
-            PropertyFloat::ResistCold => PropertyInt::AugmentationResistanceFrost,
-            PropertyFloat::ResistAcid => PropertyInt::AugmentationResistanceAcid,
-            PropertyFloat::ResistElectric => PropertyInt::AugmentationResistanceLightning,
-            PropertyFloat::ResistNether => PropertyInt::AugmentationResistanceNether,
-            _ => return 0,
-        };
-
-        self.get_int_prop(augmentation_prop).unwrap_or(0)
-    }
-
-    pub fn get_resistance_current(&self, prop: PropertyFloat) -> f32 {
-        let base = self.get_float_prop(prop).unwrap_or(1.0) as f32;
-        let strength_base = self.get_attribute_base(stats::AttributeType::StrengthAttr);
-        let endurance_base = self.get_attribute_base(stats::AttributeType::EnduranceAttr);
-        let augmentation_resistance = self.get_resistance_augmentation(prop);
-
-        crate::magic::get_player_enchanted_resistance(
-            base,
-            &self.enchantments,
-            prop as u32,
-            strength_base,
-            endurance_base,
-            augmentation_resistance,
-        )
-    }
-
-    pub fn resistances(&self) -> stats::Resistances {
-        stats::Resistances {
-            slash: self.get_resistance_current(PropertyFloat::ResistSlash),
-            pierce: self.get_resistance_current(PropertyFloat::ResistPierce),
-            bludgeon: self.get_resistance_current(PropertyFloat::ResistBludgeon),
-            fire: self.get_resistance_current(PropertyFloat::ResistFire),
-            cold: self.get_resistance_current(PropertyFloat::ResistCold),
-            acid: self.get_resistance_current(PropertyFloat::ResistAcid),
-            electric: self.get_resistance_current(PropertyFloat::ResistElectric),
-            nether: self.get_resistance_current(PropertyFloat::ResistNether),
-        }
-    }
-}
-
-impl HasProperties for PlayerState {
-    fn properties(&self) -> &WorldObjectProperties {
-        &self.properties
-    }
-}
-
-impl HasPropertiesMut for PlayerState {
-    fn properties_mut(&mut self) -> &mut WorldObjectProperties {
-        &mut self.properties
     }
 }
 
 impl PlayerState {
-    pub fn get_int_prop_default(&self, prop: PropertyInt) -> i32 {
-        self.get_int_prop(prop).unwrap_or(0)
-    }
-
-    pub fn set_property(&mut self, update: PropertyUpdate) {
-        self.properties.apply(update);
-    }
-
     /// Adds an item to the player's inventory tracking.
     pub fn add_to_inventory(&mut self, item: Guid) {
         self.inventory.insert(item);

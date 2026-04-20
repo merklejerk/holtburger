@@ -307,10 +307,10 @@ Mitigation:
 - [x] Phase 1: add test helpers for local-player entity setup
 - [x] Phase 1: retarget world/core reads away from mirrored `PlayerState` fields
 - [x] Phase 2: make `PlayerDescription` bootstrap the player entity eagerly
-- [ ] Phase 3: move property-derived player APIs off `PlayerState`
-- [ ] Phase 3: remove `PlayerState.position`
-- [ ] Phase 3: remove `PlayerState.properties`
-- [ ] Phase 3: delete property mirroring in handlers/mutations
+- [x] Phase 3: move property-derived player APIs off `PlayerState`
+- [x] Phase 3: remove `PlayerState.position`
+- [x] Phase 3: remove `PlayerState.properties`
+- [x] Phase 3: delete property mirroring in handlers/mutations
 - [ ] Phase 4: simplify movement/liveness/runtime-body special casing
 - [ ] Phase 5: trim or rename `PlayerState` APIs/docs
 - [ ] Phase 6: retarget downstream crates and tests
@@ -329,6 +329,9 @@ Mitigation:
 - Phase 2 decision: `PlayerDescription` now eagerly creates or refreshes the player entity and writes bootstrap name/properties/position there first, before projecting player-facing events.
 - Phase 2 decision: `PlayerState::hydrate_from_player_description(...)` no longer seeds live player position directly; the authoritative bootstrap pose now comes from world-side entity setup.
 - Phase 2 decision: `PlayerState.properties` remains populated as a compatibility mirror for now because `get_level_info`, `emit_player_info`, and other property-derived APIs still depend on it. Removing that mirror remains Phase 3 work.
+- Phase 3 decision: property-derived player reads now live on `WorldState` (`player_name`, `player_level`, XP/combat-mode/armor/vitae/resistance helpers) so callers consume entity-authored state through a single surface instead of reaching into `PlayerState`.
+- Phase 3 decision: derived stat emission that depends on entity properties is now orchestrated from `WorldState`/world handlers rather than from `PlayerState` mutation methods, which keeps player-local stat caches separate from entity-authored property projection.
+- Phase 3 decision: world/core tests should seed local-player authority through the player entity helper path (`seed_local_player_entity(...)`) and assert through `WorldState` accessors rather than mutating or reading removed `player.position` / `player.properties` mirrors.
 
 ### Progress Log
 
@@ -342,6 +345,11 @@ Mitigation:
 - Stopped `PlayerState::hydrate_from_player_description(...)` from seeding live position directly; bootstrap pose is now synchronized from the authoritative entity path.
 - Retargeted world tests to assert that `PlayerDescription` creates the player entity eagerly and that the self `ObjectCreate` path still works when it arrives after that bootstrap entity already exists.
 - Verification: `cargo test -p holtburger-world` passed and `cargo test -p holtburger-core` passed after the Phase 2 changes.
+- 2026-04-20: completed Phase 3 ownership cut for player properties and live pose.
+- Removed `PlayerState.position`, `PlayerState.properties`, and the `HasProperties` / `HasPropertiesMut` implementation from `PlayerState`; property-derived player APIs now resolve through entity-backed `WorldState` helpers.
+- Deleted the player property-mirroring path from property application and retargeted player-derived stat emission so handlers/world code explicitly project derived stats after player-local stat or enchantment mutations.
+- Retargeted world/core tests and helper setup away from direct `player.position` / `player.properties` mutation so local-player authority is always seeded through the player entity path.
+- Verification: `cargo test -p holtburger-world -p holtburger-core` passed after the Phase 3 changes.
 
 ### Open Questions
 

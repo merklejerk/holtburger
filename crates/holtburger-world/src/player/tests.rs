@@ -78,14 +78,24 @@ fn test_stat_calculations() {
 
 #[test]
 fn test_resistance_derivation_matches_ace_player_rules() {
-    let mut player = PlayerState::new();
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000001);
+    state.seed_local_player_entity(player_guid, "Player", WorldPosition::default());
 
-    set_attr(&mut player, stats::AttributeType::StrengthAttr, 200);
-    set_attr(&mut player, stats::AttributeType::EnduranceAttr, 200);
-    player.set_float_prop(PropertyFloat::ResistFire, 1.0);
-    player.set_int_prop(PropertyInt::AugmentationResistanceFire, 1);
+    set_attr(&mut state.player, stats::AttributeType::StrengthAttr, 200);
+    set_attr(&mut state.player, stats::AttributeType::EnduranceAttr, 200);
+    state
+        .player_entity_mut()
+        .expect("local player entity should exist")
+        .properties
+        .set_float_prop(PropertyFloat::ResistFire, 1.0);
+    state
+        .player_entity_mut()
+        .expect("local player entity should exist")
+        .properties
+        .set_int_prop(PropertyInt::AugmentationResistanceFire, 1);
 
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_category: 10,
         power_level: 100,
         stat_mod_type: (EnchantmentTypeFlags::FLOAT
@@ -97,7 +107,7 @@ fn test_resistance_derivation_matches_ace_player_rules() {
         ..Default::default()
     });
 
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_category: 20,
         power_level: 100,
         stat_mod_type: (EnchantmentTypeFlags::FLOAT
@@ -109,7 +119,7 @@ fn test_resistance_derivation_matches_ace_player_rules() {
         ..Default::default()
     });
 
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_category: 30,
         power_level: 100,
         stat_mod_type: (EnchantmentTypeFlags::FLOAT
@@ -121,7 +131,7 @@ fn test_resistance_derivation_matches_ace_player_rules() {
         ..Default::default()
     });
 
-    let resistance = player.get_resistance_current(PropertyFloat::ResistFire);
+    let resistance = state.player_resistance_current(PropertyFloat::ResistFire);
 
     assert!((resistance - 0.72).abs() < 0.0001);
 }
@@ -276,8 +286,15 @@ fn test_stat_floors() {
     );
 
     // 4. Armor level check (can stay negative for Armor Self / Imperil logic)
-    player.set_int_prop(PropertyInt::ArmorLevel, 10);
-    player.enchantments.push(Enchantment {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x50000001);
+    state.seed_local_player_entity(player_guid, "Player", WorldPosition::default());
+    state
+        .player_entity_mut()
+        .expect("local player entity should exist")
+        .properties
+        .set_int_prop(PropertyInt::ArmorLevel, 10);
+    state.player.enchantments.push(Enchantment {
         spell_id: 5,
         layer: 1,
         spell_category: 5,
@@ -295,9 +312,9 @@ fn test_stat_floors() {
         stat_mod_value: -20.0,
         spell_set_id: None,
     });
-    player.emit_derived_stats(&mut Vec::new());
+    state.emit_player_derived_stats(&mut Vec::new());
     // 10 - 20 = -10.
-    assert_eq!(player.armor(), -10);
+    assert_eq!(state.player_armor(), -10);
 }
 
 #[test]
@@ -521,7 +538,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     assert!(state.player.enchantments.iter().any(|e| e.spell_id == 100));
     assert!(!state.player.enchantments.iter().any(|e| e.spell_id == 200));
     assert!(state.player.enchantments.iter().any(|e| e.spell_id == 300));
-    assert_eq!(state.player.vitae(), 0.95);
+    assert_eq!(state.player_vitae(), 0.95);
 
     assert!(
         events
@@ -857,8 +874,7 @@ fn test_vector_update_applies_self_velocity_and_omega() {
     state.player.guid = Guid(0x50000001);
 
     let start = WorldPosition::default();
-    state.player.position = start;
-    state.add_entity(Entity::new(state.player.guid, "Player".to_string(), start));
+    state.seed_local_player_entity(state.player.guid, "Player", start);
 
     let msg = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
         guid: state.player.guid,
@@ -956,7 +972,7 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
 
     assert!(!state.player.enchantments.iter().any(|e| e.spell_id == 100));
     assert!(state.player.enchantments.iter().any(|e| e.spell_id == 666));
-    assert_eq!(state.player.vitae(), 0.88);
+    assert_eq!(state.player_vitae(), 0.88);
 
     let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
         WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
@@ -1015,15 +1031,9 @@ fn test_stale_update_position_is_ignored_when_teleport_sequence_regresses() {
 
     let mut player = PlayerState::new();
     player.guid = Guid(0x50000001);
-    player.position = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        ..Default::default()
-    };
     player.teleport_sequence = 10;
     player.force_position_sequence = 4;
 
-    let original_position = player.position;
     let mut events = Vec::<WorldEvent>::new();
     let applied = player.apply_position_from_server(
         &PositionPack {
@@ -1043,7 +1053,8 @@ fn test_stale_update_position_is_ignored_when_teleport_sequence_regresses() {
     );
 
     assert!(!applied);
-    assert_eq!(player.position, original_position);
+    assert_eq!(player.teleport_sequence, 10);
+    assert_eq!(player.force_position_sequence, 4);
     assert!(events.is_empty());
 }
 
@@ -1056,15 +1067,9 @@ fn test_stale_update_position_is_ignored_when_force_sequence_regresses() {
 
     let mut player = PlayerState::new();
     player.guid = Guid(0x50000001);
-    player.position = WorldPosition {
-        landblock_id: Guid(0x01000000),
-        coords: Vector3::new(1.0, 2.0, 3.0),
-        ..Default::default()
-    };
     player.teleport_sequence = 10;
     player.force_position_sequence = 7;
 
-    let original_position = player.position;
     let mut events = Vec::<WorldEvent>::new();
     let applied = player.apply_position_from_server(
         &PositionPack {
@@ -1084,7 +1089,8 @@ fn test_stale_update_position_is_ignored_when_force_sequence_regresses() {
     );
 
     assert!(!applied);
-    assert_eq!(player.position, original_position);
+    assert_eq!(player.teleport_sequence, 10);
+    assert_eq!(player.force_position_sequence, 7);
     assert!(events.is_empty());
 }
 

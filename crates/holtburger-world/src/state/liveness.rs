@@ -148,11 +148,9 @@ impl WorldState {
         nearby_guids: &HashSet<Guid>,
     ) -> bool {
         nearby_guids.contains(&entity.guid)
-            || self
-                .player_position()
-                .is_some_and(|position| position.distance_to(&entity.position)
-                <= CONSERVATIVE_VISIBILITY_DISTANCE_M
-                )
+            || self.player_position().is_some_and(|position| {
+                position.distance_to(&entity.position) <= CONSERVATIVE_VISIBILITY_DISTANCE_M
+            })
     }
 
     fn maintain_visibility_prune_deadlines(&mut self, now: f64) {

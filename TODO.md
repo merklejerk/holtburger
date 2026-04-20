@@ -100,6 +100,7 @@
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
 - [ ] Some equipment swapping jank going on.
+- [ ] Should untarget missing/too far entities and unsubscribe health query.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

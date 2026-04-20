@@ -31,6 +31,12 @@ pub(super) fn reduce_view_event(
                 result.request_redraw(RedrawPriority::Immediate);
             }
             inventory::refresh_entity_context_if_visible(state, entity_ref.guid, &mut result);
+            if matches!(
+                state.view.active_interaction,
+                Some(Interaction::Targeting { target_guid }) if target_guid == entity_ref.guid
+            ) {
+                result.commands.push(ClientCommand::QueryHealth(entity_ref.guid));
+            }
             inventory::sync_weapon_swap_controller(state, now, &mut result);
             if !was_ready && state.player_entity_is_ready() {
                 result.actions.push(AppAction::Notification {
@@ -150,7 +156,8 @@ pub(super) fn reduce_view_event(
 mod tests {
     use super::GameState;
     use super::reduce_view_event;
-    use crate::types::{AppAction, AppNotification};
+    use crate::types::{AppAction, AppNotification, Interaction};
+    use holtburger_core::ClientCommand;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_core::ClientViewEvent;
@@ -181,5 +188,53 @@ mod tests {
             }] if *guid == player_guid
         ));
         assert!(state.data.entities.contains_key(&player_guid));
+    }
+
+    #[test]
+    fn entity_spawn_requeries_target_health_when_target_is_active() {
+        let player_guid = Guid(0x5000_0004);
+        let target_guid = Guid(0x6000_0001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let result = reduce_view_event(
+            &mut state,
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(Entity::new(
+                    target_guid,
+                    "Drudge".to_string(),
+                    WorldPosition::default(),
+                )),
+            },
+            Instant::now(),
+        );
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::QueryHealth(guid) if *guid == target_guid)
+        }));
+    }
+
+    #[test]
+    fn entity_replaced_requeries_target_health_when_target_is_active() {
+        let player_guid = Guid(0x5000_0004);
+        let target_guid = Guid(0x6000_0001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let result = reduce_view_event(
+            &mut state,
+            &ClientViewEvent::EntityReplaced {
+                entity: Box::new(Entity::new(
+                    target_guid,
+                    "Drudge".to_string(),
+                    WorldPosition::default(),
+                )),
+            },
+            Instant::now(),
+        );
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::QueryHealth(guid) if *guid == target_guid)
+        }));
     }
 }

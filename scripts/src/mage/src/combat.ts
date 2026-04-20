@@ -14,6 +14,7 @@ import { choosePartyHealTarget, choosePartyRevitalizeTarget } from "./party";
 import {
 	castSpell,
 	logMageInfo,
+	hasRecentHealingKitSuccess,
 	useHealingKitOnTarget,
 	vulnerabilityPolicyForTarget,
 } from "./runtime-actions";
@@ -128,6 +129,13 @@ export function maybeRestoreHealth(
 
 	if (
 		isSkillUsable(skills.get("healing")) &&
+		hasRecentHealingKitSuccess(state, self.guid)
+	) {
+		return true;
+	}
+
+	if (
+		isSkillUsable(skills.get("healing")) &&
 		useHealingKitOnTarget(state, self.guid)
 	) {
 		return true;
@@ -177,6 +185,13 @@ export function maybeHealPartyMember(
 	const healTargetGuid = choosePartyHealTarget(self);
 	if (healTargetGuid == null) {
 		return false;
+	}
+
+	if (
+		isSkillUsable(skills.get("healing")) &&
+		hasRecentHealingKitSuccess(state, healTargetGuid)
+	) {
+		return true;
 	}
 
 	if (

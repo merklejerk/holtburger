@@ -18,8 +18,10 @@ import {
 	clearNonMageInteraction,
 	followPartyLeader,
 	hasRecentMissedAttack,
+	healingKitUseBlocksPlanning,
 	interruptSpellcast,
 	observeSpellCastBusy,
+	resolveHealingKitUseFromTimeout,
 	resolveCombatTarget,
 	logMageInfo,
 	setCombatTarget,
@@ -90,6 +92,12 @@ export function runMage(state: MageRuntimeState): void {
 				return;
 			}
 		} else {
+			return;
+		}
+	}
+
+	if (healingKitUseBlocksPlanning(state)) {
+		if (!resolveHealingKitUseFromTimeout(state)) {
 			return;
 		}
 	}

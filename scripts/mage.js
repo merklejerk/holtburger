@@ -12,6 +12,7 @@
   var PARTY_REVITALIZE_THRESHOLD = 0.4;
   var SPELL_SKILL_HEADROOM = 16;
   var SPELL_REPEAT_SECONDS = 1.1;
+  var HEALING_KIT_SUCCESS_GRACE_SECONDS = 2;
   var PENDING_SPELL_BUSY_GRACE_SECONDS = 1;
   var VULN_REPEAT_SECONDS = 10 * 60;
   var MAX_VULN_ATTEMPTS_PER_TARGET = 2;
@@ -526,14 +527,18 @@
   }
   function cancelCombatPlanning(state2) {
     const hadSpellcast = spellcastBlocksPlanning(state2);
+    const hadHealingKitUse = healingKitUseBlocksPlanning(state2);
     const hadCombatTarget = state2.combatTargetGuid != null;
     const hadMissHistory = state2.attackPolicy.lastMissedAttackByTarget.size > 0;
     if (hadSpellcast) {
       interruptSpellcast(state2, "teleport");
     }
+    if (hadHealingKitUse) {
+      clearHealingKitUse(state2);
+    }
     clearCombatTarget(state2);
     state2.attackPolicy.lastMissedAttackByTarget.clear();
-    return hadSpellcast || hadCombatTarget || hadMissHistory;
+    return hadSpellcast || hadHealingKitUse || hadCombatTarget || hadMissHistory;
   }
   function hasRecentVulnerabilityCast(state2, targetGuid) {
     const lastAppliedAt = state2.vulnerabilityPolicy.lastSuccessfulVulnAtByTarget.get(targetGuid);
@@ -562,8 +567,17 @@
       recentlySucceeded: hasRecentVulnerabilityCast(state2, targetGuid)
     };
   }
-  function clearVulnerabilityHistory(state2, targetGuid) {
-    state2.vulnerabilityPolicy.lastSuccessfulVulnAtByTarget.delete(targetGuid);
+  function clearHealingKitHistory(state2, targetGuid) {
+    if (state2.healingKitPolicy.pendingUse?.targetGuid === targetGuid) {
+      clearHealingKitUse(state2);
+    }
+    state2.healingKitPolicy.lastSuccessfulUseAtByTarget.delete(targetGuid);
+  }
+  function hasRecentHealingKitSuccess(state2, targetGuid) {
+    const lastAppliedAt = state2.healingKitPolicy.lastSuccessfulUseAtByTarget.get(targetGuid);
+    return lastAppliedAt != null && state2.elapsedSeconds - lastAppliedAt < HEALING_KIT_SUCCESS_GRACE_SECONDS;
+  }
+  function clearVulnerabilityAttemptHistory(state2, targetGuid) {
     state2.vulnerabilityPolicy.failedVulnAttemptsByTarget.delete(targetGuid);
   }
   function clearAttackHistory(state2, targetGuid) {
@@ -655,18 +669,74 @@
     return null;
   }
   function useHealingKitOnTarget(state2, targetGuid) {
+    if (healingKitUseBlocksPlanning(state2)) {
+      return false;
+    }
+    if (hasRecentHealingKitSuccess(state2, targetGuid)) {
+      return false;
+    }
     const kitGuid = firstHealingKit();
     if (kitGuid == null) {
       return false;
     }
-    return issueAction(
-      state2,
-      `heal-kit:${kitGuid}:${targetGuid}`,
-      SPELL_REPEAT_SECONDS,
-      () => {
-        HB.useWith(kitGuid, targetGuid);
-      }
+    const target = HB.entity(targetGuid);
+    state2.healingKitPolicy.pendingUse = {
+      targetGuid,
+      targetName: normalizeCastName(target?.name?.trim() ?? null),
+      kitGuid,
+      issuedAt: state2.elapsedSeconds
+    };
+    logMageInfo(
+      `heal-kit start -> ${describeHealingKitUse(state2.healingKitPolicy.pendingUse)} at ${state2.elapsedSeconds.toFixed(2)}s`
     );
+    HB.useWith(kitGuid, targetGuid);
+    return true;
+  }
+  function healingKitUseBlocksPlanning(state2) {
+    return state2.healingKitPolicy.pendingUse != null;
+  }
+  function resolveHealingKitUseFromChatMessage(state2, chatEvent, targetName) {
+    const request = state2.healingKitPolicy.pendingUse;
+    if (request == null) {
+      return false;
+    }
+    const expectedTargetName = request.targetName ?? targetName;
+    if (expectedTargetName == null) {
+      return false;
+    }
+    if (isHealingKitFailureMessage(chatEvent, expectedTargetName)) {
+      clearHealingKitUse(state2);
+      logMageInfo(
+        `heal-kit failed -> ${describeHealingKitUse(request)} at ${state2.elapsedSeconds.toFixed(2)}s`
+      );
+      return true;
+    }
+    if (isHealingKitSuccessMessage(chatEvent, expectedTargetName)) {
+      state2.healingKitPolicy.lastSuccessfulUseAtByTarget.set(
+        request.targetGuid,
+        state2.elapsedSeconds
+      );
+      clearHealingKitUse(state2);
+      logMageInfo(
+        `heal-kit succeeded -> ${describeHealingKitUse(request)} at ${state2.elapsedSeconds.toFixed(2)}s`
+      );
+      return true;
+    }
+    return false;
+  }
+  function resolveHealingKitUseFromTimeout(state2) {
+    const request = state2.healingKitPolicy.pendingUse;
+    if (request == null) {
+      return false;
+    }
+    if (state2.elapsedSeconds - request.issuedAt < PENDING_SPELL_TIMEOUT_SECONDS) {
+      return false;
+    }
+    clearHealingKitUse(state2);
+    logMageInfo(
+      `heal-kit timeout -> ${describeHealingKitUse(request)} at ${state2.elapsedSeconds.toFixed(2)}s`
+    );
+    return true;
   }
   function clearNonMageInteraction(state2) {
     const interaction = HB.currentInteraction();
@@ -954,6 +1024,45 @@
   function describeSpellcastRequest(request) {
     return `${request.kind}:${request.spellId}${request.damageType == null ? "" : `:${request.damageType}`}${request.targetGuid == null ? "" : `:${request.targetGuid}`}`;
   }
+  function describeHealingKitUse(request) {
+    return `${request.targetGuid}${request.targetName == null ? "" : `:${request.targetName}`}:${request.kitGuid}`;
+  }
+  function clearHealingKitUse(state2) {
+    state2.healingKitPolicy.pendingUse = null;
+  }
+  function isHealingKitFailureMessage(chatEvent, targetName) {
+    if (!isOwnHealingChatSender(chatEvent)) {
+      return false;
+    }
+    const message = normalizeChatMessage(chatEvent.message);
+    if (targetName == null) {
+      return message.startsWith("you fail to heal ") || message.endsWith(" fails to heal you.");
+    }
+    const normalizedTargetName = normalizeChatMessage(targetName);
+    return message === `you fail to heal ${normalizedTargetName}.` || message.endsWith(" fails to heal you.") && message.includes(normalizedTargetName);
+  }
+  function isHealingKitSuccessMessage(chatEvent, targetName) {
+    if (!isOwnHealingChatSender(chatEvent)) {
+      return false;
+    }
+    const message = normalizeChatMessage(chatEvent.message);
+    if (targetName == null) {
+      return message.startsWith("you heal ") || message.includes(" heals you for ");
+    }
+    const normalizedTargetName = normalizeChatMessage(targetName);
+    return message.startsWith(`you heal ${normalizedTargetName} for `) || message.includes(` ${normalizedTargetName} `) && message.includes(" heals you for ");
+  }
+  function isOwnHealingChatSender(chatEvent) {
+    const sender = normalizeCastName(chatEvent.sender?.trim() ?? null);
+    if (sender == null) {
+      return true;
+    }
+    const selfName = normalizeCastName(HB.selfEntity()?.name?.trim() ?? null);
+    if (selfName == null) {
+      return true;
+    }
+    return sender.toLowerCase() === selfName.toLowerCase();
+  }
 
   // src/combat.ts
   function collectMonsterCandidates(self, partyLeader, maxAttackRange, maxAggroDistance) {
@@ -1023,6 +1132,9 @@
     if (ratio(self.health, self.healthMax) >= SELF_HEALTH_THRESHOLD) {
       return false;
     }
+    if (isSkillUsable(skills.get("healing")) && hasRecentHealingKitSuccess(state2, self.guid)) {
+      return true;
+    }
     if (isSkillUsable(skills.get("healing")) && useHealingKitOnTarget(state2, self.guid)) {
       return true;
     }
@@ -1062,6 +1174,9 @@
     const healTargetGuid = choosePartyHealTarget(self);
     if (healTargetGuid == null) {
       return false;
+    }
+    if (isSkillUsable(skills.get("healing")) && hasRecentHealingKitSuccess(state2, healTargetGuid)) {
+      return true;
     }
     if (isSkillUsable(skills.get("healing")) && useHealingKitOnTarget(state2, healTargetGuid)) {
       return true;
@@ -1252,6 +1367,11 @@
           return;
         }
       } else {
+        return;
+      }
+    }
+    if (healingKitUseBlocksPlanning(state2)) {
+      if (!resolveHealingKitUseFromTimeout(state2)) {
         return;
       }
     }
@@ -1511,6 +1631,10 @@
       attackPolicy: {
         lastMissedAttackByTarget: /* @__PURE__ */ new Map()
       },
+      healingKitPolicy: {
+        pendingUse: null,
+        lastSuccessfulUseAtByTarget: /* @__PURE__ */ new Map()
+      },
       vulnerabilityPolicy: {
         failedVulnAttemptsByTarget: /* @__PURE__ */ new Map(),
         lastSuccessfulVulnAtByTarget: /* @__PURE__ */ new Map()
@@ -1526,6 +1650,8 @@
     state2.maxAggroDistance = MAX_AGGRO_DISTANCE;
     state2.actionTimes.clear();
     state2.attackPolicy.lastMissedAttackByTarget.clear();
+    state2.healingKitPolicy.pendingUse = null;
+    state2.healingKitPolicy.lastSuccessfulUseAtByTarget.clear();
     state2.vulnerabilityPolicy.failedVulnAttemptsByTarget.clear();
     state2.vulnerabilityPolicy.lastSuccessfulVulnAtByTarget.clear();
   }
@@ -1541,15 +1667,19 @@
     const parsed = Number(token.slice(prefix.length));
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }
-  function handleMessageEvent(message, sourceLabel) {
+  function handleMessageEvent(message, sender, sourceLabel) {
     const spellcastRequest = currentSpellcastRequest(state);
     const pendingTargetName = spellcastRequest?.targetName ?? (spellcastRequest?.targetGuid == null ? null : HB.entity(spellcastRequest.targetGuid)?.name?.trim() ?? null);
     logMageInfo(
       `${sourceLabel} received: message="${message}" pendingTargetName="${pendingTargetName}"`
     );
-    if (resolveSpellcastFromChatMessage(
+    if (resolveHealingKitUseFromChatMessage(
       state,
-      { sender: null, message },
+      { sender, message },
+      pendingTargetName
+    ) || resolveSpellcastFromChatMessage(
+      state,
+      { sender, message },
       pendingTargetName
     )) {
       runMage(state);
@@ -1563,7 +1693,7 @@
   HB.onEvent((event) => {
     switch (event.kind) {
       case "chat_message": {
-        handleMessageEvent(event.data.message, "chat_message");
+        handleMessageEvent(event.data.message, event.data.sender, "chat_message");
         return;
       }
       case "combat_feedback": {
@@ -1598,7 +1728,8 @@
           clearCombatTarget(state);
         }
         clearAttackHistory(state, event.data.guid);
-        clearVulnerabilityHistory(state, event.data.guid);
+        clearHealingKitHistory(state, event.data.guid);
+        clearVulnerabilityAttemptHistory(state, event.data.guid);
         return;
       }
       case "lifecycle": {

@@ -7,7 +7,8 @@ import {
 	cancelCombatPlanning,
 	clearAttackHistory,
 	clearCombatTarget,
-	clearVulnerabilityHistory,
+	clearHealingKitHistory,
+	clearVulnerabilityAttemptHistory,
 	currentSpellcastRequest,
 	observeSpellCastBusy,
 	logMageInfo,
@@ -15,6 +16,7 @@ import {
 	resolveSpellcastFromChatMessage,
 	resolveSpellcastFromIdle,
 	resolveSpellcastFromWeenieError,
+	resolveHealingKitUseFromChatMessage,
 } from "./runtime-actions";
 
 const state = createInitialState();
@@ -33,7 +35,11 @@ function parsePositiveNumberArg(args: string, flagName: string): number | null {
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-function handleMessageEvent(message: string, sourceLabel: string): void {
+function handleMessageEvent(
+	message: string,
+	sender: string | null,
+	sourceLabel: string,
+): void {
 	const spellcastRequest = currentSpellcastRequest(state);
 	const pendingTargetName =
 		spellcastRequest?.targetName ??
@@ -45,9 +51,14 @@ function handleMessageEvent(message: string, sourceLabel: string): void {
 		`${sourceLabel} received: message="${message}" pendingTargetName="${pendingTargetName}"`,
 	);
 	if (
+		resolveHealingKitUseFromChatMessage(
+			state,
+			{ sender, message },
+			pendingTargetName,
+		) ||
 		resolveSpellcastFromChatMessage(
 			state,
-			{ sender: null, message },
+			{ sender, message },
 			pendingTargetName,
 		)
 	) {
@@ -64,7 +75,7 @@ function handleCombatFeedbackEvent(feedback: ScriptCombatFeedback): void {
 HB.onEvent((event) => {
 	switch (event.kind) {
 		case "chat_message": {
-			handleMessageEvent(event.data.message, "chat_message");
+			handleMessageEvent(event.data.message, event.data.sender, "chat_message");
 			return;
 		}
 		case "combat_feedback": {
@@ -100,7 +111,8 @@ HB.onEvent((event) => {
 				clearCombatTarget(state);
 			}
 			clearAttackHistory(state, event.data.guid);
-			clearVulnerabilityHistory(state, event.data.guid);
+			clearHealingKitHistory(state, event.data.guid);
+			clearVulnerabilityAttemptHistory(state, event.data.guid);
 			return;
 		}
 		case "lifecycle": {

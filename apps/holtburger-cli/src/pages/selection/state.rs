@@ -1,11 +1,13 @@
 use holtburger_core::client::types::CharacterManagementOperation;
-use holtburger_core::{ClientCommand, ClientState, ClientViewEvent};
+use holtburger_core::errors::is_actually_weenie_error;
+use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry};
 
 use crate::components::text_input::SingleLineTextInput;
 use crate::pages::selection::creation::{CharacterCreationState, format_creation_errors};
 use crate::state::{EventContext, TickContext};
 use crate::types::{AppAction, AppUiAction, ChatMessageTags, UpdateResult};
+use crate::utils::format_action_result_message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CharacterScreen {
@@ -79,6 +81,24 @@ impl SelectionState {
         _ctx: &EventContext,
     ) -> UpdateResult {
         match event {
+            ClientViewEvent::ActionResult { reason, .. } => {
+                let message = format_action_result_message(&reason);
+
+                match &reason {
+                    ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
+                        log::error!("{}", message);
+                    }
+                    ActionResultReason::Weenie(_, _) => {
+                        log::info!("{}", message);
+                    }
+                    ActionResultReason::Transport(_) => {
+                        log::warn!("{}", message);
+                    }
+                    _ => {
+                        log::error!("{}", message);
+                    }
+                }
+            }
             ClientViewEvent::CharacterList(_) => {
                 self.pending_create = None;
                 if self.selected_character_index >= self.characters.len() {

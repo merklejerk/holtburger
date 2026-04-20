@@ -18,6 +18,10 @@ export function createInitialState(): MageRuntimeState {
 		attackPolicy: {
 			lastMissedAttackByTarget: new Map<Guid, AttackMissRecord>(),
 		},
+		healingKitPolicy: {
+			pendingUse: null,
+			lastSuccessfulUseAtByTarget: new Map<Guid, number>(),
+		},
 		vulnerabilityPolicy: {
 			failedVulnAttemptsByTarget: new Map<Guid, number>(),
 			lastSuccessfulVulnAtByTarget: new Map<Guid, number>(),
@@ -34,6 +38,8 @@ export function resetState(state: MageRuntimeState): void {
 	state.maxAggroDistance = MAX_AGGRO_DISTANCE;
 	state.actionTimes.clear();
 	state.attackPolicy.lastMissedAttackByTarget.clear();
+	state.healingKitPolicy.pendingUse = null;
+	state.healingKitPolicy.lastSuccessfulUseAtByTarget.clear();
 	state.vulnerabilityPolicy.failedVulnAttemptsByTarget.clear();
 	state.vulnerabilityPolicy.lastSuccessfulVulnAtByTarget.clear();
 }

@@ -141,6 +141,18 @@ export type AttackMissRecord = {
 	ray: AttackRaySnapshot;
 };
 
+export type HealingKitUseRecord = {
+	targetGuid: Guid;
+	targetName: string | null;
+	kitGuid: Guid;
+	issuedAt: number;
+};
+
+export type HealingKitPolicyState = {
+	pendingUse: HealingKitUseRecord | null;
+	lastSuccessfulUseAtByTarget: Map<Guid, number>;
+};
+
 export type MageRuntimeState = {
 	data: MageData | null;
 	config: MageConfig;
@@ -152,6 +164,7 @@ export type MageRuntimeState = {
 	maxAggroDistance: number;
 	actionTimes: Map<string, number>;
 	attackPolicy: AttackPolicyState;
+	healingKitPolicy: HealingKitPolicyState;
 	vulnerabilityPolicy: VulnerabilityPolicyState;
 };
 

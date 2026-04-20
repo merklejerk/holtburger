@@ -4,7 +4,6 @@ use crate::state::AppState;
 use crate::state::EventContext;
 use crate::types::{AppAction, AppNotification, Page, UpdateResult};
 use crate::utils::format_action_result_message;
-use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
 
@@ -90,36 +89,16 @@ impl AppState {
                 }
             }
             ClientViewEvent::ActionResult { reason, .. } => {
-                let message = format_action_result_message(reason);
-
                 if let ActionResultReason::Character(error) = &reason
                     && matches!(
                         error,
                         CharacterError::Logon | CharacterError::EnterGameCharacterInWorld
                     )
                 {
+                    let message = format_action_result_message(reason);
                     self.remember_disconnect_reason(message.clone());
                     self.request_disconnect_exit();
-                    log::error!("{}", message);
-                    return result;
                 }
-
-                match &reason {
-                    ActionResultReason::Weenie(error, _) if is_actually_weenie_error(*error) => {
-                        log::error!("{}", message);
-                    }
-                    ActionResultReason::InventoryServerSaveFailed { .. }
-                    | ActionResultReason::Character(_)
-                    | ActionResultReason::General(_) => {
-                        log::error!("{}", message);
-                    }
-                    ActionResultReason::Weenie(_, _) => {
-                        log::info!("{}", message);
-                    }
-                    ActionResultReason::Transport(_) => {
-                        log::warn!("{}", message);
-                    }
-                };
             }
             ClientViewEvent::BootAccount(reason) => {
                 let message = if reason.trim().is_empty() {
@@ -259,7 +238,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::state::NetStats;
-    use crate::types::Page;
+    use crate::types::{AppAction, ChatMessageTags, Page};
 
     fn build_test_app_state(client_state: ClientState) -> AppState {
         AppState {
@@ -363,6 +342,34 @@ mod tests {
             app_state.take_pending_exit_message().as_deref(),
             Some("Character error: Logon")
         );
+    }
+
+    #[test]
+    fn missing_spell_components_are_surfaced_in_chat() {
+        let mut app_state = build_test_app_state(ClientState::InWorld);
+        app_state.page = Page::Game(Box::new(crate::pages::game::GameState::new(
+            holtburger_common::Guid(0x50000001),
+            "Player".to_string(),
+            "World".to_string(),
+        )));
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::ActionResult {
+            source: holtburger_core::client::types::ActionResultSource::Wire,
+            reason: ActionResultReason::Weenie(
+                holtburger_protocol::errors::WeenieError::YouDontHaveAllTheComponents,
+                None,
+            ),
+        });
+
+        assert!(result.commands.is_empty());
+        assert_eq!(result.actions.len(), 1);
+        match &result.actions[0] {
+            AppAction::Log { chat_tags, message } => {
+                assert_eq!(*chat_tags, ChatMessageTags::error());
+                assert_eq!(message, "You don't have all the components.");
+            }
+            other => panic!("expected chat log action, got {:?}", other),
+        }
     }
 
     #[test]

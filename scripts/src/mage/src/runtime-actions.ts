@@ -1,6 +1,7 @@
 import {
 	ATTACK_SPELL_TIMEOUT_SECONDS,
 	FOLLOW_REPEAT_SECONDS,
+	HEALING_KIT_SUCCESS_GRACE_SECONDS,
 	PENDING_SPELL_BUSY_GRACE_SECONDS,
 	PENDING_SPELL_TIMEOUT_SECONDS,
 	SPELL_REPEAT_SECONDS,
@@ -226,17 +227,21 @@ export function interruptSpellcast(
 
 export function cancelCombatPlanning(state: MageRuntimeState): boolean {
 	const hadSpellcast = spellcastBlocksPlanning(state);
+	const hadHealingKitUse = healingKitUseBlocksPlanning(state);
 	const hadCombatTarget = state.combatTargetGuid != null;
 	const hadMissHistory = state.attackPolicy.lastMissedAttackByTarget.size > 0;
 
 	if (hadSpellcast) {
 		interruptSpellcast(state, "teleport");
 	}
+	if (hadHealingKitUse) {
+		clearHealingKitUse(state);
+	}
 
 	clearCombatTarget(state);
 	state.attackPolicy.lastMissedAttackByTarget.clear();
 
-	return hadSpellcast || hadCombatTarget || hadMissHistory;
+	return hadSpellcast || hadHealingKitUse || hadCombatTarget || hadMissHistory;
 }
 
 export function hasRecentVulnerabilityCast(
@@ -300,6 +305,35 @@ export function clearVulnerabilityHistory(
 	targetGuid: Guid,
 ): void {
 	state.vulnerabilityPolicy.lastSuccessfulVulnAtByTarget.delete(targetGuid);
+	state.vulnerabilityPolicy.failedVulnAttemptsByTarget.delete(targetGuid);
+}
+
+export function clearHealingKitHistory(
+	state: MageRuntimeState,
+	targetGuid: Guid,
+): void {
+	if (state.healingKitPolicy.pendingUse?.targetGuid === targetGuid) {
+		clearHealingKitUse(state);
+	}
+	state.healingKitPolicy.lastSuccessfulUseAtByTarget.delete(targetGuid);
+}
+
+export function hasRecentHealingKitSuccess(
+	state: MageRuntimeState,
+	targetGuid: Guid,
+): boolean {
+	const lastAppliedAt =
+		state.healingKitPolicy.lastSuccessfulUseAtByTarget.get(targetGuid);
+	return (
+		lastAppliedAt != null &&
+		state.elapsedSeconds - lastAppliedAt < HEALING_KIT_SUCCESS_GRACE_SECONDS
+	);
+}
+
+export function clearVulnerabilityAttemptHistory(
+	state: MageRuntimeState,
+	targetGuid: Guid,
+): void {
 	state.vulnerabilityPolicy.failedVulnAttemptsByTarget.delete(targetGuid);
 }
 
@@ -437,19 +471,92 @@ export function useHealingKitOnTarget(
 	state: MageRuntimeState,
 	targetGuid: Guid,
 ): boolean {
+	if (healingKitUseBlocksPlanning(state)) {
+		return false;
+	}
+
+	if (hasRecentHealingKitSuccess(state, targetGuid)) {
+		return false;
+	}
+
 	const kitGuid = firstHealingKit();
 	if (kitGuid == null) {
 		return false;
 	}
 
-	return issueAction(
-		state,
-		`heal-kit:${kitGuid}:${targetGuid}`,
-		SPELL_REPEAT_SECONDS,
-		() => {
-			HB.useWith(kitGuid, targetGuid);
-		},
+	const target = HB.entity(targetGuid);
+	state.healingKitPolicy.pendingUse = {
+		targetGuid,
+		targetName: normalizeCastName(target?.name?.trim() ?? null),
+		kitGuid,
+		issuedAt: state.elapsedSeconds,
+	};
+	logMageInfo(
+		`heal-kit start -> ${describeHealingKitUse(state.healingKitPolicy.pendingUse)} at ${state.elapsedSeconds.toFixed(2)}s`,
 	);
+	HB.useWith(kitGuid, targetGuid);
+	return true;
+}
+
+export function healingKitUseBlocksPlanning(state: MageRuntimeState): boolean {
+	return state.healingKitPolicy.pendingUse != null;
+}
+
+export function resolveHealingKitUseFromChatMessage(
+	state: MageRuntimeState,
+	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	targetName: string | null,
+): boolean {
+	const request = state.healingKitPolicy.pendingUse;
+	if (request == null) {
+		return false;
+	}
+
+	const expectedTargetName = request.targetName ?? targetName;
+	if (expectedTargetName == null) {
+		return false;
+	}
+
+	if (isHealingKitFailureMessage(chatEvent, expectedTargetName)) {
+		clearHealingKitUse(state);
+		logMageInfo(
+			`heal-kit failed -> ${describeHealingKitUse(request)} at ${state.elapsedSeconds.toFixed(2)}s`,
+		);
+		return true;
+	}
+
+	if (isHealingKitSuccessMessage(chatEvent, expectedTargetName)) {
+		state.healingKitPolicy.lastSuccessfulUseAtByTarget.set(
+			request.targetGuid,
+			state.elapsedSeconds,
+		);
+		clearHealingKitUse(state);
+		logMageInfo(
+			`heal-kit succeeded -> ${describeHealingKitUse(request)} at ${state.elapsedSeconds.toFixed(2)}s`,
+		);
+		return true;
+	}
+
+	return false;
+}
+
+export function resolveHealingKitUseFromTimeout(
+	state: MageRuntimeState,
+): boolean {
+	const request = state.healingKitPolicy.pendingUse;
+	if (request == null) {
+		return false;
+	}
+
+	if (state.elapsedSeconds - request.issuedAt < PENDING_SPELL_TIMEOUT_SECONDS) {
+		return false;
+	}
+
+	clearHealingKitUse(state);
+	logMageInfo(
+		`heal-kit timeout -> ${describeHealingKitUse(request)} at ${state.elapsedSeconds.toFixed(2)}s`,
+	);
+	return true;
 }
 
 export function clearNonMageInteraction(state: MageRuntimeState): boolean {
@@ -857,4 +964,79 @@ function describeSpellcastRequest(request: {
 	kind: MageSpellcastKind;
 }): string {
 	return `${request.kind}:${request.spellId}${request.damageType == null ? "" : `:${request.damageType}`}${request.targetGuid == null ? "" : `:${request.targetGuid}`}`;
+}
+
+function describeHealingKitUse(request: {
+	targetGuid: Guid;
+	targetName: string | null;
+	kitGuid: Guid;
+}): string {
+	return `${request.targetGuid}${request.targetName == null ? "" : `:${request.targetName}`}:${request.kitGuid}`;
+}
+
+function clearHealingKitUse(state: MageRuntimeState): void {
+	state.healingKitPolicy.pendingUse = null;
+}
+
+function isHealingKitFailureMessage(
+	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	targetName: string | null,
+): boolean {
+	if (!isOwnHealingChatSender(chatEvent)) {
+		return false;
+	}
+
+	const message = normalizeChatMessage(chatEvent.message);
+	if (targetName == null) {
+		return (
+			message.startsWith("you fail to heal ") ||
+			message.endsWith(" fails to heal you.")
+		);
+	}
+
+	const normalizedTargetName = normalizeChatMessage(targetName);
+	return (
+		message === `you fail to heal ${normalizedTargetName}.` ||
+		(message.endsWith(" fails to heal you.") &&
+			message.includes(normalizedTargetName))
+	);
+}
+
+function isHealingKitSuccessMessage(
+	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+	targetName: string | null,
+): boolean {
+	if (!isOwnHealingChatSender(chatEvent)) {
+		return false;
+	}
+
+	const message = normalizeChatMessage(chatEvent.message);
+	if (targetName == null) {
+		return (
+			message.startsWith("you heal ") || message.includes(" heals you for ")
+		);
+	}
+
+	const normalizedTargetName = normalizeChatMessage(targetName);
+	return (
+		message.startsWith(`you heal ${normalizedTargetName} for `) ||
+		(message.includes(` ${normalizedTargetName} `) &&
+			message.includes(" heals you for "))
+	);
+}
+
+function isOwnHealingChatSender(
+	chatEvent: Pick<ScriptChatEvent, "sender" | "message">,
+): boolean {
+	const sender = normalizeCastName(chatEvent.sender?.trim() ?? null);
+	if (sender == null) {
+		return true;
+	}
+
+	const selfName = normalizeCastName(HB.selfEntity()?.name?.trim() ?? null);
+	if (selfName == null) {
+		return true;
+	}
+
+	return sender.toLowerCase() === selfName.toLowerCase();
 }

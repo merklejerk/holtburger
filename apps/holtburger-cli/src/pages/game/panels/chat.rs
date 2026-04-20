@@ -116,7 +116,7 @@ impl ChatState {
                 } else {
                     ChatMessageTags::system()
                 };
-                self.log(chat_tags, msg.clone());
+                self.log_with_channel(None, chat_tags, msg.clone(), false);
             }
             ClientViewEvent::ServerMessage { message, chat_type } => {
                 self.log(chat_message_tags(*chat_type), message.clone());
@@ -177,7 +177,7 @@ impl ChatState {
     }
 
     pub fn log(&mut self, chat_tags: ChatMessageTags, text: String) {
-        self.log_with_channel(None, chat_tags, text);
+        self.log_with_channel(None, chat_tags, text, true);
     }
 
     pub fn log_channel(
@@ -186,7 +186,12 @@ impl ChatState {
         chat_tags: ChatMessageTags,
         text: String,
     ) {
-        self.log_with_channel(Some(channel), ChatMessageTags::chat().with(chat_tags), text);
+        self.log_with_channel(
+            Some(channel),
+            ChatMessageTags::chat().with(chat_tags),
+            text,
+            true,
+        );
     }
 
     fn log_with_channel(
@@ -194,7 +199,12 @@ impl ChatState {
         channel: Option<ChatChannelInfo>,
         chat_tags: ChatMessageTags,
         text: String,
+        echo_to_debug_log: bool,
     ) {
+        if echo_to_debug_log {
+            log::info!("{}", text);
+        }
+
         if let Some(log_mutex) = &self.chat_log
             && let Ok(mut file) = log_mutex.lock()
         {
@@ -741,6 +751,42 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::sync::Once;
+
+    struct TestLogger;
+
+    static TEST_LOGGER: TestLogger = TestLogger;
+    static INIT_LOGGER: Once = Once::new();
+    static CAPTURED_LOGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    impl log::Log for TestLogger {
+        fn enabled(&self, metadata: &log::Metadata) -> bool {
+            metadata.level() <= log::Level::Info
+        }
+
+        fn log(&self, record: &log::Record) {
+            if self.enabled(record.metadata()) {
+                CAPTURED_LOGS
+                    .lock()
+                    .expect("test logger should lock")
+                    .push(format!("[{}] {}", record.level(), record.args()));
+            }
+        }
+
+        fn flush(&self) {}
+    }
+
+    fn init_test_logger() {
+        INIT_LOGGER.call_once(|| {
+            let _ = log::set_logger(&TEST_LOGGER);
+            log::set_max_level(log::LevelFilter::Info);
+        });
+
+        CAPTURED_LOGS
+            .lock()
+            .expect("test logger should lock")
+            .clear();
+    }
 
     #[test]
     fn channel_message_formats_party_self_echo_without_blank_sender() {
@@ -1093,5 +1139,40 @@ mod tests {
 
         assert_eq!(chat.active_scroll_offset_for(ChatView::Everything), 3);
         assert_eq!(chat.active_scroll_offset_for(ChatView::Chat), 2);
+    }
+
+    #[test]
+    fn chat_log_is_echoed_to_debug_log() {
+        init_test_logger();
+
+        let mut chat = ChatState::new(None);
+        chat.log(ChatMessageTags::chat(), "echo this chat line".to_string());
+
+        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        assert!(
+            captured
+                .iter()
+                .any(|message| message.contains("echo this chat line")),
+            "expected chat line to be echoed into the debug log, got {:?}",
+            *captured
+        );
+    }
+
+    #[test]
+    fn rust_log_messages_do_not_re_echo_into_debug_log() {
+        init_test_logger();
+
+        let mut chat = ChatState::new(None);
+        chat.handle_event(
+            &holtburger_core::ClientViewEvent::LogMessage("[INFO] logger message".to_string()),
+            None,
+        );
+
+        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        assert!(
+            captured.is_empty(),
+            "expected no echoed debug log entries, got {:?}",
+            *captured
+        );
     }
 }

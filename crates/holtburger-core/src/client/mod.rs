@@ -511,13 +511,11 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids });
 
-                if let Some(entity) = &data.player_entity {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::EntitySpawned {
-                            entity: entity.clone(),
-                        });
-                }
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntitySpawned {
+                        entity: data.entity.clone(),
+                    });
                 self.emit_self_movement_kinematics_updated();
             }
             WorldEvent::TeleportStarted { sequence } => {

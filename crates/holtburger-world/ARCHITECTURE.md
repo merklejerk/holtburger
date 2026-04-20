@@ -49,11 +49,12 @@ File: [src/player/mod.rs](src/player/mod.rs)
 - attributes, vitals, skills, and their raw bases
 - enchantments, spells, hotbars, and derived combat stats
 - inventory/equipment membership
-- player-local position properties and protocol sequence tracking
+- player-local position overlays and protocol sequence tracking
 - bootstrap hydration for player-local `PlayerDescription` data
 
-`PlayerState` does **not** own the top-level message router anymore. Its job is to expose mutation
-helpers that encode player-local invariants, sequence tracking, and derived-stat recalculation.
+`PlayerState` does **not** own the top-level message router anymore, and it is not a second
+authoritative entity snapshot. Its job is to expose mutation helpers that encode player-local
+invariants, sequence tracking, and derived-stat recalculation.
 
 ### `WorldState` — authoritative world graph
 File: [src/state/mod.rs](src/state/mod.rs)

@@ -1005,7 +1005,7 @@ fn test_update_position_from_server_caches_grounded_state() {
         },
         &mut events,
     );
-    assert_eq!(player.server_grounded, Some(false));
+    assert_eq!(player.last_server_grounded, Some(false));
 
     player.update_position_from_server(
         &PositionPack {
@@ -1019,7 +1019,7 @@ fn test_update_position_from_server_caches_grounded_state() {
         },
         &mut events,
     );
-    assert_eq!(player.server_grounded, Some(true));
+    assert_eq!(player.last_server_grounded, Some(true));
 }
 
 #[test]

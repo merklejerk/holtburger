@@ -204,9 +204,10 @@ fn character_option_mask(option: CharacterOption) -> CharacterOptionMask {
 /// Session-local player model and derived player-facing state.
 ///
 /// `PlayerState` owns player-specific data such as attributes, vitals, spells, inventory, and
-/// protocol sequence tracking. It is intentionally **not** the protocol router anymore; feature
-/// handlers under `crate::handlers` orchestrate message flows and call into focused mutation
-/// methods on `PlayerState` and `WorldState`.
+/// protocol sequence tracking. It is intentionally **not** a second world object: authoritative
+/// entity/object state lives on the player `Entity`, while `PlayerState` retains only local-player
+/// overlays and session sequencing. Feature handlers under `crate::handlers` orchestrate message
+/// flows and call into focused mutation methods on `PlayerState` and `WorldState`.
 ///
 #[derive(Debug, Clone)]
 pub struct PlayerState {
@@ -234,12 +235,12 @@ pub struct PlayerState {
     pub force_position_sequence: u16,
     /// Sequence for client-initiated position updates.
     pub position_sequence: u16,
-    /// Last grounded state reported by authoritative server movement updates.
-    pub server_grounded: Option<bool>,
+    /// Last grounded bit reported by authoritative self movement updates.
+    pub last_server_grounded: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
-    /// Sparse authoritative storage for non-live position properties keyed by packet `PositionType`.
-    pub position_properties: HashMap<PositionType, holtburger_common::position::WorldPosition>,
+    /// Session-local private position overlays keyed by packet `PositionType`.
+    pub local_position_overlays: HashMap<PositionType, holtburger_common::position::WorldPosition>,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
     pub enchantments: Vec<Enchantment>,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
@@ -264,8 +265,8 @@ pub struct PlayerState {
     /// Items currently equipped, mapped by their primary slot mask.
     pub equipment: HashMap<Guid, EquipMask>,
 
-    /// Dirty tracking for events to minimize redundant UI updates.
-    pub(crate) last_sent_stats: Option<LastSentStats>,
+    /// Dirty tracking for emitted derived-stat snapshots.
+    pub(crate) last_emitted_derived_stats: Option<LastSentStats>,
 }
 
 impl Default for PlayerState {
@@ -289,9 +290,9 @@ impl PlayerState {
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,
-            server_grounded: None,
+            last_server_grounded: None,
             movement_sequence: 0,
-            position_properties: HashMap::new(),
+            local_position_overlays: HashMap::new(),
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             options1: CharacterOptions1::empty(),
@@ -303,7 +304,7 @@ impl PlayerState {
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
-            last_sent_stats: None,
+            last_emitted_derived_stats: None,
         }
     }
 
@@ -311,19 +312,19 @@ impl PlayerState {
         crate::magic::get_total_vitae(&self.enchantments)
     }
 
-    pub fn position_property(
+    pub fn local_position_overlay(
         &self,
         position_type: PositionType,
     ) -> Option<holtburger_common::position::WorldPosition> {
-        self.position_properties.get(&position_type).copied()
+        self.local_position_overlays.get(&position_type).copied()
     }
 
-    pub fn set_position_property(
+    pub fn set_local_position_overlay(
         &mut self,
         position_type: PositionType,
         position: holtburger_common::position::WorldPosition,
     ) {
-        self.position_properties.insert(position_type, position);
+        self.local_position_overlays.insert(position_type, position);
     }
 }
 
@@ -350,19 +351,19 @@ impl PlayerState {
         self.equipment.remove(&item);
     }
 
-    pub fn get_attributes(&self) -> Vec<stats::Attribute> {
+    pub fn attribute_snapshot(&self) -> Vec<stats::Attribute> {
         let mut attr_objs: Vec<_> = self.attributes.values().cloned().collect();
         attr_objs.sort_by_key(|a| a.attr_type as u32);
         attr_objs
     }
 
-    pub fn get_vitals(&self) -> Vec<stats::Vital> {
+    pub fn vital_snapshot(&self) -> Vec<stats::Vital> {
         let mut vitals: Vec<_> = self.vitals.values().cloned().collect();
         vitals.sort_by_key(|v| v.vital_type as u32);
         vitals
     }
 
-    pub fn get_skills(&self) -> Vec<stats::Skill> {
+    pub fn skill_snapshot(&self) -> Vec<stats::Skill> {
         let mut skills: Vec<_> = self.skills.values().cloned().collect();
         skills.sort_by_key(|s| s.skill_type as u32);
         skills

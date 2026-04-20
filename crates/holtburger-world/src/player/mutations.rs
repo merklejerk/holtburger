@@ -173,14 +173,14 @@ impl PlayerState {
         events: &mut Vec<WorldEvent>,
     ) {
         let old_forced_seq = self.force_position_sequence;
-        let old_grounded = self.server_grounded;
+        let old_grounded = self.last_server_grounded;
 
         self.instance_sequence = pos_pack.instance_sequence;
         self.position_sequence = pos_pack.position_sequence;
         self.teleport_sequence = pos_pack.teleport_sequence;
         self.force_position_sequence = pos_pack.force_position_sequence;
         let is_grounded = pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED);
-        self.server_grounded = Some(is_grounded);
+        self.last_server_grounded = Some(is_grounded);
 
         if old_grounded != Some(is_grounded) {
             events.push(WorldEvent::PlayerGroundedUpdated {

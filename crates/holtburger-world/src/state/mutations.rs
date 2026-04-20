@@ -278,11 +278,11 @@ impl WorldState {
             return;
         };
 
-        if self.player.server_grounded == Some(grounded) {
+        if self.player.last_server_grounded == Some(grounded) {
             return;
         }
 
-        self.player.server_grounded = Some(grounded);
+        self.player.last_server_grounded = Some(grounded);
         events.push(WorldEvent::PlayerGroundedUpdated { grounded });
     }
 
@@ -388,24 +388,16 @@ impl WorldState {
         events.push(WorldEvent::LevelInfoUpdated(self.get_level_info()));
     }
 
-    pub(crate) fn emit_player_info(
-        &self,
-        guid: Guid,
-        name: String,
-        pos: Option<WorldPosition>,
-        events: &mut Vec<WorldEvent>,
-    ) {
+    pub(crate) fn emit_player_info(&self, events: &mut Vec<WorldEvent>) {
+        let Some(entity) = self.player_entity() else {
+            return;
+        };
+
         events.push(WorldEvent::PlayerInfo(Box::new(crate::PlayerInfoData {
-            guid,
-            name,
-            pos,
-            player_entity: self
-                .entities
-                .get(guid)
-                .map(|entity| Box::new(entity.clone())),
-            attributes: self.player.get_attributes(),
-            vitals: self.player.get_vitals(),
-            skills: self.player.get_skills(),
+            entity: Box::new(entity.clone()),
+            attributes: self.player.attribute_snapshot(),
+            vitals: self.player.vital_snapshot(),
+            skills: self.player.skill_snapshot(),
             enchantments: self.player.enchantments.clone(),
             spells: self.player.spells.keys().cloned().collect(),
             level_info: self.get_level_info(),
@@ -457,9 +449,9 @@ impl WorldState {
         data: &PlayerDescriptionEventData,
         events: &mut Vec<WorldEvent>,
     ) {
-        let pos = self.bootstrap_player_entity_from_description(data);
+        self.bootstrap_player_entity_from_description(data);
 
-        self.emit_player_info(data.guid, data.name.clone(), pos, events);
+        self.emit_player_info(events);
         self.emit_level_info(events);
     }
 
@@ -561,7 +553,8 @@ impl WorldState {
             return;
         }
 
-        self.player.set_position_property(position_type, position);
+        self.player
+            .set_local_position_overlay(position_type, position);
     }
 
     /// Updates the player's authoritative entity position and keeps the SpatialScene
@@ -740,7 +733,8 @@ impl WorldState {
         }
 
         if guid == self.player.guid {
-            self.player.set_position_property(position_type, position);
+            self.player
+                .set_local_position_overlay(position_type, position);
         }
 
         true

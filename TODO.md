@@ -87,6 +87,7 @@
 - [x] Rendering issues in chat for some names/items like the Blackmoor's Favor gem.
 - [x] Spellcasting chat should be categorized as combat.
 - [x] Excessive entity.clone()s - health and book updates replace entire entity.
+- [x] player kill messages rendering with `{0}` template.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.

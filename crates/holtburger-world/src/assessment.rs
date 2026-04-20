@@ -316,6 +316,7 @@ pub struct WeaponInfo {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreatureInfo {
+    pub creature_type: Option<CreatureType>,
     pub health: u32,
     pub health_max: u32,
     pub stamina: u32,
@@ -697,6 +698,9 @@ impl CreatureInfo {
     fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
         let cp = object.creature_profile?;
         Some(CreatureInfo {
+            creature_type: object
+                .get_int_prop(PropertyInt::CreatureType)
+                .and_then(|t| CreatureType::from_repr(t as u32)),
             health: cp.health,
             health_max: cp.health_max,
             stamina: cp.attributes.as_ref().map(|a| a.stamina).unwrap_or(0),
@@ -875,7 +879,10 @@ mod tests {
     use crate::entity::Entity;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessorsMut};
+    use holtburger_common::properties::{
+        PropertyBool, PropertyInt, WorldObjectPropertyAccessorsMut,
+    };
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
 
     #[test]
     fn from_entity_captures_open_status_property() {
@@ -891,5 +898,29 @@ mod tests {
 
         assert_eq!(assessment.is_open, Some(true));
         assert_eq!(assessment.is_locked, Some(false));
+    }
+
+    #[test]
+    fn from_entity_captures_creature_type_property() {
+        let mut entity = Entity::new(
+            Guid(0x60000003),
+            "Test Creature".to_string(),
+            WorldPosition::default(),
+        );
+        entity.set_int_prop(PropertyInt::CreatureType, CreatureType::Olthoi as i32);
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 100,
+            health_max: 100,
+            attributes: None,
+            buffs: None,
+        });
+
+        let assessment = Assessment::from_entity(&entity);
+
+        assert_eq!(
+            assessment.creature.unwrap().creature_type,
+            Some(CreatureType::Olthoi)
+        );
     }
 }

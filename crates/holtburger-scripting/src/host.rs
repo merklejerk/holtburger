@@ -13,11 +13,11 @@ use holtburger_common::properties::{
 };
 
 use crate::{
-    ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction, ScriptClientView,
-    ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
-    ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView, ScriptEvent, ScriptIntent,
-    ScriptJsonValue, ScriptLogLevel, ScriptPartyView, ScriptPositionRef, ScriptSelfView,
-    ScriptSource, ScriptTradeInfo,
+    ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
+    ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
+    ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue, ScriptMessageStyle,
+    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -39,6 +39,7 @@ struct ScriptClientViewPtr {
     entity_instance_prop: unsafe fn(*const (), Guid, PropertyInstanceId) -> Option<Guid>,
     load_config: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
     load_data: unsafe fn(*const ()) -> Option<ScriptJsonValue>,
+    load_data_bin: unsafe fn(*const ()) -> Option<Vec<u8>>,
     write_config: unsafe fn(*const (), String) -> bool,
     debug_log: unsafe fn(*const (), String),
     #[allow(clippy::type_complexity)]
@@ -60,6 +61,9 @@ struct ScriptClientViewPtr {
     current_trade_info: unsafe fn(*const ()) -> Option<ScriptTradeInfo>,
     #[allow(clippy::type_complexity)]
     party: unsafe fn(*const ()) -> Option<ScriptPartyView>,
+    server_time: unsafe fn(*const ()) -> Option<f64>,
+    pending_confirmation: unsafe fn(*const ()) -> Option<ScriptConfirmation>,
+    busy_operation: unsafe fn(*const ()) -> ScriptBusyOperation,
 }
 
 impl ScriptClientViewPtr {
@@ -136,6 +140,10 @@ impl ScriptClientViewPtr {
 
         unsafe fn load_data<T: ScriptClientView>(data: *const ()) -> Option<ScriptJsonValue> {
             unsafe { (&*data.cast::<T>()).load_data() }
+        }
+
+        unsafe fn load_data_bin<T: ScriptClientView>(data: *const ()) -> Option<Vec<u8>> {
+            unsafe { (&*data.cast::<T>()).load_data_bin() }
         }
 
         unsafe fn write_config<T: ScriptClientView>(data: *const (), contents: String) -> bool {
@@ -225,6 +233,20 @@ impl ScriptClientViewPtr {
             unsafe { (&*data.cast::<T>()).party() }
         }
 
+        unsafe fn server_time<T: ScriptClientView>(data: *const ()) -> Option<f64> {
+            unsafe { (&*data.cast::<T>()).server_time() }
+        }
+
+        unsafe fn pending_confirmation<T: ScriptClientView>(
+            data: *const (),
+        ) -> Option<ScriptConfirmation> {
+            unsafe { (&*data.cast::<T>()).pending_confirmation() }
+        }
+
+        unsafe fn busy_operation<T: ScriptClientView>(data: *const ()) -> ScriptBusyOperation {
+            unsafe { (&*data.cast::<T>()).busy_operation() }
+        }
+
         Self {
             data: (view as *const T).cast(),
             self_entity: self_entity::<T>,
@@ -238,6 +260,7 @@ impl ScriptClientViewPtr {
             entity_instance_prop: entity_instance_prop::<T>,
             load_config: load_config::<T>,
             load_data: load_data::<T>,
+            load_data_bin: load_data_bin::<T>,
             write_config: write_config::<T>,
             debug_log: debug_log::<T>,
             nearby_entities: nearby_entities::<T>,
@@ -255,6 +278,9 @@ impl ScriptClientViewPtr {
             entity: entity::<T>,
             current_trade_info: current_trade_info::<T>,
             party: party::<T>,
+            server_time: server_time::<T>,
+            pending_confirmation: pending_confirmation::<T>,
+            busy_operation: busy_operation::<T>,
         }
     }
 
@@ -300,6 +326,10 @@ impl ScriptClientViewPtr {
 
     unsafe fn load_data(self) -> Option<ScriptJsonValue> {
         unsafe { (self.load_data)(self.data) }
+    }
+
+    unsafe fn load_data_bin(self) -> Option<Vec<u8>> {
+        unsafe { (self.load_data_bin)(self.data) }
     }
 
     unsafe fn write_config(self, contents: String) -> bool {
@@ -373,6 +403,18 @@ impl ScriptClientViewPtr {
     unsafe fn party(self) -> Option<ScriptPartyView> {
         unsafe { (self.party)(self.data) }
     }
+
+    unsafe fn server_time(self) -> Option<f64> {
+        unsafe { (self.server_time)(self.data) }
+    }
+
+    unsafe fn pending_confirmation(self) -> Option<ScriptConfirmation> {
+        unsafe { (self.pending_confirmation)(self.data) }
+    }
+
+    unsafe fn busy_operation(self) -> ScriptBusyOperation {
+        unsafe { (self.busy_operation)(self.data) }
+    }
 }
 
 const BOOTSTRAP_JS: &str = r#"
@@ -393,6 +435,9 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     },
     attack(guid) {
         Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
+    },
+    setCombatMode(on) {
+        Deno.core.ops.op_hb_set_combat_mode(Boolean(on));
     },
     follow(guid) {
         Deno.core.ops.op_hb_follow(Number(guid) >>> 0);
@@ -423,6 +468,15 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     },
     currentOpenContainer() {
         return Deno.core.ops.op_hb_current_open_container();
+    },
+    serverTime() {
+        return Deno.core.ops.op_hb_server_time();
+    },
+    pendingConfirmation() {
+        return Deno.core.ops.op_hb_pending_confirmation();
+    },
+    busyOperation() {
+        return Deno.core.ops.op_hb_busy_operation();
     },
     respondToConfirmation(accepted) {
         Deno.core.ops.op_hb_respond_to_confirmation(Boolean(accepted));
@@ -504,12 +558,15 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     loadData() {
         return Deno.core.ops.op_hb_load_data();
     },
+    loadDataBin() {
+        return Deno.core.ops.op_hb_load_data_bin();
+    },
     writeConfig(contents) {
         const serialized = typeof contents === "string" ? contents : JSON.stringify(contents);
         return Deno.core.ops.op_hb_write_config(serialized);
     },
-    log(level, message) {
-        Deno.core.ops.op_hb_log(String(level), String(message));
+    print(style, message) {
+        Deno.core.ops.op_hb_print(String(style), String(message));
     },
     debugLog(message) {
         Deno.core.ops.op_hb_debug_log(String(message));
@@ -615,8 +672,9 @@ deno_core::extension!(
         op_hb_entity_instance_prop,
         op_hb_load_config,
         op_hb_load_data,
+        op_hb_load_data_bin,
         op_hb_write_config,
-        op_hb_log,
+        op_hb_print,
         op_hb_debug_log,
         op_hb_say,
         op_hb_emote,
@@ -626,8 +684,12 @@ deno_core::extension!(
         op_hb_distance,
         op_hb_current_trade_info,
         op_hb_current_open_container,
+        op_hb_server_time,
+        op_hb_pending_confirmation,
+        op_hb_busy_operation,
         op_hb_respond_to_confirmation,
         op_hb_cast_spell,
+        op_hb_set_combat_mode,
         op_hb_open_container,
         op_hb_close_container,
         op_hb_equipment,
@@ -772,6 +834,29 @@ fn op_hb_current_open_container(state: &mut OpState) -> Option<Guid> {
 
 #[op2]
 #[serde]
+fn op_hb_server_time(state: &mut OpState) -> Option<Value> {
+    let server_time = with_current_script_client_view(state, |view| unsafe { view.server_time() })
+        .flatten()
+        .unwrap_or_default();
+
+    Some(json!(server_time))
+}
+
+#[op2]
+#[serde]
+fn op_hb_pending_confirmation(state: &mut OpState) -> Option<ScriptConfirmation> {
+    with_current_script_client_view(state, |view| unsafe { view.pending_confirmation() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_busy_operation(state: &mut OpState) -> ScriptBusyOperation {
+    with_current_script_client_view(state, |view| unsafe { view.busy_operation() })
+        .unwrap_or_default()
+}
+
+#[op2]
+#[serde]
 fn op_hb_spellbook(state: &mut OpState) -> Vec<u32> {
     with_current_script_client_view(state, |view| unsafe { view.spellbook() }).unwrap_or_default()
 }
@@ -893,8 +978,8 @@ fn op_hb_equip(state: &mut OpState, guid: u32, #[string] slot: String) {
                 .borrow::<HostRuntimeState>()
                 .outputs
                 .borrow_mut()
-                .push(ScriptIntent::Log {
-                    level: ScriptLogLevel::Error,
+                .push(ScriptIntent::Print {
+                    style: ScriptMessageStyle::Error,
                     message: format!("invalid equipment slot for equip intent: {slot}"),
                 });
             return;
@@ -1010,6 +1095,12 @@ fn op_hb_load_data(state: &mut OpState) -> Option<ScriptJsonValue> {
     with_current_script_client_view(state, |view| unsafe { view.load_data() }).flatten()
 }
 
+#[op2]
+#[serde]
+fn op_hb_load_data_bin(state: &mut OpState) -> Option<Vec<u8>> {
+    with_current_script_client_view(state, |view| unsafe { view.load_data_bin() }).flatten()
+}
+
 #[op2(fast)]
 fn op_hb_write_config(state: &mut OpState, #[string] contents: String) -> bool {
     with_current_script_client_view(state, |view| unsafe { view.write_config(contents) })
@@ -1017,13 +1108,13 @@ fn op_hb_write_config(state: &mut OpState, #[string] contents: String) -> bool {
 }
 
 #[op2(fast)]
-fn op_hb_log(state: &mut OpState, #[string] level: String, #[string] message: String) {
-    let level = parse_script_log_level(&level);
+fn op_hb_print(state: &mut OpState, #[string] style: String, #[string] message: String) {
+    let style = parse_script_message_style(&style);
     state
         .borrow::<HostRuntimeState>()
         .outputs
         .borrow_mut()
-        .push(ScriptIntent::Log { level, message });
+        .push(ScriptIntent::Print { style, message });
 }
 
 #[op2(fast)]
@@ -1184,8 +1275,8 @@ fn op_hb_salvage(state: &mut OpState, tool: u32, #[string] item_guids_json: Stri
                 .borrow::<HostRuntimeState>()
                 .outputs
                 .borrow_mut()
-                .push(ScriptIntent::Log {
-                    level: ScriptLogLevel::Error,
+                .push(ScriptIntent::Print {
+                    style: ScriptMessageStyle::Error,
                     message: format!("failed to parse salvage item list: {error}"),
                 });
             return;
@@ -1246,6 +1337,15 @@ fn op_hb_attack(state: &mut OpState, guid: u32) {
 }
 
 #[op2(fast)]
+fn op_hb_set_combat_mode(state: &mut OpState, on: bool) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::SetCombatMode { on });
+}
+
+#[op2(fast)]
 fn op_hb_follow(state: &mut OpState, guid: u32) {
     state
         .borrow::<HostRuntimeState>()
@@ -1287,13 +1387,26 @@ fn op_hb_approach(state: &mut OpState, guid: u32) {
         }));
 }
 
-fn parse_script_log_level(level: &str) -> ScriptLogLevel {
-    match level.trim().to_ascii_lowercase().as_str() {
-        "trace" => ScriptLogLevel::Trace,
-        "debug" => ScriptLogLevel::Debug,
-        "warn" | "warning" => ScriptLogLevel::Warn,
-        "error" => ScriptLogLevel::Error,
-        _ => ScriptLogLevel::Info,
+fn parse_script_message_style(style: &str) -> ScriptMessageStyle {
+    match style.trim().to_ascii_lowercase().as_str() {
+        "trace" => ScriptMessageStyle::Trace,
+        "debug" => ScriptMessageStyle::Debug,
+        "system" => ScriptMessageStyle::System,
+        "chat" => ScriptMessageStyle::Chat,
+        "combat" => ScriptMessageStyle::Combat,
+        "tell" => ScriptMessageStyle::Tell,
+        "emote" => ScriptMessageStyle::Emote,
+        "party" | "fellowship" => ScriptMessageStyle::Party,
+        "guild" | "allegiance" | "vassals" | "patron" | "monarch" | "covassals" => {
+            ScriptMessageStyle::Guild
+        }
+        "trade" => ScriptMessageStyle::Trade,
+        "help" => ScriptMessageStyle::Help,
+        "society" => ScriptMessageStyle::Society,
+        "magic" => ScriptMessageStyle::Magic,
+        "warn" | "warning" => ScriptMessageStyle::Warn,
+        "error" => ScriptMessageStyle::Error,
+        _ => ScriptMessageStyle::Info,
     }
 }
 
@@ -1461,10 +1574,11 @@ mod tests {
     use super::build_dispatch_source;
     use crate::{
         ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
-        ScriptClientInteraction, ScriptCombatInfo, ScriptContainerView, ScriptEnchantmentView,
-        ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
-        ScriptEvent, ScriptIntent, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
-        ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptClientInteraction, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
+        ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
+        ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLifecycleEvent,
+        ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptPartyMemberView,
+        ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -1480,7 +1594,7 @@ mod tests {
 
     fn resolve_position(reference: ScriptPositionRef) -> Option<WorldPosition> {
         match reference {
-            ScriptPositionRef::Position(position) => Some(position),
+            ScriptPositionRef::Position(position) => Some(position.into()),
             ScriptPositionRef::Guid(guid) => match guid {
                 Guid(7) => Some(WorldPosition {
                     landblock_id: Guid(0x0100_0000),
@@ -1582,6 +1696,21 @@ mod tests {
             Some(Guid(17))
         }
 
+        fn server_time(&self) -> Option<f64> {
+            Some(123.5)
+        }
+
+        fn pending_confirmation(&self) -> Option<ScriptConfirmation> {
+            Some(ScriptConfirmation::Local(ScriptLocalConfirmation {
+                kind: ScriptLocalConfirmationKind::Unswear,
+                text: "Please unswear first".to_string(),
+            }))
+        }
+
+        fn busy_operation(&self) -> ScriptBusyOperation {
+            ScriptBusyOperation::Sell
+        }
+
         fn equipment(&self) -> Vec<ScriptEquipmentSlotView> {
             vec![ScriptEquipmentSlotView {
                 slot: ScriptEquipmentSlotKind::HeadWear,
@@ -1631,7 +1760,8 @@ mod tests {
                 guid,
                 name: Some("Lesser Healing Kit".to_string()),
                 kind: ScriptEntityKind::HealingKit,
-                position: WorldPosition::default(),
+                weenie_id: None,
+                position: WorldPosition::default().into(),
                 profile: None,
                 container: Guid::NULL,
                 wielder: Guid::NULL,
@@ -1670,22 +1800,6 @@ mod tests {
                 ],
             })
         }
-
-        fn active_spells(&self) -> Vec<crate::ScriptSpellEffectView> {
-            Vec::new()
-        }
-
-        fn server_time(&self) -> Option<f64> {
-            None
-        }
-
-        fn pending_confirmation(&self) -> Option<crate::ScriptConfirmation> {
-            None
-        }
-
-        fn busy_operation(&self) -> ScriptBusyOperation {
-            ScriptBusyOperation::None
-        }
     }
 
     #[test]
@@ -1702,6 +1816,7 @@ mod tests {
         entity_helper_returns_js_object();
         debug_log_helper_emits_no_script_outputs();
         party_helper_returns_js_object();
+        server_time_pending_confirmation_and_busy_operation_helpers_return_js_values();
         distance_and_heading_helpers_accept_guids_and_positions();
         combat_info_helper_returns_js_object();
         respond_to_confirmation_helper_emits_script_intent();
@@ -1711,6 +1826,7 @@ mod tests {
         open_and_close_container_intents_are_emitted();
         attack_follow_and_cancel_helpers_emit_client_intents();
         current_trade_info_helper_returns_js_object();
+        set_combat_mode_helper_emits_script_intent();
     }
 
     fn dispatch_source_escapes_javascript_line_separators() {
@@ -1737,8 +1853,21 @@ mod tests {
 
         let source = build_dispatch_source(&event).expect("dispatch source should serialize");
 
-        assert!(source.contains("\\\"kind\\\":\\\"Command\\\""));
+        assert!(source.contains("\\\"kind\\\":\\\"command\\\""));
         assert!(source.contains("\\\"msg\\\":\\\"ping the script\\\""));
+        assert!(source.contains("JSON.parse("));
+    }
+
+    #[test]
+    fn dispatch_source_serializes_started_lifecycle_args() {
+        let event = ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started {
+            args: "loot now".to_string(),
+        });
+
+        let source = build_dispatch_source(&event).expect("dispatch source should serialize");
+
+        assert!(source.contains("\\\"kind\\\":\\\"started\\\""));
+        assert!(source.contains("\\\"args\\\":\\\"loot now\\\""));
         assert!(source.contains("JSON.parse("));
     }
 
@@ -1747,7 +1876,7 @@ mod tests {
             "equipment-map-test",
             r#"
                 const equipment = Holtburger.equipment();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         equipment instanceof Map,
@@ -1763,7 +1892,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,true,42]"
         ));
     }
@@ -1773,7 +1902,7 @@ mod tests {
             "spellbook-array-test",
             r#"
                 const spellbook = Holtburger.spellbook();
-                Holtburger.log("info", JSON.stringify(spellbook));
+                Holtburger.print("info", JSON.stringify(spellbook));
             "#,
         );
 
@@ -1782,7 +1911,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[7,11,13]"
         ));
     }
@@ -1792,7 +1921,7 @@ mod tests {
             "inventory-array-test",
             r#"
                 const inventory = Holtburger.inventory();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         Array.isArray(inventory),
@@ -1810,7 +1939,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,1,17,4,[11,12]]"
         ));
     }
@@ -1819,7 +1948,7 @@ mod tests {
         let source = ScriptSource::new(
             "current-open-container-test",
             r#"
-                Holtburger.log("info", String(Holtburger.currentOpenContainer()));
+                Holtburger.print("info", String(Holtburger.currentOpenContainer()));
             "#,
         );
 
@@ -1828,7 +1957,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "17"
         ));
     }
@@ -1838,7 +1967,7 @@ mod tests {
             "current-interaction-test",
             r#"
                 const interaction = Holtburger.currentInteraction();
-                Holtburger.log("info", JSON.stringify(interaction));
+                Holtburger.print("info", JSON.stringify(interaction));
             "#,
         );
 
@@ -1847,7 +1976,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "{\"kind\":\"Attack\",\"data\":{\"guid\":7}}"
         ));
     }
@@ -1857,7 +1986,7 @@ mod tests {
             "enchantments-test",
             r#"
                 const enchantments = Holtburger.enchantments();
-                Holtburger.log("info", JSON.stringify(enchantments));
+                Holtburger.print("info", JSON.stringify(enchantments));
             "#,
         );
 
@@ -1866,7 +1995,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[{\"spellId\":7,\"endTime\":123.5},{\"spellId\":11,\"endTime\":222.25}]"
         ));
     }
@@ -1876,7 +2005,7 @@ mod tests {
             "entity-test",
             r#"
                 const entity = Holtburger.entity(11);
-                Holtburger.log("info", JSON.stringify([entity.guid, entity.name, entity.kind]));
+                Holtburger.print("info", JSON.stringify([entity.guid, entity.name, entity.kind]));
             "#,
         );
 
@@ -1885,7 +2014,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[11,\"Lesser Healing Kit\",\"healing_kit\"]"
         ));
     }
@@ -1895,7 +2024,7 @@ mod tests {
             "debug-log-test",
             r#"
                 Holtburger.debugLog("script diagnostics");
-                Holtburger.log("info", "after debug log");
+                Holtburger.print("info", "after debug log");
             "#,
         );
 
@@ -1904,7 +2033,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "after debug log"
         ));
     }
@@ -1914,7 +2043,7 @@ mod tests {
             "party-test",
             r#"
                 const party = Holtburger.party();
-                Holtburger.log("info", JSON.stringify(party));
+                Holtburger.print("info", JSON.stringify(party));
             "#,
         );
 
@@ -1923,7 +2052,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message.contains("\"leaderGuid\":7")
                     && message.contains("\"members\"")
                     && message.contains("\"guid\":7")
@@ -1935,13 +2064,41 @@ mod tests {
         ));
     }
 
+    fn server_time_pending_confirmation_and_busy_operation_helpers_return_js_values() {
+        let source = ScriptSource::new(
+            "script-state-test",
+            r#"
+                const values = [
+                    Holtburger.serverTime(),
+                    Holtburger.pendingConfirmation(),
+                    Holtburger.busyOperation(),
+                ];
+                Holtburger.print("info", JSON.stringify(values));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        match outputs.as_slice() {
+            [ScriptIntent::Print { message, .. }]
+                if message
+                    == "[123.5,{\"kind\":\"local\",\"data\":{\"kind\":{\"kind\":\"unswear\"},\"text\":\"Please unswear first\"}},\"sell\"]" =>
+                {}
+            [ScriptIntent::Print { message, .. }] => {
+                panic!("unexpected script-state output: {message}")
+            }
+            other => panic!("unexpected outputs: {other:?}"),
+        }
+    }
+
     fn distance_and_heading_helpers_accept_guids_and_positions() {
         let source = ScriptSource::new(
             "distance-heading-test",
             r#"
                 const distance = Holtburger.distance(7, 42);
                 const heading = Holtburger.headingTo(7, 42);
-                Holtburger.log("info", JSON.stringify([distance, heading]));
+                Holtburger.print("info", JSON.stringify([distance, heading]));
             "#,
         );
 
@@ -1950,7 +2107,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if deno_core::serde_json::from_str::<Vec<f64>>(message).is_ok_and(|values| {
                     values.len() == 2
                         && (values[0] - 10.0).abs() < 1e-6
@@ -1964,7 +2121,7 @@ mod tests {
             "combat-info-test",
             r#"
                 const combatInfo = Holtburger.combatInfo();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         combatInfo.combatMode,
@@ -1983,8 +2140,29 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[\"Melee\",true,7,0.75,\"High\",123.5]"
+        ));
+    }
+
+    fn set_combat_mode_helper_emits_script_intent() {
+        let source = ScriptSource::new(
+            "set-combat-mode-test",
+            r#"
+                Holtburger.setCombatMode(false);
+                Holtburger.setCombatMode(true);
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [
+                ScriptIntent::SetCombatMode { on: false },
+                ScriptIntent::SetCombatMode { on: true },
+            ]
         ));
     }
 
@@ -2057,7 +2235,7 @@ mod tests {
         let source = ScriptSource::new(
             "spellbook-membership-test",
             r#"
-                Holtburger.log("info", JSON.stringify([
+                Holtburger.print("info", JSON.stringify([
                     Holtburger.inSpellbook(7),
                     Holtburger.inSpellbook(99),
                 ]));
@@ -2069,7 +2247,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,false]"
         ));
     }
@@ -2079,10 +2257,10 @@ mod tests {
             "heading-to-test",
             r#"
                 const heading = Holtburger.headingTo(
-                    { landblock_id: 16777216, coords: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
-                    { landblock_id: 16777216, coords: { x: 0, y: 10, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
+                    { landblockId: 16777216, coords: { x: 0, y: 0, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
+                    { landblockId: 16777216, coords: { x: 0, y: 10, z: 0 }, rotation: { w: 1, x: 0, y: 0, z: 0 } },
                 );
-                Holtburger.log("info", String(heading));
+                Holtburger.print("info", String(heading));
             "#,
         );
 
@@ -2091,7 +2269,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message
                     .parse::<f64>()
                     .is_ok_and(|heading| (heading - 90.0_f64.to_radians()).abs() < 1e-6)
@@ -2102,7 +2280,7 @@ mod tests {
         let source = ScriptSource::new(
             "entity-exists-test",
             r#"
-                Holtburger.log("info", JSON.stringify([
+                Holtburger.print("info", JSON.stringify([
                     Holtburger.entityExists(42),
                     Holtburger.entityExists(7),
                 ]));
@@ -2114,7 +2292,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[true,false]"
         ));
     }
@@ -2124,7 +2302,7 @@ mod tests {
             "current-trade-info-test",
             r#"
                 const trade = Holtburger.currentTradeInfo();
-                Holtburger.log(
+                Holtburger.print(
                     "info",
                     JSON.stringify([
                         trade.partnerGuid,
@@ -2141,7 +2319,7 @@ mod tests {
 
         assert!(matches!(
             outputs.as_slice(),
-            [ScriptIntent::Log { message, .. }]
+            [ScriptIntent::Print { message, .. }]
                 if message == "[7,\"Buddy\",[11],[21,22]]"
         ));
     }

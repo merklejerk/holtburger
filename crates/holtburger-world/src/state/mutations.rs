@@ -1031,10 +1031,10 @@ impl WorldState {
 
         if let Some(entity) = self.entities.get_mut(target_guid) {
             match property {
-                PropertyInstanceId::Container => {
-                    if value != Guid::NULL && target_guid != self.player.guid {
-                        clear_world_presence = true;
-                    }
+                PropertyInstanceId::Container
+                    if value != Guid::NULL && target_guid != self.player.guid =>
+                {
+                    clear_world_presence = true;
                 }
                 PropertyInstanceId::Wielder => {
                     if value == Guid::NULL {

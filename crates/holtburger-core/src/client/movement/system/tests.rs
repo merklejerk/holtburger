@@ -178,7 +178,10 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
         now,
     );
 
-    assert_eq!(movement.current_local_drive_control(&world), None);
+    assert_eq!(
+        movement.current_local_drive_control(&world, Duration::from_millis(33)),
+        None
+    );
 
     movement
         .tick(now, &mut world, &mut session)
@@ -186,7 +189,7 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
         .expect("autonomous drive should activate on movement tick");
 
     let drive = movement
-        .current_local_drive_control(&world)
+        .current_local_drive_control(&world, Duration::from_millis(33))
         .expect("autonomous drive should be exposed to simulation");
 
     assert_eq!(drive.body_id, SpatialBodyId::LocalPlayer(world.player.guid));
@@ -208,7 +211,10 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
         .await
         .expect("tick-scoped autonomous drive should expire when not resent");
 
-    assert_eq!(movement.current_local_drive_control(&world), None);
+    assert_eq!(
+        movement.current_local_drive_control(&world, Duration::from_millis(33)),
+        None
+    );
 }
 
 #[tokio::test]
@@ -245,7 +251,10 @@ async fn later_manual_drive_wins_over_queued_autonomous_drive() {
         .await
         .expect("movement tick should arbitrate queued drive intents");
 
-    assert_eq!(movement.current_local_drive_control(&world), None);
+    assert_eq!(
+        movement.current_local_drive_control(&world, Duration::from_millis(33)),
+        None
+    );
     assert!(matches!(
         movement.active_drive,
         Some(ActiveDriveState {
@@ -911,6 +920,86 @@ async fn pulsed_run_input_expires_on_tick_and_sends_stop_transition() {
     assert!(player.velocity.length_squared() <= 1e-6);
     assert!(player.omega.length_squared() <= 1e-6);
     assert_eq!(session.packet_sequence, 4);
+}
+
+#[tokio::test]
+async fn server_controlled_movement_suppresses_next_frontend_autonomous_wire_pulse() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    world.player.guid = guid;
+    world.player.position = position;
+    world
+        .entities
+        .insert(Entity::new(guid, "Player".to_string(), position));
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let now = Instant::now();
+
+    movement.note_server_controlled_movement_started();
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: Some(0.0),
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        now,
+    );
+
+    movement
+        .tick(now, &mut world, &mut session)
+        .await
+        .expect("server-controlled suppression tick should succeed");
+
+    assert!(movement.active_drive.is_none());
+    assert!(!movement.server_motion_active);
+}
+
+#[test]
+fn server_controlled_projection_uses_landblock_aware_global_delta() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let current_pose = WorldPosition {
+        landblock_id: Guid(0x1234_0001),
+        coords: Vector3::new(191.0, 64.0, 0.0),
+        rotation: Quaternion::from_heading(0.0),
+    };
+    let target_pose = WorldPosition {
+        landblock_id: Guid(0x1334_0001),
+        coords: Vector3::new(1.0, 64.0, 0.0),
+        rotation: Quaternion::from_heading(0.0),
+    };
+
+    world.player.guid = guid;
+    world.player.position = current_pose;
+    world
+        .entities
+        .insert(Entity::new(guid, "Player".to_string(), current_pose));
+
+    let mut movement = MovementSystem::new();
+    movement.set_server_controlled_projection(ServerControlledProjection {
+        target_pose,
+        speed_mps: 2.0,
+    });
+
+    let drive = movement
+        .current_local_drive_control(&world, Duration::from_secs(1))
+        .expect("server-controlled projection should expose a local drive");
+
+    assert_eq!(drive.desired_world_delta, Vector3::new(2.0, 0.0, 0.0));
+    assert_eq!(
+        drive.desired_heading,
+        Some(current_pose.heading_to(&target_pose))
+    );
+    assert_eq!(drive.target_hint, Some(target_pose));
 }
 
 #[tokio::test]

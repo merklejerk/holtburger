@@ -56,7 +56,7 @@ impl ClientRuntime {
                     WorldEvent::SelfServerControlledMotion(data) => {
                         self.movement
                             .record_server_control_sequence(data.server_control_sequence);
-                        let (wire_events, world_events) = {
+                        let world_events = {
                             let ClientRuntime {
                                 simulation,
                                 movement,
@@ -68,9 +68,6 @@ impl ClientRuntime {
                                 .handle_server_controlled_movement(*data, movement, world, session)
                                 .await?
                         };
-                        for event in wire_events {
-                            self.emit_wire_event(event);
-                        }
                         follow_up_events.extend(world_events);
                     }
                     WorldEvent::SelfUpdatePosition {

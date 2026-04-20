@@ -606,20 +606,20 @@ impl CharacterCreationFormState {
         }
 
         let minimum = self.minimum_skill_advancement(skill_id);
-        if !matches!(
-            minimum,
-            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive
-        ) && advancement_rank(current) <= advancement_rank(minimum)
-        {
-            self.set_feedback("That skill is already at its template minimum.", true);
-            return false;
-        }
-
         let next = match current {
             SkillAdvancementClass::Specialized => SkillAdvancementClass::Trained,
             SkillAdvancementClass::Trained => SkillAdvancementClass::Untrained,
             SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => unreachable!(),
         };
+
+        if !matches!(
+            minimum,
+            SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive
+        ) && advancement_rank(next) > advancement_rank(minimum)
+        {
+            self.set_feedback("That skill is already at its template minimum.", true);
+            return false;
+        }
 
         self.skill_advancement_classes[skill_id as usize] = next;
         self.clear_feedback();
@@ -1052,6 +1052,20 @@ mod tests {
                 .as_ref()
                 .map(|feedback| feedback.message.as_str()),
             Some("That skill is already at its template minimum.")
+        );
+    }
+
+    #[test]
+    fn lower_selected_skill_can_stop_at_template_minimum() {
+        let mut form = CharacterCreationFormState::new(test_catalog());
+        form.selected_skill_id = Some(SkillType::Run as u32);
+        form.skill_advancement_classes[SkillType::Run as usize] =
+            SkillAdvancementClass::Specialized;
+
+        assert!(form.lower_selected_skill());
+        assert_eq!(
+            form.skill_advancement_classes[SkillType::Run as usize],
+            SkillAdvancementClass::Trained
         );
     }
 

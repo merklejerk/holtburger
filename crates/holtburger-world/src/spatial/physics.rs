@@ -302,6 +302,7 @@ fn project_pose_by_offset(
         ),
         rotation: authoritative_pose.rotation,
     }
+    .normalize_outdoor_cell()
 }
 
 pub(crate) fn project_pose_by_velocity(

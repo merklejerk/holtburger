@@ -22,11 +22,11 @@ pub use host::ScriptHost;
 pub use types::{
     ScriptBusyOperation, ScriptCharacterAttributeView, ScriptCharacterSheetView,
     ScriptCharacterSkillView, ScriptCharacterVitalView, ScriptChatChannelKind, ScriptChatEvent,
-    ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatInfo,
-    ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView, ScriptEntityKind,
-    ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind, ScriptEquipmentSlotView,
-    ScriptEvent, ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
-    ScriptLocalConfirmationKind, ScriptLogLevel, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptSpellEffectView,
-    ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptClientIntent, ScriptClientInteraction, ScriptClientView, ScriptCombatFeedback,
+    ScriptCombatInfo, ScriptConfirmation, ScriptContainerView, ScriptEnchantmentView,
+    ScriptEntityKind, ScriptEntityProfile, ScriptEntityView, ScriptEquipmentSlotKind,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLifecycleEvent,
+    ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptMessageStyle, ScriptMotionCommand,
+    ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
+    ScriptTradeInfo, ScriptWorkflowEvent, ScriptWorldPosition,
 };

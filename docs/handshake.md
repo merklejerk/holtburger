@@ -9,9 +9,10 @@ The handshake follows a strict progression of ports and security states.
 | **Login** | C $\rightarrow$ S | `LoginRequest` (0x10000) | Login Port (9000) | None | 0 |
 | **Port Switch** | S $\rightarrow$ C | `ConnectRequest` (0x40000) | Login Port | None | 0 |
 | **Establishment** | C $\rightarrow$ S | `ConnectResponse` (0x80000) | **Login Port + 1** | None | 1 |
-| **Authenticated** | Both | `BlobFragments` (0x04) | Login Port | ISAAC Checksum | 2+ |
+| **Authenticated** | C $\rightarrow$ S | `BlobFragments` (0x04) | Login Port | ISAAC Checksum | 2+ |
+| **Authenticated** | S $\rightarrow$ C | `BlobFragments` (0x04) | Login Port + 1 | ISAAC Checksum | 2+ |
 
-*\*Note: The server uses an "Activation Port" (Login Port + 1) specifically for the `ConnectResponse`. All subsequent game traffic returns to the primary Login Port.*
+*Note: The server uses an "Activation Port" (Login Port + 1) specifically for the `ConnectResponse`. After that, ACE sources server-to-client traffic from the activation port while client-to-server traffic continues to target the primary login port.*
 
 ---
 
@@ -53,8 +54,8 @@ The server responds from the Game Port (clarifying the session parameters).
 In standard ACE local configurations, the server listens for initial logins on a specific port (e.g. 9000), but requires a specific "activation" on the **Login Port + 1** (e.g. 9001).
 
 - **The ConnectResponse Ping:** The client MUST send the `ConnectResponse` (Step 3) to **Login Port + 1**, even if the `ConnectRequest` came from the primary port.
-- **Port Continuity:** After the `ConnectResponse` is sent to the activation port, the server expects all subsequent game traffic (Character List, World data, etc.) to resume on the **original Login Port**.
-- **Important:** If you permanently switch your target port to the activation port, you will time out because the world manager expects you to talk back to the main listener.
+- **Port Continuity:** After the `ConnectResponse` is sent to the activation port, the client keeps sending to the **original Login Port**, but ACE sends server-to-client packets from the **activation port**.
+- **Important:** If you filter inbound packets by the original login port only, you will drop the character list and later login traffic because it arrives from the activation listener.
 
 **ACE Synchronization: The "Race Condition"**
 ACE (and other emulators) perform the database verification in an asynchronous task. There is a known race condition where the server sends the `ConnectRequest` but is not yet listening for the activation on the Game Port.

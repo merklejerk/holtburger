@@ -29,7 +29,9 @@ The safest assumption is that a Holtburger script should be a small, determinist
 
 1. Put a script in your writable local script directory, using the basename you want to run.
 2. Run the TUI.
-3. Use `/run <BASENAME>` to start the script, or `/scripts` to inspect what the client can see.
+3. Use `/run <BASENAME> [ARGS...]` to start the script, or `/scripts` to inspect what the client can see.
+
+If you issue `/run` before the client has entered the world and the player entity is available, the client logs a warning and ignores the command.
 
 The simplest useful script is usually an event handler that logs a little state and then grows from there.
 
@@ -37,12 +39,13 @@ The simplest useful script is usually an event handler that logs a little state 
 const config = HB.loadConfig() ?? { enabled: true };
 
 HB.onEvent((event) => {
-  if (event.kind === "Lifecycle" && event.data.kind === "Started") {
-    HB.log("info", "hello from Holtburger");
+  if (event.kind === "lifecycle" && event.data.kind === "started") {
+    HB.debugLog(`started with args: ${event.data.args}`);
+    HB.print("info", "hello from Holtburger");
     return;
   }
 
-  if (event.kind === "Lifecycle" && event.data.kind === "Tick") {
+  if (event.kind === "lifecycle" && event.data.kind === "tick") {
     if (config.enabled === false) {
       return;
     }
@@ -138,28 +141,31 @@ That kind of workflow maps well to Holtburger because the runtime wants one runn
 
 `HB.onEvent(handler)` registers a function that receives every structured event from the host. Handlers are called synchronously in registration order.
 
-The event payloads are plain JSON objects serialized from the Rust `ScriptEvent` enums. The exact field names come from the Rust types in [src/types.rs](src/types.rs), but the high-level kinds are:
+The event payloads are plain JSON objects serialized from the Rust `ScriptEvent` enums. The exact field names come from the Rust types in [src/types.rs](src/types.rs), and the top-level event kinds are lowercase snake_case:
 
-- `Lifecycle`
-- `ChatMessage`
-- `Workflow`
-- `Command`
-- `WeenieError`
-- `SelfVitalsChanged`
-- `EntityAppeared`
-- `EntityDisappeared`
-- `EntityUpdated`
-- `InventoryChanged`
-- `SpellbookChanged`
-- `PartyChanged`
+- `lifecycle`
+- `chat_message`
+- `combat_feedback`
+- `workflow`
+- `command`
+- `weenie_error`
+- `self_vitals_changed`
+- `entity_appeared`
+- `entity_disappeared`
+- `entity_updated`
+- `teleport_started`
+- `player_killed`
+- `inventory_changed`
+- `spellbook_changed`
+- `party_changed`
 
 Lifecycle events are especially important:
 
-- `Started` fires when the host is ready.
-- `Stopped` fires when the script is shutting down.
-- `Tick` fires on the normal update cadence and carries `elapsed_seconds`.
+- `started` fires when the host is ready. It includes an `args` string from `/run`, which is empty when no extra arguments were provided.
+- `stopped` fires when the script is shutting down.
+- `tick` fires on the normal update cadence and carries `elapsed_seconds`.
 
-The most common pattern is to handle `Started` for one-time setup and `Tick` for repeatable decision making.
+The most common pattern is to handle `started` for one-time setup and `tick` for repeatable decision making.
 
 ## Reading State
 
@@ -174,6 +180,9 @@ Use the read helpers to inspect the current client snapshot.
 - `HB.currentTradeInfo()` returns the active trade state, including the trade partner and both item lists, or `null` if no trade is active.
 - `HB.party()` returns the current party snapshot, or `null` if the client is not in a party.
 - `HB.currentOpenContainer()` returns the guid of the currently open container, or `null`.
+- `HB.serverTime()` returns the current server time as a number, or `0` if the client has not synced yet.
+- `HB.pendingConfirmation()` returns the active confirmation dialog snapshot, or `null` if no confirmation is open.
+- `HB.busyOperation()` returns the current busy operation state as a snake_case string, or `none` when the client is idle.
 - `HB.inventory()` returns container views for the current inventory, or an empty array if the client snapshot is not ready.
 - `HB.equipment()` returns a JavaScript `Map` keyed by snake_case equipment slot name, with values containing `equipMask` and `itemGuid`; if no snapshot is available, it returns an empty map.
 
@@ -211,7 +220,7 @@ The write side of the API emits frontend intents or direct client actions.
 
 ### Logging and Chat
 
-- `HB.log(level, message)` emits a script log. Accepted levels are `trace`, `debug`, `info`, `warn`, `warning`, and `error`; unknown values fall back to `info`.
+- `HB.print(style, message)` emits a script message into the chat buffer. Accepted styles include `trace`, `debug`, `info`, `warn`, `warning`, `error`, `system`, `chat`, `combat`, `tell`, `emote`, `party`, `guild`, `trade`, `help`, `society`, and `magic`; unknown values fall back to `info`.
 - `HB.debugLog(message)` sends a message to the frontend debug log.
 - `HB.say(message)` sends in-game chat text.
 - `HB.emote(message)` sends an emote message.
@@ -222,6 +231,7 @@ The write side of the API emits frontend intents or direct client actions.
 - `HB.approach(guid)` requests movement toward the given entity.
 - `HB.follow(guid)` requests following the given entity.
 - `HB.attack(guid)` requests attacking the given entity.
+- `HB.setCombatMode(on)` requests combat mode on (`true`) or off (`false`).
 - `HB.cancelInteraction()` cancels the current client interaction workflow.
 
 ### Movement and Combat
@@ -270,13 +280,14 @@ Use config for user preferences, toggles, and state that should survive script r
 ### Data
 
 - `HB.loadData()` reads optional script data, checking the writable local script directory first and then the bundled script tree, or returns `null` if no data is available.
+- `HB.loadDataBin()` reads optional binary script data from `<BASENAME>.data.bin`, checking the writable local script directory first and then the bundled script tree, or returns `null` if no binary data is available.
 
 Use data for shipped tables, lookup data, and other script-owned resources that should be versioned with the script but may be overridden locally.
 
 ## Practical Conventions
 
 - Prefer one top-level `HB.onEvent(...)` registration per script unless you have a strong reason to split handlers.
-- Treat `Started` as initialization and `Tick` as the steady-state control loop.
+- Treat `started` as initialization and `tick` as the steady-state control loop.
 - Keep action emission idempotent when possible. The same tick can be revisited many times while the client state is stable.
 - Store durable state in config, not in globals.
 - Use `HB.loadData()` for data tables that should travel with the script.

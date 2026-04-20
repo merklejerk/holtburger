@@ -11,7 +11,7 @@ The protocol is structured in layers, operating over **UDP**:
 
 0.  **[Glossary](glossary.md):** Common terms like Weenies, GUIDs, and Landblocks.
 1.  **Transport Layer:** Handles UDP framing, packet sequencing, and retransmission (NAK/PAK). It uses a fixed 20-byte header on every packet.
-2.  **Session Layer:** Manages connection state, handshakes, and port switching. A session begins on a primary port (e.g. 9000) and uses a secondary port (+1) for handshake activation.
+2.  **Session Layer:** Manages connection state, handshakes, and port switching. A session begins on a primary port (e.g. 9000); after `ConnectResponse`, ACE sources server-to-client packets from the secondary activation port (+1) while client-to-server traffic continues to target the primary port.
 3.  **Cryptographic Layer:** Employs the **ISAAC** stream cipher. Once the handshake verifies the peers, ISAAC is used to "mask" the 32-bit checksum of every packet, providing basic security and integrity.
 4.  **Fragmentation Layer:** Since game messages can exceed the 1024-byte UDP packet limit, the protocol includes a fragmentation system to split and reassemble large "blobs".
 5.  **Application (Message) Layer:** The top level where game logic resides. This layer uses **Opcodes** to identify message types (e.g., `CharacterList`, `Movement`) and further specializes into **GameActions** (client-to-server) and **GameEvents** (server-to-client). See [stats.md](stats.md) for character data, [properties.md](properties.md) for object traits, and [inventory.md](inventory.md) for ownership state.

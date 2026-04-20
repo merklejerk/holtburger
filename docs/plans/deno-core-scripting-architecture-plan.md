@@ -286,7 +286,7 @@ We should not be dogmatic about forcing every intent to be immediately cross-cli
 
 ```rust
 pub enum ScriptIntent {
-    Log { level: ScriptLogLevel, message: String },
+    Print { style: ScriptMessageStyle, message: String },
     Say { message: String },
     Tell { target: String, message: String },
     Use { guid: Guid },
@@ -661,7 +661,7 @@ Start with the smallest slice that proves the architecture without overcommittin
 - `ScriptEvent::EntityAppeared`
 - `ScriptClientView::self_entity`
 - `ScriptClientView::nearby_entities`
-- `ScriptIntent::Log`
+- `ScriptIntent::Print`
 - `ScriptIntent::Say`
 - `ScriptIntent::Client(ScriptClientIntent::TargetEntity { .. })`
 - `ScriptIntent::Client(ScriptClientIntent::Approach { .. })`

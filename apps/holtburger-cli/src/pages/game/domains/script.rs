@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::scripting::{
-    DeferredScriptSource, TuiScriptClientView, WorkflowProjection, chat_tags_for_level,
+    TuiScriptClientView, WorkflowProjection, chat_tags_for_style,
     deferred_script_source_for_basename, resolve_deferred_script_source,
     script_event_from_notification, script_event_from_view_event, workflow_events,
     workflow_projection,
@@ -32,9 +32,9 @@ fn script_client_view<'a>(
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     match action {
-        AppAction::RunScript { basename } => {
+        AppAction::RunScript { basename, args } => {
             let mut result = UpdateResult::new();
-            state.run_script_command(&basename, &mut result);
+            state.run_script_command(&basename, args, &mut result);
             result
         }
         AppAction::ScriptCommand { msg } => {
@@ -60,27 +60,29 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.unrun_script_command(&mut result);
             result
         }
+        AppAction::Notification {
+            notification: AppNotification::PlayerEntityReady { .. },
+        } => {
+            let mut result = UpdateResult::new();
+            state.maybe_start_queued_script_startup(&mut result);
+            result
+        }
         _ => UpdateResult::new(),
     }
 }
 
 impl GameState {
-    fn pending_script_source(&self) -> Option<&DeferredScriptSource> {
-        self.script.pending_source.as_ref()
-    }
-
-    fn set_pending_script_source(&mut self, source: Option<DeferredScriptSource>) {
-        self.script.pending_source = source;
+    pub(crate) fn set_queued_script_startup(
+        &mut self,
+        queued_script_startup: Option<crate::state::QueuedScriptStartup>,
+        result: &mut UpdateResult,
+    ) {
+        self.script.queued_script_startup = queued_script_startup;
+        self.maybe_start_queued_script_startup(result);
     }
 
     fn script_host_is_running(&self) -> bool {
         self.script.host.is_some()
-    }
-
-    fn script_player_entity_is_ready(&self) -> bool {
-        self.data
-            .player_guid
-            .is_some_and(|guid| self.data.entities.contains_key(&guid))
     }
 
     fn stop_script_host(&mut self, result: &mut UpdateResult) {
@@ -112,14 +114,39 @@ impl GameState {
         }
     }
 
-    fn clear_script_host_after_error(&mut self) {
-        self.set_pending_script_source(None);
-        self.script.host = None;
-        self.script.tick_accumulator = Duration::ZERO;
-        self.script.running_source_name = None;
+    pub(crate) fn maybe_start_queued_script_startup(&mut self, result: &mut UpdateResult) {
+        if !self.player_entity_is_ready() {
+            return;
+        }
+
+        let Some(queued_script_startup) = self.script.queued_script_startup.take() else {
+            return;
+        };
+
+        self.run_script_command(
+            &queued_script_startup.basename,
+            queued_script_startup.args,
+            result,
+        );
     }
 
-    pub(crate) fn run_script_command(&mut self, basename: &str, result: &mut UpdateResult) {
+    pub(crate) fn run_script_command(
+        &mut self,
+        basename: &str,
+        args: String,
+        result: &mut UpdateResult,
+    ) {
+        if !self.player_entity_is_ready() {
+            result.actions.push(AppAction::Log {
+                chat_tags: ChatMessageTags::warning(),
+                message: format!(
+                    "[script] Ignoring /run {basename} because the client is not ready yet"
+                ),
+            });
+            result.request_redraw(crate::types::RedrawPriority::Immediate);
+            return;
+        }
+
         let source = match deferred_script_source_for_basename(basename) {
             Ok(source) => source,
             Err(error) => {
@@ -132,35 +159,72 @@ impl GameState {
             }
         };
 
-        let loaded_path = match &source {
-            DeferredScriptSource::Path(path) => path.display().to_string(),
-            DeferredScriptSource::Inline(source) => source.name.clone(),
+        let source = match resolve_deferred_script_source(&source) {
+            Ok(source) => source,
+            Err(error) => {
+                result.actions.push(AppAction::Log {
+                    chat_tags: ChatMessageTags::error(),
+                    message: format!("[script] Failed to load script source: {error:?}"),
+                });
+                result.request_redraw(crate::types::RedrawPriority::Immediate);
+                return;
+            }
         };
 
-        self.set_pending_script_source(Some(source));
-        self.stop_script_host(result);
-        self.start_script_host_if_needed(None, result);
+        let loaded_path = source.name.clone();
+        let running_source_name = source.name.clone();
 
         if self.script_host_is_running() {
-            result.actions.push(AppAction::Log {
-                chat_tags: ChatMessageTags::info(),
-                message: format!("[script] Loaded {loaded_path}"),
-            });
+            self.stop_script_host(result);
+        }
+
+        let view = script_client_view(
+            &self.data,
+            &self.view,
+            None,
+            Some(running_source_name.as_str()),
+        );
+
+        match ScriptHost::spawn(source, &view) {
+            Ok(mut host) => {
+                let started_ok = dispatch_script_event_to_host(
+                    &view,
+                    &mut host,
+                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started { args }),
+                    result,
+                );
+
+                if started_ok {
+                    self.script.running_source_name = Some(running_source_name);
+                    self.script.host = Some(host);
+                    self.script.tick_accumulator = Duration::ZERO;
+                    result.actions.push(AppAction::Log {
+                        chat_tags: ChatMessageTags::info(),
+                        message: format!("[script] Loaded {loaded_path}"),
+                    });
+                }
+            }
+            Err(error) => {
+                result.actions.push(AppAction::Log {
+                    chat_tags: ChatMessageTags::error(),
+                    message: format!("[script] Failed to start script host: {error}"),
+                });
+            }
         }
 
         result.request_redraw(crate::types::RedrawPriority::Immediate);
     }
 
     pub(crate) fn unrun_script_command(&mut self, result: &mut UpdateResult) {
-        let had_pending = self.pending_script_source().is_some();
-        self.set_pending_script_source(None);
+        let had_queued_startup = self.script.queued_script_startup.take().is_some();
         let had_running = self.script_host_is_running();
         self.stop_script_host(result);
 
-        let message = if had_running || had_pending {
-            "[script] Stopped active script"
-        } else {
-            "[script] No active or queued script to stop"
+        let message = match (had_running, had_queued_startup) {
+            (true, true) => "[script] Stopped active script and cleared queued startup",
+            (true, false) => "[script] Stopped active script",
+            (false, true) => "[script] Cleared queued script startup",
+            (false, false) => "[script] No active script to stop",
         };
 
         result.actions.push(AppAction::Log {
@@ -170,68 +234,10 @@ impl GameState {
         result.request_redraw(crate::types::RedrawPriority::Immediate);
     }
 
-    fn start_script_host_if_needed(
-        &mut self,
-        server_time: Option<(f64, Instant)>,
-        result: &mut UpdateResult,
-    ) {
-        if self.script_host_is_running() || !self.script_player_entity_is_ready() {
-            return;
-        }
-
-        let Some(source) = self.pending_script_source().cloned() else {
-            return;
-        };
-
-        let source = match resolve_deferred_script_source(&source) {
-            Ok(source) => source,
-            Err(error) => {
-                self.set_pending_script_source(None);
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] Failed to load script source: {error:?}"),
-                });
-                return;
-            }
-        };
-
-        let running_source_name = source.name.clone();
-        let view = script_client_view(
-            &self.data,
-            &self.view,
-            server_time,
-            Some(running_source_name.as_str()),
-        );
-        match ScriptHost::spawn(source, &view) {
-            Ok(mut host) => {
-                let started_ok = dispatch_script_event_to_host(
-                    &view,
-                    &mut host,
-                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Started),
-                    result,
-                );
-
-                if started_ok {
-                    self.script.running_source_name = Some(running_source_name);
-                    self.script.host = Some(host);
-                } else {
-                    self.clear_script_host_after_error();
-                }
-            }
-            Err(error) => {
-                self.set_pending_script_source(None);
-                result.actions.push(AppAction::Log {
-                    chat_tags: ChatMessageTags::error(),
-                    message: format!("[script] Failed to start script host: {error}"),
-                });
-            }
-        }
-    }
-
     fn compile_script_intent(view: &ViewState, intent: ScriptIntent) -> Result<AppAction> {
         match intent {
-            ScriptIntent::Log { level, message } => Ok(AppAction::Log {
-                chat_tags: chat_tags_for_level(level),
+            ScriptIntent::Print { style, message } => Ok(AppAction::Log {
+                chat_tags: chat_tags_for_style(style),
                 message,
             }),
             ScriptIntent::Say { message } => Ok(AppAction::SendCommands {
@@ -313,6 +319,7 @@ impl GameState {
 
                 anyhow::bail!("no active confirmation to respond to")
             }
+            ScriptIntent::SetCombatMode { on } => Ok(AppAction::SetCombatMode { on }),
             ScriptIntent::Client(intent) => match intent {
                 ScriptClientIntent::TargetEntity { guid } => Ok(AppAction::BeginInteraction {
                     interaction: Interaction::Targeting { target_guid: guid },
@@ -348,13 +355,6 @@ impl GameState {
         before_workflow: &WorkflowProjection,
         result: &mut UpdateResult,
     ) {
-        let host_was_running = self.script_host_is_running();
-        let should_run_after = self.pending_script_source().is_some();
-
-        if !host_was_running && should_run_after {
-            self.start_script_host_if_needed(server_time, result);
-        }
-
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -363,53 +363,35 @@ impl GameState {
         );
         let after_workflow = workflow_projection(Some(self));
 
-        let host_was_cleared = {
-            let Some(host) = self.script.host.as_mut() else {
-                return;
-            };
-
-            let mut dispatch_failed = false;
-
-            if let Some(script_event) = script_event_from_view_event(event) {
-                dispatch_failed |=
-                    !dispatch_script_event_to_host(&view, host, script_event, result);
-            }
-
-            if !dispatch_failed {
-                for workflow_event in workflow_events(before_workflow, &after_workflow) {
-                    dispatch_failed |= !dispatch_script_event_to_host(
-                        &view,
-                        host,
-                        ScriptEvent::Workflow(workflow_event),
-                        result,
-                    );
-
-                    if dispatch_failed {
-                        break;
-                    }
-                }
-            }
-
-            if dispatch_failed {
-                true
-            } else if !should_run_after {
-                dispatch_script_event_to_host(
-                    &view,
-                    host,
-                    ScriptEvent::Lifecycle(ScriptLifecycleEvent::Stopped),
-                    result,
-                );
-                true
-            } else {
-                false
-            }
+        let Some(host) = self.script.host.as_mut() else {
+            return;
         };
 
-        if host_was_cleared {
-            self.script.host = None;
-            if self.pending_script_source().is_some() {
-                self.clear_script_host_after_error();
+        let mut dispatch_failed = false;
+
+        if let Some(script_event) = script_event_from_view_event(event) {
+            dispatch_failed |= !dispatch_script_event_to_host(&view, host, script_event, result);
+        }
+
+        if !dispatch_failed {
+            for workflow_event in workflow_events(before_workflow, &after_workflow) {
+                dispatch_failed |= !dispatch_script_event_to_host(
+                    &view,
+                    host,
+                    ScriptEvent::Workflow(workflow_event),
+                    result,
+                );
+
+                if dispatch_failed {
+                    break;
+                }
             }
+        }
+
+        if dispatch_failed {
+            self.script.host = None;
+            self.script.running_source_name = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -419,11 +401,8 @@ impl GameState {
         notification: &AppNotification,
         result: &mut UpdateResult,
     ) {
-        let host_was_running = self.script_host_is_running();
-        let should_run_after = self.pending_script_source().is_some();
-
-        if !host_was_running && should_run_after {
-            self.start_script_host_if_needed(server_time, result);
+        if matches!(notification, AppNotification::PlayerEntityReady { .. }) {
+            self.maybe_start_queued_script_startup(result);
         }
 
         let view = script_client_view(
@@ -440,7 +419,9 @@ impl GameState {
         if let Some(script_event) = script_event_from_notification(notification)
             && !dispatch_script_event_to_host(&view, host, script_event, result)
         {
-            self.clear_script_host_after_error();
+            self.script.host = None;
+            self.script.running_source_name = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -450,13 +431,6 @@ impl GameState {
         elapsed: f64,
         result: &mut UpdateResult,
     ) {
-        let host_was_running = self.script_host_is_running();
-        let should_run_after = self.pending_script_source().is_some();
-
-        if !host_was_running && should_run_after {
-            self.start_script_host_if_needed(server_time, result);
-        }
-
         let view = script_client_view(
             &self.data,
             &self.view,
@@ -499,16 +473,13 @@ impl GameState {
                 }
             }
 
-            dispatch_failed || !should_run_after
+            dispatch_failed
         };
 
         if host_was_cleared {
             self.script.host = None;
-            if self.pending_script_source().is_some() {
-                self.clear_script_host_after_error();
-            } else {
-                self.script.tick_accumulator = Duration::ZERO;
-            }
+            self.script.running_source_name = None;
+            self.script.tick_accumulator = Duration::ZERO;
         }
     }
 
@@ -548,9 +519,14 @@ mod tests {
     use super::ScriptEquipmentSlotKind;
     use super::ScriptIntent;
     use super::ViewState;
+    use crate::state::QueuedScriptStartup;
+    use crate::types::AppNotification;
+    use crate::types::UpdateResult;
     use crate::types::{AppAction, InspectTarget};
     use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
     use holtburger_core::client::types::TargetSlot;
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn compile_script_intent_maps_new_item_actions() {
@@ -674,6 +650,12 @@ mod tests {
         ));
 
         assert!(matches!(
+            GameState::compile_script_intent(&view, ScriptIntent::SetCombatMode { on: true },)
+                .expect("set combat mode should compile"),
+            AppAction::SetCombatMode { on: true }
+        ));
+
+        assert!(matches!(
             GameState::compile_script_intent(
                 &view,
                 ScriptIntent::Emote {
@@ -782,5 +764,29 @@ mod tests {
             AppAction::PickUp { item, container }
                 if item == Guid(8) && container == Some(Guid(9))
         ));
+    }
+
+    #[test]
+    fn queued_script_startup_runs_once_player_entity_is_ready() {
+        let player_guid = Guid(0x5000_0001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        let script_basename = format!("queued-startup-test-{}", std::process::id());
+
+        state.data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), WorldPosition::default()),
+        );
+        state.script.queued_script_startup =
+            Some(QueuedScriptStartup::new(&script_basename, "pick up loot"));
+
+        let mut result = UpdateResult::new();
+        state.sync_script_host_for_notification(
+            None,
+            &AppNotification::PlayerEntityReady { guid: player_guid },
+            &mut result,
+        );
+
+        assert!(state.script.queued_script_startup.is_none());
+        assert!(state.script.host.is_none());
     }
 }

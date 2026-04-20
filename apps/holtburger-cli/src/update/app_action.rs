@@ -45,8 +45,13 @@ impl AppState {
                 game.chat.chat_log = self.chat_log.take();
                 game.data.spell_catalog = self.spell_catalog.clone();
                 game.data.skill_table = self.skill_table.clone();
+                let queued_script_startup = self.queued_script_startup.take();
                 self.page = Page::Game(Box::new(game));
-                UpdateResult::redraw()
+                let mut result = UpdateResult::redraw();
+                if let Page::Game(game) = &mut self.page {
+                    game.set_queued_script_startup(queued_script_startup, &mut result);
+                }
+                result
             }
             other => self.page.handle_action(other).unwrap_or_default(),
         }
@@ -104,6 +109,7 @@ mod tests {
             quit_on_disconnect: false,
             disconnect_reason: None,
             pending_exit_message: None,
+            queued_script_startup: None,
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -146,6 +152,7 @@ mod tests {
             quit_on_disconnect: false,
             disconnect_reason: None,
             pending_exit_message: None,
+            queued_script_startup: None,
         };
 
         app_state.drain_actions(&mut UpdateResult {
@@ -190,6 +197,7 @@ mod tests {
             quit_on_disconnect: false,
             disconnect_reason: None,
             pending_exit_message: None,
+            queued_script_startup: None,
         };
 
         let result = app_state.reduce_app_action(AppAction::SendCommands {
@@ -225,6 +233,7 @@ mod tests {
             quit_on_disconnect: false,
             disconnect_reason: None,
             pending_exit_message: None,
+            queued_script_startup: None,
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -235,6 +244,47 @@ mod tests {
         match &app_state.page {
             Page::Game(game) => {
                 assert_eq!(game.data.character_name.as_deref(), Some("New Player"));
+            }
+            _ => panic!("expected game page after transition"),
+        }
+    }
+
+    #[test]
+    fn transition_to_game_transfers_queued_script_startup() {
+        let mut app_state = AppState {
+            account_name: "account".to_string(),
+            account_password: "password".to_string(),
+            character_preference: None,
+            chat_log: None,
+            page: Page::Selection(Box::default()),
+            client_state: ClientState::Connected,
+            net_stats: NetStats::default(),
+            world_name: "World".to_string(),
+            server_time: None,
+            content: None,
+            spell_catalog: None,
+            skill_table: None,
+            verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
+            queued_script_startup: Some(crate::state::QueuedScriptStartup::new(
+                "fighter",
+                "pick up loot",
+            )),
+        };
+
+        let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
+            guid: Guid(0x50000003),
+            name: "Queued Player".to_string(),
+        });
+
+        match &app_state.page {
+            Page::Game(game) => {
+                assert!(matches!(
+                    game.script.queued_script_startup.as_ref(),
+                    Some(startup) if startup.basename == "fighter" && startup.args == "pick up loot"
+                ));
             }
             _ => panic!("expected game page after transition"),
         }

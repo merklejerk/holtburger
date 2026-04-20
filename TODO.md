@@ -257,8 +257,17 @@
 - [x] Salvaging waits for UseDone, leaving us in a busy state.
 - [x] `/version` and `--version`, seeded from commit hash env var set by build system?
 - [x] Attack spam too verbose.
-- [ ] `/promote <PLAYER>` - Promote new party leader.
-- [ ] Show "creature type" in assessment.
+- [x] `/promote <PLAYER>` - Promote new party leader.
+- [x] Can't specialize then unspecialize a skill in character creator.
+- [x] Show "creature type" in assessment.
+- [x] Fix rare follow teleporting.
+- [x] Client sending duplicate packets to server.
+- [x] Add all spells causes a sequence error.
+- [x] Add `/run <ARGS>` command.
+- [~] Mage script improvements:
+    - [x] Add preferred spell IDs.
+    - [x] Fix not using revitalize.
+    - [x] Snap to target heading before casting?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

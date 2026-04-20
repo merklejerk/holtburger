@@ -485,8 +485,8 @@ pub enum GameActionOpcode {
     FellowshipRecruit = 0x00A5,
     /// C2S: Tell the server whether the fellowship panel is open so it can stream updates.
     FellowshipUpdateRequest = 0x00A6,
-    // /// C2S: Designate a new fellowship leader.
-    // FellowshipAssignNewLeader = 0x0290,
+    /// C2S: Designate a new fellowship leader.
+    FellowshipAssignNewLeader = 0x0290,
     // /// C2S: Toggle the fellowship's open/closed enrollment status.
     // FellowshipChangeOpenness = 0x0291,
 

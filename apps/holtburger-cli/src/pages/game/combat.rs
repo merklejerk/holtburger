@@ -12,7 +12,9 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
-use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+use holtburger_protocol::messages::movement::{
+    InterpretedMotionCommand, MovementEventData, MovementTypeData,
+};
 use holtburger_world::context::{CombatTargetStatus, WorldContextExt};
 use holtburger_world::entity::Entity;
 use std::f32::consts::{PI, TAU};
@@ -364,6 +366,7 @@ pub struct CombatRuntimeState {
     pub engagement: CombatEngagementState,
     last_attack_attempt_at: Option<Instant>,
     pending_feedback_since: Option<Instant>,
+    server_controlled_melee_move: Option<ServerControlledMeleeMove>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -380,6 +383,12 @@ pub enum AttackActivity {
     Active,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ServerControlledMeleeMove {
+    target_guid: Guid,
+    server_control_sequence: u16,
+}
+
 impl CombatRuntimeState {
     pub fn handle_mode_updated(&mut self, mode: CombatMode) {
         self.engagement.handle_mode_updated(mode);
@@ -389,6 +398,7 @@ impl CombatRuntimeState {
             CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
         ) {
             self.issue_state = CombatIssueState::Idle;
+            self.server_controlled_melee_move = None;
         }
     }
 
@@ -396,6 +406,7 @@ impl CombatRuntimeState {
         self.engagement.begin_explicit_engagement(target_guid, mode);
         self.last_attack_attempt_at = None;
         self.pending_feedback_since = None;
+        self.server_controlled_melee_move = None;
     }
 
     pub fn clear_engagement(&mut self) {
@@ -403,6 +414,7 @@ impl CombatRuntimeState {
         self.issue_state = CombatIssueState::Idle;
         self.last_attack_attempt_at = None;
         self.pending_feedback_since = None;
+        self.server_controlled_melee_move = None;
     }
 
     pub fn recover_stalled_attack(&mut self) {
@@ -414,6 +426,7 @@ impl CombatRuntimeState {
         };
         self.last_attack_attempt_at = None;
         self.pending_feedback_since = None;
+        self.server_controlled_melee_move = None;
     }
 
     pub fn desired_engagement(self) -> Option<DesiredCombatEngagement> {
@@ -450,6 +463,37 @@ impl CombatRuntimeState {
         }
     }
 
+    pub fn note_self_server_controlled_motion(&mut self, data: &MovementEventData) {
+        let previous = self.server_controlled_melee_move;
+        let next = match &data.data {
+            MovementTypeData::MoveToObject(move_to)
+                if self.engagement.desired_target() == Some(move_to.target) =>
+            {
+                Some(ServerControlledMeleeMove {
+                    target_guid: move_to.target,
+                    server_control_sequence: data.server_control_sequence,
+                })
+            }
+            _ => previous
+                .filter(|active| data.server_control_sequence < active.server_control_sequence),
+        };
+
+        if previous != next {
+            log::info!(
+                "combat runtime: server-controlled melee move previous={:?} next={:?}",
+                previous,
+                next
+            );
+        }
+
+        self.server_controlled_melee_move = next;
+    }
+
+    pub fn awaiting_server_controlled_melee_completion(self, target_guid: Guid) -> bool {
+        self.server_controlled_melee_move
+            .is_some_and(|active| active.target_guid == target_guid)
+    }
+
     pub fn issue_state(self) -> CombatIssueState {
         self.issue_state
     }
@@ -474,6 +518,7 @@ impl CombatRuntimeState {
     pub fn cancel_attack(&mut self) {
         self.issue_state = CombatIssueState::Idle;
         self.pending_feedback_since = None;
+        self.server_controlled_melee_move = None;
         self.engagement
             .handle_feedback(&CombatFeedback::AttackDone {
                 error: WeenieError::ActionCancelled,
@@ -486,11 +531,13 @@ impl CombatRuntimeState {
         match feedback {
             CombatFeedback::AttackCommenced => {
                 self.issue_state = CombatIssueState::InFlight;
+                self.server_controlled_melee_move = None;
             }
             CombatFeedback::AttackDone {
                 error: WeenieError::None,
             } => {
                 self.pending_feedback_since = None;
+                self.server_controlled_melee_move = None;
                 self.issue_state = if self.engagement.desired().is_some() {
                     CombatIssueState::Ready
                 } else {
@@ -501,6 +548,7 @@ impl CombatRuntimeState {
             | CombatFeedback::VictimNotification { .. }
             | CombatFeedback::KillerNotification { .. } => {
                 self.pending_feedback_since = None;
+                self.server_controlled_melee_move = None;
                 self.issue_state = CombatIssueState::Idle;
             }
             // PlayerKilled notifies when any nearby player is killed, so it may
@@ -640,20 +688,31 @@ pub(crate) fn navigation_request(state: &GameState) -> Option<CombatNavigationRe
     let desired = state.data.combat_runtime.desired_engagement()?;
     let target_guid = desired.target_guid;
 
-    if facing_requirement(desired.mode) != Some(CombatFacingRequirement::StickyCloseRange)
-        || state.data.combat_mode != desired.mode
-    {
+    let facing_requirement = facing_requirement(desired.mode);
+    if facing_requirement != Some(CombatFacingRequirement::StickyCloseRange) {
         return None;
     }
 
-    if current_target_guid(state) != Some(target_guid) {
+    if state.data.combat_mode != desired.mode {
         return None;
     }
 
-    if !state.data.combat_target_status(target_guid).is_available() || player_is_dead(state) {
+    let current_target = current_target_guid(state);
+    if current_target != Some(target_guid) {
         return None;
     }
 
+    let target_available = state.data.combat_target_status(target_guid).is_available();
+    let player_dead = player_is_dead(state);
+    if !target_available || player_dead {
+        return None;
+    }
+
+    log::info!(
+        "combat navigation request active target=0x{:08X} mode={:?}",
+        target_guid.0,
+        state.data.combat_mode
+    );
     Some(CombatNavigationRequest {
         target_guid,
         mode: state.data.combat_mode,
@@ -851,6 +910,10 @@ fn should_rearm_sticky_auto_attack(state: &GameState) -> bool {
     current_target_guid(state) == Some(target_guid)
         && state.data.combat_target_status(target_guid).is_available()
         && !player_is_dead(state)
+        && !state
+            .data
+            .combat_runtime
+            .awaiting_server_controlled_melee_completion(target_guid)
 }
 
 fn combat_drive_input(
@@ -864,6 +927,16 @@ fn combat_drive_input(
     }
 
     let target_guid = current_target_guid(state)?;
+    if mode == CombatMode::Melee
+        && state.data.combat_runtime.pending_feedback_since().is_some()
+        && state
+            .data
+            .combat_runtime
+            .awaiting_server_controlled_melee_completion(target_guid)
+    {
+        return None;
+    }
+
     let attack_profile = desired_attack_profile(state, mode)?;
 
     Some(CombatDriveInput::Tick {

@@ -1,0 +1,4184 @@
+{
+  "skills": {
+    "healing": 21,
+    "life": 33,
+    "void": 43,
+    "war": 34
+  },
+  "spells": {
+    "war": {
+      "flame-bolt-i": {
+        "name": "Flame Bolt I",
+        "spellId": 27,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 30.7
+      },
+      "frost-bolt-i": {
+        "name": "Frost Bolt I",
+        "spellId": 28,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 30.7
+      },
+      "magic-bolt": {
+        "name": "Magic Bolt",
+        "spellId": 57,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 30.7
+      },
+      "acid-stream-i": {
+        "name": "Acid Stream I",
+        "spellId": 58,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 30.7
+      },
+      "acid-stream-ii": {
+        "name": "Acid Stream II",
+        "spellId": 59,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 60
+      },
+      "acid-stream-iii": {
+        "name": "Acid Stream III",
+        "spellId": 60,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-stream-iv": {
+        "name": "Acid Stream IV",
+        "spellId": 61,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-stream-v": {
+        "name": "Acid Stream V",
+        "spellId": 62,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-stream-vi": {
+        "name": "Acid Stream VI",
+        "spellId": 63,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "shock-wave-i": {
+        "name": "Shock Wave I",
+        "spellId": 64,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 30.7
+      },
+      "shock-wave-ii": {
+        "name": "Shock Wave II",
+        "spellId": 65,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 60
+      },
+      "shock-wave-iii": {
+        "name": "Shock Wave III",
+        "spellId": 66,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-wave-iv": {
+        "name": "Shock Wave IV",
+        "spellId": 67,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-wave-v": {
+        "name": "Shock Wave V",
+        "spellId": 68,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-wave-vi": {
+        "name": "Shock Wave VI",
+        "spellId": 69,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "frost-bolt-ii": {
+        "name": "Frost Bolt II",
+        "spellId": 70,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 60
+      },
+      "frost-bolt-iii": {
+        "name": "Frost Bolt III",
+        "spellId": 71,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-bolt-iv": {
+        "name": "Frost Bolt IV",
+        "spellId": 72,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-bolt-v": {
+        "name": "Frost Bolt V",
+        "spellId": 73,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-bolt-vi": {
+        "name": "Frost Bolt VI",
+        "spellId": 74,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "lightning-bolt-i": {
+        "name": "Lightning Bolt I",
+        "spellId": 75,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 30.7
+      },
+      "lightning-bolt-ii": {
+        "name": "Lightning Bolt II",
+        "spellId": 76,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 60
+      },
+      "lightning-bolt-iii": {
+        "name": "Lightning Bolt III",
+        "spellId": 77,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-bolt-iv": {
+        "name": "Lightning Bolt IV",
+        "spellId": 78,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-bolt-v": {
+        "name": "Lightning Bolt V",
+        "spellId": 79,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-bolt-vi": {
+        "name": "Lightning Bolt VI",
+        "spellId": 80,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "flame-bolt-ii": {
+        "name": "Flame Bolt II",
+        "spellId": 81,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 60
+      },
+      "flame-bolt-iii": {
+        "name": "Flame Bolt III",
+        "spellId": 82,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-iv": {
+        "name": "Flame Bolt IV",
+        "spellId": 83,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-v": {
+        "name": "Flame Bolt V",
+        "spellId": 84,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-vi": {
+        "name": "Flame Bolt VI",
+        "spellId": 85,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "force-bolt-i": {
+        "name": "Force Bolt I",
+        "spellId": 86,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 30.7
+      },
+      "force-bolt-ii": {
+        "name": "Force Bolt II",
+        "spellId": 87,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 60
+      },
+      "force-bolt-iii": {
+        "name": "Force Bolt III",
+        "spellId": 88,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-bolt-iv": {
+        "name": "Force Bolt IV",
+        "spellId": 89,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-bolt-v": {
+        "name": "Force Bolt V",
+        "spellId": 90,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-bolt-vi": {
+        "name": "Force Bolt VI",
+        "spellId": 91,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "whirling-blade-i": {
+        "name": "Whirling Blade I",
+        "spellId": 92,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 30.7
+      },
+      "whirling-blade-ii": {
+        "name": "Whirling Blade II",
+        "spellId": 93,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 60
+      },
+      "whirling-blade-iii": {
+        "name": "Whirling Blade III",
+        "spellId": 94,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "whirling-blade-iv": {
+        "name": "Whirling Blade IV",
+        "spellId": 95,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "whirling-blade-v": {
+        "name": "Whirling Blade V",
+        "spellId": 96,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "whirling-blade-vi": {
+        "name": "Whirling Blade VI",
+        "spellId": 97,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "flaming-missile": {
+        "name": "Flaming Missile",
+        "spellId": 1097,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 30.7
+      },
+      "flaming-missile-volley": {
+        "name": "Flaming Missile Volley",
+        "spellId": 1481,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 30.7
+      },
+      "flaming-blaze": {
+        "name": "Flaming Blaze",
+        "spellId": 2030,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "steel-thorns": {
+        "name": "Steel Thorns",
+        "spellId": 2031,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "electric-blaze": {
+        "name": "Electric Blaze",
+        "spellId": 2032,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "acidic-spray": {
+        "name": "Acidic Spray",
+        "spellId": 2033,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "electric-discharge": {
+        "name": "Electric Discharge",
+        "spellId": 2035,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "fuming-acid": {
+        "name": "Fuming Acid",
+        "spellId": 2036,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "flaming-irruption": {
+        "name": "Flaming Irruption",
+        "spellId": 2037,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "disintegration": {
+        "name": "Disintegration",
+        "spellId": 2122,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "ilservian-s-flame": {
+        "name": "Ilservian's Flame",
+        "spellId": 2128,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "the-spike": {
+        "name": "The Spike",
+        "spellId": 2132,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "icy-torment": {
+        "name": "Icy Torment",
+        "spellId": 2136,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "alset-s-coil": {
+        "name": "Alset's Coil",
+        "spellId": 2140,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "crushing-shame": {
+        "name": "Crushing Shame",
+        "spellId": 2144,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "evisceration": {
+        "name": "Evisceration",
+        "spellId": 2146,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "dark-flame": {
+        "name": "Dark Flame",
+        "spellId": 2383,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "invoking-aun-tanua": {
+        "name": "Invoking Aun Tanua",
+        "spellId": 2637,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "acid-arc-i": {
+        "name": "Acid Arc I",
+        "spellId": 2711,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 30.7
+      },
+      "acid-arc-ii": {
+        "name": "Acid Arc II",
+        "spellId": 2712,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 60
+      },
+      "acid-arc-iii": {
+        "name": "Acid Arc III",
+        "spellId": 2713,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-arc-iv": {
+        "name": "Acid Arc IV",
+        "spellId": 2714,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-arc-v": {
+        "name": "Acid Arc V",
+        "spellId": 2715,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-arc-vi": {
+        "name": "Acid Arc VI",
+        "spellId": 2716,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-arc-vii": {
+        "name": "Acid Arc VII",
+        "spellId": 2717,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "force-arc-i": {
+        "name": "Force Arc I",
+        "spellId": 2718,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 30.7
+      },
+      "force-arc-ii": {
+        "name": "Force Arc II",
+        "spellId": 2719,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 60
+      },
+      "force-arc-iii": {
+        "name": "Force Arc III",
+        "spellId": 2720,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-arc-iv": {
+        "name": "Force Arc IV",
+        "spellId": 2721,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-arc-v": {
+        "name": "Force Arc V",
+        "spellId": 2722,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-arc-vi": {
+        "name": "Force Arc VI",
+        "spellId": 2723,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "force-arc-vii": {
+        "name": "Force Arc VII",
+        "spellId": 2724,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "frost-arc-i": {
+        "name": "Frost Arc I",
+        "spellId": 2725,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 30.7
+      },
+      "frost-arc-ii": {
+        "name": "Frost Arc II",
+        "spellId": 2726,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 60
+      },
+      "frost-arc-iii": {
+        "name": "Frost Arc III",
+        "spellId": 2727,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-arc-iv": {
+        "name": "Frost Arc IV",
+        "spellId": 2728,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-arc-v": {
+        "name": "Frost Arc V",
+        "spellId": 2729,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-arc-vi": {
+        "name": "Frost Arc VI",
+        "spellId": 2730,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "frost-arc-vii": {
+        "name": "Frost Arc VII",
+        "spellId": 2731,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "lightning-arc-i": {
+        "name": "Lightning Arc I",
+        "spellId": 2732,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 30.7
+      },
+      "lightning-arc-ii": {
+        "name": "Lightning Arc II",
+        "spellId": 2733,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 60
+      },
+      "lightning-arc-iii": {
+        "name": "Lightning Arc III",
+        "spellId": 2734,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-arc-iv": {
+        "name": "Lightning Arc IV",
+        "spellId": 2735,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-arc-v": {
+        "name": "Lightning Arc V",
+        "spellId": 2736,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-arc-vi": {
+        "name": "Lightning Arc VI",
+        "spellId": 2737,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-arc-vii": {
+        "name": "Lightning Arc VII",
+        "spellId": 2738,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "flame-arc-i": {
+        "name": "Flame Arc I",
+        "spellId": 2739,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 30.7
+      },
+      "flame-arc-ii": {
+        "name": "Flame Arc II",
+        "spellId": 2740,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 60
+      },
+      "flame-arc-iii": {
+        "name": "Flame Arc III",
+        "spellId": 2741,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-arc-iv": {
+        "name": "Flame Arc IV",
+        "spellId": 2742,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-arc-v": {
+        "name": "Flame Arc V",
+        "spellId": 2743,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-arc-vi": {
+        "name": "Flame Arc VI",
+        "spellId": 2744,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-arc-vii": {
+        "name": "Flame Arc VII",
+        "spellId": 2745,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "shock-arc-i": {
+        "name": "Shock Arc I",
+        "spellId": 2746,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 30.7
+      },
+      "shock-arc-ii": {
+        "name": "Shock Arc II",
+        "spellId": 2747,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 60
+      },
+      "shock-arc-iii": {
+        "name": "Shock Arc III",
+        "spellId": 2748,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-arc-iv": {
+        "name": "Shock Arc IV",
+        "spellId": 2749,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-arc-v": {
+        "name": "Shock Arc V",
+        "spellId": 2750,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-arc-vi": {
+        "name": "Shock Arc VI",
+        "spellId": 2751,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "shock-arc-vii": {
+        "name": "Shock Arc VII",
+        "spellId": 2752,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "blade-arc-i": {
+        "name": "Blade Arc I",
+        "spellId": 2753,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 30.7
+      },
+      "blade-arc-ii": {
+        "name": "Blade Arc II",
+        "spellId": 2754,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 60
+      },
+      "blade-arc-iii": {
+        "name": "Blade Arc III",
+        "spellId": 2755,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-arc-iv": {
+        "name": "Blade Arc IV",
+        "spellId": 2756,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-arc-v": {
+        "name": "Blade Arc V",
+        "spellId": 2757,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-arc-vi": {
+        "name": "Blade Arc VI",
+        "spellId": 2758,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-arc-vii": {
+        "name": "Blade Arc VII",
+        "spellId": 2759,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "rolling-death": {
+        "name": "Rolling Death",
+        "spellId": 2791,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "rolling-death-2792": {
+        "name": "Rolling Death",
+        "spellId": 2792,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "rolling-death-2793": {
+        "name": "Rolling Death",
+        "spellId": 2793,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "rolling-death-2794": {
+        "name": "Rolling Death",
+        "spellId": 2794,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "priest-s-curse": {
+        "name": "Priest's Curse",
+        "spellId": 2814,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "shriek": {
+        "name": "Shriek",
+        "spellId": 3025,
+        "type": "attack",
+        "difficulty": 280,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 61
+      },
+      "flay-soul": {
+        "name": "Flay Soul",
+        "spellId": 3107,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "flay-soul-3108": {
+        "name": "Flay Soul",
+        "spellId": 3108,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "liquefy-flesh": {
+        "name": "Liquefy Flesh",
+        "spellId": 3109,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "sear-flesh": {
+        "name": "Sear Flesh",
+        "spellId": 3110,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "soul-hammer": {
+        "name": "Soul Hammer",
+        "spellId": 3111,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "soul-spike": {
+        "name": "Soul Spike",
+        "spellId": 3112,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "flay-soul-3113": {
+        "name": "Flay Soul",
+        "spellId": 3113,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "liquefy-flesh-3114": {
+        "name": "Liquefy Flesh",
+        "spellId": 3114,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "sear-flesh-3115": {
+        "name": "Sear Flesh",
+        "spellId": 3115,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "soul-hammer-3116": {
+        "name": "Soul Hammer",
+        "spellId": 3116,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "soul-spike-3117": {
+        "name": "Soul Spike",
+        "spellId": 3117,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "liquefy-flesh-3118": {
+        "name": "Liquefy Flesh",
+        "spellId": 3118,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "sear-flesh-3119": {
+        "name": "Sear Flesh",
+        "spellId": 3119,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "soul-hammer-3120": {
+        "name": "Soul Hammer",
+        "spellId": 3120,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "soul-spike-3121": {
+        "name": "Soul Spike",
+        "spellId": 3121,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "sacrificial-edge": {
+        "name": "Sacrificial Edge",
+        "spellId": 3122,
+        "type": "attack",
+        "difficulty": 500,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "concussive-belch": {
+        "name": "Concussive Belch",
+        "spellId": 3451,
+        "type": "attack",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "wrath-of-the-feelun": {
+        "name": "Wrath of the Feelun",
+        "spellId": 3454,
+        "type": "attack",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "koruu-s-wrath": {
+        "name": "Koruu's Wrath",
+        "spellId": 3456,
+        "type": "attack",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "mana-bolt": {
+        "name": "Mana Bolt",
+        "spellId": 3457,
+        "type": "attack",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "breath-of-the-deep": {
+        "name": "Breath of the Deep",
+        "spellId": 3836,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "corrosive-strike": {
+        "name": "Corrosive Strike",
+        "spellId": 3877,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "incendiary-strike": {
+        "name": "Incendiary Strike",
+        "spellId": 3878,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "glacial-strike": {
+        "name": "Glacial Strike",
+        "spellId": 3879,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "galvanic-strike": {
+        "name": "Galvanic Strike",
+        "spellId": 3880,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "egg-bomb": {
+        "name": "Egg Bomb",
+        "spellId": 3901,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "harbinger-s-fiery-touch": {
+        "name": "Harbinger's Fiery Touch",
+        "spellId": 3926,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "rock-fall": {
+        "name": "Rock Fall",
+        "spellId": 3986,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 10
+      },
+      "dark-lightning": {
+        "name": "Dark Lightning",
+        "spellId": 3989,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "snowball": {
+        "name": "Snowball",
+        "spellId": 4028,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 30.7
+      },
+      "acid-ball": {
+        "name": "Acid Ball",
+        "spellId": 4044,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 30
+      },
+      "flame-ball": {
+        "name": "Flame Ball",
+        "spellId": 4045,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 30
+      },
+      "lightning-ball": {
+        "name": "Lightning Ball",
+        "spellId": 4046,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 30
+      },
+      "egg": {
+        "name": "Egg",
+        "spellId": 4078,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 30.1
+      },
+      "big-fire": {
+        "name": "Big Fire",
+        "spellId": 4082,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-chain": {
+        "name": "Flame Chain",
+        "spellId": 4096,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "essence-bolt": {
+        "name": "Essence Bolt",
+        "spellId": 4181,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "ball-lightning": {
+        "name": "Ball Lightning",
+        "spellId": 4182,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "corrosive-veil": {
+        "name": "Corrosive Veil",
+        "spellId": 4183,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "essence-bolt-4184": {
+        "name": "Essence Bolt",
+        "spellId": 4184,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "essence-bolt-4185": {
+        "name": "Essence Bolt",
+        "spellId": 4185,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "hoar-frost": {
+        "name": "Hoar Frost",
+        "spellId": 4186,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "essence-bolt-4187": {
+        "name": "Essence Bolt",
+        "spellId": 4187,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "shadowed-flame": {
+        "name": "Shadowed Flame",
+        "spellId": 4188,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "spectral-flame": {
+        "name": "Spectral Flame",
+        "spellId": 4208,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "arcane-death": {
+        "name": "Arcane Death",
+        "spellId": 4264,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "arcane-pyramid": {
+        "name": "Arcane Pyramid",
+        "spellId": 4265,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "cow": {
+        "name": "Cow",
+        "spellId": 4267,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "fireworks": {
+        "name": "Fireworks",
+        "spellId": 4268,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "present": {
+        "name": "Present",
+        "spellId": 4269,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "table": {
+        "name": "Table",
+        "spellId": 4270,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "arcane-death-4282": {
+        "name": "Arcane Death",
+        "spellId": 4282,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "arcane-death-4283": {
+        "name": "Arcane Death",
+        "spellId": 4283,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "incantation-of-acid-arc": {
+        "name": "Incantation of Acid Arc",
+        "spellId": 4421,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "incantation-of-blade-arc": {
+        "name": "Incantation of Blade Arc",
+        "spellId": 4422,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "incantation-of-flame-arc": {
+        "name": "Incantation of Flame Arc",
+        "spellId": 4423,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "incantation-of-force-arc": {
+        "name": "Incantation of Force Arc",
+        "spellId": 4424,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "incantation-of-frost-arc": {
+        "name": "Incantation of Frost Arc",
+        "spellId": 4425,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "incantation-of-lightning-arc": {
+        "name": "Incantation of Lightning Arc",
+        "spellId": 4426,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "incantation-of-shock-arc": {
+        "name": "Incantation of Shock Arc",
+        "spellId": 4427,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "incantation-of-acid-stream": {
+        "name": "Incantation of Acid Stream",
+        "spellId": 4433,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "incantation-of-flame-bolt": {
+        "name": "Incantation of Flame Bolt",
+        "spellId": 4439,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "incantation-of-force-bolt": {
+        "name": "Incantation of Force Bolt",
+        "spellId": 4443,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "incantation-of-frost-bolt": {
+        "name": "Incantation of Frost Bolt",
+        "spellId": 4447,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "incantation-of-lightning-bolt": {
+        "name": "Incantation of Lightning Bolt",
+        "spellId": 4451,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "incantation-of-shock-wave": {
+        "name": "Incantation of Shock Wave",
+        "spellId": 4455,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "incantation-of-whirling-blade": {
+        "name": "Incantation of Whirling Blade",
+        "spellId": 4457,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "incantation-of-acid-stream-with-300-spellpower": {
+        "name": "Incantation of Acid Stream with 300 Spellpower",
+        "spellId": 4927,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "incantation-of-acid-stream-with-350-spellpower": {
+        "name": "Incantation of Acid Stream with 350 Spellpower",
+        "spellId": 4928,
+        "type": "attack",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "flame-bolt-i-4930": {
+        "name": "Flame Bolt I",
+        "spellId": 4930,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "mini-fireball": {
+        "name": "Mini Fireball",
+        "spellId": 4931,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "mini-fireball-4932": {
+        "name": "Mini Fireball",
+        "spellId": 4932,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-i-4936": {
+        "name": "Flame Bolt I",
+        "spellId": 4936,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-i-4937": {
+        "name": "Flame Bolt I",
+        "spellId": 4937,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-i-4938": {
+        "name": "Flame Bolt I",
+        "spellId": 4938,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "mini-uber": {
+        "name": "Mini Uber",
+        "spellId": 4939,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "mini-fireball-4943": {
+        "name": "Mini Fireball",
+        "spellId": 4943,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "flame-bolt-i-4945": {
+        "name": "Flame Bolt I",
+        "spellId": 4945,
+        "type": "attack",
+        "difficulty": 900,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "olthoi-spit": {
+        "name": "Olthoi Spit",
+        "spellId": 4987,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 30.7
+      },
+      "flaming-skull": {
+        "name": "Flaming Skull",
+        "spellId": 5166,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "bael-zharon-s-nether-arc": {
+        "name": "Bael'zharon's Nether Arc",
+        "spellId": 5333,
+        "type": "attack",
+        "difficulty": 700,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "acid-spit-1": {
+        "name": "Acid Spit 1",
+        "spellId": 5440,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-spit-2": {
+        "name": "Acid Spit 2",
+        "spellId": 5441,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-spit-arc-1": {
+        "name": "Acid Spit Arc 1",
+        "spellId": 5442,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-spit-arc-2": {
+        "name": "Acid Spit Arc 2",
+        "spellId": 5443,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-spit-vulnerability-1": {
+        "name": "Acid Spit Vulnerability 1",
+        "spellId": 5522,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-spit-vulnerability-2": {
+        "name": "Acid Spit Vulnerability 2",
+        "spellId": 5523,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acidic-blood": {
+        "name": "Acidic Blood",
+        "spellId": 5535,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acidic-blood-5536": {
+        "name": "Acidic Blood",
+        "spellId": 5536,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acidic-blood-5537": {
+        "name": "Acidic Blood",
+        "spellId": 5537,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "rolling-death-5762": {
+        "name": "Rolling Death",
+        "spellId": 5762,
+        "type": "attack",
+        "difficulty": 320,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "galvanic-arc": {
+        "name": "Galvanic Arc",
+        "spellId": 5967,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "galvanic-strike-5969": {
+        "name": "Galvanic Strike",
+        "spellId": 5969,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "thorns": {
+        "name": "Thorns",
+        "spellId": 6160,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "acidic-thorns": {
+        "name": "Acidic Thorns",
+        "spellId": 6161,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "thorn-arc": {
+        "name": "Thorn Arc",
+        "spellId": 6162,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "incantation-of-lightning-bolt-6198": {
+        "name": "Incantation of Lightning Bolt",
+        "spellId": 6198,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "incantation-of-lightning-arc-6199": {
+        "name": "Incantation of Lightning Arc",
+        "spellId": 6199,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      }
+    },
+    "life": {
+      "heal-other-i": {
+        "name": "Heal Other I",
+        "spellId": 5,
+        "type": "heal",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 6
+      },
+      "infuse-mana-other-i": {
+        "name": "Infuse Mana Other I",
+        "spellId": 9,
+        "type": "mana-to-mana",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5.5
+      },
+      "fire-vulnerability-other-i": {
+        "name": "Fire Vulnerability Other I",
+        "spellId": 21,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 30
+      },
+      "acid-vulnerability-other-i": {
+        "name": "Acid Vulnerability Other I",
+        "spellId": 521,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 30
+      },
+      "acid-vulnerability-other-ii": {
+        "name": "Acid Vulnerability Other II",
+        "spellId": 522,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 68.75
+      },
+      "acid-vulnerability-other-iii": {
+        "name": "Acid Vulnerability Other III",
+        "spellId": 523,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-vulnerability-other-iv": {
+        "name": "Acid Vulnerability Other IV",
+        "spellId": 524,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-vulnerability-other-v": {
+        "name": "Acid Vulnerability Other V",
+        "spellId": 525,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "acid-vulnerability-other-vi": {
+        "name": "Acid Vulnerability Other VI",
+        "spellId": 526,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 73.75
+      },
+      "bludgeoning-vulnerability-other-i": {
+        "name": "Bludgeoning Vulnerability Other I",
+        "spellId": 1048,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 30
+      },
+      "bludgeoning-vulnerability-other-ii": {
+        "name": "Bludgeoning Vulnerability Other II",
+        "spellId": 1049,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 68.75
+      },
+      "bludgeoning-vulnerability-other-iii": {
+        "name": "Bludgeoning Vulnerability Other III",
+        "spellId": 1050,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "bludgeoning-vulnerability-other-iv": {
+        "name": "Bludgeoning Vulnerability Other IV",
+        "spellId": 1051,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "bludgeoning-vulnerability-other-v": {
+        "name": "Bludgeoning Vulnerability Other V",
+        "spellId": 1052,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "bludgeoning-vulnerability-other-vi": {
+        "name": "Bludgeoning Vulnerability Other VI",
+        "spellId": 1053,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 73.75
+      },
+      "cold-vulnerability-other-i": {
+        "name": "Cold Vulnerability Other I",
+        "spellId": 1060,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 30
+      },
+      "cold-vulnerability-other-ii": {
+        "name": "Cold Vulnerability Other II",
+        "spellId": 1061,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 68.75
+      },
+      "cold-vulnerability-other-iii": {
+        "name": "Cold Vulnerability Other III",
+        "spellId": 1062,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "cold-vulnerability-other-iv": {
+        "name": "Cold Vulnerability Other IV",
+        "spellId": 1063,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "cold-vulnerability-other-v": {
+        "name": "Cold Vulnerability Other V",
+        "spellId": 1064,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "cold-vulnerability-other-vi": {
+        "name": "Cold Vulnerability Other VI",
+        "spellId": 1065,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 73.75
+      },
+      "lightning-vulnerability-other-i": {
+        "name": "Lightning Vulnerability Other I",
+        "spellId": 1084,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 30
+      },
+      "lightning-vulnerability-other-ii": {
+        "name": "Lightning Vulnerability Other II",
+        "spellId": 1085,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 68.75
+      },
+      "lightning-vulnerability-other-iii": {
+        "name": "Lightning Vulnerability Other III",
+        "spellId": 1086,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-vulnerability-other-iv": {
+        "name": "Lightning Vulnerability Other IV",
+        "spellId": 1087,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-vulnerability-other-v": {
+        "name": "Lightning Vulnerability Other V",
+        "spellId": 1088,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "lightning-vulnerability-other-vi": {
+        "name": "Lightning Vulnerability Other VI",
+        "spellId": 1089,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 73.75
+      },
+      "fire-vulnerability-other-ii": {
+        "name": "Fire Vulnerability Other II",
+        "spellId": 1104,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 68.75
+      },
+      "fire-vulnerability-other-iii": {
+        "name": "Fire Vulnerability Other III",
+        "spellId": 1105,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "fire-vulnerability-other-iv": {
+        "name": "Fire Vulnerability Other IV",
+        "spellId": 1106,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "fire-vulnerability-other-v": {
+        "name": "Fire Vulnerability Other V",
+        "spellId": 1107,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "fire-vulnerability-other-vi": {
+        "name": "Fire Vulnerability Other VI",
+        "spellId": 1108,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 73.75
+      },
+      "blade-vulnerability-other-i": {
+        "name": "Blade Vulnerability Other I",
+        "spellId": 1127,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 30
+      },
+      "blade-vulnerability-other-ii": {
+        "name": "Blade Vulnerability Other II",
+        "spellId": 1128,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 68.75
+      },
+      "blade-vulnerability-other-iii": {
+        "name": "Blade Vulnerability Other III",
+        "spellId": 1129,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-vulnerability-other-iv": {
+        "name": "Blade Vulnerability Other IV",
+        "spellId": 1130,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-vulnerability-other-v": {
+        "name": "Blade Vulnerability Other V",
+        "spellId": 1131,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "blade-vulnerability-other-vi": {
+        "name": "Blade Vulnerability Other VI",
+        "spellId": 1132,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 73.75
+      },
+      "piercing-vulnerability-other-i": {
+        "name": "Piercing Vulnerability Other I",
+        "spellId": 1151,
+        "type": "vuln",
+        "difficulty": 25,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 30
+      },
+      "piercing-vulnerability-other-ii": {
+        "name": "Piercing Vulnerability Other II",
+        "spellId": 1152,
+        "type": "vuln",
+        "difficulty": 75,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 68.75
+      },
+      "piercing-vulnerability-other-iii": {
+        "name": "Piercing Vulnerability Other III",
+        "spellId": 1153,
+        "type": "vuln",
+        "difficulty": 125,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "piercing-vulnerability-other-iv": {
+        "name": "Piercing Vulnerability Other IV",
+        "spellId": 1154,
+        "type": "vuln",
+        "difficulty": 175,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "piercing-vulnerability-other-v": {
+        "name": "Piercing Vulnerability Other V",
+        "spellId": 1155,
+        "type": "vuln",
+        "difficulty": 225,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "piercing-vulnerability-other-vi": {
+        "name": "Piercing Vulnerability Other VI",
+        "spellId": 1156,
+        "type": "vuln",
+        "difficulty": 275,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 73.75
+      },
+      "heal-other-ii": {
+        "name": "Heal Other II",
+        "spellId": 1162,
+        "type": "heal",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 47.5
+      },
+      "heal-other-iii": {
+        "name": "Heal Other III",
+        "spellId": 1163,
+        "type": "heal",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 75
+      },
+      "heal-other-iv": {
+        "name": "Heal Other IV",
+        "spellId": 1164,
+        "type": "heal",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 75
+      },
+      "heal-other-v": {
+        "name": "Heal Other V",
+        "spellId": 1165,
+        "type": "heal",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 75
+      },
+      "heal-other-vi": {
+        "name": "Heal Other VI",
+        "spellId": 1166,
+        "type": "heal",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 67.5
+      },
+      "revitalize-self-i": {
+        "name": "Revitalize Self I",
+        "spellId": 1177,
+        "type": "revitalize",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "revitalize-self-ii": {
+        "name": "Revitalize Self II",
+        "spellId": 1178,
+        "type": "revitalize",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "revitalize-self-iii": {
+        "name": "Revitalize Self III",
+        "spellId": 1179,
+        "type": "revitalize",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "revitalize-self-iv": {
+        "name": "Revitalize Self IV",
+        "spellId": 1180,
+        "type": "revitalize",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "revitalize-self-v": {
+        "name": "Revitalize Self V",
+        "spellId": 1181,
+        "type": "revitalize",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "revitalize-self-vi": {
+        "name": "Revitalize Self VI",
+        "spellId": 1182,
+        "type": "revitalize",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "revitalize-other-i": {
+        "name": "Revitalize Other I",
+        "spellId": 1183,
+        "type": "revitalize",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5.85
+      },
+      "revitalize-other-ii": {
+        "name": "Revitalize Other II",
+        "spellId": 1184,
+        "type": "revitalize",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 47.5
+      },
+      "revitalize-other-iii": {
+        "name": "Revitalize Other III",
+        "spellId": 1185,
+        "type": "revitalize",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 75
+      },
+      "revitalize-other-iv": {
+        "name": "Revitalize Other IV",
+        "spellId": 1186,
+        "type": "revitalize",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 75
+      },
+      "revitalize-other-v": {
+        "name": "Revitalize Other V",
+        "spellId": 1187,
+        "type": "revitalize",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 75
+      },
+      "revitalize-other-vi": {
+        "name": "Revitalize Other VI",
+        "spellId": 1188,
+        "type": "revitalize",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 67.5
+      },
+      "infuse-health-other-i": {
+        "name": "Infuse Health Other I",
+        "spellId": 1225,
+        "type": "health-to-health",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5.5
+      },
+      "infuse-health-other-ii": {
+        "name": "Infuse Health Other II",
+        "spellId": 1226,
+        "type": "health-to-health",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 25
+      },
+      "infuse-health-other-iii": {
+        "name": "Infuse Health Other III",
+        "spellId": 1227,
+        "type": "health-to-health",
+        "difficulty": 75,
+        "targetKind": "other",
+        "range": 27.5
+      },
+      "infuse-health-other-iv": {
+        "name": "Infuse Health Other IV",
+        "spellId": 1228,
+        "type": "health-to-health",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 35
+      },
+      "infuse-health-other-v": {
+        "name": "Infuse Health Other V",
+        "spellId": 1229,
+        "type": "health-to-health",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 25
+      },
+      "infuse-health-other-vi": {
+        "name": "Infuse Health Other VI",
+        "spellId": 1230,
+        "type": "health-to-health",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 30
+      },
+      "drain-health-other-i": {
+        "name": "Drain Health Other I",
+        "spellId": 1237,
+        "type": "health-to-health",
+        "difficulty": 38,
+        "targetKind": "other",
+        "range": 10
+      },
+      "drain-health-other-ii": {
+        "name": "Drain Health Other II",
+        "spellId": 1238,
+        "type": "health-to-health",
+        "difficulty": 88,
+        "targetKind": "other",
+        "range": 15
+      },
+      "drain-health-other-iii": {
+        "name": "Drain Health Other III",
+        "spellId": 1239,
+        "type": "health-to-health",
+        "difficulty": 138,
+        "targetKind": "other",
+        "range": 20
+      },
+      "drain-health-other-iv": {
+        "name": "Drain Health Other IV",
+        "spellId": 1240,
+        "type": "health-to-health",
+        "difficulty": 188,
+        "targetKind": "other",
+        "range": 25
+      },
+      "drain-health-other-v": {
+        "name": "Drain Health Other V",
+        "spellId": 1241,
+        "type": "health-to-health",
+        "difficulty": 238,
+        "targetKind": "other",
+        "range": 30
+      },
+      "drain-health-other-vi": {
+        "name": "Drain Health Other VI",
+        "spellId": 1242,
+        "type": "health-to-health",
+        "difficulty": 288,
+        "targetKind": "other",
+        "range": 33
+      },
+      "infuse-stamina-other-i": {
+        "name": "Infuse Stamina Other I",
+        "spellId": 1243,
+        "type": "stamina-to-stamina",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5.5
+      },
+      "infuse-stamina-other-ii": {
+        "name": "Infuse Stamina Other II",
+        "spellId": 1244,
+        "type": "stamina-to-stamina",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 25
+      },
+      "infuse-stamina-other-iii": {
+        "name": "Infuse Stamina Other III",
+        "spellId": 1245,
+        "type": "stamina-to-stamina",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 35
+      },
+      "infuse-stamina-other-iv": {
+        "name": "Infuse Stamina Other IV",
+        "spellId": 1246,
+        "type": "stamina-to-stamina",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 50
+      },
+      "infuse-stamina-other-v": {
+        "name": "Infuse Stamina Other V",
+        "spellId": 1247,
+        "type": "stamina-to-stamina",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 25
+      },
+      "infuse-stamina-other-vi": {
+        "name": "Infuse Stamina Other VI",
+        "spellId": 1248,
+        "type": "stamina-to-stamina",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 30
+      },
+      "drain-stamina-other-i": {
+        "name": "Drain Stamina Other I",
+        "spellId": 1249,
+        "type": "stamina-to-stamina",
+        "difficulty": 38,
+        "targetKind": "other",
+        "range": 10
+      },
+      "drain-stamina-other-ii": {
+        "name": "Drain Stamina Other II",
+        "spellId": 1250,
+        "type": "stamina-to-stamina",
+        "difficulty": 88,
+        "targetKind": "other",
+        "range": 15
+      },
+      "drain-stamina-other-iii": {
+        "name": "Drain Stamina Other III",
+        "spellId": 1251,
+        "type": "stamina-to-stamina",
+        "difficulty": 138,
+        "targetKind": "other",
+        "range": 20
+      },
+      "drain-stamina-other-iv": {
+        "name": "Drain Stamina Other IV",
+        "spellId": 1252,
+        "type": "stamina-to-stamina",
+        "difficulty": 188,
+        "targetKind": "other",
+        "range": 25
+      },
+      "drain-stamina-other-v": {
+        "name": "Drain Stamina Other V",
+        "spellId": 1253,
+        "type": "stamina-to-stamina",
+        "difficulty": 238,
+        "targetKind": "other",
+        "range": 30
+      },
+      "drain-stamina-other-vi": {
+        "name": "Drain Stamina Other VI",
+        "spellId": 1254,
+        "type": "stamina-to-stamina",
+        "difficulty": 288,
+        "targetKind": "other",
+        "range": 33
+      },
+      "infuse-mana-other-ii": {
+        "name": "Infuse Mana Other II",
+        "spellId": 1255,
+        "type": "mana-to-mana",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 25
+      },
+      "infuse-mana-other-iii": {
+        "name": "Infuse Mana Other III",
+        "spellId": 1256,
+        "type": "mana-to-mana",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 35
+      },
+      "infuse-mana-other-iv": {
+        "name": "Infuse Mana Other IV",
+        "spellId": 1257,
+        "type": "mana-to-mana",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 35
+      },
+      "infuse-mana-other-v": {
+        "name": "Infuse Mana Other V",
+        "spellId": 1258,
+        "type": "mana-to-mana",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 25
+      },
+      "infuse-mana-other-vi": {
+        "name": "Infuse Mana Other VI",
+        "spellId": 1259,
+        "type": "mana-to-mana",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 30
+      },
+      "drain-mana-other-i": {
+        "name": "Drain Mana Other I",
+        "spellId": 1260,
+        "type": "mana-to-mana",
+        "difficulty": 38,
+        "targetKind": "other",
+        "range": 10
+      },
+      "drain-mana-other-ii": {
+        "name": "Drain Mana Other II",
+        "spellId": 1261,
+        "type": "mana-to-mana",
+        "difficulty": 88,
+        "targetKind": "other",
+        "range": 15
+      },
+      "drain-mana-other-iii": {
+        "name": "Drain Mana Other III",
+        "spellId": 1262,
+        "type": "mana-to-mana",
+        "difficulty": 138,
+        "targetKind": "other",
+        "range": 20
+      },
+      "drain-mana-other-iv": {
+        "name": "Drain Mana Other IV",
+        "spellId": 1263,
+        "type": "mana-to-mana",
+        "difficulty": 188,
+        "targetKind": "other",
+        "range": 25
+      },
+      "drain-mana-other-v": {
+        "name": "Drain Mana Other V",
+        "spellId": 1264,
+        "type": "mana-to-mana",
+        "difficulty": 238,
+        "targetKind": "other",
+        "range": 30
+      },
+      "drain-mana-other-vi": {
+        "name": "Drain Mana Other VI",
+        "spellId": 1265,
+        "type": "mana-to-mana",
+        "difficulty": 288,
+        "targetKind": "other",
+        "range": 33
+      },
+      "health-to-stamina-other-i": {
+        "name": "Health to Stamina Other I",
+        "spellId": 1266,
+        "type": "health-to-stamina",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-stamina-other-ii": {
+        "name": "Health to Stamina Other II",
+        "spellId": 1267,
+        "type": "health-to-stamina",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-stamina-other-iii": {
+        "name": "Health to Stamina Other III",
+        "spellId": 1268,
+        "type": "health-to-stamina",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-stamina-other-iv": {
+        "name": "Health to Stamina Other IV",
+        "spellId": 1269,
+        "type": "health-to-stamina",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-stamina-other-v": {
+        "name": "Health to Stamina Other V",
+        "spellId": 1270,
+        "type": "health-to-stamina",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-stamina-other-vi": {
+        "name": "Health to Stamina Other VI",
+        "spellId": 1271,
+        "type": "health-to-stamina",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-stamina-self-i": {
+        "name": "Health to Stamina Self I",
+        "spellId": 1272,
+        "type": "health-to-stamina",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "health-to-stamina-self-ii": {
+        "name": "Health to Stamina Self II",
+        "spellId": 1273,
+        "type": "health-to-stamina",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "health-to-stamina-self-iii": {
+        "name": "Health to Stamina Self III",
+        "spellId": 1274,
+        "type": "health-to-stamina",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "health-to-stamina-self-iv": {
+        "name": "Health to Stamina Self IV",
+        "spellId": 1275,
+        "type": "health-to-stamina",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "health-to-stamina-self-v": {
+        "name": "Health to Stamina Self V",
+        "spellId": 1276,
+        "type": "health-to-stamina",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "health-to-stamina-self-vi": {
+        "name": "Health to Stamina Self VI",
+        "spellId": 1277,
+        "type": "health-to-stamina",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "health-to-mana-self-i": {
+        "name": "Health to Mana Self I",
+        "spellId": 1278,
+        "type": "health-to-mana",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "health-to-mana-self-ii": {
+        "name": "Health to Mana Self II",
+        "spellId": 1279,
+        "type": "health-to-mana",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "health-to-mana-self-iii": {
+        "name": "Health to Mana Self III",
+        "spellId": 1280,
+        "type": "health-to-mana",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "health-to-mana-other-iv": {
+        "name": "Health to Mana Other IV",
+        "spellId": 1281,
+        "type": "health-to-mana",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-mana-other-v": {
+        "name": "Health to Mana Other V",
+        "spellId": 1282,
+        "type": "health-to-mana",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-mana-other-vi": {
+        "name": "Health to Mana Other VI",
+        "spellId": 1283,
+        "type": "health-to-mana",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-other-i": {
+        "name": "Mana to Health Other I",
+        "spellId": 1284,
+        "type": "mana-to-health",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-other-ii": {
+        "name": "Mana to Health Other II",
+        "spellId": 1285,
+        "type": "mana-to-health",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-other-iii": {
+        "name": "Mana to Health Other III",
+        "spellId": 1286,
+        "type": "mana-to-health",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-other-iv": {
+        "name": "Mana to Health Other IV",
+        "spellId": 1287,
+        "type": "mana-to-health",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-other-v": {
+        "name": "Mana to Health Other V",
+        "spellId": 1288,
+        "type": "mana-to-health",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-other-vi": {
+        "name": "Mana to Health Other VI",
+        "spellId": 1289,
+        "type": "mana-to-health",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-health-self-i": {
+        "name": "Mana to Health Self I",
+        "spellId": 1290,
+        "type": "mana-to-health",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "mana-to-health-self-ii": {
+        "name": "Mana to Health Self II",
+        "spellId": 1291,
+        "type": "mana-to-health",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "mana-to-health-self-iii": {
+        "name": "Mana to Health Self III",
+        "spellId": 1292,
+        "type": "mana-to-health",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "mana-to-health-self-iv": {
+        "name": "Mana to Health Self IV",
+        "spellId": 1293,
+        "type": "mana-to-health",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "mana-to-health-self-v": {
+        "name": "Mana to Health Self V",
+        "spellId": 1294,
+        "type": "mana-to-health",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "mana-to-health-self-vi": {
+        "name": "Mana to Health Self VI",
+        "spellId": 1295,
+        "type": "mana-to-health",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-self-i": {
+        "name": "Mana to Stamina Self I",
+        "spellId": 1296,
+        "type": "mana-to-stamina",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-self-ii": {
+        "name": "Mana to Stamina Self II",
+        "spellId": 1297,
+        "type": "mana-to-stamina",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-self-iii": {
+        "name": "Mana to Stamina Self III",
+        "spellId": 1298,
+        "type": "mana-to-stamina",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-self-iv": {
+        "name": "Mana to Stamina Self IV",
+        "spellId": 1299,
+        "type": "mana-to-stamina",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-self-v": {
+        "name": "Mana to Stamina Self V",
+        "spellId": 1300,
+        "type": "mana-to-stamina",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-self-vi": {
+        "name": "Mana to Stamina Self VI",
+        "spellId": 1301,
+        "type": "mana-to-stamina",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-other-i": {
+        "name": "Mana to Stamina Other I",
+        "spellId": 1302,
+        "type": "mana-to-stamina",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-stamina-other-ii": {
+        "name": "Mana to Stamina Other II",
+        "spellId": 1303,
+        "type": "mana-to-stamina",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-stamina-other-iii": {
+        "name": "Mana to Stamina Other III",
+        "spellId": 1304,
+        "type": "mana-to-stamina",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-stamina-other-iv": {
+        "name": "Mana to Stamina Other IV",
+        "spellId": 1305,
+        "type": "mana-to-stamina",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-stamina-other-v": {
+        "name": "Mana to Stamina Other V",
+        "spellId": 1306,
+        "type": "mana-to-stamina",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 5
+      },
+      "mana-to-stamina-other-vi": {
+        "name": "Mana to Stamina Other VI",
+        "spellId": 1307,
+        "type": "mana-to-stamina",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-other-i": {
+        "name": "Stamina to Health Other I",
+        "spellId": 1658,
+        "type": "stamina-to-health",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-other-ii": {
+        "name": "Stamina to Health Other II",
+        "spellId": 1659,
+        "type": "stamina-to-health",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-other-iii": {
+        "name": "Stamina to Health Other III",
+        "spellId": 1660,
+        "type": "stamina-to-health",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-other-iv": {
+        "name": "Stamina to Health Other IV",
+        "spellId": 1661,
+        "type": "stamina-to-health",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-other-v": {
+        "name": "Stamina to Health Other V",
+        "spellId": 1662,
+        "type": "stamina-to-health",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-other-vi": {
+        "name": "Stamina to Health Other VI",
+        "spellId": 1663,
+        "type": "stamina-to-health",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-health-self-i": {
+        "name": "Stamina to Health Self I",
+        "spellId": 1664,
+        "type": "stamina-to-health",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "stamina-to-health-self-ii": {
+        "name": "Stamina to Health Self II",
+        "spellId": 1665,
+        "type": "stamina-to-health",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "stamina-to-health-self-iii": {
+        "name": "Stamina to Health Self III",
+        "spellId": 1666,
+        "type": "stamina-to-health",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "stamina-to-health-self-iv": {
+        "name": "Stamina to Health Self IV",
+        "spellId": 1667,
+        "type": "stamina-to-health",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "stamina-to-health-self-v": {
+        "name": "Stamina to Health Self V",
+        "spellId": 1668,
+        "type": "stamina-to-health",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "stamina-to-health-self-vi": {
+        "name": "Stamina to Health Self VI",
+        "spellId": 1669,
+        "type": "stamina-to-health",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-other-i": {
+        "name": "Stamina to Mana Other I",
+        "spellId": 1670,
+        "type": "stamina-to-mana",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-mana-other-ii": {
+        "name": "Stamina to Mana Other II",
+        "spellId": 1671,
+        "type": "stamina-to-mana",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-mana-other-iii": {
+        "name": "Stamina to Mana Other III",
+        "spellId": 1672,
+        "type": "stamina-to-mana",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-mana-other-iv": {
+        "name": "Stamina to Mana Other IV",
+        "spellId": 1673,
+        "type": "stamina-to-mana",
+        "difficulty": 150,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-mana-other-v": {
+        "name": "Stamina to Mana Other V",
+        "spellId": 1674,
+        "type": "stamina-to-mana",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-mana-other-vi": {
+        "name": "Stamina to Mana Other VI",
+        "spellId": 1675,
+        "type": "stamina-to-mana",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 5
+      },
+      "stamina-to-mana-self-i": {
+        "name": "Stamina to Mana Self I",
+        "spellId": 1676,
+        "type": "stamina-to-mana",
+        "difficulty": 1,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-self-ii": {
+        "name": "Stamina to Mana Self II",
+        "spellId": 1677,
+        "type": "stamina-to-mana",
+        "difficulty": 50,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-self-iii": {
+        "name": "Stamina to Mana Self III",
+        "spellId": 1678,
+        "type": "stamina-to-mana",
+        "difficulty": 100,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-self-iv": {
+        "name": "Stamina to Mana Self IV",
+        "spellId": 1679,
+        "type": "stamina-to-mana",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-self-v": {
+        "name": "Stamina to Mana Self V",
+        "spellId": 1680,
+        "type": "stamina-to-mana",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-self-vi": {
+        "name": "Stamina to Mana Self VI",
+        "spellId": 1681,
+        "type": "stamina-to-mana",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "health-to-mana-self-iv": {
+        "name": "Health to Mana Self IV",
+        "spellId": 1702,
+        "type": "health-to-mana",
+        "difficulty": 150,
+        "targetKind": "self"
+      },
+      "health-to-mana-self-v": {
+        "name": "Health to Mana Self V",
+        "spellId": 1703,
+        "type": "health-to-mana",
+        "difficulty": 200,
+        "targetKind": "self"
+      },
+      "health-to-mana-self-vi": {
+        "name": "Health to Mana Self VI",
+        "spellId": 1704,
+        "type": "health-to-mana",
+        "difficulty": 250,
+        "targetKind": "self"
+      },
+      "health-to-mana-other-i": {
+        "name": "Health to Mana Other I",
+        "spellId": 1705,
+        "type": "health-to-mana",
+        "difficulty": 1,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-mana-other-ii": {
+        "name": "Health to Mana Other II",
+        "spellId": 1706,
+        "type": "health-to-mana",
+        "difficulty": 50,
+        "targetKind": "other",
+        "range": 5
+      },
+      "health-to-mana-other-iii": {
+        "name": "Health to Mana Other III",
+        "spellId": 1707,
+        "type": "health-to-mana",
+        "difficulty": 100,
+        "targetKind": "other",
+        "range": 5
+      },
+      "thaumaturgic-shroud": {
+        "name": "Thaumaturgic Shroud",
+        "spellId": 2021,
+        "type": "mana-to-mana",
+        "difficulty": 350,
+        "targetKind": "other",
+        "range": 22.5
+      },
+      "soul-shroud": {
+        "name": "Soul Shroud",
+        "spellId": 2022,
+        "type": "health-to-health",
+        "difficulty": 350,
+        "targetKind": "other",
+        "range": 22.5
+      },
+      "nerve-burn": {
+        "name": "Nerve Burn",
+        "spellId": 2026,
+        "type": "stamina-to-stamina",
+        "difficulty": 350,
+        "targetKind": "other",
+        "range": 22.5
+      },
+      "martyr": {
+        "name": "Martyr",
+        "spellId": 2027,
+        "type": "health-to-health",
+        "difficulty": 250,
+        "targetKind": "other",
+        "range": 30
+      },
+      "adja-s-gift": {
+        "name": "Adja's Gift",
+        "spellId": 2072,
+        "type": "heal",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 75
+      },
+      "replenish": {
+        "name": "Replenish",
+        "spellId": 2082,
+        "type": "revitalize",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 75
+      },
+      "robustification": {
+        "name": "Robustification",
+        "spellId": 2083,
+        "type": "revitalize",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "olthoi-s-gift": {
+        "name": "Olthoi's Gift",
+        "spellId": 2162,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "swordsman-s-gift": {
+        "name": "Swordsman's Gift",
+        "spellId": 2164,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "tusker-s-gift": {
+        "name": "Tusker's Gift",
+        "spellId": 2166,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "gelidite-s-gift": {
+        "name": "Gelidite's Gift",
+        "spellId": 2168,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "inferno-s-gift": {
+        "name": "Inferno's Gift",
+        "spellId": 2170,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "astyrrian-s-gift": {
+        "name": "Astyrrian's Gift",
+        "spellId": 2172,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "archer-s-gift": {
+        "name": "Archer's Gift",
+        "spellId": 2174,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "vitality-siphon": {
+        "name": "Vitality Siphon",
+        "spellId": 2328,
+        "type": "health-to-health",
+        "difficulty": 325,
+        "targetKind": "other",
+        "range": 35
+      },
+      "essence-void": {
+        "name": "Essence Void",
+        "spellId": 2329,
+        "type": "mana-to-mana",
+        "difficulty": 325,
+        "targetKind": "other",
+        "range": 35
+      },
+      "vigor-siphon": {
+        "name": "Vigor Siphon",
+        "spellId": 2330,
+        "type": "stamina-to-stamina",
+        "difficulty": 325,
+        "targetKind": "other",
+        "range": 35
+      },
+      "health-to-mana-other-vii": {
+        "name": "Health to Mana Other VII",
+        "spellId": 2331,
+        "type": "health-to-mana",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 5
+      },
+      "cannibalize": {
+        "name": "Cannibalize",
+        "spellId": 2332,
+        "type": "health-to-mana",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "health-to-stamina-other-vii": {
+        "name": "Health to Stamina Other VII",
+        "spellId": 2333,
+        "type": "health-to-stamina",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 5
+      },
+      "self-sacrifice": {
+        "name": "Self Sacrifice",
+        "spellId": 2334,
+        "type": "health-to-stamina",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "gift-of-vitality": {
+        "name": "Gift of Vitality",
+        "spellId": 2335,
+        "type": "health-to-health",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 35
+      },
+      "gift-of-essence": {
+        "name": "Gift of Essence",
+        "spellId": 2336,
+        "type": "mana-to-mana",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 35
+      },
+      "gift-of-vigor": {
+        "name": "Gift of Vigor",
+        "spellId": 2337,
+        "type": "stamina-to-stamina",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 35
+      },
+      "mana-to-health-other-vii": {
+        "name": "Mana to Health Other VII",
+        "spellId": 2338,
+        "type": "mana-to-health",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 5
+      },
+      "energize-vitality": {
+        "name": "Energize Vitality",
+        "spellId": 2339,
+        "type": "mana-to-health",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "mana-to-stamina-other-vii": {
+        "name": "Mana to Stamina Other VII",
+        "spellId": 2340,
+        "type": "mana-to-stamina",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 5
+      },
+      "energize-vigor": {
+        "name": "Energize Vigor",
+        "spellId": 2341,
+        "type": "mana-to-stamina",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "stamina-to-health-other-vii": {
+        "name": "Stamina to Health Other VII",
+        "spellId": 2342,
+        "type": "stamina-to-health",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 5
+      },
+      "rushed-recovery": {
+        "name": "Rushed Recovery",
+        "spellId": 2343,
+        "type": "stamina-to-health",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "stamina-to-mana-other-vii": {
+        "name": "Stamina to Mana Other VII",
+        "spellId": 2344,
+        "type": "stamina-to-mana",
+        "difficulty": 300,
+        "targetKind": "other",
+        "range": 5
+      },
+      "meditative-trance": {
+        "name": "Meditative Trance",
+        "spellId": 2345,
+        "type": "stamina-to-mana",
+        "difficulty": 300,
+        "targetKind": "self"
+      },
+      "gift-of-rotting-flesh": {
+        "name": "Gift of Rotting Flesh",
+        "spellId": 2370,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "curse-of-mortal-flesh": {
+        "name": "Curse of Mortal Flesh",
+        "spellId": 2371,
+        "type": "vuln",
+        "difficulty": 325,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "endless-vigor": {
+        "name": "Endless Vigor",
+        "spellId": 2980,
+        "type": "revitalize",
+        "difficulty": 350,
+        "targetKind": "self"
+      },
+      "vim": {
+        "name": "Vim",
+        "spellId": 2986,
+        "type": "revitalize",
+        "difficulty": 15,
+        "targetKind": "self"
+      },
+      "bruised-flesh": {
+        "name": "Bruised Flesh",
+        "spellId": 3074,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "flesh-of-cloth": {
+        "name": "Flesh of Cloth",
+        "spellId": 3075,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "exposed-flesh": {
+        "name": "Exposed Flesh",
+        "spellId": 3076,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "flesh-of-flint": {
+        "name": "Flesh of Flint",
+        "spellId": 3077,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "weaken-flesh": {
+        "name": "Weaken Flesh",
+        "spellId": 3078,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "bruised-flesh-3080": {
+        "name": "Bruised Flesh",
+        "spellId": 3080,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "flesh-of-cloth-3081": {
+        "name": "Flesh of Cloth",
+        "spellId": 3081,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "exposed-flesh-3082": {
+        "name": "Exposed Flesh",
+        "spellId": 3082,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "flesh-of-flint-3083": {
+        "name": "Flesh of Flint",
+        "spellId": 3083,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "weaken-flesh-3084": {
+        "name": "Weaken Flesh",
+        "spellId": 3084,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "bruised-flesh-3085": {
+        "name": "Bruised Flesh",
+        "spellId": 3085,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "flesh-of-cloth-3086": {
+        "name": "Flesh of Cloth",
+        "spellId": 3086,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "exposed-flesh-3087": {
+        "name": "Exposed Flesh",
+        "spellId": 3087,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "flesh-of-flint-3088": {
+        "name": "Flesh of Flint",
+        "spellId": 3088,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "weaken-flesh-3089": {
+        "name": "Weaken Flesh",
+        "spellId": 3089,
+        "type": "vuln",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "restorative-draught": {
+        "name": "Restorative Draught",
+        "spellId": 3236,
+        "type": "heal",
+        "difficulty": 200,
+        "targetKind": "other",
+        "range": 55
+      },
+      "batter-flesh": {
+        "name": "Batter Flesh",
+        "spellId": 3461,
+        "type": "vuln",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "canker-flesh": {
+        "name": "Canker Flesh",
+        "spellId": 3462,
+        "type": "vuln",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "char-flesh": {
+        "name": "Char Flesh",
+        "spellId": 3463,
+        "type": "vuln",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "numb-flesh": {
+        "name": "Numb Flesh",
+        "spellId": 3464,
+        "type": "vuln",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "acidic-curse": {
+        "name": "Acidic Curse",
+        "spellId": 3875,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "curse-of-the-blades": {
+        "name": "Curse of the Blades",
+        "spellId": 3876,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "numbing-chill": {
+        "name": "Numbing Chill",
+        "spellId": 3917,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "flammable": {
+        "name": "Flammable",
+        "spellId": 3918,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "lightning-rod": {
+        "name": "Lightning Rod",
+        "spellId": 3919,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "charge-flesh": {
+        "name": "Charge Flesh",
+        "spellId": 3927,
+        "type": "vuln",
+        "difficulty": 350,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "numbing-chill-4201": {
+        "name": "Numbing Chill",
+        "spellId": 4201,
+        "type": "vuln",
+        "difficulty": 340,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "incantation-of-heal-other": {
+        "name": "Incantation of Heal Other",
+        "spellId": 4310,
+        "type": "heal",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 75
+      },
+      "incantation-of-revitalize-other": {
+        "name": "Incantation of Revitalize Other",
+        "spellId": 4320,
+        "type": "revitalize",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 75
+      },
+      "incantation-of-revitalize-self": {
+        "name": "Incantation of Revitalize Self",
+        "spellId": 4321,
+        "type": "revitalize",
+        "difficulty": 400,
+        "targetKind": "self"
+      },
+      "incantation-of-acid-vulnerability-other": {
+        "name": "Incantation of Acid Vulnerability Other",
+        "spellId": 4473,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "acid",
+        "range": 75
+      },
+      "incantation-of-blade-vulnerability-other": {
+        "name": "Incantation of Blade Vulnerability Other",
+        "spellId": 4475,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "slash",
+        "range": 75
+      },
+      "incantation-of-bludgeoning-vulnerability-other": {
+        "name": "Incantation of Bludgeoning Vulnerability Other",
+        "spellId": 4477,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "bludgeon",
+        "range": 75
+      },
+      "incantation-of-cold-vulnerability-other": {
+        "name": "Incantation of Cold Vulnerability Other",
+        "spellId": 4479,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "cold",
+        "range": 75
+      },
+      "incantation-of-fire-vulnerability-other": {
+        "name": "Incantation of Fire Vulnerability Other",
+        "spellId": 4481,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "fire",
+        "range": 75
+      },
+      "incantation-of-lightning-vulnerability-other": {
+        "name": "Incantation of Lightning Vulnerability Other",
+        "spellId": 4483,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "lightning",
+        "range": 75
+      },
+      "incantation-of-piercing-vulnerability-other": {
+        "name": "Incantation of Piercing Vulnerability Other",
+        "spellId": 4485,
+        "type": "vuln",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "pierce",
+        "range": 75
+      },
+      "incantation-of-drain-health-other": {
+        "name": "Incantation of Drain Health Other",
+        "spellId": 4643,
+        "type": "health-to-health",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 35
+      },
+      "incantation-of-drain-mana-other": {
+        "name": "Incantation of Drain Mana Other",
+        "spellId": 4644,
+        "type": "mana-to-mana",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 35
+      },
+      "incantation-of-drain-stamina-other": {
+        "name": "Incantation of Drain Stamina Other",
+        "spellId": 4645,
+        "type": "stamina-to-stamina",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 35
+      },
+      "incantation-of-health-to-mana-other": {
+        "name": "Incantation of Health to Mana Other",
+        "spellId": 4646,
+        "type": "health-to-mana",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 5
+      },
+      "incantation-of-health-to-mana-self": {
+        "name": "Incantation of Health to Mana Self",
+        "spellId": 4647,
+        "type": "health-to-mana",
+        "difficulty": 400,
+        "targetKind": "self"
+      },
+      "incantation-of-health-to-stamina-other": {
+        "name": "Incantation of Health to Stamina Other",
+        "spellId": 4648,
+        "type": "health-to-stamina",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 5
+      },
+      "incantation-of-health-to-stamina-self": {
+        "name": "Incantation of Health to Stamina Self",
+        "spellId": 4649,
+        "type": "health-to-stamina",
+        "difficulty": 400,
+        "targetKind": "self"
+      },
+      "incantation-of-infuse-health-other": {
+        "name": "Incantation of Infuse Health Other",
+        "spellId": 4650,
+        "type": "health-to-health",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 45
+      },
+      "incantation-of-infuse-mana-other": {
+        "name": "Incantation of Infuse Mana Other",
+        "spellId": 4651,
+        "type": "mana-to-mana",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 45
+      },
+      "incantation-of-infuse-stamina-other": {
+        "name": "Incantation of Infuse Stamina Other",
+        "spellId": 4652,
+        "type": "stamina-to-stamina",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 45
+      },
+      "incantation-of-mana-to-health-other": {
+        "name": "Incantation of Mana to Health Other",
+        "spellId": 4653,
+        "type": "mana-to-health",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 5
+      },
+      "incantation-of-mana-to-health-self": {
+        "name": "Incantation of Mana to Health Self",
+        "spellId": 4654,
+        "type": "mana-to-health",
+        "difficulty": 400,
+        "targetKind": "self"
+      },
+      "incantation-of-mana-to-stamina-other": {
+        "name": "Incantation of Mana to Stamina Other",
+        "spellId": 4655,
+        "type": "mana-to-stamina",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 5
+      },
+      "incantation-of-mana-to-stamina-self": {
+        "name": "Incantation of Mana to Stamina Self",
+        "spellId": 4656,
+        "type": "mana-to-stamina",
+        "difficulty": 400,
+        "targetKind": "self"
+      },
+      "incantation-of-stamina-to-health-other": {
+        "name": "Incantation of Stamina to Health Other",
+        "spellId": 4657,
+        "type": "stamina-to-health",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 5
+      },
+      "incantation-of-stamina-to-health-self": {
+        "name": "Incantation of Stamina to Health Self",
+        "spellId": 4658,
+        "type": "stamina-to-health",
+        "difficulty": 400,
+        "targetKind": "self"
+      },
+      "incantation-of-stamina-to-mana-other": {
+        "name": "Incantation of Stamina to Mana Other",
+        "spellId": 4659,
+        "type": "stamina-to-mana",
+        "difficulty": 400,
+        "targetKind": "other",
+        "range": 5
+      },
+      "incantation-of-stamina-to-mana-self": {
+        "name": "Incantation of Stamina to Mana Self",
+        "spellId": 4981,
+        "type": "stamina-to-mana",
+        "difficulty": 400,
+        "targetKind": "self"
+      }
+    },
+    "void": {
+      "nether-bolt-i": {
+        "name": "Nether Bolt I",
+        "spellId": 5349,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 30.7
+      },
+      "nether-bolt-ii": {
+        "name": "Nether Bolt II",
+        "spellId": 5350,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 60
+      },
+      "nether-bolt-iii": {
+        "name": "Nether Bolt III",
+        "spellId": 5351,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-bolt-iv": {
+        "name": "Nether Bolt IV",
+        "spellId": 5352,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-bolt-v": {
+        "name": "Nether Bolt V",
+        "spellId": 5353,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-bolt-vi": {
+        "name": "Nether Bolt VI",
+        "spellId": 5354,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-bolt-vii": {
+        "name": "Nether Bolt VII",
+        "spellId": 5355,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "incantation-of-nether-bolt": {
+        "name": "Incantation of Nether Bolt",
+        "spellId": 5356,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-arc-ii": {
+        "name": "Nether Arc II",
+        "spellId": 5362,
+        "type": "attack",
+        "difficulty": 50,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 60
+      },
+      "nether-arc-iii": {
+        "name": "Nether Arc III",
+        "spellId": 5363,
+        "type": "attack",
+        "difficulty": 100,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-arc-iv": {
+        "name": "Nether Arc IV",
+        "spellId": 5364,
+        "type": "attack",
+        "difficulty": 150,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-arc-v": {
+        "name": "Nether Arc V",
+        "spellId": 5365,
+        "type": "attack",
+        "difficulty": 200,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-arc-vi": {
+        "name": "Nether Arc VI",
+        "spellId": 5366,
+        "type": "attack",
+        "difficulty": 250,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-arc-vii": {
+        "name": "Nether Arc VII",
+        "spellId": 5367,
+        "type": "attack",
+        "difficulty": 300,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "incantation-of-nether-arc": {
+        "name": "Incantation of Nether Arc",
+        "spellId": 5368,
+        "type": "attack",
+        "difficulty": 400,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 75
+      },
+      "nether-arc-i": {
+        "name": "Nether Arc I",
+        "spellId": 5369,
+        "type": "attack",
+        "difficulty": 1,
+        "targetKind": "other",
+        "damageType": "void",
+        "range": 30.7
+      }
+    }
+  }
+}

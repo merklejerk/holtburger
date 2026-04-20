@@ -1755,6 +1755,75 @@ fn test_fellowship_quit_for_local_player_clears_state() {
 }
 
 #[test]
+fn test_fellowship_quit_for_leader_reassigns_remaining_leader() {
+    let mut state = WorldState::synthetic();
+    let leader_guid = Guid(0x5000_0001);
+    let member_guid = Guid(0x5000_0002);
+
+    state.player.guid = Guid(0x5000_00FF);
+    state.fellowship = Some(FellowshipState {
+        name: "Raid Bus".to_string(),
+        leader_guid,
+        share_xp: true,
+        even_share: false,
+        open: true,
+        is_locked: false,
+        members: vec![
+            FellowshipMemberState {
+                guid: leader_guid,
+                name: "Leader".to_string(),
+                level: 12,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 180,
+                max_stamina: 150,
+                max_mana: 120,
+                current_health: 170,
+                current_stamina: 140,
+                current_mana: 110,
+                share_loot: true,
+            },
+            FellowshipMemberState {
+                guid: member_guid,
+                name: "Bravo".to_string(),
+                level: 18,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 220,
+                max_stamina: 160,
+                max_mana: 140,
+                current_health: 215,
+                current_stamina: 150,
+                current_mana: 130,
+                share_loot: true,
+            },
+        ],
+        departed_members: Vec::new(),
+        locks: Vec::new(),
+    });
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 1,
+        event: GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData {
+            player_guid: leader_guid,
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    let fellowship = state.fellowship.as_ref().expect("fellowship should remain");
+    assert_eq!(fellowship.members.len(), 1);
+    assert_eq!(fellowship.members[0].guid, member_guid);
+    assert_eq!(fellowship.leader_guid, member_guid);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipStateUpdated(Some(fellowship))
+            if fellowship.leader_guid == member_guid && fellowship.members.len() == 1
+    )));
+}
+
+#[test]
 fn test_fellowship_update_fellow_for_new_remote_member_emits_join_activity() {
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x5000_0001);

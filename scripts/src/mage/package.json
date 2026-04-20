@@ -1,0 +1,31 @@
+{
+	"name": "@holtburger/scripts-mage",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"data:export-spells": "cargo run -p holtburger-tools --bin dat-tool -- spell-export ../../../dats/assets.hba --namespace eor/portal --fields name,description,school,category,bitfield,base-range-constant,base-range-mod,power --output .cache/mage.spells.json",
+		"data:build": "npm run data:export-spells && tsx src/cli/build-mage-data.ts --input .cache/mage.spells.json --output ../../mage.data.json && cargo run -p holtburger-tools --bin weenie-resists -- --output - --binary ../../mage.data.bin >/dev/null",
+		"prebuild": "npm run check && npm run lint && npm run format:check",
+		"build": "esbuild src/index.ts --bundle --platform=browser --format=iife --target=es2020 --outfile=../../mage.js --legal-comments=none",
+		"prewatch": "npm run check && npm run lint && npm run format:check",
+		"watch": "esbuild src/index.ts --bundle --platform=browser --format=iife --target=es2020 --outfile=../../mage.js --legal-comments=none --watch",
+		"check": "tsc --noEmit",
+		"lint": "eslint src eslint.config.mjs",
+		"lint:fix": "eslint src eslint.config.mjs --fix",
+		"test": "tsx --test src/**/*.test.ts",
+		"format": "prettier src/*.ts src/**/*.ts *.json *.mjs README.md --write",
+		"format:check": "prettier src/*.ts src/**/*.ts *.json *.mjs README.md --check",
+		"clean": "node -e \"require('node:fs').rmSync('../../mage.js', { force: true })\""
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@types/node": "^24.7.2",
+		"esbuild": "^0.28.0",
+		"eslint": "^10.2.0",
+		"globals": "^17.5.0",
+		"prettier": "^3.8.2",
+		"tsx": "^4.20.6",
+		"typescript": "^6.0.2",
+		"typescript-eslint": "^8.58.1"
+	}
+}

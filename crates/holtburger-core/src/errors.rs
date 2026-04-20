@@ -133,6 +133,7 @@ pub fn format_weenie_error(error: WeenieError, parameter: Option<&str>) -> Strin
             Some("You are an invalid target for the spell of {}.")
         }
         WeenieError::IsAtFullHealth => Some("{} is already at full health!"),
+        WeenieError::YouDontHaveAllTheComponents => Some("You don't have all the components."),
         WeenieError::HasNoSpellTargets => {
             Some("{} has no appropriate targets equipped for this spell.")
         }
@@ -308,5 +309,6 @@ pub fn is_actually_weenie_error(err: WeenieError) -> bool {
             | WeenieError::YouHaveLeftTheChannel
             | WeenieError::ITeleported
             | WeenieError::YouHaveEnteredTheChannel
+            | WeenieError::CharacterNotAvailable
     )
 }

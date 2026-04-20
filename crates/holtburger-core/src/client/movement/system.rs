@@ -125,6 +125,8 @@ pub(crate) struct MovementSystem {
     active_drive: Option<ActiveDriveState>,
     server_motion_active: bool,
     last_server_motion_intent: Option<ServerMotionIntent>,
+    suppress_frontend_autonomous_once: bool,
+    server_controlled_projection: Option<ServerControlledProjection>,
     next_autonomous_position_heartbeat_at: Option<Instant>,
 }
 
@@ -179,6 +181,12 @@ struct ServerMotionIntent {
     motion_style: MotionStyle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ServerControlledProjection {
+    pub target_pose: holtburger_common::position::WorldPosition,
+    pub speed_mps: f32,
+}
+
 fn server_motion_intent(state: MotionState, motion_style: MotionStyle) -> ServerMotionIntent {
     ServerMotionIntent {
         state,
@@ -196,8 +204,25 @@ impl MovementSystem {
             active_drive: None,
             server_motion_active: false,
             last_server_motion_intent: None,
+            suppress_frontend_autonomous_once: false,
+            server_controlled_projection: None,
             next_autonomous_position_heartbeat_at: None,
         }
+    }
+
+    pub(crate) fn note_server_controlled_movement_started(&mut self) {
+        self.suppress_frontend_autonomous_once = true;
+    }
+
+    pub(crate) fn set_server_controlled_projection(
+        &mut self,
+        projection: ServerControlledProjection,
+    ) {
+        self.server_controlled_projection = Some(projection);
+    }
+
+    pub(crate) fn clear_server_controlled_projection(&mut self) {
+        self.server_controlled_projection = None;
     }
 
     fn clear_autonomous_position_heartbeat_schedule(&mut self) {
@@ -335,6 +360,8 @@ impl MovementSystem {
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
+        self.reconcile_server_controlled_projection(world);
+
         let had_active_manual_motion = matches!(
             self.active_drive,
             Some(ActiveDriveState {
@@ -360,6 +387,22 @@ impl MovementSystem {
         for command in queued {
             self.ingest_drive_command(command, now);
         }
+
+        if self.suppress_frontend_autonomous_once
+            && matches!(
+                self.active_drive,
+                Some(ActiveDriveState {
+                    intent: ActiveDriveIntent::Autonomous(_),
+                    ..
+                })
+            )
+        {
+            log::info!(
+                "movement: suppressing frontend autonomous wire motion during server-controlled movement"
+            );
+            self.active_drive = None;
+        }
+        self.suppress_frontend_autonomous_once = false;
 
         let mut events = Vec::new();
         if let Some(pose) = self.pending_arrival_pose.take() {
@@ -426,12 +469,51 @@ impl MovementSystem {
     pub(crate) fn current_local_drive_control(
         &self,
         world: &WorldState,
+        dt: Duration,
     ) -> Option<LocalDriveControl> {
         if world.player.guid == Guid::NULL {
             return None;
         }
 
         let body_id = SpatialBodyId::LocalPlayer(world.player.guid);
+
+        if let Some(projection) = self.server_controlled_projection {
+            let current_pose = world
+                .local_player_runtime_pose()
+                .unwrap_or(world.player.position);
+            let to_target = projection.target_pose.global_coords() - current_pose.global_coords();
+            let max_step = (projection.speed_mps.max(0.1) * dt.as_secs_f32().max(0.001)).max(0.05);
+            let desired_world_delta = if to_target.length_squared() <= 1e-6 {
+                Vector3::zero()
+            } else {
+                let distance = to_target.length();
+                if distance <= max_step {
+                    to_target
+                } else {
+                    to_target.normalize() * max_step
+                }
+            };
+
+            let desired_heading = if desired_world_delta.length_squared() > 1e-6 {
+                Some(current_pose.heading_to(&projection.target_pose))
+            } else {
+                Some(projection.target_pose.rotation.to_heading())
+            };
+
+            return Some(LocalDriveControl {
+                body_id,
+                desired_world_delta,
+                desired_heading,
+                target_hint: Some(projection.target_pose),
+                gait: if projection.speed_mps > 1.0 {
+                    LocalDriveGait::Run
+                } else {
+                    LocalDriveGait::Walk
+                },
+                force_grounded: true,
+            });
+        }
+
         let intent = match self.active_drive?.intent {
             ActiveDriveIntent::Autonomous(intent) => intent,
             ActiveDriveIntent::Manual(_) => return None,
@@ -498,6 +580,27 @@ impl MovementSystem {
             velocity,
             omega,
         ))
+    }
+
+    fn reconcile_server_controlled_projection(&mut self, world: &WorldState) {
+        let Some(projection) = self.server_controlled_projection else {
+            return;
+        };
+        let Some(current_pose) = world.local_player_runtime_pose() else {
+            return;
+        };
+
+        if current_pose.landblock_id != projection.target_pose.landblock_id {
+            return;
+        }
+
+        if current_pose.distance_to(&projection.target_pose) <= 0.05 {
+            log::info!(
+                "movement: completed server-controlled projection at {:?}",
+                projection.target_pose
+            );
+            self.server_controlled_projection = None;
+        }
     }
 
     pub(crate) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {

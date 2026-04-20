@@ -2,6 +2,9 @@
 
 Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. The TUI client already covers a meaningful set of gameplay, automation, and data-projection workflows, and the stack keeps expanding.
 
+> [!IMPORTANT]
+> Holtburger is being developed against the ACE server implementation, not GDLE. It will likely be very unstable on GDLE servers.
+
 ![tui client screenshot](screenshot.png)
 
 ## The Ecosystem
@@ -116,7 +119,10 @@ Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 3. Launch the binary from the extracted folder:
 
 ```bash
+# see help
 ./holtburger-cli --help
+# connect
+./holtburger-cli -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
 ```
 
 Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
@@ -126,7 +132,10 @@ Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 Download the flatpak from releases then run `flatpak install ./holtburger-cli.flatpak`.
 
 ```bash
+# see help
 flatpak run io.github.merklejerk.holtburger-cli --help
+# connect
+flatpak run io.github.merklejerk.holtburger-cli -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
 ```
 
 By default the Flatpak bundle sets `SCRIPT_DIR` to the writable per-app data tree inside the sandbox (`/var/data/holtburger/scripts`, which Flatpak maps to `~/.var/app/$FLATPAK_ID/data/holtburger/scripts` on the host). You can store custom scripts there.
@@ -138,7 +147,10 @@ By default the Flatpak bundle sets `SCRIPT_DIR` to the writable per-app data tre
 3. Launch the binary from the extracted folder:
 
 ```bash
+# see help
 ./holtburger-cli --help
+# connect
+./holtburger-cli -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
 ```
 
 Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
@@ -158,7 +170,11 @@ cargo build --release
 For day-to-day development, run the TUI through Cargo:
 
 ```bash
+# see help
 cargo run --bin tui -- --help
+# connect
+cargo run --bin tui -- -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+# connect
 ```
 
 The source tree uses `./scripts/` as the local script directory by default. Local scripts, script data, and per-script config live under that writable directory unless you override `SCRIPT_DIR`.
@@ -240,16 +256,6 @@ At runtime, the frontend constructs a `holtburger-content::ContentRepository` fr
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
 > **Note:** Official DAT files no longer need to be renamed when passed to tooling. Runtime startup no longer scans raw DAT files; use `dat2hba` to produce a namespaced `assets.hba` bundle first.
-
-### Benchmarking
-
-For archive performance checks, run:
-
-```bash
-cargo bench -p holtburger-dat --bench provider_bench -- --noplot
-```
-
-That benchmark covers provider reads plus synthetic multi-namespace HBA lookup and full index iteration.
 
 ## License
 

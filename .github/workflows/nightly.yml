@@ -69,7 +69,7 @@ jobs:
           cp target/release/dat2hba$EXT staging/dat2hba$EXT
           cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
           cp dats/assets.hba staging/dats/assets.hba
-          cp -R scripts/. staging/scripts/
+          cp scripts/*.js scripts/*.data.json scripts/*.data.bin staging/scripts/
           ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             7z a "$ARCHIVE_NAME.zip" ./staging/*

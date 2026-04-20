@@ -2255,7 +2255,7 @@ fn test_player_description_initialization() {
         event,
     }));
 
-    state.handle_message(&msg);
+    let events = state.handle_message(&msg);
 
     assert_eq!(state.player.guid, player_guid);
     assert_eq!(state.player_name(), player_name);
@@ -2277,6 +2277,17 @@ fn test_player_description_initialization() {
         player_entity.get_int64_prop(PropertyInt64::AvailableExperience),
         Some(12345)
     );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::PlayerInfo(data)
+            if data.entity.guid == player_guid
+                && data.entity.name() == player_name
+                && data.entity.position == bootstrap_pos
+                && data.level_info.level == 17
+    )));
+    assert!(events.iter().any(
+        |event| matches!(event, WorldEvent::LevelInfoUpdated(level_info) if level_info.level == 17)
+    ));
     assert!(
         state
             .player

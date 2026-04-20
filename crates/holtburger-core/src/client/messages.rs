@@ -1067,6 +1067,7 @@ mod tests {
         )));
 
         let mut saw_options_projection = false;
+        let mut saw_authoritative_player_spawn = false;
         while let Ok(event) = events.try_recv() {
             if matches!(
                 event,
@@ -1075,11 +1076,20 @@ mod tests {
                         && options.options2 == CharacterOptions2::SHOW_HELM
             ) {
                 saw_options_projection = true;
-                break;
+            }
+
+            if matches!(
+                event,
+                ClientViewEvent::EntitySpawned { entity }
+                    if entity.guid == holtburger_common::Guid(0x50000001)
+                        && entity.name() == "Test Player"
+            ) {
+                saw_authoritative_player_spawn = true;
             }
         }
 
         assert!(saw_options_projection);
+        assert!(saw_authoritative_player_spawn);
     }
 
     #[tokio::test]

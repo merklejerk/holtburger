@@ -55,7 +55,7 @@ Holtburger is being built in phases, and the current TUI client is intentionally
 
 The long-term goal is not to stop at a terminal client. The TUI is how we validate the full client stack quickly, iterate on gameplay and automation semantics, and de-risk the architecture before investing in a richer frontend.
 
-Current focus: Phase 2.
+Current focus: Phase 2 and 3.
 
 ### Phase 1: TUI and Stack Buildout
 

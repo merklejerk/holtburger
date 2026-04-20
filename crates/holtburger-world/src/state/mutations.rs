@@ -73,7 +73,7 @@ impl WorldState {
         }
 
         if guid == self.player.guid {
-            Some(self.player.position)
+            self.player_position()
         } else {
             self.entities.get(guid).map(|entity| entity.position)
         }
@@ -89,12 +89,12 @@ impl WorldState {
         }
 
         if guid == self.player.guid {
-            let (velocity, omega) = self
-                .entities
-                .get(guid)
-                .map(|entity| (entity.velocity, entity.omega))
-                .unwrap_or((Vector3::zero(), Vector3::zero()));
-            Some((body_id, self.player.position, velocity, omega))
+            self.player_entity()
+                .map(|entity| (body_id, entity.position, entity.velocity, entity.omega))
+                .or_else(|| {
+                    self.player_position()
+                        .map(|position| (body_id, position, Vector3::zero(), Vector3::zero()))
+                })
         } else {
             self.entities
                 .get(guid)
@@ -126,15 +126,15 @@ impl WorldState {
 
         let guid = body_id.authoritative_guid()?;
         if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
+            let authoritative_pose = self.player_position()?;
             let (velocity, omega, motion_state) = self
-                .entities
-                .get(guid)
+                .player_entity()
                 .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
                 .unwrap_or((Vector3::zero(), Vector3::zero(), None));
             return Some(RuntimeSpatialBodyView {
                 body_id,
-                authoritative_pose: Some(self.player.position),
-                runtime_pose: self.player.position,
+                authoritative_pose: Some(authoritative_pose),
+                runtime_pose: authoritative_pose,
                 velocity,
                 omega,
                 motion_state,
@@ -448,22 +448,49 @@ impl WorldState {
         })));
     }
 
+    fn bootstrap_player_entity_from_description(
+        &mut self,
+        data: &PlayerDescriptionEventData,
+    ) -> Option<WorldPosition> {
+        let guid = data.guid;
+        let mut properties = data.properties.clone();
+        properties
+            .strings
+            .0
+            .entry(PropertyString::Name)
+            .or_insert_with(|| data.name.clone());
+
+        let bootstrap_position = data
+            .pos
+            .or_else(|| self.entities.get(guid).map(|entity| entity.position))
+            .or_else(|| (guid == self.player.guid).then_some(self.player.position))
+            .unwrap_or_default();
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.properties = properties;
+            entity.position = bootstrap_position;
+            entity.set_string_prop(PropertyString::Name, data.name.clone());
+        } else {
+            let mut entity = crate::entity::Entity::new(guid, data.name.clone(), bootstrap_position);
+            entity.properties = properties;
+            self.add_entity(entity);
+        }
+
+        if data.pos.is_some() {
+            self.sync_player_position(bootstrap_position);
+        }
+
+        self.entities.get(guid).map(|entity| entity.position)
+    }
+
     pub(crate) fn apply_player_description_world_state(
         &mut self,
-        guid: Guid,
-        name: &str,
-        pos: Option<WorldPosition>,
+        data: &PlayerDescriptionEventData,
         events: &mut Vec<WorldEvent>,
     ) {
-        if let Some(entity) = self.entities.get_mut(guid) {
-            entity.set_string_prop(PropertyString::Name, name.to_string());
-        }
+        let pos = self.bootstrap_player_entity_from_description(data);
 
-        if let Some(position) = pos {
-            events.extend(self.set_player_position(position));
-        }
-
-        self.emit_player_info(guid, name.to_string(), pos, events);
+        self.emit_player_info(data.guid, data.name.clone(), pos, events);
         self.emit_level_info(events);
     }
 
@@ -585,13 +612,16 @@ impl WorldState {
             || !pos.rotation.y.is_finite()
             || !pos.rotation.z.is_finite()
         {
-            pos.rotation = self.player.position.rotation;
+            pos.rotation = self
+                .player_position()
+                .map(|current| current.rotation)
+                .unwrap_or_default();
         }
 
-        let old_lb = self.player.position.landblock_id;
+        let old_lb = self.player_landblock().unwrap_or(Guid::NULL);
         self.player.position = pos;
 
-        if let Some(entity) = self.entities.get_mut(guid) {
+        if let Some(entity) = self.player_entity_mut() {
             entity.position = pos;
         }
         self.scene.update_entity(guid, old_lb, pos);
@@ -671,7 +701,10 @@ impl WorldState {
         let runtime_delta_m = self
             .local_player_runtime_pose()
             .map(|pose| pose.distance_to(&data.position));
-        let auth_delta_m = self.player.position.distance_to(&data.position);
+        let auth_delta_m = self
+            .player_position()
+            .map(|position| position.distance_to(&data.position))
+            .unwrap_or_default();
 
         log::debug!(
             "player: self AutonomousPosition {} pos {:?} runtime_delta={:?} auth_delta={:.2}m seqs inst={} server={} teleport={} force={} current teleport={} force={} server={}",

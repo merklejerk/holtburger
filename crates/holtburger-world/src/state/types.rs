@@ -58,6 +58,50 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    pub fn player_entity(&self) -> Option<&Entity> {
+        let guid = self.player.guid;
+        (guid != Guid::NULL)
+            .then(|| self.entities.get(guid))
+            .flatten()
+    }
+
+    pub fn player_entity_mut(&mut self) -> Option<&mut Entity> {
+        let guid = self.player.guid;
+        (guid != Guid::NULL)
+            .then(|| self.entities.get_mut(guid))
+            .flatten()
+    }
+
+    pub fn player_position(&self) -> Option<holtburger_common::position::WorldPosition> {
+        self.player_entity()
+            .map(|entity| entity.position)
+            .or_else(|| (self.player.guid != Guid::NULL).then_some(self.player.position))
+    }
+
+    pub fn player_landblock(&self) -> Option<Guid> {
+        self.player_position()
+            .map(|position| position.landblock_id)
+            .filter(|landblock| *landblock != Guid::NULL)
+    }
+
+    pub fn player_properties(&self) -> Option<&holtburger_common::properties::WorldObjectProperties> {
+        self.player_entity()
+            .map(|entity| &entity.properties)
+            .or_else(|| (self.player.guid != Guid::NULL).then_some(&self.player.properties))
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn seed_local_player_entity(
+        &mut self,
+        guid: Guid,
+        name: impl Into<String>,
+        position: holtburger_common::position::WorldPosition,
+    ) {
+        self.player.guid = guid;
+        self.player.position = position;
+        self.add_entity(Entity::new(guid, name.into(), position));
+    }
+
     /// Stable public entry point for applying a decoded game message to world state.
     ///
     /// Feature handlers own the orchestration order; this method preserves the external API while
@@ -131,8 +175,7 @@ impl WorldState {
 
     pub fn get_player_enchanted_int(&self, key: PropertyInt) -> i32 {
         let base = self
-            .entities
-            .get(self.player.guid)
+            .player_entity()
             .and_then(|e| e.get_int_prop(key))
             .unwrap_or(0);
 
@@ -169,8 +212,7 @@ impl WorldState {
         }
 
         let base = self
-            .entities
-            .get(self.player.guid)
+            .player_entity()
             .and_then(|e| e.get_float_prop(key))
             .map(|f| f as f32)
             .unwrap_or(1.0);

@@ -100,6 +100,8 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 
 Nightly builds and archives for Windows, Mac, and Linux are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. All bundles ship with a minimal (`micro`) assets file, `assets.hba`, so they're ready to run immediately.
 
+The TUI client is a command-line application, so you must launch it from a terminal. On Windows, use a modern terminal emulator such as Windows Terminal; the legacy Command Prompt and classic PowerShell console do not render it well.
+
 ### Windows Install
 
 1. Download the Windows archive.
@@ -167,14 +169,13 @@ cd holtburger
 cargo build --release
 ```
 
-For day-to-day development, run the TUI through Cargo:
+For day-to-day development, launch the TUI through Cargo from a terminal:
 
 ```bash
 # see help
 cargo run --bin tui -- --help
 # connect
 cargo run --bin tui -- -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
-# connect
 ```
 
 The source tree uses `./scripts/` as the local script directory by default. Local scripts, script data, and per-script config live under that writable directory unless you override `SCRIPT_DIR`.
@@ -190,29 +191,13 @@ Unlike the release builds and Flatpak, source builds do **not** bundle client da
 
 ## Running the TUI Client
 
-Once installed, use the launch path that matches how you obtained the client:
+Use the launch command that matches how you installed Holtburger:
 
-### Release Archive
+- Release archive: `./holtburger-cli [ARGS]`
+- Flatpak: `flatpak run io.github.merklejerk.holtburger-cli [ARGS]`
+- Local development: `cargo run --bin tui -- [ARGS]`
 
-```bash
-./holtburger-cli [ARGS]
-```
-
-### Flatpak
-
-```bash
-flatpak run io.github.merklejerk.holtburger-cli [ARGS]
-```
-
-### Local Development
-
-```bash
-cargo run --bin tui -- [ARGS]
-```
-
-### Windows Notes
-
-The TUI client needs a modern terminal emulator to render correctly. The built-in Command Prompt and legacy PowerShell console are not adequate. [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) is a good default and ships with Windows 11.
+The Windows-specific terminal guidance above still applies when launching any of those binaries.
 
 > [!TIP]
 > If you get an error about missing `VCRuntime140.dll`, install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe). You may also need to allow the executable through Windows Defender by running it once, choosing "More info", and then selecting "Run anyway".

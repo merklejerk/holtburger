@@ -7,7 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::pages;
-use holtburger_cli::state::{AppState, NetStats};
+use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_cli::utils::format_action_result_message;
 use holtburger_content::ContentRepository;
@@ -183,6 +183,19 @@ struct Args {
     password: String,
     #[arg(short, long)]
     character: Option<String>,
+    #[arg(
+        long,
+        value_name = "SCRIPT_NAME",
+        help = "Queue a script to start as soon as the client is ready"
+    )]
+    run: Option<String>,
+    #[arg(
+        long = "run-args",
+        value_name = "SCRIPT_ARGS",
+        requires = "run",
+        help = "Arguments passed to the queued script's Started lifecycle event"
+    )]
+    run_args: Option<String>,
     #[arg(long)]
     capture: Option<String>,
     #[arg(short, long, help = "Write chat and in-game system messages to a file")]
@@ -253,6 +266,18 @@ fn format_boot_account_message(reason: &str) -> String {
 
 fn clear_captured_logs(local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>) {
     while local_log_rx.try_recv().is_ok() {}
+}
+
+fn queued_script_startup_from_args(args: &Args) -> Option<QueuedScriptStartup> {
+    let basename = args.run.as_ref()?;
+    let script_args = args
+        .run_args
+        .as_deref()
+        .unwrap_or_default()
+        .trim_start()
+        .to_string();
+
+    Some(QueuedScriptStartup::new(basename.clone(), script_args))
 }
 
 #[derive(Default)]
@@ -668,6 +693,7 @@ async fn run() -> Result<()> {
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,
+        queued_script_startup: queued_script_startup_from_args(&args),
     };
 
     if args.verbose > 0 {
@@ -764,6 +790,7 @@ async fn run() -> Result<()> {
             match server_event_rx.try_recv() {
                 Ok(event) => {
                     requested_initial_view_state = false;
+
                     let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
                     update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
                     should_quit |= app_state.has_pending_exit();
@@ -942,6 +969,27 @@ mod tests {
             .expect("auto-quit args should parse");
 
         assert!(args.quit_on_disconnect);
+    }
+
+    #[test]
+    fn run_flags_parse_and_seed_queued_script_startup() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--run",
+            "fighter",
+            "--run-args",
+            "pick up loot",
+        ])
+        .expect("run args should parse");
+
+        assert_eq!(args.run.as_deref(), Some("fighter"));
+        assert_eq!(args.run_args.as_deref(), Some("pick up loot"));
+
+        let queued = queued_script_startup_from_args(&args).expect("queued startup should exist");
+        assert_eq!(queued.basename, "fighter");
+        assert_eq!(queued.args, "pick up loot");
     }
 
     #[test]

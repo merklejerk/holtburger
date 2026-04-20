@@ -1,18 +1,15 @@
 use super::*;
 use crate::pages::game::combat as combat_model;
 use holtburger_core::ActionResultReason;
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 
 pub(super) enum EnterCombatModeResult {
     Success(UpdateResult),
     Failed(UpdateResult),
 }
 
-pub(crate) fn toggled_combat_mode(state: &GameState) -> CombatMode {
-    if state.data.combat_mode != CombatMode::NonCombat {
-        CombatMode::NonCombat
-    } else {
-        state.data.get_suggested_combat_mode()
-    }
+pub(crate) fn is_in_combat_mode(state: &GameState) -> bool {
+    state.data.combat_mode != CombatMode::NonCombat
 }
 
 pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
@@ -30,6 +27,11 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 EnterCombatModeResult::Success(res) => {
                     result.merge(res);
                     if let Some(target) = target {
+                        if let Some(heading) = targeted_spell_heading(state, target) {
+                            result.commands.push(ClientCommand::DriveSelf(
+                                PlayerDriveIntent::SnapFacing { heading },
+                            ));
+                        }
                         result
                             .commands
                             .push(ClientCommand::CastTargetedSpell { spell_id, target });
@@ -49,18 +51,43 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
             state.data.combat_controls.cycle_attack_height();
             result.request_redraw(RedrawPriority::Immediate);
         }
-        AppAction::SetCombatMode { mode } => match try_enter_combat_mode(state, mode) {
-            EnterCombatModeResult::Failed(res) => {
-                result.merge(res);
+        AppAction::SetCombatMode { on } => {
+            let desired_mode = if on {
+                if state.data.combat_mode != CombatMode::NonCombat {
+                    None
+                } else {
+                    Some(state.data.get_suggested_combat_mode())
+                }
+            } else {
+                Some(CombatMode::NonCombat)
+            };
+
+            if let Some(mode) = desired_mode {
+                match try_enter_combat_mode(state, mode) {
+                    EnterCombatModeResult::Failed(res) => {
+                        result.merge(res);
+                    }
+                    EnterCombatModeResult::Success(res) => {
+                        result.merge(res);
+                    }
+                }
             }
-            EnterCombatModeResult::Success(res) => {
-                result.merge(res);
-            }
-        },
+        }
         _ => {}
     }
 
     result
+}
+
+fn targeted_spell_heading(state: &GameState, target_guid: Guid) -> Option<f32> {
+    if Some(target_guid) == state.data.player_guid {
+        return None;
+    }
+
+    let player_position = state.data.runtime_player_position()?;
+    let target_position = state.data.runtime_position_for_guid(target_guid)?;
+
+    Some(player_position.heading_to(&target_position))
 }
 
 pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) -> UpdateResult {
@@ -83,6 +110,15 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             if combat_model::combat_feedback_context_active(state) =>
         {
             state.data.combat_runtime.note_server_message(message);
+        }
+        ClientViewEvent::SelfServerControlledMotion { data }
+            if state.data.combat_mode == CombatMode::Melee
+                && combat_model::combat_feedback_context_active(state) =>
+        {
+            state
+                .data
+                .combat_runtime
+                .note_self_server_controlled_motion(data);
         }
         _ => {}
     }

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use crate::types::Interaction;
 
-const MELEE_ATTACK_DISTANCE: f32 = 0.6;
+const MELEE_ATTACK_DISTANCE: f32 = 1.0;
 const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 const DEFAULT_APPROACH_DISTANCE: f32 = 1.0;
 const DEFAULT_FOLLOW_DISTANCE: f32 = 0.1;
@@ -63,7 +63,7 @@ impl NavigationSyncInput {
         arrival_pose.coords.z = target_pose.coords.z;
         arrival_pose.landblock_id = target_pose.landblock_id;
 
-        Some(arrival_pose)
+        Some(arrival_pose.normalize_outdoor_cell())
     }
 }
 
@@ -652,10 +652,9 @@ impl TuiNavigation {
         let target_guid = combat_request.target_guid;
         let stop_distance =
             effective_arrival_distance(MELEE_ATTACK_DISTANCE, input.target_use_radius());
+        let distance_to_target = self.distance_to_target(input);
 
-        let pursuing = self
-            .distance_to_target(input)
-            .is_some_and(|distance| distance > stop_distance);
+        let pursuing = distance_to_target.is_some_and(|distance| distance >= stop_distance);
 
         self.active = ActiveNavigation::StickyMelee {
             target_guid,
@@ -1368,6 +1367,55 @@ mod tests {
     }
 
     #[test]
+    fn follow_arrival_normalizes_outdoor_cell_after_landblock_crossing() {
+        let now = Instant::now();
+        let player_position = WorldPosition {
+            landblock_id: Guid(0x3519_0039),
+            coords: Vector3::new(0.05, 58.299316, 12.0),
+            rotation: Quaternion::from_heading(180.0_f32.to_radians()),
+        };
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x3419_003B),
+            coords: Vector3::new(191.98, 58.299316, 13.145146),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let target_guid = Guid(0x5000_000A);
+        let mut navigation = TuiNavigation {
+            drive_active: true,
+            last_drive_block_reason: None,
+            ..Default::default()
+        };
+
+        navigation.active = ActiveNavigation::Follow {
+            target_guid,
+            arrival_distance: 0.1,
+            pursuing: true,
+        };
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.1),
+            snapshot: snapshot(
+                Some(player_position),
+                Some(target_sample(target_guid, target_position)),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+            ),
+        });
+
+        assert_eq!(
+            update.drive_command,
+            Some(PlayerDriveIntent::ArriveAtPose {
+                pose: WorldPosition {
+                    landblock_id: Guid(0x3419_0003),
+                    coords: Vector3::new(0.05, 58.299316, 13.145146),
+                    rotation: Quaternion::from_heading(180.0_f32.to_radians()),
+                },
+            })
+        );
+    }
+
+    #[test]
     fn forced_reposition_clears_approach_interaction_and_stops_drive() {
         let now = Instant::now();
         let player_position = world_position(0.0, 0.0, 0.0);
@@ -1503,6 +1551,46 @@ mod tests {
             ActiveNavigation::StickyMelee {
                 latched_target_guid: Some(guid),
                 pursuing: false,
+                ..
+            } if guid == target_guid
+        ));
+    }
+
+    #[test]
+    fn sticky_melee_keeps_pursuing_at_exact_stop_distance() {
+        let now = Instant::now();
+        let player_position = world_position_with_heading(0.0, 0.0, 0.0, 180.0_f32.to_radians());
+        let target_guid = Guid(0x5000_0009);
+        let mut navigation = TuiNavigation::default();
+
+        let update = navigation.tick(NavigationTick {
+            now,
+            dt: Duration::from_secs_f32(0.016),
+            snapshot: sticky_snapshot(
+                Some(player_position),
+                Some(target_sample_with_use_radius(
+                    target_guid,
+                    world_position(1.0, 0.0, 0.0),
+                    0.5,
+                )),
+                Some(test_self_movement_kinematics(1.0, 2.0, 1.5)),
+                Some(4.5),
+                Some(CombatNavigationRequest {
+                    target_guid,
+                    mode: CombatMode::Melee,
+                }),
+            ),
+        });
+
+        assert!(matches!(
+            update.drive_command,
+            Some(PlayerDriveIntent::Autonomous(_)) | Some(PlayerDriveIntent::SnapFacing { .. })
+        ));
+        assert!(matches!(
+            navigation.active,
+            ActiveNavigation::StickyMelee {
+                latched_target_guid: Some(guid),
+                pursuing: true,
                 ..
             } if guid == target_guid
         ));

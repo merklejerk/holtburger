@@ -1,15 +1,20 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt,
-    PropertyInt64, PropertyString,
+    DamageType, EquipMask, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
+    PropertyInt, PropertyInt64, PropertyString,
 };
 use holtburger_common::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_core::{ActiveCharacterConfirmation, BusyOperationKind};
-use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+use holtburger_protocol::messages::combat::{
+    AttackConditions, AttackHeight, CombatMode, DamageLocation,
+};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
-use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
-use serde::{Deserialize, Serialize};
+use holtburger_protocol::messages::object::types::{
+    ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
+    WeaponProfile,
+};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::ScriptJsonValue;
 
@@ -53,6 +58,9 @@ pub trait ScriptClientView {
     fn load_data(&self) -> Option<ScriptJsonValue> {
         None
     }
+    fn load_data_bin(&self) -> Option<Vec<u8>> {
+        None
+    }
     fn write_config(&self, _contents: String) -> bool {
         false
     }
@@ -77,7 +85,6 @@ pub trait ScriptClientView {
     fn entity_exists(&self, guid: Guid) -> bool;
     fn current_trade_info(&self) -> Option<ScriptTradeInfo>;
     fn party(&self) -> Option<ScriptPartyView>;
-    fn active_spells(&self) -> Vec<ScriptSpellEffectView>;
     fn server_time(&self) -> Option<f64>;
     fn pending_confirmation(&self) -> Option<ScriptConfirmation>;
     fn busy_operation(&self) -> ScriptBusyOperation;
@@ -88,7 +95,7 @@ pub trait ScriptClientView {
 pub struct ScriptSelfView {
     pub guid: Guid,
     pub name: String,
-    pub position: WorldPosition,
+    pub position: ScriptWorldPosition,
     pub health: u32,
     pub health_max: u32,
     pub stamina: u32,
@@ -139,19 +146,53 @@ pub struct ScriptCharacterSkillView {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ScriptPositionRef {
-    Position(WorldPosition),
+    Position(ScriptWorldPosition),
     Guid(Guid),
+}
+
+impl From<ScriptWorldPosition> for ScriptPositionRef {
+    fn from(position: ScriptWorldPosition) -> Self {
+        Self::Position(position)
+    }
 }
 
 impl From<WorldPosition> for ScriptPositionRef {
     fn from(position: WorldPosition) -> Self {
-        Self::Position(position)
+        Self::Position(position.into())
     }
 }
 
 impl From<Guid> for ScriptPositionRef {
     fn from(guid: Guid) -> Self {
         Self::Guid(guid)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptWorldPosition {
+    pub landblock_id: Guid,
+    pub coords: holtburger_common::Vector3,
+    pub rotation: holtburger_common::Quaternion,
+}
+
+impl From<WorldPosition> for ScriptWorldPosition {
+    fn from(position: WorldPosition) -> Self {
+        Self {
+            landblock_id: position.landblock_id,
+            coords: position.coords,
+            rotation: position.rotation,
+        }
+    }
+}
+
+impl From<ScriptWorldPosition> for WorldPosition {
+    fn from(position: ScriptWorldPosition) -> Self {
+        Self {
+            landblock_id: position.landblock_id,
+            coords: position.coords,
+            rotation: position.rotation,
+        }
     }
 }
 
@@ -233,7 +274,8 @@ pub struct ScriptEntityView {
     pub guid: Guid,
     pub name: Option<String>,
     pub kind: ScriptEntityKind,
-    pub position: WorldPosition,
+    pub weenie_id: Option<u32>,
+    pub position: ScriptWorldPosition,
     pub profile: Option<ScriptEntityProfile>,
     pub container: Guid,
     pub wielder: Guid,
@@ -241,12 +283,257 @@ pub struct ScriptEntityView {
     pub motion_command: ScriptMotionCommand,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ScriptEntityProfile {
     Armor(ArmorProfile),
     Creature(CreatureProfile),
     Weapon(WeaponProfile),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptArmorProfileSerde {
+    slashing: f32,
+    piercing: f32,
+    bludgeoning: f32,
+    cold: f32,
+    fire: f32,
+    acid: f32,
+    nether: f32,
+    lightning: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptCreatureAttributesSerde {
+    strength: u32,
+    endurance: u32,
+    quickness: u32,
+    coordination: u32,
+    focus: u32,
+    self_attr: u32,
+    stamina: u32,
+    mana: u32,
+    stamina_max: u32,
+    mana_max: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptCreatureBuffsSerde {
+    highlights: u16,
+    colors: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptCreatureProfileSerde {
+    flags: CreatureProfileFlags,
+    health: u32,
+    health_max: u32,
+    attributes: Option<ScriptCreatureAttributesSerde>,
+    buffs: Option<ScriptCreatureBuffsSerde>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptWeaponProfileSerde {
+    damage_type: u32,
+    weapon_time: u32,
+    weapon_skill: u32,
+    damage: u32,
+    damage_variance: f64,
+    damage_mod: f64,
+    weapon_length: f64,
+    max_velocity: f64,
+    weapon_offense: f64,
+    max_velocity_estimated: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+enum ScriptEntityProfileSerde {
+    Armor(ScriptArmorProfileSerde),
+    Creature(ScriptCreatureProfileSerde),
+    Weapon(ScriptWeaponProfileSerde),
+}
+
+impl Serialize for ScriptEntityProfile {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        ScriptEntityProfileSerde::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ScriptEntityProfile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        ScriptEntityProfileSerde::deserialize(deserializer).map(Into::into)
+    }
+}
+
+impl From<&ScriptEntityProfile> for ScriptEntityProfileSerde {
+    fn from(profile: &ScriptEntityProfile) -> Self {
+        match profile {
+            ScriptEntityProfile::Armor(data) => Self::Armor(data.into()),
+            ScriptEntityProfile::Creature(data) => Self::Creature(data.into()),
+            ScriptEntityProfile::Weapon(data) => Self::Weapon(data.into()),
+        }
+    }
+}
+
+impl From<ScriptEntityProfileSerde> for ScriptEntityProfile {
+    fn from(profile: ScriptEntityProfileSerde) -> Self {
+        match profile {
+            ScriptEntityProfileSerde::Armor(data) => Self::Armor(data.into()),
+            ScriptEntityProfileSerde::Creature(data) => Self::Creature(data.into()),
+            ScriptEntityProfileSerde::Weapon(data) => Self::Weapon(data.into()),
+        }
+    }
+}
+
+impl From<&ArmorProfile> for ScriptArmorProfileSerde {
+    fn from(profile: &ArmorProfile) -> Self {
+        Self {
+            slashing: profile.slashing,
+            piercing: profile.piercing,
+            bludgeoning: profile.bludgeoning,
+            cold: profile.cold,
+            fire: profile.fire,
+            acid: profile.acid,
+            nether: profile.nether,
+            lightning: profile.lightning,
+        }
+    }
+}
+
+impl From<ScriptArmorProfileSerde> for ArmorProfile {
+    fn from(profile: ScriptArmorProfileSerde) -> Self {
+        Self {
+            slashing: profile.slashing,
+            piercing: profile.piercing,
+            bludgeoning: profile.bludgeoning,
+            cold: profile.cold,
+            fire: profile.fire,
+            acid: profile.acid,
+            nether: profile.nether,
+            lightning: profile.lightning,
+        }
+    }
+}
+
+impl From<&CreatureAttributes> for ScriptCreatureAttributesSerde {
+    fn from(attributes: &CreatureAttributes) -> Self {
+        Self {
+            strength: attributes.strength,
+            endurance: attributes.endurance,
+            quickness: attributes.quickness,
+            coordination: attributes.coordination,
+            focus: attributes.focus,
+            self_attr: attributes.self_attr,
+            stamina: attributes.stamina,
+            mana: attributes.mana,
+            stamina_max: attributes.stamina_max,
+            mana_max: attributes.mana_max,
+        }
+    }
+}
+
+impl From<ScriptCreatureAttributesSerde> for CreatureAttributes {
+    fn from(attributes: ScriptCreatureAttributesSerde) -> Self {
+        Self {
+            strength: attributes.strength,
+            endurance: attributes.endurance,
+            quickness: attributes.quickness,
+            coordination: attributes.coordination,
+            focus: attributes.focus,
+            self_attr: attributes.self_attr,
+            stamina: attributes.stamina,
+            mana: attributes.mana,
+            stamina_max: attributes.stamina_max,
+            mana_max: attributes.mana_max,
+        }
+    }
+}
+
+impl From<&CreatureBuffs> for ScriptCreatureBuffsSerde {
+    fn from(buffs: &CreatureBuffs) -> Self {
+        Self {
+            highlights: buffs.highlights,
+            colors: buffs.colors,
+        }
+    }
+}
+
+impl From<ScriptCreatureBuffsSerde> for CreatureBuffs {
+    fn from(buffs: ScriptCreatureBuffsSerde) -> Self {
+        Self {
+            highlights: buffs.highlights,
+            colors: buffs.colors,
+        }
+    }
+}
+
+impl From<&CreatureProfile> for ScriptCreatureProfileSerde {
+    fn from(profile: &CreatureProfile) -> Self {
+        Self {
+            flags: profile.flags,
+            health: profile.health,
+            health_max: profile.health_max,
+            attributes: profile.attributes.as_ref().map(Into::into),
+            buffs: profile.buffs.as_ref().map(Into::into),
+        }
+    }
+}
+
+impl From<ScriptCreatureProfileSerde> for CreatureProfile {
+    fn from(profile: ScriptCreatureProfileSerde) -> Self {
+        Self {
+            flags: profile.flags,
+            health: profile.health,
+            health_max: profile.health_max,
+            attributes: profile.attributes.map(Into::into),
+            buffs: profile.buffs.map(Into::into),
+        }
+    }
+}
+
+impl From<&WeaponProfile> for ScriptWeaponProfileSerde {
+    fn from(profile: &WeaponProfile) -> Self {
+        Self {
+            damage_type: profile.damage_type,
+            weapon_time: profile.weapon_time,
+            weapon_skill: profile.weapon_skill,
+            damage: profile.damage,
+            damage_variance: profile.damage_variance,
+            damage_mod: profile.damage_mod,
+            weapon_length: profile.weapon_length,
+            max_velocity: profile.max_velocity,
+            weapon_offense: profile.weapon_offense,
+            max_velocity_estimated: profile.max_velocity_estimated,
+        }
+    }
+}
+
+impl From<ScriptWeaponProfileSerde> for WeaponProfile {
+    fn from(profile: ScriptWeaponProfileSerde) -> Self {
+        Self {
+            damage_type: profile.damage_type,
+            weapon_time: profile.weapon_time,
+            weapon_skill: profile.weapon_skill,
+            damage: profile.damage,
+            damage_variance: profile.damage_variance,
+            damage_mod: profile.damage_mod,
+            weapon_length: profile.weapon_length,
+            max_velocity: profile.max_velocity,
+            weapon_offense: profile.weapon_offense,
+            max_velocity_estimated: profile.max_velocity_estimated,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -467,18 +754,10 @@ pub struct ScriptPartyMemberView {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptSpellEffectView {
-    pub spell_id: u32,
-    pub name: Option<String>,
-    pub remaining_seconds: Option<f64>,
-    pub target_guid: Option<Guid>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptEvent {
     ChatMessage(ScriptChatEvent),
+    CombatFeedback(ScriptCombatFeedback),
     Lifecycle(ScriptLifecycleEvent),
     Workflow(ScriptWorkflowEvent),
     Command {
@@ -497,6 +776,14 @@ pub enum ScriptEvent {
     EntityUpdated {
         guid: Guid,
     },
+    TeleportStarted {
+        sequence: u16,
+    },
+    PlayerKilled {
+        death_message: String,
+        victim_id: Guid,
+        killer_id: Guid,
+    },
     InventoryChanged {
         added: Vec<Guid>,
         removed: Vec<Guid>,
@@ -510,6 +797,51 @@ pub struct ScriptChatEvent {
     pub channel: ScriptChatChannelKind,
     pub sender: Option<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum ScriptCombatFeedback {
+    #[serde(rename_all = "camelCase")]
+    AttackDone {
+        error: holtburger_protocol::errors::WeenieError,
+    },
+    AttackCommenced,
+    #[serde(rename_all = "camelCase")]
+    AttackerNotification {
+        defender_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    #[serde(rename_all = "camelCase")]
+    DefenderNotification {
+        attacker_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        damage_location: DamageLocation,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    #[serde(rename_all = "camelCase")]
+    EvasionAttackerNotification {
+        defender_name: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    EvasionDefenderNotification {
+        attacker_name: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    VictimNotification {
+        death_message: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    KillerNotification {
+        death_message: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -535,15 +867,20 @@ pub enum ScriptChatChannelKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptLifecycleEvent {
-    Started,
+    Started {
+        args: String,
+    },
     Stopped,
-    Tick { elapsed_seconds: f64 },
+    #[serde(rename_all = "camelCase")]
+    Tick {
+        elapsed_seconds: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptWorkflowEvent {
     ConfirmationOpened { confirmation: ScriptConfirmation },
     ConfirmationClosed,
@@ -552,7 +889,7 @@ pub enum ScriptWorkflowEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptConfirmation {
     Character(ActiveCharacterConfirmation),
     Local(ScriptLocalConfirmation),
@@ -565,6 +902,7 @@ pub struct ScriptLocalConfirmation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum ScriptLocalConfirmationKind {
     Unswear,
     Other(String),
@@ -573,8 +911,8 @@ pub enum ScriptLocalConfirmationKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data")]
 pub enum ScriptIntent {
-    Log {
-        level: ScriptLogLevel,
+    Print {
+        style: ScriptMessageStyle,
         message: String,
     },
     Say {
@@ -658,11 +996,13 @@ pub enum ScriptIntent {
     RespondToConfirmation {
         accepted: bool,
     },
+    SetCombatMode {
+        on: bool,
+    },
     Client(ScriptClientIntent),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "data")]
 pub enum ScriptClientIntent {
     TargetEntity { guid: Guid },
     Approach { guid: Guid },
@@ -672,10 +1012,206 @@ pub enum ScriptClientIntent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ScriptLogLevel {
+#[serde(rename_all = "snake_case")]
+pub enum ScriptMessageStyle {
     Trace,
     Debug,
     Info,
     Warn,
     Error,
+    System,
+    Chat,
+    Combat,
+    Tell,
+    Emote,
+    Party,
+    Guild,
+    Trade,
+    Help,
+    Society,
+    Magic,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ScriptEntityProfile;
+    use crate::ScriptCombatFeedback;
+    use deno_core::serde_json::{Value, from_value, json, to_value};
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::DamageType;
+    use holtburger_common::{Quaternion, Vector3};
+    use holtburger_protocol::messages::combat::AttackConditions;
+    use holtburger_protocol::messages::object::types::{
+        ArmorProfile, CreatureAttributes, CreatureBuffs, CreatureProfile, CreatureProfileFlags,
+        WeaponProfile,
+    };
+
+    fn assert_roundtrip(profile: ScriptEntityProfile, expected: Value) {
+        let actual = to_value(&profile).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(from_value::<ScriptEntityProfile>(actual).unwrap(), profile);
+    }
+
+    #[test]
+    fn script_entity_profile_serializes_nested_profiles_as_camel_case() {
+        assert_roundtrip(
+            ScriptEntityProfile::Armor(ArmorProfile {
+                slashing: 1.0,
+                piercing: 2.0,
+                bludgeoning: 3.0,
+                cold: 4.0,
+                fire: 5.0,
+                acid: 6.0,
+                nether: 7.0,
+                lightning: 8.0,
+            }),
+            json!({
+                "kind": "armor",
+                "data": {
+                    "slashing": 1.0,
+                    "piercing": 2.0,
+                    "bludgeoning": 3.0,
+                    "cold": 4.0,
+                    "fire": 5.0,
+                    "acid": 6.0,
+                    "nether": 7.0,
+                    "lightning": 8.0,
+                }
+            }),
+        );
+
+        assert_roundtrip(
+            ScriptEntityProfile::Creature(CreatureProfile {
+                flags: CreatureProfileFlags::SHOW_ATTRIBUTES
+                    | CreatureProfileFlags::HAS_BUFFS_DEBUFFS,
+                health: 10,
+                health_max: 20,
+                attributes: Some(CreatureAttributes {
+                    strength: 1,
+                    endurance: 2,
+                    quickness: 3,
+                    coordination: 4,
+                    focus: 5,
+                    self_attr: 6,
+                    stamina: 7,
+                    mana: 8,
+                    stamina_max: 9,
+                    mana_max: 10,
+                }),
+                buffs: Some(CreatureBuffs {
+                    highlights: 11,
+                    colors: 12,
+                }),
+            }),
+            json!({
+                "kind": "creature",
+                "data": {
+                    "flags": "HAS_BUFFS_DEBUFFS | SHOW_ATTRIBUTES",
+                    "health": 10,
+                    "healthMax": 20,
+                    "attributes": {
+                        "strength": 1,
+                        "endurance": 2,
+                        "quickness": 3,
+                        "coordination": 4,
+                        "focus": 5,
+                        "selfAttr": 6,
+                        "stamina": 7,
+                        "mana": 8,
+                        "staminaMax": 9,
+                        "manaMax": 10,
+                    },
+                    "buffs": {
+                        "highlights": 11,
+                        "colors": 12,
+                    }
+                }
+            }),
+        );
+
+        assert_roundtrip(
+            ScriptEntityProfile::Weapon(WeaponProfile {
+                damage_type: 13,
+                weapon_time: 14,
+                weapon_skill: 15,
+                damage: 16,
+                damage_variance: 0.5,
+                damage_mod: 1.25,
+                weapon_length: 2.5,
+                max_velocity: 3.5,
+                weapon_offense: 4.5,
+                max_velocity_estimated: 17,
+            }),
+            json!({
+                "kind": "weapon",
+                "data": {
+                    "damageType": 13,
+                    "weaponTime": 14,
+                    "weaponSkill": 15,
+                    "damage": 16,
+                    "damageVariance": 0.5,
+                    "damageMod": 1.25,
+                    "weaponLength": 2.5,
+                    "maxVelocity": 3.5,
+                    "weaponOffense": 4.5,
+                    "maxVelocityEstimated": 17,
+                }
+            }),
+        );
+    }
+
+    #[test]
+    fn script_world_position_serializes_landblock_id_as_camel_case() {
+        let position = super::ScriptWorldPosition::from(WorldPosition {
+            landblock_id: holtburger_common::Guid(0x0100_0001),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: Quaternion::identity(),
+        });
+
+        let actual = to_value(position).unwrap();
+        assert_eq!(
+            actual,
+            json!({
+                "landblockId": 16777217,
+                "coords": { "x": 1.0, "y": 2.0, "z": 3.0 },
+                "rotation": { "w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0 },
+            })
+        );
+        assert_eq!(
+            from_value::<super::ScriptWorldPosition>(actual).unwrap(),
+            position
+        );
+    }
+
+    #[test]
+    fn script_combat_feedback_serializes_fields_as_camel_case() {
+        let feedback = ScriptCombatFeedback::AttackerNotification {
+            defender_name: "Defender".to_owned(),
+            damage_type: DamageType::FIRE,
+            health_percent: 42.5,
+            damage: 17,
+            critical_hit: true,
+            attack_conditions: AttackConditions::RECKLESSNESS,
+        };
+
+        let actual = to_value(&feedback).unwrap();
+        assert_eq!(
+            actual,
+            json!({
+                "kind": "attacker_notification",
+                "data": {
+                    "defenderName": "Defender",
+                    "damageType": "FIRE",
+                    "healthPercent": 42.5,
+                    "damage": 17,
+                    "criticalHit": true,
+                    "attackConditions": "RECKLESSNESS",
+                }
+            })
+        );
+        assert_eq!(
+            from_value::<ScriptCombatFeedback>(actual).unwrap(),
+            feedback
+        );
+    }
 }

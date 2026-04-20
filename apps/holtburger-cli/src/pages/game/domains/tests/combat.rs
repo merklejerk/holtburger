@@ -1,7 +1,14 @@
 use super::test_support::*;
 use super::*;
 use crate::pages::game::combat::{CombatIssueState, DesiredCombatEngagement};
+use holtburger_core::client::movement_types::PlayerDriveIntent;
 use holtburger_core::client::types::CombatFeedback;
+use holtburger_protocol::messages::movement::messages::motion::{
+    MoveToObject, MoveToParameters, Origin,
+};
+use holtburger_protocol::messages::{
+    MotionStance, MovementEventData, MovementType, MovementTypeData,
+};
 
 #[test]
 fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() {
@@ -18,6 +25,7 @@ fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() 
         target.set_bool_prop(PropertyBool::Attackable, true);
         target
     });
+
     let result = state
         .handle_action(AppAction::Attack { guid: target_guid })
         .unwrap();
@@ -65,6 +73,50 @@ fn explicit_attack_from_peace_acquires_targeting_before_the_first_melee_swing() 
             } if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
         )
     }));
+}
+
+#[test]
+fn targeted_spell_cast_snaps_facing_before_casting() {
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    state.data.combat_mode = CombatMode::Magic;
+
+    let player_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(12.0, 0.0, 0.0),
+        rotation: Quaternion::identity(),
+    };
+
+    state.data.player_pos = Some(player_position);
+    state.data.entities.insert(
+        target_guid,
+        creature_entity(target_guid, "Drudge", target_position),
+    );
+
+    let result = state
+        .handle_action(AppAction::CastSpell {
+            spell_id: 42,
+            target: Some(target_guid),
+        })
+        .unwrap();
+
+    assert_eq!(result.commands.len(), 2);
+    assert!(matches!(
+        result.commands[0],
+        ClientCommand::DriveSelf(PlayerDriveIntent::SnapFacing { heading })
+            if (heading - player_position.heading_to(&target_position)).abs() < f32::EPSILON
+    ));
+    assert!(matches!(
+        result.commands[1],
+        ClientCommand::CastTargetedSpell { target, spell_id }
+            if target == target_guid && spell_id == 42
+    ));
 }
 
 #[test]
@@ -704,6 +756,79 @@ fn explicit_player_cancel_prevents_sticky_rearm() {
             || is_run_movement_command(command)
     }));
     assert_eq!(state.view.active_interaction, None);
+}
+
+#[test]
+fn pending_server_controlled_melee_move_suppresses_reissued_attack() {
+    let player_guid = Guid(0x50000001);
+    let target_guid = Guid(0x60000001);
+    let attempted_at = Instant::now();
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+    state.data.combat_mode = CombatMode::Melee;
+    state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+    let player_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        ..WorldPosition::default()
+    };
+    let target_position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(3.0, 0.0, 0.0),
+        ..WorldPosition::default()
+    };
+
+    state.data.player_pos = Some(player_position);
+    state.data.entities.insert(
+        player_guid,
+        Entity::new(player_guid, "Player".to_string(), player_position),
+    );
+    state.data.entities.insert(target_guid, {
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        target
+    });
+    state
+        .data
+        .combat_runtime
+        .begin_explicit_engagement(target_guid, CombatMode::Melee);
+    state.data.combat_runtime.arm_attack_drive();
+    state.data.combat_runtime.note_attack_attempt(attempted_at);
+
+    let _ = state.handle_view_event(ClientViewEvent::SelfServerControlledMotion {
+        data: Box::new(MovementEventData {
+            guid: player_guid,
+            object_instance_sequence: 1,
+            movement_sequence: 10,
+            server_control_sequence: 2,
+            is_autonomous: false,
+            movement_type: MovementType::MoveToObject,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::MoveToObject(MoveToObject {
+                target: target_guid,
+                origin: Origin {
+                    cell_id: target_position.landblock_id,
+                    position: target_position.coords,
+                },
+                params: MoveToParameters {
+                    distance_to_object: 0.6,
+                    ..Default::default()
+                },
+                run_rate: 1.0,
+            }),
+        }),
+    });
+
+    let mut result = UpdateResult::new();
+    crate::pages::game::combat::advance_combat_drive(
+        &mut state,
+        attempted_at + Duration::from_secs(2),
+        &mut result,
+    );
+
+    assert!(!result.commands.iter().any(|command| {
+        matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+    }));
 }
 
 #[test]

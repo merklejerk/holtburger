@@ -115,6 +115,7 @@ fn apply_member_departure(
 
     if let Some(fellowship) = state.fellowship.as_mut() {
         fellowship.remove_member(player_guid);
+        fellowship.reassess_leader_after_departure(player_guid);
         clear_fellowship = clear_fellowship || fellowship.members.is_empty();
     }
 

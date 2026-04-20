@@ -134,6 +134,18 @@ impl FellowshipState {
     pub fn remove_member(&mut self, guid: Guid) {
         self.members.retain(|member| member.guid != guid);
     }
+
+    pub fn reassess_leader_after_departure(&mut self, departed_guid: Guid) {
+        if self.leader_guid != departed_guid {
+            return;
+        }
+
+        self.leader_guid = self
+            .members
+            .first()
+            .map(|member| member.guid)
+            .unwrap_or(Guid::NULL);
+    }
 }
 
 impl From<&FellowshipFullUpdateEventData> for FellowshipState {

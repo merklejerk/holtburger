@@ -15,7 +15,24 @@ type PropertyString = number;
 type PropertyDataId = number;
 type PropertyInstanceId = number;
 
-type ScriptLogLevelInput = "trace" | "debug" | "info" | "warn" | "warning" | "error";
+type ScriptMessageStyleInput =
+  | "trace"
+  | "debug"
+  | "info"
+  | "warn"
+  | "warning"
+  | "error"
+  | "system"
+  | "chat"
+  | "combat"
+  | "tell"
+  | "emote"
+  | "party"
+  | "guild"
+  | "trade"
+  | "help"
+  | "society"
+  | "magic";
 type ScriptEntityKind =
   | "player"
   | "npc"
@@ -184,8 +201,11 @@ type SkillType =
   | "Summoning";
 
 type WeenieError = string;
+type DamageType = number;
+type AttackConditions = number;
+type DamageLocation = number;
 
-type ScriptLocalConfirmationKind = "Unswear" | { Other: string };
+type ScriptLocalConfirmationKind = { kind: "unswear" } | { kind: "other"; data: string };
 
 interface Vector3 {
   x: number;
@@ -200,9 +220,8 @@ interface Quaternion {
   z: number;
 }
 
-// Matches the Rust field names exactly.
 interface WorldPosition {
-  landblock_id: Guid;
+  landblockId: Guid;
   coords: Vector3;
   rotation: Quaternion;
 }
@@ -317,11 +336,11 @@ interface CreatureAttributes {
   quickness: number;
   coordination: number;
   focus: number;
-  self_attr: number;
+  selfAttr: number;
   stamina: number;
   mana: number;
-  stamina_max: number;
-  mana_max: number;
+  staminaMax: number;
+  manaMax: number;
 }
 
 interface CreatureBuffs {
@@ -332,36 +351,36 @@ interface CreatureBuffs {
 interface CreatureProfile {
   flags: number;
   health: number;
-  health_max: number;
+  healthMax: number;
   attributes: CreatureAttributes | null;
   buffs: CreatureBuffs | null;
 }
 
 interface WeaponProfile {
-  damage_type: number;
-  weapon_time: number;
-  weapon_skill: number;
+  damageType: number;
+  weaponTime: number;
+  weaponSkill: number;
   damage: number;
-  damage_variance: number;
-  damage_mod: number;
-  weapon_length: number;
-  max_velocity: number;
-  weapon_offense: number;
-  max_velocity_estimated: number;
+  damageVariance: number;
+  damageMod: number;
+  weaponLength: number;
+  maxVelocity: number;
+  weaponOffense: number;
+  maxVelocityEstimated: number;
 }
 
 interface ScriptEntityArmorProfile {
-  kind: "Armor";
+  kind: "armor";
   data: ArmorProfile;
 }
 
 interface ScriptEntityCreatureProfile {
-  kind: "Creature";
+  kind: "creature";
   data: CreatureProfile;
 }
 
 interface ScriptEntityWeaponProfile {
-  kind: "Weapon";
+  kind: "weapon";
   data: WeaponProfile;
 }
 
@@ -433,6 +452,7 @@ interface ScriptEntityView {
   guid: Guid;
   name: string | null;
   kind: ScriptEntityKind;
+  weenieId: number | null;
   position: WorldPosition;
   profile: ScriptEntityProfile | null;
   container: Guid;
@@ -472,13 +492,6 @@ interface ScriptPartyView {
   members: ScriptPartyMemberView[];
 }
 
-interface ScriptSpellEffectView {
-  spellId: number;
-  name: string | null;
-  remainingSeconds: number | null;
-  targetGuid: Guid | null;
-}
-
 interface ScriptChatEvent {
   channel: ScriptChatChannelKind;
   sender: string | null;
@@ -492,7 +505,7 @@ interface ActiveCharacterConfirmation {
 }
 
 interface ScriptCharacterConfirmation {
-  kind: "Character";
+  kind: "character";
   data: ActiveCharacterConfirmation;
 }
 
@@ -502,24 +515,27 @@ interface ScriptLocalConfirmation {
 }
 
 interface ScriptLocalConfirmationWrapper {
-  kind: "Local";
+  kind: "local";
   data: ScriptLocalConfirmation;
 }
 
 type ScriptConfirmation = ScriptCharacterConfirmation | ScriptLocalConfirmationWrapper;
 
 interface ScriptLifecycleStartedEvent {
-  kind: "Started";
+  kind: "started";
+  data: {
+    args: string;
+  };
 }
 
 interface ScriptLifecycleStoppedEvent {
-  kind: "Stopped";
+  kind: "stopped";
 }
 
 interface ScriptLifecycleTickEvent {
-  kind: "Tick";
+  kind: "tick";
   data: {
-    elapsed_seconds: number;
+    elapsedSeconds: number;
   };
 }
 
@@ -529,25 +545,25 @@ type ScriptLifecycleEvent =
   | ScriptLifecycleTickEvent;
 
 interface ScriptWorkflowConfirmationOpenedEvent {
-  kind: "ConfirmationOpened";
+  kind: "confirmation_opened";
   data: {
     confirmation: ScriptConfirmation;
   };
 }
 
 interface ScriptWorkflowConfirmationClosedEvent {
-  kind: "ConfirmationClosed";
+  kind: "confirmation_closed";
 }
 
 interface ScriptWorkflowBusyOperationChangedEvent {
-  kind: "BusyOperationChanged";
+  kind: "busy_operation_changed";
   data: {
     busy: ScriptBusyOperation;
   };
 }
 
 interface ScriptWorkflowTargetEntityChangedEvent {
-  kind: "TargetEntityChanged";
+  kind: "target_entity_changed";
   data: {
     guid: Guid | null;
   };
@@ -560,61 +576,156 @@ type ScriptWorkflowEvent =
   | ScriptWorkflowTargetEntityChangedEvent;
 
 interface ScriptChatMessageEvent {
-  kind: "ChatMessage";
+  kind: "chat_message";
   data: ScriptChatEvent;
 }
 
+interface ScriptCombatFeedbackAttackDone {
+  kind: "attack_done";
+  data: {
+    error: WeenieError;
+  };
+}
+
+interface ScriptCombatFeedbackAttackCommenced {
+  kind: "attack_commenced";
+}
+
+interface ScriptCombatFeedbackAttackerNotification {
+  kind: "attacker_notification";
+  data: {
+    defender_name: string;
+    damage_type: DamageType;
+    health_percent: number;
+    damage: number;
+    critical_hit: boolean;
+    attack_conditions: AttackConditions;
+  };
+}
+
+interface ScriptCombatFeedbackDefenderNotification {
+  kind: "defender_notification";
+  data: {
+    attacker_name: string;
+    damage_type: DamageType;
+    health_percent: number;
+    damage: number;
+    damage_location: DamageLocation;
+    critical_hit: boolean;
+    attack_conditions: AttackConditions;
+  };
+}
+
+interface ScriptCombatFeedbackEvasionAttackerNotification {
+  kind: "evasion_attacker_notification";
+  data: {
+    defender_name: string;
+  };
+}
+
+interface ScriptCombatFeedbackEvasionDefenderNotification {
+  kind: "evasion_defender_notification";
+  data: {
+    attacker_name: string;
+  };
+}
+
+interface ScriptCombatFeedbackVictimNotification {
+  kind: "victim_notification";
+  data: {
+    death_message: string;
+  };
+}
+
+interface ScriptCombatFeedbackKillerNotification {
+  kind: "killer_notification";
+  data: {
+    death_message: string;
+  };
+}
+
+type ScriptCombatFeedback =
+  | ScriptCombatFeedbackAttackDone
+  | ScriptCombatFeedbackAttackCommenced
+  | ScriptCombatFeedbackAttackerNotification
+  | ScriptCombatFeedbackDefenderNotification
+  | ScriptCombatFeedbackEvasionAttackerNotification
+  | ScriptCombatFeedbackEvasionDefenderNotification
+  | ScriptCombatFeedbackVictimNotification
+  | ScriptCombatFeedbackKillerNotification;
+
+interface ScriptCombatFeedbackEvent {
+  kind: "combat_feedback";
+  data: ScriptCombatFeedback;
+}
+
 interface ScriptEventLifecycle {
-  kind: "Lifecycle";
+  kind: "lifecycle";
   data: ScriptLifecycleEvent;
 }
 
 interface ScriptEventWorkflow {
-  kind: "Workflow";
+  kind: "workflow";
   data: ScriptWorkflowEvent;
 }
 
 interface ScriptEventCommand {
-  kind: "Command";
+  kind: "command";
   data: {
     msg: string;
   };
 }
 
 interface ScriptEventWeenieError {
-  kind: "WeenieError";
+  kind: "weenie_error";
   data: {
     error: WeenieError;
   };
 }
 
 interface ScriptEventSelfVitalsChanged {
-  kind: "SelfVitalsChanged";
+  kind: "self_vitals_changed";
 }
 
 interface ScriptEventEntityAppeared {
-  kind: "EntityAppeared";
+  kind: "entity_appeared";
   data: {
     guid: Guid;
   };
 }
 
 interface ScriptEventEntityDisappeared {
-  kind: "EntityDisappeared";
+  kind: "entity_disappeared";
   data: {
     guid: Guid;
   };
 }
 
 interface ScriptEventEntityUpdated {
-  kind: "EntityUpdated";
+  kind: "entity_updated";
   data: {
     guid: Guid;
   };
 }
 
+interface ScriptEventTeleportStarted {
+  kind: "teleport_started";
+  data: {
+    sequence: number;
+  };
+}
+
+interface ScriptEventPlayerKilled {
+  kind: "player_killed";
+  data: {
+    death_message: string;
+    victim_id: Guid;
+    killer_id: Guid;
+  };
+}
+
 interface ScriptEventInventoryChanged {
-  kind: "InventoryChanged";
+  kind: "inventory_changed";
   data: {
     added: Guid[];
     removed: Guid[];
@@ -622,15 +733,16 @@ interface ScriptEventInventoryChanged {
 }
 
 interface ScriptEventSpellbookChanged {
-  kind: "SpellbookChanged";
+  kind: "spellbook_changed";
 }
 
 interface ScriptEventPartyChanged {
-  kind: "PartyChanged";
+  kind: "party_changed";
 }
 
 type ScriptEvent =
   | ScriptChatMessageEvent
+  | ScriptCombatFeedbackEvent
   | ScriptEventLifecycle
   | ScriptEventWorkflow
   | ScriptEventCommand
@@ -639,6 +751,8 @@ type ScriptEvent =
   | ScriptEventEntityAppeared
   | ScriptEventEntityDisappeared
   | ScriptEventEntityUpdated
+  | ScriptEventTeleportStarted
+  | ScriptEventPlayerKilled
   | ScriptEventInventoryChanged
   | ScriptEventSpellbookChanged
   | ScriptEventPartyChanged;
@@ -655,6 +769,9 @@ interface HoltburgerApi {
   currentTradeInfo(): ScriptTradeInfo | null;
   party(): ScriptPartyView | null;
   currentOpenContainer(): Guid | null;
+  serverTime(): number;
+  pendingConfirmation(): ScriptConfirmation | null;
+  busyOperation(): ScriptBusyOperation;
   inventory(): ScriptContainerView[];
   equipment(): Map<ScriptEquipmentSlotKind, ScriptEquipmentSlotState>;
 
@@ -678,9 +795,10 @@ interface HoltburgerApi {
 
   loadConfig(): JsonValue | null;
   loadData(): JsonValue | null;
+  loadDataBin(): Uint8Array | null;
   writeConfig(contents: string | JsonValue): boolean;
 
-  log(level: string, message: string): void;
+  print(style: ScriptMessageStyleInput, message: string): void;
   debugLog(message: string): void;
   say(message: string): void;
   emote(message: string): void;
@@ -688,6 +806,7 @@ interface HoltburgerApi {
   targetEntity(guid: Guid): void;
   approach(guid: Guid): void;
   follow(guid: Guid): void;
+  setCombatMode(on: boolean): void;
   attack(guid: Guid): void;
   cancelInteraction(): void;
 

@@ -363,9 +363,7 @@ mod tests {
     fn synthetic_player_world(start: WorldPosition) -> (WorldState, Guid) {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x5000_0001);
-        world.player.guid = player_guid;
-        world.player.position = start;
-        world.add_entity(Entity::new(player_guid, "Player".to_string(), start));
+        world.seed_local_player_entity(player_guid, "Player", start);
         (world, player_guid)
     }
 
@@ -381,21 +379,12 @@ mod tests {
             rotation: Quaternion::identity(),
         };
 
-        world.player.guid = player_guid;
-        world.player.position = WorldPosition {
+        let player_pose = WorldPosition {
             landblock_id: Guid(0x1234_0000),
             ..Default::default()
         };
-        world.add_entity(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            world.player.position,
-        ));
-        world.add_entity(Entity::new(
-            remote_guid,
-            "Remote".to_string(),
-            world.player.position,
-        ));
+        world.seed_local_player_entity(player_guid, "Player", player_pose);
+        world.add_entity(Entity::new(remote_guid, "Remote".to_string(), player_pose));
 
         let events = simulation.apply_solve_batch(
             &mut world,

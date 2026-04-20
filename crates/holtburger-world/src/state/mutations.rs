@@ -72,11 +72,7 @@ impl WorldState {
             return Some(body.pose);
         }
 
-        if guid == self.player.guid {
-            self.player_position()
-        } else {
-            self.entities.get(guid).map(|entity| entity.position)
-        }
+        self.entities.get(guid).map(|entity| entity.position)
     }
 
     pub fn runtime_kinematics_for_guid(
@@ -88,18 +84,9 @@ impl WorldState {
             return Some((body_id, body.pose, body.velocity, body.omega));
         }
 
-        if guid == self.player.guid {
-            self.player_entity()
-                .map(|entity| (body_id, entity.position, entity.velocity, entity.omega))
-                .or_else(|| {
-                    self.player_position()
-                        .map(|position| (body_id, position, Vector3::zero(), Vector3::zero()))
-                })
-        } else {
-            self.entities
-                .get(guid)
-                .map(|entity| (body_id, entity.position, entity.velocity, entity.omega))
-        }
+        self.entities
+            .get(guid)
+            .map(|entity| (body_id, entity.position, entity.velocity, entity.omega))
     }
 
     pub fn local_player_runtime_pose(&self) -> Option<WorldPosition> {
@@ -125,24 +112,6 @@ impl WorldState {
         }
 
         let guid = body_id.authoritative_guid()?;
-        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
-            let authoritative_pose = self.player_position()?;
-            let (velocity, omega, motion_state) = self
-                .player_entity()
-                .map(|entity| (entity.velocity, entity.omega, entity.motion_snapshot))
-                .unwrap_or((Vector3::zero(), Vector3::zero(), None));
-            return Some(RuntimeSpatialBodyView {
-                body_id,
-                authoritative_pose: Some(authoritative_pose),
-                runtime_pose: authoritative_pose,
-                velocity,
-                omega,
-                motion_state,
-                contact: ContactState::Unknown,
-                sample_mode: SpatialSampleMode::AuthoritativeOnly,
-            });
-        }
-
         self.entities
             .get(guid)
             .map(|entity| RuntimeSpatialBodyView {
@@ -440,9 +409,9 @@ impl WorldState {
             enchantments: self.player.enchantments.clone(),
             spells: self.player.spells.keys().cloned().collect(),
             level_info: self.get_level_info(),
-            resistances: self.player.resistances(),
-            armor: self.player.armor(),
-            vitae: self.player.vitae(),
+            resistances: self.player_resistances(),
+            armor: self.player_armor(),
+            vitae: self.player_vitae(),
             inventory: self.player.inventory.clone(),
             equipment: self.player.equipment.clone(),
         })));
@@ -463,7 +432,6 @@ impl WorldState {
         let bootstrap_position = data
             .pos
             .or_else(|| self.entities.get(guid).map(|entity| entity.position))
-            .or_else(|| (guid == self.player.guid).then_some(self.player.position))
             .unwrap_or_default();
 
         if let Some(entity) = self.entities.get_mut(guid) {
@@ -471,7 +439,8 @@ impl WorldState {
             entity.position = bootstrap_position;
             entity.set_string_prop(PropertyString::Name, data.name.clone());
         } else {
-            let mut entity = crate::entity::Entity::new(guid, data.name.clone(), bootstrap_position);
+            let mut entity =
+                crate::entity::Entity::new(guid, data.name.clone(), bootstrap_position);
             entity.properties = properties;
             self.add_entity(entity);
         }
@@ -595,8 +564,8 @@ impl WorldState {
         self.player.set_position_property(position_type, position);
     }
 
-    /// Updates the player's position, ensuring the record in PlayerState,
-    /// the mirrored Entity, and the SpatialScene stay in sync.
+    /// Updates the player's authoritative entity position and keeps the SpatialScene
+    /// reconciliation state aligned with that world-owned pose.
     fn update_player_position(
         &mut self,
         mut pos: WorldPosition,
@@ -619,10 +588,10 @@ impl WorldState {
         }
 
         let old_lb = self.player_landblock().unwrap_or(Guid::NULL);
-        self.player.position = pos;
-
         if let Some(entity) = self.player_entity_mut() {
             entity.position = pos;
+        } else {
+            return None;
         }
         self.scene.update_entity(guid, old_lb, pos);
         let (velocity, omega) = self
@@ -649,7 +618,7 @@ impl WorldState {
         events
     }
 
-    /// Synchronizes the player's mirrored position without emitting movement events.
+    /// Synchronizes the authoritative player position without emitting movement events.
     ///
     /// This is intended for hydration/bootstrap flows where the client is seeding authoritative
     /// state rather than reacting to a live movement update packet.
@@ -1029,7 +998,6 @@ impl WorldState {
         &mut self,
         guid: Guid,
         update: &PropertyUpdate,
-        mirror_player: bool,
     ) -> Guid {
         let target_guid = self.resolve_property_target_guid(guid);
 
@@ -1042,10 +1010,6 @@ impl WorldState {
                 .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
-        }
-
-        if mirror_player && target_guid == self.player.guid {
-            self.player.set_property(update.clone());
         }
 
         target_guid
@@ -1108,7 +1072,6 @@ impl WorldState {
     ) -> bool {
         if data.guid == self.player.guid {
             self.player.instance_sequence = data.instance_sequence;
-            return true;
         }
 
         if let Some(entity) = self.entities.get_mut(data.guid) {
@@ -1118,6 +1081,8 @@ impl WorldState {
                 guid: data.guid,
                 physics_state: data.physics_state,
             });
+            true
+        } else if data.guid == self.player.guid {
             true
         } else {
             false

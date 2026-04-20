@@ -1081,15 +1081,15 @@ mod tests {
     fn simulation_build_request_includes_idle_local_player_runtime_body() {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
 
-        client.world.player.guid = guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.player.position.rotation = Quaternion::identity();
-        client.world.entities.insert(Entity::new(
-            guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
 
         let request = client
             .simulation
@@ -1107,7 +1107,7 @@ mod tests {
             body.body_id,
             holtburger_world::SpatialBodyId::LocalPlayer(guid)
         );
-        assert_eq!(body.pose, client.world.player.position);
+        assert_eq!(body.pose, player_pose);
         assert!(matches!(
             body.basis,
             Some(holtburger_world::SolveProjectionBasis::Velocity { velocity, omega })
@@ -1121,15 +1121,15 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
 
-        client.world.player.guid = guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.player.position.rotation = Quaternion::identity();
-        client.world.entities.insert(Entity::new(
-            guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::Autonomous(movement_types::AutonomousDriveIntent {
@@ -1185,17 +1185,17 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
 
         seed_test_self_movement_capabilities(&mut client);
 
-        client.world.player.guid = guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.player.position.rotation = Quaternion::identity();
-        client.world.entities.insert(Entity::new(
-            guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
@@ -1251,17 +1251,17 @@ mod tests {
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
         let now = Instant::now();
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
 
         seed_test_self_movement_capabilities(&mut client);
 
-        client.world.player.guid = player_guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.player.position.rotation = Quaternion::identity();
-        client.world.entities.insert(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", player_pose);
         client.world.add_entity(Entity::new(
             remote_guid,
             "Remote".to_string(),
@@ -1333,13 +1333,15 @@ mod tests {
         client
             .world
             .set_motion_kinematics(test_remote_motion_kinematics_asset(motion_table_id));
-        client.world.player.guid = player_guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.entities.insert(Entity::new(
+        client.world.seed_local_player_entity(
             player_guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::zero(),
+                rotation: Quaternion::identity(),
+            },
+        );
 
         let mut remote = Entity::new(
             remote_guid,
@@ -1401,17 +1403,17 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         let guid = Guid(0x0102_0304);
         let now = Instant::now();
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
 
         seed_test_self_movement_capabilities(&mut client);
 
-        client.world.player.guid = guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.player.position.rotation = Quaternion::identity();
-        client.world.entities.insert(Entity::new(
-            guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+        client
+            .world
+            .seed_local_player_entity(guid, "Player", player_pose);
 
         client.movement.enqueue_drive_intent(
             movement_types::PlayerDriveIntent::ManualHeld(
@@ -1436,8 +1438,12 @@ mod tests {
             &mut client.movement,
         );
 
-        assert_eq!(client.world.player.position.landblock_id, Guid(0x1000_0001));
-        assert!(client.world.player.position.coords.y.abs() <= f32::EPSILON);
+        let authoritative_pose = client
+            .world
+            .player_position()
+            .expect("local player entity should exist");
+        assert_eq!(authoritative_pose.landblock_id, Guid(0x1000_0001));
+        assert!(authoritative_pose.coords.y.abs() <= f32::EPSILON);
         let body = client
             .world
             .scene
@@ -1458,17 +1464,17 @@ mod tests {
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
         let now = Instant::now();
+        let player_pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
 
         seed_test_self_movement_capabilities(&mut client);
 
-        client.world.player.guid = player_guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.player.position.rotation = Quaternion::identity();
-        client.world.entities.insert(Entity::new(
-            player_guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+        client
+            .world
+            .seed_local_player_entity(player_guid, "Player", player_pose);
         client.world.add_entity(Entity::new(
             remote_guid,
             "Remote".to_string(),
@@ -1556,13 +1562,15 @@ mod tests {
         let player_guid = Guid(0x0102_0304);
         let remote_guid = Guid(0x0102_0305);
 
-        client.world.player.guid = player_guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.entities.insert(Entity::new(
+        client.world.seed_local_player_entity(
             player_guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::zero(),
+                rotation: Quaternion::identity(),
+            },
+        );
         client.world.add_entity(Entity::new(
             remote_guid,
             "Remote".to_string(),
@@ -1619,13 +1627,15 @@ mod tests {
         client
             .world
             .set_motion_kinematics(test_remote_motion_kinematics_asset(motion_table_id));
-        client.world.player.guid = player_guid;
-        client.world.player.position.landblock_id = Guid(0x1000_0001);
-        client.world.entities.insert(Entity::new(
+        client.world.seed_local_player_entity(
             player_guid,
-            "Player".to_string(),
-            client.world.player.position,
-        ));
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x1000_0001),
+                coords: Vector3::zero(),
+                rotation: Quaternion::identity(),
+            },
+        );
 
         let mut remote = Entity::new(
             remote_guid,

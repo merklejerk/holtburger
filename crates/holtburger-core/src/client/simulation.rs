@@ -403,7 +403,7 @@ mod tests {
             },
         );
 
-        assert_eq!(world.player.server_grounded, Some(true));
+        assert_eq!(world.player.last_server_grounded, Some(true));
         assert_eq!(
             world
                 .scene

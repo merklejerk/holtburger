@@ -637,7 +637,7 @@ fn autonomous_position_uses_server_grounded_when_contact_unspecified() {
     entity.velocity = Vector3::new(2.0, 0.0, 0.0);
 
     world.player.guid = guid;
-    world.player.server_grounded = Some(true);
+    world.player.last_server_grounded = Some(true);
     seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 

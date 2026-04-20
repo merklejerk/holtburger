@@ -1047,10 +1047,11 @@ mod tests {
 
         client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(
             holtburger_world::PlayerInfoData {
-                guid: holtburger_common::Guid(0x50000001),
-                name: "Test Player".to_string(),
-                pos: None,
-                player_entity: None,
+                entity: Box::new(Entity::new(
+                    holtburger_common::Guid(0x50000001),
+                    "Test Player".to_string(),
+                    WorldPosition::default(),
+                )),
                 attributes: Vec::new(),
                 vitals: Vec::new(),
                 skills: Vec::new(),

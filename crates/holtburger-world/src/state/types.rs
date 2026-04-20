@@ -224,19 +224,19 @@ impl WorldState {
         self.player.refresh_cached_derived_stat_inputs();
 
         let current = crate::player::types::LastSentStats {
-            attributes: self.player.get_attributes(),
-            vitals: self.player.get_vitals(),
-            skills: self.player.get_skills(),
+            attributes: self.player.attribute_snapshot(),
+            vitals: self.player.vital_snapshot(),
+            skills: self.player.skill_snapshot(),
             resistances: self.player_resistances(),
             armor: self.player_armor(),
             vitae: self.player_vitae(),
         };
 
-        if self.player.last_sent_stats.as_ref() == Some(&current) {
+        if self.player.last_emitted_derived_stats.as_ref() == Some(&current) {
             return;
         }
 
-        self.player.last_sent_stats = Some(current.clone());
+        self.player.last_emitted_derived_stats = Some(current.clone());
         events.push(WorldEvent::DerivedStatsUpdated(Box::new(
             crate::DerivedStatsData {
                 attributes: current.attributes,

@@ -312,7 +312,7 @@ Mitigation:
 - [x] Phase 3: remove `PlayerState.properties`
 - [x] Phase 3: delete property mirroring in handlers/mutations
 - [x] Phase 4: simplify movement/liveness/runtime-body special casing
-- [ ] Phase 5: trim or rename `PlayerState` APIs/docs
+- [x] Phase 5: trim or rename `PlayerState` APIs/docs
 - [ ] Phase 6: retarget downstream crates and tests
 - [ ] Final verification across world/core/cli
 
@@ -335,6 +335,9 @@ Mitigation:
 - Phase 4 decision: local-player branching should remain only where the semantics are genuinely self-specific, such as `SpatialBodyId::LocalPlayer(...)`, self sequencing, player-local position-property overlays, or self-side trade/fellowship projection. Branches whose only job was choosing between mirrored storage locations should be removed.
 - Phase 4 decision: runtime and movement code should prefer body identity over GUID equality when the distinction is “local player body versus remote body,” and should prefer shared entity-backed helpers over hand-written self fallbacks when the distinction is only storage access.
 - Phase 4 decision: self `SetState` remains responsible for advancing player-local instance sequencing, but it must also hydrate the authoritative player entity's physics state/properties when that entity exists so self physics-state updates are not silently dropped.
+- Phase 5 decision: keep the type name `PlayerState`; after the ownership cut it still accurately describes the session-local state model for the current player, while avoiding churn that would not buy additional architectural clarity.
+- Phase 5 decision: rename remaining overlay-oriented `PlayerState` APIs and fields to advertise their reduced role explicitly (`last_server_grounded`, `local_position_overlays`, derived-stat snapshot naming) so callers do not mistake them for generic world/entity state.
+- Phase 5 decision: `PlayerInfoData` should carry a single authoritative player `Entity` snapshot plus player-local overlays, rather than parallel `guid`/`name`/`pos` fields that duplicate the entity snapshot shape.
 
 ### Progress Log
 
@@ -358,8 +361,12 @@ Mitigation:
 - Tightened runtime tracking to distinguish the local player by `SpatialBodyId::LocalPlayer(...)` instead of GUID equality where the semantics are body identity rather than storage ownership.
 - Simplified world movement handling so self-only branches remain only for true self semantics, and fixed self `SetState` handling so it no longer drops authoritative physics-state hydration for the local player entity.
 - Verification: `cargo test -p holtburger-world -p holtburger-core` passed after the Phase 4 changes.
+- 2026-04-20: completed Phase 5 PlayerState clarification and player snapshot cleanup.
+- Renamed the remaining `PlayerState` overlay-facing fields and helper methods so grounded state, private position overlays, and derived-stat snapshots no longer read like duplicated world/object ownership.
+- Simplified `PlayerInfoData` to carry one authoritative player entity snapshot plus local-player overlays, and retargeted world/core projection code to that explicit composition model.
+- Updated architecture/docs wording to describe `PlayerState` as session-local overlay state rather than a second world object.
+- Verification: `cargo test -p holtburger-world -p holtburger-core` passed after the Phase 5 changes.
 
 ### Open Questions
 
 - Should self sequencing remain entirely on `PlayerState`, or should some of it move onto the player entity once the base ownership split is complete?
-- Should `PlayerInfoData` continue exposing `player_entity` as an embedded snapshot, or should it move to a more explicit composition model after the authority split lands?

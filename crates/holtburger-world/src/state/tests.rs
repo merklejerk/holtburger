@@ -14,8 +14,8 @@ use crate::{
 use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
-    WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
+    PhysicsState, PropertyBool, PropertyInt, PropertyInt64, WorldObjectExt as _,
+    WorldObjectProperties, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
 use holtburger_dat::file_type::{
@@ -874,7 +874,7 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
     assert_eq!(runtime_body.pose, solved.pose);
     assert_eq!(runtime_body.velocity, solved.velocity);
     assert_eq!(runtime_body.omega, solved.omega);
-    assert_eq!(state.player.server_grounded, Some(true));
+    assert_eq!(state.player.last_server_grounded, Some(true));
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::RuntimeBodyChanged {
@@ -896,7 +896,7 @@ fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unk
 
     state.player.guid = player_guid;
     state.seed_local_player_entity(player_guid, "Player", start_pos);
-    state.player.server_grounded = Some(true);
+    state.player.last_server_grounded = Some(true);
 
     let solved = SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
@@ -912,7 +912,7 @@ fn apply_solved_body_kinematics_preserves_player_grounded_cache_when_contact_unk
 
     let events = state.apply_solved_body_kinematics(&solved);
 
-    assert_eq!(state.player.server_grounded, Some(true));
+    assert_eq!(state.player.last_server_grounded, Some(true));
     assert!(
         !events
             .iter()
@@ -1897,7 +1897,7 @@ fn test_private_update_position_non_location_is_stored_without_moving_player() {
     assert_eq!(
         state
             .player
-            .position_property(PositionType::LastOutsideDeath),
+            .local_position_overlay(PositionType::LastOutsideDeath),
         Some(saved_position)
     );
 }
@@ -1937,7 +1937,7 @@ fn test_public_update_position_non_location_for_player_is_stored_without_moving_
         live_position
     );
     assert_eq!(
-        state.player.position_property(PositionType::Sanctuary),
+        state.player.local_position_overlay(PositionType::Sanctuary),
         Some(sanctuary_position)
     );
 }
@@ -1987,7 +1987,7 @@ fn test_public_update_position_non_location_for_other_entity_does_not_move_it() 
     assert_eq!(
         state
             .player
-            .position_property(PositionType::LinkedPortalOne),
+            .local_position_overlay(PositionType::LinkedPortalOne),
         None
     );
 }
@@ -3004,11 +3004,7 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
     let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x5000_0001);
     state.player.instance_sequence = 0;
-    state.seed_local_player_entity(
-        state.player.guid,
-        "Player",
-        WorldPosition::default(),
-    );
+    state.seed_local_player_entity(state.player.guid, "Player", WorldPosition::default());
     let mut events = Vec::new();
 
     let handled = state.apply_set_state_update(

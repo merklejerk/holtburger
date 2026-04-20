@@ -227,6 +227,7 @@ impl GameState {
                         result.actions.push(AppUiAction::ExitInputMode.into());
                         return result;
                     }
+                    self.chat_input.record_history_submission(&command);
                     if command.starts_with('/') {
                         return self.handle_slash_command(&command);
                     }
@@ -285,6 +286,7 @@ impl GameState {
             }
             KeyCode::Up => match self.view.focused_pane {
                 FocusedPane::Input if !self.chat_input.input_history.is_empty() => {
+                    self.chat_input.begin_history_navigation();
                     let idx = self
                         .chat_input
                         .history_index
@@ -320,8 +322,7 @@ impl GameState {
                                 .input
                                 .set_text(&self.chat_input.input_history[next]);
                         } else {
-                            self.chat_input.history_index = None;
-                            self.chat_input.input.clear();
+                            self.chat_input.restore_history_draft();
                         }
                         result.request_redraw(RedrawPriority::Immediate);
                     }

@@ -980,6 +980,10 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
+        assert_eq!(
+            state.chat_input.input_history.last().map(String::as_str),
+            Some("/help")
+        );
         assert!(
             state
                 .chat
@@ -1907,6 +1911,9 @@ mod tests {
         assert!(result.redraw_requested());
         assert_eq!(state.view.focused_pane, FocusedPane::Input);
         assert!(state.chat_input.input.is_empty());
-        assert!(state.chat_input.input_history.is_empty());
+        assert_eq!(
+            state.chat_input.input_history.last().map(String::as_str),
+            Some("/wave hello")
+        );
     }
 }

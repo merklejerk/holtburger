@@ -25,8 +25,14 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                 apply_set_focused_pane(state, state.view.previous_focused_pane, false)
             }
             AppUiAction::FinishInputCommandSubmission { command } => {
-                state.chat_input.input_history.push(command);
+                if state.chat_input.pending_history_submission.as_deref() != Some(command.as_str())
+                {
+                    state.chat_input.input_history.push(command);
+                } else {
+                    state.chat_input.pending_history_submission = None;
+                }
                 state.chat_input.history_index = None;
+                state.chat_input.history_draft = None;
                 apply_set_focused_pane(state, state.view.previous_focused_pane, false)
             }
             AppUiAction::OpenUnswearConfirmation { target } => {

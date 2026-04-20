@@ -21,8 +21,8 @@ use crate::theme::{pane_block, pane_title_style};
 use crate::types::ChatMessageTags;
 use crate::utils::wrap_text;
 
-pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
-const MAX_CHAT: usize = 4000;
+pub const CHAT_HISTORY_WINDOW_SIZE: usize = 500;
+const MAX_CHAT: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChatView {

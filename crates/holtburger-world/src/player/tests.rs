@@ -688,8 +688,10 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityReplaced(entity)
-            if entity.guid == guid && entity.health_fraction == Some(0.0)
+        WorldEvent::EntityHealthUpdated {
+            guid: event_guid,
+            health_fraction,
+        } if *event_guid == guid && *health_fraction == 0.0
     )));
 }
 

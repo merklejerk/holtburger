@@ -547,6 +547,25 @@ impl ClientRuntime {
                     self.emit_self_movement_kinematics_updated();
                 }
             }
+            WorldEvent::EntityHealthUpdated {
+                guid,
+                health_fraction,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityHealthUpdated {
+                        guid: *guid,
+                        health_fraction: *health_fraction,
+                    });
+            }
+            WorldEvent::EntityBookUpdated { guid, book } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityBookUpdated {
+                        guid: *guid,
+                        book: book.clone(),
+                    });
+            }
             WorldEvent::EntityIdentified(entity) => {
                 let _ = self
                     .client_view_event_tx

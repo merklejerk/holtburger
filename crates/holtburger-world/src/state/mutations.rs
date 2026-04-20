@@ -800,17 +800,15 @@ impl WorldState {
             }
         }
 
-        let mut replaced_entity = None;
         if let Some(entity) = self.entities.get_mut(guid)
             && entity.health_fraction != Some(health_fraction)
         {
             entity.health_fraction = Some(health_fraction);
-            replaced_entity = Some(entity.clone());
+            events.push(WorldEvent::EntityHealthUpdated {
+                guid,
+                health_fraction,
+            });
             updated = true;
-        }
-
-        if let Some(entity) = replaced_entity {
-            events.push(WorldEvent::EntityReplaced(Box::new(entity)));
         }
 
         updated

@@ -86,9 +86,11 @@
 - [x] `/options` syntax is awkward.
 - [x] Rendering issues in chat for some names/items like the Blackmoor's Favor gem.
 - [x] Spellcasting chat should be categorized as combat.
+- [x] Excessive entity.clone()s - health and book updates replace entire entity.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
+    - [ ] Keep non-entity stuff in PlayerState and store an entity GUID there instead?
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?

@@ -40,6 +40,23 @@ pub(super) fn reduce_view_event(
                 });
             }
         }
+        ClientViewEvent::EntityHealthUpdated {
+            guid,
+            health_fraction,
+        } => {
+            if let Some(entity) = state.data.entities.get_mut(guid) {
+                entity.health_fraction = Some(*health_fraction);
+            }
+            inventory::refresh_entity_context_if_visible(state, *guid, &mut result);
+            result.request_redraw(RedrawPriority::Immediate);
+        }
+        ClientViewEvent::EntityBookUpdated { guid, book } => {
+            if let Some(entity) = state.data.entities.get_mut(guid) {
+                entity.book = Some(book.as_ref().clone());
+            }
+            inventory::refresh_entity_context_if_visible(state, *guid, &mut result);
+            result.request_redraw(RedrawPriority::Immediate);
+        }
         ClientViewEvent::EntityPropertiesUpdated { guid, updates } => {
             let mut needs_update = false;
             if let Some(entity) = state.data.entities.get_mut(guid) {

@@ -100,13 +100,13 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 
 Nightly builds and archives for Windows, Mac, and Linux are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. All bundles ship with a minimal (`micro`) assets file, `assets.hba`, so they're ready to run immediately.
 
-The TUI client is a command-line application, so you must launch it from a terminal. On Windows, use a modern terminal emulator such as Windows Terminal; the legacy Command Prompt and classic PowerShell console do not render it well.
+The TUI client is a command-line application, so you must launch it from a terminal. On Windows, use a modern terminal emulator such as Windows Terminal; the legacy Command Prompt and classic PowerShell console cannot render it.
 
 ### Windows Install
 
 1. Download the Windows archive.
 2. Extract it.
-3. Launch the executable from the extracted folder:
+3. Open a terminal and launch the executable from the extracted folder:
 
 ```powershell
 holtburger-cli.exe --help
@@ -118,7 +118,7 @@ Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 
 1. Download the MacOS archive.
 2. Extract it.
-3. Launch the binary from the extracted folder:
+3. Open a terminal and launch the binary from the extracted folder:
 
 ```bash
 # see help
@@ -146,7 +146,7 @@ By default the Flatpak bundle sets `SCRIPT_DIR` to the writable per-app data tre
 
 1. Download the Linux archive.
 2. Extract it.
-3. Launch the binary from the extracted folder:
+3. Open a terminal and launch the binary from the extracted folder:
 
 ```bash
 # see help

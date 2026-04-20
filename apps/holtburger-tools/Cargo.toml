@@ -9,12 +9,18 @@ default-run = "dat2hba"
 holtburger-common = { workspace = true }
 holtburger-dat = { path = "../../crates/holtburger-dat" }
 anyhow = { workspace = true }
+binrw = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 indicatif = { workspace = true } # Progress bars for the win
 rayon = { workspace = true }
+serde = { workspace = true }
+serde_json.workspace = true
 thiserror.workspace = true
+reqwest.workspace = true
+zip.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 tempfile = { workspace = true }

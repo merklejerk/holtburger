@@ -61,14 +61,23 @@ pub(crate) struct CachedPacket {
 pub(crate) struct ReceivedPacket {
     pub(crate) header: PacketHeader,
     pub(crate) data: Vec<u8>,
-    pub(crate) addr: SocketAddr,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum PendingControlPacketData {
+    Prebuilt(Vec<u8>),
+    DeferredCleartext {
+        header: PacketHeader,
+        payload: Vec<u8>,
+        use_current_sequence: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct PendingControlPacket {
     pub(crate) addr: SocketAddr,
     pub(crate) ready_at: Instant,
-    pub(crate) bytes: Vec<u8>,
+    pub(crate) data: PendingControlPacketData,
 }
 
 #[derive(Debug)]
@@ -80,6 +89,7 @@ pub enum SessionEvent {
 pub struct Session {
     pub(crate) transport: Box<dyn Transport>,
     pub server_addr: SocketAddr,
+    pub(crate) server_source_addr: SocketAddr,
     pub isaac_c2s: Option<Isaac>,
     pub isaac_s2c: Option<Isaac>,
     pub packet_sequence: u32,

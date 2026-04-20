@@ -170,9 +170,8 @@ impl Session {
             "Requesting retransmit of S2C packets {:?}",
             needed_sequences
         );
-        self.queue_cleartext_control_packet(
+        self.queue_deferred_cleartext_control_packet(
             PacketHeader {
-                sequence: self.current_client_sequence(),
                 flags: packet_flags::REQUEST_RETRANSMIT,
                 id: self.client_id,
                 ..Default::default()
@@ -180,6 +179,7 @@ impl Session {
             &payload,
             self.server_addr,
             Instant::now(),
+            true,
         )?;
         self.last_request_retransmit_time = Some(Instant::now());
         Ok(())

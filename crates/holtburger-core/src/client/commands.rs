@@ -149,6 +149,7 @@ impl ClientRuntime {
             ClientCommand::CreateParty { .. }
             | ClientCommand::ShowPartyStatus
             | ClientCommand::InviteToParty { .. }
+            | ClientCommand::PromotePartyLeader { .. }
             | ClientCommand::LeaveParty
             | ClientCommand::UninviteFromParty { .. } => self.handle_social_command(cmd).await,
 
@@ -1037,6 +1038,34 @@ impl ClientRuntime {
                 )))
                 .await
             }
+            ClientCommand::PromotePartyLeader { target } => {
+                let Some(fellowship) = self.world.fellowship.as_ref() else {
+                    log::warn!(
+                        ">>> Ignoring promote request because there is no active fellowship"
+                    );
+                    return Ok(());
+                };
+
+                let Some(member) = fellowship
+                    .members
+                    .iter()
+                    .find(|member| member.guid == target)
+                else {
+                    log::warn!(
+                        ">>> Ignoring promote request for 0x{:08X} because the player is not in the fellowship",
+                        target.0
+                    );
+                    return Ok(());
+                };
+
+                log::info!(">>> Promoting {} to party leader", member.name);
+                self.send_game_action(GameAction::FellowshipAssignNewLeader(Box::new(
+                    FellowshipAssignNewLeaderActionData {
+                        new_leader_guid: target,
+                    },
+                )))
+                .await
+            }
             ClientCommand::LeaveParty => {
                 log::info!(">>> Leaving party");
                 self.send_game_action(GameAction::FellowshipQuit(Box::new(
@@ -1581,6 +1610,62 @@ mod tests {
 
         client
             .handle_command(ClientCommand::UninviteFromParty {
+                target: Guid(0x5000_0042),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn promote_party_leader_sends_guid_directly() {
+        let mut client = build_test_client();
+
+        client.world.fellowship = Some(holtburger_world::state::FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x5000_0001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: vec![
+                holtburger_world::state::FellowshipMemberState {
+                    guid: Guid(0x5000_0001),
+                    name: "Player".to_string(),
+                    level: 42,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 200,
+                    max_stamina: 180,
+                    max_mana: 160,
+                    current_health: 190,
+                    current_stamina: 170,
+                    current_mana: 150,
+                    share_loot: true,
+                },
+                holtburger_world::state::FellowshipMemberState {
+                    guid: Guid(0x5000_0042),
+                    name: "Bestie".to_string(),
+                    level: 37,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 180,
+                    max_stamina: 160,
+                    max_mana: 140,
+                    current_health: 175,
+                    current_stamina: 155,
+                    current_mana: 135,
+                    share_loot: true,
+                },
+            ],
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+
+        client
+            .handle_command(ClientCommand::PromotePartyLeader {
                 target: Guid(0x5000_0042),
             })
             .await

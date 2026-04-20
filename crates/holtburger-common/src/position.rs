@@ -86,6 +86,31 @@ impl WorldPosition {
         (x, y)
     }
 
+    pub fn derived_outdoor_cell_id(&self) -> Option<u32> {
+        if self.landblock_id == Guid::NULL || self.is_indoors() {
+            return None;
+        }
+
+        // ACE derives outdoor cell ids from the local 0-192 block coordinates.
+        let max_local = METERS_PER_LANDBLOCK - 1e-4;
+        let local_x = self.coords.x.clamp(0.0, max_local);
+        let local_y = self.coords.y.clamp(0.0, max_local);
+        let cell_length = METERS_PER_LANDBLOCK / 8.0;
+        let cell_x = (local_x / cell_length) as u32;
+        let cell_y = (local_y / cell_length) as u32;
+
+        Some((cell_x * 8) + cell_y + 1)
+    }
+
+    pub fn normalize_outdoor_cell(mut self) -> Self {
+        let Some(cell_id) = self.derived_outdoor_cell_id() else {
+            return self;
+        };
+
+        self.landblock_id = Guid((self.landblock_id.0 & 0xFFFF_0000) | cell_id);
+        self
+    }
+
     pub fn landblock_chebyshev_distance_to(&self, other: &Self) -> Option<u8> {
         if self.landblock_id == Guid::NULL || other.landblock_id == Guid::NULL {
             return None;
@@ -305,6 +330,29 @@ mod tests {
         };
 
         assert_eq!(p1.landblock_chebyshev_distance_to(&p2), None);
+    }
+
+    #[test]
+    fn test_normalize_outdoor_cell_recomputes_low_word_from_local_coords() {
+        let pos = WorldPosition {
+            landblock_id: Guid(0x3419_0039),
+            coords: Vector3::new(0.3076172, 58.299316, 13.145146),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(pos.derived_outdoor_cell_id(), Some(0x0003));
+        assert_eq!(pos.normalize_outdoor_cell().landblock_id, Guid(0x3419_0003));
+    }
+
+    #[test]
+    fn test_normalize_outdoor_cell_leaves_indoor_positions_unchanged() {
+        let pos = WorldPosition {
+            landblock_id: Guid(0x016C_0155),
+            coords: Vector3::new(12.0, -60.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(pos.normalize_outdoor_cell(), pos);
     }
 
     #[test]

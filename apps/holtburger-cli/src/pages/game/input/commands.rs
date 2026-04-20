@@ -1,11 +1,10 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
-use crate::scripting::{
-    DeferredScriptSource, DiscoverableScriptSource, discoverable_scripts, script_directory,
-};
+use crate::scripting::{DiscoverableScriptSource, discoverable_scripts, script_directory};
 use crate::types::{AppUiAction, ChatMessageTags, RedrawPriority};
 use holtburger_core::client::types::ChatChannelKind;
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::context::normalize_name_for_lookup;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
     match raw {
@@ -94,6 +93,25 @@ fn parse_float_argument_command(command: &str, aliases: &[&str]) -> Option<f32> 
     value.is_finite().then_some(value)
 }
 
+fn parse_run_command(command: &str) -> Option<(&str, &str)> {
+    let rest = command.strip_prefix("/run")?;
+    let first = rest.chars().next()?;
+    if !first.is_whitespace() {
+        return None;
+    }
+
+    let trimmed = rest.trim_start();
+    let (basename, args) = trimmed
+        .split_once(char::is_whitespace)
+        .unwrap_or((trimmed, ""));
+
+    if basename.is_empty() {
+        return None;
+    }
+
+    Some((basename, args.trim_start()))
+}
+
 fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a str>> {
     for alias in aliases {
         if command == *alias {
@@ -117,6 +135,16 @@ fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a
     }
 
     None
+}
+
+fn display_absolute_path(path: &std::path::Path) -> String {
+    if path.is_absolute() {
+        return path.display().to_string();
+    }
+
+    std::env::current_dir()
+        .map(|cwd| cwd.join(path).display().to_string())
+        .unwrap_or_else(|_| path.display().to_string())
 }
 
 impl GameState {
@@ -171,35 +199,10 @@ impl GameState {
         self.chat.log(ChatMessageTags::system(), usage.to_string());
     }
 
-    fn describe_script_source(source: &DeferredScriptSource) -> String {
-        match source {
-            DeferredScriptSource::Path(path) => path.display().to_string(),
-            DeferredScriptSource::Inline(source) => source.name.clone(),
-        }
-    }
-
     fn log_scripts_overview(&mut self) {
-        let current_source = if self.script.host.is_some() {
-            self.script
-                .running_source_name
-                .as_ref()
-                .cloned()
-                .or_else(|| {
-                    self.script
-                        .pending_source
-                        .as_ref()
-                        .map(Self::describe_script_source)
-                })
-        } else {
-            self.script
-                .pending_source
-                .as_ref()
-                .map(Self::describe_script_source)
-        };
+        let current_source = self.script.running_source_name.as_ref().cloned();
         let status = if self.script.host.is_some() {
             "running"
-        } else if current_source.is_some() {
-            "queued"
         } else {
             "idle"
         };
@@ -212,14 +215,25 @@ impl GameState {
                 status
             ),
         );
+        if let Some(queued_script_startup) = &self.script.queued_script_startup {
+            self.chat.log(
+                ChatMessageTags::system(),
+                format!(
+                    "Queued script startup: {}{}",
+                    queued_script_startup.basename,
+                    if queued_script_startup.args.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(" {}", queued_script_startup.args)
+                    }
+                ),
+            );
+        }
         self.chat.log(
             ChatMessageTags::system(),
             format!(
                 "Local script dir: {}",
-                script_directory()
-                    .canonicalize()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|_| "?".to_string())
+                display_absolute_path(&script_directory())
             ),
         );
 
@@ -254,7 +268,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options, /option"
+            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /promote, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -271,7 +285,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /leave, /uninvite <PLAYER>"
+            "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /promote <NAME>, /leave, /uninvite <PLAYER>"
                 .to_string(),
         );
         self.chat.log(
@@ -293,7 +307,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageTags::system(),
-            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> loads <BASENAME>.js; /unrun stops the active script and clears queued startup".to_string(),
+            "Scripting: /script <MSG> sends a message to the active script; /scripts shows running and discoverable scripts; /run <BASENAME> [ARGS...] loads <BASENAME>.js and passes ARGS to the start event; /unrun stops the active script".to_string(),
         );
         self.chat.log(
             ChatMessageTags::system(),
@@ -374,6 +388,10 @@ impl GameState {
                 "Usage: /invite <PLAYER>".to_string(),
                 "Invite a nearby or known player to your party.".to_string(),
             ],
+            "promote" => vec![
+                "Usage: /promote <NAME>".to_string(),
+                "Promote a party member to become the fellowship leader.".to_string(),
+            ],
             "leave" => vec![
                 "Usage: /leave".to_string(),
                 "Leave your current party.".to_string(),
@@ -435,8 +453,10 @@ impl GameState {
                 "Some doors open only after the right name is spoken.".to_string(),
             ],
             "run" => vec![
-                "Usage: /run <BASENAME>".to_string(),
+                "Usage: /run <BASENAME> [ARGS...]".to_string(),
                 "Load or replace the active long-running script for this session.".to_string(),
+                "If the client is not ready yet, the command is ignored with a warning.".to_string(),
+                "Any extra text after the basename is passed to the script in the started lifecycle event.".to_string(),
                 "Example: /run loot-bot".to_string(),
             ],
             "script" => vec![
@@ -447,9 +467,9 @@ impl GameState {
             ],
             "scripts" => vec![
                 "Usage: /scripts".to_string(),
-                "Show the current script status, local script dir, and discovered scripts."
+                "Show the current script status, queued startup, local script dir, and discovered scripts."
                     .to_string(),
-                "Use /run <BASENAME> to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
+                "Use /run <BASENAME> [ARGS...] to load SCRIPT_DIR/<BASENAME>.js and /unrun to stop it."
                     .to_string(),
             ],
             "unrun" => vec![
@@ -564,16 +584,17 @@ impl GameState {
             return result;
         }
 
-        if let Some(basename) = parse_single_argument_command(command, &["/run"]) {
+        if let Some((basename, args)) = parse_run_command(command) {
             result.actions.push(crate::types::AppAction::RunScript {
                 basename: basename.to_string(),
+                args: args.to_string(),
             });
             result.merge(self.finish_input_command_submission(command));
             return result.with_redraw(true);
         }
 
         if command == "/run" {
-            self.log_command_usage("Usage: /run <BASENAME>");
+            self.log_command_usage("Usage: /run <BASENAME> [ARGS...]");
             return result.with_redraw(true);
         }
 
@@ -778,6 +799,44 @@ impl GameState {
             return result.with_redraw(true);
         }
 
+        if let Some(player_name) = parse_single_argument_command(command, &["/promote"]) {
+            let Some(party) = self.data.party.as_ref() else {
+                self.chat.log(
+                    ChatMessageTags::warning(),
+                    "You are not currently in a party.".to_string(),
+                );
+                return result.with_redraw(true);
+            };
+
+            let requested_name = normalize_name_for_lookup(player_name);
+            let Some(member) = party
+                .members
+                .iter()
+                .find(|member| normalize_name_for_lookup(&member.name) == requested_name)
+            else {
+                self.chat.log(
+                    ChatMessageTags::warning(),
+                    format!("Unable to find party member '{}' to promote.", player_name),
+                );
+                return result.with_redraw(true);
+            };
+
+            result.commands.push(ClientCommand::PromotePartyLeader {
+                target: member.guid,
+            });
+            self.chat.log(
+                ChatMessageTags::system(),
+                format!("Promoting {} to party leader...", member.name),
+            );
+            result.merge(self.finish_input_command_submission(command));
+            return result.with_redraw(true);
+        }
+
+        if command == "/promote" {
+            self.log_command_usage("Usage: /promote <NAME>");
+            return result.with_redraw(true);
+        }
+
         if command == "/leave" {
             result.commands.push(ClientCommand::LeaveParty);
             result.merge(self.finish_input_command_submission(command));
@@ -852,10 +911,9 @@ impl GameState {
                 result.with_redraw(true)
             }
             "/combat" => {
-                let mode = crate::pages::game::state::domains::toggled_combat_mode(self);
-                result
-                    .actions
-                    .push(crate::types::AppAction::SetCombatMode { mode });
+                result.actions.push(crate::types::AppAction::SetCombatMode {
+                    on: !crate::pages::game::state::domains::is_in_combat_mode(self),
+                });
                 result.merge(self.finish_input_command_submission(command));
                 result.with_redraw(true)
             }
@@ -922,6 +980,10 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
+        assert_eq!(
+            state.chat_input.input_history.last().map(String::as_str),
+            Some("/help")
+        );
         assert!(
             state
                 .chat
@@ -1011,7 +1073,24 @@ mod tests {
 
         assert!(matches!(
             result.actions.first(),
-            Some(AppAction::RunScript { basename }) if basename == "farmer"
+            Some(AppAction::RunScript { basename, args }) if basename == "farmer" && args.is_empty()
+        ));
+    }
+
+    #[test]
+    fn run_command_dispatches_run_script_action_with_args() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/run farmer pick up loot");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::RunScript { basename, args })
+                if basename == "farmer" && args == "pick up loot"
         ));
     }
 
@@ -1066,44 +1145,19 @@ mod tests {
         }));
     }
 
-    // Disabled due to V8 threading issues.
-    // #[test]
-    // fn scripts_command_reports_running_script_source_when_host_is_active() {
-    //     let player_guid = Guid(0x50000001);
-    //     let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-    //     state.view.focused_pane = FocusedPane::Input;
-    //     state.chat_input.input.set_text("/scripts");
-    //     state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+    #[test]
+    fn script_directory_display_is_absolute_without_exists_check() {
+        let relative = std::path::PathBuf::from("scripts");
 
-    //     let host = {
-    //         let view = crate::scripting::TuiScriptClientView {
-    //             data: &state.data,
-    //             view: &state.view,
-    //             server_time: None,
-    //             script_name: Some("script-command-test"),
-    //         };
+        let displayed = display_absolute_path(&relative);
+        let expected = std::env::current_dir()
+            .expect("current directory should be available")
+            .join(&relative)
+            .display()
+            .to_string();
 
-    //         holtburger_scripting::ScriptHost::spawn(
-    //             holtburger_scripting::ScriptSource::new("script-command-test", ""),
-    //             &view,
-    //         )
-    //         .expect("script host should spawn")
-    //     };
-
-    //     state.script.host = Some(host);
-    //     state.script.running_source_name = Some("script-command-test".to_string());
-    //     state.script.pending_source = Some(DeferredScriptSource::Inline(
-    //         holtburger_scripting::ScriptSource::new("queued-script", ""),
-    //     ));
-
-    //     let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-
-    //     assert!(result.commands.is_empty());
-    //     assert!(state.chat.messages.iter().any(|message| {
-    //         message.chat_tags.contains(ChatMessageTags::system())
-    //             && message.text == "Current script: script-command-test"
-    //     }));
-    // }
+        assert_eq!(displayed, expected);
+    }
 
     #[test]
     fn unrun_command_dispatches_unrun_script_action() {
@@ -1588,6 +1642,75 @@ mod tests {
     }
 
     #[test]
+    fn promote_command_dispatches_party_leader_change() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.data.party = Some(holtburger_world::state::FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: vec![
+                holtburger_world::state::FellowshipMemberState {
+                    guid: Guid(0x50000001),
+                    name: "Player".to_string(),
+                    level: 42,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 200,
+                    max_stamina: 180,
+                    max_mana: 160,
+                    current_health: 190,
+                    current_stamina: 170,
+                    current_mana: 150,
+                    share_loot: true,
+                },
+                holtburger_world::state::FellowshipMemberState {
+                    guid: Guid(0x50000042),
+                    name: "Bestie".to_string(),
+                    level: 37,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 180,
+                    max_stamina: 160,
+                    max_mana: 140,
+                    current_health: 175,
+                    current_stamina: 155,
+                    current_mana: 135,
+                    share_loot: true,
+                },
+            ],
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+        state.chat_input.input.set_text("/promote Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::PromotePartyLeader { target }) if *target == Guid(0x50000042)
+        ));
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::UiAction {
+                action: AppUiAction::FinishInputCommandSubmission { command }
+            }) if command == "/promote Bestie"
+        ));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Promoting Bestie to party leader...")
+        );
+    }
+
+    #[test]
     fn leave_command_dispatches_leave_party() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -1788,6 +1911,9 @@ mod tests {
         assert!(result.redraw_requested());
         assert_eq!(state.view.focused_pane, FocusedPane::Input);
         assert!(state.chat_input.input.is_empty());
-        assert!(state.chat_input.input_history.is_empty());
+        assert_eq!(
+            state.chat_input.input_history.last().map(String::as_str),
+            Some("/wave hello")
+        );
     }
 }

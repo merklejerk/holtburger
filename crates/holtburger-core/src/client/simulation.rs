@@ -1,7 +1,7 @@
-use super::movement::MovementSystem;
-use crate::client::WireEvent;
+use super::movement::{MovementSystem, ServerControlledProjection};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::WorldObjectExt;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
@@ -28,6 +28,16 @@ fn calculate_arrival_position(
         fallback.x += distance;
         fallback
     }
+}
+
+fn approximate_move_to_object_projection_target(
+    source: &WorldPosition,
+    target_pos: &Vector3,
+    distance_to_object: f32,
+    target_use_radius: Option<f32>,
+) -> Vector3 {
+    let conservative_center_distance = distance_to_object + target_use_radius.unwrap_or(0.0);
+    calculate_arrival_position(source, target_pos, conservative_center_distance.max(0.0))
 }
 
 #[derive(Debug, Default)]
@@ -128,7 +138,7 @@ impl ClientSimulationSystem {
         Some(SpatialSolveRequest {
             dt,
             bodies,
-            local_drive: movement.current_local_drive_control(world),
+            local_drive: movement.current_local_drive_control(world, dt),
         })
     }
 
@@ -156,17 +166,55 @@ impl ClientSimulationSystem {
         movement: &mut MovementSystem,
         world: &mut WorldState,
         session: &mut Session,
-    ) -> Result<(Vec<WireEvent>, Vec<WorldEvent>)> {
-        let mut wire_events = Vec::new();
+    ) -> Result<Vec<WorldEvent>> {
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
             data.movement_type,
             data.server_control_sequence
         );
+        movement.note_server_controlled_movement_started();
 
-        let Some(solved) = self.build_server_controlled_result(&data, world, &mut wire_events)
-        else {
-            return Ok((wire_events, Vec::new()));
+        match &data.data {
+            MovementTypeData::MoveToObject(mto) => {
+                let Some(current_pos) = world.local_player_runtime_pose() else {
+                    return Ok(Vec::new());
+                };
+
+                let target_use_radius = world
+                    .get_visible_entity(mto.target)
+                    .and_then(|target| target.use_radius())
+                    .map(|radius| radius as f32);
+                let mut target_pose = current_pos;
+                target_pose.landblock_id = mto.origin.cell_id;
+                target_pose.coords = approximate_move_to_object_projection_target(
+                    &current_pos,
+                    &mto.origin.position,
+                    mto.params.distance_to_object,
+                    target_use_radius,
+                );
+                target_pose.rotation = if mto.params.desired_heading.abs() <= 1e-6 {
+                    Quaternion::from_heading(target_pose.coords.heading_to(&mto.origin.position))
+                } else {
+                    Quaternion::from_heading(mto.params.desired_heading)
+                };
+
+                movement.set_server_controlled_projection(ServerControlledProjection {
+                    target_pose,
+                    speed_mps: (mto.run_rate * mto.params.speed.max(0.1)).max(0.1),
+                });
+                movement.arm_autonomous_position_heartbeat_schedule(Instant::now(), world);
+                return Ok(Vec::new());
+            }
+            MovementTypeData::Invalid(_) => {
+                movement.clear_server_controlled_projection();
+            }
+            _ => {
+                movement.clear_server_controlled_projection();
+            }
+        }
+
+        let Some(solved) = self.build_server_controlled_result(&data, world) else {
+            return Ok(Vec::new());
         };
 
         let world_events = world.apply_solved_body_kinematics(&solved);
@@ -184,14 +232,13 @@ impl ClientSimulationSystem {
             movement.arm_autonomous_position_heartbeat_schedule(now, world);
         }
 
-        Ok((wire_events, world_events))
+        Ok(world_events)
     }
 
     fn build_server_controlled_result(
         &self,
         data: &MovementEventData,
         world: &WorldState,
-        wire_events: &mut Vec<WireEvent>,
     ) -> Option<SolvedBodyKinematics> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
@@ -267,10 +314,6 @@ impl ClientSimulationSystem {
                 distance,
                 AUTO_MOVE_DISTANCE_LIMIT
             );
-            wire_events.push(WireEvent::ClientError(format!(
-                "Item is too far away ({:.1}m). Move closer!",
-                distance
-            )));
             return None;
         }
 
@@ -397,7 +440,6 @@ mod tests {
         let start = make_world_position(10.0, 20.0, 1.25);
         let destination = make_world_position(32.0, 48.0, 0.0);
         let (world, player_guid) = synthetic_player_world(start);
-        let mut wire_events = Vec::new();
 
         let solved = simulation
             .build_server_controlled_result(
@@ -423,11 +465,9 @@ mod tests {
                     }),
                 },
                 &world,
-                &mut wire_events,
             )
             .expect("server-controlled move should resolve");
 
-        assert!(wire_events.is_empty());
         assert_eq!(solved.pose.landblock_id, destination.landblock_id);
         assert_eq!(solved.pose.coords, destination.coords);
         assert!(
@@ -445,7 +485,6 @@ mod tests {
         let arrival_distance = 2.0;
         let expected_coords = calculate_arrival_position(&start, &target.coords, arrival_distance);
         let (world, player_guid) = synthetic_player_world(start);
-        let mut wire_events = Vec::new();
 
         let solved = simulation
             .build_server_controlled_result(
@@ -473,16 +512,28 @@ mod tests {
                     }),
                 },
                 &world,
-                &mut wire_events,
             )
             .expect("server-controlled move should resolve");
 
-        assert!(wire_events.is_empty());
         assert_eq!(solved.pose.landblock_id, target.landblock_id);
         assert_eq!(solved.pose.coords, expected_coords);
         assert!(
             (solved.pose.rotation.to_heading() - expected_coords.heading_to(&target.coords)).abs()
                 < 1e-5
+        );
+    }
+
+    #[test]
+    fn move_to_object_projection_target_adds_target_use_radius() {
+        let start = make_world_position(10.0, 20.0, 0.0);
+        let target = make_world_position(13.0, 24.0, 0.0);
+
+        let projected =
+            approximate_move_to_object_projection_target(&start, &target.coords, 0.6, Some(0.5));
+
+        assert_eq!(
+            projected,
+            calculate_arrival_position(&start, &target.coords, 1.1)
         );
     }
 

@@ -5,13 +5,18 @@ use byteorder::{ByteOrder, LittleEndian};
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+type SentPacket = (SocketAddr, Vec<u8>);
+type RecvPacket = (Vec<u8>, SocketAddr);
+type RecvQueue = Arc<Mutex<VecDeque<RecvPacket>>>;
+
 #[derive(Clone)]
 struct ScriptedTransport {
-    sent: Arc<Mutex<Vec<Vec<u8>>>>,
+    sent: Arc<Mutex<Vec<SentPacket>>>,
     recv: Arc<Mutex<Vec<Vec<u8>>>>,
     recv_addr: SocketAddr,
 }
@@ -26,14 +31,23 @@ impl ScriptedTransport {
     }
 
     async fn sent_packets(&self) -> Vec<Vec<u8>> {
+        self.sent
+            .lock()
+            .await
+            .iter()
+            .map(|(_, bytes)| bytes.clone())
+            .collect()
+    }
+
+    async fn sent_entries(&self) -> Vec<(SocketAddr, Vec<u8>)> {
         self.sent.lock().await.clone()
     }
 }
 
 #[async_trait]
 impl Transport for ScriptedTransport {
-    async fn send_to(&self, buf: &[u8], _addr: SocketAddr) -> Result<usize> {
-        self.sent.lock().await.push(buf.to_vec());
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize> {
+        self.sent.lock().await.push((addr, buf.to_vec()));
         Ok(buf.len())
     }
 
@@ -49,7 +63,49 @@ impl Transport for ScriptedTransport {
     }
 }
 
+#[derive(Clone)]
+struct SequencedTransport {
+    sent: Arc<Mutex<Vec<SentPacket>>>,
+    recv: RecvQueue,
+}
+
+impl SequencedTransport {
+    fn new(recv_packets: Vec<(Vec<u8>, SocketAddr)>) -> Self {
+        Self {
+            sent: Arc::new(Mutex::new(Vec::new())),
+            recv: Arc::new(Mutex::new(recv_packets.into_iter().collect())),
+        }
+    }
+}
+
+#[async_trait]
+impl Transport for SequencedTransport {
+    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize> {
+        self.sent.lock().await.push((addr, buf.to_vec()));
+        Ok(buf.len())
+    }
+
+    async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        let mut recv = self.recv.lock().await;
+        if let Some((data, addr)) = recv.pop_front() {
+            buf[..data.len()].copy_from_slice(&data);
+            Ok((data.len(), addr))
+        } else {
+            Err(anyhow!("Empty"))
+        }
+    }
+}
+
 fn build_transport_packet(header: PacketHeader, payload: &[u8]) -> Vec<u8> {
+    let session = Session::new_test();
+    let mut header = header;
+    header.size = payload.len() as u16;
+
+    let payload_hash = session
+        .calculate_payload_hash(header.flags, payload)
+        .unwrap();
+    header.checksum = header.calculate_checksum().wrapping_add(payload_hash);
+
     let mut packet = Vec::new();
     header.pack(&mut packet);
     packet.extend_from_slice(payload);
@@ -242,14 +298,17 @@ async fn test_multi_fragment_packet_unaligned() {
             }
             let data = q.remove(0);
             buf[..data.len()].copy_from_slice(&data);
-            Ok((data.len(), "127.0.0.1:9001".parse().unwrap()))
+            Ok((data.len(), "127.0.0.1:9000".parse().unwrap()))
         }
     }
 
     let hex = "71000000060000003C8E48C70B0029B157000100AD0000000000008001001D0000000900E9020000000200000001000000AE0000000000008001001D0000000900E9020000000400000001000000AF0000000000008001001D0000000900E9020000000600000001000000";
     let data = hex::decode(hex).unwrap();
+    let mut header = unpack_header(&data);
+    header.flags &= !packet_flags::ENCRYPTED_CHECKSUM;
+    let packet = build_transport_packet(header, &data[transport::HEADER_SIZE..]);
 
-    let q = Arc::new(Mutex::new(vec![data]));
+    let q = Arc::new(Mutex::new(vec![packet]));
     let mut session = Session::new_test();
     session.transport = Box::new(MultiFragMock(q));
     session.last_server_seq = 112;
@@ -290,7 +349,7 @@ async fn test_ack_sequence_prunes_cached_packets() {
             },
             &6u32.to_le_bytes(),
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
 
     let mut session = Session::new_test();
@@ -349,7 +408,7 @@ async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
         },
         &payload,
     );
-    let transport = ScriptedTransport::new(vec![packet], "127.0.0.1:9001".parse().unwrap());
+    let transport = ScriptedTransport::new(vec![packet], "127.0.0.1:9000".parse().unwrap());
     let sent_handle = transport.clone();
 
     let mut session = Session::new_test();
@@ -367,6 +426,42 @@ async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
             .iter()
             .any(|packet| unpack_header(packet).flags == packet_flags::ACK_SEQUENCE)
     );
+
+    let sent_entries = sent_handle.sent_entries().await;
+    assert!(sent_entries.iter().any(|(addr, packet)| {
+        *addr == session.server_addr && unpack_header(packet).flags == packet_flags::ACK_SEQUENCE
+    }));
+}
+
+#[test]
+fn test_payload_hash_multi_fragment_unaligned_matches_wire_layout() {
+    let session = Session::new_test();
+    let hex = "71000000060000003C8E48C70B0029B157000100AD0000000000008001001D0000000900E9020000000200000001000000AE0000000000008001001D0000000900E9020000000400000001000000AF0000000000008001001D0000000900E9020000000600000001000000";
+    let packet = hex::decode(hex).unwrap();
+    let payload = &packet[transport::HEADER_SIZE..];
+
+    let hash = session
+        .calculate_payload_hash(packet_flags::BLOB_FRAGMENTS, payload)
+        .unwrap();
+
+    let expected = holtburger_protocol::crypto::Hash32::compute(&payload[0..16])
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[16..29],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[29..45],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[45..58],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[58..74],
+        ))
+        .wrapping_add(holtburger_protocol::crypto::Hash32::compute(
+            &payload[74..87],
+        ));
+
+    assert_eq!(hash, expected);
 }
 
 #[tokio::test]
@@ -383,7 +478,7 @@ async fn test_request_retransmit_replays_cached_packet() {
             },
             &retransmit_payload,
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -443,6 +538,10 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
     let events = session.recv_message().await.unwrap();
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], SessionEvent::TimeSync(time) if time == connect_request.time));
+    assert_eq!(
+        session.server_source_addr,
+        "127.0.0.1:9001".parse().unwrap()
+    );
     assert_eq!(session.pending_control_packets.len(), 1);
     assert!(sent_handle.sent_packets().await.is_empty());
 
@@ -464,12 +563,55 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
 }
 
 #[tokio::test]
+async fn test_packets_from_activation_port_are_accepted_after_handshake_request() {
+    let connect_request = ConnectRequestData {
+        time: 123.5,
+        cookie: 0x1122_3344_5566_7788,
+        client_id: 0x345,
+        server_seed: 0x1234_5678,
+        client_seed: 0x9ABC_DEF0,
+    };
+    let transport = SequencedTransport::new(vec![
+        (
+            build_connect_request_packet(connect_request),
+            "127.0.0.1:9000".parse().unwrap(),
+        ),
+        (
+            build_transport_packet(
+                PacketHeader {
+                    flags: packet_flags::TIME_SYNC,
+                    size: 8,
+                    ..Default::default()
+                },
+                &1.25f64.to_le_bytes(),
+            ),
+            "127.0.0.1:9001".parse().unwrap(),
+        ),
+    ]);
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+
+    let first_events = session.recv_message().await.unwrap();
+    assert_eq!(first_events.len(), 1);
+    assert!(matches!(first_events[0], SessionEvent::TimeSync(time) if time == 123.5));
+    assert_eq!(
+        session.server_source_addr,
+        "127.0.0.1:9001".parse().unwrap()
+    );
+
+    let second_events = session.recv_message().await.unwrap();
+    assert_eq!(second_events.len(), 1);
+    assert!(matches!(second_events[0], SessionEvent::TimeSync(time) if time == 1.25));
+}
+
+#[tokio::test]
 async fn test_connect_response_parses_cookie_from_optional_header_offset() {
     let cookie = 0x1122_3344_5566_7788u64;
     let client_id = 0x345u16;
     let transport = ScriptedTransport::new(
         vec![build_connect_response_packet(cookie, client_id)],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
 
     let mut session = Session::new_test();
@@ -485,7 +627,7 @@ async fn test_connect_response_parses_cookie_from_optional_header_offset() {
 async fn test_wrapped_server_sequence_zero_is_processed_as_expected() {
     let transport = ScriptedTransport::new(
         vec![build_single_fragment_packet(0, &[0xAA, 0xBB, 0xCC])],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
 
     let mut session = Session::new_test();
@@ -518,7 +660,7 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
                 &[],
             ),
         ],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -540,6 +682,12 @@ async fn test_out_of_order_server_packet_requests_retransmit() {
     assert_eq!(retransmit_header.sequence, 4);
     assert_eq!(retransmit_header.flags, packet_flags::REQUEST_RETRANSMIT);
 
+    let sent_entries = sent_handle.sent_entries().await;
+    assert!(sent_entries.iter().any(|(addr, packet)| {
+        *addr == session.server_addr
+            && (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0
+    }));
+
     let payload = &retransmit_packet[transport::HEADER_SIZE..];
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 2);
     assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
@@ -556,7 +704,7 @@ async fn test_single_packet_gap_requests_retransmit() {
             },
             &[],
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -582,7 +730,7 @@ async fn test_single_packet_gap_requests_retransmit() {
 
 #[tokio::test]
 async fn test_send_request_retransmit_wraps_sequence_window() {
-    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9001".parse().unwrap());
+    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9000".parse().unwrap());
     let sent_handle = transport.clone();
 
     let mut session = Session::new_test();
@@ -601,6 +749,38 @@ async fn test_send_request_retransmit_wraps_sequence_window() {
     let payload = &retransmit_packet[transport::HEADER_SIZE..];
     assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
     assert_eq!(LittleEndian::read_u32(&payload[4..8]), 0);
+}
+
+#[tokio::test]
+async fn test_queued_ack_uses_latest_client_sequence_when_flushed() {
+    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9000".parse().unwrap());
+    let sent_handle = transport.clone();
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+    session.packet_sequence = 2;
+    session.client_id = 0x123;
+
+    session.queue_ack(0x55).unwrap();
+
+    let header = PacketHeader {
+        sequence: session.packet_sequence,
+        flags: packet_flags::BLOB_FRAGMENTS,
+        id: session.client_id,
+        ..Default::default()
+    };
+    session.packet_sequence += 1;
+    session.send_packet(header, &[]).await.unwrap();
+
+    assert!(session.flush_pending_control_packets().await.unwrap());
+
+    let sent_packets = sent_handle.sent_packets().await;
+    assert_eq!(sent_packets.len(), 2);
+    assert_eq!(unpack_header(&sent_packets[0]).sequence, 2);
+
+    let ack_header = unpack_header(&sent_packets[1]);
+    assert_eq!(ack_header.flags, packet_flags::ACK_SEQUENCE);
+    assert_eq!(ack_header.sequence, 2);
 }
 
 #[test]
@@ -643,7 +823,7 @@ fn test_build_cleartext_control_packet_rejects_payloads_larger_than_u16() {
     let payload = vec![0u8; u16::MAX as usize + 1];
 
     let err = session
-        .queue_cleartext_control_packet(
+        .queue_deferred_cleartext_control_packet(
             PacketHeader {
                 flags: packet_flags::ACK_SEQUENCE,
                 ..Default::default()
@@ -651,6 +831,7 @@ fn test_build_cleartext_control_packet_rejects_payloads_larger_than_u16() {
             &payload,
             session.server_addr,
             std::time::Instant::now(),
+            false,
         )
         .unwrap_err();
 
@@ -687,7 +868,7 @@ async fn test_first_server_packet_sequence_two_does_not_request_retransmit() {
             },
             &0.0f64.to_le_bytes(),
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 
@@ -720,7 +901,7 @@ async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
             },
             &retransmit_payload,
         )],
-        "127.0.0.1:9001".parse().unwrap(),
+        "127.0.0.1:9000".parse().unwrap(),
     );
     let sent_handle = transport.clone();
 

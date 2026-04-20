@@ -36,6 +36,7 @@ anyhow = "1.0"
 rand = "0.10"
 log = "0.4"
 env_logger = "0.11"
+socket2 = "0.6"
 encoding_rs = "0.8"
 clap = { version = "4.0", features = ["derive"] }
 ratatui = "0.30"
@@ -58,6 +59,9 @@ indicatif = "0.18"
 directories = "6.0"
 unicode-width = "0.2"
 hex = "0.4.3"
+reqwest = { version = "0.13", features = ["blocking", "json"] }
+zip = "8.5"
+regex = "1.12"
 ratatui-textarea = "0.8"
 
 # Config for 'cargo dist'
@@ -69,7 +73,13 @@ ci = "github"
 # The installers to generate for each app
 installers = ["shell", "powershell"]
 # Extra static files to include in distributions
-include = ["dats/README.md", "scripts"]
+include = [
+    "dats/README.md",
+    "scripts/fighter.js",
+    "scripts/mage.js",
+    "scripts/mage.data.json",
+    "scripts/mage.data.bin",
+]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Publish jobs to run in CI

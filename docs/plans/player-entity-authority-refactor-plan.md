@@ -311,7 +311,7 @@ Mitigation:
 - [x] Phase 3: remove `PlayerState.position`
 - [x] Phase 3: remove `PlayerState.properties`
 - [x] Phase 3: delete property mirroring in handlers/mutations
-- [ ] Phase 4: simplify movement/liveness/runtime-body special casing
+- [x] Phase 4: simplify movement/liveness/runtime-body special casing
 - [ ] Phase 5: trim or rename `PlayerState` APIs/docs
 - [ ] Phase 6: retarget downstream crates and tests
 - [ ] Final verification across world/core/cli
@@ -332,6 +332,9 @@ Mitigation:
 - Phase 3 decision: property-derived player reads now live on `WorldState` (`player_name`, `player_level`, XP/combat-mode/armor/vitae/resistance helpers) so callers consume entity-authored state through a single surface instead of reaching into `PlayerState`.
 - Phase 3 decision: derived stat emission that depends on entity properties is now orchestrated from `WorldState`/world handlers rather than from `PlayerState` mutation methods, which keeps player-local stat caches separate from entity-authored property projection.
 - Phase 3 decision: world/core tests should seed local-player authority through the player entity helper path (`seed_local_player_entity(...)`) and assert through `WorldState` accessors rather than mutating or reading removed `player.position` / `player.properties` mirrors.
+- Phase 4 decision: local-player branching should remain only where the semantics are genuinely self-specific, such as `SpatialBodyId::LocalPlayer(...)`, self sequencing, player-local position-property overlays, or self-side trade/fellowship projection. Branches whose only job was choosing between mirrored storage locations should be removed.
+- Phase 4 decision: runtime and movement code should prefer body identity over GUID equality when the distinction is “local player body versus remote body,” and should prefer shared entity-backed helpers over hand-written self fallbacks when the distinction is only storage access.
+- Phase 4 decision: self `SetState` remains responsible for advancing player-local instance sequencing, but it must also hydrate the authoritative player entity's physics state/properties when that entity exists so self physics-state updates are not silently dropped.
 
 ### Progress Log
 
@@ -350,6 +353,11 @@ Mitigation:
 - Deleted the player property-mirroring path from property application and retargeted player-derived stat emission so handlers/world code explicitly project derived stats after player-local stat or enchantment mutations.
 - Retargeted world/core tests and helper setup away from direct `player.position` / `player.properties` mutation so local-player authority is always seeded through the player entity path.
 - Verification: `cargo test -p holtburger-world -p holtburger-core` passed after the Phase 3 changes.
+- 2026-04-20: completed Phase 4 special-case collapse across movement, runtime bodies, and liveness-facing helper paths.
+- Removed redundant self-storage fallback branches from world/core movement/runtime code so local-player pose and kinematics now resolve through the same entity-backed/runtime-body helper surface as other authoritative bodies.
+- Tightened runtime tracking to distinguish the local player by `SpatialBodyId::LocalPlayer(...)` instead of GUID equality where the semantics are body identity rather than storage ownership.
+- Simplified world movement handling so self-only branches remain only for true self semantics, and fixed self `SetState` handling so it no longer drops authoritative physics-state hydration for the local player entity.
+- Verification: `cargo test -p holtburger-world -p holtburger-core` passed after the Phase 4 changes.
 
 ### Open Questions
 

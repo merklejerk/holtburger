@@ -90,7 +90,7 @@ These modules own movement-facing invariants:
 `SpatialScene` is the world-owned spatial composite and solve/query context. Shared runtime
 sampling behavior lives inside it via `BodySamplingStore`, and that world-owned sampling state is
 the canonical runtime body model for the client. Any app-facing cache in `holtburger-core` or a
-frontend is mirrored read state only; it must not independently advance runtime bodies.
+frontend is derived read state only; it must not independently advance runtime bodies.
 
 Shared world no longer performs automatic local collision or local velocity integration during
 `tick()`. Those semantics are intentionally deferred until a future client can define a real

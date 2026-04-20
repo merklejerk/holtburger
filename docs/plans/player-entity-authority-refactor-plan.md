@@ -313,8 +313,8 @@ Mitigation:
 - [x] Phase 3: delete property mirroring in handlers/mutations
 - [x] Phase 4: simplify movement/liveness/runtime-body special casing
 - [x] Phase 5: trim or rename `PlayerState` APIs/docs
-- [ ] Phase 6: retarget downstream crates and tests
-- [ ] Final verification across world/core/cli
+- [x] Phase 6: retarget downstream crates and tests
+- [x] Final verification across world/core/cli
 
 ### Decisions Log
 
@@ -338,6 +338,8 @@ Mitigation:
 - Phase 5 decision: keep the type name `PlayerState`; after the ownership cut it still accurately describes the session-local state model for the current player, while avoiding churn that would not buy additional architectural clarity.
 - Phase 5 decision: rename remaining overlay-oriented `PlayerState` APIs and fields to advertise their reduced role explicitly (`last_server_grounded`, `local_position_overlays`, derived-stat snapshot naming) so callers do not mistake them for generic world/entity state.
 - Phase 5 decision: `PlayerInfoData` should carry a single authoritative player `Entity` snapshot plus player-local overlays, rather than parallel `guid`/`name`/`pos` fields that duplicate the entity snapshot shape.
+- Phase 6 decision: keep downstream CLI projection logic centered on entity readiness and `ClientViewEvent` projection rather than introducing any frontend-side `PlayerState` compatibility shim; the downstream work is test/doc retargeting and regression proof, not a new API layer.
+- Phase 6 decision: the final regression set should explicitly cover authoritative `PlayerInfo` composition at both boundaries: world emits an entity-backed snapshot, and core projects that snapshot back into the frontend entity stream.
 
 ### Progress Log
 
@@ -366,6 +368,10 @@ Mitigation:
 - Simplified `PlayerInfoData` to carry one authoritative player entity snapshot plus local-player overlays, and retargeted world/core projection code to that explicit composition model.
 - Updated architecture/docs wording to describe `PlayerState` as session-local overlay state rather than a second world object.
 - Verification: `cargo test -p holtburger-world -p holtburger-core` passed after the Phase 5 changes.
+- 2026-04-20: completed Phase 6 downstream cleanup and final verification.
+- Audited the actual CLI package (`apps/holtburger-cli`) and downstream core/world surfaces for stale ownership assumptions; no new compatibility layer was needed because the TUI was already consuming entity-oriented readiness and projection state.
+- Added focused regression coverage so world bootstrap tests assert the authoritative `PlayerInfo` entity snapshot and core message tests assert that `PlayerInfo` projection re-emits the player entity through `ClientViewEvent::EntitySpawned`.
+- Verification: `cargo test -p holtburger-world -p holtburger-core -p holtburger-cli` passed, and `cargo test --all` passed after the final changes.
 
 ### Open Questions
 

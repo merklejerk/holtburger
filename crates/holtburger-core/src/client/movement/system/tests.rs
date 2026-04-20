@@ -77,11 +77,15 @@ fn seed_self_movement_capabilities_override(
 #[test]
 fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
     let mut world = WorldState::synthetic();
-    world.player.position = WorldPosition {
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
         landblock_id: Guid(0x1234_0000),
         coords: Vector3::new(10.0, 20.0, 0.0),
         rotation: Quaternion::from_heading(0.0),
-    };
+        },
+    );
 
     let state = MovementSystem::autonomous_wire_motion_state(
         &world,
@@ -103,11 +107,15 @@ fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
 #[test]
 fn autonomous_wire_motion_state_can_turn_in_place() {
     let mut world = WorldState::synthetic();
-    world.player.position = WorldPosition {
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
         landblock_id: Guid(0x1234_0000),
         coords: Vector3::new(10.0, 20.0, 0.0),
         rotation: Quaternion::from_heading(0.0),
-    };
+        },
+    );
 
     let state = MovementSystem::autonomous_wire_motion_state(
         &world,
@@ -129,11 +137,15 @@ fn autonomous_wire_motion_state_can_turn_in_place() {
 #[test]
 fn autonomous_wire_motion_state_skips_idle_aligned_requests() {
     let mut world = WorldState::synthetic();
-    world.player.position = WorldPosition {
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
         landblock_id: Guid(0x1234_0000),
         coords: Vector3::new(10.0, 20.0, 0.0),
         rotation: Quaternion::from_heading(0.0),
-    };
+        },
+    );
 
     let state = MovementSystem::autonomous_wire_motion_state(
         &world,
@@ -152,13 +164,14 @@ fn autonomous_wire_motion_state_skips_idle_aligned_requests() {
 #[tokio::test]
 async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
     let mut world = WorldState::synthetic();
-    world.player.guid = Guid(0x5000_0123);
-    world.player.position.landblock_id = Guid(0x1234_0000);
-    world.entities.insert(Entity::new(
-        world.player.guid,
-        "Player".to_string(),
-        world.player.position,
-    ));
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            ..Default::default()
+        },
+    );
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -220,13 +233,14 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
 #[tokio::test]
 async fn later_manual_drive_wins_over_queued_autonomous_drive() {
     let mut world = WorldState::synthetic();
-    world.player.guid = Guid(0x5000_0123);
-    world.player.position.landblock_id = Guid(0x1234_0000);
-    world.entities.insert(Entity::new(
-        world.player.guid,
-        "Player".to_string(),
-        world.player.position,
-    ));
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            ..Default::default()
+        },
+    );
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();

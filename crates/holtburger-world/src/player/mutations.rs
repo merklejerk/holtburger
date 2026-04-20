@@ -431,10 +431,6 @@ impl PlayerState {
             }
         }
 
-        if let Some(pos) = data.pos {
-            self.position = pos;
-        }
-
         self.emit_derived_stats(events);
     }
 

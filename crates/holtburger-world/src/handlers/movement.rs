@@ -72,7 +72,10 @@ pub(crate) fn handle_message(
             }
 
             let current_position = if guid == state.player.guid {
-                state.player.position
+                match state.player_position() {
+                    Some(position) => position,
+                    None => return false,
+                }
             } else {
                 match state.entities.get(guid) {
                     Some(entity) => entity.position,
@@ -106,7 +109,9 @@ pub(crate) fn handle_message(
 
             if let Some(rotation) = maybe_rotation {
                 if guid == state.player.guid {
-                    let mut pos = state.player.position;
+                    let Some(mut pos) = state.player_position() else {
+                        return false;
+                    };
                     pos.rotation = rotation;
                     events.extend(state.set_player_position(pos));
                     true

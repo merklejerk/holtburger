@@ -312,7 +312,8 @@ impl MovementSystem {
     ) -> Option<MotionState> {
         let current_heading = world
             .local_player_runtime_pose()
-            .unwrap_or(world.player.position)
+            .or_else(|| world.player_position())
+            .unwrap_or_default()
             .rotation
             .to_heading();
         let planar_delta = Vector3::new(
@@ -480,7 +481,8 @@ impl MovementSystem {
         if let Some(projection) = self.server_controlled_projection {
             let current_pose = world
                 .local_player_runtime_pose()
-                .unwrap_or(world.player.position);
+                .or_else(|| world.player_position())
+                .unwrap_or_default();
             let to_target = projection.target_pose.global_coords() - current_pose.global_coords();
             let max_step = (projection.speed_mps.max(0.1) * dt.as_secs_f32().max(0.001)).max(0.05);
             let desired_world_delta = if to_target.length_squared() <= 1e-6 {
@@ -542,7 +544,7 @@ impl MovementSystem {
         }
 
         if world.scene.body(SpatialBodyId::LocalPlayer(guid)).is_none()
-            && world.player.position.landblock_id == Guid::NULL
+            && world.player_landblock().is_none()
         {
             return None;
         }
@@ -550,7 +552,7 @@ impl MovementSystem {
         let body_id = SpatialBodyId::LocalPlayer(guid);
         let pose = world
             .local_player_runtime_pose()
-            .unwrap_or(world.player.position);
+            .or_else(|| world.player_position())?;
         let (velocity, omega) = match self.active_drive.map(|active| active.intent) {
             Some(ActiveDriveIntent::Manual(state)) => {
                 let heading = pose.rotation.to_heading();
@@ -878,7 +880,8 @@ impl MovementSystem {
             ),
             position: world
                 .local_player_runtime_pose()
-                .unwrap_or(world.player.position),
+                .or_else(|| world.player_position())
+                .unwrap_or_default(),
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
@@ -904,7 +907,8 @@ impl MovementSystem {
             ),
             position: world
                 .local_player_runtime_pose()
-                .unwrap_or(world.player.position),
+                .or_else(|| world.player_position())
+                .unwrap_or_default(),
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,

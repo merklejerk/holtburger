@@ -15,7 +15,7 @@ use crate::stats::{Skill, SkillType, TrainingLevel};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PhysicsState, PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
-    WorldObjectPropertyAccessorsMut,
+    WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
 use holtburger_dat::file_type::{
@@ -637,11 +637,7 @@ fn set_local_player_runtime_pose_only_emits_runtime_body_change() {
         rotation: holtburger_common::math::Quaternion::identity(),
     };
 
-    state.player.guid = player_guid;
-    state.player.position = start_pos;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
+    state.seed_local_player_entity(player_guid, "Player", start_pos);
 
     let events = state.set_local_player_runtime_pose(WorldPosition {
         coords: Vector3::new(4.0, 5.0, 6.0),
@@ -713,13 +709,7 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
         ..authoritative_pose
     };
 
-    state.player.guid = player_guid;
-    state.player.position = authoritative_pose;
-    state.entities.insert(Entity::new(
-        player_guid,
-        "Player".to_string(),
-        authoritative_pose,
-    ));
+    state.seed_local_player_entity(player_guid, "Player", authoritative_pose);
 
     let runtime_events = state.apply_solved_body_kinematics(&SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
@@ -760,11 +750,7 @@ fn local_forced_reposition_uses_single_reset_reconcile_path() {
         ..start_pos
     };
 
-    state.player.guid = player_guid;
-    state.player.position = start_pos;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
+    state.seed_local_player_entity(player_guid, "Player", start_pos);
 
     let events = state.apply_spatial_body_event(&crate::SpatialBodyEvent::ForcedReposition {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
@@ -856,11 +842,7 @@ fn apply_solved_body_kinematics_updates_local_runtime_body_and_grounded_state() 
         rotation: holtburger_common::math::Quaternion::identity(),
     };
 
-    state.player.guid = player_guid;
-    state.player.position = start_pos;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), start_pos));
+    state.seed_local_player_entity(player_guid, "Player", start_pos);
 
     let solved = SolvedBodyKinematics {
         body_id: SpatialBodyId::LocalPlayer(player_guid),
@@ -2242,6 +2224,11 @@ fn test_player_description_initialization() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
     let player_name = "TestingPlayer".to_string();
+    let bootstrap_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(12.0, 34.0, 56.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
     let options1 =
         CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG | CharacterOptions1::HEAR_ALLEGIANCE_CHAT;
     let options2 = CharacterOptions2::SHOW_HELM | CharacterOptions2::HEAR_GENERAL_CHAT;
@@ -2249,14 +2236,17 @@ fn test_player_description_initialization() {
     let desired_comps = vec![(42, 7), (99, 12)];
     let spellbook_filters = 0xA5A5_5A5A;
     let gameplay_options = vec![0x10, 0x20, 0x30];
+    let mut properties = WorldObjectProperties::default();
+    properties.set_int_prop(PropertyInt::Level, 17);
+    properties.set_int64_prop(PropertyInt64::AvailableExperience, 12345);
 
     let data = PlayerDescriptionEventData {
         guid: player_guid,
         sequence: 1,
         name: player_name.clone(),
         wee_type: 1,
-        pos: Some(WorldPosition::default()),
-        properties: WorldObjectProperties::default(),
+        pos: Some(bootstrap_pos),
+        properties,
         positions: std::collections::BTreeMap::new(),
         attributes: std::collections::BTreeMap::new(),
         skills: std::collections::BTreeMap::new(),
@@ -2285,12 +2275,24 @@ fn test_player_description_initialization() {
 
     assert_eq!(state.player.guid, player_guid);
     assert_eq!(state.player.name(), player_name);
+    assert_eq!(state.player.position, bootstrap_pos);
     assert_eq!(state.player.options1, options1);
     assert_eq!(state.player.options2, options2);
     assert_eq!(state.player.hotbar_spells, hotbar_spells);
     assert_eq!(state.player.desired_comps, desired_comps);
     assert_eq!(state.player.spellbook_filters, spellbook_filters);
     assert_eq!(state.player.gameplay_options, gameplay_options);
+    let player_entity = state
+        .entities
+        .get(player_guid)
+        .expect("player description should eagerly materialize the player entity");
+    assert_eq!(player_entity.name(), player_name);
+    assert_eq!(player_entity.position, bootstrap_pos);
+    assert_eq!(player_entity.get_int_prop(PropertyInt::Level), Some(17));
+    assert_eq!(
+        player_entity.get_int64_prop(PropertyInt64::AvailableExperience),
+        Some(12345)
+    );
     assert!(
         state
             .player
@@ -2423,11 +2425,34 @@ fn test_self_object_create_bootstraps_player_position() {
         coords: Vector3::new(1.0, 2.0, 3.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
-    state.player.guid = player_guid;
-    state.player.position = initial_pos;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), initial_pos));
+    let player_description = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: player_guid,
+        sequence: 1,
+        event: GameEvent::PlayerDescription(Box::new(PlayerDescriptionEventData {
+            guid: player_guid,
+            sequence: 1,
+            name: "Player".to_string(),
+            wee_type: 1,
+            pos: Some(initial_pos),
+            properties: WorldObjectProperties::default(),
+            positions: std::collections::BTreeMap::new(),
+            attributes: std::collections::BTreeMap::new(),
+            skills: std::collections::BTreeMap::new(),
+            enchantments: Vec::new(),
+            spells: std::collections::BTreeMap::new(),
+            has_health: true,
+            options1: CharacterOptions1::empty(),
+            options2: CharacterOptions2::empty(),
+            shortcuts: Vec::new(),
+            hotbar_spells: Vec::new(),
+            desired_comps: Vec::new(),
+            spellbook_filters: 0,
+            gameplay_options: Vec::new(),
+            inventory: Vec::new(),
+            equipped_objects: Vec::new(),
+        })),
+    }));
+    let _ = state.handle_message(&player_description);
 
     let bootstrap_pos = WorldPosition {
         landblock_id: Guid(0x12340010),

@@ -9,7 +9,7 @@ pub(crate) fn handle_event(
 ) -> bool {
     match &event.event {
         GameEvent::PlayerDescription(data) => {
-            state.apply_player_description_world_state(data.guid, &data.name, data.pos, events);
+            state.apply_player_description_world_state(data, events);
             true
         }
         _ => false,

@@ -20,15 +20,23 @@ impl Session {
             let expected_addr = self.server_source_addr;
             let pending_addr = self.pending_server_source_addr;
             let addr_allowed = addr == expected_addr
-                || pending_addr.is_some_and(|candidate| addr == candidate)
-                || (pending_addr.is_some() && addr == self.server_addr);
+                || pending_addr.is_some_and(|candidate| addr == candidate);
 
             if !addr_allowed {
-                log::warn!(
-                    "Ignoring inbound packet from unexpected source {}; expected {}",
-                    addr,
-                    expected_addr
-                );
+                if let Some(candidate) = pending_addr {
+                    log::warn!(
+                        "Ignoring inbound packet from unexpected source {}; expected {} or {}",
+                        addr,
+                        expected_addr,
+                        candidate
+                    );
+                } else {
+                    log::warn!(
+                        "Ignoring inbound packet from unexpected source {}; expected {}",
+                        addr,
+                        expected_addr
+                    );
+                }
                 continue;
             }
 

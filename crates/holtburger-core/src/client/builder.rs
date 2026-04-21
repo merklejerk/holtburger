@@ -85,7 +85,22 @@ impl ClientRuntimeBuilder {
         self
     }
 
+    fn ensure_message_dump_dir(&self) -> Result<()> {
+        if let Some(path) = &self.message_dump_dir {
+            std::fs::create_dir_all(path).with_context(|| {
+                format!(
+                    "failed to create message dump directory: {}",
+                    path.display()
+                )
+            })?;
+        }
+
+        Ok(())
+    }
+
     pub async fn connect(self) -> Result<ClientRuntime> {
+        self.ensure_message_dump_dir()?;
+
         let endpoint = self.server_endpoint.clone().ok_or_else(|| {
             anyhow!("ClientRuntimeBuilder requires a server endpoint before connect()")
         })?;
@@ -108,6 +123,7 @@ impl ClientRuntimeBuilder {
 
     #[cfg(test)]
     pub(crate) fn build_with_session(self, session: Session) -> Result<ClientRuntime> {
+        self.ensure_message_dump_dir()?;
         self.finish(session)
     }
 

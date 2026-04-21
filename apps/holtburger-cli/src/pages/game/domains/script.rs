@@ -455,7 +455,7 @@ impl GameState {
                 return;
             };
 
-            let mut dispatch_failed = false;
+            let mut dispatch_failed = !pump_script_host(&view, host, result);
 
             for _ in 0..tick_count {
                 dispatch_failed |= !dispatch_script_event_to_host(
@@ -499,6 +499,26 @@ fn dispatch_script_event_to_host(
     GameState::drain_script_host_outputs(view.view, outputs, result);
 
     if let Err(error) = dispatch_result {
+        result.actions.push(AppAction::Log {
+            chat_tags: ChatMessageTags::error(),
+            message: format!("[script] {error:?}"),
+        });
+        return false;
+    }
+
+    true
+}
+
+fn pump_script_host(
+    view: &TuiScriptClientView<'_>,
+    host: &mut ScriptHost,
+    result: &mut UpdateResult,
+) -> bool {
+    let pump_result = host.pump(view);
+    let outputs = host.drain_outputs();
+    GameState::drain_script_host_outputs(view.view, outputs, result);
+
+    if let Err(error) = pump_result {
         result.actions.push(AppAction::Log {
             chat_tags: ChatMessageTags::error(),
             message: format!("[script] {error:?}"),

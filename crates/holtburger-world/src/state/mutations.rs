@@ -1076,10 +1076,8 @@ impl WorldState {
                 physics_state: data.physics_state,
             });
             true
-        } else if data.guid == self.player.guid {
-            true
         } else {
-            false
+            data.guid == self.player.guid
         }
     }
 

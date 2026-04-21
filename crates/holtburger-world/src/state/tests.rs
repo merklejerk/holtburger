@@ -3043,11 +3043,10 @@ fn apply_set_state_updates_local_player_instance_sequence_and_entity_physics_sta
             .get_int_prop(PropertyInt::PhysicsState),
         Some((PhysicsState::REPORT_COLLISIONS | PhysicsState::IGNORE_COLLISIONS).bits() as i32)
     );
-    assert_eq!(
+    assert!(
         player_entity
             .properties
-            .get_bool_prop(PropertyBool::IgnoreCollisions),
-        true
+            .get_bool_prop(PropertyBool::IgnoreCollisions)
     );
     assert!(matches!(
         events.as_slice(),

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::ContentRepository;
-use holtburger_core::{ClientCommand, ClientRuntimeBuilder, WireEvent};
+use holtburger_core::{ClientCommand, ClientRuntimeBuilder, ClientViewEvent};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -55,7 +55,6 @@ async fn main() -> Result<()> {
     println!("Message Extractor starting...");
     println!("Dumping messages to: {}", out_dir.display());
 
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
     let content = if dats_path.is_dir() {
@@ -66,22 +65,11 @@ async fn main() -> Result<()> {
     let mut builder =
         ClientRuntimeBuilder::new(args.account.clone()).server(args.server.clone(), args.port);
     builder.load_assets(&content)?;
+    builder = builder.message_dump_dir(out_dir.clone());
 
     let mut client = builder.connect().await?;
-
-    client.message_dump_dir = Some(out_dir);
-    let mut wire_rx = client.subscribe_wire_events();
+    let mut view_rx = client.subscribe_client_view_events();
     client.set_command_rx(command_rx);
-
-    // Forward broadcast to mpsc for the loop
-    let event_tx_inner = event_tx.clone();
-    tokio::spawn(async move {
-        while let Ok(event) = wire_rx.recv().await {
-            if event_tx_inner.send(event).is_err() {
-                break;
-            }
-        }
-    });
 
     let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let mut client_handle = tokio::spawn(async move {
@@ -99,8 +87,11 @@ async fn main() -> Result<()> {
 
     loop {
         tokio::select! {
-            Some(event) = event_rx.recv() => {
-                if let WireEvent::CharacterList(chars) = event {
+            result = view_rx.recv() => {
+                let Ok(event) = result else {
+                    break;
+                };
+                if let ClientViewEvent::CharacterList(chars) = event {
                     println!("Characters received:");
                     for entry in &chars { println!("  - {} ({:08X})", entry.name, entry.guid); }
 

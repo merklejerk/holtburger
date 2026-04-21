@@ -257,8 +257,6 @@ pub struct PlayerState {
     pub spellbook_filters: u32,
     /// Opaque gameplay options blob retained from PlayerDescription.
     pub gameplay_options: Vec<u8>,
-    /// Whether collision detection is disabled for movement.
-    pub noclip: bool,
 
     /// Flat set of all item GUIDs currently owned by the player (in pack or containers).
     pub inventory: HashSet<Guid>,
@@ -301,7 +299,6 @@ impl PlayerState {
             desired_comps: Vec::new(),
             spellbook_filters: 0,
             gameplay_options: Vec::new(),
-            noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             last_emitted_derived_stats: None,

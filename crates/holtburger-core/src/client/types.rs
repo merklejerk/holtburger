@@ -13,9 +13,8 @@ use holtburger_protocol::messages::movement::MovementEventData;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
-    ChatChannelId, ChatMessageTypeId, GameMessage, SetTurbineChatChannelsEventData,
-    TurbineChatChannel, TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType,
-    TurbineChatTypeId, ViewContentsEventItem,
+    ChatChannelId, ChatMessageTypeId, SetTurbineChatChannelsEventData, TurbineChatChannel,
+    TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType, TurbineChatTypeId,
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
@@ -180,73 +179,6 @@ pub enum CharacterManagementOperation {
     Create,
     Delete,
     Restore,
-}
-
-#[derive(Debug, Clone)]
-pub enum WireEvent {
-    CharacterList(Vec<CharacterEntry>),
-    CharacterManagementResponse {
-        operation: Option<CharacterManagementOperation>,
-        response: CharacterCreateResponseData,
-    },
-    CharacterDeleteResponse,
-    PlayerEntered {
-        guid: Guid,
-        name: String,
-    },
-    StatusUpdate {
-        state: ClientState,
-    },
-    ServerMessage {
-        message: String,
-        chat_type: u32,
-    },
-    CharacterError(CharacterError),
-    ClientError(String),
-    WeenieError {
-        error: WeenieError,
-        parameter: Option<String>,
-    },
-    InventoryServerSaveFailed {
-        item_guid: Guid,
-        error: WeenieError,
-    },
-    BootAccount(String),
-    GameMessage(Box<GameMessage>),
-    Chat {
-        sender: String,
-        message: String,
-        chat_type: u32,
-    },
-    ChannelMessage {
-        channel: ChatChannelInfo,
-        sender: String,
-        message: String,
-    },
-    Tell {
-        sender: String,
-        message: String,
-    },
-    Emote {
-        sender: String,
-        text: String,
-    },
-    PingResponse,
-    ViewContents {
-        container: Guid,
-        items: Vec<ViewContentsEventItem>,
-    },
-    ItemManaResponse {
-        target: Guid,
-        mana: f32,
-        success: u32,
-    },
-    RawMessage(Vec<u8>),
-    LogMessage(String),
-    UseDone {
-        error: WeenieError,
-    },
-    CombatFeedback(CombatFeedback),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -435,9 +367,6 @@ pub enum ClientViewEvent {
     },
     CombatModeUpdated {
         mode: CombatMode,
-    },
-    NoClipUpdated {
-        enabled: bool,
     },
     VendorStateUpdated {
         vendor: Option<VendorState>,

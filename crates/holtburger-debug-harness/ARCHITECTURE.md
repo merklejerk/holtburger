@@ -4,7 +4,7 @@ The `holtburger-debug-harness` is a bespoke, headless, non-interactive integrati
 
 ## Core Philosophical Principles
 - **Programmable Scenarios**: Allows developers to script exact "Walk to point A, cast spell B, verify server response C" workflows through code.
-- **Headless Execution**: Bypasses rendering loops and UI state projections. It executes strictly against the `ClientViewEvent` standard or even lower `WireEvent`/`WorldEvent` layers if debugging core network mechanics.
+- **Headless Execution**: Bypasses rendering loops and UI state projections. It executes strictly against `ClientViewEvent` plus explicit diagnostic configuration when raw packet dumps are needed.
 - **Isolate and Diagnose**: Before complex data translation bugs get obfuscated by UI projection (lossy design), you can halt execution right at the protocol translation boundary here.
 
 ## Key Components
@@ -13,7 +13,7 @@ The `holtburger-debug-harness` is a bespoke, headless, non-interactive integrati
 Contains the main binary entry points that instantiate a `ClientBuilder`, establish connections to dynamic local or public servers, and await explicit programmatic exit conditions.
 
 ### 2. Integration Scaffolding ([src/lib.rs](src/lib.rs))
-Exposes the helpers and mock environments needed to spoof credentials, generate realistic player load, and dump `WireEvent` packets directly to disk (using `message_dump_dir`).
+Exposes the helpers and mock environments needed to spoof credentials, generate realistic player load, and dump raw reassembled message bytes directly to disk via `ClientRuntimeBuilder::message_dump_dir(...)`.
 
 ## Use Cases
 

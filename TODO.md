@@ -91,19 +91,19 @@
 - [x] PlayerState and entities mirroring in `WorldState` is annoying.
     - [x] Keep non-entity stuff in PlayerState and store an entity GUID there instead?
 - [x] Server messages being colored as errors, even though they aren't all errors.
+- [x] add deno_fetch.
+- [x] Get rid of noclip (dead code).
+- [x] `holtburger-core` abuses the shit out of WireEvents.
 - [~] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
-- [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
 - [ ] Some equipment swapping jank going on.
-- [ ] Get rid of noclip (dead code).
 - [ ] Speed up TUI rendering.
-- [ ] add deno_fetch.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -268,7 +268,7 @@
 - [x] Client sending duplicate packets to server.
 - [x] Add all spells causes a sequence error.
 - [x] Add `/run <ARGS>` command.
-- [~] Mage script improvements:
+- [x] Mage script improvements:
     - [x] Add preferred spell IDs.
     - [x] Fix not using revitalize.
     - [x] Snap to target heading before casting?

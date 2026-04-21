@@ -2,6 +2,7 @@ use super::{ClientRuntime, types::*};
 use anyhow::Result;
 use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_world::RuntimeBodyResetCause;
@@ -99,8 +100,6 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
-        self.emit_wire_event(WireEvent::RawMessage(data.to_vec()));
-
         if let Some(ref dump_dir) = self.message_dump_dir {
             let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
             std::fs::write(path, data)?;
@@ -128,7 +127,11 @@ impl ClientRuntime {
 
         log::debug!("GameMessage: {:?}", message);
 
-        self.emit_wire_event(WireEvent::GameMessage(Box::new(message.clone())));
+        if let GameMessage::ServerName(data) = &message {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
+        }
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
@@ -154,22 +157,28 @@ impl ClientRuntime {
                 self.state =
                     ClientState::CharacterSelection(self.character_selection.characters.clone());
                 self.send_status_event();
-                self.emit_wire_event(WireEvent::CharacterList(
-                    self.character_selection.characters.clone(),
-                ));
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterList(
+                        self.character_selection.characters.clone(),
+                    ));
                 Ok(())
             }
             GameMessage::CharacterCreateResponse(data) => {
                 let operation = self.character_selection.take_pending_character_operation();
-                self.emit_wire_event(WireEvent::CharacterManagementResponse {
-                    operation,
-                    response: (*data).clone(),
-                });
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::CharacterManagementResponse {
+                            operation,
+                            response: (*data).clone(),
+                        });
                 Ok(())
             }
             GameMessage::CharacterDeleteResponse => {
                 self.character_selection.take_pending_character_operation();
-                self.emit_wire_event(WireEvent::CharacterDeleteResponse);
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterDeleteResponse);
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
@@ -189,29 +198,27 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::PingResponse(_) => {
-                    self.emit_wire_event(WireEvent::PingResponse);
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PingResponse);
                     Ok(())
                 }
-                GameEvent::ViewContents(data) => {
-                    self.emit_wire_event(WireEvent::ViewContents {
-                        container: data.container,
-                        items: data.items.clone(),
-                    });
-                    Ok(())
-                }
+                GameEvent::ViewContents(_data) => Ok(()),
                 GameEvent::Tell(data) => {
-                    self.emit_wire_event(WireEvent::Tell {
+                    let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
                         sender: data.sender_name.clone(),
                         message: data.message.clone(),
                     });
                     Ok(())
                 }
                 GameEvent::ChannelBroadcast(data) => {
-                    self.emit_wire_event(WireEvent::ChannelMessage {
-                        channel: ChatChannelInfo::legacy(data.channel),
-                        sender: data.sender_name.clone(),
-                        message: data.message.clone(),
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ChannelMessage {
+                            channel: ChatChannelInfo::legacy(data.channel),
+                            sender: data.sender_name.clone(),
+                            message: data.message.clone(),
+                        });
                     Ok(())
                 }
                 GameEvent::SetTurbineChatChannels(data) => {
@@ -219,10 +226,12 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::PopupString(data) => {
-                    self.emit_wire_event(WireEvent::ServerMessage {
-                        message: data.message.clone(),
-                        chat_type: ChatMessageType::System as u32,
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ServerMessage {
+                            message: data.message.clone(),
+                            chat_type: (ChatMessageType::System as u32).into(),
+                        });
                     Ok(())
                 }
                 GameEvent::CharacterConfirmationRequest(data) => {
@@ -260,109 +269,135 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::CommunicationTransientString(data) => {
-                    self.emit_wire_event(WireEvent::ServerMessage {
-                        message: data.message.clone(),
-                        chat_type: ChatMessageType::System as u32,
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ServerMessage {
+                            message: data.message.clone(),
+                            chat_type: (ChatMessageType::System as u32).into(),
+                        });
                     Ok(())
                 }
                 GameEvent::AttackDone(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::AttackDone { error: data.error },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::AttackDone { error: data.error },
+                        ));
                     Ok(())
                 }
                 GameEvent::AttackerNotification(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::AttackerNotification {
-                            defender_name: data.defender_name.clone(),
-                            damage_type: data.damage_type,
-                            health_percent: data.health_percent,
-                            damage: data.damage,
-                            critical_hit: data.critical_hit,
-                            attack_conditions: data.attack_conditions,
-                        },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::AttackerNotification {
+                                defender_name: data.defender_name.clone(),
+                                damage_type: data.damage_type,
+                                health_percent: data.health_percent,
+                                damage: data.damage,
+                                critical_hit: data.critical_hit,
+                                attack_conditions: data.attack_conditions,
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::DefenderNotification(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::DefenderNotification {
-                            attacker_name: data.attacker_name.clone(),
-                            damage_type: data.damage_type,
-                            health_percent: data.health_percent,
-                            damage: data.damage,
-                            damage_location: data.damage_location,
-                            critical_hit: data.critical_hit,
-                            attack_conditions: data.attack_conditions,
-                        },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::DefenderNotification {
+                                attacker_name: data.attacker_name.clone(),
+                                damage_type: data.damage_type,
+                                health_percent: data.health_percent,
+                                damage: data.damage,
+                                damage_location: data.damage_location,
+                                critical_hit: data.critical_hit,
+                                attack_conditions: data.attack_conditions,
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::EvasionAttackerNotification(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::EvasionAttackerNotification {
-                            defender_name: data.defender_name.clone(),
-                        },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::EvasionAttackerNotification {
+                                defender_name: data.defender_name.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::EvasionDefenderNotification(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::EvasionDefenderNotification {
-                            attacker_name: data.attacker_name.clone(),
-                        },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::EvasionDefenderNotification {
+                                attacker_name: data.attacker_name.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::CombatCommenceAttack => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::AttackCommenced,
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::AttackCommenced,
+                        ));
                     Ok(())
                 }
                 GameEvent::VictimNotification(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::VictimNotification {
-                            death_message: data.death_message.clone(),
-                        },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::VictimNotification {
+                                death_message: data.death_message.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::KillerNotification(data) => {
-                    self.emit_wire_event(WireEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::KillerNotification {
-                            death_message: data.death_message.clone(),
-                        },
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::KillerNotification {
+                                death_message: data.death_message.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::WeenieError(data) => {
                     self.note_busy_error(data.error, None);
-                    self.emit_wire_event(WireEvent::WeenieError {
-                        error: data.error,
-                        parameter: None,
-                    });
+                    self.emit_action_result(
+                        ActionResultSource::Wire,
+                        ActionResultReason::Weenie(data.error, None),
+                    );
                     Ok(())
                 }
                 GameEvent::WeenieErrorWithString(data) => {
                     self.note_busy_error(data.error, Some(data.parameter.clone()));
-                    self.emit_wire_event(WireEvent::WeenieError {
-                        error: data.error,
-                        parameter: Some(data.parameter.clone()),
-                    });
+                    self.emit_action_result(
+                        ActionResultSource::Wire,
+                        ActionResultReason::Weenie(data.error, Some(data.parameter.clone())),
+                    );
                     Ok(())
                 }
                 GameEvent::InventoryServerSaveFailed(data) => {
-                    self.emit_wire_event(WireEvent::InventoryServerSaveFailed {
-                        item_guid: data.item_guid,
-                        error: data.error,
-                    });
+                    self.emit_action_result(
+                        ActionResultSource::Wire,
+                        ActionResultReason::InventoryServerSaveFailed {
+                            item_guid: data.item_guid,
+                            error: data.error,
+                        },
+                    );
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
                     self.finish_busy_operation_from_use_done(data.error);
-                    self.emit_wire_event(WireEvent::UseDone { error: data.error });
+                    if data.error != WeenieError::None {
+                        self.emit_action_result(
+                            ActionResultSource::Wire,
+                            ActionResultReason::Weenie(data.error, None),
+                        );
+                    }
                     Ok(())
                 }
                 GameEvent::RegisterTrade(data) => {
@@ -377,18 +412,23 @@ impl ClientRuntime {
                         .get(partner_guid)
                         .map(|e: &Entity| e.name().to_string())
                         .unwrap_or_else(|| format!("0x{:08X}", partner_guid.0));
-                    self.emit_wire_event(WireEvent::ServerMessage {
-                        message: format!("Trade started with {}.", partner_name),
-                        chat_type: ChatMessageType::System as u32,
-                    });
+                    let message = format!("Trade started with {}.", partner_name);
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ServerMessage {
+                            message: message.clone(),
+                            chat_type: (ChatMessageType::System as u32).into(),
+                        });
                     Ok(())
                 }
                 GameEvent::QueryItemManaResponse(data) => {
-                    self.emit_wire_event(WireEvent::ItemManaResponse {
-                        target: ev.target,
-                        mana: data.mana,
-                        success: data.success,
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ItemManaResponse {
+                            target: ev.target,
+                            mana: data.mana,
+                            success: data.success,
+                        });
                     Ok(())
                 }
                 _ => Ok(()),
@@ -417,23 +457,27 @@ impl ClientRuntime {
                         }
                     });
 
-                self.emit_wire_event(WireEvent::PlayerEntered {
-                    guid: player_id,
-                    name: name.clone(),
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerEntered {
+                        guid: player_id,
+                        name: name.clone(),
+                    });
 
                 self.send_login_complete().await?;
                 self.enter_world().await?;
                 Ok(())
             }
             GameMessage::PlayerKilled(data) => {
-                self.emit_wire_event(WireEvent::CombatFeedback(
-                    crate::client::types::CombatFeedback::PlayerKilled {
-                        death_message: data.death_message.clone(),
-                        victim_id: data.victim_id,
-                        killer_id: data.killer_id,
-                    },
-                ));
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::PlayerKilled {
+                            death_message: data.death_message.clone(),
+                            victim_id: data.victim_id,
+                            killer_id: data.killer_id,
+                        },
+                    ));
                 Ok(())
             }
             GameMessage::PlayerTeleport(data) => {
@@ -449,24 +493,31 @@ impl ClientRuntime {
             }
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
-                self.emit_wire_event(WireEvent::ServerMessage {
-                    message: data.message.clone(),
-                    chat_type: data.chat_type,
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ServerMessage {
+                        message: data.message.clone(),
+                        chat_type: data.chat_type.into(),
+                    });
                 Ok(())
             }
             GameMessage::CharacterError(data) => {
                 let error = self
                     .character_selection
                     .handle_character_error(data.error_id);
-                self.emit_wire_event(WireEvent::CharacterError(error));
+                self.emit_action_result(
+                    ActionResultSource::Wire,
+                    ActionResultReason::Character(error),
+                );
                 Ok(())
             }
             GameMessage::AccountBoot(data) => {
                 let reason = self.character_selection.handle_boot_account(*data);
                 self.state = ClientState::Disconnected;
                 self.send_status_event();
-                self.emit_wire_event(WireEvent::BootAccount(reason));
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::BootAccount(reason.clone()));
                 Ok(())
             }
             GameMessage::DddInterrogation => {
@@ -484,30 +535,30 @@ impl ClientRuntime {
                 } else {
                     data.sender_name.clone()
                 };
-                self.emit_wire_event(WireEvent::Chat {
-                    sender,
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
+                    sender: sender.clone(),
                     message: data.message.clone(),
-                    chat_type: data.chat_type,
+                    chat_type: data.chat_type.into(),
                 });
                 Ok(())
             }
             GameMessage::HearRangedSpeech(data) => {
-                self.emit_wire_event(WireEvent::Chat {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
                     sender: data.sender_name.clone(),
                     message: data.message.clone(),
-                    chat_type: data.chat_type,
+                    chat_type: data.chat_type.into(),
                 });
                 Ok(())
             }
             GameMessage::EmoteText(data) => {
-                self.emit_wire_event(WireEvent::Emote {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
                     sender: data.sender_name.clone(),
                     text: data.text.clone(),
                 });
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
-                self.emit_wire_event(WireEvent::Emote {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
                     sender: data.sender_name.clone(),
                     text: data.text.clone(),
                 });
@@ -522,11 +573,15 @@ impl ClientRuntime {
                     ..
                 } = &data.payload
                 {
-                    self.emit_wire_event(WireEvent::ChannelMessage {
-                        channel: ChatChannelInfo::turbine(*channel, *chat_type, data.dispatch_type),
-                        sender: sender_name.clone(),
-                        message: message.clone(),
-                    });
+                    let channel_info =
+                        ChatChannelInfo::turbine(*channel, *chat_type, data.dispatch_type);
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ChannelMessage {
+                            channel: channel_info,
+                            sender: sender_name.clone(),
+                            message: message.clone(),
+                        });
                 }
                 Ok(())
             }
@@ -950,7 +1005,6 @@ mod tests {
     #[tokio::test]
     async fn test_character_create_response_projects_pending_operation() {
         let mut client = build_test_client();
-        let mut wire_events = client.subscribe_wire_events();
         let mut view_events = client.subscribe_client_view_events();
         client.character_selection.pending_character_operation =
             Some(CharacterManagementOperation::Create);
@@ -965,24 +1019,6 @@ mod tests {
         )));
 
         client.handle_message(&encoded).await.unwrap();
-
-        let mut saw_wire = false;
-        while let Ok(event) = wire_events.try_recv() {
-            if matches!(
-                event,
-                WireEvent::CharacterManagementResponse {
-                    operation: Some(CharacterManagementOperation::Create),
-                    response: CharacterCreateResponseData {
-                        response: CharacterGenerationVerificationResponse::Ok,
-                        ..
-                    },
-                }
-            ) {
-                saw_wire = true;
-                break;
-            }
-        }
-        assert!(saw_wire);
 
         let mut saw_view = false;
         while let Ok(event) = view_events.try_recv() {
@@ -1006,7 +1042,6 @@ mod tests {
     #[tokio::test]
     async fn test_character_delete_response_projects_event() {
         let mut client = build_test_client();
-        let mut wire_events = client.subscribe_wire_events();
         let mut view_events = client.subscribe_client_view_events();
         client.character_selection.pending_character_operation =
             Some(CharacterManagementOperation::Delete);
@@ -1014,19 +1049,6 @@ mod tests {
         let encoded = encode_message(&GameMessage::CharacterDeleteResponse);
 
         client.handle_message(&encoded).await.unwrap();
-
-        assert!(matches!(
-            wire_events.try_recv(),
-            Ok(WireEvent::RawMessage(_))
-        ));
-        let mut saw_wire = false;
-        while let Ok(event) = wire_events.try_recv() {
-            if matches!(event, WireEvent::CharacterDeleteResponse) {
-                saw_wire = true;
-                break;
-            }
-        }
-        assert!(saw_wire);
 
         let mut saw_view = false;
         while let Ok(event) = view_events.try_recv() {

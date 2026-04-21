@@ -19,8 +19,8 @@ impl Session {
 
             let expected_addr = self.server_source_addr;
             let pending_addr = self.pending_server_source_addr;
-            let addr_allowed = addr == expected_addr
-                || pending_addr.is_some_and(|candidate| addr == candidate);
+            let addr_allowed =
+                addr == expected_addr || pending_addr.is_some_and(|candidate| addr == candidate);
 
             if !addr_allowed {
                 if let Some(candidate) = pending_addr {

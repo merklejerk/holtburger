@@ -35,15 +35,11 @@ impl ScriptSource {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[derive(Default)]
 pub enum ScriptFetchMethod {
+    #[default]
     Get,
     Post,
-}
-
-impl Default for ScriptFetchMethod {
-    fn default() -> Self {
-        Self::Get
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

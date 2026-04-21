@@ -237,9 +237,9 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_scripting::ScriptHostConfig;
     use crate::state::NetStats;
     use crate::types::{AppAction, ChatMessageTags, Page};
+    use holtburger_scripting::ScriptHostConfig;
 
     fn build_test_app_state(client_state: ClientState) -> AppState {
         AppState {

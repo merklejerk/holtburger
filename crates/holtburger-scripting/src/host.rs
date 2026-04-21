@@ -104,21 +104,24 @@ impl FetchWorkerPool {
             let worker_rx = shared_rx.clone();
             thread::Builder::new()
                 .name(format!("script-fetch-worker-{worker_index}"))
-                .spawn(move || loop {
-                    let job = {
-                        let receiver = worker_rx.lock().expect("fetch worker receiver poisoned");
-                        receiver.recv()
-                    };
+                .spawn(move || {
+                    loop {
+                        let job = {
+                            let receiver =
+                                worker_rx.lock().expect("fetch worker receiver poisoned");
+                            receiver.recv()
+                        };
 
-                    let Ok(job) = job else {
-                        break;
-                    };
+                        let Ok(job) = job else {
+                            break;
+                        };
 
-                    let outcome = execute_prepared_fetch_request(job.prepared);
-                    let _ = job.completion_tx.send(CompletedFetchRequest {
-                        request_id: job.request_id,
-                        outcome,
-                    });
+                        let outcome = execute_prepared_fetch_request(job.prepared);
+                        let _ = job.completion_tx.send(CompletedFetchRequest {
+                            request_id: job.request_id,
+                            outcome,
+                        });
+                    }
                 })
                 .expect("spawn script fetch worker thread");
         }
@@ -126,8 +129,11 @@ impl FetchWorkerPool {
         Self { job_tx }
     }
 
-    fn submit(&self, request: PendingFetchRequest) -> std::result::Result<(), PendingFetchRequest> {
-        self.job_tx.send(request).map_err(|error| error.0)
+    fn submit(
+        &self,
+        request: PendingFetchRequest,
+    ) -> std::result::Result<(), Box<PendingFetchRequest>> {
+        self.job_tx.send(request).map_err(|error| Box::new(error.0))
     }
 }
 
@@ -1793,7 +1799,10 @@ fn execute_prepared_fetch_request(prepared: PreparedFetchRequest) -> ScriptFetch
         max_response_bytes,
     } = prepared;
 
-    let client = match reqwest::blocking::Client::builder().timeout(timeout).build() {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+    {
         Ok(client) => client,
         Err(error) => {
             return script_fetch_error(
@@ -1857,7 +1866,10 @@ fn ensure_v8_platform_initialized() {
     });
 }
 
-fn create_js_runtime(outputs: Rc<RefCell<Vec<ScriptIntent>>>, config: ScriptHostConfig) -> JsRuntime {
+fn create_js_runtime(
+    outputs: Rc<RefCell<Vec<ScriptIntent>>>,
+    config: ScriptHostConfig,
+) -> JsRuntime {
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![holtburger_script_ext::init_ops_and_esm()],
         ..Default::default()
@@ -2036,9 +2048,9 @@ mod tests {
         ScriptClientInteraction, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
         ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
         ScriptEquipmentSlotView, ScriptEvent, ScriptFetchAllowedHost, ScriptHostConfig,
-        ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
-        ScriptLocalConfirmationKind, ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef,
-        ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation, ScriptLocalConfirmationKind,
+        ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
+        ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -2328,7 +2340,8 @@ mod tests {
                 request.extend_from_slice(&buffer[..bytes_read]);
 
                 if header_len.is_none()
-                    && let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n")
+                    && let Some(position) =
+                        request.windows(4).position(|window| window == b"\r\n\r\n")
                 {
                     let end = position + 4;
                     header_len = Some(end);
@@ -2369,7 +2382,11 @@ mod tests {
         (port, handle)
     }
 
-    fn spawn_fetch_test_host(source: ScriptSource, port: u16, timeout_ms: u64) -> super::ScriptHost {
+    fn spawn_fetch_test_host(
+        source: ScriptSource,
+        port: u16,
+        timeout_ms: u64,
+    ) -> super::ScriptHost {
         super::ScriptHost::spawn_with_config(
             source,
             &TestView,
@@ -2750,9 +2767,9 @@ mod tests {
         );
 
         let mut host = spawn_fetch_test_host(source, port, 1_000);
-    assert!(host.drain_outputs().is_empty());
+        assert!(host.drain_outputs().is_empty());
         let request = server.join().expect("server join");
-    let outputs = pump_fetch_test_host(&mut host);
+        let outputs = pump_fetch_test_host(&mut host);
         let lower_request = request.to_ascii_lowercase();
 
         assert!(request.starts_with("GET /status HTTP/1.1\r\n"));
@@ -2766,7 +2783,8 @@ mod tests {
     }
 
     fn fetch_json_helper_posts_json_body() {
-        let (port, server) = spawn_test_http_server("202 Accepted", "{\"accepted\":true}", Duration::ZERO);
+        let (port, server) =
+            spawn_test_http_server("202 Accepted", "{\"accepted\":true}", Duration::ZERO);
         let source = ScriptSource::new(
             "fetch-json-post-test",
             format!(
@@ -2784,9 +2802,9 @@ mod tests {
         );
 
         let mut host = spawn_fetch_test_host(source, port, 1_000);
-    assert!(host.drain_outputs().is_empty());
+        assert!(host.drain_outputs().is_empty());
         let request = server.join().expect("server join");
-    let outputs = pump_fetch_test_host(&mut host);
+        let outputs = pump_fetch_test_host(&mut host);
         let lower_request = request.to_ascii_lowercase();
 
         assert!(request.starts_with("POST /submit HTTP/1.1\r\n"));
@@ -2821,11 +2839,8 @@ mod tests {
     }
 
     fn fetch_json_helper_rejects_timeout() {
-        let (port, server) = spawn_test_http_server(
-            "200 OK",
-            "{\"slow\":true}",
-            Duration::from_millis(150),
-        );
+        let (port, server) =
+            spawn_test_http_server("200 OK", "{\"slow\":true}", Duration::from_millis(150));
         let source = ScriptSource::new(
             "fetch-json-timeout-test",
             format!(
@@ -2851,11 +2866,8 @@ mod tests {
     }
 
     fn fetch_json_helper_does_not_block_host_while_request_is_in_flight() {
-        let (port, server) = spawn_test_http_server(
-            "200 OK",
-            "{\"slow\":true}",
-            Duration::from_millis(150),
-        );
+        let (port, server) =
+            spawn_test_http_server("200 OK", "{\"slow\":true}", Duration::from_millis(150));
         let source = ScriptSource::new(
             "fetch-json-non-blocking-test",
             format!(

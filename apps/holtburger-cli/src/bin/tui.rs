@@ -293,34 +293,37 @@ fn clear_captured_logs(local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>) 
     while local_log_rx.try_recv().is_ok() {}
 }
 
-fn parse_script_fetch_allowed_host(raw: &str) -> std::result::Result<ScriptFetchAllowedHost, String> {
+fn parse_script_fetch_allowed_host(
+    raw: &str,
+) -> std::result::Result<ScriptFetchAllowedHost, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("script fetch host cannot be empty".to_string());
     }
 
     if trimmed.contains("://") {
-        let (scheme, rest) = trimmed
-            .split_once("://")
-            .ok_or_else(|| "script fetch host must be HOST:PORT or http(s)://HOST[:PORT]".to_string())?;
+        let (scheme, rest) = trimmed.split_once("://").ok_or_else(|| {
+            "script fetch host must be HOST:PORT or http(s)://HOST[:PORT]".to_string()
+        })?;
         let default_port = match scheme {
             "http" => 80,
             "https" => 443,
             _ => {
                 return Err(
-                    "script fetch host must use http or https when a scheme is present"
-                        .to_string(),
+                    "script fetch host must use http or https when a scheme is present".to_string(),
                 );
             }
         };
 
-        let authority = rest.split_once('/').map_or(rest, |(authority, _)| authority);
+        let authority = rest
+            .split_once('/')
+            .map_or(rest, |(authority, _)| authority);
         if authority.trim().is_empty() {
             return Err("script fetch host must include a hostname".to_string());
         }
 
         let (host, port) = match authority.rsplit_once(':') {
-            Some((_, port)) if port.is_empty() => {
+            Some((_, "")) => {
                 return Err(format!("invalid script fetch port in {trimmed}"));
             }
             Some((host, port)) => {
@@ -372,8 +375,10 @@ fn parse_script_fetch_max_response_bytes(raw: &str) -> std::result::Result<usize
 }
 
 fn default_script_fetch_allowed_hosts() -> Vec<ScriptFetchAllowedHost> {
-    vec![parse_script_fetch_allowed_host(DEFAULT_SCRIPT_FETCH_ALLOWED_HOST)
-        .expect("default script fetch host should parse")]
+    vec![
+        parse_script_fetch_allowed_host(DEFAULT_SCRIPT_FETCH_ALLOWED_HOST)
+            .expect("default script fetch host should parse"),
+    ]
 }
 
 fn script_host_config_from_args(args: &Args) -> ScriptHostConfig {

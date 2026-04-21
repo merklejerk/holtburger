@@ -278,60 +278,62 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::AttackDone(data) => {
-                    let feedback =
-                        crate::client::types::CombatFeedback::AttackDone { error: data.error };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::AttackDone { error: data.error },
+                        ));
                     Ok(())
                 }
                 GameEvent::AttackerNotification(data) => {
-                    let feedback = crate::client::types::CombatFeedback::AttackerNotification {
-                        defender_name: data.defender_name.clone(),
-                        damage_type: data.damage_type,
-                        health_percent: data.health_percent,
-                        damage: data.damage,
-                        critical_hit: data.critical_hit,
-                        attack_conditions: data.attack_conditions,
-                    };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::AttackerNotification {
+                                defender_name: data.defender_name.clone(),
+                                damage_type: data.damage_type,
+                                health_percent: data.health_percent,
+                                damage: data.damage,
+                                critical_hit: data.critical_hit,
+                                attack_conditions: data.attack_conditions,
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::DefenderNotification(data) => {
-                    let feedback = crate::client::types::CombatFeedback::DefenderNotification {
-                        attacker_name: data.attacker_name.clone(),
-                        damage_type: data.damage_type,
-                        health_percent: data.health_percent,
-                        damage: data.damage,
-                        damage_location: data.damage_location,
-                        critical_hit: data.critical_hit,
-                        attack_conditions: data.attack_conditions,
-                    };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::DefenderNotification {
+                                attacker_name: data.attacker_name.clone(),
+                                damage_type: data.damage_type,
+                                health_percent: data.health_percent,
+                                damage: data.damage,
+                                damage_location: data.damage_location,
+                                critical_hit: data.critical_hit,
+                                attack_conditions: data.attack_conditions,
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::EvasionAttackerNotification(data) => {
-                    let feedback =
-                        crate::client::types::CombatFeedback::EvasionAttackerNotification {
-                            defender_name: data.defender_name.clone(),
-                        };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::EvasionAttackerNotification {
+                                defender_name: data.defender_name.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::EvasionDefenderNotification(data) => {
-                    let feedback =
-                        crate::client::types::CombatFeedback::EvasionDefenderNotification {
-                            attacker_name: data.attacker_name.clone(),
-                        };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::EvasionDefenderNotification {
+                                attacker_name: data.attacker_name.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::CombatCommenceAttack => {
@@ -343,21 +345,23 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::VictimNotification(data) => {
-                    let feedback = crate::client::types::CombatFeedback::VictimNotification {
-                        death_message: data.death_message.clone(),
-                    };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::VictimNotification {
+                                death_message: data.death_message.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::KillerNotification(data) => {
-                    let feedback = crate::client::types::CombatFeedback::KillerNotification {
-                        death_message: data.death_message.clone(),
-                    };
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::KillerNotification {
+                                death_message: data.death_message.clone(),
+                            },
+                        ));
                     Ok(())
                 }
                 GameEvent::WeenieError(data) => {
@@ -465,14 +469,15 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::PlayerKilled(data) => {
-                let feedback = crate::client::types::CombatFeedback::PlayerKilled {
-                    death_message: data.death_message.clone(),
-                    victim_id: data.victim_id,
-                    killer_id: data.killer_id,
-                };
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+                    .send(ClientViewEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::PlayerKilled {
+                            death_message: data.death_message.clone(),
+                            victim_id: data.victim_id,
+                            killer_id: data.killer_id,
+                        },
+                    ));
                 Ok(())
             }
             GameMessage::PlayerTeleport(data) => {

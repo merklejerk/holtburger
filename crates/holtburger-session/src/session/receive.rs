@@ -17,13 +17,29 @@ impl Session {
         loop {
             let (len, addr) = self.transport.recv_from(buf).await?;
 
-            if addr != self.server_source_addr {
+            let expected_addr = self.server_source_addr;
+            let pending_addr = self.pending_server_source_addr;
+            let addr_allowed = addr == expected_addr
+                || pending_addr.is_some_and(|candidate| addr == candidate)
+                || (pending_addr.is_some() && addr == self.server_addr);
+
+            if !addr_allowed {
                 log::warn!(
                     "Ignoring inbound packet from unexpected source {}; expected {}",
                     addr,
-                    self.server_source_addr
+                    expected_addr
                 );
                 continue;
+            }
+
+            if pending_addr.is_some_and(|candidate| addr == candidate) {
+                log::debug!(
+                    "Inbound packet confirmed activation source {}; switching expected source from {}",
+                    addr,
+                    expected_addr
+                );
+                self.server_source_addr = addr;
+                self.pending_server_source_addr = None;
             }
 
             if len < transport::HEADER_SIZE {

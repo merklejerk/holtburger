@@ -1,4 +1,6 @@
-use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
+use crate::client::types::{
+    ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, TargetSlot,
+};
 use crate::client::{ClientRuntime, ClientState};
 use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
@@ -316,10 +318,13 @@ impl ClientRuntime {
                             .await;
                     }
 
-                    self.emit_wire_event(WireEvent::ClientError(format!(
-                        "No supported chat transport is available for {:?}.",
-                        channel
-                    )));
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(format!(
+                            "No supported chat transport is available for {:?}.",
+                            channel
+                        )),
+                    );
                 }
                 Ok(())
             }
@@ -622,9 +627,12 @@ impl ClientRuntime {
             }
             ClientCommand::RespondToConfirmation { accepted } => {
                 let Some(confirmation) = self.active_confirmation.clone() else {
-                    self.emit_wire_event(WireEvent::ClientError(
-                        "No active confirmation request to answer.".to_string(),
-                    ));
+                    self.emit_action_result(
+                        ActionResultSource::Client,
+                        ActionResultReason::General(
+                            "No active confirmation request to answer.".to_string(),
+                        ),
+                    );
                     return Ok(());
                 };
 
@@ -1025,7 +1033,7 @@ impl ClientRuntime {
             }
             ClientCommand::ShowPartyStatus => {
                 for line in self.format_party_status_lines() {
-                    self.emit_wire_event(WireEvent::LogMessage(line));
+                    self.emit_log_message(line);
                 }
                 Ok(())
             }
@@ -1223,8 +1231,8 @@ mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
-        ActiveCharacterConfirmation, BusyOperationKind, CharacterManagementOperation,
-        ClientCommand, ClientViewEvent, WireEvent,
+        ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
+        CharacterManagementOperation, ClientCommand, ClientViewEvent,
     };
     use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::position::WorldPosition;
@@ -1801,7 +1809,7 @@ mod tests {
                 },
             }],
         });
-        let mut wire_events = client.subscribe_wire_events();
+        let mut view_events = client.subscribe_client_view_events();
 
         client
             .handle_command(ClientCommand::ShowPartyStatus)
@@ -1809,8 +1817,8 @@ mod tests {
             .unwrap();
 
         let mut log_lines = Vec::new();
-        while let Ok(event) = wire_events.try_recv() {
-            if let WireEvent::LogMessage(line) = event {
+        while let Ok(event) = view_events.try_recv() {
+            if let ClientViewEvent::LogMessage(line) = event {
                 log_lines.push(line);
             }
         }
@@ -1834,6 +1842,34 @@ mod tests {
                 .any(|line| line == "Departed members tracked: 1")
         );
         assert!(log_lines.iter().any(|line| line == "Locks: Leader Lock"));
+    }
+
+    #[tokio::test]
+    async fn respond_to_confirmation_without_active_request_emits_client_action_result() {
+        let mut client = build_test_client();
+        let mut view_events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::RespondToConfirmation { accepted: true })
+            .await
+            .unwrap();
+
+        let mut saw_result = false;
+        while let Ok(event) = view_events.try_recv() {
+            if let ClientViewEvent::ActionResult { source, reason } = event {
+                assert_eq!(source, ActionResultSource::Client);
+                assert_eq!(
+                    reason,
+                    ActionResultReason::General(
+                        "No active confirmation request to answer.".to_string(),
+                    )
+                );
+                saw_result = true;
+                break;
+            }
+        }
+
+        assert!(saw_result);
     }
 
     #[tokio::test]

@@ -98,7 +98,6 @@ sequenceDiagram
     participant Content as ContentRepository
     participant Srv as Server (UDP)
     participant Sess as Session Layer
-    participant Proto as Protocol Layer
     participant Core as Core Engine
     participant World as World State
 
@@ -108,9 +107,8 @@ sequenceDiagram
 
     Srv->>Sess: Inbound Encrypted Bytes
     Sess->>Sess: Decrypt & Assemble Fragment Chunk
-    Sess->>Proto: Deserialize Buffer
-    Proto->>Sess: Unpacked GameMessage
-    Sess->>Core: Emit WireEvent (Raw Protocol)
+    Sess->>Core: Reassembled Message Bytes
+    Core->>Core: Decode GameMessage
     
     Core->>World: Issue Mutation Command (e.g., spawn, update vitals)
     World->>Core: Emit StateEvent (Authority Updated)
@@ -121,7 +119,6 @@ sequenceDiagram
 
 1. **Content (`content`)** discovers HBA sources, assembles `WorldBootstrap`, and exposes static lookup-oriented data to the frontend.
 2. **Networking (`session`)** tracks sequence numbers and decrypts data.
-3. **Parser (`protocol`)** turns data into Rust struct representations.
-4. **Engine (`core`)** coordinates protocol handling, movement execution, and world mutation requests.
-5. **Authority (`world`)** applies the mutation, preserves world invariants, and tells the engine what observably changed.
-6. **App (`cli`)** receives semantic deltas, updates mirrored read caches, and may query frontend-owned content or feed optional shared controllers with world-derived inputs before issuing new commands.
+3. **Engine (`core`)** decodes `GameMessage`, coordinates protocol handling, movement execution, and world mutation requests.
+4. **Authority (`world`)** applies the mutation, preserves world invariants, and tells the engine what observably changed.
+5. **App (`cli`)** receives semantic deltas, updates mirrored read caches, and may query frontend-owned content or feed optional shared controllers with world-derived inputs before issuing new commands.

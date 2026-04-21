@@ -1,3 +1,4 @@
+use crate::book::BookData;
 use crate::entity::{Entity, EntityMotionSnapshot};
 use crate::spatial::{RuntimeBodyResetCause, SpatialBodyId};
 use crate::state;
@@ -54,6 +55,14 @@ pub enum FellowshipActivity {
 pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
+    EntityHealthUpdated {
+        guid: Guid,
+        health_fraction: f32,
+    },
+    EntityBookUpdated {
+        guid: Guid,
+        book: Box<BookData>,
+    },
     EntityMoved {
         guid: Guid,
         pos: WorldPosition,

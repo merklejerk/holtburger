@@ -979,7 +979,9 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
         ClientViewEvent::EntityIdentified { entity } => {
             Some(ScriptEvent::EntityUpdated { guid: entity.guid })
         }
-        ClientViewEvent::EntityPropertiesUpdated { guid, .. }
+        ClientViewEvent::EntityHealthUpdated { guid, .. }
+        | ClientViewEvent::EntityBookUpdated { guid, .. }
+        | ClientViewEvent::EntityPropertiesUpdated { guid, .. }
         | ClientViewEvent::EntityMoved { guid, .. }
         | ClientViewEvent::EntityKinematicsUpdated { guid, .. }
         | ClientViewEvent::EntityMotionUpdated { guid, .. }

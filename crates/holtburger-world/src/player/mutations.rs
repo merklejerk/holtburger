@@ -165,8 +165,8 @@ impl PlayerState {
         }
     }
 
-    /// Copies a server-authored player position snapshot into player state and emits
-    /// grounded or forced-reposition events when those observable outcomes change.
+    /// Updates the player entity's authoritative position sequencing and cached grounded
+    /// state, then emits grounded or forced-reposition events when those outcomes change.
     pub fn update_position_from_server(
         &mut self,
         pos_pack: &PositionPack,

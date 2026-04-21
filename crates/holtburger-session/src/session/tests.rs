@@ -540,7 +540,11 @@ async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
     assert!(matches!(events[0], SessionEvent::TimeSync(time) if time == connect_request.time));
     assert_eq!(
         session.server_source_addr,
-        "127.0.0.1:9001".parse().unwrap()
+        "127.0.0.1:9000".parse().unwrap()
+    );
+    assert_eq!(
+        session.pending_server_source_addr,
+        Some("127.0.0.1:9001".parse().unwrap())
     );
     assert_eq!(session.pending_control_packets.len(), 1);
     assert!(sent_handle.sent_packets().await.is_empty());
@@ -597,12 +601,71 @@ async fn test_packets_from_activation_port_are_accepted_after_handshake_request(
     assert!(matches!(first_events[0], SessionEvent::TimeSync(time) if time == 123.5));
     assert_eq!(
         session.server_source_addr,
-        "127.0.0.1:9001".parse().unwrap()
+        "127.0.0.1:9000".parse().unwrap()
+    );
+    assert_eq!(
+        session.pending_server_source_addr,
+        Some("127.0.0.1:9001".parse().unwrap())
     );
 
     let second_events = session.recv_message().await.unwrap();
     assert_eq!(second_events.len(), 1);
     assert!(matches!(second_events[0], SessionEvent::TimeSync(time) if time == 1.25));
+    assert_eq!(
+        session.server_source_addr,
+        "127.0.0.1:9001".parse().unwrap()
+    );
+    assert_eq!(session.pending_server_source_addr, None);
+}
+
+#[tokio::test]
+async fn test_packets_from_login_port_are_accepted_until_activation_port_is_confirmed() {
+    let connect_request = ConnectRequestData {
+        time: 123.5,
+        cookie: 0x1122_3344_5566_7788,
+        client_id: 0x345,
+        server_seed: 0x1234_5678,
+        client_seed: 0x9ABC_DEF0,
+    };
+    let boot_message = GameMessage::AccountBoot(Box::new(BootAccountData {
+        reason: Some(" because the password entered for this account was not correct".to_string()),
+    }));
+    let mut boot_payload = Vec::new();
+    boot_message.pack(&mut boot_payload);
+
+    let transport = SequencedTransport::new(vec![
+        (
+            build_connect_request_packet(connect_request),
+            "127.0.0.1:9000".parse().unwrap(),
+        ),
+        (
+            build_single_fragment_packet(2, &boot_payload),
+            "127.0.0.1:9000".parse().unwrap(),
+        ),
+    ]);
+
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport);
+
+    let first_events = session.recv_message().await.unwrap();
+    assert_eq!(first_events.len(), 1);
+    assert!(matches!(first_events[0], SessionEvent::TimeSync(time) if time == 123.5));
+    assert_eq!(
+        session.pending_server_source_addr,
+        Some("127.0.0.1:9001".parse().unwrap())
+    );
+
+    let second_events = session.recv_message().await.unwrap();
+    assert_eq!(second_events.len(), 1);
+    assert!(matches!(second_events[0], SessionEvent::Message(ref msg) if msg == &boot_payload));
+    assert_eq!(
+        session.server_source_addr,
+        "127.0.0.1:9000".parse().unwrap()
+    );
+    assert_eq!(
+        session.pending_server_source_addr,
+        Some("127.0.0.1:9001".parse().unwrap())
+    );
 }
 
 #[tokio::test]

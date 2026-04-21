@@ -303,8 +303,6 @@ pub struct GameData {
     pub combat_runtime: CombatRuntimeState,
     /// Local CLI combat controls for melee power or missile accuracy and attack height.
     pub combat_controls: CombatControlState,
-    /// Whether we can walk through walls (debug feature).
-    pub noclip: bool,
     /// Every entity currently in player's pack.
     pub inventory: HashSet<Guid>,
     /// Map of GUIDs currently equipped on the character.
@@ -346,7 +344,6 @@ impl Default for GameData {
             combat_mode: CombatMode::NonCombat,
             combat_runtime: CombatRuntimeState::default(),
             combat_controls: CombatControlState::default(),
-            noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             trade: None,

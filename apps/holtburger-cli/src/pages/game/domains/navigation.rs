@@ -107,14 +107,6 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             object_interaction::refresh_context_buffer(state);
             result.request_redraw(RedrawPriority::Immediate);
         }
-        ClientViewEvent::NoClipUpdated { enabled } => {
-            state.data.noclip = *enabled;
-            let status = if *enabled { "ENABLED" } else { "DISABLED" };
-            result.actions.push(AppAction::Log {
-                chat_tags: ChatMessageTags::system(),
-                message: format!(">> NoClip is now {}", status),
-            });
-        }
         ClientViewEvent::TeleportStarted { .. } => {}
         _ => {}
     }

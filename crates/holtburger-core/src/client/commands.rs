@@ -1231,8 +1231,8 @@ mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
-        ActiveCharacterConfirmation, BusyOperationKind, CharacterManagementOperation,
-        ActionResultReason, ActionResultSource, ClientCommand, ClientViewEvent,
+        ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
+        CharacterManagementOperation, ClientCommand, ClientViewEvent,
     };
     use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::position::WorldPosition;

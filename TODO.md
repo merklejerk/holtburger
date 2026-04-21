@@ -91,6 +91,8 @@
 - [x] PlayerState and entities mirroring in `WorldState` is annoying.
     - [x] Keep non-entity stuff in PlayerState and store an entity GUID there instead?
 - [x] Server messages being colored as errors, even though they aren't all errors.
+- [x] add deno_fetch.
+- [x] Get rid of noclip (dead code).
 - [~] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] Implement actual collisions.
@@ -101,9 +103,7 @@
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
 - [ ] Some equipment swapping jank going on.
-- [ ] Get rid of noclip (dead code).
 - [ ] Speed up TUI rendering.
-- [ ] add deno_fetch.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -268,7 +268,7 @@
 - [x] Client sending duplicate packets to server.
 - [x] Add all spells causes a sequence error.
 - [x] Add `/run <ARGS>` command.
-- [~] Mage script improvements:
+- [x] Mage script improvements:
     - [x] Add preferred spell IDs.
     - [x] Fix not using revitalize.
     - [x] Snap to target heading before casting?

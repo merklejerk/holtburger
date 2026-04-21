@@ -676,11 +676,6 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::CombatModeUpdated { mode: *mode });
             }
-            WorldEvent::NoClipUpdated(enabled) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
-            }
             WorldEvent::VendorStateUpdated(vendor) => {
                 let _ = self
                     .client_view_event_tx

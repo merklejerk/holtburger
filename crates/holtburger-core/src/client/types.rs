@@ -436,9 +436,6 @@ pub enum ClientViewEvent {
     CombatModeUpdated {
         mode: CombatMode,
     },
-    NoClipUpdated {
-        enabled: bool,
-    },
     VendorStateUpdated {
         vendor: Option<VendorState>,
     },

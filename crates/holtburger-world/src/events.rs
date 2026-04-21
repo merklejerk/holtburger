@@ -119,7 +119,6 @@ pub enum WorldEvent {
         spell_ids: Vec<u32>,
     },
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
-    NoClipUpdated(bool),
     ServerTimeUpdate(f64),
     TeleportStarted {
         sequence: u16,

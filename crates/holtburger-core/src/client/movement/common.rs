@@ -69,7 +69,7 @@ pub(super) fn raw_motion_state_with_motion_style(
 fn resolve_contact(world: &WorldState, metadata: MovementPacketMetadata) -> bool {
     metadata
         .contact
-        .or(world.player.server_grounded)
+        .or(world.player.last_server_grounded)
         .unwrap_or(true)
 }
 

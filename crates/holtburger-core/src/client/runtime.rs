@@ -11,11 +11,7 @@ impl ClientRuntime {
     }
 
     fn sync_remote_body_tracking(&mut self, body_id: SpatialBodyId) {
-        let Some(guid) = body_id.authoritative_guid() else {
-            return;
-        };
-
-        if guid == self.world.player.guid {
+        if matches!(body_id, SpatialBodyId::LocalPlayer(_)) {
             return;
         }
 
@@ -78,7 +74,7 @@ impl ClientRuntime {
                 self.sync_remote_body_tracking(*body_id);
             }
             WorldEvent::RuntimeBodyRemoved { body_id }
-                if body_id.authoritative_guid().is_some() =>
+                if !matches!(body_id, SpatialBodyId::LocalPlayer(_)) =>
             {
                 self.simulation.untrack_body(*body_id);
             }

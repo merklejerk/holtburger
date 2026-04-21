@@ -13,10 +13,8 @@ use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
 pub struct PlayerInfoData {
-    pub guid: Guid,
-    pub name: String,
-    pub pos: Option<WorldPosition>,
-    pub player_entity: Option<Box<Entity>>,
+    /// Authoritative world/entity snapshot for the local player.
+    pub entity: Box<Entity>,
     pub attributes: Vec<stats::Attribute>,
     pub vitals: Vec<stats::Vital>,
     pub skills: Vec<stats::Skill>,

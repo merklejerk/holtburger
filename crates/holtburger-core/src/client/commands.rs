@@ -1710,15 +1710,13 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::Connected);
         let mut events = client.subscribe_client_view_events();
         let player_guid = Guid(0x5000_0001);
-
-        client.world.player.guid = player_guid;
-        client.world.player.position = WorldPosition {
+        let player_pose = WorldPosition {
             landblock_id: Guid(0x0102_0000),
             ..WorldPosition::default()
         };
-        client
-            .world
-            .set_local_player_runtime_pose(client.world.player.position);
+
+        client.world.player.guid = player_guid;
+        client.world.set_local_player_runtime_pose(player_pose);
         client.character_selection.characters = vec![CharacterEntry {
             guid: player_guid,
             name: "Player".to_string(),

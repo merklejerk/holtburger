@@ -31,7 +31,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PrivateUpdatePropertyInt(data) => {
             let update = PropertyUpdate::try_from_raw_int(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
                 match data.property {
                     p if p == PropertyInt::Level as u32
@@ -40,17 +40,11 @@ pub(crate) fn handle_message(
                         state.emit_level_info(events);
                     }
                     p if p == PropertyInt::CombatMode as u32 => {
-                        if let Some(mode) =
-                            holtburger_protocol::messages::combat::CombatMode::from_repr(
-                                data.value as u32,
-                            )
-                        {
-                            events.push(WorldEvent::CombatModeUpdated(mode));
-                        }
+                        events.push(WorldEvent::CombatModeUpdated(state.player_combat_mode()));
                     }
                     _ => {}
                 }
-                state.player.emit_derived_stats(events);
+                state.emit_player_derived_stats(events);
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
@@ -60,16 +54,12 @@ pub(crate) fn handle_message(
         }
         GameMessage::PublicUpdatePropertyInt(data) => {
             let update = PropertyUpdate::try_from_raw_int(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
-                if data.property == PropertyInt::CombatMode as u32
-                    && let Some(mode) = holtburger_protocol::messages::combat::CombatMode::from_repr(
-                        data.value as u32,
-                    )
-                {
-                    events.push(WorldEvent::CombatModeUpdated(mode));
+                if data.property == PropertyInt::CombatMode as u32 {
+                    events.push(WorldEvent::CombatModeUpdated(state.player_combat_mode()));
                 }
-                state.player.emit_derived_stats(events);
+                state.emit_player_derived_stats(events);
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
@@ -79,7 +69,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PrivateUpdatePropertyInt64(data) => {
             let update = PropertyUpdate::try_from_raw_int64(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
                 match data.property {
                     p if p
@@ -102,7 +92,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PublicUpdatePropertyInt64(data) => {
             let update = PropertyUpdate::try_from_raw_int64(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, false);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -111,7 +101,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PrivateUpdatePropertyBool(data) => {
             let update = PropertyUpdate::try_from_raw_bool(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -120,7 +110,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PublicUpdatePropertyBool(data) => {
             let update = PropertyUpdate::try_from_raw_bool(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -129,9 +119,9 @@ pub(crate) fn handle_message(
         }
         GameMessage::PrivateUpdatePropertyFloat(data) => {
             let update = PropertyUpdate::try_from_raw_float(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
-                state.player.emit_derived_stats(events);
+                state.emit_player_derived_stats(events);
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
@@ -141,9 +131,9 @@ pub(crate) fn handle_message(
         }
         GameMessage::PublicUpdatePropertyFloat(data) => {
             let update = PropertyUpdate::try_from_raw_float(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if target_guid == state.player.guid {
-                state.player.emit_derived_stats(events);
+                state.emit_player_derived_stats(events);
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
@@ -153,7 +143,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PrivateUpdatePropertyString(data) => {
             let update = PropertyUpdate::try_from_raw_string(data.property, data.value.clone());
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -162,7 +152,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PublicUpdatePropertyString(data) => {
             let update = PropertyUpdate::try_from_raw_string(data.property, data.value.clone());
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -171,7 +161,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PrivateUpdatePropertyDataId(data) => {
             let update = PropertyUpdate::try_from_raw_did(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -180,7 +170,7 @@ pub(crate) fn handle_message(
         }
         GameMessage::PublicUpdatePropertyDataId(data) => {
             let update = PropertyUpdate::try_from_raw_did(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
                 updates: vec![update],
@@ -190,7 +180,7 @@ pub(crate) fn handle_message(
         GameMessage::PrivateUpdatePropertyInstanceId(data) => {
             let prop = PropertyInstanceId::from_repr(data.property);
             let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if let Some(prop) = prop {
                 state.apply_instance_id_side_effect(target_guid, prop, data.value, events);
             }
@@ -203,7 +193,7 @@ pub(crate) fn handle_message(
         GameMessage::PublicUpdatePropertyInstanceId(data) => {
             let prop = PropertyInstanceId::from_repr(data.property);
             let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
-            let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
+            let target_guid = state.apply_property_update_to_target(data.guid, &update);
             if let Some(prop) = prop {
                 state.apply_instance_id_side_effect(target_guid, prop, data.value, events);
             }

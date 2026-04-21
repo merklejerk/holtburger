@@ -1,7 +1,9 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::io::Read;
 use std::rc::Rc;
-use std::sync::Once;
+use std::sync::{Once, OnceLock, mpsc};
+use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -27,16 +29,110 @@ use crate::{
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
 const EVENT_SCRIPT_NAME: &str = "<holtburger-event>";
 const USER_SCRIPT_NAME: &str = "<holtburger-user-script>";
+const FETCH_COMPLETION_SCRIPT_NAME: &str = "<holtburger-fetch-completion>";
 const SCRIPT_FETCH_ORIGIN: &str = "https://holtburger.invalid";
 const SCRIPT_FETCH_USER_AGENT: &str =
     concat!("Holtburger/", env!("CARGO_PKG_VERSION"), " ScriptFetch");
+const SCRIPT_FETCH_WORKER_COUNT: usize = 2;
 static V8_PLATFORM_INIT: Once = Once::new();
+static FETCH_WORKER_POOL: OnceLock<FetchWorkerPool> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ScriptFetchOpOutcome {
     response: Option<ScriptFetchResponse>,
     error: Option<ScriptFetchError>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptFetchStartOutcome {
+    request_id: Option<u64>,
+    error: Option<ScriptFetchError>,
+}
+
+impl ScriptFetchStartOutcome {
+    fn queued(request_id: u64) -> Self {
+        Self {
+            request_id: Some(request_id),
+            error: None,
+        }
+    }
+
+    fn failure(code: ScriptFetchErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            request_id: None,
+            error: Some(ScriptFetchError {
+                code,
+                message: message.into(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PreparedFetchRequest {
+    request: ScriptFetchRequest,
+    url: reqwest::Url,
+    timeout: Duration,
+    max_response_bytes: usize,
+}
+
+#[derive(Debug)]
+struct PendingFetchRequest {
+    request_id: u64,
+    prepared: PreparedFetchRequest,
+    completion_tx: mpsc::Sender<CompletedFetchRequest>,
+}
+
+#[derive(Debug, Clone)]
+struct CompletedFetchRequest {
+    request_id: u64,
+    outcome: ScriptFetchOpOutcome,
+}
+
+struct FetchWorkerPool {
+    job_tx: mpsc::Sender<PendingFetchRequest>,
+}
+
+impl FetchWorkerPool {
+    fn new() -> Self {
+        let (job_tx, job_rx) = mpsc::channel::<PendingFetchRequest>();
+        let shared_rx = std::sync::Arc::new(std::sync::Mutex::new(job_rx));
+
+        for worker_index in 0..SCRIPT_FETCH_WORKER_COUNT {
+            let worker_rx = shared_rx.clone();
+            thread::Builder::new()
+                .name(format!("script-fetch-worker-{worker_index}"))
+                .spawn(move || loop {
+                    let job = {
+                        let receiver = worker_rx.lock().expect("fetch worker receiver poisoned");
+                        receiver.recv()
+                    };
+
+                    let Ok(job) = job else {
+                        break;
+                    };
+
+                    let outcome = execute_prepared_fetch_request(job.prepared);
+                    let _ = job.completion_tx.send(CompletedFetchRequest {
+                        request_id: job.request_id,
+                        outcome,
+                    });
+                })
+                .expect("spawn script fetch worker thread");
+        }
+
+        Self { job_tx }
+    }
+
+    fn submit(&self, request: PendingFetchRequest) -> std::result::Result<(), PendingFetchRequest> {
+        self.job_tx.send(request).map_err(|error| error.0)
+    }
+}
+
+fn fetch_worker_pool() -> &'static FetchWorkerPool {
+    FETCH_WORKER_POOL.get_or_init(FetchWorkerPool::new)
 }
 
 impl ScriptFetchOpOutcome {
@@ -452,6 +548,25 @@ impl ScriptClientViewPtr {
 
 const BOOTSTRAP_JS: &str = r#"
 const __holtburgerHandlers = [];
+const __holtburgerPendingFetches = new Map();
+
+globalThis.__holtburgerCompleteFetch = (requestId, result) => {
+    const pending = __holtburgerPendingFetches.get(requestId);
+    if (!pending) {
+        return;
+    }
+
+    __holtburgerPendingFetches.delete(requestId);
+
+    if (result.error) {
+        const error = new Error(result.error.message);
+        error.code = result.error.code;
+        pending.reject(error);
+        return;
+    }
+
+    pending.resolve(result.response);
+};
 
 globalThis.Holtburger = globalThis.HB = Object.freeze({
   onEvent(handler) {
@@ -466,19 +581,21 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     characterSheet() {
         return Deno.core.ops.op_hb_character_sheet();
     },
-    async fetchJson(request) {
+    fetchJson(request) {
         if (request == null || typeof request !== "object" || Array.isArray(request)) {
-            throw new TypeError("Holtburger.fetchJson expects a request object");
+            return Promise.reject(new TypeError("Holtburger.fetchJson expects a request object"));
         }
 
-        const result = await Promise.resolve().then(() => Deno.core.ops.op_hb_fetch_json(request));
+        const result = Deno.core.ops.op_hb_fetch_json_start(request);
         if (result.error) {
             const error = new Error(result.error.message);
             error.code = result.error.code;
-            throw error;
+            return Promise.reject(error);
         }
 
-        return result.response;
+        return new Promise((resolve, reject) => {
+            __holtburgerPendingFetches.set(result.requestId, { resolve, reject });
+        });
     },
     attack(guid) {
         Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
@@ -709,7 +826,7 @@ deno_core::extension!(
     ops = [
         op_hb_self_entity,
         op_hb_character_sheet,
-        op_hb_fetch_json,
+        op_hb_fetch_json_start,
         op_hb_nearby_entities,
         op_hb_entity_bool_prop,
         op_hb_entity_int_prop,
@@ -778,15 +895,56 @@ struct HostRuntimeState {
     outputs: Rc<RefCell<Vec<ScriptIntent>>>,
     current_context: Cell<Option<ScriptClientViewPtr>>,
     config: ScriptHostConfig,
+    fetch_completion_tx: mpsc::Sender<CompletedFetchRequest>,
+    fetch_completion_rx: mpsc::Receiver<CompletedFetchRequest>,
+    next_fetch_request_id: u64,
 }
 
 impl HostRuntimeState {
     fn new(outputs: Rc<RefCell<Vec<ScriptIntent>>>, config: ScriptHostConfig) -> Self {
+        let (fetch_completion_tx, fetch_completion_rx) = mpsc::channel();
         Self {
             outputs,
             current_context: Cell::new(None),
             config,
+            fetch_completion_tx,
+            fetch_completion_rx,
+            next_fetch_request_id: 1,
         }
+    }
+
+    fn start_fetch_request(&mut self, request: ScriptFetchRequest) -> ScriptFetchStartOutcome {
+        let prepared = match prepare_fetch_request(&self.config.fetch_policy, request) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return ScriptFetchStartOutcome {
+                    request_id: None,
+                    error: error.error,
+                };
+            }
+        };
+
+        let request_id = self.next_fetch_request_id;
+        self.next_fetch_request_id += 1;
+
+        let pending = PendingFetchRequest {
+            request_id,
+            prepared,
+            completion_tx: self.fetch_completion_tx.clone(),
+        };
+
+        if fetch_worker_pool().submit(pending).is_err() {
+            return ScriptFetchStartOutcome::failure(
+                ScriptFetchErrorCode::Transport,
+                "failed to queue fetch request",
+            );
+        }
+
+        ScriptFetchStartOutcome::queued(request_id)
+    }
+
+    fn drain_fetch_completions(&mut self) -> Vec<CompletedFetchRequest> {
+        self.fetch_completion_rx.try_iter().collect()
     }
 }
 
@@ -842,9 +1000,13 @@ fn op_hb_character_sheet(state: &mut OpState) -> Option<ScriptCharacterSheetView
 
 #[op2]
 #[serde]
-fn op_hb_fetch_json(state: &mut OpState, #[serde] request: ScriptFetchRequest) -> ScriptFetchOpOutcome {
-    let policy = state.borrow::<HostRuntimeState>().config.fetch_policy.clone();
-    execute_fetch_request(policy, request)
+fn op_hb_fetch_json_start(
+    state: &mut OpState,
+    #[serde] request: ScriptFetchRequest,
+) -> ScriptFetchStartOutcome {
+    state
+        .borrow_mut::<HostRuntimeState>()
+        .start_fetch_request(request)
 }
 
 #[op2]
@@ -1515,10 +1677,10 @@ fn script_fetch_error(
     ScriptFetchOpOutcome::failure(code, message)
 }
 
-fn validate_fetch_request(
+fn prepare_fetch_request(
     policy: &ScriptFetchPolicy,
-    request: &ScriptFetchRequest,
-) -> std::result::Result<(reqwest::Url, Duration), ScriptFetchOpOutcome> {
+    request: ScriptFetchRequest,
+) -> std::result::Result<PreparedFetchRequest, ScriptFetchOpOutcome> {
     let url = reqwest::Url::parse(&request.url).map_err(|error| {
         script_fetch_error(
             ScriptFetchErrorCode::InvalidRequest,
@@ -1563,10 +1725,12 @@ fn validate_fetch_request(
         ));
     }
 
-    Ok((
+    Ok(PreparedFetchRequest {
+        timeout: Duration::from_millis(policy.effective_timeout_ms(request.timeout_ms)),
+        max_response_bytes: policy.max_response_bytes,
+        request,
         url,
-        Duration::from_millis(policy.effective_timeout_ms(request.timeout_ms)),
-    ))
+    })
 }
 
 fn read_limited_response_body(
@@ -1621,14 +1785,13 @@ fn parse_fetch_response_body(
         })
 }
 
-fn execute_fetch_request(
-    policy: ScriptFetchPolicy,
-    request: ScriptFetchRequest,
-) -> ScriptFetchOpOutcome {
-    let (url, timeout) = match validate_fetch_request(&policy, &request) {
-        Ok(validated) => validated,
-        Err(error) => return error,
-    };
+fn execute_prepared_fetch_request(prepared: PreparedFetchRequest) -> ScriptFetchOpOutcome {
+    let PreparedFetchRequest {
+        request,
+        url,
+        timeout,
+        max_response_bytes,
+    } = prepared;
 
     let client = match reqwest::blocking::Client::builder().timeout(timeout).build() {
         Ok(client) => client,
@@ -1672,7 +1835,7 @@ fn execute_fetch_request(
     };
 
     let status = response.status();
-    let body = match read_limited_response_body(&mut response, policy.max_response_bytes) {
+    let body = match read_limited_response_body(&mut response, max_response_bytes) {
         Ok(body) => body,
         Err(error) => return error,
     };
@@ -1717,6 +1880,10 @@ fn run_js_script(
     js_runtime
         .execute_script(engine_name, source)
         .with_context(|| format!("failed to execute script {display_name}"))?;
+    run_js_event_loop(js_runtime, display_name)
+}
+
+fn run_js_event_loop(js_runtime: &mut JsRuntime, display_name: &str) -> Result<()> {
     block_on(js_runtime.run_event_loop(Default::default()))
         .with_context(|| format!("failed to drive script event loop for {display_name}"))?;
     Ok(())
@@ -1738,6 +1905,47 @@ fn escape_js_string_separators(value: &str) -> String {
     value
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
+}
+
+fn build_fetch_completion_source(completions: &[CompletedFetchRequest]) -> Result<Option<String>> {
+    if completions.is_empty() {
+        return Ok(None);
+    }
+
+    let mut statements = VecDeque::with_capacity(completions.len());
+    for completion in completions {
+        let outcome_json = deno_core::serde_json::to_string(&completion.outcome)
+            .context("failed to serialize fetch completion outcome")?;
+        let outcome_literal = deno_core::serde_json::to_string(&outcome_json)
+            .context("failed to serialize fetch completion JSON literal")?;
+        let outcome_literal = escape_js_string_separators(&outcome_literal);
+
+        statements.push_back(format!(
+            "globalThis.__holtburgerCompleteFetch({}, JSON.parse({outcome_literal}));",
+            completion.request_id
+        ));
+    }
+
+    Ok(Some(statements.into_iter().collect::<Vec<_>>().join("\n")))
+}
+
+fn drain_completed_fetches(js_runtime: &mut JsRuntime) -> Result<()> {
+    let completions = {
+        let op_state = js_runtime.op_state();
+        let mut op_state_ref = op_state.borrow_mut();
+        op_state_ref
+            .borrow_mut::<HostRuntimeState>()
+            .drain_fetch_completions()
+    };
+
+    let Some(source) = build_fetch_completion_source(&completions)? else {
+        return Ok(());
+    };
+
+    js_runtime
+        .execute_script(FETCH_COMPLETION_SCRIPT_NAME, source)
+        .context("failed to execute fetch completion script")?;
+    run_js_event_loop(js_runtime, FETCH_COMPLETION_SCRIPT_NAME)
 }
 
 pub struct ScriptHost {
@@ -1785,13 +1993,19 @@ impl ScriptHost {
         let dispatch_source = build_dispatch_source(&event)?;
 
         with_active_script_context(&mut self.js_runtime, context, |js_runtime| {
+            drain_completed_fetches(js_runtime)?;
             run_js_script(
                 js_runtime,
                 EVENT_SCRIPT_NAME,
                 EVENT_SCRIPT_NAME,
                 dispatch_source,
-            )
+            )?;
+            drain_completed_fetches(js_runtime)
         })
+    }
+
+    pub fn pump(&mut self, context: &impl ScriptClientView) -> Result<()> {
+        with_active_script_context(&mut self.js_runtime, context, drain_completed_fetches)
     }
 
     pub fn drain_outputs(&mut self) -> Vec<ScriptIntent> {
@@ -1837,7 +2051,7 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[derive(Default)]
     struct TestView;
@@ -2079,6 +2293,7 @@ mod tests {
         set_combat_mode_helper_emits_script_intent();
         fetch_json_helper_returns_json_response_for_get();
         fetch_json_helper_posts_json_body();
+        fetch_json_helper_does_not_block_host_while_request_is_in_flight();
         fetch_json_helper_rejects_denied_host();
         fetch_json_helper_rejects_timeout();
     }
@@ -2167,6 +2382,20 @@ mod tests {
             },
         )
         .expect("script host")
+    }
+
+    fn pump_fetch_test_host(host: &mut super::ScriptHost) -> Vec<ScriptIntent> {
+        let deadline = Instant::now() + Duration::from_millis(500);
+
+        loop {
+            host.pump(&TestView).expect("pump script host");
+            let outputs = host.drain_outputs();
+            if !outputs.is_empty() || Instant::now() >= deadline {
+                return outputs;
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn dispatch_source_escapes_javascript_line_separators() {
@@ -2521,8 +2750,9 @@ mod tests {
         );
 
         let mut host = spawn_fetch_test_host(source, port, 1_000);
-        let outputs = host.drain_outputs();
+    assert!(host.drain_outputs().is_empty());
         let request = server.join().expect("server join");
+    let outputs = pump_fetch_test_host(&mut host);
         let lower_request = request.to_ascii_lowercase();
 
         assert!(request.starts_with("GET /status HTTP/1.1\r\n"));
@@ -2554,8 +2784,9 @@ mod tests {
         );
 
         let mut host = spawn_fetch_test_host(source, port, 1_000);
-        let outputs = host.drain_outputs();
+    assert!(host.drain_outputs().is_empty());
         let request = server.join().expect("server join");
+    let outputs = pump_fetch_test_host(&mut host);
         let lower_request = request.to_ascii_lowercase();
 
         assert!(request.starts_with("POST /submit HTTP/1.1\r\n"));
@@ -2607,14 +2838,50 @@ mod tests {
         );
 
         let mut host = spawn_fetch_test_host(source, port, 25);
-        let outputs = host.drain_outputs();
+        assert!(host.drain_outputs().is_empty());
         let _ = server.join();
+        let outputs = pump_fetch_test_host(&mut host);
 
         assert!(matches!(
             outputs.as_slice(),
             [ScriptIntent::Print { style, message }]
                 if *style == crate::ScriptMessageStyle::Error
                     && message.starts_with("timeout:fetch request timed out after 25 ms")
+        ));
+    }
+
+    fn fetch_json_helper_does_not_block_host_while_request_is_in_flight() {
+        let (port, server) = spawn_test_http_server(
+            "200 OK",
+            "{\"slow\":true}",
+            Duration::from_millis(150),
+        );
+        let source = ScriptSource::new(
+            "fetch-json-non-blocking-test",
+            format!(
+                r#"
+                (async () => {{
+                    const response = await Holtburger.fetchJson({{ url: "http://127.0.0.1:{port}/slow" }});
+                    Holtburger.print("info", JSON.stringify(response));
+                }})().catch((error) => Holtburger.print("error", `${{error.code}}:${{error.message}}`));
+            "#
+            ),
+        );
+
+        let started_at = Instant::now();
+        let mut host = spawn_fetch_test_host(source, port, 1_000);
+        let spawn_elapsed = started_at.elapsed();
+
+        assert!(spawn_elapsed < Duration::from_millis(100));
+        assert!(host.drain_outputs().is_empty());
+
+        let _ = server.join();
+        let outputs = pump_fetch_test_host(&mut host);
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { message, .. }]
+                if message == "{\"ok\":true,\"status\":200,\"bodyJson\":{\"slow\":true}}"
         ));
     }
 

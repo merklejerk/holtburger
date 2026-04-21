@@ -218,9 +218,9 @@ struct Args {
     quit_on_disconnect: bool,
     #[arg(
         long = "script-fetch-allow-host",
-        value_name = "HOST:PORT",
+        value_name = "HOST:PORT|http(s)://HOST[:PORT]",
         value_parser = parse_script_fetch_allowed_host,
-        help = "Allow HB.fetchJson to call an exact host and port; repeat to allow multiple hosts"
+        help = "Allow HB.fetchJson to call an exact host and port; repeat to allow multiple hosts. Accepts HOST:PORT or http(s)://HOST[:PORT]."
     )]
     script_fetch_allow_host: Vec<ScriptFetchAllowedHost>,
     #[arg(
@@ -297,6 +297,42 @@ fn parse_script_fetch_allowed_host(raw: &str) -> std::result::Result<ScriptFetch
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("script fetch host cannot be empty".to_string());
+    }
+
+    if trimmed.contains("://") {
+        let (scheme, rest) = trimmed
+            .split_once("://")
+            .ok_or_else(|| "script fetch host must be HOST:PORT or http(s)://HOST[:PORT]".to_string())?;
+        let default_port = match scheme {
+            "http" => 80,
+            "https" => 443,
+            _ => {
+                return Err(
+                    "script fetch host must use http or https when a scheme is present"
+                        .to_string(),
+                );
+            }
+        };
+
+        let authority = rest.split_once('/').map_or(rest, |(authority, _)| authority);
+        if authority.trim().is_empty() {
+            return Err("script fetch host must include a hostname".to_string());
+        }
+
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((_, port)) if port.is_empty() => {
+                return Err(format!("invalid script fetch port in {trimmed}"));
+            }
+            Some((host, port)) => {
+                let port = port
+                    .parse::<u16>()
+                    .map_err(|_| format!("invalid script fetch port in {trimmed}"))?;
+                (host, port)
+            }
+            None => (authority, default_port),
+        };
+
+        return Ok(ScriptFetchAllowedHost::new(host, port));
     }
 
     let (host, port) = trimmed
@@ -1109,9 +1145,9 @@ mod tests {
             "--account",
             "acct",
             "--script-fetch-allow-host",
-            "localhost:8080",
+            "https://example.com",
             "--script-fetch-allow-host",
-            "example.com:443",
+            "localhost:8080",
             "--script-fetch-timeout-ms",
             "2500",
             "--script-fetch-max-response-bytes",
@@ -1124,12 +1160,31 @@ mod tests {
         assert_eq!(
             config.fetch_policy.allowed_hosts,
             vec![
-                ScriptFetchAllowedHost::new("localhost", 8080),
                 ScriptFetchAllowedHost::new("example.com", 443),
+                ScriptFetchAllowedHost::new("localhost", 8080),
             ]
         );
         assert_eq!(config.fetch_policy.timeout_ms, 2500);
         assert_eq!(config.fetch_policy.max_response_bytes, 8192);
+    }
+
+    #[test]
+    fn script_fetch_policy_accepts_http_scheme_with_default_port() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--script-fetch-allow-host",
+            "http://example.org",
+        ])
+        .expect("http allow-host args should parse");
+
+        let config = script_host_config_from_args(&args);
+
+        assert_eq!(
+            config.fetch_policy.allowed_hosts,
+            vec![ScriptFetchAllowedHost::new("example.org", 80)]
+        );
     }
 
     #[test]

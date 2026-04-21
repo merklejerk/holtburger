@@ -5,6 +5,30 @@ interface JsonObject {
 interface JsonArray extends Array<any> {}
 type JsonValue = JsonPrimitive | JsonObject | JsonArray;
 
+type ScriptPostErrorCode =
+  | "invalid_request"
+  | "policy_denied"
+  | "timeout"
+  | "transport"
+  | "response_too_large"
+  | "invalid_json_response";
+
+interface ScriptPostRequest {
+  url: string;
+  bodyJson?: JsonValue;
+  timeoutMs?: number;
+}
+
+interface ScriptPostResponse {
+  ok: boolean;
+  status: number;
+  bodyJson: JsonValue | null;
+}
+
+interface ScriptPostError extends Error {
+  code: ScriptPostErrorCode;
+}
+
 type Guid = number;
 
 type PropertyBool = number;
@@ -764,6 +788,7 @@ interface HoltburgerApi {
 
   selfEntity(): ScriptSelfView | null;
   characterSheet(): ScriptCharacterSheetView | null;
+  postJson(request: ScriptPostRequest): Promise<ScriptPostResponse>;
   currentInteraction(): ScriptClientInteraction | null;
   combatInfo(): ScriptCombatInfo;
   currentTradeInfo(): ScriptTradeInfo | null;

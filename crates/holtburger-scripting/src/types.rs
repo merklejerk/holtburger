@@ -33,6 +33,114 @@ impl ScriptSource {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptPostRequest {
+    pub url: String,
+    #[serde(default)]
+    pub body_json: Option<ScriptJsonValue>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptPostResponse {
+    pub ok: bool,
+    pub status: u16,
+    pub body_json: Option<ScriptJsonValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptPostErrorCode {
+    InvalidRequest,
+    PolicyDenied,
+    Timeout,
+    Transport,
+    ResponseTooLarge,
+    InvalidJsonResponse,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptPostError {
+    pub code: ScriptPostErrorCode,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptFetchAllowedHost {
+    pub host: String,
+    pub port: u16,
+}
+
+fn normalize_script_fetch_host(host: &str) -> String {
+    let trimmed = host.trim();
+    let normalized = trimmed
+        .strip_prefix('[')
+        .and_then(|trimmed| trimmed.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    normalized.to_ascii_lowercase()
+}
+
+impl ScriptFetchAllowedHost {
+    pub fn new(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            host: normalize_script_fetch_host(&host.into()),
+            port,
+        }
+    }
+
+    pub fn matches(&self, host: &str, port: u16) -> bool {
+        self.host == normalize_script_fetch_host(host) && self.port == port
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptFetchPolicy {
+    pub allowed_hosts: Vec<ScriptFetchAllowedHost>,
+    pub timeout_ms: u64,
+    pub max_response_bytes: usize,
+}
+
+impl ScriptFetchPolicy {
+    pub const DEFAULT_TIMEOUT_MS: u64 = 5_000;
+    pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 256 * 1024;
+
+    pub fn effective_timeout_ms(&self, requested_timeout_ms: Option<u64>) -> u64 {
+        match requested_timeout_ms {
+            Some(requested_timeout_ms) if requested_timeout_ms > 0 => {
+                requested_timeout_ms.min(self.timeout_ms)
+            }
+            _ => self.timeout_ms,
+        }
+    }
+
+    pub fn allows(&self, host: &str, port: u16) -> bool {
+        self.allowed_hosts
+            .iter()
+            .any(|allowed_host| allowed_host.matches(host, port))
+    }
+}
+
+impl Default for ScriptFetchPolicy {
+    fn default() -> Self {
+        Self {
+            allowed_hosts: Vec::new(),
+            timeout_ms: Self::DEFAULT_TIMEOUT_MS,
+            max_response_bytes: Self::DEFAULT_MAX_RESPONSE_BYTES,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptHostConfig {
+    pub fetch_policy: ScriptFetchPolicy,
+}
+
 /// Script-facing snapshot of client-visible state.
 ///
 /// Implementations should project semantic frontend state and avoid leaking
@@ -1213,5 +1321,14 @@ mod tests {
             from_value::<ScriptCombatFeedback>(actual).unwrap(),
             feedback
         );
+    }
+
+    #[test]
+    fn script_fetch_allowed_host_normalizes_ipv6_brackets() {
+        let allowed_host = super::ScriptFetchAllowedHost::new("[::1]", 443);
+
+        assert_eq!(allowed_host.host, "::1");
+        assert!(allowed_host.matches("::1", 443));
+        assert!(allowed_host.matches("[::1]", 443));
     }
 }

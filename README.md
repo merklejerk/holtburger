@@ -202,6 +202,31 @@ The Windows-specific terminal guidance above still applies when launching any of
 > [!TIP]
 > If you get an error about missing `VCRuntime140.dll`, install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe). You may also need to allow the executable through Windows Defender by running it once, choosing "More info", and then selecting "Run anyway".
 
+## Durable Bot Runs
+
+If you want Holtburger to keep running as a bot, launch it under something that can restart the process after a disconnect.
+
+Use `-Q` when the restart policy is exit-based. In that setup, `-Q` turns a disconnect into a process exit, which is what the supervisor needs to trigger a restart.
+
+On Linux, `systemd` is the cleanest option because it can supervise the process and restart it automatically:
+
+```bash
+systemd-run --user --unit=holtburger-bot \
+    --property=Restart=always \
+    --property=RestartSec=5s \
+    --working-directory="$PWD" \
+    ./holtburger-cli -Q -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+```
+
+If you want a lightweight fallback without a full service unit, a shell loop also works:
+
+```bash
+while true; do
+    ./holtburger-cli -Q -s SERVER_ADDRESS:PORT -a ACCOUNT_NAME -P PASSWORD
+    sleep 5
+done
+```
+
 ## Data File Configuration
 
 The TUI client requires a namespaced HBA bundle that carries retail data under `eor/portal` and the derived runtime asset under `holtburger/core`. Optional richer world data may also be present under `eor/cell`.

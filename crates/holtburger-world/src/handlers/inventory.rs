@@ -184,8 +184,12 @@ pub(crate) fn handle_event(
         GameEvent::BookDataResponse(data) => {
             let guid = data.object_guid;
             if let Some(entity) = state.entities.get_mut(guid) {
-                entity.book = Some(BookData::from_response(data));
-                events.push(WorldEvent::EntityReplaced(Box::new(entity.clone())));
+                let book = BookData::from_response(data);
+                entity.book = Some(book.clone());
+                events.push(WorldEvent::EntityBookUpdated {
+                    guid,
+                    book: Box::new(book),
+                });
                 true
             } else {
                 false
@@ -198,7 +202,12 @@ pub(crate) fn handle_event(
                     .book
                     .get_or_insert_with(BookData::default)
                     .apply_page_response(data);
-                events.push(WorldEvent::EntityReplaced(Box::new(entity.clone())));
+                if let Some(book) = entity.book.clone() {
+                    events.push(WorldEvent::EntityBookUpdated {
+                        guid,
+                        book: Box::new(book),
+                    });
+                }
                 true
             } else {
                 false

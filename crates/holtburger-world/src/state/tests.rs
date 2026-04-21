@@ -1581,8 +1581,10 @@ fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::EntityReplaced(entity)
-            if entity.guid == guid && entity.health_fraction == Some(0.5)
+        WorldEvent::EntityHealthUpdated {
+            guid: event_guid,
+            health_fraction,
+        } if *event_guid == guid && *health_fraction == 0.5
     )));
 }
 
@@ -4043,9 +4045,13 @@ fn test_book_data_response_updates_entity_book_state() {
 
     let events = state.handle_message(&message);
 
-    assert!(
-        matches!(events.first(), Some(WorldEvent::EntityReplaced(entity)) if entity.guid == guid)
-    );
+    assert!(matches!(
+        events.first(),
+        Some(WorldEvent::EntityBookUpdated {
+            guid: event_guid,
+            book,
+        }) if *event_guid == guid && book.inscription.as_deref() == Some("Signed and sealed")
+    ));
 
     let entity = state.entities.get(guid).expect("entity should still exist");
     let book = entity.book.as_ref().expect("book data should be populated");
@@ -4095,9 +4101,13 @@ fn test_book_page_data_response_merges_into_existing_book_state() {
 
     let events = state.handle_message(&message);
 
-    assert!(
-        matches!(events.first(), Some(WorldEvent::EntityReplaced(entity)) if entity.guid == guid)
-    );
+    assert!(matches!(
+        events.first(),
+        Some(WorldEvent::EntityBookUpdated {
+            guid: event_guid,
+            book,
+        }) if *event_guid == guid && book.pages.len() == 2
+    ));
 
     let entity = state.entities.get(guid).expect("entity should still exist");
     let book = entity.book.as_ref().expect("book data should be populated");

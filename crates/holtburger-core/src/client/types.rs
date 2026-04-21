@@ -19,6 +19,7 @@ use holtburger_protocol::messages::{
 };
 use holtburger_world::FellowshipActivity;
 use holtburger_world::SelfMovementKinematics;
+use holtburger_world::book::BookData;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
 use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
@@ -368,6 +369,14 @@ pub enum ClientViewEvent {
     },
     EntityReplaced {
         entity: Box<Entity>,
+    },
+    EntityHealthUpdated {
+        guid: Guid,
+        health_fraction: f32,
+    },
+    EntityBookUpdated {
+        guid: Guid,
+        book: Box<BookData>,
     },
     EntityIdentified {
         entity: Box<Entity>,

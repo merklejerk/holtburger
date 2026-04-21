@@ -157,19 +157,21 @@ impl ClientRuntime {
                 self.state =
                     ClientState::CharacterSelection(self.character_selection.characters.clone());
                 self.send_status_event();
-                let _ = self.client_view_event_tx.send(ClientViewEvent::CharacterList(
-                    self.character_selection.characters.clone(),
-                ));
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterList(
+                        self.character_selection.characters.clone(),
+                    ));
                 Ok(())
             }
             GameMessage::CharacterCreateResponse(data) => {
                 let operation = self.character_selection.take_pending_character_operation();
-                let _ = self.client_view_event_tx.send(
-                    ClientViewEvent::CharacterManagementResponse {
-                        operation,
-                        response: (*data).clone(),
-                    },
-                );
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::CharacterManagementResponse {
+                            operation,
+                            response: (*data).clone(),
+                        });
                 Ok(())
             }
             GameMessage::CharacterDeleteResponse => {
@@ -196,7 +198,9 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::PingResponse(_) => {
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::PingResponse);
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::PingResponse);
                     Ok(())
                 }
                 GameEvent::ViewContents(_data) => Ok(()),
@@ -208,11 +212,13 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::ChannelBroadcast(data) => {
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::ChannelMessage {
-                        channel: ChatChannelInfo::legacy(data.channel),
-                        sender: data.sender_name.clone(),
-                        message: data.message.clone(),
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ChannelMessage {
+                            channel: ChatChannelInfo::legacy(data.channel),
+                            sender: data.sender_name.clone(),
+                            message: data.message.clone(),
+                        });
                     Ok(())
                 }
                 GameEvent::SetTurbineChatChannels(data) => {
@@ -220,10 +226,12 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::PopupString(data) => {
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::ServerMessage {
-                        message: data.message.clone(),
-                        chat_type: (ChatMessageType::System as u32).into(),
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ServerMessage {
+                            message: data.message.clone(),
+                            chat_type: (ChatMessageType::System as u32).into(),
+                        });
                     Ok(())
                 }
                 GameEvent::CharacterConfirmationRequest(data) => {
@@ -261,16 +269,17 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::CommunicationTransientString(data) => {
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::ServerMessage {
-                        message: data.message.clone(),
-                        chat_type: (ChatMessageType::System as u32).into(),
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ServerMessage {
+                            message: data.message.clone(),
+                            chat_type: (ChatMessageType::System as u32).into(),
+                        });
                     Ok(())
                 }
                 GameEvent::AttackDone(data) => {
-                    let feedback = crate::client::types::CombatFeedback::AttackDone {
-                        error: data.error,
-                    };
+                    let feedback =
+                        crate::client::types::CombatFeedback::AttackDone { error: data.error };
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(feedback.clone()));
@@ -306,27 +315,31 @@ impl ClientRuntime {
                     Ok(())
                 }
                 GameEvent::EvasionAttackerNotification(data) => {
-                    let feedback = crate::client::types::CombatFeedback::EvasionAttackerNotification {
-                        defender_name: data.defender_name.clone(),
-                    };
+                    let feedback =
+                        crate::client::types::CombatFeedback::EvasionAttackerNotification {
+                            defender_name: data.defender_name.clone(),
+                        };
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(feedback.clone()));
                     Ok(())
                 }
                 GameEvent::EvasionDefenderNotification(data) => {
-                    let feedback = crate::client::types::CombatFeedback::EvasionDefenderNotification {
-                        attacker_name: data.attacker_name.clone(),
-                    };
+                    let feedback =
+                        crate::client::types::CombatFeedback::EvasionDefenderNotification {
+                            attacker_name: data.attacker_name.clone(),
+                        };
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::CombatFeedback(feedback.clone()));
                     Ok(())
                 }
                 GameEvent::CombatCommenceAttack => {
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::CombatFeedback(
-                        crate::client::types::CombatFeedback::AttackCommenced,
-                    ));
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatFeedback(
+                            crate::client::types::CombatFeedback::AttackCommenced,
+                        ));
                     Ok(())
                 }
                 GameEvent::VictimNotification(data) => {
@@ -396,10 +409,12 @@ impl ClientRuntime {
                         .map(|e: &Entity| e.name().to_string())
                         .unwrap_or_else(|| format!("0x{:08X}", partner_guid.0));
                     let message = format!("Trade started with {}.", partner_name);
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::ServerMessage {
-                        message: message.clone(),
-                        chat_type: (ChatMessageType::System as u32).into(),
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ServerMessage {
+                            message: message.clone(),
+                            chat_type: (ChatMessageType::System as u32).into(),
+                        });
                     Ok(())
                 }
                 GameEvent::QueryItemManaResponse(data) => {
@@ -438,10 +453,12 @@ impl ClientRuntime {
                         }
                     });
 
-                let _ = self.client_view_event_tx.send(ClientViewEvent::PlayerEntered {
-                    guid: player_id,
-                    name: name.clone(),
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerEntered {
+                        guid: player_id,
+                        name: name.clone(),
+                    });
 
                 self.send_login_complete().await?;
                 self.enter_world().await?;
@@ -471,10 +488,12 @@ impl ClientRuntime {
             }
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::ServerMessage {
-                    message: data.message.clone(),
-                    chat_type: data.chat_type.into(),
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ServerMessage {
+                        message: data.message.clone(),
+                        chat_type: data.chat_type.into(),
+                    });
                 Ok(())
             }
             GameMessage::CharacterError(data) => {
@@ -551,11 +570,13 @@ impl ClientRuntime {
                 {
                     let channel_info =
                         ChatChannelInfo::turbine(*channel, *chat_type, data.dispatch_type);
-                    let _ = self.client_view_event_tx.send(ClientViewEvent::ChannelMessage {
-                        channel: channel_info,
-                        sender: sender_name.clone(),
-                        message: message.clone(),
-                    });
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::ChannelMessage {
+                            channel: channel_info,
+                            sender: sender_name.clone(),
+                            message: message.clone(),
+                        });
                 }
                 Ok(())
             }

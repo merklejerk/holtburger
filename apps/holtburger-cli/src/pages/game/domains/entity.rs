@@ -35,7 +35,9 @@ pub(super) fn reduce_view_event(
                 state.view.active_interaction,
                 Some(Interaction::Targeting { target_guid }) if target_guid == entity_ref.guid
             ) {
-                result.commands.push(ClientCommand::QueryHealth(entity_ref.guid));
+                result
+                    .commands
+                    .push(ClientCommand::QueryHealth(entity_ref.guid));
             }
             inventory::sync_weapon_swap_controller(state, now, &mut result);
             if !was_ready && state.player_entity_is_ready() {
@@ -157,9 +159,9 @@ mod tests {
     use super::GameState;
     use super::reduce_view_event;
     use crate::types::{AppAction, AppNotification, Interaction};
-    use holtburger_core::ClientCommand;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
+    use holtburger_core::ClientCommand;
     use holtburger_core::ClientViewEvent;
     use holtburger_world::entity::Entity;
     use std::time::Instant;

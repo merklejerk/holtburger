@@ -18,12 +18,8 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             victim_id,
             killer_id,
         }) => {
-            let message = resolve_player_killed_message(
-                &state.data,
-                death_message,
-                *victim_id,
-                *killer_id,
-            );
+            let message =
+                resolve_player_killed_message(&state.data, death_message, *victim_id, *killer_id);
             state.chat.log(ChatMessageTags::info().combat(), message);
         }
         _ => {
@@ -138,11 +134,7 @@ mod tests {
 
         state.data.entities.insert(
             victim_guid,
-            Entity::new(
-                victim_guid,
-                "Bestie".to_string(),
-                WorldPosition::default(),
-            ),
+            Entity::new(victim_guid, "Bestie".to_string(), WorldPosition::default()),
         );
 
         let _ = reduce_view_event(
@@ -154,7 +146,11 @@ mod tests {
             }),
         );
 
-        let message = state.chat.messages.last().expect("death message should log");
+        let message = state
+            .chat
+            .messages
+            .last()
+            .expect("death message should log");
 
         assert!(message.chat_tags.contains(ChatMessageTags::COMBAT));
         assert_eq!(message.text, "Bestie died!");

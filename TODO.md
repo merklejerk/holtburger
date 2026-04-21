@@ -88,22 +88,22 @@
 - [x] Spellcasting chat should be categorized as combat.
 - [x] Excessive entity.clone()s - health and book updates replace entire entity.
 - [x] player kill messages rendering with `{0}` template.
-- [ ] All verbs should have equivalent slash chat commands.
+- [x] PlayerState and entities mirroring in `WorldState` is annoying.
+    - [x] Keep non-entity stuff in PlayerState and store an entity GUID there instead?
+- [x] Server messages being colored as errors, even though they aren't all errors.
+- [~] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
-- [ ] PlayerState and entities mirroring in `WorldState` is annoying.
-    - [ ] Keep non-entity stuff in PlayerState and store an entity GUID there instead?
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
-- [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
-- [ ] Add intelligent entity context scanners.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
 - [ ] Emotes.
 - [ ] Some equipment swapping jank going on.
-- [ ] Should untarget missing/too far entities and unsubscribe health query.
+- [ ] Get rid of noclip (dead code).
+- [ ] Speed up TUI rendering.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

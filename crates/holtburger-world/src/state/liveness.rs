@@ -118,10 +118,9 @@ impl WorldState {
             return HashSet::new();
         }
 
-        let player_landblock = self.player.position.landblock_id;
-        if player_landblock == Guid::NULL {
+        let Some(player_landblock) = self.player_landblock() else {
             return HashSet::new();
-        }
+        };
 
         let nearby_guids = self.scene.get_nearby_entities(player_landblock);
 
@@ -149,8 +148,9 @@ impl WorldState {
         nearby_guids: &HashSet<Guid>,
     ) -> bool {
         nearby_guids.contains(&entity.guid)
-            || self.player.position.distance_to(&entity.position)
-                <= CONSERVATIVE_VISIBILITY_DISTANCE_M
+            || self.player_position().is_some_and(|position| {
+                position.distance_to(&entity.position) <= CONSERVATIVE_VISIBILITY_DISTANCE_M
+            })
     }
 
     fn maintain_visibility_prune_deadlines(&mut self, now: f64) {
@@ -364,7 +364,9 @@ impl WorldState {
             return Vec::new();
         }
 
-        let lb = self.player.position.landblock_id;
+        let Some(lb) = self.player_landblock() else {
+            return Vec::new();
+        };
 
         let nearby_guids = self.scene.get_nearby_entities(lb);
         nearby_guids

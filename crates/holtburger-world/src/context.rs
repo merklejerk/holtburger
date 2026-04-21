@@ -129,7 +129,7 @@ impl WorldContext for WorldState {
     }
 
     fn get_player_int_property(&self, prop: PropertyInt) -> Option<i32> {
-        self.player.get_int_prop(prop)
+        self.player_int_property(prop)
     }
 }
 

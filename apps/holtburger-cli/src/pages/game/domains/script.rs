@@ -185,7 +185,7 @@ impl GameState {
             Some(running_source_name.as_str()),
         );
 
-        match ScriptHost::spawn(source, &view) {
+        match ScriptHost::spawn_with_config(source, &view, self.script.host_config.clone()) {
             Ok(mut host) => {
                 let started_ok = dispatch_script_event_to_host(
                     &view,

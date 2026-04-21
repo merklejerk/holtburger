@@ -7,13 +7,14 @@ The runtime is intentionally small and opinionated:
 - Scripts are plain JavaScript files loaded by basename.
 - The host exposes a frozen global object named `HB`, with `Holtburger` as an alias.
 - Scripts receive structured events and can emit typed intents back to the frontend.
+- Scripts can make small JSON-only HTTP requests through `HB.fetchJson()` when the frontend allows it.
 - Script-specific config is local-only; script data can be local or bundled.
 
 For platform-specific install guidance and the writable script directory defaults, see the root [README](../../README.md#installation-and-first-run).
 
 ## Embedded Runtime Limits
 
-The scripting host is an embedded Deno Core runtime, NOT the full Deno CLI or a general-purpose Node environment. You will not have access to raw filesystem ops, networking, or node libraries. The exported `HB` API is all you get.
+The scripting host is an embedded Deno Core runtime, NOT the full Deno CLI or a general-purpose Node environment. You will not have access to raw filesystem ops, generic networking, or node libraries. The exported `HB` API is all you get.
 
 Practical constraints to keep in mind:
 
@@ -21,6 +22,7 @@ Practical constraints to keep in mind:
 - There is no first-class TypeScript execution path at runtime. TypeScript needs to be compiled before the script is run.
 - You cannot `import()` or `require()` dependencies. If you want external dependencies, bundle them into the final JavaScript file.
 - The host injects `HB`/`Holtburger` and structured events, but it does not provide a browser DOM or UI framework runtime.
+- The only network helper is `HB.fetchJson()`, and the TUI may deny requests that are outside its launch-time allowlist.
 - Long synchronous work will block the script host. Keep heavy work out of the hot path.
 
 The safest assumption is that a Holtburger script should be a small, deterministic control loop that reacts to client state and emits a few focused actions.
@@ -61,6 +63,32 @@ HB.onEvent((event) => {
 ```
 
 The repo includes a larger example in [scripts/fighter.js](../../scripts/fighter.js).
+
+## HTTP Requests
+
+`HB.fetchJson()` is the only network helper in the embedded runtime. It is intentionally narrow:
+
+- Only `GET` and `POST` are supported.
+- Request and response bodies are JSON-only.
+- Scripts cannot set custom headers.
+- The host always sends Holtburger-identifying `Origin` and `User-Agent` headers.
+- The TUI decides which exact host and port pairs are allowed at launch time.
+
+Typical usage:
+
+```js
+const response = await HB.fetchJson({
+  url: "http://localhost:9999/status",
+});
+
+if (!response.ok) {
+  HB.print("warn", `helper returned HTTP ${response.status}`);
+} else {
+  HB.debugLog(JSON.stringify(response.bodyJson));
+}
+```
+
+Failures such as timeouts, denied hosts, malformed URLs, oversize responses, and transport errors reject the promise with an `Error` whose `code` is a stable snake_case string such as `timeout` or `policy_denied`.
 
 ## Script Layout
 

@@ -1,33 +1,33 @@
-# Script Fetch Plan
+# Script Fetch Non-Blocking Plan
 
 ## Context And Boundaries
 
 ### Goal
 
-Add a narrow frontend-owned `HB.fetchJson` capability to the TUI scripting runtime so scripts can make small outbound JSON requests under explicit command-line policy, without turning the embedded Deno host into a general-purpose network runtime.
+Make `HB.fetchJson()` non-blocking for the TUI by moving only the HTTP request work off the synchronous script-host execution path, while keeping the refactor narrowly contained to the scripting crate.
 
 ### Why This Matters
 
-The current scripting host is intentionally tiny and explicitly promises no raw networking. That keeps the runtime predictable, but it blocks practical automation cases such as talking to a local helper process, polling a small JSON status endpoint, or posting script telemetry.
+`HB.fetchJson()` currently returns a Promise to scripts, but the Rust host still performs the request synchronously inside the same thread that drives the embedded JS runtime. That means the TUI can stall while a request is in flight.
 
-We should solve that with a host-curated API, not by dropping in generic Deno networking wholesale.
+We do not need a full script-runtime-worker architecture to fix that immediate problem. The narrower target is to background only the request execution, keep JS and V8 interactions on the script-host thread, and resolve or reject pending fetch Promises during the host's existing tick or event pumping.
 
 ### In Scope
 
-- Define a minimal `HB.fetchJson` surface for small JSON request-response workflows.
-- Keep network policy frontend-owned and injected by the TUI at startup.
-- Make user-tunable policy ephemeral and command-line driven rather than persisted in config files.
-- Default the allowed-host policy to `localhost:9999`.
-- Treat an empty allowed-host list as effectively disabled, without a separate enable flag.
-- Add a phased implementation path covering host API, CLI plumbing, tests, and docs.
+- Remove blocking HTTP request execution from the synchronous `HB.fetchJson()` host op path.
+- Keep Promise creation and Promise settlement owned by `holtburger-scripting`.
+- Run only the outbound HTTP request work in a small bounded background worker pool.
+- Drain completed request outcomes on the script-host thread before normal event dispatch and tick handling.
+- Preserve the existing fetch policy model, CLI surface, and script-facing API contract.
+- Add tests proving the TUI-facing script host no longer blocks while requests are pending.
 
 ### Out Of Scope
 
-- Exposing raw `fetch`, `Request`, `Response`, streams, cookies, or browser-compatible networking semantics.
-- Dynamic module imports, remote code loading, or general Deno permission plumbing.
-- Persistent scripting-network config files.
-- A full cross-client scripting policy shared with future frontends.
-- Arbitrary localhost or LAN access by default.
+- A dedicated out-of-process or cross-thread script runtime worker.
+- A full Tokio-backed async `deno_core` host redesign.
+- Reworking the TUI's event loop or frontend state architecture.
+- Changing the `HB.fetchJson()` request or response shape.
+- Expanding fetch capabilities beyond the current bounded JSON-only semantics.
 
 ## Ground Truth And Existing Patterns
 
@@ -36,211 +36,110 @@ We should solve that with a host-curated API, not by dropping in generic Deno ne
 - [AGENTS.md](AGENTS.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 - [apps/holtburger-cli/ARCHITECTURE.md](apps/holtburger-cli/ARCHITECTURE.md)
-- [apps/holtburger-cli/src/bin/tui.rs](apps/holtburger-cli/src/bin/tui.rs)
-- [apps/holtburger-cli/src/scripting.rs](apps/holtburger-cli/src/scripting.rs)
 - [apps/holtburger-cli/src/pages/game/domains/script.rs](apps/holtburger-cli/src/pages/game/domains/script.rs)
 - [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs)
+- [crates/holtburger-scripting/src/types.rs](crates/holtburger-scripting/src/types.rs)
 - [crates/holtburger-scripting/src/lib.rs](crates/holtburger-scripting/src/lib.rs)
 - [crates/holtburger-scripting/holtburger.d.ts](crates/holtburger-scripting/holtburger.d.ts)
 - [crates/holtburger-scripting/SCRIPTING_GUIDE.md](crates/holtburger-scripting/SCRIPTING_GUIDE.md)
-- [docs/plans/deno-core-scripting-architecture-plan.md](docs/plans/deno-core-scripting-architecture-plan.md)
 
 ### Relevant Current Architecture Facts
 
-- The TUI owns the scripting bridge and frontend projection state; it already wires `TuiScriptClientView` into `ScriptHost` in [apps/holtburger-cli/src/scripting.rs](apps/holtburger-cli/src/scripting.rs).
-- The scripting runtime is a frontend-owned embedded `deno_core` host, not a full Deno CLI environment, as documented in [crates/holtburger-scripting/SCRIPTING_GUIDE.md](crates/holtburger-scripting/SCRIPTING_GUIDE.md).
-- The public script surface is hand-authored as a frozen `HB` object in [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs), so adding one more curated method fits the existing pattern.
-- Script startup is already queued from CLI arguments in [apps/holtburger-cli/src/bin/tui.rs](apps/holtburger-cli/src/bin/tui.rs), which makes command-line-only script policy a natural fit.
-- The current guide explicitly says scripts do not have raw networking. That contract must be revised carefully if `HB.fetchJson` lands.
+- The TUI currently calls into the script host inline during game-state reduction in [apps/holtburger-cli/src/pages/game/domains/script.rs](apps/holtburger-cli/src/pages/game/domains/script.rs).
+- `ScriptHost` owns the embedded `deno_core` runtime and currently drives JS execution synchronously in [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs).
+- `HB.fetchJson()` already exists and already has a bounded policy model and stable error codes, but the current host op performs the request synchronously.
+- The TUI already provides a recurring tick event to running scripts, which gives the scripting crate a natural cadence for draining completed background fetches without adding new frontend responsibilities.
 
 ### Existing Patterns To Follow
 
-- Frontend-owned policy and integration seams belong in the CLI crate, per [apps/holtburger-cli/ARCHITECTURE.md](apps/holtburger-cli/ARCHITECTURE.md).
-- Script intents should continue compiling back into frontend actions rather than reaching across boundaries directly.
-- The scripting crate should stay focused on the host boundary types and runtime plumbing, not TUI-specific argument parsing or persisted app configuration.
+- Keep frontend policy ownership in the TUI crate and runtime mechanics in the scripting crate.
+- Preserve the frozen `HB` surface and avoid widening the public API for implementation convenience.
+- Keep V8 and JS object interactions on the script-host thread; background workers should handle only plain Rust data.
 
 ## Core Design Decisions
 
-### Decision 1: Use A Bespoke `HB.fetchJson`, Not Generic Deno Fetch
+### Decision 1: Limit The Fix To Request Execution
 
-The runtime should expose a narrow `HB.fetchJson` API tailored for small JSON request-response use cases. We should not install the full generic Deno fetch stack as the script contract.
-
-Consequences:
-
-- The host keeps a reviewable attack surface.
-- We avoid browser-compatibility scope creep.
-- The API can return plain JSON-friendly objects instead of re-creating `Response`, streaming semantics, or script-visible headers.
-- The runtime can inject fixed `Origin` and `User-Agent` values that identify Holtburger without exposing headers back to scripts.
-
-### Decision 2: Keep Network Policy Frontend-Owned
-
-Allowed-host policy should be supplied by the TUI at process startup and passed into the scripting bridge. The scripting crate should enforce the policy it is given, but it should not discover that policy from files or own a persistent config story.
+The bug to fix is request blocking, not general script latency isolation. The plan should background only the network request work and keep the rest of the script host architecture unchanged.
 
 Consequences:
 
-- Policy remains a frontend concern, which matches the current crate boundaries.
-- Other frontends can choose a different policy model later without forcing TUI assumptions into shared crates.
+- The change stays narrow and mostly confined to `holtburger-scripting`.
+- We avoid a larger worker-runtime refactor until there is a stronger need for one.
+- Promise continuations may settle on the next script-host pump rather than immediately when the socket completes.
 
-### Decision 3: Command-Line-Only User Tuning
+### Decision 2: Use A Small Bounded Worker Pool
 
-Any user-visible policy knobs introduced in v1 should be ephemeral CLI arguments. We should not add a persisted fetch config file.
-
-Consequences:
-
-- Launch-time behavior is explicit and reproducible.
-- There is no new config file lifecycle to document or migrate.
-- The implementation can reuse the existing Clap-based startup flow.
-
-### Decision 4: Default Allowlist Is `localhost:9999`
-
-The default allowed-host list should contain only `localhost:9999`. Users can override that with a CLI option. An empty list means no hosts are allowed, which is equivalent to disabling fetch without a second `enabled` switch.
+The background execution should use a small fixed-size pool rather than one ad hoc thread per request. That keeps request handling off the host thread without creating unbounded thread growth.
 
 Consequences:
 
-- The common local-helper workflow works out of the box.
-- We do not silently grant broad localhost, LAN, or internet access.
-- The host-policy model stays simple: host list only, no separate boolean gate.
+- We get the non-blocking behavior we want without making request bursts expensive to reason about.
+- The pool size and saturation policy remain explicit implementation choices instead of accidental behavior.
+- The host still owns the request IDs and Promise settlement path.
+
+### Decision 3: Keep Promise Resolution On The Script-Host Thread
+
+Background workers must not touch V8 handles or JS callbacks. They should return only plain Rust completion data keyed by an internal request ID.
+
+Consequences:
+
+- We keep V8 safety simple and explicit.
+- The host thread remains the only place that resolves or rejects JS Promises.
+- The implementation can use thread-safe queues without cross-thread JS ownership.
+
+### Decision 4: Reuse Existing Tick And Event Pumping
+
+Completed fetches should be drained before normal script event dispatch and before tick work is evaluated, using the host's existing execution cadence.
+
+Consequences:
+
+- No new CLI or TUI API is needed just to advance fetches.
+- The change can remain invisible to frontend code or require at most a tiny host-method call-site adjustment.
+- Promise continuation latency is bounded by the next host pump rather than true immediate wakeup.
+
+### Decision 5: Preserve The Existing Fetch Contract
+
+This refactor should not change allowed-host behavior, timeout semantics, max-response behavior, request methods, JSON rules, or script-visible error codes.
+
+Consequences:
+
+- The work is mechanical and architectural rather than product-facing.
+- Existing tests for fetch semantics should remain valid and simply shift to the new completion path.
 
 ## Proposed Runtime Topology
 
 ```text
-CLI args
-  -> parse script fetch policy
-  -> build frontend scripting bridge config
-  -> spawn ScriptHost with runtime-owned HTTP policy
-
 script code
   -> HB.fetchJson(request)
-  -> scripting host op validates request against injected policy
-  -> host performs bounded HTTP request
-  -> host resolves Promise with small response object
+  -> host allocates request id + JS promise capability
+  -> host validates request policy and spawns background request worker
+
+background worker
+  -> performs bounded HTTP request using plain Rust data only
+  -> pushes { request_id, outcome } into a thread-safe completion queue
+
+script host pump on next tick/event
+  -> drain completed outcomes
+  -> resolve/reject stored JS promises on the host thread
+  -> run pending JS microtasks / continuations
+  -> continue normal event dispatch
 ```
 
 Ownership split:
 
-- CLI crate owns argument parsing and launch-time policy defaults.
-- CLI scripting bridge owns translating parsed args into a scripting-host config object.
-- `holtburger-scripting` owns runtime boundary types, policy enforcement, JS op plumbing, and Promise resolution.
-
-## Proposed API Shape
-
-### Script-Facing API
-
-Keep v1 intentionally small:
-
-```ts
-type HbFetchRequest = {
-  url: string;
-  method?: "GET" | "POST";
-  bodyJson?: JsonValue;
-  timeoutMs?: number;
-};
-
-type HbFetchResponse = {
-  ok: boolean;
-  status: number;
-  bodyJson: JsonValue | null;
-};
-```
-
-Optional convenience in the same phase:
-
-```ts
-HB.fetchJson(request): Promise<{
-  ok: boolean;
-  status: number;
-  bodyJson: JsonValue | null;
-}>;
-```
-
-Deliberately exclude in v1:
-
-- cookies
-- script-visible headers
-- redirect customization beyond a safe default
-- binary upload and streaming bodies
-- arbitrary browser header semantics
-- request cancellation API beyond host-enforced timeout
-- request methods other than `GET` and `POST`
-
-Failure semantics:
-
-- HTTP responses resolve normally, even for non-2xx status codes.
-- Timeouts, DNS failures, connect failures, TLS failures, malformed URLs, and policy denials reject the Promise with a normal JS error.
-- The rejected error should carry a stable machine-readable code so scripts can distinguish timeout from other transport failures.
-
-### CLI Policy Surface
-
-Recommended initial CLI flags:
-
-- `--script-fetch-allow-host <HOST[:PORT]>`
-  - repeatable
-  - default value list: `localhost:9999`
-  - supplying the flag one or more times replaces the default list
-- `--script-fetch-timeout-ms <MILLISECONDS>`
-  - CLI arg with a sane default timeout
-- `--script-fetch-max-response-bytes <BYTES>`
-  - CLI arg with a sane default response cap
-
-Important rule: if a knob is user-configurable in v1, it should be CLI-only and not persisted.
-
-The host should always add fixed Holtburger-identifiable request headers internally, including `Origin` and `User-Agent`, but those headers should not be script-visible or script-configurable.
+- `holtburger-scripting` owns request IDs, pending Promise bookkeeping, worker spawning, completion queue draining, and JS Promise settlement.
+- The TUI continues to own fetch policy inputs, but should not need behavior changes for this refactor.
 
 ## Phased Implementation
 
-### Phase 1: Define The Shared Host Boundary
+### Phase 1: Add Internal Fetch Request Tracking
 
 #### Deliverables
 
-- Add script-facing request/response types to the scripting crate.
-- Add a small host-policy type for allowed hosts and bounded request limits.
-- Extend the frozen `HB` API with `fetchJson`.
-- Document the Promise-based behavior and error semantics in the type definitions.
-
-#### Files
-
-- [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs)
-- [crates/holtburger-scripting/src/lib.rs](crates/holtburger-scripting/src/lib.rs)
-- [crates/holtburger-scripting/holtburger.d.ts](crates/holtburger-scripting/holtburger.d.ts)
-
-#### Acceptance Criteria
-
-- The public scripting API shape is explicit and intentionally narrower than raw fetch.
-- The scripting crate can represent runtime host policy without depending on the CLI crate.
-- The JS API returns Promises and fits the current event-loop-driven host model.
-
-### Phase 2: Wire CLI Arguments Into Frontend-Owned Policy
-
-#### Deliverables
-
-- Add new Clap args in the TUI entrypoint.
-- Parse the effective allowed-host list using `localhost:9999` as the default.
-- Treat an explicit empty effective list as deny-all.
-- Add CLI args for timeout and max-response with sane defaults.
-- Thread the policy into the CLI scripting bridge and into `ScriptHost::spawn`.
-
-#### Files
-
-- [apps/holtburger-cli/src/bin/tui.rs](apps/holtburger-cli/src/bin/tui.rs)
-- [apps/holtburger-cli/src/scripting.rs](apps/holtburger-cli/src/scripting.rs)
-- [apps/holtburger-cli/src/pages/game/domains/script.rs](apps/holtburger-cli/src/pages/game/domains/script.rs) if startup plumbing changes require it
-
-#### Acceptance Criteria
-
-- Launch-time script-fetch policy is entirely driven by CLI args.
-- No new persistent config file is introduced.
-- The default policy allows only `localhost:9999`.
-- Overriding the host list from the CLI is unambiguous and test-covered.
-- Timeout and max-response limits are user-tunable from the CLI and still have sane defaults.
-
-### Phase 3: Implement Bounded Request Execution
-
-#### Deliverables
-
-- Add an async host op that validates request method, URL scheme, host, and port.
-- Enforce the injected allowed-host list before any outbound request is sent.
-- Apply timeout and response-size limits.
-- Return small structured results for JSON responses and normal JS errors for policy, timeout, or transport failures.
+- Add host-internal pending fetch bookkeeping keyed by request ID.
+- Represent completed fetch results as plain Rust data that can cross thread boundaries safely.
+- Separate synchronous request validation from actual request execution.
 
 #### Files
 
@@ -248,107 +147,134 @@ The host should always add fixed Holtburger-identifiable request headers interna
 
 #### Acceptance Criteria
 
-- Requests to unapproved hosts are rejected.
-- The default path can talk to `localhost:9999` but not arbitrary localhost ports.
-- `GET` and `POST` are supported without exposing a broader network runtime.
-- Requests resolve through the existing Deno event loop without hanging the host.
+- The host can allocate and track multiple outstanding fetch requests at once.
+- Pending fetch state does not store frontend borrows or non-thread-safe JS state in worker-owned data.
+- Validation failures still reject immediately with the current documented error codes.
 
-### Phase 4: Tests, Docs, And Guardrails
+### Phase 2: Move HTTP Execution To Background Workers
 
 #### Deliverables
 
-- Add unit tests for CLI parsing, effective host-list selection, and host-policy validation.
-- Add scripting-host tests covering allowed, denied, timeout, and malformed-request cases.
-- Update scripting docs to replace the current blanket “no networking” statement with the new host-curated `HB.fetchJson` contract.
-- Add usage examples for the local-helper workflow.
+- Submit accepted requests into a small bounded worker pool.
+- Run the bounded HTTP request logic off the script-host thread.
+- Push completion outcomes into a thread-safe queue owned by the host.
 
 #### Files
 
-- [apps/holtburger-cli/src/bin/tui.rs](apps/holtburger-cli/src/bin/tui.rs)
 - [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs)
+
+#### Acceptance Criteria
+
+- Issuing `HB.fetchJson()` does not block the thread that is currently driving the script host.
+- The TUI remains responsive while a slow request is in flight.
+- Request timeouts, transport failures, and oversized responses are preserved in completion outcomes.
+
+### Phase 3: Settle Promises During Existing Host Pumps
+
+#### Deliverables
+
+- Add a host-internal drain step that resolves or rejects completed fetch Promises before normal event dispatch.
+- Ensure tick and event handling both flush pending completions and run JS continuations.
+- Drop stale completions safely when a script host shuts down before the request finishes.
+
+#### Files
+
+- [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs)
+- [apps/holtburger-cli/src/pages/game/domains/script.rs](apps/holtburger-cli/src/pages/game/domains/script.rs) only if an explicit host pump call-site adjustment is proven necessary
+
+#### Acceptance Criteria
+
+- Completed fetches settle their Promises on the script-host thread without blocking the TUI while the request is in flight.
+- Promise continuations run on the next host pump and can emit normal script intents.
+- No V8 interaction occurs on background threads.
+
+### Phase 4: Tighten Tests And Docs Around Non-Blocking Semantics
+
+#### Deliverables
+
+- Add host tests for multiple concurrent fetches, deferred completion, and stale completion drop on shutdown.
+- Add regression tests proving a fetch can remain pending while the host continues ticking.
+- Update docs to describe that `HB.fetchJson()` remains Promise-based and no longer blocks the TUI while the request runs.
+
+#### Files
+
+- [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs)
+- [crates/holtburger-scripting/holtburger.d.ts](crates/holtburger-scripting/holtburger.d.ts) if any implementation-facing comments need clarification
 - [crates/holtburger-scripting/SCRIPTING_GUIDE.md](crates/holtburger-scripting/SCRIPTING_GUIDE.md)
-- [README.md](README.md) if startup documentation should mention the new CLI flags
 
 #### Acceptance Criteria
 
-- CLI parsing tests prove default and override behavior.
-- Host tests prove deny-by-policy behavior and bounded execution.
-- User-facing docs no longer contradict the runtime.
+- Tests cover success, timeout, denial, concurrent in-flight requests, and post-shutdown completions.
+- Docs no longer imply that a pending fetch can stall the client.
 
 ## Risks And Mitigations
 
-### Risk: Localhost Default Still Expands The Sandbox
+### Risk: Promise Settlement Requires V8 Work On The Correct Thread
 
-Even a narrow `localhost:9999` default is a real sandbox expansion.
-
-Mitigation:
-
-- Keep the default as exact host plus port, not all localhost.
-- Keep the API narrow.
-- Reject every request outside the configured allowlist.
-
-### Risk: Async Host Work Becomes Hard To Reason About
-
-Promise-based HTTP must still cooperate with the existing script-host lifecycle.
+If background workers try to touch JS state directly, the runtime becomes unsafe fast.
 
 Mitigation:
 
-- Reuse the current event-loop pumping model in the scripting host.
-- Keep request semantics strictly request-response.
-- Avoid streaming and long-lived sockets.
+- Restrict background workers to plain Rust request execution only.
+- Keep Promise resolve and reject handling entirely inside host-thread drain logic.
 
-### Risk: Policy Logic Leaks TUI Concerns Into Shared Crates
+### Risk: Completed Requests Do Not Run Until The Next Tick Or Event
 
-If the scripting crate starts parsing CLI strings or owning app-specific defaults, crate boundaries get muddy.
-
-Mitigation:
-
-- Parse CLI args in the TUI.
-- Pass a typed policy object into the scripting host.
-- Keep shared crate logic focused on enforcement, not argument UX.
-
-### Risk: Header And Redirect Scope Creep
-
-“Just one more header” or “just one more fetch option” can quickly turn this into raw fetch.
+This design removes blocking, but completion is still pump-driven.
 
 Mitigation:
 
-- Freeze a small v1 surface.
-- Explicitly list excluded features in docs and tests.
-- Add new semantics only when a concrete use case proves they are needed.
+- Explicitly document that settlement latency is bounded by the next host pump.
+- Drain completions before normal tick and event dispatch so they are processed at the earliest natural point.
+
+### Risk: Unbounded Background Request Spawning
+
+Scripts could issue many requests in a burst and create resource pressure.
+
+Mitigation:
+
+- Keep the worker pool bounded so request bursts do not create unbounded thread growth.
+- Keep all current host allowlist and timeout limits intact.
+
+### Risk: Script Shutdown Leaves Orphaned Completions
+
+Requests may finish after the script host has already been stopped.
+
+Mitigation:
+
+- Track host-local request IDs and pending state.
+- Ignore completions whose request ID is no longer known.
 
 ## Definition Of Done
 
-- `HB.fetchJson` exists as a documented Promise-based scripting API.
-- The TUI exposes command-line-only launch policy for allowed hosts, with `localhost:9999` as the default.
-- An empty effective allowlist denies all fetches without a second enable flag.
-- Requests are bounded by host policy and execution limits.
-- Timeouts and other transport failures reject with a documented JS error shape and stable error code.
-- Tests cover CLI parsing, policy enforcement, and basic request behavior.
-- Docs accurately describe the new network contract and local-helper workflow.
+- `HB.fetchJson()` no longer blocks the TUI while the HTTP request is in flight.
+- The fix is contained to `holtburger-scripting`, except for at most a minimal host pump call-site adjustment if proven necessary.
+- Promise settlement happens only on the script-host thread.
+- Existing fetch policy and error semantics remain unchanged.
+- Tests cover concurrent pending requests, delayed completion, and shutdown cleanup.
 - `cargo test -p holtburger-scripting` and relevant CLI tests pass.
 
 ## Living Worksheet
 
 ### Task Checklist
 
-- [ ] Phase 1: define scripting-host request, response, and policy types
-- [ ] Phase 1: extend the JS `HB.fetchJson` surface and TypeScript declarations
-- [ ] Phase 2: add TUI CLI args for script-fetch host policy
-- [ ] Phase 2: thread effective policy through the CLI scripting bridge
-- [ ] Phase 3: implement bounded async request execution
-- [ ] Phase 3: enforce exact host allowlist semantics
-- [ ] Phase 4: add CLI parsing and host enforcement tests
-- [ ] Phase 4: update scripting docs and startup docs
+- [ ] Phase 1: add pending fetch request bookkeeping in the script host
+- [ ] Phase 1: define plain Rust completion payloads keyed by request ID
+- [ ] Phase 2: move bounded HTTP execution into background workers
+- [ ] Phase 2: queue completed request outcomes back to the host
+- [ ] Phase 3: drain completions before normal host tick and event dispatch
+- [ ] Phase 3: settle or reject JS Promises on the host thread only
+- [ ] Phase 3: ignore stale completions after script shutdown
+- [ ] Phase 4: add concurrent and deferred-completion tests
+- [ ] Phase 4: update docs to describe non-blocking request execution
 
 ### Decisions Log
 
-- Command-line-only policy: user-visible script-fetch tuning should be ephemeral and supplied at startup, not persisted.
-- Default allowed-host list: `localhost:9999`.
-- No separate enable flag: an empty effective allowlist acts as deny-all.
-- Favor a bespoke `HB.fetchJson` over enabling generic Deno fetch as the public script contract.
-- The runtime injects Holtburger-identifiable `Origin` and `User-Agent` headers internally; scripts do not set or observe headers.
-- Timeout and max-response limits are exposed as CLI args with sane defaults.
+- This plan targets only request non-blocking behavior, not general script-runtime isolation.
+- The intended containment boundary is the scripting crate, with no planned CLI product-surface changes.
+- Background workers handle network I/O only; V8 interaction stays on the script-host thread.
+- Promise completion is pump-driven and should settle on the next tick or event rather than immediately on socket readiness.
+- The background execution model uses a small fixed-size worker pool rather than one thread per request.
 
 ### Verification Log
 
@@ -356,4 +282,4 @@ Mitigation:
 
 ### Open Questions
 
-- None.
+- What exact pool size and saturation behavior should v1 use?

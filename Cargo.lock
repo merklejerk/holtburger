@@ -1533,6 +1533,7 @@ dependencies = [
  "holtburger-core",
  "holtburger-protocol",
  "log",
+ "reqwest",
  "serde",
 ]
 

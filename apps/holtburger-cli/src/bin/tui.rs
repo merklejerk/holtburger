@@ -18,6 +18,7 @@ use holtburger_core::{
 };
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::errors::CharacterError;
+use holtburger_scripting::{ScriptFetchAllowedHost, ScriptFetchPolicy, ScriptHostConfig};
 use holtburger_world::BasicSpatialPhysics;
 use holtburger_world::RuntimeBodyResetCause;
 use holtburger_world::spell::SpellCatalog;
@@ -31,6 +32,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 const PRE_WORLD_RETRY_DELAY: Duration = Duration::from_secs(3);
+const DEFAULT_SCRIPT_FETCH_ALLOWED_HOST: &str = "localhost:9999";
 
 struct BootstrappedClient {
     server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
@@ -214,6 +216,29 @@ struct Args {
         help = "Exit the TUI immediately when the client disconnects"
     )]
     quit_on_disconnect: bool,
+    #[arg(
+        long = "script-fetch-allow-host",
+        value_name = "HOST:PORT",
+        value_parser = parse_script_fetch_allowed_host,
+        help = "Allow HB.fetchJson to call an exact host and port; repeat to allow multiple hosts"
+    )]
+    script_fetch_allow_host: Vec<ScriptFetchAllowedHost>,
+    #[arg(
+        long = "script-fetch-timeout-ms",
+        value_name = "MILLISECONDS",
+        default_value_t = ScriptFetchPolicy::DEFAULT_TIMEOUT_MS,
+        value_parser = parse_script_fetch_timeout_ms,
+        help = "Default timeout for HB.fetchJson requests in milliseconds"
+    )]
+    script_fetch_timeout_ms: u64,
+    #[arg(
+        long = "script-fetch-max-response-bytes",
+        value_name = "BYTES",
+        default_value_t = ScriptFetchPolicy::DEFAULT_MAX_RESPONSE_BYTES,
+        value_parser = parse_script_fetch_max_response_bytes,
+        help = "Maximum HB.fetchJson response body size in bytes"
+    )]
+    script_fetch_max_response_bytes: usize,
     #[arg(long, action = clap::ArgAction::Help)]
     help: Option<bool>,
     #[arg(long, action = clap::ArgAction::Version)]
@@ -266,6 +291,69 @@ fn format_boot_account_message(reason: &str) -> String {
 
 fn clear_captured_logs(local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>) {
     while local_log_rx.try_recv().is_ok() {}
+}
+
+fn parse_script_fetch_allowed_host(raw: &str) -> std::result::Result<ScriptFetchAllowedHost, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("script fetch host cannot be empty".to_string());
+    }
+
+    let (host, port) = trimmed
+        .rsplit_once(':')
+        .ok_or_else(|| "script fetch host must be in HOST:PORT form".to_string())?;
+    if host.trim().is_empty() {
+        return Err("script fetch host must include a hostname".to_string());
+    }
+
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| format!("invalid script fetch port in {trimmed}"))?;
+
+    Ok(ScriptFetchAllowedHost::new(host, port))
+}
+
+fn parse_script_fetch_timeout_ms(raw: &str) -> std::result::Result<u64, String> {
+    let value = raw
+        .parse::<u64>()
+        .map_err(|_| format!("invalid script fetch timeout: {raw}"))?;
+    if value == 0 {
+        return Err("script fetch timeout must be greater than zero".to_string());
+    }
+
+    Ok(value)
+}
+
+fn parse_script_fetch_max_response_bytes(raw: &str) -> std::result::Result<usize, String> {
+    let value = raw
+        .parse::<usize>()
+        .map_err(|_| format!("invalid script fetch max response size: {raw}"))?;
+    if value == 0 {
+        return Err("script fetch max response size must be greater than zero".to_string());
+    }
+
+    Ok(value)
+}
+
+fn default_script_fetch_allowed_hosts() -> Vec<ScriptFetchAllowedHost> {
+    vec![parse_script_fetch_allowed_host(DEFAULT_SCRIPT_FETCH_ALLOWED_HOST)
+        .expect("default script fetch host should parse")]
+}
+
+fn script_host_config_from_args(args: &Args) -> ScriptHostConfig {
+    let allowed_hosts = if args.script_fetch_allow_host.is_empty() {
+        default_script_fetch_allowed_hosts()
+    } else {
+        args.script_fetch_allow_host.clone()
+    };
+
+    ScriptHostConfig {
+        fetch_policy: ScriptFetchPolicy {
+            allowed_hosts,
+            timeout_ms: args.script_fetch_timeout_ms,
+            max_response_bytes: args.script_fetch_max_response_bytes,
+        },
+    }
 }
 
 fn queued_script_startup_from_args(args: &Args) -> Option<QueuedScriptStartup> {
@@ -694,6 +782,7 @@ async fn run() -> Result<()> {
         disconnect_reason: None,
         pending_exit_message: None,
         queued_script_startup: queued_script_startup_from_args(&args),
+        script_host_config: script_host_config_from_args(&args),
     };
 
     if args.verbose > 0 {
@@ -990,6 +1079,57 @@ mod tests {
         let queued = queued_script_startup_from_args(&args).expect("queued startup should exist");
         assert_eq!(queued.basename, "fighter");
         assert_eq!(queued.args, "pick up loot");
+    }
+
+    #[test]
+    fn script_fetch_policy_defaults_to_localhost_9999() {
+        let args = Args::try_parse_from(["tui", "--account", "acct"])
+            .expect("default script fetch args should parse");
+
+        let config = script_host_config_from_args(&args);
+
+        assert_eq!(
+            config.fetch_policy.allowed_hosts,
+            vec![ScriptFetchAllowedHost::new("localhost", 9999)]
+        );
+        assert_eq!(
+            config.fetch_policy.timeout_ms,
+            ScriptFetchPolicy::DEFAULT_TIMEOUT_MS
+        );
+        assert_eq!(
+            config.fetch_policy.max_response_bytes,
+            ScriptFetchPolicy::DEFAULT_MAX_RESPONSE_BYTES
+        );
+    }
+
+    #[test]
+    fn script_fetch_policy_overrides_default_hosts_and_limits() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--script-fetch-allow-host",
+            "localhost:8080",
+            "--script-fetch-allow-host",
+            "example.com:443",
+            "--script-fetch-timeout-ms",
+            "2500",
+            "--script-fetch-max-response-bytes",
+            "8192",
+        ])
+        .expect("script fetch override args should parse");
+
+        let config = script_host_config_from_args(&args);
+
+        assert_eq!(
+            config.fetch_policy.allowed_hosts,
+            vec![
+                ScriptFetchAllowedHost::new("localhost", 8080),
+                ScriptFetchAllowedHost::new("example.com", 443),
+            ]
+        );
+        assert_eq!(config.fetch_policy.timeout_ms, 2500);
+        assert_eq!(config.fetch_policy.max_response_bytes, 8192);
     }
 
     #[test]

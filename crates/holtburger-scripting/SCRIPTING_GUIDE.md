@@ -7,13 +7,15 @@ The runtime is intentionally small and opinionated:
 - Scripts are plain JavaScript files loaded by basename.
 - The host exposes a frozen global object named `HB`, with `Holtburger` as an alias.
 - Scripts receive structured events and can emit typed intents back to the frontend.
+- Scripts can make small JSON-only HTTP requests through `HB.postJson()` when the frontend allows it.
+- HTTP access is hard-gated by the TUI's launch-time allowlist. If you do not explicitly allow a host, the request is rejected.
 - Script-specific config is local-only; script data can be local or bundled.
 
 For platform-specific install guidance and the writable script directory defaults, see the root [README](../../README.md#installation-and-first-run).
 
 ## Embedded Runtime Limits
 
-The scripting host is an embedded Deno Core runtime, NOT the full Deno CLI or a general-purpose Node environment. You will not have access to raw filesystem ops, networking, or node libraries. The exported `HB` API is all you get.
+The scripting host is an embedded Deno Core runtime, NOT the full Deno CLI or a general-purpose Node environment. You will not have access to raw filesystem ops, generic networking, or node libraries. The exported `HB` API is all you get.
 
 Practical constraints to keep in mind:
 
@@ -21,6 +23,7 @@ Practical constraints to keep in mind:
 - There is no first-class TypeScript execution path at runtime. TypeScript needs to be compiled before the script is run.
 - You cannot `import()` or `require()` dependencies. If you want external dependencies, bundle them into the final JavaScript file.
 - The host injects `HB`/`Holtburger` and structured events, but it does not provide a browser DOM or UI framework runtime.
+- The only network helper is `HB.postJson()`, and the TUI may deny requests that are outside its launch-time allowlist.
 - Long synchronous work will block the script host. Keep heavy work out of the hot path.
 
 The safest assumption is that a Holtburger script should be a small, deterministic control loop that reacts to client state and emits a few focused actions.
@@ -61,6 +64,47 @@ HB.onEvent((event) => {
 ```
 
 The repo includes a larger example in [scripts/fighter.js](../../scripts/fighter.js).
+
+## HTTP Requests
+
+`HB.postJson()` is the only network helper in the embedded runtime. It is intentionally narrow:
+
+- Only `POST` is supported.
+- The request and response bodies are JSON-only.
+- Scripts cannot set custom headers.
+- The host always sends Holtburger-identifying `Origin` and `User-Agent` headers.
+- The TUI decides which exact host and port pairs are allowed at launch time, and its command-line args also set the request timeout and maximum response size.
+- The `--script-fetch-allow-host` flag accepts either `HOST:PORT` or `http(s)://HOST[:PORT]` and normalizes both forms to a host plus port allowlist entry.
+- By default, the only allowed host is `localhost:9999`.
+- Requests to any host other than the launch-time allowlist are denied before the HTTP request is sent.
+- The HTTP work runs off the main script-host thread, and the Promise settles on the next normal host pump.
+
+Typical usage with error handling:
+
+```js
+(async () => {
+  try {
+    const response = await HB.postJson({
+      url: "http://localhost:9999/status",
+    });
+
+    if (!response.ok) {
+      HB.print("warn", `helper returned HTTP ${response.status}`);
+      return;
+    }
+
+    HB.debugLog(JSON.stringify(response.bodyJson));
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : "unknown";
+    const message = error instanceof Error ? error.message : String(error);
+    HB.print("error", `fetch failed (${code}): ${message}`);
+  }
+})();
+```
+
+Failures such as timeouts, denied hosts, malformed URLs, oversize responses, and transport errors reject the promise with an `Error` whose `code` is a stable snake_case string such as `timeout` or `policy_denied`.
 
 ## Script Layout
 
@@ -110,6 +154,9 @@ Useful patterns:
 - Keep the runtime-facing entrypoint small and let helper modules disappear into the bundle.
 
 There is an experimental Holtburger API typedef file at [holtburger.d.ts](holtburger.d.ts).
+
+> [!TIP]
+> Even if you aren't using TS, the typedef file can serve as a complete reference for the API shapes.
 
 ## Bundler Suggestions
 

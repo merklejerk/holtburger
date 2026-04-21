@@ -45,6 +45,7 @@ impl AppState {
                 game.chat.chat_log = self.chat_log.take();
                 game.data.spell_catalog = self.spell_catalog.clone();
                 game.data.skill_table = self.skill_table.clone();
+                game.script.host_config = self.script_host_config.clone();
                 let queued_script_startup = self.queued_script_startup.take();
                 self.page = Page::Game(Box::new(game));
                 let mut result = UpdateResult::redraw();
@@ -76,6 +77,7 @@ mod tests {
     use holtburger_common::Guid;
     use holtburger_core::ClientState;
     use holtburger_core::client::types::ClientCommand;
+    use holtburger_scripting::ScriptHostConfig;
     use std::fs::File;
     use std::sync::Mutex;
 
@@ -110,6 +112,7 @@ mod tests {
             disconnect_reason: None,
             pending_exit_message: None,
             queued_script_startup: None,
+            script_host_config: ScriptHostConfig::default(),
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -153,6 +156,7 @@ mod tests {
             disconnect_reason: None,
             pending_exit_message: None,
             queued_script_startup: None,
+            script_host_config: ScriptHostConfig::default(),
         };
 
         app_state.drain_actions(&mut UpdateResult {
@@ -198,6 +202,7 @@ mod tests {
             disconnect_reason: None,
             pending_exit_message: None,
             queued_script_startup: None,
+            script_host_config: ScriptHostConfig::default(),
         };
 
         let result = app_state.reduce_app_action(AppAction::SendCommands {
@@ -234,6 +239,7 @@ mod tests {
             disconnect_reason: None,
             pending_exit_message: None,
             queued_script_startup: None,
+            script_host_config: ScriptHostConfig::default(),
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {
@@ -272,6 +278,7 @@ mod tests {
                 "fighter",
                 "pick up loot",
             )),
+            script_host_config: ScriptHostConfig::default(),
         };
 
         let _ = app_state.reduce_app_action(AppAction::TransitionToGame {

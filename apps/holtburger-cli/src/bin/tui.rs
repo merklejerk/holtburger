@@ -220,7 +220,7 @@ struct Args {
         long = "script-fetch-allow-host",
         value_name = "HOST:PORT|http(s)://HOST[:PORT]",
         value_parser = parse_script_fetch_allowed_host,
-        help = "Allow HB.fetchJson to call an exact host and port; repeat to allow multiple hosts. Accepts HOST:PORT or http(s)://HOST[:PORT]."
+        help = "Allow HB.postJson to call an exact host and port; repeat to allow multiple hosts. Accepts HOST:PORT or http(s)://HOST[:PORT]."
     )]
     script_fetch_allow_host: Vec<ScriptFetchAllowedHost>,
     #[arg(
@@ -228,7 +228,7 @@ struct Args {
         value_name = "MILLISECONDS",
         default_value_t = ScriptFetchPolicy::DEFAULT_TIMEOUT_MS,
         value_parser = parse_script_fetch_timeout_ms,
-        help = "Default timeout for HB.fetchJson requests in milliseconds"
+        help = "Default timeout for HB.postJson requests in milliseconds"
     )]
     script_fetch_timeout_ms: u64,
     #[arg(
@@ -236,7 +236,7 @@ struct Args {
         value_name = "BYTES",
         default_value_t = ScriptFetchPolicy::DEFAULT_MAX_RESPONSE_BYTES,
         value_parser = parse_script_fetch_max_response_bytes,
-        help = "Maximum HB.fetchJson response body size in bytes"
+        help = "Maximum HB.postJson response body size in bytes"
     )]
     script_fetch_max_response_bytes: usize,
     #[arg(long, action = clap::ArgAction::Help)]

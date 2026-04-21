@@ -5,8 +5,7 @@ interface JsonObject {
 interface JsonArray extends Array<any> {}
 type JsonValue = JsonPrimitive | JsonObject | JsonArray;
 
-type ScriptFetchMethod = "GET" | "POST";
-type ScriptFetchErrorCode =
+type ScriptPostErrorCode =
   | "invalid_request"
   | "policy_denied"
   | "timeout"
@@ -14,21 +13,20 @@ type ScriptFetchErrorCode =
   | "response_too_large"
   | "invalid_json_response";
 
-interface ScriptFetchRequest {
+interface ScriptPostRequest {
   url: string;
-  method?: ScriptFetchMethod;
   bodyJson?: JsonValue;
   timeoutMs?: number;
 }
 
-interface ScriptFetchResponse {
+interface ScriptPostResponse {
   ok: boolean;
   status: number;
   bodyJson: JsonValue | null;
 }
 
-interface ScriptFetchError extends Error {
-  code: ScriptFetchErrorCode;
+interface ScriptPostError extends Error {
+  code: ScriptPostErrorCode;
 }
 
 type Guid = number;
@@ -790,7 +788,7 @@ interface HoltburgerApi {
 
   selfEntity(): ScriptSelfView | null;
   characterSheet(): ScriptCharacterSheetView | null;
-  fetchJson(request: ScriptFetchRequest): Promise<ScriptFetchResponse>;
+  postJson(request: ScriptPostRequest): Promise<ScriptPostResponse>;
   currentInteraction(): ScriptClientInteraction | null;
   combatInfo(): ScriptCombatInfo;
   currentTradeInfo(): ScriptTradeInfo | null;

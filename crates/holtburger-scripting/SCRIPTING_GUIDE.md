@@ -7,7 +7,7 @@ The runtime is intentionally small and opinionated:
 - Scripts are plain JavaScript files loaded by basename.
 - The host exposes a frozen global object named `HB`, with `Holtburger` as an alias.
 - Scripts receive structured events and can emit typed intents back to the frontend.
-- Scripts can make small JSON-only HTTP requests through `HB.fetchJson()` when the frontend allows it.
+- Scripts can make small JSON-only HTTP requests through `HB.postJson()` when the frontend allows it.
 - HTTP access is hard-gated by the TUI's launch-time allowlist. If you do not explicitly allow a host, the request is rejected.
 - Script-specific config is local-only; script data can be local or bundled.
 
@@ -23,7 +23,7 @@ Practical constraints to keep in mind:
 - There is no first-class TypeScript execution path at runtime. TypeScript needs to be compiled before the script is run.
 - You cannot `import()` or `require()` dependencies. If you want external dependencies, bundle them into the final JavaScript file.
 - The host injects `HB`/`Holtburger` and structured events, but it does not provide a browser DOM or UI framework runtime.
-- The only network helper is `HB.fetchJson()`, and the TUI may deny requests that are outside its launch-time allowlist.
+- The only network helper is `HB.postJson()`, and the TUI may deny requests that are outside its launch-time allowlist.
 - Long synchronous work will block the script host. Keep heavy work out of the hot path.
 
 The safest assumption is that a Holtburger script should be a small, deterministic control loop that reacts to client state and emits a few focused actions.
@@ -67,10 +67,10 @@ The repo includes a larger example in [scripts/fighter.js](../../scripts/fighter
 
 ## HTTP Requests
 
-`HB.fetchJson()` is the only network helper in the embedded runtime. It is intentionally narrow:
+`HB.postJson()` is the only network helper in the embedded runtime. It is intentionally narrow:
 
-- Only `GET` and `POST` are supported.
-- Request and response bodies are JSON-only.
+- Only `POST` is supported.
+- The request and response bodies are JSON-only.
 - Scripts cannot set custom headers.
 - The host always sends Holtburger-identifying `Origin` and `User-Agent` headers.
 - The TUI decides which exact host and port pairs are allowed at launch time, and its command-line args also set the request timeout and maximum response size.
@@ -84,7 +84,7 @@ Typical usage with error handling:
 ```js
 (async () => {
   try {
-    const response = await HB.fetchJson({
+    const response = await HB.postJson({
       url: "http://localhost:9999/status",
     });
 

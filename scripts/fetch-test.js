@@ -4,26 +4,30 @@ HB.onEvent((event) => {
 	}
 
 	(async () => {
-		HB.print("info", "starting fetchJson smoke test");
+		HB.print("info", "starting postJson smoke test");
 
-		const [getResult, postResult] = await Promise.allSettled([
-			HB.fetchJson({
-				url: "https://httpbin.org/get?source=holtburger",
-			}),
-			HB.fetchJson({
+		const [firstResult, secondResult] = await Promise.allSettled([
+			HB.postJson({
 				url: "https://httpbin.org/post",
-				method: "POST",
 				bodyJson: {
-					kind: "fetchJson-smoke-test",
+					kind: "postJson-smoke-test",
 					source: "holtburger",
 					values: [1, 2, 3],
+				},
+			}),
+			HB.postJson({
+				url: "http://httpbin.org/anything",
+				bodyJson: {
+					kind: "postJson-smoke-test",
+					source: "holtburger",
+					values: [4, 5, 6],
 				},
 			}),
 		]);
 
 		for (const [label, result] of [
-			["GET", getResult],
-			["POST", postResult],
+			["first", firstResult],
+			["second", secondResult],
 		]) {
 			if (result.status === "fulfilled") {
 				HB.print(
@@ -41,12 +45,12 @@ HB.onEvent((event) => {
 			HB.print("error", `${label} failed (${code}): ${message}`);
 		}
 
-		HB.print("info", "fetchJson smoke test complete");
+		HB.print("info", "postJson smoke test complete");
 	})().catch((error) => {
 		const code = error && typeof error === "object" && "code" in error
 			? String(error.code)
 			: "unknown";
 		const message = error instanceof Error ? error.message : String(error);
-		HB.print("error", `fetchJson smoke test failed (${code}): ${message}`);
+		HB.print("error", `postJson smoke test failed (${code}): ${message}`);
 	});
 });

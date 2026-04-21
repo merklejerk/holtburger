@@ -20,10 +20,10 @@ use crate::{
     ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
     ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
     ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptFetchPolicy,
-    ScriptHostConfig, ScriptIntent, ScriptJsonValue, ScriptMessageStyle, ScriptPartyView,
-    ScriptPostError, ScriptPostErrorCode, ScriptPostRequest, ScriptPostResponse,
-    ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptFetchPolicy, ScriptHostConfig, ScriptIntent,
+    ScriptJsonValue, ScriptMessageStyle, ScriptPartyView, ScriptPositionRef, ScriptPostError,
+    ScriptPostErrorCode, ScriptPostRequest, ScriptPostResponse, ScriptSelfView, ScriptSource,
+    ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
@@ -1805,10 +1805,11 @@ fn execute_prepared_post_request(prepared: PreparedFetchRequest) -> ScriptFetchO
         }
     };
 
-    let mut request_builder = client.post(url)
-    .header(reqwest::header::ORIGIN, SCRIPT_FETCH_ORIGIN)
-    .header(reqwest::header::USER_AGENT, SCRIPT_FETCH_USER_AGENT)
-    .header(reqwest::header::ACCEPT, "application/json");
+    let mut request_builder = client
+        .post(url)
+        .header(reqwest::header::ORIGIN, SCRIPT_FETCH_ORIGIN)
+        .header(reqwest::header::USER_AGENT, SCRIPT_FETCH_USER_AGENT)
+        .header(reqwest::header::ACCEPT, "application/json");
 
     let body_json = request.body_json.unwrap_or(Value::Null);
     request_builder = request_builder
@@ -2370,11 +2371,7 @@ mod tests {
         (port, handle)
     }
 
-    fn spawn_post_test_host(
-        source: ScriptSource,
-        port: u16,
-        timeout_ms: u64,
-    ) -> super::ScriptHost {
+    fn spawn_post_test_host(source: ScriptSource, port: u16, timeout_ms: u64) -> super::ScriptHost {
         super::ScriptHost::spawn_with_config(
             source,
             &TestView,

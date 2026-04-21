@@ -38,10 +38,9 @@ pub struct ClientRuntime {
     active_confirmation: Option<ActiveCharacterConfirmation>,
     active_busy_operation: Option<PendingBusyOperation>,
     state: ClientState,
-    wire_event_tx: broadcast::Sender<WireEvent>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
-    pub message_dump_dir: Option<std::path::PathBuf>,
+    message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
     movement: MovementSystem,
     simulation: ClientSimulationSystem,
@@ -95,6 +94,22 @@ impl ClientRuntime {
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::BusyOperationFinished { operation, result });
+    }
+
+    pub(super) fn emit_action_result(
+        &self,
+        source: ActionResultSource,
+        reason: ActionResultReason,
+    ) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::ActionResult { source, reason });
+    }
+
+    pub(super) fn emit_log_message(&self, message: String) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::LogMessage(message));
     }
 
     fn emit_self_movement_kinematics_updated(&self) {
@@ -202,10 +217,6 @@ impl ClientRuntime {
         self.emit_runtime_body_snapshot();
     }
 
-    pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
-        self.wire_event_tx.subscribe()
-    }
-
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
         self.client_view_event_tx.subscribe()
     }
@@ -215,181 +226,11 @@ impl ClientRuntime {
     }
 
     fn send_status_event(&self) {
-        self.emit_wire_event(WireEvent::StatusUpdate {
-            state: self.state.clone(),
-        });
-    }
-
-    pub fn emit_wire_event(&self, event: WireEvent) {
-        // New ClientView stream projection (normalization)
-        match &event {
-            WireEvent::StatusUpdate { state } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::StatusUpdate {
-                        state: state.clone(),
-                    });
-            }
-            WireEvent::InventoryServerSaveFailed { item_guid, error } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ActionResult {
-                        source: ActionResultSource::Wire,
-                        reason: ActionResultReason::InventoryServerSaveFailed {
-                            item_guid: *item_guid,
-                            error: *error,
-                        },
-                    });
-            }
-            WireEvent::WeenieError { error, parameter } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ActionResult {
-                        source: ActionResultSource::Wire,
-                        reason: ActionResultReason::Weenie(*error, parameter.clone()),
-                    });
-            }
-            WireEvent::CharacterError(err) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ActionResult {
-                        source: ActionResultSource::Wire,
-                        reason: ActionResultReason::Character(*err),
-                    });
-            }
-            WireEvent::ClientError(msg) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ActionResult {
-                        source: ActionResultSource::Client,
-                        reason: ActionResultReason::General(msg.clone()),
-                    });
-            }
-            WireEvent::UseDone { error } if *error != WeenieError::None => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ActionResult {
-                        source: ActionResultSource::Wire,
-                        reason: ActionResultReason::Weenie(*error, None),
-                    });
-            }
-            WireEvent::CombatFeedback(feedback) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::CombatFeedback(feedback.clone()));
-            }
-            WireEvent::ServerMessage { message, chat_type } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ServerMessage {
-                        message: message.clone(),
-                        chat_type: (*chat_type).into(),
-                    });
-            }
-            WireEvent::Chat {
-                sender,
-                message,
-                chat_type,
-            } => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
-                    sender: sender.clone(),
-                    message: message.clone(),
-                    chat_type: (*chat_type).into(),
-                });
-            }
-            WireEvent::ChannelMessage {
-                channel,
-                sender,
-                message,
-            } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ChannelMessage {
-                        channel: *channel,
-                        sender: sender.clone(),
-                        message: message.clone(),
-                    });
-            }
-            WireEvent::Tell { sender, message } => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
-                    sender: sender.clone(),
-                    message: message.clone(),
-                });
-            }
-            WireEvent::CharacterList(list) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::CharacterList(list.clone()));
-            }
-            WireEvent::CharacterManagementResponse {
-                operation,
-                response,
-            } => {
-                let _ =
-                    self.client_view_event_tx
-                        .send(ClientViewEvent::CharacterManagementResponse {
-                            operation: *operation,
-                            response: response.clone(),
-                        });
-            }
-            WireEvent::CharacterDeleteResponse => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::CharacterDeleteResponse);
-            }
-            WireEvent::PlayerEntered { guid, name } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerEntered {
-                        guid: *guid,
-                        name: name.clone(),
-                    });
-            }
-            WireEvent::ItemManaResponse {
-                target,
-                mana,
-                success,
-            } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::ItemManaResponse {
-                        target: *target,
-                        mana: *mana,
-                        success: *success,
-                    });
-            }
-            WireEvent::GameMessage(msg) => {
-                if let holtburger_protocol::messages::GameMessage::ServerName(data) = &**msg {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
-                }
-            }
-            WireEvent::Emote { sender, text } => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
-                    sender: sender.clone(),
-                    text: text.clone(),
-                });
-            }
-            WireEvent::PingResponse => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PingResponse);
-            }
-            WireEvent::LogMessage(msg) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::LogMessage(msg.clone()));
-            }
-            WireEvent::BootAccount(reason) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::BootAccount(reason.clone()));
-            }
-            _ => {}
-        }
-
-        let _ = self.wire_event_tx.send(event);
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::StatusUpdate {
+                state: self.state.clone(),
+            });
     }
 
     pub fn handle_world_event(&self, event: &WorldEvent) {
@@ -887,10 +728,13 @@ mod tests {
         let mut events = client.subscribe_client_view_events();
         let item_guid = Guid(0x4000_0001);
 
-        client.emit_wire_event(WireEvent::InventoryServerSaveFailed {
-            item_guid,
-            error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
-        });
+        client.emit_action_result(
+            ActionResultSource::Wire,
+            ActionResultReason::InventoryServerSaveFailed {
+                item_guid,
+                error: holtburger_protocol::errors::WeenieError::YoureTooBusy,
+            },
+        );
 
         let mut saw_projected_event = false;
         while let Ok(event) = events.try_recv() {

@@ -3,6 +3,7 @@ use holtburger_content::ContentRepository;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
 use holtburger_world::{BasicSpatialPhysics, SpatialPhysics, WorldBootstrap, WorldState};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -23,6 +24,7 @@ pub struct ClientRuntimeBuilder {
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
     spatial_physics: Option<Arc<dyn SpatialPhysics>>,
+    message_dump_dir: Option<PathBuf>,
 }
 
 impl ClientRuntimeBuilder {
@@ -32,6 +34,7 @@ impl ClientRuntimeBuilder {
             server_endpoint: None,
             world_bootstrap: None,
             spatial_physics: None,
+            message_dump_dir: None,
         }
     }
 
@@ -77,6 +80,11 @@ impl ClientRuntimeBuilder {
         self
     }
 
+    pub fn message_dump_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.message_dump_dir = Some(path.into());
+        self
+    }
+
     pub async fn connect(self) -> Result<ClientRuntime> {
         let endpoint = self.server_endpoint.clone().ok_or_else(|| {
             anyhow!("ClientRuntimeBuilder requires a server endpoint before connect()")
@@ -111,7 +119,6 @@ impl ClientRuntimeBuilder {
             .spatial_physics
             .unwrap_or_else(|| Arc::new(BasicSpatialPhysics));
 
-        let (wire_event_tx, _) = broadcast::channel(1024);
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
         Ok(ClientRuntime {
@@ -120,10 +127,9 @@ impl ClientRuntimeBuilder {
             active_confirmation: None,
             active_busy_operation: None,
             state: ClientState::Connected,
-            wire_event_tx,
             client_view_event_tx,
             command_rx: None,
-            message_dump_dir: None,
+            message_dump_dir: self.message_dump_dir,
             message_counter: 0,
             movement: MovementSystem::new(),
             simulation: ClientSimulationSystem::new(),
@@ -135,7 +141,6 @@ impl ClientRuntimeBuilder {
 
 #[cfg(test)]
 pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
-    let (wire_event_tx, _) = broadcast::channel(1024);
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
@@ -144,7 +149,6 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         active_confirmation: None,
         active_busy_operation: None,
         state: ClientState::Connected,
-        wire_event_tx,
         client_view_event_tx,
         command_rx: None,
         message_dump_dir: None,

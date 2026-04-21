@@ -75,16 +75,25 @@ pub struct ScriptFetchAllowedHost {
     pub port: u16,
 }
 
+fn normalize_script_fetch_host(host: &str) -> String {
+    let trimmed = host.trim();
+    let normalized = trimmed
+        .strip_prefix('[')
+        .and_then(|trimmed| trimmed.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    normalized.to_ascii_lowercase()
+}
+
 impl ScriptFetchAllowedHost {
     pub fn new(host: impl Into<String>, port: u16) -> Self {
         Self {
-            host: host.into().trim().to_ascii_lowercase(),
+            host: normalize_script_fetch_host(&host.into()),
             port,
         }
     }
 
     pub fn matches(&self, host: &str, port: u16) -> bool {
-        self.host == host.trim().to_ascii_lowercase() && self.port == port
+        self.host == normalize_script_fetch_host(host) && self.port == port
     }
 }
 
@@ -1312,5 +1321,14 @@ mod tests {
             from_value::<ScriptCombatFeedback>(actual).unwrap(),
             feedback
         );
+    }
+
+    #[test]
+    fn script_fetch_allowed_host_normalizes_ipv6_brackets() {
+        let allowed_host = super::ScriptFetchAllowedHost::new("[::1]", 443);
+
+        assert_eq!(allowed_host.host, "::1");
+        assert!(allowed_host.matches("::1", 443));
+        assert!(allowed_host.matches("[::1]", 443));
     }
 }

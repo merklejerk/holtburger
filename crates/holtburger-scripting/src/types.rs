@@ -33,21 +33,10 @@ impl ScriptSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[derive(Default)]
-pub enum ScriptFetchMethod {
-    #[default]
-    Get,
-    Post,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScriptFetchRequest {
+pub struct ScriptPostRequest {
     pub url: String,
-    #[serde(default)]
-    pub method: ScriptFetchMethod,
     #[serde(default)]
     pub body_json: Option<ScriptJsonValue>,
     #[serde(default)]
@@ -56,7 +45,7 @@ pub struct ScriptFetchRequest {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScriptFetchResponse {
+pub struct ScriptPostResponse {
     pub ok: bool,
     pub status: u16,
     pub body_json: Option<ScriptJsonValue>,
@@ -64,7 +53,7 @@ pub struct ScriptFetchResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ScriptFetchErrorCode {
+pub enum ScriptPostErrorCode {
     InvalidRequest,
     PolicyDenied,
     Timeout,
@@ -75,8 +64,8 @@ pub enum ScriptFetchErrorCode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScriptFetchError {
-    pub code: ScriptFetchErrorCode,
+pub struct ScriptPostError {
+    pub code: ScriptPostErrorCode,
     pub message: String,
 }
 

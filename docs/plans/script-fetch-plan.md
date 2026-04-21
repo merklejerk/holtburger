@@ -1,20 +1,20 @@
-# Script Fetch Non-Blocking Plan
+# Script Post Non-Blocking Plan
 
 ## Context And Boundaries
 
 ### Goal
 
-Make `HB.fetchJson()` non-blocking for the TUI by moving only the HTTP request work off the synchronous script-host execution path, while keeping the refactor narrowly contained to the scripting crate.
+Make `HB.postJson()` non-blocking for the TUI by moving only the HTTP request work off the synchronous script-host execution path, while keeping the refactor narrowly contained to the scripting crate.
 
 ### Why This Matters
 
-`HB.fetchJson()` currently returns a Promise to scripts, but the Rust host still performs the request synchronously inside the same thread that drives the embedded JS runtime. That means the TUI can stall while a request is in flight.
+`HB.postJson()` currently returns a Promise to scripts, but the Rust host still performs the request synchronously inside the same thread that drives the embedded JS runtime. That means the TUI can stall while a request is in flight.
 
 We do not need a full script-runtime-worker architecture to fix that immediate problem. The narrower target is to background only the request execution, keep JS and V8 interactions on the script-host thread, and resolve or reject pending fetch Promises during the host's existing tick or event pumping.
 
 ### In Scope
 
-- Remove blocking HTTP request execution from the synchronous `HB.fetchJson()` host op path.
+- Remove blocking HTTP request execution from the synchronous `HB.postJson()` host op path.
 - Keep Promise creation and Promise settlement owned by `holtburger-scripting`.
 - Run only the outbound HTTP request work in a small bounded background worker pool.
 - Drain completed request outcomes on the script-host thread before normal event dispatch and tick handling.
@@ -26,7 +26,7 @@ We do not need a full script-runtime-worker architecture to fix that immediate p
 - A dedicated out-of-process or cross-thread script runtime worker.
 - A full Tokio-backed async `deno_core` host redesign.
 - Reworking the TUI's event loop or frontend state architecture.
-- Changing the `HB.fetchJson()` request or response shape.
+- Changing the `HB.postJson()` request or response shape.
 - Expanding fetch capabilities beyond the current bounded JSON-only semantics.
 
 ## Ground Truth And Existing Patterns
@@ -47,7 +47,7 @@ We do not need a full script-runtime-worker architecture to fix that immediate p
 
 - The TUI currently calls into the script host inline during game-state reduction in [apps/holtburger-cli/src/pages/game/domains/script.rs](apps/holtburger-cli/src/pages/game/domains/script.rs).
 - `ScriptHost` owns the embedded `deno_core` runtime and currently drives JS execution synchronously in [crates/holtburger-scripting/src/host.rs](crates/holtburger-scripting/src/host.rs).
-- `HB.fetchJson()` already exists and already has a bounded policy model and stable error codes, but the current host op performs the request synchronously.
+- `HB.postJson()` already exists and already has a bounded policy model and stable error codes, but the current host op performs the request synchronously.
 - The TUI already provides a recurring tick event to running scripts, which gives the scripting crate a natural cadence for draining completed background fetches without adding new frontend responsibilities.
 
 ### Existing Patterns To Follow
@@ -111,7 +111,7 @@ Consequences:
 
 ```text
 script code
-  -> HB.fetchJson(request)
+  -> HB.postJson(request)
   -> host allocates request id + JS promise capability
   -> host validates request policy and spawns background request worker
 
@@ -165,7 +165,7 @@ Ownership split:
 
 #### Acceptance Criteria
 
-- Issuing `HB.fetchJson()` does not block the thread that is currently driving the script host.
+- Issuing `HB.postJson()` does not block the thread that is currently driving the script host.
 - The TUI remains responsive while a slow request is in flight.
 - Request timeouts, transport failures, and oversized responses are preserved in completion outcomes.
 
@@ -194,7 +194,7 @@ Ownership split:
 
 - Add host tests for multiple concurrent fetches, deferred completion, and stale completion drop on shutdown.
 - Add regression tests proving a fetch can remain pending while the host continues ticking.
-- Update docs to describe that `HB.fetchJson()` remains Promise-based and no longer blocks the TUI while the request runs.
+- Update docs to describe that `HB.postJson()` remains Promise-based and no longer blocks the TUI while the request runs.
 
 #### Files
 
@@ -247,7 +247,7 @@ Mitigation:
 
 ## Definition Of Done
 
-- `HB.fetchJson()` no longer blocks the TUI while the HTTP request is in flight.
+- `HB.postJson()` no longer blocks the TUI while the HTTP request is in flight.
 - The fix is contained to `holtburger-scripting`, except for at most a minimal host pump call-site adjustment if proven necessary.
 - Promise settlement happens only on the script-host thread.
 - Existing fetch policy and error semantics remain unchanged.

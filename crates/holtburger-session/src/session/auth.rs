@@ -44,7 +44,7 @@ impl Session {
             })?;
         let mut activation_addr = self.server_addr;
         activation_addr.set_port(activation_port);
-        self.server_source_addr = activation_addr;
+        self.pending_server_source_addr = Some(activation_addr);
 
         let resp_header = PacketHeader {
             flags: packet_flags::CONNECT_RESPONSE,

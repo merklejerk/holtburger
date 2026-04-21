@@ -465,7 +465,7 @@ fn test_payload_hash_multi_fragment_unaligned_matches_wire_layout() {
 }
 
 #[tokio::test]
-async fn test_request_retransmit_replays_cached_packet() {
+async fn test_request_retransmit_sends_cached_packet() {
     let requested_sequence = 9u32;
     let retransmit_payload = [1u32.to_le_bytes(), requested_sequence.to_le_bytes()].concat();
     let transport = ScriptedTransport::new(

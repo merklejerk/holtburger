@@ -49,6 +49,10 @@ fn seed_player_run_rate_scalar(world: &mut WorldState, run_skill: u32) -> f32 {
     player_run_rate_scalar(world)
 }
 
+fn seed_local_player(world: &mut WorldState, guid: Guid, position: WorldPosition) {
+    world.seed_local_player_entity(guid, "Player", position);
+}
+
 fn seed_self_movement_capabilities_override(
     world: &mut WorldState,
     run_rate_scalar: f32,
@@ -77,11 +81,15 @@ fn seed_self_movement_capabilities_override(
 #[test]
 fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
     let mut world = WorldState::synthetic();
-    world.player.position = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(10.0, 20.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::from_heading(0.0),
+        },
+    );
 
     let state = MovementSystem::autonomous_wire_motion_state(
         &world,
@@ -103,11 +111,15 @@ fn autonomous_wire_motion_state_uses_forward_without_turn_when_moving() {
 #[test]
 fn autonomous_wire_motion_state_can_turn_in_place() {
     let mut world = WorldState::synthetic();
-    world.player.position = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(10.0, 20.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::from_heading(0.0),
+        },
+    );
 
     let state = MovementSystem::autonomous_wire_motion_state(
         &world,
@@ -129,11 +141,15 @@ fn autonomous_wire_motion_state_can_turn_in_place() {
 #[test]
 fn autonomous_wire_motion_state_skips_idle_aligned_requests() {
     let mut world = WorldState::synthetic();
-    world.player.position = WorldPosition {
-        landblock_id: Guid(0x1234_0000),
-        coords: Vector3::new(10.0, 20.0, 0.0),
-        rotation: Quaternion::from_heading(0.0),
-    };
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::from_heading(0.0),
+        },
+    );
 
     let state = MovementSystem::autonomous_wire_motion_state(
         &world,
@@ -152,13 +168,14 @@ fn autonomous_wire_motion_state_skips_idle_aligned_requests() {
 #[tokio::test]
 async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
     let mut world = WorldState::synthetic();
-    world.player.guid = Guid(0x5000_0123);
-    world.player.position.landblock_id = Guid(0x1234_0000);
-    world.entities.insert(Entity::new(
-        world.player.guid,
-        "Player".to_string(),
-        world.player.position,
-    ));
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            ..Default::default()
+        },
+    );
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -220,13 +237,14 @@ async fn enqueue_drive_intent_exposes_autonomous_drive_for_current_tick_only() {
 #[tokio::test]
 async fn later_manual_drive_wins_over_queued_autonomous_drive() {
     let mut world = WorldState::synthetic();
-    world.player.guid = Guid(0x5000_0123);
-    world.player.position.landblock_id = Guid(0x1234_0000);
-    world.entities.insert(Entity::new(
-        world.player.guid,
-        "Player".to_string(),
-        world.player.position,
-    ));
+    world.seed_local_player_entity(
+        Guid(0x5000_0123),
+        "Player",
+        WorldPosition {
+            landblock_id: Guid(0x1234_0000),
+            ..Default::default()
+        },
+    );
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -467,19 +485,15 @@ fn current_local_solve_body_input_uses_shared_resolved_manual_run_speed() {
     world.player.guid = player_guid;
     let capabilities = seed_self_movement_capabilities_override(&mut world, 3.25, 1.0, 2.0, 1.25);
     let expected_local_run_speed = capabilities.resolved_manual_run_speed();
-    world.player.position = WorldPosition {
+    let mut position = WorldPosition {
         landblock_id: Guid(0x12340000),
         coords: Vector3::new(10.0, 20.0, 0.0),
         rotation: Quaternion::identity(),
     };
-    world.entities.insert(Entity::new(
-        player_guid,
-        "Player".to_string(),
-        world.player.position,
-    ));
+    seed_local_player(&mut world, player_guid, position);
 
-    world.player.position.rotation = Quaternion::from_heading(90.0_f32.to_radians());
-    let _ = world.set_player_position(world.player.position);
+    position.rotation = Quaternion::from_heading(90.0_f32.to_radians());
+    let _ = world.set_player_position(position);
 
     let mut movement = MovementSystem::new();
     movement.active_drive = Some(ActiveDriveState::manual(
@@ -506,16 +520,12 @@ fn current_local_solve_body_input_uses_shared_turn_omega_for_turn_in_place() {
     let player_guid = Guid(0x50000123);
     world.player.guid = player_guid;
     let capabilities = seed_self_movement_capabilities_override(&mut world, 3.25, 1.0, 2.0, 1.25);
-    world.player.position = WorldPosition {
+    let position = WorldPosition {
         landblock_id: Guid(0x12340000),
         coords: Vector3::new(10.0, 20.0, 0.0),
         rotation: Quaternion::identity(),
     };
-    world.entities.insert(Entity::new(
-        player_guid,
-        "Player".to_string(),
-        world.player.position,
-    ));
+    seed_local_player(&mut world, player_guid, position);
 
     let mut movement = MovementSystem::new();
     movement.active_drive = Some(ActiveDriveState::manual(
@@ -596,11 +606,11 @@ fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
     entity.velocity = Vector3::new(2.0, 0.0, 0.0);
 
     world.player.guid = guid;
-    world.player.position = position;
     world.player.instance_sequence = 11;
     world.player.server_control_sequence = 22;
     world.player.teleport_sequence = 33;
     world.player.force_position_sequence = 44;
+    seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
     let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
@@ -627,8 +637,8 @@ fn autonomous_position_uses_server_grounded_when_contact_unspecified() {
     entity.velocity = Vector3::new(2.0, 0.0, 0.0);
 
     world.player.guid = guid;
-    world.player.position = position;
-    world.player.server_grounded = Some(true);
+    world.player.last_server_grounded = Some(true);
+    seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
     let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
@@ -650,7 +660,7 @@ fn autonomous_position_can_be_built_for_turn_only_motion() {
     entity.omega = Vector3::new(0.0, 0.0, 1.0);
 
     world.player.guid = guid;
-    world.player.position = position;
+    seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
     let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
@@ -670,14 +680,11 @@ fn autonomous_position_can_be_built_for_stationary_player() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
     world.player.instance_sequence = 11;
     world.player.server_control_sequence = 22;
     world.player.teleport_sequence = 33;
     world.player.force_position_sequence = 44;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let position_action = build_autonomous_position(&world, MovementPacketMetadata::default())
         .expect("autonomous position action should emit even when stationary");
@@ -701,7 +708,7 @@ async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
     let mut entity = Entity::new(guid, "Player".to_string(), position);
 
     world.player.guid = guid;
-    world.player.position = position;
+    seed_local_player(&mut world, guid, position);
     world.entities.insert(entity.clone());
 
     let mut movement = MovementSystem::new();
@@ -745,10 +752,7 @@ async fn stop_without_active_drive_does_not_send_final_position_sync() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -782,10 +786,7 @@ async fn unchanged_motion_state_requests_do_not_resend_motion_pulses() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -829,10 +830,7 @@ async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent()
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -885,10 +883,7 @@ async fn pulsed_run_input_expires_on_tick_and_sends_stop_transition() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -933,10 +928,7 @@ async fn server_controlled_movement_suppresses_next_frontend_autonomous_wire_pul
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -979,10 +971,7 @@ fn server_controlled_projection_uses_landblock_aware_global_delta() {
     };
 
     world.player.guid = guid;
-    world.player.position = current_pose;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), current_pose));
+    seed_local_player(&mut world, guid, current_pose);
 
     let mut movement = MovementSystem::new();
     movement.set_server_controlled_projection(ServerControlledProjection {
@@ -1013,10 +1002,7 @@ async fn stop_input_clears_held_run_and_sends_stop_transition() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1057,10 +1043,7 @@ async fn autonomous_drive_gap_does_not_send_stop_pulse_without_explicit_stop() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1102,10 +1085,7 @@ async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1146,10 +1126,7 @@ async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1190,10 +1167,7 @@ async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1243,9 +1217,7 @@ async fn movement_heartbeat_arms_then_sends_for_stationary_player_with_valid_pos
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    let entity = Entity::new(guid, "Player".to_string(), position);
-    world.entities.insert(entity);
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();
@@ -1313,7 +1285,7 @@ async fn armed_movement_heartbeat_stays_armed_when_player_stops_moving() {
     entity.velocity = Vector3::new(1.0, 0.0, 0.0);
 
     world.player.guid = guid;
-    world.player.position = position;
+    seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
     let mut movement = MovementSystem::new();
@@ -1368,7 +1340,7 @@ async fn movement_tick_emits_autonomous_position_heartbeat_when_due() {
     entity.velocity = Vector3::new(2.0, 0.0, 0.0);
 
     world.player.guid = guid;
-    world.player.position = position;
+    seed_local_player(&mut world, guid, position);
     world.entities.insert(entity);
 
     let mut movement = MovementSystem::new();
@@ -1405,10 +1377,7 @@ async fn stop_without_active_drive_keeps_autonomous_position_heartbeat_armed() {
     };
 
     world.player.guid = guid;
-    world.player.position = position;
-    world
-        .entities
-        .insert(Entity::new(guid, "Player".to_string(), position));
+    seed_local_player(&mut world, guid, position);
 
     let mut movement = MovementSystem::new();
     let mut session = Session::new_test();

@@ -3,7 +3,7 @@ use crate::WorldEvent;
 use crate::player::types::{SkillBase, VitalBase};
 use crate::stats;
 use holtburger_common::Guid;
-use holtburger_common::properties::{EnchantmentTypeFlags, PropertyString};
+use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::*;
@@ -62,7 +62,6 @@ impl PlayerState {
 
             self.attributes.insert(attr_type, attr_obj.clone());
             events.push(WorldEvent::AttributeUpdated(attr_obj));
-            self.emit_derived_stats(events);
         }
     }
 
@@ -114,7 +113,6 @@ impl PlayerState {
 
             self.skills.insert(skill_type, skill_obj.clone());
             events.push(WorldEvent::SkillUpdated(skill_obj));
-            self.emit_derived_stats(events);
         }
     }
 
@@ -149,7 +147,6 @@ impl PlayerState {
             };
             self.vitals.insert(vital_type, vital_obj.clone());
             events.push(WorldEvent::VitalUpdated(vital_obj));
-            self.emit_derived_stats(events);
         }
     }
 
@@ -168,23 +165,22 @@ impl PlayerState {
         }
     }
 
-    /// Copies a server-authored player position snapshot into player state and emits
-    /// grounded or forced-reposition events when those observable outcomes change.
+    /// Updates the player entity's authoritative position sequencing and cached grounded
+    /// state, then emits grounded or forced-reposition events when those outcomes change.
     pub fn update_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
         events: &mut Vec<WorldEvent>,
     ) {
         let old_forced_seq = self.force_position_sequence;
-        let old_grounded = self.server_grounded;
+        let old_grounded = self.last_server_grounded;
 
-        self.position = pos_pack.pos;
         self.instance_sequence = pos_pack.instance_sequence;
         self.position_sequence = pos_pack.position_sequence;
         self.teleport_sequence = pos_pack.teleport_sequence;
         self.force_position_sequence = pos_pack.force_position_sequence;
         let is_grounded = pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED);
-        self.server_grounded = Some(is_grounded);
+        self.last_server_grounded = Some(is_grounded);
 
         if old_grounded != Some(is_grounded) {
             events.push(WorldEvent::PlayerGroundedUpdated {
@@ -195,7 +191,7 @@ impl PlayerState {
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
             events.push(WorldEvent::ForcedReposition {
                 guid: self.guid,
-                pos: self.position,
+                pos: pos_pack.pos,
                 sequence: self.force_position_sequence,
             });
         }
@@ -306,16 +302,10 @@ impl PlayerState {
         data: &PlayerDescriptionEventData,
         xp_table: &holtburger_dat::file_type::XpTable,
         skill_table: &holtburger_dat::file_type::SkillTable,
-        events: &mut Vec<WorldEvent>,
+        _events: &mut Vec<WorldEvent>,
     ) {
         self.guid = data.guid;
         self.enchantments = data.enchantments.clone();
-        self.properties = data.properties.clone();
-        self.properties
-            .strings
-            .0
-            .entry(PropertyString::Name)
-            .or_insert_with(|| data.name.clone());
 
         self.spells = data.spells.clone();
         self.options1 = data.options1;
@@ -430,12 +420,6 @@ impl PlayerState {
                 self.wield_item(*item_guid, mask);
             }
         }
-
-        if let Some(pos) = data.pos {
-            self.position = pos;
-        }
-
-        self.emit_derived_stats(events);
     }
 
     pub fn upsert_enchantment(
@@ -569,6 +553,5 @@ impl PlayerState {
         events.push(WorldEvent::PlayerEnchantmentsUpdated {
             enchantments: self.enchantments.clone(),
         });
-        self.emit_derived_stats(events);
     }
 }

@@ -88,6 +88,7 @@ pub(crate) fn handle_message(
             state
                 .player
                 .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
+            state.emit_player_derived_stats(events);
             true
         }
         GameMessage::PublicUpdateAttribute(data) => {
@@ -101,6 +102,7 @@ pub(crate) fn handle_message(
             state
                 .player
                 .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
+            state.emit_player_derived_stats(events);
             true
         }
         GameMessage::PrivateUpdateSkill(data) => {
@@ -124,6 +126,7 @@ pub(crate) fn handle_message(
                 },
                 events,
             );
+            state.emit_player_derived_stats(events);
             true
         }
         GameMessage::PublicUpdateSkill(data) => {
@@ -147,6 +150,7 @@ pub(crate) fn handle_message(
                 },
                 events,
             );
+            state.emit_player_derived_stats(events);
             true
         }
         GameMessage::PrivateUpdateVital(data) => {
@@ -169,6 +173,7 @@ pub(crate) fn handle_message(
                 },
                 events,
             );
+            state.emit_player_derived_stats(events);
             true
         }
         GameMessage::PublicUpdateVital(data) => {
@@ -191,6 +196,7 @@ pub(crate) fn handle_message(
                 },
                 events,
             );
+            state.emit_player_derived_stats(events);
             true
         }
         GameMessage::PrivateUpdateVitalCurrent(data) => {
@@ -220,37 +226,81 @@ pub(crate) fn handle_event(
                 &state.skill_table,
                 events,
             );
+            state.emit_player_derived_stats(events);
             false
         }
         GameEvent::MagicUpdateEnchantment(data) => {
-            state
+            let handled = state
                 .player
-                .upsert_enchantment(data.target, data.enchantment, events)
+                .upsert_enchantment(data.target, data.enchantment, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
         }
-        GameEvent::MagicUpdateMultipleEnchantments(data) => state
-            .player
-            .upsert_multiple_enchantments(data.target, &data.enchantments, events),
+        GameEvent::MagicUpdateMultipleEnchantments(data) => {
+            let handled =
+                state
+                    .player
+                    .upsert_multiple_enchantments(data.target, &data.enchantments, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
+        }
         GameEvent::MagicRemoveEnchantment(data) => {
-            state
-                .player
-                .remove_enchantment(data.target, data.spell_id, data.layer, events)
+            let handled =
+                state
+                    .player
+                    .remove_enchantment(data.target, data.spell_id, data.layer, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
         }
         GameEvent::MagicDispelEnchantment(data) => {
-            state
-                .player
-                .remove_enchantment(data.target, data.spell_id, data.layer, events)
+            let handled =
+                state
+                    .player
+                    .remove_enchantment(data.target, data.spell_id, data.layer, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
         }
-        GameEvent::MagicRemoveMultipleEnchantments(data) => state
-            .player
-            .remove_multiple_enchantments(data.target, &data.spells, events),
-        GameEvent::MagicDispelMultipleEnchantments(data) => state
-            .player
-            .remove_multiple_enchantments(data.target, &data.spells, events),
+        GameEvent::MagicRemoveMultipleEnchantments(data) => {
+            let handled =
+                state
+                    .player
+                    .remove_multiple_enchantments(data.target, &data.spells, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
+        }
+        GameEvent::MagicDispelMultipleEnchantments(data) => {
+            let handled =
+                state
+                    .player
+                    .remove_multiple_enchantments(data.target, &data.spells, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
+        }
         GameEvent::MagicPurgeEnchantments(data) => {
-            state.player.purge_enchantments(data.target, false, events)
+            let handled = state.player.purge_enchantments(data.target, false, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
         }
         GameEvent::MagicPurgeBadEnchantments(data) => {
-            state.player.purge_enchantments(data.target, true, events)
+            let handled = state.player.purge_enchantments(data.target, true, events);
+            if handled {
+                state.emit_player_derived_stats(events);
+            }
+            handled
         }
         GameEvent::MagicUpdateSpell(data) => {
             state.player.add_spell(data.spell_id as u32, events);

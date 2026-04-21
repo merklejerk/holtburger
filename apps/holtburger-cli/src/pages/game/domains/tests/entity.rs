@@ -37,6 +37,33 @@ fn test_entity_replaced_updates_cached_entity_state() {
 }
 
 #[test]
+fn health_update_event_updates_cached_entity_state() {
+    let player_guid = Guid(0x50000001);
+    let entity_guid = Guid(0x60000001);
+    let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+    state.data.entities.insert(
+        entity_guid,
+        Entity::new(entity_guid, "Drudge".to_string(), WorldPosition::default()),
+    );
+
+    let result = state.handle_view_event(ClientViewEvent::EntityHealthUpdated {
+        guid: entity_guid,
+        health_fraction: 0.25,
+    });
+
+    assert!(result.redraw_requested());
+    assert_eq!(
+        state
+            .data
+            .entities
+            .get(&entity_guid)
+            .and_then(|entity| entity.health_fraction),
+        Some(0.25)
+    );
+}
+
+#[test]
 fn book_response_refreshes_visible_context_and_requests_redraw() {
     let player_guid = Guid(0x50000001);
     let book_guid = Guid(0x60000001);
@@ -70,8 +97,9 @@ fn book_response_refreshes_visible_context_and_requests_redraw() {
         ..BookData::default()
     });
 
-    let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
-        entity: Box::new(book_entity),
+    let result = state.handle_view_event(ClientViewEvent::EntityBookUpdated {
+        guid: book_guid,
+        book: Box::new(book_entity.book.take().expect("book payload should exist")),
     });
 
     assert!(result.redraw_requested());

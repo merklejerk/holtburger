@@ -4,6 +4,7 @@ use std::{fs::File, sync::Mutex};
 use holtburger_content::ContentRepository;
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
+use holtburger_scripting::ScriptHostConfig;
 use holtburger_world::spell::SpellCatalog;
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
@@ -65,6 +66,7 @@ pub struct AppState {
     pub disconnect_reason: Option<String>,
     pub pending_exit_message: Option<String>,
     pub queued_script_startup: Option<QueuedScriptStartup>,
+    pub script_host_config: ScriptHostConfig,
 }
 
 pub struct RenderContext<'a> {

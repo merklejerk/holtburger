@@ -96,7 +96,6 @@
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
-- [ ] Some echantments duplicated in char tab.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] should really prefix server vs client messages. There are some messages that are bi-directional and confusing.
@@ -104,6 +103,7 @@
 - [ ] Some equipment swapping jank going on.
 - [ ] Get rid of noclip (dead code).
 - [ ] Speed up TUI rendering.
+- [ ] add deno_fetch.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

@@ -1,6 +1,10 @@
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
+use std::io::Read;
 use std::rc::Rc;
-use std::sync::Once;
+use std::sync::{Once, OnceLock, mpsc};
+use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use deno_core::serde_json::{Value, from_value, json};
@@ -16,14 +20,145 @@ use crate::{
     ScriptBusyOperation, ScriptCharacterSheetView, ScriptClientIntent, ScriptClientInteraction,
     ScriptClientView, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
     ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-    ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptJsonValue, ScriptMessageStyle,
-    ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+    ScriptEquipmentSlotView, ScriptEvent, ScriptFetchPolicy, ScriptHostConfig, ScriptIntent,
+    ScriptJsonValue, ScriptMessageStyle, ScriptPartyView, ScriptPositionRef, ScriptPostError,
+    ScriptPostErrorCode, ScriptPostRequest, ScriptPostResponse, ScriptSelfView, ScriptSource,
+    ScriptTradeInfo,
 };
 
 const BOOTSTRAP_SCRIPT_NAME: &str = "<holtburger-bootstrap>";
 const EVENT_SCRIPT_NAME: &str = "<holtburger-event>";
 const USER_SCRIPT_NAME: &str = "<holtburger-user-script>";
+const FETCH_COMPLETION_SCRIPT_NAME: &str = "<holtburger-fetch-completion>";
+const SCRIPT_FETCH_ORIGIN: &str = "https://holtburger.invalid";
+const SCRIPT_FETCH_USER_AGENT: &str =
+    concat!("Holtburger/", env!("CARGO_PKG_VERSION"), " ScriptFetch");
+const SCRIPT_FETCH_WORKER_COUNT: usize = 2;
 static V8_PLATFORM_INIT: Once = Once::new();
+static FETCH_WORKER_POOL: OnceLock<FetchWorkerPool> = OnceLock::new();
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptFetchOpOutcome {
+    response: Option<ScriptPostResponse>,
+    error: Option<ScriptPostError>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ScriptFetchStartOutcome {
+    request_id: Option<u64>,
+    error: Option<ScriptPostError>,
+}
+
+impl ScriptFetchStartOutcome {
+    fn queued(request_id: u64) -> Self {
+        Self {
+            request_id: Some(request_id),
+            error: None,
+        }
+    }
+
+    fn failure(code: ScriptPostErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            request_id: None,
+            error: Some(ScriptPostError {
+                code,
+                message: message.into(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PreparedFetchRequest {
+    request: ScriptPostRequest,
+    url: reqwest::Url,
+    timeout: Duration,
+    max_response_bytes: usize,
+}
+
+#[derive(Debug)]
+struct PendingFetchRequest {
+    request_id: u64,
+    prepared: PreparedFetchRequest,
+    completion_tx: mpsc::Sender<CompletedFetchRequest>,
+}
+
+#[derive(Debug, Clone)]
+struct CompletedFetchRequest {
+    request_id: u64,
+    outcome: ScriptFetchOpOutcome,
+}
+
+struct FetchWorkerPool {
+    job_tx: mpsc::Sender<PendingFetchRequest>,
+}
+
+impl FetchWorkerPool {
+    fn new() -> Self {
+        let (job_tx, job_rx) = mpsc::channel::<PendingFetchRequest>();
+        let shared_rx = std::sync::Arc::new(std::sync::Mutex::new(job_rx));
+
+        for worker_index in 0..SCRIPT_FETCH_WORKER_COUNT {
+            let worker_rx = shared_rx.clone();
+            thread::Builder::new()
+                .name(format!("script-fetch-worker-{worker_index}"))
+                .spawn(move || {
+                    loop {
+                        let job = {
+                            let receiver =
+                                worker_rx.lock().expect("fetch worker receiver poisoned");
+                            receiver.recv()
+                        };
+
+                        let Ok(job) = job else {
+                            break;
+                        };
+
+                        let outcome = execute_prepared_post_request(job.prepared);
+                        let _ = job.completion_tx.send(CompletedFetchRequest {
+                            request_id: job.request_id,
+                            outcome,
+                        });
+                    }
+                })
+                .expect("spawn script fetch worker thread");
+        }
+
+        Self { job_tx }
+    }
+
+    fn submit(
+        &self,
+        request: PendingFetchRequest,
+    ) -> std::result::Result<(), Box<PendingFetchRequest>> {
+        self.job_tx.send(request).map_err(|error| Box::new(error.0))
+    }
+}
+
+fn fetch_worker_pool() -> &'static FetchWorkerPool {
+    FETCH_WORKER_POOL.get_or_init(FetchWorkerPool::new)
+}
+
+impl ScriptFetchOpOutcome {
+    fn success(response: ScriptPostResponse) -> Self {
+        Self {
+            response: Some(response),
+            error: None,
+        }
+    }
+
+    fn failure(code: ScriptPostErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            response: None,
+            error: Some(ScriptPostError {
+                code,
+                message: message.into(),
+            }),
+        }
+    }
+}
 
 #[derive(Clone, Copy)]
 struct ScriptClientViewPtr {
@@ -419,6 +554,25 @@ impl ScriptClientViewPtr {
 
 const BOOTSTRAP_JS: &str = r#"
 const __holtburgerHandlers = [];
+const __holtburgerPendingFetches = new Map();
+
+globalThis.__holtburgerCompleteFetch = (requestId, result) => {
+    const pending = __holtburgerPendingFetches.get(requestId);
+    if (!pending) {
+        return;
+    }
+
+    __holtburgerPendingFetches.delete(requestId);
+
+    if (result.error) {
+        const error = new Error(result.error.message);
+        error.code = result.error.code;
+        pending.reject(error);
+        return;
+    }
+
+    pending.resolve(result.response);
+};
 
 globalThis.Holtburger = globalThis.HB = Object.freeze({
   onEvent(handler) {
@@ -432,6 +586,22 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     },
     characterSheet() {
         return Deno.core.ops.op_hb_character_sheet();
+    },
+    postJson(request) {
+        if (request == null || typeof request !== "object" || Array.isArray(request)) {
+            return Promise.reject(new TypeError("Holtburger.postJson expects a request object"));
+        }
+
+        const result = Deno.core.ops.op_hb_post_json_start(request);
+        if (result.error) {
+            const error = new Error(result.error.message);
+            error.code = result.error.code;
+            return Promise.reject(error);
+        }
+
+        return new Promise((resolve, reject) => {
+            __holtburgerPendingFetches.set(result.requestId, { resolve, reject });
+        });
     },
     attack(guid) {
         Deno.core.ops.op_hb_attack(Number(guid) >>> 0);
@@ -662,6 +832,7 @@ deno_core::extension!(
     ops = [
         op_hb_self_entity,
         op_hb_character_sheet,
+        op_hb_post_json_start,
         op_hb_nearby_entities,
         op_hb_entity_bool_prop,
         op_hb_entity_int_prop,
@@ -729,14 +900,57 @@ deno_core::extension!(
 struct HostRuntimeState {
     outputs: Rc<RefCell<Vec<ScriptIntent>>>,
     current_context: Cell<Option<ScriptClientViewPtr>>,
+    config: ScriptHostConfig,
+    fetch_completion_tx: mpsc::Sender<CompletedFetchRequest>,
+    fetch_completion_rx: mpsc::Receiver<CompletedFetchRequest>,
+    next_fetch_request_id: u64,
 }
 
 impl HostRuntimeState {
-    fn new(outputs: Rc<RefCell<Vec<ScriptIntent>>>) -> Self {
+    fn new(outputs: Rc<RefCell<Vec<ScriptIntent>>>, config: ScriptHostConfig) -> Self {
+        let (fetch_completion_tx, fetch_completion_rx) = mpsc::channel();
         Self {
             outputs,
             current_context: Cell::new(None),
+            config,
+            fetch_completion_tx,
+            fetch_completion_rx,
+            next_fetch_request_id: 1,
         }
+    }
+
+    fn start_post_request(&mut self, request: ScriptPostRequest) -> ScriptFetchStartOutcome {
+        let prepared = match prepare_post_request(&self.config.fetch_policy, request) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return ScriptFetchStartOutcome {
+                    request_id: None,
+                    error: error.error,
+                };
+            }
+        };
+
+        let request_id = self.next_fetch_request_id;
+        self.next_fetch_request_id += 1;
+
+        let pending = PendingFetchRequest {
+            request_id,
+            prepared,
+            completion_tx: self.fetch_completion_tx.clone(),
+        };
+
+        if fetch_worker_pool().submit(pending).is_err() {
+            return ScriptFetchStartOutcome::failure(
+                ScriptPostErrorCode::Transport,
+                "failed to queue post request",
+            );
+        }
+
+        ScriptFetchStartOutcome::queued(request_id)
+    }
+
+    fn drain_fetch_completions(&mut self) -> Vec<CompletedFetchRequest> {
+        self.fetch_completion_rx.try_iter().collect()
     }
 }
 
@@ -788,6 +1002,23 @@ fn op_hb_self_entity(state: &mut OpState) -> Option<ScriptSelfView> {
 #[serde]
 fn op_hb_character_sheet(state: &mut OpState) -> Option<ScriptCharacterSheetView> {
     with_current_script_client_view(state, |view| unsafe { view.character_sheet() }).flatten()
+}
+
+#[op2]
+#[serde]
+fn op_hb_post_json_start(
+    state: &mut OpState,
+    #[serde] request: deno_core::serde_json::Value,
+) -> ScriptFetchStartOutcome {
+    match from_value::<ScriptPostRequest>(request) {
+        Ok(request) => state
+            .borrow_mut::<HostRuntimeState>()
+            .start_post_request(request),
+        Err(error) => ScriptFetchStartOutcome::failure(
+            ScriptPostErrorCode::InvalidRequest,
+            format!("invalid postJson request: {error}"),
+        ),
+    }
 }
 
 #[op2]
@@ -1451,13 +1682,192 @@ fn parse_script_entity_kind(kind: String) -> Option<ScriptEntityKind> {
     from_value(Value::String(kind)).ok()
 }
 
+fn script_post_error(
+    code: ScriptPostErrorCode,
+    message: impl Into<String>,
+) -> ScriptFetchOpOutcome {
+    ScriptFetchOpOutcome::failure(code, message)
+}
+
+fn prepare_post_request(
+    policy: &ScriptFetchPolicy,
+    request: ScriptPostRequest,
+) -> std::result::Result<PreparedFetchRequest, ScriptFetchOpOutcome> {
+    let url = reqwest::Url::parse(&request.url).map_err(|error| {
+        script_post_error(
+            ScriptPostErrorCode::InvalidRequest,
+            format!("invalid postJson URL: {error}"),
+        )
+    })?;
+
+    match url.scheme() {
+        "http" | "https" => {}
+        scheme => {
+            return Err(script_post_error(
+                ScriptPostErrorCode::InvalidRequest,
+                format!("unsupported postJson URL scheme: {scheme}"),
+            ));
+        }
+    }
+
+    let host = url.host_str().ok_or_else(|| {
+        script_post_error(
+            ScriptPostErrorCode::InvalidRequest,
+            "postJson URL must include a host",
+        )
+    })?;
+    let port = url.port_or_known_default().ok_or_else(|| {
+        script_post_error(
+            ScriptPostErrorCode::InvalidRequest,
+            "postJson URL must resolve to a network port",
+        )
+    })?;
+
+    if !policy.allows(host, port) {
+        return Err(script_post_error(
+            ScriptPostErrorCode::PolicyDenied,
+            format!("postJson denied for host {host}:{port}"),
+        ));
+    }
+
+    Ok(PreparedFetchRequest {
+        timeout: Duration::from_millis(policy.effective_timeout_ms(request.timeout_ms)),
+        max_response_bytes: policy.max_response_bytes,
+        request,
+        url,
+    })
+}
+
+fn read_limited_response_body(
+    response: &mut reqwest::blocking::Response,
+    max_response_bytes: usize,
+) -> std::result::Result<Vec<u8>, ScriptFetchOpOutcome> {
+    let mut body = Vec::new();
+    let mut chunk = [0_u8; 8 * 1024];
+
+    loop {
+        let bytes_read = response.read(&mut chunk).map_err(|error| {
+            script_post_error(
+                ScriptPostErrorCode::Transport,
+                format!("failed to read postJson response body: {error}"),
+            )
+        })?;
+
+        if bytes_read == 0 {
+            break;
+        }
+
+        if bytes_read > max_response_bytes.saturating_sub(body.len()) {
+            return Err(script_post_error(
+                ScriptPostErrorCode::ResponseTooLarge,
+                format!(
+                    "postJson response exceeded max size of {} bytes",
+                    max_response_bytes
+                ),
+            ));
+        }
+
+        body.extend_from_slice(&chunk[..bytes_read]);
+    }
+
+    Ok(body)
+}
+
+fn parse_fetch_response_body(
+    body: &[u8],
+) -> std::result::Result<Option<ScriptJsonValue>, ScriptFetchOpOutcome> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+
+    deno_core::serde_json::from_slice::<ScriptJsonValue>(body)
+        .map(Some)
+        .map_err(|error| {
+            script_post_error(
+                ScriptPostErrorCode::InvalidJsonResponse,
+                format!("postJson response was not valid JSON: {error}"),
+            )
+        })
+}
+
+fn execute_prepared_post_request(prepared: PreparedFetchRequest) -> ScriptFetchOpOutcome {
+    let PreparedFetchRequest {
+        request,
+        url,
+        timeout,
+        max_response_bytes,
+    } = prepared;
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return script_post_error(
+                ScriptPostErrorCode::Transport,
+                format!("failed to create postJson client: {error}"),
+            );
+        }
+    };
+
+    let mut request_builder = client
+        .post(url)
+        .header(reqwest::header::ORIGIN, SCRIPT_FETCH_ORIGIN)
+        .header(reqwest::header::USER_AGENT, SCRIPT_FETCH_USER_AGENT)
+        .header(reqwest::header::ACCEPT, "application/json");
+
+    let body_json = request.body_json.unwrap_or(Value::Null);
+    request_builder = request_builder
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(&body_json);
+
+    let mut response = match request_builder.send() {
+        Ok(response) => response,
+        Err(error) if error.is_timeout() => {
+            return script_post_error(
+                ScriptPostErrorCode::Timeout,
+                format!(
+                    "postJson request timed out after {} ms",
+                    timeout.as_millis()
+                ),
+            );
+        }
+        Err(error) => {
+            return script_post_error(
+                ScriptPostErrorCode::Transport,
+                format!("postJson request failed: {error}"),
+            );
+        }
+    };
+
+    let status = response.status();
+    let body = match read_limited_response_body(&mut response, max_response_bytes) {
+        Ok(body) => body,
+        Err(error) => return error,
+    };
+    let body_json = match parse_fetch_response_body(&body) {
+        Ok(body_json) => body_json,
+        Err(error) => return error,
+    };
+
+    ScriptFetchOpOutcome::success(ScriptPostResponse {
+        ok: status.is_success(),
+        status: status.as_u16(),
+        body_json,
+    })
+}
+
 fn ensure_v8_platform_initialized() {
     V8_PLATFORM_INIT.call_once(|| {
         JsRuntime::init_platform(None, false);
     });
 }
 
-fn create_js_runtime(outputs: Rc<RefCell<Vec<ScriptIntent>>>) -> JsRuntime {
+fn create_js_runtime(
+    outputs: Rc<RefCell<Vec<ScriptIntent>>>,
+    config: ScriptHostConfig,
+) -> JsRuntime {
     let mut js_runtime = JsRuntime::new(RuntimeOptions {
         extensions: vec![holtburger_script_ext::init_ops_and_esm()],
         ..Default::default()
@@ -1466,7 +1876,7 @@ fn create_js_runtime(outputs: Rc<RefCell<Vec<ScriptIntent>>>) -> JsRuntime {
     js_runtime
         .op_state()
         .borrow_mut()
-        .put(HostRuntimeState::new(outputs));
+        .put(HostRuntimeState::new(outputs, config));
 
     js_runtime
 }
@@ -1480,6 +1890,10 @@ fn run_js_script(
     js_runtime
         .execute_script(engine_name, source)
         .with_context(|| format!("failed to execute script {display_name}"))?;
+    run_js_event_loop(js_runtime, display_name)
+}
+
+fn run_js_event_loop(js_runtime: &mut JsRuntime, display_name: &str) -> Result<()> {
     block_on(js_runtime.run_event_loop(Default::default()))
         .with_context(|| format!("failed to drive script event loop for {display_name}"))?;
     Ok(())
@@ -1503,6 +1917,47 @@ fn escape_js_string_separators(value: &str) -> String {
         .replace('\u{2029}', "\\u2029")
 }
 
+fn build_fetch_completion_source(completions: &[CompletedFetchRequest]) -> Result<Option<String>> {
+    if completions.is_empty() {
+        return Ok(None);
+    }
+
+    let mut statements = VecDeque::with_capacity(completions.len());
+    for completion in completions {
+        let outcome_json = deno_core::serde_json::to_string(&completion.outcome)
+            .context("failed to serialize fetch completion outcome")?;
+        let outcome_literal = deno_core::serde_json::to_string(&outcome_json)
+            .context("failed to serialize fetch completion JSON literal")?;
+        let outcome_literal = escape_js_string_separators(&outcome_literal);
+
+        statements.push_back(format!(
+            "globalThis.__holtburgerCompleteFetch({}, JSON.parse({outcome_literal}));",
+            completion.request_id
+        ));
+    }
+
+    Ok(Some(statements.into_iter().collect::<Vec<_>>().join("\n")))
+}
+
+fn drain_completed_fetches(js_runtime: &mut JsRuntime) -> Result<()> {
+    let completions = {
+        let op_state = js_runtime.op_state();
+        let mut op_state_ref = op_state.borrow_mut();
+        op_state_ref
+            .borrow_mut::<HostRuntimeState>()
+            .drain_fetch_completions()
+    };
+
+    let Some(source) = build_fetch_completion_source(&completions)? else {
+        return Ok(());
+    };
+
+    js_runtime
+        .execute_script(FETCH_COMPLETION_SCRIPT_NAME, source)
+        .context("failed to execute fetch completion script")?;
+    run_js_event_loop(js_runtime, FETCH_COMPLETION_SCRIPT_NAME)
+}
+
 pub struct ScriptHost {
     js_runtime: JsRuntime,
     outputs: Rc<RefCell<Vec<ScriptIntent>>>,
@@ -1510,10 +1965,18 @@ pub struct ScriptHost {
 
 impl ScriptHost {
     pub fn spawn<T: ScriptClientView>(source: ScriptSource, context: &T) -> Result<Self> {
+        Self::spawn_with_config(source, context, ScriptHostConfig::default())
+    }
+
+    pub fn spawn_with_config<T: ScriptClientView>(
+        source: ScriptSource,
+        context: &T,
+        config: ScriptHostConfig,
+    ) -> Result<Self> {
         ensure_v8_platform_initialized();
 
         let outputs = Rc::new(RefCell::new(Vec::new()));
-        let mut js_runtime = create_js_runtime(outputs.clone());
+        let mut js_runtime = create_js_runtime(outputs.clone(), config);
         let ScriptSource { name, source } = source;
 
         with_active_script_context(&mut js_runtime, context, |js_runtime| {
@@ -1540,13 +2003,19 @@ impl ScriptHost {
         let dispatch_source = build_dispatch_source(&event)?;
 
         with_active_script_context(&mut self.js_runtime, context, |js_runtime| {
+            drain_completed_fetches(js_runtime)?;
             run_js_script(
                 js_runtime,
                 EVENT_SCRIPT_NAME,
                 EVENT_SCRIPT_NAME,
                 dispatch_source,
-            )
+            )?;
+            drain_completed_fetches(js_runtime)
         })
+    }
+
+    pub fn pump(&mut self, context: &impl ScriptClientView) -> Result<()> {
+        with_active_script_context(&mut self.js_runtime, context, drain_completed_fetches)
     }
 
     pub fn drain_outputs(&mut self) -> Vec<ScriptIntent> {
@@ -1576,9 +2045,10 @@ mod tests {
         ScriptBusyOperation, ScriptChatChannelKind, ScriptChatEvent, ScriptClientIntent,
         ScriptClientInteraction, ScriptCombatInfo, ScriptConfirmation, ScriptContainerView,
         ScriptEnchantmentView, ScriptEntityKind, ScriptEntityView, ScriptEquipmentSlotKind,
-        ScriptEquipmentSlotView, ScriptEvent, ScriptIntent, ScriptLifecycleEvent,
-        ScriptLocalConfirmation, ScriptLocalConfirmationKind, ScriptPartyMemberView,
-        ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo,
+        ScriptEquipmentSlotView, ScriptEvent, ScriptFetchAllowedHost, ScriptHostConfig,
+        ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation, ScriptLocalConfirmationKind,
+        ScriptPartyMemberView, ScriptPartyView, ScriptPositionRef, ScriptSelfView, ScriptSource,
+        ScriptTradeInfo,
     };
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
@@ -1588,6 +2058,10 @@ mod tests {
     };
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[derive(Default)]
     struct TestView;
@@ -1827,6 +2301,113 @@ mod tests {
         attack_follow_and_cancel_helpers_emit_client_intents();
         current_trade_info_helper_returns_js_object();
         set_combat_mode_helper_emits_script_intent();
+        post_json_helper_returns_json_response_for_post_without_body();
+        post_json_helper_posts_json_body();
+        post_json_helper_does_not_block_host_while_request_is_in_flight();
+        post_json_helper_rejects_invalid_request_shape();
+        post_json_helper_rejects_denied_host();
+        post_json_helper_rejects_timeout();
+    }
+
+    fn spawn_test_http_server(
+        status_line: &str,
+        response_body: &str,
+        delay_before_response: Duration,
+    ) -> (u16, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("test listener");
+        let port = listener.local_addr().expect("local addr").port();
+        let status_line = status_line.to_string();
+        let response_body = response_body.to_string();
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accepted connection");
+            stream
+                .set_read_timeout(Some(Duration::from_millis(500)))
+                .expect("read timeout");
+
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            let mut header_len = None;
+            let mut content_length = 0_usize;
+
+            loop {
+                let bytes_read = stream.read(&mut buffer).expect("read request bytes");
+                if bytes_read == 0 {
+                    break;
+                }
+
+                request.extend_from_slice(&buffer[..bytes_read]);
+
+                if header_len.is_none()
+                    && let Some(position) =
+                        request.windows(4).position(|window| window == b"\r\n\r\n")
+                {
+                    let end = position + 4;
+                    header_len = Some(end);
+                    let headers = String::from_utf8_lossy(&request[..end]);
+                    content_length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().ok())
+                                .flatten()
+                        })
+                        .unwrap_or_default();
+                }
+
+                if let Some(header_len) = header_len
+                    && request.len() >= header_len + content_length
+                {
+                    break;
+                }
+            }
+
+            if !delay_before_response.is_zero() {
+                thread::sleep(delay_before_response);
+            }
+
+            let response = format!(
+                "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{response_body}",
+                response_body.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+
+            String::from_utf8(request).expect("utf8 request")
+        });
+
+        (port, handle)
+    }
+
+    fn spawn_post_test_host(source: ScriptSource, port: u16, timeout_ms: u64) -> super::ScriptHost {
+        super::ScriptHost::spawn_with_config(
+            source,
+            &TestView,
+            ScriptHostConfig {
+                fetch_policy: crate::ScriptFetchPolicy {
+                    allowed_hosts: vec![ScriptFetchAllowedHost::new("127.0.0.1", port)],
+                    timeout_ms,
+                    max_response_bytes: 16 * 1024,
+                },
+            },
+        )
+        .expect("script host")
+    }
+
+    fn pump_post_test_host(host: &mut super::ScriptHost) -> Vec<ScriptIntent> {
+        let deadline = Instant::now() + Duration::from_millis(500);
+
+        loop {
+            host.pump(&TestView).expect("pump script host");
+            let outputs = host.drain_outputs();
+            if !outputs.is_empty() || Instant::now() >= deadline {
+                return outputs;
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 
     fn dispatch_source_escapes_javascript_line_separators() {
@@ -2163,6 +2744,177 @@ mod tests {
                 ScriptIntent::SetCombatMode { on: false },
                 ScriptIntent::SetCombatMode { on: true },
             ]
+        ));
+    }
+
+    fn post_json_helper_returns_json_response_for_post_without_body() {
+        let (port, server) = spawn_test_http_server("200 OK", "{\"pong\":true}", Duration::ZERO);
+        let source = ScriptSource::new(
+            "post-json-post-without-body-test",
+            format!(
+                r#"
+                (async () => {{
+                    const response = await Holtburger.postJson({{ url: "http://127.0.0.1:{port}/status" }});
+                    Holtburger.print("info", JSON.stringify(response));
+                }})().catch((error) => Holtburger.print("error", `${{error.code}}:${{error.message}}`));
+            "#
+            ),
+        );
+
+        let mut host = spawn_post_test_host(source, port, 1_000);
+        assert!(host.drain_outputs().is_empty());
+        let request = server.join().expect("server join");
+        let outputs = pump_post_test_host(&mut host);
+        let lower_request = request.to_ascii_lowercase();
+        let expected_user_agent = format!(
+            "user-agent: holtburger/{} scriptfetch\r\n",
+            env!("CARGO_PKG_VERSION")
+        );
+
+        assert!(request.starts_with("POST /status HTTP/1.1\r\n"));
+        assert!(lower_request.contains("origin: https://holtburger.invalid\r\n"));
+        assert!(lower_request.contains(&expected_user_agent));
+        assert!(lower_request.contains("content-type: application/json\r\n"));
+        assert!(request.ends_with("null"));
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { message, .. }]
+                if message == "{\"ok\":true,\"status\":200,\"bodyJson\":{\"pong\":true}}"
+        ));
+    }
+
+    fn post_json_helper_posts_json_body() {
+        let (port, server) =
+            spawn_test_http_server("202 Accepted", "{\"accepted\":true}", Duration::ZERO);
+        let source = ScriptSource::new(
+            "post-json-post-body-test",
+            format!(
+                r#"
+                (async () => {{
+                    const response = await Holtburger.postJson({{
+                        url: "http://127.0.0.1:{port}/submit",
+                        bodyJson: {{ action: "ping", count: 2 }},
+                    }});
+                    Holtburger.print("info", JSON.stringify(response));
+                }})().catch((error) => Holtburger.print("error", `${{error.code}}:${{error.message}}`));
+            "#
+            ),
+        );
+
+        let mut host = spawn_post_test_host(source, port, 1_000);
+        assert!(host.drain_outputs().is_empty());
+        let request = server.join().expect("server join");
+        let outputs = pump_post_test_host(&mut host);
+        let lower_request = request.to_ascii_lowercase();
+
+        assert!(request.starts_with("POST /submit HTTP/1.1\r\n"));
+        assert!(lower_request.contains("content-type: application/json\r\n"));
+        assert!(request.ends_with("{\"action\":\"ping\",\"count\":2}"));
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { message, .. }]
+                if message == "{\"ok\":true,\"status\":202,\"bodyJson\":{\"accepted\":true}}"
+        ));
+    }
+
+    fn post_json_helper_rejects_denied_host() {
+        let source = ScriptSource::new(
+            "post-json-denied-test",
+            r#"
+                (async () => {
+                    await Holtburger.postJson({ url: "http://127.0.0.1:6553/blocked" });
+                })().catch((error) => Holtburger.print("error", `${error.code}:${error.message}`));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { style, message }]
+                if *style == crate::ScriptMessageStyle::Error
+                    && message.starts_with("policy_denied:postJson denied for host 127.0.0.1:6553")
+        ));
+    }
+
+    fn post_json_helper_rejects_invalid_request_shape() {
+        let source = ScriptSource::new(
+            "post-json-invalid-request-test",
+            r#"
+                (async () => {
+                    await Holtburger.postJson({ url: 7 });
+                })().catch((error) => Holtburger.print("error", `${error.code}:${error.message}`));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { style, message }]
+                if *style == crate::ScriptMessageStyle::Error
+                    && message.starts_with("invalid_request:invalid postJson request:")
+        ));
+    }
+
+    fn post_json_helper_rejects_timeout() {
+        let (port, server) =
+            spawn_test_http_server("200 OK", "{\"slow\":true}", Duration::from_millis(150));
+        let source = ScriptSource::new(
+            "post-json-timeout-test",
+            format!(
+                r#"
+                (async () => {{
+                    await Holtburger.postJson({{ url: "http://127.0.0.1:{port}/slow" }});
+                }})().catch((error) => Holtburger.print("error", `${{error.code}}:${{error.message}}`));
+            "#
+            ),
+        );
+
+        let mut host = spawn_post_test_host(source, port, 25);
+        assert!(host.drain_outputs().is_empty());
+        let _ = server.join();
+        let outputs = pump_post_test_host(&mut host);
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { style, message }]
+                if *style == crate::ScriptMessageStyle::Error
+                    && message.starts_with("timeout:postJson request timed out after 25 ms")
+        ));
+    }
+
+    fn post_json_helper_does_not_block_host_while_request_is_in_flight() {
+        let response_delay = Duration::from_millis(500);
+        let (port, server) = spawn_test_http_server("200 OK", "{\"slow\":true}", response_delay);
+        let source = ScriptSource::new(
+            "post-json-non-blocking-test",
+            format!(
+                r#"
+                (async () => {{
+                    const response = await Holtburger.postJson({{ url: "http://127.0.0.1:{port}/slow" }});
+                    Holtburger.print("info", JSON.stringify(response));
+                }})().catch((error) => Holtburger.print("error", `${{error.code}}:${{error.message}}`));
+            "#
+            ),
+        );
+
+        let started_at = Instant::now();
+        let mut host = spawn_post_test_host(source, port, 1_000);
+        let spawn_elapsed = started_at.elapsed();
+
+        assert!(spawn_elapsed < Duration::from_millis(250));
+        assert!(host.drain_outputs().is_empty());
+
+        let _ = server.join();
+        let outputs = pump_post_test_host(&mut host);
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { message, .. }]
+                if message == "{\"ok\":true,\"status\":200,\"bodyJson\":{\"slow\":true}}"
         ));
     }
 

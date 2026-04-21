@@ -9,6 +9,6 @@ pub use client::runtime_body_view_cache::RuntimeBodyViewCache;
 pub use client::types::{
     ActionResultReason, ActionResultSource, ActiveCharacterConfirmation, BusyOperationKind,
     BusyOperationResult, ClientCommand, ClientState, ClientViewEvent, PlayerCharacterOptions,
-    RetryState, WireEvent,
+    RetryState,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};

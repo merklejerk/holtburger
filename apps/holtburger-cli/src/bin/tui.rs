@@ -302,10 +302,10 @@ fn parse_script_fetch_allowed_host(
     }
 
     if trimmed.contains("://") {
-        let (scheme, rest) = trimmed.split_once("://").ok_or_else(|| {
+        let parsed = reqwest::Url::parse(trimmed).map_err(|_| {
             "script fetch host must be HOST:PORT or http(s)://HOST[:PORT]".to_string()
         })?;
-        let default_port = match scheme {
+        let default_port = match parsed.scheme() {
             "http" => 80,
             "https" => 443,
             _ => {
@@ -315,25 +315,14 @@ fn parse_script_fetch_allowed_host(
             }
         };
 
-        let authority = rest
-            .split_once('/')
-            .map_or(rest, |(authority, _)| authority);
-        if authority.trim().is_empty() {
-            return Err("script fetch host must include a hostname".to_string());
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return Err("script fetch host must not include user info".to_string());
         }
 
-        let (host, port) = match authority.rsplit_once(':') {
-            Some((_, "")) => {
-                return Err(format!("invalid script fetch port in {trimmed}"));
-            }
-            Some((host, port)) => {
-                let port = port
-                    .parse::<u16>()
-                    .map_err(|_| format!("invalid script fetch port in {trimmed}"))?;
-                (host, port)
-            }
-            None => (authority, default_port),
-        };
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| "script fetch host must include a hostname".to_string())?;
+        let port = parsed.port().unwrap_or(default_port);
 
         return Ok(ScriptFetchAllowedHost::new(host, port));
     }
@@ -1190,6 +1179,38 @@ mod tests {
             config.fetch_policy.allowed_hosts,
             vec![ScriptFetchAllowedHost::new("example.org", 80)]
         );
+    }
+
+    #[test]
+    fn script_fetch_policy_accepts_https_ipv6_authority() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--script-fetch-allow-host",
+            "https://[::1]:8443/path",
+        ])
+        .expect("ipv6 allow-host args should parse");
+
+        let config = script_host_config_from_args(&args);
+
+        assert_eq!(
+            config.fetch_policy.allowed_hosts,
+            vec![ScriptFetchAllowedHost::new("::1", 8443)]
+        );
+    }
+
+    #[test]
+    fn script_fetch_policy_rejects_url_user_info() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--script-fetch-allow-host",
+            "https://user@example.org",
+        ]);
+
+        assert!(args.is_err());
     }
 
     #[test]

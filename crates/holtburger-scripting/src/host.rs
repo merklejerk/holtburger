@@ -1008,11 +1008,17 @@ fn op_hb_character_sheet(state: &mut OpState) -> Option<ScriptCharacterSheetView
 #[serde]
 fn op_hb_post_json_start(
     state: &mut OpState,
-    #[serde] request: ScriptPostRequest,
+    #[serde] request: deno_core::serde_json::Value,
 ) -> ScriptFetchStartOutcome {
-    state
-        .borrow_mut::<HostRuntimeState>()
-        .start_post_request(request)
+    match from_value::<ScriptPostRequest>(request) {
+        Ok(request) => state
+            .borrow_mut::<HostRuntimeState>()
+            .start_post_request(request),
+        Err(error) => ScriptFetchStartOutcome::failure(
+            ScriptPostErrorCode::InvalidRequest,
+            format!("invalid postJson request: {error}"),
+        ),
+    }
 }
 
 #[op2]
@@ -1690,7 +1696,7 @@ fn prepare_post_request(
     let url = reqwest::Url::parse(&request.url).map_err(|error| {
         script_post_error(
             ScriptPostErrorCode::InvalidRequest,
-            format!("invalid fetch URL: {error}"),
+            format!("invalid postJson URL: {error}"),
         )
     })?;
 
@@ -1699,7 +1705,7 @@ fn prepare_post_request(
         scheme => {
             return Err(script_post_error(
                 ScriptPostErrorCode::InvalidRequest,
-                format!("unsupported fetch URL scheme: {scheme}"),
+                format!("unsupported postJson URL scheme: {scheme}"),
             ));
         }
     }
@@ -1707,20 +1713,20 @@ fn prepare_post_request(
     let host = url.host_str().ok_or_else(|| {
         script_post_error(
             ScriptPostErrorCode::InvalidRequest,
-            "fetch URL must include a host",
+            "postJson URL must include a host",
         )
     })?;
     let port = url.port_or_known_default().ok_or_else(|| {
         script_post_error(
             ScriptPostErrorCode::InvalidRequest,
-            "fetch URL must resolve to a network port",
+            "postJson URL must resolve to a network port",
         )
     })?;
 
     if !policy.allows(host, port) {
         return Err(script_post_error(
             ScriptPostErrorCode::PolicyDenied,
-            format!("fetch denied for host {host}:{port}"),
+            format!("postJson denied for host {host}:{port}"),
         ));
     }
 
@@ -1743,7 +1749,7 @@ fn read_limited_response_body(
         let bytes_read = response.read(&mut chunk).map_err(|error| {
             script_post_error(
                 ScriptPostErrorCode::Transport,
-                format!("failed to read fetch response body: {error}"),
+                format!("failed to read postJson response body: {error}"),
             )
         })?;
 
@@ -1751,11 +1757,11 @@ fn read_limited_response_body(
             break;
         }
 
-        if body.len() + bytes_read > max_response_bytes {
+        if bytes_read > max_response_bytes.saturating_sub(body.len()) {
             return Err(script_post_error(
                 ScriptPostErrorCode::ResponseTooLarge,
                 format!(
-                    "fetch response exceeded max size of {} bytes",
+                    "postJson response exceeded max size of {} bytes",
                     max_response_bytes
                 ),
             ));
@@ -1779,7 +1785,7 @@ fn parse_fetch_response_body(
         .map_err(|error| {
             script_post_error(
                 ScriptPostErrorCode::InvalidJsonResponse,
-                format!("fetch response was not valid JSON: {error}"),
+                format!("postJson response was not valid JSON: {error}"),
             )
         })
 }
@@ -1800,7 +1806,7 @@ fn execute_prepared_post_request(prepared: PreparedFetchRequest) -> ScriptFetchO
         Err(error) => {
             return script_post_error(
                 ScriptPostErrorCode::Transport,
-                format!("failed to create fetch client: {error}"),
+                format!("failed to create postJson client: {error}"),
             );
         }
     };
@@ -1821,13 +1827,16 @@ fn execute_prepared_post_request(prepared: PreparedFetchRequest) -> ScriptFetchO
         Err(error) if error.is_timeout() => {
             return script_post_error(
                 ScriptPostErrorCode::Timeout,
-                format!("fetch request timed out after {} ms", timeout.as_millis()),
+                format!(
+                    "postJson request timed out after {} ms",
+                    timeout.as_millis()
+                ),
             );
         }
         Err(error) => {
             return script_post_error(
                 ScriptPostErrorCode::Transport,
-                format!("fetch request failed: {error}"),
+                format!("postJson request failed: {error}"),
             );
         }
     };
@@ -2295,6 +2304,7 @@ mod tests {
         post_json_helper_returns_json_response_for_post_without_body();
         post_json_helper_posts_json_body();
         post_json_helper_does_not_block_host_while_request_is_in_flight();
+        post_json_helper_rejects_invalid_request_shape();
         post_json_helper_rejects_denied_host();
         post_json_helper_rejects_timeout();
     }
@@ -2756,10 +2766,14 @@ mod tests {
         let request = server.join().expect("server join");
         let outputs = pump_post_test_host(&mut host);
         let lower_request = request.to_ascii_lowercase();
+        let expected_user_agent = format!(
+            "user-agent: holtburger/{} scriptfetch\r\n",
+            env!("CARGO_PKG_VERSION")
+        );
 
         assert!(request.starts_with("POST /status HTTP/1.1\r\n"));
         assert!(lower_request.contains("origin: https://holtburger.invalid\r\n"));
-        assert!(lower_request.contains("user-agent: holtburger/0.1.0 scriptfetch\r\n"));
+        assert!(lower_request.contains(&expected_user_agent));
         assert!(lower_request.contains("content-type: application/json\r\n"));
         assert!(request.ends_with("null"));
         assert!(matches!(
@@ -2820,7 +2834,28 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Print { style, message }]
                 if *style == crate::ScriptMessageStyle::Error
-                    && message.starts_with("policy_denied:fetch denied for host 127.0.0.1:6553")
+                    && message.starts_with("policy_denied:postJson denied for host 127.0.0.1:6553")
+        ));
+    }
+
+    fn post_json_helper_rejects_invalid_request_shape() {
+        let source = ScriptSource::new(
+            "post-json-invalid-request-test",
+            r#"
+                (async () => {
+                    await Holtburger.postJson({ url: 7 });
+                })().catch((error) => Holtburger.print("error", `${error.code}:${error.message}`));
+            "#,
+        );
+
+        let mut host = super::ScriptHost::spawn(source, &TestView).expect("script host");
+        let outputs = host.drain_outputs();
+
+        assert!(matches!(
+            outputs.as_slice(),
+            [ScriptIntent::Print { style, message }]
+                if *style == crate::ScriptMessageStyle::Error
+                    && message.starts_with("invalid_request:invalid postJson request:")
         ));
     }
 
@@ -2847,13 +2882,13 @@ mod tests {
             outputs.as_slice(),
             [ScriptIntent::Print { style, message }]
                 if *style == crate::ScriptMessageStyle::Error
-                    && message.starts_with("timeout:fetch request timed out after 25 ms")
+                    && message.starts_with("timeout:postJson request timed out after 25 ms")
         ));
     }
 
     fn post_json_helper_does_not_block_host_while_request_is_in_flight() {
-        let (port, server) =
-            spawn_test_http_server("200 OK", "{\"slow\":true}", Duration::from_millis(150));
+        let response_delay = Duration::from_millis(500);
+        let (port, server) = spawn_test_http_server("200 OK", "{\"slow\":true}", response_delay);
         let source = ScriptSource::new(
             "post-json-non-blocking-test",
             format!(
@@ -2870,7 +2905,7 @@ mod tests {
         let mut host = spawn_post_test_host(source, port, 1_000);
         let spawn_elapsed = started_at.elapsed();
 
-        assert!(spawn_elapsed < Duration::from_millis(100));
+        assert!(spawn_elapsed < Duration::from_millis(250));
         assert!(host.drain_outputs().is_empty());
 
         let _ = server.join();

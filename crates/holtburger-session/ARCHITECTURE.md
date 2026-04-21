@@ -25,21 +25,17 @@ The connection begins plaintext, securely executes an RSA handshake, and transit
 sequenceDiagram
     participant Srv as Server
     participant Sess as Session Layer
-    participant Proto as Protocol Layer (Binrw)
     participant Core as Engine
 
     Srv->>Sess: UDP Fragment (Encrypted)
     Sess->>Sess: Decrypt & Track Sequence
     Sess->>Sess: Reassemble Complete Payload
-    Sess->>Proto: Bytes
-    Proto->>Sess: Unpacked GameMessage
-    Sess->>Core: WireEvent (Raw Protocol Message)
+    Sess->>Core: Message Bytes
 ```
 
 1. **Receive**: Decrypts raw UDP bytes.
 2. **Reassemble**: Combines fragments based on sequence ordering.
-3. **Parse**: Uses `holtburger-protocol` to convert the `[u8]` slice into strongly typed `holtburger_protocol::messages::GameMessage` objects.
-4. **Emit**: Hands the discrete protocol message upward as a `WireEvent` to the Core Engine for state manipulation.
+3. **Emit**: Hands each reassembled payload upward as bytes so core can decode it into `holtburger_protocol::messages::GameMessage` at the core/world boundary.
 
 ## 🛠️ Developer Onboarding
 

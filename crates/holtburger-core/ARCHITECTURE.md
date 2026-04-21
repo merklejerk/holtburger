@@ -15,16 +15,17 @@ The top-level entry point. It instantiates the `Session` (networking) from `holt
 To instantiate a client, we use the `ClientBuilder` ([src/client/builder.rs](src/client/builder.rs)). This configures credentials, server endpoints, optional debug features, and runtime asset loading. `ClientRuntimeBuilder::load_assets(&ContentRepository)` is where the builder reads the specific startup assets it needs and assembles `WorldBootstrap`.
 
 #### Event Streams
-We use a 3-layer event model to separate protocol fidelity from UI ergonomics, solving the monolithic object-cloning problem via highly granular Delta Events:
+We use a narrow runtime surface that keeps protocol and UI concerns distinct without inventing an extra public bus:
 
-1. **`WireEvent`** (Protocol): 1:1 raw packet semantics from `holtburger-session`. Used for logging, debugging, or deep client control.
+1. **Session bytes / decoded `GameMessage`**: `holtburger-session` hands reassembled payload bytes to core, and core decodes them into protocol types at the core-to-world boundary.
 2. **`WorldEvent`** (World): World-layer events emitted by `holtburger-world`, including authoritative mutations and packet-scoped processing outcomes.
-3. **`WorldViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed. The core listens to incoming `WireEvent`s and `WorldEvent`s and collapses them onto THIS SINGLE CHANNEL line.
-   - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
+3. **`ClientViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed exposed to frontends, scripts, and harnesses.
+    - Consumers (like `holtburger-cli`) subscribe to `ClientViewEvent` because it broadcasts granular semantic deltas (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
+    - Low-level raw packet dumping, when needed for diagnostics, is configured explicitly through `ClientRuntimeBuilder::message_dump_dir(...)` instead of a general-purpose runtime event bus.
 
 #### Interaction
 - **ClientCommand**: Commands sent from the UI to the engine (e.g., `DriveMovement`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
-- **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from Wire -> State -> View.
+- **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the public event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from decoded protocol -> state -> view.
 
 ### Command and Controller Boundary
 
@@ -138,20 +139,21 @@ sequenceDiagram
     participant Net as Session (UDP Transport)
     participant Core as Client Engine (Orchestrator)
     participant World as WorldState (Data Authority)
-    participant View as WorldViewEvent (Delta Stream)
+    participant View as ClientViewEvent (Delta Stream)
     participant UI as Consumer (TUI/Local Projection)
 
-    Net->>Core: WireEvent (Unpacked Packet)
+    Net->>Core: Reassembled Message Bytes
+    Core->>Core: Decode GameMessage
     Core->>World: Mutate Authority (e.g. Spawn)
     World->>Core: WorldEvent (e.g EntitySpawned)
     Core->>View: Emit as Semantic Delta
     View->>UI: Process In-Place Projection Update
 ```
 
-1. **Networking**: `holtburger-session` parses UDP packets.
-2. **Engine**: `Client` processes the `WireEvent` and emits intents to `holtburger-world`'s `WorldState`.
+1. **Networking**: `holtburger-session` reassembles decrypted UDP payloads.
+2. **Engine**: `Client` decodes `GameMessage`, performs any core-owned handling, and emits intents to `holtburger-world`'s `WorldState`.
 3. **Authority**: `WorldState` performs the mutation and emits a `WorldEvent`.
-4. **Projection**: `Client` translates the `WorldEvent` directly into a granular `WorldViewEvent` delta snapshot.
+4. **Projection**: `Client` translates decoded protocol handling and `WorldEvent` output directly into granular `ClientViewEvent` deltas.
 5. **UI**: Consumers receive the delta and mutate their local cached models safely without lock contention (`Arc<RwLock>`) or massive memory allocations.
 
 ## 🛠️ Developer Onboarding
@@ -161,7 +163,7 @@ sequenceDiagram
 2. **Update Protocol**: Add the message structure to `holtburger-protocol`.
 3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
 4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `WorldEvent`.
-5. **Map to View**: Update the `WorldViewEvent` stream in `emit_wire_event` or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
+5. **Map to View**: Update the direct `ClientViewEvent` emission in [src/client/messages.rs](src/client/messages.rs) or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
 
 ### Adding or Refactoring a Reusable Controller
 1. **Prove the behavior is shared**: Confirm that the behavior is likely useful across multiple clients or modes of control.

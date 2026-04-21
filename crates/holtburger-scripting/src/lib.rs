@@ -28,7 +28,7 @@ pub use types::{
     ScriptEquipmentSlotView, ScriptEvent, ScriptFetchAllowedHost, ScriptFetchPolicy,
     ScriptHostConfig, ScriptIntent, ScriptLifecycleEvent, ScriptLocalConfirmation,
     ScriptLocalConfirmationKind, ScriptMessageStyle, ScriptMotionCommand, ScriptPartyMemberView,
-    ScriptPartyView, ScriptPostError, ScriptPostErrorCode, ScriptPostRequest, ScriptPostResponse,
-    ScriptPositionRef, ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
+    ScriptPartyView, ScriptPositionRef, ScriptPostError, ScriptPostErrorCode, ScriptPostRequest,
+    ScriptPostResponse, ScriptSelfView, ScriptSource, ScriptTradeInfo, ScriptWorkflowEvent,
     ScriptWorldPosition,
 };

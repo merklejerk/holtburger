@@ -1,6 +1,4 @@
 use super::PlayerState;
-use crate::WorldEvent;
-use crate::player::types::LastSentStats;
 use crate::stats;
 use holtburger_common::properties::EnchantmentTypeFlags;
 
@@ -192,7 +190,7 @@ impl PlayerState {
         }
     }
 
-    pub fn emit_derived_stats(&mut self, events: &mut Vec<WorldEvent>) {
+    pub(crate) fn refresh_cached_derived_stat_inputs(&mut self) {
         // Recalculate Attributes
         let attr_types: Vec<_> = self.attributes.keys().cloned().collect();
         for attr_type in attr_types {
@@ -233,40 +231,5 @@ impl PlayerState {
                 skill.current = current_val;
             }
         }
-
-        // Recalculate Armor
-        let armor = self.armor();
-
-        // Recalculate Resistances
-        let resistances = self.resistances();
-
-        // Recalculate Vitae
-        let vitae = self.vitae();
-
-        let current = LastSentStats {
-            attributes: self.get_attributes(),
-            vitals: self.get_vitals(),
-            skills: self.get_skills(),
-            resistances: resistances.clone(),
-            armor,
-            vitae,
-        };
-
-        if self.last_sent_stats.as_ref() == Some(&current) {
-            return;
-        }
-
-        self.last_sent_stats = Some(current.clone());
-
-        events.push(WorldEvent::DerivedStatsUpdated(Box::new(
-            crate::DerivedStatsData {
-                attributes: current.attributes,
-                vitals: current.vitals,
-                skills: current.skills,
-                resistances: current.resistances,
-                armor: current.armor,
-                vitae: current.vitae,
-            },
-        )));
     }
 }

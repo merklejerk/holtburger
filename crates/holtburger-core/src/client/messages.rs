@@ -681,14 +681,9 @@ mod tests {
         };
         client.world.player.guid = player_guid;
         client.world.player.server_control_sequence = 9;
-        client.world.player.position = position;
         client
             .world
-            .add_entity(holtburger_world::entity::Entity::new(
-                player_guid,
-                "Player".to_string(),
-                position,
-            ));
+            .seed_local_player_entity(player_guid, "Player", position);
 
         let encoded = encode_message(&server_controlled_motion(player_guid, 10, 20));
 
@@ -723,14 +718,9 @@ mod tests {
         let player_guid = holtburger_common::Guid(0x50000001);
         client.world.player.guid = player_guid;
         client.world.player.server_control_sequence = 10;
-        client.world.player.position = WorldPosition::default();
         client
             .world
-            .add_entity(holtburger_world::entity::Entity::new(
-                player_guid,
-                "Player".to_string(),
-                WorldPosition::default(),
-            ));
+            .seed_local_player_entity(player_guid, "Player", WorldPosition::default());
 
         let encoded = encode_message(&server_controlled_motion(player_guid, 9, 19));
 
@@ -757,12 +747,10 @@ mod tests {
         };
 
         client.world.player.guid = player_guid;
-        client.world.player.position = start;
         client.world.player.server_control_sequence = 9;
         client
             .world
-            .entities
-            .insert(Entity::new(player_guid, "Player".to_string(), start));
+            .seed_local_player_entity(player_guid, "Player", start);
 
         let encoded = encode_message(&server_controlled_move_to_position(
             player_guid,
@@ -775,7 +763,7 @@ mod tests {
         client.handle_message(&encoded).await.unwrap();
 
         assert_eq!(client.world.player.server_control_sequence, 10);
-        assert_eq!(client.world.player.position, start);
+        assert_eq!(client.world.player_position(), Some(start));
         let body = client
             .world
             .scene
@@ -1059,10 +1047,11 @@ mod tests {
 
         client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(
             holtburger_world::PlayerInfoData {
-                guid: holtburger_common::Guid(0x50000001),
-                name: "Test Player".to_string(),
-                pos: None,
-                player_entity: None,
+                entity: Box::new(Entity::new(
+                    holtburger_common::Guid(0x50000001),
+                    "Test Player".to_string(),
+                    WorldPosition::default(),
+                )),
                 attributes: Vec::new(),
                 vitals: Vec::new(),
                 skills: Vec::new(),
@@ -1078,6 +1067,7 @@ mod tests {
         )));
 
         let mut saw_options_projection = false;
+        let mut saw_authoritative_player_spawn = false;
         while let Ok(event) = events.try_recv() {
             if matches!(
                 event,
@@ -1086,11 +1076,20 @@ mod tests {
                         && options.options2 == CharacterOptions2::SHOW_HELM
             ) {
                 saw_options_projection = true;
-                break;
+            }
+
+            if matches!(
+                event,
+                ClientViewEvent::EntitySpawned { entity }
+                    if entity.guid == holtburger_common::Guid(0x50000001)
+                        && entity.name() == "Test Player"
+            ) {
+                saw_authoritative_player_spawn = true;
             }
         }
 
         assert!(saw_options_projection);
+        assert!(saw_authoritative_player_spawn);
     }
 
     #[tokio::test]

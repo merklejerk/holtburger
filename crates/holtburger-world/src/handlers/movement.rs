@@ -71,13 +71,9 @@ pub(crate) fn handle_message(
                 target_info = Some((target.position.landblock_id, target.position.coords));
             }
 
-            let current_position = if guid == state.player.guid {
-                state.player.position
-            } else {
-                match state.entities.get(guid) {
-                    Some(entity) => entity.position,
-                    None => return false,
-                }
+            let current_position = match state.entities.get(guid) {
+                Some(entity) => entity.position,
+                None => return false,
             };
 
             let maybe_rotation = match &data.data {
@@ -105,14 +101,7 @@ pub(crate) fn handle_message(
             };
 
             if let Some(rotation) = maybe_rotation {
-                if guid == state.player.guid {
-                    let mut pos = state.player.position;
-                    pos.rotation = rotation;
-                    events.extend(state.set_player_position(pos));
-                    true
-                } else {
-                    state.set_entity_rotation(guid, rotation, events)
-                }
+                state.set_entity_rotation(guid, rotation, events)
             } else {
                 false
             }

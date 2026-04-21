@@ -1,3 +1,4 @@
+use crate::book::BookData;
 use crate::entity::{Entity, EntityMotionSnapshot};
 use crate::spatial::{RuntimeBodyResetCause, SpatialBodyId};
 use crate::state;
@@ -12,10 +13,8 @@ use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
 pub struct PlayerInfoData {
-    pub guid: Guid,
-    pub name: String,
-    pub pos: Option<WorldPosition>,
-    pub player_entity: Option<Box<Entity>>,
+    /// Authoritative world/entity snapshot for the local player.
+    pub entity: Box<Entity>,
     pub attributes: Vec<stats::Attribute>,
     pub vitals: Vec<stats::Vital>,
     pub skills: Vec<stats::Skill>,
@@ -54,6 +53,14 @@ pub enum FellowshipActivity {
 pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
+    EntityHealthUpdated {
+        guid: Guid,
+        health_fraction: f32,
+    },
+    EntityBookUpdated {
+        guid: Guid,
+        book: Box<BookData>,
+    },
     EntityMoved {
         guid: Guid,
         pos: WorldPosition,

@@ -1,7 +1,7 @@
 # World State Architecture 🌍
 
 `holtburger-world` is the client's authoritative in-memory world model. It owns the live player
-model, hydrated entities, spatial index, lifecycle/retention rules, and world-domain state, while
+entity, hydrated entities, spatial index, lifecycle/retention rules, and world-domain state, while
 keeping protocol routing separate from the state models themselves.
 
 The refactor goal was simple: **handlers orchestrate, models mutate**.
@@ -16,8 +16,8 @@ The refactor goal was simple: **handlers orchestrate, models mutate**.
     now just a facade over the handler layer.
 - **Narrow mutation surfaces**: handlers call focused mutation helpers on `PlayerState` and
     `WorldState` instead of open-coding state changes.
-- **Mirror invariants matter**: the current player is mirrored between `PlayerState` and the player
-    `Entity` in `WorldState.entities`; movement/placement helpers must keep those views synchronized.
+- **One world authority**: player world/object state lives on the player `Entity` in
+    `WorldState.entities`; `PlayerState` is reserved for local-player/session overlays.
 - **Retention is part of authority**: whether an entity stays visible to the client is determined by
     `WorldState` retention/lifecycle rules, not by ad hoc handler-local cleanup.
 
@@ -49,11 +49,12 @@ File: [src/player/mod.rs](src/player/mod.rs)
 - attributes, vitals, skills, and their raw bases
 - enchantments, spells, hotbars, and derived combat stats
 - inventory/equipment membership
-- player properties and protocol sequence tracking
+- player-local position overlays and protocol sequence tracking
 - bootstrap hydration for player-local `PlayerDescription` data
 
-`PlayerState` does **not** own the top-level message router anymore. Its job is to expose mutation
-helpers that encode player-local invariants, sequence tracking, and derived-stat recalculation.
+`PlayerState` does **not** own the top-level message router anymore, and it is not a second
+authoritative entity snapshot. Its job is to expose mutation helpers that encode player-local
+invariants, sequence tracking, and derived-stat recalculation.
 
 ### `WorldState` — authoritative world graph
 File: [src/state/mod.rs](src/state/mod.rs)
@@ -85,12 +86,12 @@ These modules own movement-facing invariants:
 - player/entity movement synchronization
 - retention/visibility housekeeping for the world graph
 - conservative visibility tracking for prune deadlines
-- player mirror helpers such as `set_player_position()` and `set_player_vector()`
+- authoritative player-entity helpers such as `set_player_position()` and `set_player_vector()`
 
 `SpatialScene` is the world-owned spatial composite and solve/query context. Shared runtime
 sampling behavior lives inside it via `BodySamplingStore`, and that world-owned sampling state is
 the canonical runtime body model for the client. Any app-facing cache in `holtburger-core` or a
-frontend is mirrored read state only; it must not independently advance runtime bodies.
+frontend is derived read state only; it must not independently advance runtime bodies.
 
 Shared world no longer performs automatic local collision or local velocity integration during
 `tick()`. Those semantics are intentionally deferred until a future client can define a real
@@ -152,14 +153,12 @@ sequenceDiagram
 
 ## Important Invariants
 
-### Player mirror invariant
-The current player exists in two forms:
+### Player authority invariant
+The current player's world/object state lives on the player entity in `WorldState.entities`.
 
-- the session-local player model in `WorldState.player`
-- the physical entity entry in `WorldState.entities`
-
-Anything that changes the player's physical position or velocity must keep both views in sync.
-Prefer `WorldState` movement helpers over direct field writes.
+Anything that changes the player's physical position or velocity must update that entity through
+the `WorldState` movement helpers so the authoritative entity state and the runtime-body state stay
+in sync. `PlayerState` is for local-player overlays and sequencing, not duplicate world storage.
 
 ### Handler boundary
 Handlers should orchestrate domain flows; they should not become mini state stores.
@@ -171,7 +170,7 @@ type instead of open-coding the mutation logic again.
 `PlayerDescription` is intentionally a shared flow:
 
 - the `player` handler hydrates the session-local player model first
-- the `login` handler then mirrors world-facing details and emits `PlayerInfo`/`LevelInfo`
+- the `login` handler then hydrates the authoritative player entity and emits `PlayerInfo`/`LevelInfo`
 
 That ordering avoids world helpers reading partially hydrated player state.
 

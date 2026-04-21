@@ -239,6 +239,7 @@ mod tests {
     use super::*;
     use crate::state::NetStats;
     use crate::types::{AppAction, ChatMessageTags, Page};
+    use holtburger_scripting::ScriptHostConfig;
 
     fn build_test_app_state(client_state: ClientState) -> AppState {
         AppState {
@@ -259,6 +260,7 @@ mod tests {
             disconnect_reason: None,
             pending_exit_message: None,
             queued_script_startup: None,
+            script_host_config: ScriptHostConfig::default(),
         }
     }
 

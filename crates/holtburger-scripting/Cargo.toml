@@ -13,5 +13,6 @@ holtburger-common.workspace = true
 holtburger-core.workspace = true
 holtburger-protocol.workspace = true
 log = { workspace = true }
+reqwest.workspace = true
 serde.workspace = true
 deno_core = "0.330.0"

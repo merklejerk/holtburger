@@ -5,7 +5,7 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
-use holtburger_scripting::ScriptHost;
+use holtburger_scripting::{ScriptHost, ScriptHostConfig};
 use holtburger_world::context::WorldContext;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -53,6 +53,7 @@ pub(crate) struct GameScriptState {
     pub(crate) tick_accumulator: Duration,
     pub(crate) running_source_name: Option<String>,
     pub(crate) queued_script_startup: Option<QueuedScriptStartup>,
+    pub(crate) host_config: ScriptHostConfig,
 }
 
 pub(crate) const SCRIPT_TICK_INTERVAL: Duration = Duration::from_millis(100);

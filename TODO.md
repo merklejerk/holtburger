@@ -273,6 +273,7 @@
     - [x] Fix not using revitalize.
     - [x] Snap to target heading before casting?
 - [ ] TUI hangs w/100% CPU upon choosing character when started with verbosity >= `-vv`.
+- [ ] `+Holtfighter puts %p hands on %p hips`
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

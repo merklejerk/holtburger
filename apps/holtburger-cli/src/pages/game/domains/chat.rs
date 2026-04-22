@@ -1,14 +1,57 @@
 use super::*;
 use crate::utils::format_action_result_message;
+use holtburger_core::motion_command_for_soul_emote_pose;
+use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_core::ActionResultReason;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_core::errors::is_actually_weenie_error;
+use holtburger_world::entity::EntityMotionSnapshot;
 
-pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> UpdateResult {
+pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateResult {
     match action {
         AppAction::Emote { message } => UpdateResult::commands(vec![ClientCommand::Emote(message)]),
-        AppAction::SoulEmote { token } => UpdateResult::commands(vec![ClientCommand::SoulEmote(token)]),
+        AppAction::SoulEmote { token } => {
+            let mut result = UpdateResult::commands(vec![ClientCommand::SoulEmote(token.clone())]);
+            project_local_soul_emote_pose(state, &token, &mut result);
+            result
+        }
         _ => UpdateResult::new(),
+    }
+}
+
+fn project_local_soul_emote_pose(state: &mut GameState, token: &str, result: &mut UpdateResult) {
+    let Some(player_guid) = state.data.player_guid else {
+        return;
+    };
+
+    let Some(catalog) = state.data.soul_emote_catalog.as_ref() else {
+        return;
+    };
+
+    let Some(command) = catalog
+        .resolve(token)
+        .and_then(|resolved| motion_command_for_soul_emote_pose(resolved.pose))
+    else {
+        return;
+    };
+
+    let snapshot = EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(command),
+        ..EntityMotionSnapshot::default()
+    };
+
+    if let Some(entity) = state.data.entities.get_mut(&player_guid) {
+        entity.motion_snapshot = Some(snapshot);
+    }
+
+    let cache_changed = state
+        .data
+        .runtime_body_cache
+        .set_motion_state_for_guid(player_guid, Some(snapshot));
+
+    if cache_changed || state.data.entities.contains_key(&player_guid) {
+        result.request_redraw(RedrawPriority::Motion);
     }
 }
 
@@ -87,9 +130,15 @@ mod tests {
     use super::*;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
+    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_core::client::types::ClientCommand;
     use holtburger_protocol::errors::WeenieError;
+    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::entity::Entity;
+    use holtburger_world::{ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Instant;
 
     #[test]
     fn emote_action_dispatches_emote_command() {
@@ -109,7 +158,29 @@ mod tests {
 
     #[test]
     fn soul_emote_action_dispatches_soul_emote_command() {
-        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), WorldPosition::default()),
+        );
+        state.data.soul_emote_catalog = Some(Arc::new(SoulEmoteCatalog {
+            tokens: BTreeMap::from([(
+                "wave".to_string(),
+                SoulEmoteToken {
+                    token: "wave".to_string(),
+                    pose: "Wave".to_string(),
+                },
+            )]),
+            poses: BTreeMap::from([(
+                "Wave".to_string(),
+                SoulEmotePose {
+                    pose: "Wave".to_string(),
+                    my_emote: "wave.".to_string(),
+                    other_emote: "waves.".to_string(),
+                },
+            )]),
+        }));
 
         let result = reduce_action(
             &mut state,
@@ -121,6 +192,76 @@ mod tests {
         assert!(matches!(
             result.commands.as_slice(),
             [ClientCommand::SoulEmote(token)] if token == "wave"
+        ));
+        assert!(matches!(
+            state
+                .data
+                .entities
+                .get(&player_guid)
+                .and_then(|entity| entity.motion_snapshot),
+            Some(EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                forward_command: Some(command),
+                ..
+            }) if command == InterpretedMotionCommand(0x0087)
+        ));
+    }
+
+    #[test]
+    fn soul_emote_action_updates_runtime_body_cache_motion_state() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.soul_emote_catalog = Some(Arc::new(SoulEmoteCatalog {
+            tokens: BTreeMap::from([(
+                "wave".to_string(),
+                SoulEmoteToken {
+                    token: "wave".to_string(),
+                    pose: "Wave".to_string(),
+                },
+            )]),
+            poses: BTreeMap::from([(
+                "Wave".to_string(),
+                SoulEmotePose {
+                    pose: "Wave".to_string(),
+                    my_emote: "wave.".to_string(),
+                    other_emote: "waves.".to_string(),
+                },
+            )]),
+        }));
+        state.data.runtime_body_cache.apply_view_event(
+            &ClientViewEvent::RuntimeBodyUpserted {
+                body: Box::new(RuntimeSpatialBodyView {
+                    body_id: SpatialBodyId::LocalPlayer(player_guid),
+                    authoritative_pose: Some(WorldPosition::default()),
+                    runtime_pose: WorldPosition::default(),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    contact: ContactState::Grounded,
+                    sample_mode: SpatialSampleMode::SimulatingMotionState,
+                }),
+            },
+            Instant::now(),
+        );
+
+        let _ = reduce_action(
+            &mut state,
+            AppAction::SoulEmote {
+                token: "wave".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            state
+                .data
+                .runtime_body_cache
+                .spatial_sample(player_guid)
+                .and_then(|sample| sample.motion_state),
+            Some(EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                forward_command: Some(command),
+                ..
+            }) if command == InterpretedMotionCommand(0x0087)
         ));
     }
 

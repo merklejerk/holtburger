@@ -2,6 +2,7 @@ use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use holtburger_common::position::WorldPosition;
+use holtburger_content::SoulEmoteCatalog;
 use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
@@ -293,6 +294,8 @@ pub struct GameData {
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Loaded portal skill table for skill formulas and skill costs.
     pub skill_table: Option<Arc<SkillTable>>,
+    /// Loaded soul-emote catalog for local pose projection.
+    pub soul_emote_catalog: Option<Arc<SoulEmoteCatalog>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
     /// Server name (e.g. "Morningthaw").
@@ -339,6 +342,7 @@ impl Default for GameData {
             self_movement_kinematics: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,

@@ -55,10 +55,17 @@ Implement retail-style soul emote support end-to-end so holtburger can send, rec
 - `ChatPoseTable` contains command string -> pose string plus pose string -> chat emote metadata, but not `MotionCommand` ids.
 - Holburger already parses server-to-client `SoulEmote` messages but currently collapses them into the same event shape as plain emotes.
 - Holburger does not currently expose a `ChatPoseTable` parser or runtime emote catalog.
-- The TUI already has a generic emote/chat lane, but today it treats emotes as plain chat text and does not distinguish soul-emote semantics.
+- The current runtime asset-loading seam already flows through `ContentRepository -> ClientRuntimeBuilder::load_assets() -> WorldBootstrap -> WorldState`; there is no late-bound content lookup seam inside core message handling today.
+- The TUI already has a generic emote/chat lane, but today it routes only colon-prefixed input to a plain `ClientCommand::Emote`, treats incoming plain and soul emotes identically in chat, and mirrors that collapsed shape into scripting.
 
 ### Key Architectural Implication
 The shared implementation seam is not “play the animation.” The seam is “recognize, transport, and classify soul emotes as a distinct semantic feature.” That belongs in `protocol`, `dat`, `content`, and `core`. The TUI should consume those semantics but stay presentation-light.
+
+### Dry-Run Adjustments
+- The plan should treat soul-emote lookup as bootstrap data, not as an ad hoc repository query from `holtburger-core`. The existing runtime already loads spell and motion reference data into `WorldBootstrap` and `WorldState`, and soul-emote resolution should follow that same ownership model.
+- The command split needs to be explicit earlier in the plan. The current code has only `ClientCommand::Emote(String)` and only `ClientViewEvent::Emote { sender, text }`, so preserving the soul/plain distinction is an API change across `core`, the TUI domain reducer, update filters, and scripting.
+- The TUI phase currently undercounts affected surfaces. Besides input and chat rendering, `apps/holtburger-cli/src/update/world.rs` and `apps/holtburger-cli/src/scripting.rs` also depend on the collapsed emote event shape and should be called out as first-class touch points.
+- A cleaner first pass is to keep soul-emote semantic resolution lossless and string-based. `ChatPoseTable` plus ACE’s current wire behavior supports token -> pose -> text metadata, but not retail-accurate `MotionCommand` playback data. The plan should avoid implying a stronger motion contract than the codebase can currently prove.
 
 ---
 
@@ -81,10 +88,16 @@ Add a `ChatPoseTable` parser to `holtburger-dat` that captures:
 This parser should stay lossless and retail-shaped rather than baking TUI policy into the type.
 
 ### Layer 3: Runtime Content Catalog
-Expose a shared emote catalog in `holtburger-content` so runtime code can answer:
+Expose a shared emote catalog in `holtburger-content`, then load it through the existing world-bootstrap path so runtime code can answer:
 - is this token a known soul emote?
 - what pose does it resolve to?
 - what display strings are associated with the pose?
+
+Recommended ownership:
+- `holtburger-dat` parses raw `ChatPoseTable`
+- `holtburger-content` builds a curated `SoulEmoteCatalog`
+- `ClientRuntimeBuilder::load_assets()` loads that catalog into `WorldBootstrap`
+- `holtburger-world` or `holtburger-core` consumes the loaded catalog without reaching back into `ContentRepository`
 
 If persistent-state classification is needed, store that in a derived shared catalog or semantic layer instead of teaching the TUI its own lookup table.
 
@@ -97,6 +110,12 @@ Recommended event shape:
 - resolved pose id when known
 - resolved display text or fallback raw token
 - semantic kind: transient vs persistent-state if classification is available
+
+Recommended command shape:
+- Keep `ClientCommand::Emote(String)` for the current plain emote transport
+- `ClientCommand::SoulEmote(String)` for the dedicated `0x01E1` path
+
+This keeps the existing plain-emote command stable while making the dedicated soul-emote transport explicit. The important constraint is not renaming the old command; it is preventing core and downstream consumers from collapsing both transports back into one semantic lane.
 
 ### Layer 5: TUI Policy
 The TUI should:
@@ -149,12 +168,18 @@ The TUI should not attempt to render the motion itself in this feature.
 
 #### Likely Files
 - `crates/holtburger-content/src/repository.rs`
-- a new content-facing emote module if needed
+- `crates/holtburger-content/src/lib.rs`
+- a new content-facing emote module
+- `crates/holtburger-core/src/client/builder.rs`
+- `crates/holtburger-world/src/bootstrap.rs`
+- `crates/holtburger-world/src/state/types.rs`
 
 #### Acceptance Criteria
 - Runtime code can look up a token like `*wave*` and get back a resolved pose plus display-text metadata
 - Unknown tokens fail cleanly without inventing semantics
 - Content code stays free of TUI-only rendering concerns
+- The loaded catalog is available from runtime state without direct `ContentRepository` access in message handlers
+- The runtime-facing API is a curated `SoulEmoteCatalog`, while `ChatPoseTable` remains available as the raw parsed substrate in `holtburger-dat`
 
 ### Phase 4: Preserve Soul-Emote Semantics Through `holtburger-core`
 
@@ -169,6 +194,8 @@ The TUI should not attempt to render the motion itself in this feature.
 - `crates/holtburger-core/src/client/commands.rs`
 - `crates/holtburger-core/src/client/messages.rs`
 - `crates/holtburger-core/src/client/mod.rs`
+- `apps/holtburger-cli/src/update/world.rs` because the in-game event allowlist currently names only the collapsed `ClientViewEvent::Emote`
+- `apps/holtburger-cli/src/scripting.rs` because scripting currently maps the collapsed emote event into a generic chat-emote script event
 
 #### Acceptance Criteria
 - Core can intentionally send `SoulEmote` actions
@@ -185,15 +212,19 @@ The TUI should not attempt to render the motion itself in this feature.
 - Keep the TUI UI neutral: no motion badges, no animation state widgets
 
 #### Recommended Direction
-- Preserve the current generic emote pathway for freeform text emotes
+- Preserve the current colon-prefixed pathway for freeform plain emotes
 - Add a retail-oriented path for soul-emote syntax such as `*wave*`
+- Route `:waves` and `*wave*` to different client commands intentionally rather than teaching core to guess transport from arbitrary free text
 - Resolve and log soul emotes via the shared core event, not local TUI lookups
+- Match retail input syntax for the first-pass soul-emote path rather than introducing additional aliases
 
 #### Likely Files
 - `apps/holtburger-cli/src/pages/game/input.rs`
 - `apps/holtburger-cli/src/pages/game/domains/chat.rs`
 - `apps/holtburger-cli/src/pages/game/panels/chat.rs`
-- `apps/holtburger-cli/src/types.rs` only if a new app action is needed
+- `apps/holtburger-cli/src/types.rs`
+- `apps/holtburger-cli/src/update/world.rs`
+- `apps/holtburger-cli/src/scripting.rs`
 
 #### Acceptance Criteria
 - Typing a recognized soul emote sends the dedicated soul-emote command path
@@ -228,7 +259,7 @@ Mitigation:
 Some pose names clearly look stateful, but a guessed classification table can drift from retail behavior.
 
 Mitigation:
-- Treat persistent-state classification as optional in the first pass
+- Defer persistent-state classification in the first pass
 - Only promote classifications that are proven from retail references or obvious ACE naming with documented confidence
 - Preserve raw pose ids so future work can refine semantics without changing the wire layer
 
@@ -238,8 +269,17 @@ The current code already collapses both into one event. A partial refactor could
 Mitigation:
 - Make the split explicit in `WireEvent` or `ClientViewEvent`
 - Add tests that assert different message opcodes yield different event kinds
+- Add TUI and scripting tests that assert the split survives downstream projection rather than being recombined at the app boundary
 
-### Risk 4: Expanding TUI Scope Into Motion Rendering
+### Risk 4: Putting Lookup Logic In The Wrong Crate
+If soul-emote lookup stays as an on-demand `ContentRepository` query from `holtburger-core`, we will bypass the existing bootstrap model and create a one-off dependency seam for chat only.
+
+Mitigation:
+- Build the catalog in `holtburger-content`
+- Load it alongside spell and motion assets through `ClientRuntimeBuilder`
+- Store the resolved runtime-facing catalog on `WorldBootstrap` or `WorldState`, then consume it from there
+
+### Risk 5: Expanding TUI Scope Into Motion Rendering
 It is tempting to add small “waving” or “kneeling” markers once semantic data exists.
 
 Mitigation:
@@ -253,8 +293,10 @@ Mitigation:
 - `holtburger-protocol` supports `SoulEmote` client actions with tests
 - `holtburger-dat` can parse `ChatPoseTable` with tests
 - `holtburger-content` exposes a runtime soul-emote lookup surface
+- The soul-emote catalog is loaded through the existing world bootstrap path rather than queried directly from `ContentRepository` at runtime
 - `holtburger-core` preserves plain emotes vs soul emotes as distinct semantic events
 - The TUI can send recognized soul emotes and display them correctly in chat
+- Scripting and app event filtering preserve the plain-vs-soul split
 - No motion playback UI is added to the TUI
 - Narrow targeted tests pass for touched protocol/content/core/TUI slices
 - Relevant docs are updated to describe the wire/content/runtime model accurately
@@ -274,13 +316,16 @@ Mitigation:
 ### Decisions Log
 - 2026-04-21: TUI motion playback or state badges are explicitly out of scope for this feature.
 - 2026-04-21: Shared implementation should focus on transport and semantic classification, not animation playback.
+- 2026-04-21: Keep `ClientCommand::Emote` for plain emotes and add `ClientCommand::SoulEmote` for the dedicated retail soul-emote transport.
+- 2026-04-21: First-pass TUI soul-emote input should match retail `*token*` syntax.
+- 2026-04-21: Persistent-state classification is deferred until a later consumer needs it.
+- 2026-04-21: `holtburger-dat` should expose the raw parsed `ChatPoseTable`, while `holtburger-content` should expose a curated runtime-facing `SoulEmoteCatalog` derived from it.
 
 ### Verification Log
 - 2026-04-21: Verified ACE uses a dedicated `SoulEmote` client action opcode (`0x01E1`) and rebroadcast message opcode (`0x01E2`).
 - 2026-04-21: Verified ACE `ChatPoseTable` contains command and chat text mappings, but not `MotionCommand` ids.
 - 2026-04-21: Verified holtburger currently decodes `SoulEmote` server messages but lacks a client action path and collapses soul/plain emotes into the same event lane.
+- 2026-04-21: Dry-run against current runtime wiring showed a cleaner ownership seam through `ContentRepository -> ClientRuntimeBuilder -> WorldBootstrap -> WorldState` instead of core-side repository lookups.
+- 2026-04-21: Dry-run against TUI/app code showed additional required touch points in update filtering and scripting, not just input/chat rendering.
 
 ### Open Questions
-- Should TUI soul emote input be limited to strict retail `*token*` syntax, or should we also support slash/colon aliases that resolve through the same shared catalog?
-- Do we want a first-pass persistent-state classification table now, or should Phase 3 stay purely lossless and defer state semantics until a later client actually consumes them?
-- Should the content layer expose raw `ChatPoseTable` records directly, or a curated runtime `SoulEmoteCatalog` wrapper that is easier for core to consume?

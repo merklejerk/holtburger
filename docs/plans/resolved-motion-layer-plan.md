@@ -203,12 +203,20 @@ The more achievable sequencing is:
 - The command path now queues soul-emote motion into `MovementSystem` and still sends the dedicated `GameAction::SoulEmote` immediately.
 - The matching `MoveToState` now emits on the next movement tick, which keeps wire-edge ownership singular inside `MovementSystem` but means command-handler tests must validate the post-command tick rather than immediate dual-send behavior.
 
+### Phase 2 Implementation Notes
+- Phase 2 chose the dedicated `ClientViewEvent` branch rather than overloading runtime-body deltas. The first bridge is `ClientViewEvent::ResolvedLocalMotionUpdated { motion }`.
+- The first bridge payload stays intentionally narrow: `ResolvedLocalMotionView` currently carries only the resolved local `EntityMotionSnapshot` needed to replace the soul-emote workaround later.
+- `MovementSystem` now owns the current resolved local motion view and updates it for base locomotion, transient motion, and idle/stop transitions.
+- `ClientRuntime` snapshots that view on `RequestInitialViewState` and emits change-based updates after physics ticks, which keeps frontend synchronization on the existing `ClientViewEvent` lane without mutating runtime-body cache state.
+- The TUI now mirrors the shared bridge into game state, but Phase 2 deliberately does not remove the local projection workaround yet.
+
 ### Recommended Course Corrections
 - Treat the first implementation milestone as ownership correction, not full resolved-motion exposure. This keeps the first code slice small and testable.
 - Prefer an event-backed first resolved-motion bridge over a brand-new polling API because the runtime already projects state to frontends through `ClientViewEvent`.
 - Add an explicit intermediate phase for replacing the TUI workaround with shared-core event consumption before broad generalization.
 - Call out the cleanup of TUI `soul_emote_catalog` threading as part of the workaround-removal phase rather than leaving it implicit.
 - Keep transient-motion storage private to `MovementSystem` until a second caller proves that a shared public motion-intent type is buying us something.
+- Keep the first resolved-motion bridge snapshot-only. Folding it into runtime-body deltas or expanding it into a larger local-motion API before Phase 3 would widen migration surface without yet deleting the real workaround.
 
 ## Phased Implementation
 
@@ -238,6 +246,8 @@ Status: completed 2026-04-22
 - Focused tests reproduce and prevent the current neutral-pose-after-emote regression.
 
 ### Phase 2: Add A Minimal Event-Backed Resolved Local-Motion Bridge
+
+Status: completed 2026-04-22
 
 #### Deliverables
 - Introduce a first shared resolved local-motion surface for the local player.
@@ -315,6 +325,26 @@ Status: completed 2026-04-22
 - Adding another transient motion does not require a second out-of-band `MoveToState` path.
 - The resolved-motion layer remains compatible with the future controller work rather than fighting it.
 
+### Phase 6: Reassess The Runtime Projection Seam
+
+#### Deliverables
+- Reevaluate whether `ClientRuntime` should continue to diff and project resolved local motion, or whether that responsibility should move behind a cleaner movement-owned change signal.
+- Decide whether `last_resolved_local_motion` remains as a projection cache, is renamed to make its role explicit, or is removed entirely in favor of a dirty bit, revision counter, or explicit movement-produced projection event.
+- Confirm that the final projection shape matches the post-Phase-3 reality rather than preserving Phase-2 transitional glue by inertia.
+
+#### Likely Files
+- `crates/holtburger-core/src/client/mod.rs`
+- `crates/holtburger-core/src/client/runtime.rs`
+- `crates/holtburger-core/src/client/movement/system.rs`
+- `crates/holtburger-core/src/client/types.rs`
+- `docs/plans/resolved-motion-layer-plan.md`
+
+#### Acceptance Criteria
+- The plan records an explicit decision about whether runtime-side diffing stays or goes.
+- If runtime-side diffing remains, the field and helper names make its projection-only role obvious.
+- If runtime-side diffing is removed, the replacement preserves change-based frontend projection without reintroducing duplicate motion ownership.
+- The final architecture no longer contains unexplained Phase-2 projection glue.
+
 ## Risks And Mitigations
 
 ### Risk: The Resolver Becomes A Second Physics System
@@ -360,13 +390,14 @@ Add focused `holtburger-core` tests around:
 - [x] Phase 1: add transient motion intent support to `MovementSystem`
 - [x] Phase 1: route soul-emote motion through `MovementSystem`
 - [x] Phase 1: add regression test for pursuit resuming after soul emote
-- [ ] Phase 2: add minimal event-backed resolved local-motion bridge
-- [ ] Phase 2: wire the bridge into runtime event projection
+- [x] Phase 2: add minimal event-backed resolved local-motion bridge
+- [x] Phase 2: wire the bridge into runtime event projection
 - [ ] Phase 3: remove TUI-local soul-emote projection
 - [ ] Phase 3: delete `RuntimeBodyViewCache::set_motion_state_for_guid`
 - [ ] Phase 3: remove TUI-only `soul_emote_catalog` threading if no longer needed
 - [ ] Phase 4: formalize the broader `ResolvedMotion` abstraction
 - [ ] Phase 5: generalize precedence rules and add follow-on regression cases
+- [ ] Phase 6: reassess whether runtime-side resolved-motion diffing should remain
 
 ### Decisions Log
 - `holtburger-world` remains the kinematics solver; resolved motion lives in `holtburger-core`.
@@ -378,6 +409,10 @@ Add focused `holtburger-core` tests around:
 - 2026-04-22: Phase 1 used an internal `MovementSystem` transient-motion queue instead of adding a new public shared motion-intent type up front.
 - 2026-04-22: The first ownership move keeps soul-emote chat payload dispatch in `ClientCommand::SoulEmote`, but the matching `MoveToState` now emits only from `MovementSystem::tick`.
 - 2026-04-22: A transient motion should suppress locomotion emission for that tick and clear the last-sent locomotion fingerprint so the next continuing drive tick reasserts locomotion cleanly.
+- 2026-04-22: Phase 2 uses a dedicated `ClientViewEvent::ResolvedLocalMotionUpdated` event instead of piggybacking on runtime-body deltas.
+- 2026-04-22: The first shared `ResolvedLocalMotionView` stays intentionally narrow and currently exposes only the resolved local `EntityMotionSnapshot` needed by frontend consumers.
+- 2026-04-22: `MovementSystem` is now the owner of the current resolved local-motion view, while `ClientRuntime` owns diff-based projection of that view onto the frontend event lane.
+- 2026-04-22: The runtime-side `last_resolved_local_motion` cache is currently treated as Phase-2 projection glue, not as a settled long-term ownership decision.
 
 ### Verification Log
 - 2026-04-22: Implemented Phase 1 by adding an internal transient-motion queue to `MovementSystem`, routing soul-emote motion through `enqueue_transient_motion`, and deleting the command handler's direct `MoveToState` send.
@@ -385,8 +420,15 @@ Add focused `holtburger-core` tests around:
 - 2026-04-22: Validated the command path with `cargo test -p holtburger-core soul_emote_command_sends_dedicated_game_action`.
 - 2026-04-22: Validated transient locomotion reassertion with `cargo test -p holtburger-core transient_motion_reasserts_autonomous_locomotion_on_next_tick`.
 - 2026-04-22: Revalidated the broader soul-emote core slice with `cargo test -p holtburger-core soul_emote`.
+- 2026-04-22: Implemented Phase 2 by adding `ResolvedLocalMotionView`, `ClientViewEvent::ResolvedLocalMotionUpdated`, `MovementSystem`-owned resolved local-motion tracking, and `ClientRuntime` snapshot/change projection on the existing event lane.
+- 2026-04-22: Mirrored the new bridge into TUI game state without removing the existing local soul-emote workaround yet.
+- 2026-04-22: Validated initial snapshot projection with `cargo test -p holtburger-core request_initial_view_state_projects_resolved_local_motion_snapshot`.
+- 2026-04-22: Validated change-based projection with `cargo test -p holtburger-core resolved_local_motion_bridge_emits_when_local_motion_changes`.
+- 2026-04-22: Validated passive TUI consumption with `cargo test -p holtburger-cli resolved_local_motion_update_is_cached_in_game_data`.
+- 2026-04-22: Revalidated the broader core and CLI soul-emote slices with `cargo test -p holtburger-core soul_emote` and `cargo test -p holtburger-cli soul_emote`.
 
 ### Open Questions
 - After the narrow bridge lands, should long-term `ResolvedMotion` be exposed as a pollable runtime snapshot, a `ClientViewEvent`, or both?
 - Do transient motions need explicit duration ownership in the first pass, or is wire reassertion alone enough while ACE/server echoes drive clear timing?
 - Should snap-facing remain a separate pose-sync edge, or should it become another resolved-motion transient in the longer term?
+- After the TUI workaround is gone, should `ClientRuntime` still diff resolved local motion with `last_resolved_local_motion`, or should movement expose a cleaner change signal so runtime no longer shadows that state?

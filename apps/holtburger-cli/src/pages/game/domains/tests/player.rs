@@ -33,3 +33,29 @@ fn projected_player_options_update_game_data() {
         })
     ));
 }
+
+#[test]
+fn resolved_local_motion_update_is_cached_in_game_data() {
+    let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+
+    let result = state.handle_view_event(ClientViewEvent::ResolvedLocalMotionUpdated {
+        motion: holtburger_core::ResolvedLocalMotionView {
+            snapshot: Some(holtburger_world::entity::EntityMotionSnapshot {
+                current_style: Some(holtburger_protocol::messages::movement::MotionStance::NonCombat),
+                forward_command: Some(holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087)),
+                ..Default::default()
+            }),
+        },
+    });
+
+    assert!(result.redraw_requested());
+    assert!(matches!(
+        state.data.resolved_local_motion,
+        holtburger_core::ResolvedLocalMotionView {
+            snapshot: Some(holtburger_world::entity::EntityMotionSnapshot {
+                forward_command: Some(holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087)),
+                ..
+            }),
+        }
+    ));
+}

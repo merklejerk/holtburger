@@ -255,6 +255,11 @@ pub enum BusyOperationResult {
     TimedOut,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ResolvedLocalMotionView {
+    pub snapshot: Option<EntityMotionSnapshot>,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
     StatusUpdate {
@@ -347,6 +352,9 @@ pub enum ClientViewEvent {
     },
     SelfMovementKinematicsUpdated {
         kinematics: Option<SelfMovementKinematics>,
+    },
+    ResolvedLocalMotionUpdated {
+        motion: ResolvedLocalMotionView,
     },
     SelfServerControlledMotion {
         data: Box<MovementEventData>,

@@ -192,6 +192,8 @@ impl ClientRuntime {
                     for event in simulation_events {
                         self.handle_runtime_world_event(&event);
                     }
+
+                    self.sync_resolved_local_motion_view();
                 }
             }
         }

@@ -88,6 +88,10 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
             state.data.player_options = Some(*options);
             handled = true;
         }
+        ClientViewEvent::ResolvedLocalMotionUpdated { motion } => {
+            state.data.resolved_local_motion = *motion;
+            handled = true;
+        }
         ClientViewEvent::CombatModeUpdated { mode } => {
             if *mode != CombatMode::NonCombat {
                 state.data.trade = None;

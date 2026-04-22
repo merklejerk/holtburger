@@ -7,7 +7,7 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
+use holtburger_core::{PlayerCharacterOptions, ResolvedLocalMotionView, RuntimeBodyViewCache};
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
@@ -290,6 +290,8 @@ pub struct GameData {
     pub runtime_body_cache: RuntimeBodyViewCache,
     /// Projected shared self-movement kinematics from core/world.
     pub self_movement_kinematics: Option<SelfMovementKinematics>,
+    /// Projected shared local resolved-motion view from core.
+    pub resolved_local_motion: ResolvedLocalMotionView,
     /// Frontend-owned spell metadata lookup cache.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Loaded portal skill table for skill formulas and skill costs.
@@ -340,6 +342,7 @@ impl Default for GameData {
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),
             self_movement_kinematics: None,
+            resolved_local_motion: ResolvedLocalMotionView::default(),
             spell_catalog: None,
             skill_table: None,
             soul_emote_catalog: None,

@@ -1,4 +1,5 @@
 use crate::spell::SpellCatalog;
+use holtburger_content::SoulEmoteCatalog;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
@@ -8,6 +9,7 @@ pub struct WorldBootstrap {
     pub spell_table: Arc<SpellTable>,
     pub xp_table: Arc<XpTable>,
     pub motion_kinematics: Arc<MotionKinematics>,
+    pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
 }
 
 impl WorldBootstrap {
@@ -16,12 +18,14 @@ impl WorldBootstrap {
         spell_table: SpellTable,
         xp_table: XpTable,
         motion_kinematics: MotionKinematics,
+        soul_emote_catalog: SoulEmoteCatalog,
     ) -> Self {
         Self {
             skill_table: Arc::new(skill_table),
             spell_table: Arc::new(spell_table),
             xp_table: Arc::new(xp_table),
             motion_kinematics: Arc::new(motion_kinematics),
+            soul_emote_catalog: Arc::new(soul_emote_catalog),
         }
     }
 
@@ -40,6 +44,7 @@ impl WorldBootstrap {
             },
             XpTable::default(),
             MotionKinematics::default(),
+            SoulEmoteCatalog::default(),
         )
     }
 }

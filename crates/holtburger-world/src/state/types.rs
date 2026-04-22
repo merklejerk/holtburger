@@ -3,6 +3,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
     WorldObjectExt as _, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_content::SoulEmoteCatalog;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use holtburger_protocol::messages::combat::CombatMode;
@@ -49,6 +50,7 @@ pub struct WorldState {
     pub xp_table: Arc<XpTable>,
     pub skill_table: Arc<SkillTable>,
     pub spell_catalog: Arc<SpellCatalog>,
+    pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
     pub motion_kinematics: Arc<MotionKinematics>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
@@ -382,6 +384,7 @@ impl WorldState {
             xp_table: Arc::clone(&bootstrap.xp_table),
             skill_table: Arc::clone(&bootstrap.skill_table),
             spell_catalog: bootstrap.spell_catalog(),
+            soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
             motion_kinematics: Arc::clone(&bootstrap.motion_kinematics),
             scene: SpatialScene::new_with_physics(spatial_physics),
             vendor: None,

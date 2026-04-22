@@ -72,6 +72,7 @@ The shared implementation seam is not “play the animation.” The seam is “r
 - Keep protocol fixtures ACE-verified and parity-focused. The first `SoulEmote` client action confirmed the same `String16L` layout as `Emote`, but also showed why alignment assumptions should be proven in tests instead of inferred from nearby packets.
 - Avoid starting the `holtburger-core` or TUI semantic split before the Phase 3 bootstrap/catalog seam exists. Otherwise downstream code will be forced to choose between raw-token passthrough and ad hoc repository lookups that the plan already ruled out.
 - Keep the Phase 3 catalog lossless and string-first. The parsed `ChatPoseTable` yields command tokens, pose identifiers, and display strings, but it still does not prove any stronger enum or motion-command contract.
+- Keep the catalog type owned by `holtburger-content`, and have `holtburger-world` consume it through bootstrap data. Phase 3 exposed that the old `content -> world` dependency was backwards for this seam.
 
 ---
 
@@ -172,6 +173,8 @@ Status: completed 2026-04-21
 - The new file type is available through normal typed asset lookup patterns
 
 ### Phase 3: Expose A Shared Soul-Emote Catalog Through `holtburger-content`
+
+Status: completed 2026-04-22
 
 #### Deliverables
 - Add a runtime-facing content query or typed asset wrapper for soul-emote lookup
@@ -320,7 +323,7 @@ Mitigation:
 ### Task Checklist
 - [x] Phase 1: Add protocol support for client soul emotes
 - [x] Phase 2: Parse `ChatPoseTable` in `holtburger-dat`
-- [ ] Phase 3: Expose a shared soul-emote catalog in `holtburger-content`
+- [x] Phase 3: Expose a shared soul-emote catalog in `holtburger-content`
 - [ ] Phase 4: Preserve soul-emote semantics through `holtburger-core`
 - [ ] Phase 5: Update TUI input and chat handling without UI motion playback
 - [ ] Phase 6: Add docs, diagnostics, and hardening
@@ -332,6 +335,8 @@ Mitigation:
 - 2026-04-21: First-pass TUI soul-emote input should match retail `*token*` syntax.
 - 2026-04-21: Persistent-state classification is deferred until a later consumer needs it.
 - 2026-04-21: `holtburger-dat` should expose the raw parsed `ChatPoseTable`, while `holtburger-content` should expose a curated runtime-facing `SoulEmoteCatalog` derived from it.
+- 2026-04-22: `SoulEmoteCatalog` should stay content-owned and be loaded into runtime bootstrap data, not recreated inside `holtburger-world` or looked up from `ContentRepository` during message handling.
+- 2026-04-22: The crate dependency direction for this seam should be `holtburger-world -> holtburger-content`, not `holtburger-content -> holtburger-world`.
 
 ### Verification Log
 - 2026-04-21: Verified ACE uses a dedicated `SoulEmote` client action opcode (`0x01E1`) and rebroadcast message opcode (`0x01E2`).
@@ -345,8 +350,13 @@ Mitigation:
 - 2026-04-21: Implemented Phase 2 in `holtburger-dat` by adding a retail-shaped `ChatPoseTable` parser with `chat_pose_hash` (`command -> pose`) and `chat_emote_hash` (`pose -> ChatEmoteData`) plus `StaticResourceKey` wiring.
 - 2026-04-21: Validated Phase 2 with `cargo test -p holtburger-dat` (`48` unit tests plus `2` integration tests passed).
 - 2026-04-21: Confirmed the DAT parser requires padded 16-bit PStrings for both hash keys and values, including nested `ChatEmoteData` strings.
+- 2026-04-22: Implemented Phase 3 by adding a curated `SoulEmoteCatalog` in `holtburger-content`, a `ContentRepository::read_soul_emote_catalog()` helper, and runtime bootstrap wiring through `ClientRuntimeBuilder`, `WorldBootstrap`, and `WorldState`.
+- 2026-04-22: Corrected the crate boundary for this seam by removing the unused `holtburger-content -> holtburger-world` dependency and making `holtburger-world` consume the content-owned catalog instead.
+- 2026-04-22: Validated the Phase 3 runtime-loading seam with `cargo test -p holtburger-core runtime_builder_load_assets_reads_bootstrap_from_repository`.
+- 2026-04-22: Validated the content layer with `cargo test -p holtburger-content`.
+- 2026-04-22: Validated the updated synthetic world bootstrap shape with `cargo test -p holtburger-world test_empty_world_uses_synthetic_reference_data`.
 
 ### Open Questions
-- None blocking Phase 2.
+- None blocking Phase 4.
 - Persistent-state classification remains intentionally deferred until a concrete downstream consumer needs it.
-- Phase 3 should decide the minimum curated `SoulEmoteCatalog` surface without discarding raw pose-string fidelity from the parsed table.
+- Phase 4 should decide the minimum soul-emote event payload that preserves raw token plus resolved catalog metadata without re-collapsing plain and soul emotes into one lane.

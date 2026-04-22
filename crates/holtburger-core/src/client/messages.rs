@@ -558,9 +558,11 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
+                let resolved = self.world.soul_emote_catalog.resolve(&data.text).map(Into::into);
+                let _ = self.client_view_event_tx.send(ClientViewEvent::SoulEmote {
                     sender: data.sender_name.clone(),
-                    text: data.text.clone(),
+                    token: data.text.clone(),
+                    resolved,
                 });
                 Ok(())
             }
@@ -724,6 +726,92 @@ mod tests {
         }
 
         assert!(saw_item_mana_response);
+    }
+
+    #[tokio::test]
+    async fn soul_emote_message_projects_distinct_view_event_with_resolution() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client.world.soul_emote_catalog = std::sync::Arc::new(holtburger_content::SoulEmoteCatalog {
+            tokens: std::collections::BTreeMap::from([(
+                "*wave*".to_string(),
+                holtburger_content::SoulEmoteToken {
+                    token: "*wave*".to_string(),
+                    pose: "Wave".to_string(),
+                },
+            )]),
+            poses: std::collections::BTreeMap::from([(
+                "Wave".to_string(),
+                holtburger_content::SoulEmotePose {
+                    pose: "Wave".to_string(),
+                    my_emote: "You wave.".to_string(),
+                    other_emote: "waves.".to_string(),
+                },
+            )]),
+        });
+
+        let encoded = encode_message(&GameMessage::SoulEmote(Box::new(SoulEmoteData {
+            sender: 0x5000_0002,
+            sender_name: "Fellow".to_string(),
+            text: "*wave*".to_string(),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_soul_emote = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::SoulEmote {
+                sender,
+                token,
+                resolved,
+            } = event
+            {
+                assert_eq!(sender, "Fellow");
+                assert_eq!(token, "*wave*");
+
+                let resolved = resolved.expect("known token should resolve");
+                assert_eq!(resolved.pose, "Wave");
+                assert_eq!(resolved.my_emote.as_deref(), Some("You wave."));
+                assert_eq!(resolved.other_emote.as_deref(), Some("waves."));
+                saw_soul_emote = true;
+                break;
+            }
+        }
+
+        assert!(saw_soul_emote);
+    }
+
+    #[tokio::test]
+    async fn unknown_soul_emote_message_preserves_raw_token_without_inventing_resolution() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        let encoded = encode_message(&GameMessage::SoulEmote(Box::new(SoulEmoteData {
+            sender: 0x5000_0002,
+            sender_name: "Fellow".to_string(),
+            text: "*mystery*".to_string(),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_soul_emote = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::SoulEmote {
+                sender,
+                token,
+                resolved,
+            } = event
+            {
+                assert_eq!(sender, "Fellow");
+                assert_eq!(token, "*mystery*");
+                assert!(resolved.is_none());
+                saw_soul_emote = true;
+                break;
+            }
+        }
+
+        assert!(saw_soul_emote);
     }
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 use crate::client::movement_types::PlayerDriveIntent;
 use holtburger_common::properties::DamageType;
+use holtburger_content::SoulEmoteResolution;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
 };
@@ -429,6 +430,11 @@ pub enum ClientViewEvent {
         sender: String,
         text: String,
     },
+    SoulEmote {
+        sender: String,
+        token: String,
+        resolved: Option<ResolvedSoulEmote>,
+    },
     PingResponse,
     LogMessage(String),
     CombatFeedback(CombatFeedback),
@@ -441,6 +447,23 @@ pub enum ClientViewEvent {
         bytes_out: u64,
     },
     Disconnected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedSoulEmote {
+    pub pose: String,
+    pub my_emote: Option<String>,
+    pub other_emote: Option<String>,
+}
+
+impl<'a> From<SoulEmoteResolution<'a>> for ResolvedSoulEmote {
+    fn from(value: SoulEmoteResolution<'a>) -> Self {
+        Self {
+            pose: value.pose.to_string(),
+            my_emote: value.my_emote.map(str::to_string),
+            other_emote: value.other_emote.map(str::to_string),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -463,6 +486,7 @@ pub enum ClientCommand {
         message: String,
     },
     Emote(String),
+    SoulEmote(String),
     RecallLifestone,
     TeleportToPklArena,
     TeleportToMarketplace,

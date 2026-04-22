@@ -150,6 +150,7 @@ impl AppState {
                 | ClientViewEvent::ChannelMessage { .. }
                 | ClientViewEvent::Tell { .. }
                 | ClientViewEvent::Emote { .. }
+                | ClientViewEvent::SoulEmote { .. }
                 | ClientViewEvent::ItemManaResponse { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)

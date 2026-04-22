@@ -1569,27 +1569,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_initial_view_state_projects_resolved_local_motion_snapshot() {
-        let mut client = build_test_client();
-        let mut events = client.subscribe_client_view_events();
-
-        client
-            .handle_command(ClientCommand::RequestInitialViewState)
-            .await
-            .unwrap();
-
-        let mut saw_snapshot = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(event, ClientViewEvent::ResolvedLocalMotionUpdated { .. }) {
-                saw_snapshot = true;
-                break;
-            }
-        }
-
-        assert!(saw_snapshot);
-    }
-
-    #[tokio::test]
     async fn request_initial_view_state_projects_trade_and_vendor_snapshot() {
         let mut client = build_test_client();
         let player_guid = client.world.player.guid;

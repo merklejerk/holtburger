@@ -422,9 +422,6 @@ pub enum ClientViewEvent {
     SelfMovementKinematicsUpdated {
         kinematics: Option<SelfMovementKinematics>,
     },
-    ResolvedLocalMotionUpdated {
-        motion: ResolvedLocalMotionView,
-    },
     SelfServerControlledMotion {
         data: Box<MovementEventData>,
     },

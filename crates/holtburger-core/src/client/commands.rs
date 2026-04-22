@@ -50,6 +50,10 @@ fn normalize_spell_cast(
     }
 }
 
+fn render_soul_emote_text(text: &str) -> String {
+    text.replace("%p", "their")
+}
+
 impl ClientRuntime {
     fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
         match kind {
@@ -358,9 +362,9 @@ impl ClientRuntime {
                     let pose = resolved.pose.to_string();
                     let message = resolved
                         .other_emote
-                        .or(resolved.my_emote)
-                        .unwrap_or(resolved.token)
-                        .to_string();
+                        .map(render_soul_emote_text)
+                        .or_else(|| resolved.my_emote.map(str::to_owned))
+                        .unwrap_or_else(|| resolved.token.to_string());
 
                     if let Some(command) = motion_command_for_soul_emote_pose(&pose) {
                         let motion_style = self
@@ -1969,6 +1973,14 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[test]
+    fn render_soul_emote_text_expands_possessive_placeholder() {
+        assert_eq!(
+            super::render_soul_emote_text("puts %p hands on %p hips."),
+            "puts their hands on their hips."
+        );
     }
 
     #[tokio::test]

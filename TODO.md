@@ -104,6 +104,7 @@
 - [ ] Emotes.
 - [ ] Some equipment swapping jank going on.
 - [ ] Speed up TUI rendering.
+- [ ] Apply the eventual consistency pattern to the codebase more broadly.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -272,8 +273,7 @@
     - [x] Add preferred spell IDs.
     - [x] Fix not using revitalize.
     - [x] Snap to target heading before casting?
-- [ ] TUI hangs w/100% CPU upon choosing character when started with verbosity >= `-vv`.
-- [ ] `+Holtfighter puts %p hands on %p hips`
+- [x] `+Holtfighter puts %p hands on %p hips` (`%p` renders as `their`)
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -284,6 +284,7 @@
 - [x] Not pruning entities!
     - When they go out of range/teleported.
     - When a trade is closed?
+- [ ] TUI hangs w/100% CPU upon choosing character when started with verbosity >= `-vv`.
 
 ### Stretch
 - [x] Integrate `deno-core` for scripting.

@@ -409,7 +409,7 @@ Status: completed 2026-04-22
 
 ### Phase 7: Investigate The Remaining Internal Resolved-Motion Model
 
-Status: planned
+Status: completed 2026-04-22
 
 #### Deliverables
 - Reevaluate whether `MovementSystem` should continue to maintain internal `resolved_local_motion` state once the dedicated runtime and frontend projection seam is gone.
@@ -483,7 +483,7 @@ Add focused `holtburger-core` tests around:
 - [x] Phase 4: formalize the broader `ResolvedMotion` abstraction
 - [x] Phase 5: generalize precedence rules and add follow-on regression cases
 - [x] Phase 6: delete the dedicated runtime or frontend resolved-motion projection seam
-- [ ] Phase 7: investigate remaining internal `resolved_local_motion` state and accessor
+- [x] Phase 7: investigate remaining internal `resolved_local_motion` state and accessor
 
 ### Decisions Log
 - `holtburger-world` remains the kinematics solver; resolved motion lives in `holtburger-core`.
@@ -514,6 +514,7 @@ Add focused `holtburger-core` tests around:
 - 2026-04-22: `MovementSystem::resolved_local_motion_view()` is now treated as suspicious leftover surface rather than presumed durable API; Phase 7 must justify it explicitly or remove it.
 - 2026-04-22: Phase 6 removed `ClientViewEvent::ResolvedLocalMotionUpdated`, `ClientRuntime::last_resolved_local_motion`, the runtime-side sync helper, TUI-side `resolved_local_motion`, and the local-player overlay in `GameData::runtime_sample_for_guid()`.
 - 2026-04-22: As an adjacent cleanup after Phase 6, `MovementSystem::resolved_local_motion_view()` has already been narrowed to `#[cfg(test)]` because no production caller remains. Phase 7 still needs to decide whether the underlying internal model survives.
+- 2026-04-22: Phase 7 removed `MovementSystem`'s internal `resolved_local_motion` model entirely because no production consumer remained after Phase 6 and the few remaining tests were stronger when rewritten against behavior-level signals like `current_local_drive_control`, `server_motion_active`, and `last_server_motion_intent`.
 
 ### Verification Log
 - 2026-04-22: Implemented Phase 1 by adding an internal transient-motion queue to `MovementSystem`, routing soul-emote motion through `enqueue_transient_motion`, and deleting the command handler's direct `MoveToState` send.
@@ -541,6 +542,10 @@ Add focused `holtburger-core` tests around:
 - 2026-04-22: Validated the core initial-view-state slice after seam deletion with `cargo test -p holtburger-core request_initial_view_state_projects`.
 - 2026-04-22: Validated the CLI local-player sample now uses the authoritative runtime-body lane with `cargo test -p holtburger-cli runtime_sample_for_local_player_uses_runtime_body_motion_snapshot`.
 - 2026-04-22: Revalidated adjacent CLI player projection behavior with `cargo test -p holtburger-cli projected_player_options_update_game_data`.
+- 2026-04-22: Implemented Phase 7 by deleting `ResolvedLocalMotionView`, `ResolvedMotion`, `ResolvedMotionPresentation`, the remaining `MovementSystem`-internal `resolved_local_motion` state, and the test-only `resolved_local_motion_view()` accessor.
+- 2026-04-22: Replaced the remaining snapshot-style movement tests with behavior-scoped assertions on transient precedence, server-motion tracking, server-controlled takeover, and autonomous handoff.
+- 2026-04-22: Validated the focused phase-7 slice with `cargo test -p holtburger-core transient_motion_reasserts_autonomous_locomotion_on_next_tick`, `cargo test -p holtburger-core manual_motion_updates_server_motion_tracking_state`, `cargo test -p holtburger-core server_controlled_projection_becomes_current_local_drive_control`, and `cargo test -p holtburger-core clearing_server_controlled_projection_reasserts_autonomous_motion_intent`.
+- 2026-04-22: Revalidated the full workspace after Phase 7 with `cargo test --all`.
 
 ### Open Questions
 - After the narrow bridge lands, should long-term `ResolvedMotion` be exposed as a pollable runtime snapshot, a `ClientViewEvent`, or both?
@@ -549,5 +554,3 @@ Add focused `holtburger-core` tests around:
 - Does the CLI actually need any dedicated local resolved-motion projection once world/runtime-body updates are treated as sufficiently prompt for user-visible behavior?
 - If the answer is no, should `ClientRuntime::last_resolved_local_motion`, `ClientViewEvent::ResolvedLocalMotionUpdated`, and TUI-side `resolved_local_motion` all be deleted together as one migration seam?
 - If the answer is yes, what concrete UX case fails under the eventual model, and is that failure important enough to justify a persistent non-authoritative projection lane?
-- After phase 6 deletes the dedicated projection seam, does the remaining internal `resolved_local_motion` model still buy enough value for precedence clarity or diagnostics to justify keeping it?
-- If the internal model remains, should `resolved_local_motion_view()` survive only under `#[cfg(test)]` or another explicitly diagnostic shape rather than as a normal production accessor?

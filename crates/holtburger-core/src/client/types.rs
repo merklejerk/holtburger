@@ -1,4 +1,4 @@
-use crate::client::movement_types::{MotionState, MotionStyle, PlayerDriveIntent};
+use crate::client::movement_types::PlayerDriveIntent;
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -9,7 +9,7 @@ use holtburger_protocol::messages::combat::{
 };
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MovementEventData};
+use holtburger_protocol::messages::movement::MovementEventData;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{
     CharacterCreateRequestData, CharacterCreateResponseData, CharacterEntry, ChatChannel,
@@ -253,80 +253,6 @@ pub enum BusyOperationResult {
         parameter: Option<String>,
     },
     TimedOut,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ResolvedMotionPresentation {
-    #[default]
-    Idle,
-    Locomotion,
-    Transient,
-    ServerControlled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ResolvedMotion {
-    pub base_locomotion: Option<MotionState>,
-    pub transient_command: Option<InterpretedMotionCommand>,
-    pub motion_style: MotionStyle,
-    pub presentation: ResolvedMotionPresentation,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ResolvedLocalMotionView {
-    pub resolved: ResolvedMotion,
-    pub snapshot: Option<EntityMotionSnapshot>,
-}
-
-impl ResolvedLocalMotionView {
-    pub fn locomotion(
-        state: MotionState,
-        motion_style: MotionStyle,
-        snapshot: Option<EntityMotionSnapshot>,
-    ) -> Self {
-        Self {
-            resolved: ResolvedMotion {
-                base_locomotion: Some(state),
-                transient_command: None,
-                motion_style,
-                presentation: ResolvedMotionPresentation::Locomotion,
-            },
-            snapshot,
-        }
-    }
-
-    pub fn transient(
-        base_locomotion: Option<MotionState>,
-        command: InterpretedMotionCommand,
-        motion_style: MotionStyle,
-        snapshot: Option<EntityMotionSnapshot>,
-    ) -> Self {
-        Self {
-            resolved: ResolvedMotion {
-                base_locomotion,
-                transient_command: Some(command),
-                motion_style,
-                presentation: ResolvedMotionPresentation::Transient,
-            },
-            snapshot,
-        }
-    }
-
-    pub fn server_controlled(
-        base_locomotion: Option<MotionState>,
-        motion_style: MotionStyle,
-        snapshot: Option<EntityMotionSnapshot>,
-    ) -> Self {
-        Self {
-            resolved: ResolvedMotion {
-                base_locomotion,
-                transient_command: None,
-                motion_style,
-                presentation: ResolvedMotionPresentation::ServerControlled,
-            },
-            snapshot,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

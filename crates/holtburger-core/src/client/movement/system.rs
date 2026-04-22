@@ -1,11 +1,9 @@
 use super::common::{
     AUTONOMOUS_POSITION_HEARTBEAT_INTERVAL, build_autonomous_position,
     build_motion_state_raw_motion_state, encode_contact_long_jump,
-    entity_motion_snapshot_for_state, entity_motion_snapshot_from_raw_motion_state,
     has_autonomous_position_sync_target, local_omega_for_state, local_velocity_for_state,
     normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
 };
-use crate::client::types::ResolvedLocalMotionView;
 use crate::client::movement_types::{
     AutonomousDriveIntent, Locomotion, MotionState, MotionStyle, MovementPacketMetadata,
     PlayerDriveIntent, Turn,
@@ -124,7 +122,6 @@ pub(crate) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
     queued_drive_commands: Vec<QueuedDriveCommand>,
     pending_transient_motion: Option<TransientMotionIntent>,
-    resolved_local_motion: ResolvedLocalMotionView,
     pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
     pending_snap_facing: Option<f32>,
     active_drive: Option<ActiveDriveState>,
@@ -212,7 +209,6 @@ impl MovementSystem {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
             queued_drive_commands: Vec::new(),
             pending_transient_motion: None,
-            resolved_local_motion: ResolvedLocalMotionView::default(),
             pending_arrival_pose: None,
             pending_snap_facing: None,
             active_drive: None,
@@ -226,87 +222,6 @@ impl MovementSystem {
 
     pub(crate) fn note_server_controlled_movement_started(&mut self) {
         self.suppress_frontend_autonomous_once = true;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn resolved_local_motion_view(&self) -> ResolvedLocalMotionView {
-        self.resolved_local_motion
-    }
-
-    fn current_server_controlled_motion_state(&self, world: &WorldState) -> Option<MotionState> {
-        let projection = self.server_controlled_projection?;
-        let current_pose = world.local_player_runtime_pose()?;
-        let to_target = projection.target_pose.global_coords() - current_pose.global_coords();
-        let desired_world_delta = if to_target.length_squared() <= 1e-6 {
-            Vector3::zero()
-        } else {
-            to_target
-        };
-        let desired_heading = if desired_world_delta.length_squared() > 1e-6 {
-            Some(current_pose.heading_to(&projection.target_pose))
-        } else {
-            Some(projection.target_pose.rotation.to_heading())
-        };
-
-        Self::autonomous_wire_motion_state(
-            world,
-            AutonomousDriveIntent {
-                desired_world_delta,
-                desired_heading,
-                target_hint: Some(projection.target_pose),
-                gait: if projection.speed_mps > 1.0 {
-                    crate::client::movement_types::Gait::Run
-                } else {
-                    crate::client::movement_types::Gait::Walk
-                },
-                force_grounded: true,
-            },
-        )
-    }
-
-    fn refresh_resolved_local_motion_for_authority(&mut self, world: &WorldState) {
-        if let Some(state) = self.current_server_controlled_motion_state(world) {
-            self.resolved_local_motion = ResolvedLocalMotionView::server_controlled(
-                Some(state),
-                MotionStyle::PreserveServer,
-                entity_motion_snapshot_for_state(world, state, MotionStyle::PreserveServer),
-            );
-            return;
-        }
-
-        self.resolved_local_motion = match self.active_drive.map(|active| active.intent) {
-            Some(ActiveDriveIntent::Manual(state)) => ResolvedLocalMotionView::locomotion(
-                state,
-                MotionStyle::PreserveServer,
-                entity_motion_snapshot_for_state(world, state, MotionStyle::PreserveServer),
-            ),
-            Some(ActiveDriveIntent::Autonomous(intent)) => {
-                if let Some(state) = Self::autonomous_wire_motion_state(world, intent) {
-                    ResolvedLocalMotionView::locomotion(
-                        state,
-                        MotionStyle::PreserveServer,
-                        entity_motion_snapshot_for_state(
-                            world,
-                            state,
-                            MotionStyle::PreserveServer,
-                        ),
-                    )
-                } else {
-                    ResolvedLocalMotionView::default()
-                }
-            }
-            None => ResolvedLocalMotionView::default(),
-        };
-    }
-
-    fn current_base_locomotion_state(&self, world: &WorldState) -> Option<MotionState> {
-        match self.active_drive.map(|active| active.intent) {
-            Some(ActiveDriveIntent::Manual(state)) => Some(state),
-            Some(ActiveDriveIntent::Autonomous(intent)) => {
-                Self::autonomous_wire_motion_state(world, intent)
-            }
-            None => None,
-        }
     }
 
     pub(crate) fn set_server_controlled_projection(
@@ -571,9 +486,7 @@ impl MovementSystem {
                         .await?,
                     );
                 }
-                None => {
-                    self.refresh_resolved_local_motion_for_authority(world);
-                }
+                None => {}
             }
         }
 
@@ -719,7 +632,6 @@ impl MovementSystem {
                 projection.target_pose
             );
             self.server_controlled_projection = None;
-            self.refresh_resolved_local_motion_for_authority(world);
         }
     }
 
@@ -764,7 +676,6 @@ impl MovementSystem {
     fn note_server_motion_cleared(&mut self) {
         self.server_motion_active = false;
         self.last_server_motion_intent = None;
-        self.resolved_local_motion = ResolvedLocalMotionView::default();
     }
 
     async fn execute_motion_state_at(
@@ -793,7 +704,6 @@ impl MovementSystem {
         had_active_local_motion: bool,
     ) -> Result<Vec<WorldEvent>> {
         let state_events = Vec::new();
-        self.resolved_local_motion = ResolvedLocalMotionView::default();
 
         if self.should_send_stop_pulse() {
             log::info!(
@@ -821,12 +731,6 @@ impl MovementSystem {
         _now: Instant,
     ) -> Result<Vec<WorldEvent>> {
         let state_events = Vec::new();
-
-        self.resolved_local_motion = ResolvedLocalMotionView::locomotion(
-            state,
-            metadata.motion_style,
-            entity_motion_snapshot_for_state(world, state, metadata.motion_style),
-        );
 
         if self.should_send_motion_state_pulse(state, metadata.motion_style) {
             log::info!("movement: sending resolved motion pulse state={:?}", state);
@@ -856,23 +760,6 @@ impl MovementSystem {
                 ..Default::default()
             },
             intent.motion_style,
-        );
-
-        self.resolved_local_motion = ResolvedLocalMotionView::transient(
-            self.current_base_locomotion_state(world),
-            intent.command,
-            intent.motion_style,
-            entity_motion_snapshot_from_raw_motion_state(&raw_motion_state).or(Some(
-                holtburger_world::entity::EntityMotionSnapshot {
-                    current_style: raw_motion_state.current_style.and_then(|style| {
-                        u16::try_from(style).ok().and_then(
-                            holtburger_protocol::messages::movement::MotionStance::from_interpreted,
-                        )
-                    }),
-                    forward_command: Some(intent.command),
-                    ..Default::default()
-                },
-            )),
         );
         Self::send_transient_motion_pulse(world, session, raw_motion_state).await?;
         self.note_transient_motion_sent();

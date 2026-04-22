@@ -1163,17 +1163,18 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
         .expect("transient motion should replace the locomotion pulse for this tick");
 
     assert_eq!(
-        movement.resolved_local_motion_view().resolved.base_locomotion,
-        MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
+        movement.current_local_drive_control(&world, Duration::from_millis(33)),
+        Some(LocalDriveControl {
+            body_id: SpatialBodyId::LocalPlayer(guid),
+            desired_world_delta: autonomous_intent.desired_world_delta,
+            desired_heading: autonomous_intent.desired_heading,
+            target_hint: autonomous_intent.target_hint,
+            gait: holtburger_world::spatial::LocalDriveGait::Run,
+            force_grounded: true,
+        })
     );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.transient_command,
-        Some(holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087))
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.presentation,
-        crate::client::types::ResolvedMotionPresentation::Transient
-    );
+    assert!(movement.server_motion_active);
+    assert!(movement.last_server_motion_intent.is_none());
 
     assert_eq!(session.game_action_sequence, 2);
 
@@ -1187,23 +1188,16 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
         .expect("locomotion should be reasserted after the transient motion clears");
 
     assert_eq!(
-        movement.resolved_local_motion_view().resolved.base_locomotion,
+        movement.last_server_motion_intent,
         MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.transient_command,
-        None
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.presentation,
-        crate::client::types::ResolvedMotionPresentation::Locomotion
+            .map(|state| server_motion_intent(state, MotionStyle::PreserveServer))
     );
 
     assert_eq!(session.game_action_sequence, 3);
 }
 
 #[tokio::test]
-async fn manual_motion_populates_explicit_resolved_locomotion_state() {
+async fn manual_motion_updates_server_motion_tracking_state() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_1304);
     let position = WorldPosition {
@@ -1224,24 +1218,17 @@ async fn manual_motion_populates_explicit_resolved_locomotion_state() {
     movement
         .tick(start, &mut world, &mut session)
         .await
-        .expect("manual locomotion should populate resolved motion");
+        .expect("manual locomotion should update server motion tracking");
 
+    assert!(movement.server_motion_active);
     assert_eq!(
-        movement.resolved_local_motion_view().resolved.base_locomotion,
-        Some(state)
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.transient_command,
-        None
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.presentation,
-        crate::client::types::ResolvedMotionPresentation::Locomotion
+        movement.last_server_motion_intent,
+        Some(server_motion_intent(state, MotionStyle::PreserveServer))
     );
 }
 
 #[tokio::test]
-async fn server_controlled_projection_populates_explicit_resolved_motion_state() {
+async fn server_controlled_projection_becomes_current_local_drive_control() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_2304);
     let current_pose = WorldPosition {
@@ -1281,24 +1268,24 @@ async fn server_controlled_projection_populates_explicit_resolved_motion_state()
     movement
         .tick(start, &mut world, &mut session)
         .await
-        .expect("server-controlled tick should resolve explicit shared motion state");
+        .expect("server-controlled tick should expose a projected local drive");
 
     assert_eq!(
-        movement.resolved_local_motion_view().resolved.presentation,
-        crate::client::types::ResolvedMotionPresentation::ServerControlled
+        movement.current_local_drive_control(&world, Duration::from_secs(1)),
+        Some(LocalDriveControl {
+            body_id: SpatialBodyId::LocalPlayer(guid),
+            desired_world_delta: Vector3::new(2.0, 0.0, 0.0),
+            desired_heading: Some(current_pose.heading_to(&target_pose)),
+            target_hint: Some(target_pose),
+            gait: holtburger_world::spatial::LocalDriveGait::Run,
+            force_grounded: true,
+        })
     );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.base_locomotion,
-        Some(MotionState::builder().run().forward().build())
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.transient_command,
-        None
-    );
+    assert!(!movement.server_motion_active);
 }
 
 #[tokio::test]
-async fn clearing_server_controlled_projection_hands_back_to_autonomous_locomotion() {
+async fn clearing_server_controlled_projection_reasserts_autonomous_motion_intent() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_3304);
     let current_pose = WorldPosition {
@@ -1345,15 +1332,12 @@ async fn clearing_server_controlled_projection_hands_back_to_autonomous_locomoti
     movement
         .tick(start + Duration::from_millis(30), &mut world, &mut session)
         .await
-        .expect("autonomous handoff should restore locomotion semantics");
+        .expect("autonomous handoff should restore locomotion emission");
 
     assert_eq!(
-        movement.resolved_local_motion_view().resolved.presentation,
-        crate::client::types::ResolvedMotionPresentation::Locomotion
-    );
-    assert_eq!(
-        movement.resolved_local_motion_view().resolved.base_locomotion,
+        movement.last_server_motion_intent,
         MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
+            .map(|state| server_motion_intent(state, MotionStyle::PreserveServer))
     );
 }
 

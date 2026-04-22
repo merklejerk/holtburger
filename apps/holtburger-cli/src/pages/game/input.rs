@@ -839,10 +839,12 @@ mod tests {
             result.commands.as_slice(),
             [ClientCommand::Talk(message)] if message == "**"
         ));
-        assert!(result
-            .actions
-            .iter()
-            .all(|action| !matches!(action, AppAction::SoulEmote { .. })));
+        assert!(
+            result
+                .actions
+                .iter()
+                .all(|action| !matches!(action, AppAction::SoulEmote { .. }))
+        );
     }
 
     #[test]

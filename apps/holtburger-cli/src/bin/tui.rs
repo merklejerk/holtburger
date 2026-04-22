@@ -10,7 +10,7 @@ use holtburger_cli::pages;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
 use holtburger_cli::utils::format_action_result_message;
-use holtburger_content::{ContentRepository, SoulEmoteCatalog};
+use holtburger_content::ContentRepository;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
     ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
@@ -42,7 +42,6 @@ struct BootstrappedClient {
     content: Arc<ContentRepository>,
     spell_catalog: Arc<SpellCatalog>,
     skill_table: Arc<SkillTable>,
-    soul_emote_catalog: Arc<SoulEmoteCatalog>,
 }
 
 enum BootstrapOutcome {
@@ -522,7 +521,6 @@ fn finalize_bootstrap_outcome(
     content: Arc<ContentRepository>,
     spell_catalog: Arc<SpellCatalog>,
     skill_table: Arc<SkillTable>,
-    soul_emote_catalog: Arc<SoulEmoteCatalog>,
 ) -> BootstrapOutcome {
     match outcome {
         BootstrapEventOutcome::Ready { initial_events } => {
@@ -534,7 +532,6 @@ fn finalize_bootstrap_outcome(
                 content,
                 spell_catalog,
                 skill_table,
-                soul_emote_catalog,
             })
         }
         BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
@@ -561,7 +558,6 @@ async fn bootstrap_once(
     let mut client = builder.connect().await?;
     let spell_catalog = Arc::clone(&client.world.spell_catalog);
     let skill_table = Arc::clone(&client.world.skill_table);
-    let soul_emote_catalog = Arc::clone(&client.world.soul_emote_catalog);
 
     apply_capture_path(&mut client, args.capture.as_ref());
 
@@ -601,7 +597,6 @@ async fn bootstrap_once(
                             Arc::clone(&content),
                             Arc::clone(&spell_catalog),
                             Arc::clone(&skill_table),
-                            Arc::clone(&soul_emote_catalog),
                         ));
                     }
                 }
@@ -633,7 +628,6 @@ async fn bootstrap_once(
                                 Arc::clone(&content),
                                 Arc::clone(&spell_catalog),
                                 Arc::clone(&skill_table),
-                                Arc::clone(&soul_emote_catalog),
                             ));
                         }
                     }
@@ -786,7 +780,6 @@ async fn run() -> Result<()> {
         content,
         spell_catalog,
         skill_table,
-        soul_emote_catalog,
     } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
         Ok(ready) => ready,
         Err(e) => {
@@ -815,7 +808,6 @@ async fn run() -> Result<()> {
         content: Some(content),
         spell_catalog: Some(spell_catalog),
         skill_table: Some(skill_table),
-        soul_emote_catalog: Some(soul_emote_catalog),
         quit_on_disconnect: args.quit_on_disconnect,
         disconnect_reason: None,
         pending_exit_message: None,

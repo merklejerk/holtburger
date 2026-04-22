@@ -40,6 +40,14 @@ fn resolved_local_motion_update_is_cached_in_game_data() {
 
     let result = state.handle_view_event(ClientViewEvent::ResolvedLocalMotionUpdated {
         motion: holtburger_core::ResolvedLocalMotionView {
+            resolved: holtburger_core::ResolvedMotion {
+                base_locomotion: None,
+                transient_command: Some(
+                    holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087),
+                ),
+                motion_style: holtburger_core::client::movement_types::MotionStyle::PreserveServer,
+                presentation: holtburger_core::ResolvedMotionPresentation::Transient,
+            },
             snapshot: Some(holtburger_world::entity::EntityMotionSnapshot {
                 current_style: Some(holtburger_protocol::messages::movement::MotionStance::NonCombat),
                 forward_command: Some(holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087)),
@@ -52,6 +60,11 @@ fn resolved_local_motion_update_is_cached_in_game_data() {
     assert!(matches!(
         state.data.resolved_local_motion,
         holtburger_core::ResolvedLocalMotionView {
+            resolved: holtburger_core::ResolvedMotion {
+                transient_command: Some(holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087)),
+                presentation: holtburger_core::ResolvedMotionPresentation::Transient,
+                ..
+            },
             snapshot: Some(holtburger_world::entity::EntityMotionSnapshot {
                 forward_command: Some(holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087)),
                 ..

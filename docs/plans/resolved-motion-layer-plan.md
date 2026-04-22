@@ -217,6 +217,12 @@ The more achievable sequencing is:
 - The old TUI-only `soul_emote_catalog` threading was removed from app bootstrap and game state because outbound input and inbound chat rendering no longer depend on local pose-projection lookups.
 - One direct local-player debug path was also switched from raw runtime-body cache reads to `GameData::runtime_sample_for_guid()` so the resolved-local-motion bridge stays the single frontend consumption seam.
 
+### Phase 4 Implementation Notes
+- Phase 4 broadens `ResolvedLocalMotionView` beyond a snapshot-only bridge by adding an explicit `ResolvedMotion` payload with base locomotion, transient-command state, motion style, and presentation semantics.
+- `MovementSystem` now populates that explicit resolved state for both locomotion and transient motion instead of treating the view as a thin wrapper around `EntityMotionSnapshot`.
+- Transient resolved motion now preserves the current base locomotion when it is still known, which makes the shared surface more honest about “transient overrides locomotion” rather than pretending locomotion vanished.
+- The first broader rollout stays additive and event-backed: existing consumers still read the snapshot field, while new consumers can start using the explicit resolved semantics without another frontend workaround.
+
 ### Recommended Course Corrections
 - Treat the first implementation milestone as ownership correction, not full resolved-motion exposure. This keeps the first code slice small and testable.
 - Prefer an event-backed first resolved-motion bridge over a brand-new polling API because the runtime already projects state to frontends through `ClientViewEvent`.
@@ -225,6 +231,8 @@ The more achievable sequencing is:
 - Keep transient-motion storage private to `MovementSystem` until a second caller proves that a shared public motion-intent type is buying us something.
 - Keep the first resolved-motion bridge snapshot-only. Folding it into runtime-body deltas or expanding it into a larger local-motion API before Phase 3 would widen migration surface without yet deleting the real workaround.
 - 2026-04-22 update: make `GameData::runtime_sample_for_guid()` or an equivalent shared helper the canonical TUI read path for local-player motion semantics. Direct reads from `runtime_body_cache` are now a drift risk because they bypass the resolved-local-motion overlay.
+- 2026-04-22 update: keep the broadened phase-4 surface additive and event-backed for now. A new pollable runtime API would widen the migration surface before phase 6 settles the projection seam and before a second consumer proves it is necessary.
+- 2026-04-22 update: treat server-controlled takeover and handoff as a first-class resolved-motion precedence case before adding more transient command categories. That keeps phase 5 grounded in an existing authority seam instead of growing a speculative motion taxonomy.
 
 ## Phased Implementation
 
@@ -302,6 +310,8 @@ Status: completed 2026-04-22
 
 ### Phase 4: Broaden `ResolvedMotion` Into A Real Shared Surface
 
+Status: completed 2026-04-22
+
 #### Deliverables
 - Expand the narrow local bridge into a clearer shared resolved-motion model with explicit base locomotion, transient-command state, and presentation-relevant semantics.
 - Decide whether the long-term surface should remain event-backed only, add a pollable snapshot, or support both.
@@ -319,6 +329,8 @@ Status: completed 2026-04-22
 - No second workaround path is introduced in either core or the TUI.
 
 ### Phase 5: Generalize Motion Arbitration Beyond Soul Emotes
+
+Status: completed 2026-04-22
 
 #### Deliverables
 - Harden the resolver so it can support additional transient motions and authority transitions without special-casing soul emotes forever.
@@ -409,8 +421,8 @@ Add focused `holtburger-core` tests around:
 - [x] Phase 3: remove TUI-local soul-emote projection
 - [x] Phase 3: delete `RuntimeBodyViewCache::set_motion_state_for_guid`
 - [x] Phase 3: remove TUI-only `soul_emote_catalog` threading if no longer needed
-- [ ] Phase 4: formalize the broader `ResolvedMotion` abstraction
-- [ ] Phase 5: generalize precedence rules and add follow-on regression cases
+- [x] Phase 4: formalize the broader `ResolvedMotion` abstraction
+- [x] Phase 5: generalize precedence rules and add follow-on regression cases
 - [ ] Phase 6: reassess whether runtime-side resolved-motion diffing should remain
 
 ### Decisions Log
@@ -430,6 +442,11 @@ Add focused `holtburger-core` tests around:
 - 2026-04-22: Phase 3 makes `GameData::runtime_sample_for_guid()` the canonical TUI seam for local-player motion semantics by overlaying `ResolvedLocalMotionView` onto the mirrored runtime-body sample.
 - 2026-04-22: `RuntimeBodyViewCache` is back to being read-only mirrored state; frontend-owned motion injection is no longer an accepted escape hatch.
 - 2026-04-22: The CLI no longer threads `soul_emote_catalog` through app/game state because shared resolved motion, not local catalog lookup, now drives local soul-emote visibility.
+- 2026-04-22: Phase 4 introduces explicit `ResolvedMotion` and `ResolvedMotionPresentation` semantics inside `ResolvedLocalMotionView` instead of treating the shared surface as snapshot-only.
+- 2026-04-22: The broadened resolved-motion surface remains event-backed for now; a pollable runtime API is deferred until the phase-6 projection assessment or a concrete second consumer justifies it.
+- 2026-04-22: Transient resolved motion now preserves known base locomotion alongside the overriding transient command so the shared surface models precedence explicitly.
+- 2026-04-22: Phase 5 makes server-controlled projection an explicit resolved-motion precedence case instead of letting takeover read as implicit idle state in the shared surface.
+- 2026-04-22: For now, `ResolvedMotionPresentation::ServerControlled` is sufficient to model takeover/handoff without inventing a larger public authority taxonomy; revisit that only if a second non-transient authority path needs more detail.
 
 ### Verification Log
 - 2026-04-22: Implemented Phase 1 by adding an internal transient-motion queue to `MovementSystem`, routing soul-emote motion through `enqueue_transient_motion`, and deleting the command handler's direct `MoveToState` send.
@@ -446,6 +463,13 @@ Add focused `holtburger-core` tests around:
 - 2026-04-22: Implemented Phase 3 by deleting the TUI soul-emote projection helper, removing `RuntimeBodyViewCache::set_motion_state_for_guid`, overlaying `ResolvedLocalMotionView` in `GameData::runtime_sample_for_guid()`, and deleting TUI-only `soul_emote_catalog` threading.
 - 2026-04-22: Validated Phase 3 outbound/input behavior with `cargo test -p holtburger-cli soul_emote`.
 - 2026-04-22: Validated the new local-player consumption seam with `cargo test -p holtburger-cli runtime_sample_for_local_player_prefers_resolved_local_motion_snapshot`.
+- 2026-04-22: Implemented Phase 4 by adding explicit `ResolvedMotion` and `ResolvedMotionPresentation` types, widening `ResolvedLocalMotionView`, and teaching `MovementSystem` to populate base locomotion plus transient-command semantics.
+- 2026-04-22: Validated the broadened runtime projection with `cargo test -p holtburger-core resolved_local_motion_bridge_emits_when_local_motion_changes`.
+- 2026-04-22: Validated explicit transient/base precedence semantics with `cargo test -p holtburger-core transient_motion_reasserts_autonomous_locomotion_on_next_tick` and `cargo test -p holtburger-core manual_motion_populates_explicit_resolved_locomotion_state`.
+- 2026-04-22: Validated existing TUI projection consumers still work with the broadened type using `cargo test -p holtburger-cli resolved_local_motion_update_is_cached_in_game_data` and `cargo test -p holtburger-cli runtime_sample_for_local_player_prefers_resolved_local_motion_snapshot`.
+- 2026-04-22: Implemented Phase 5 by teaching `MovementSystem` to export explicit server-controlled resolved motion, centralizing fallback authority refresh instead of defaulting unresolved takeover state to idle.
+- 2026-04-22: Added focused takeover/handoff regressions with `cargo test -p holtburger-core server_controlled_projection_populates_explicit_resolved_motion_state` and `cargo test -p holtburger-core clearing_server_controlled_projection_hands_back_to_autonomous_locomotion`.
+- 2026-04-22: Revalidated adjacent precedence and projection behavior with `cargo test -p holtburger-core transient_motion_reasserts_autonomous_locomotion_on_next_tick`, `cargo test -p holtburger-core manual_motion_populates_explicit_resolved_locomotion_state`, and `cargo test -p holtburger-core resolved_local_motion_bridge_emits_when_local_motion_changes`.
 
 ### Open Questions
 - After the narrow bridge lands, should long-term `ResolvedMotion` be exposed as a pollable runtime snapshot, a `ClientViewEvent`, or both?

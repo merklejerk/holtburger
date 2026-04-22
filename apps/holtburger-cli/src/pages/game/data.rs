@@ -709,6 +709,12 @@ mod tests {
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.player_pos = Some(authoritative_player);
         data.resolved_local_motion = ResolvedLocalMotionView {
+            resolved: holtburger_core::ResolvedMotion {
+                base_locomotion: None,
+                transient_command: Some(InterpretedMotionCommand(0x0087)),
+                motion_style: holtburger_core::client::movement_types::MotionStyle::PreserveServer,
+                presentation: holtburger_core::ResolvedMotionPresentation::Transient,
+            },
             snapshot: Some(resolved_motion),
         };
 

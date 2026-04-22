@@ -920,6 +920,12 @@ mod tests {
                 event,
                 ClientViewEvent::ResolvedLocalMotionUpdated {
                     motion: ResolvedLocalMotionView {
+                        resolved: crate::client::types::ResolvedMotion {
+                            base_locomotion: Some(_),
+                            transient_command: None,
+                            presentation: crate::client::types::ResolvedMotionPresentation::Locomotion,
+                            ..
+                        },
                         snapshot: Some(EntityMotionSnapshot {
                             forward_command: Some(_),
                             ..

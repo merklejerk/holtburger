@@ -272,9 +272,7 @@ impl MovementSystem {
         &mut self,
         command: InterpretedMotionCommand,
         motion_style: MotionStyle,
-        now: Instant,
     ) {
-        let _ = now;
         self.queued_drive_commands
             .push(QueuedDriveCommand::Transient(TransientMotionIntent {
                 command,

@@ -1155,7 +1155,6 @@ async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
     movement.enqueue_transient_motion(
         holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087),
         MotionStyle::Explicit(MotionStance::NonCombat),
-        start + Duration::from_millis(30),
     );
     movement
         .tick(start + Duration::from_millis(30), &mut world, &mut session)

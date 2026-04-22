@@ -375,7 +375,6 @@ impl ClientRuntime {
                         self.movement.enqueue_transient_motion(
                             command,
                             crate::client::movement_types::MotionStyle::Explicit(motion_style),
-                            Instant::now(),
                         );
                     }
 

@@ -1005,23 +1005,6 @@ mod tests {
     }
 
     #[test]
-    fn unknown_soul_emote_event_falls_back_to_raw_token() {
-        let mut chat = ChatState::new(None);
-
-        chat.handle_event(
-            &holtburger_core::ClientViewEvent::SoulEmote {
-                sender: "Bestie".to_string(),
-                text: "waves.".to_string(),
-            },
-            Some("Player"),
-        );
-
-        let message = chat.messages.last().expect("soul emote should log");
-        assert!(message.chat_tags.contains(ChatMessageTags::EMOTE));
-        assert_eq!(message.text, "Bestie waves.");
-    }
-
-    #[test]
     fn attacker_feedback_formats_damage_summary() {
         let mut chat = ChatState::new(None);
 

@@ -447,7 +447,6 @@ pub enum ClientViewEvent {
     Disconnected,
 }
 
-
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
     Login(String),

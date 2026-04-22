@@ -377,9 +377,9 @@ impl ClientRuntime {
 
                     log::info!(">>> You soul emote: \"{}\"", message);
                     return self
-                        .send_game_action(GameAction::SoulEmote(Box::new(
-                            SoulEmoteActionData { message },
-                        )))
+                        .send_game_action(GameAction::SoulEmote(Box::new(SoulEmoteActionData {
+                            message,
+                        })))
                         .await;
                 }
                 Ok(())
@@ -1280,9 +1280,9 @@ mod tests {
         CharacterManagementOperation, ClientCommand, ClientViewEvent,
     };
     use crate::client::{ClientRuntime, ClientState};
-    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
+    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
         SkillAdvancementClass,

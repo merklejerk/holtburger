@@ -273,7 +273,7 @@ mod tests {
         let bytes = value.as_bytes();
         buf.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
         buf.extend_from_slice(bytes);
-        while buf.len() % 4 != 0 {
+        while !buf.len().is_multiple_of(4) {
             buf.push(0);
         }
     }

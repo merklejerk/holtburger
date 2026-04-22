@@ -4,7 +4,11 @@ use holtburger_content::ContentRepository;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Inspect the resolved soul-emote catalog from mounted HBA content")]
+#[command(
+    author,
+    version,
+    about = "Inspect the resolved soul-emote catalog from mounted HBA content"
+)]
 struct Cli {
     /// HBA directory or single HBA archive to inspect
     path: PathBuf,
@@ -39,10 +43,7 @@ fn main() -> Result<()> {
 
         println!("token: {}", resolved.token);
         println!("pose: {}", resolved.pose);
-        println!(
-            "my_emote: {}",
-            resolved.my_emote.unwrap_or("<missing>")
-        );
+        println!("my_emote: {}", resolved.my_emote.unwrap_or("<missing>"));
         println!(
             "other_emote: {}",
             resolved.other_emote.unwrap_or("<missing>")

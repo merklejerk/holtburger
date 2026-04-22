@@ -458,7 +458,8 @@ impl MovementSystem {
         }
 
         let transient_sent = if let Some(intent) = self.pending_transient_motion.take() {
-            self.execute_transient_motion_at(intent, world, session).await?;
+            self.execute_transient_motion_at(intent, world, session)
+                .await?;
             true
         } else {
             false

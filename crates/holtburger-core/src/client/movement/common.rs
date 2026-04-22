@@ -6,9 +6,7 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
-use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_world::context::WorldContextExt;
-use holtburger_world::entity::{EntityMotionSnapshot, OrderedMotionSpeed};
 use holtburger_world::{SelfMovementCapabilities, WorldState};
 use std::f32::consts::{PI, TAU};
 use std::time::Duration;
@@ -188,63 +186,6 @@ pub(super) fn build_motion_state_raw_motion_state(
     }
 
     raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
-}
-
-pub(super) fn entity_motion_snapshot_from_raw_motion_state(
-    raw_motion_state: &RawMotionState,
-) -> Option<EntityMotionSnapshot> {
-    let snapshot = EntityMotionSnapshot {
-        current_style: raw_motion_state
-            .current_style
-            .and_then(|style| u16::try_from(style).ok().and_then(MotionStance::from_interpreted)),
-        forward_command: raw_motion_state
-            .forward_command
-            .and_then(|command| {
-                u16::try_from(command & 0xFFFF)
-                    .ok()
-                    .map(InterpretedMotionCommand)
-            }),
-        sidestep_command: raw_motion_state
-            .sidestep_command
-            .and_then(|command| {
-                u16::try_from(command & 0xFFFF)
-                    .ok()
-                    .map(InterpretedMotionCommand)
-            }),
-        turn_command: raw_motion_state
-            .turn_command
-            .and_then(|command| {
-                u16::try_from(command & 0xFFFF)
-                    .ok()
-                    .map(InterpretedMotionCommand)
-            }),
-        forward_speed: raw_motion_state
-            .forward_speed
-            .and_then(OrderedMotionSpeed::from_f32),
-        sidestep_speed: raw_motion_state
-            .sidestep_speed
-            .and_then(OrderedMotionSpeed::from_f32),
-        turn_speed: raw_motion_state.turn_speed.and_then(OrderedMotionSpeed::from_f32),
-        directive: None,
-    };
-
-    (snapshot.current_style.is_some()
-        || snapshot.forward_command.is_some()
-        || snapshot.sidestep_command.is_some()
-        || snapshot.turn_command.is_some()
-        || snapshot.forward_speed.is_some()
-        || snapshot.sidestep_speed.is_some()
-        || snapshot.turn_speed.is_some())
-    .then_some(snapshot)
-}
-
-pub(super) fn entity_motion_snapshot_for_state(
-    world: &WorldState,
-    state: MotionState,
-    motion_style: MotionStyle,
-) -> Option<EntityMotionSnapshot> {
-    let raw_motion_state = build_motion_state_raw_motion_state(world, state, motion_style);
-    entity_motion_snapshot_from_raw_motion_state(&raw_motion_state)
 }
 
 fn local_locomotion_speed_for_state(

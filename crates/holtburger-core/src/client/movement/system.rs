@@ -228,6 +228,7 @@ impl MovementSystem {
         self.suppress_frontend_autonomous_once = true;
     }
 
+    #[cfg(test)]
     pub(crate) fn resolved_local_motion_view(&self) -> ResolvedLocalMotionView {
         self.resolved_local_motion
     }

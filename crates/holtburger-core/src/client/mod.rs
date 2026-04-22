@@ -43,7 +43,6 @@ pub struct ClientRuntime {
     message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
     movement: MovementSystem,
-    last_resolved_local_motion: ResolvedLocalMotionView,
     simulation: ClientSimulationSystem,
     character_selection: CharacterSelectionState,
     turbine_chat: TurbineChatState,
@@ -124,20 +123,6 @@ impl ClientRuntime {
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::SelfMovementKinematicsUpdated { kinematics });
-    }
-
-    fn emit_resolved_local_motion_updated(&self, motion: ResolvedLocalMotionView) {
-        let _ = self
-            .client_view_event_tx
-            .send(ClientViewEvent::ResolvedLocalMotionUpdated { motion });
-    }
-
-    fn sync_resolved_local_motion_view(&mut self) {
-        let motion = self.movement.resolved_local_motion_view();
-        if motion != self.last_resolved_local_motion {
-            self.last_resolved_local_motion = motion;
-            self.emit_resolved_local_motion_updated(motion);
-        }
     }
 
     fn updates_affect_self_movement_kinematics(
@@ -230,9 +215,6 @@ impl ClientRuntime {
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();
         self.emit_runtime_body_snapshot();
-        let motion = self.movement.resolved_local_motion_view();
-        self.last_resolved_local_motion = motion;
-        self.emit_resolved_local_motion_updated(motion);
     }
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
@@ -888,57 +870,6 @@ mod tests {
         while let Ok(event) = events.try_recv() {
             assert!(!matches!(event, ClientViewEvent::ActionResult { .. }));
         }
-    }
-
-    #[tokio::test]
-    async fn resolved_local_motion_bridge_emits_when_local_motion_changes() {
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let mut events = client.subscribe_client_view_events();
-        let guid = Guid(0x5000_0001);
-
-        client
-            .world
-            .seed_local_player_entity(guid, "Player", WorldPosition::default());
-
-        client.movement.enqueue_drive_intent(
-            movement_types::PlayerDriveIntent::ManualHeld(
-                movement_types::MotionState::builder().run().forward().build(),
-            ),
-            Instant::now(),
-        );
-        client
-            .movement
-            .tick(Instant::now(), &mut client.world, &mut client.session)
-            .await
-            .expect("manual drive should resolve local motion");
-
-        client.sync_resolved_local_motion_view();
-
-        let mut saw_motion = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(
-                event,
-                ClientViewEvent::ResolvedLocalMotionUpdated {
-                    motion: ResolvedLocalMotionView {
-                        resolved: crate::client::types::ResolvedMotion {
-                            base_locomotion: Some(_),
-                            transient_command: None,
-                            presentation: crate::client::types::ResolvedMotionPresentation::Locomotion,
-                            ..
-                        },
-                        snapshot: Some(EntityMotionSnapshot {
-                            forward_command: Some(_),
-                            ..
-                        }),
-                    },
-                }
-            ) {
-                saw_motion = true;
-                break;
-            }
-        }
-
-        assert!(saw_motion);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
-use holtburger_core::{PlayerCharacterOptions, ResolvedLocalMotionView, RuntimeBodyViewCache};
+use holtburger_core::{PlayerCharacterOptions, RuntimeBodyViewCache};
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
@@ -289,8 +289,6 @@ pub struct GameData {
     pub runtime_body_cache: RuntimeBodyViewCache,
     /// Projected shared self-movement kinematics from core/world.
     pub self_movement_kinematics: Option<SelfMovementKinematics>,
-    /// Projected shared local resolved-motion view from core.
-    pub resolved_local_motion: ResolvedLocalMotionView,
     /// Frontend-owned spell metadata lookup cache.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Loaded portal skill table for skill formulas and skill costs.
@@ -339,7 +337,6 @@ impl Default for GameData {
             player_options: None,
             runtime_body_cache: RuntimeBodyViewCache::default(),
             self_movement_kinematics: None,
-            resolved_local_motion: ResolvedLocalMotionView::default(),
             spell_catalog: None,
             skill_table: None,
             entities: HashMap::new(),
@@ -444,10 +441,7 @@ impl GameData {
     pub fn runtime_sample_for_guid(&self, guid: Guid) -> Option<SpatialEntitySample> {
         if Some(guid) == self.player_guid {
             if let Some(sample) = self.runtime_body_cache.spatial_sample(guid) {
-                return Some(SpatialEntitySample {
-                    motion_state: self.resolved_local_motion.snapshot.or(sample.motion_state),
-                    ..sample
-                });
+                return Some(sample);
             }
 
             let pose = self.player_pos?;
@@ -463,7 +457,7 @@ impl GameData {
                 projected_pose: pose,
                 velocity,
                 omega,
-                motion_state: self.resolved_local_motion.snapshot.or(motion_state),
+                motion_state,
                 projection_mode: holtburger_world::SpatialSampleMode::AuthoritativeOnly,
             });
         }
@@ -565,7 +559,7 @@ mod tests {
     use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{CharacterOptions1, CharacterOptions2};
     use holtburger_core::ClientViewEvent;
-    use holtburger_core::{PlayerCharacterOptions, ResolvedLocalMotionView};
+    use holtburger_core::PlayerCharacterOptions;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::context::WorldContextExt;
     use holtburger_world::entity::{Entity, EntityMotionSnapshot};
@@ -690,7 +684,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_sample_for_local_player_prefers_resolved_local_motion_snapshot() {
+    fn runtime_sample_for_local_player_uses_runtime_body_motion_snapshot() {
         let player_guid = Guid(0x5000_0001);
         let authoritative_player = WorldPosition {
             landblock_id: Guid(0x0100_0000),
@@ -701,22 +695,8 @@ mod tests {
             forward_command: Some(InterpretedMotionCommand(0x0001)),
             ..Default::default()
         };
-        let resolved_motion = EntityMotionSnapshot {
-            current_style: Some(MotionStance::NonCombat),
-            forward_command: Some(InterpretedMotionCommand(0x0087)),
-            ..Default::default()
-        };
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.player_pos = Some(authoritative_player);
-        data.resolved_local_motion = ResolvedLocalMotionView {
-            resolved: holtburger_core::ResolvedMotion {
-                base_locomotion: None,
-                transient_command: Some(InterpretedMotionCommand(0x0087)),
-                motion_style: holtburger_core::client::movement_types::MotionStyle::PreserveServer,
-                presentation: holtburger_core::ResolvedMotionPresentation::Transient,
-            },
-            snapshot: Some(resolved_motion),
-        };
 
         data.runtime_body_cache.apply_view_event(
             &ClientViewEvent::RuntimeBodyUpserted {
@@ -738,7 +718,7 @@ mod tests {
             data.runtime_sample_for_guid(player_guid),
             Some(holtburger_world::SpatialEntitySample {
                 motion_state: Some(EntityMotionSnapshot {
-                    forward_command: Some(InterpretedMotionCommand(0x0087)),
+                    forward_command: Some(InterpretedMotionCommand(0x0001)),
                     ..
                 }),
                 ..

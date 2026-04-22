@@ -198,6 +198,8 @@ Status: completed 2026-04-22
 
 ### Phase 4: Preserve Soul-Emote Semantics Through `holtburger-core`
 
+Status: completed 2026-04-22
+
 #### Deliverables
 - Add a distinct client command path for soul emotes in core
 - Stop collapsing `EmoteText` and `SoulEmote` into the same event shape
@@ -324,7 +326,7 @@ Mitigation:
 - [x] Phase 1: Add protocol support for client soul emotes
 - [x] Phase 2: Parse `ChatPoseTable` in `holtburger-dat`
 - [x] Phase 3: Expose a shared soul-emote catalog in `holtburger-content`
-- [ ] Phase 4: Preserve soul-emote semantics through `holtburger-core`
+- [x] Phase 4: Preserve soul-emote semantics through `holtburger-core`
 - [ ] Phase 5: Update TUI input and chat handling without UI motion playback
 - [ ] Phase 6: Add docs, diagnostics, and hardening
 
@@ -337,6 +339,8 @@ Mitigation:
 - 2026-04-21: `holtburger-dat` should expose the raw parsed `ChatPoseTable`, while `holtburger-content` should expose a curated runtime-facing `SoulEmoteCatalog` derived from it.
 - 2026-04-22: `SoulEmoteCatalog` should stay content-owned and be loaded into runtime bootstrap data, not recreated inside `holtburger-world` or looked up from `ContentRepository` during message handling.
 - 2026-04-22: The crate dependency direction for this seam should be `holtburger-world -> holtburger-content`, not `holtburger-content -> holtburger-world`.
+- 2026-04-22: The minimum Phase 4 soul-emote view payload should preserve the raw token plus optional resolved pose and display strings (`my_emote`, `other_emote`) rather than collapsing to a preformatted chat line.
+- 2026-04-22: Downstream scripting should preserve the semantic split with a dedicated soul-emote chat channel instead of folding soul emotes back into the generic emote lane.
 
 ### Verification Log
 - 2026-04-21: Verified ACE uses a dedicated `SoulEmote` client action opcode (`0x01E1`) and rebroadcast message opcode (`0x01E2`).
@@ -355,8 +359,12 @@ Mitigation:
 - 2026-04-22: Validated the Phase 3 runtime-loading seam with `cargo test -p holtburger-core runtime_builder_load_assets_reads_bootstrap_from_repository`.
 - 2026-04-22: Validated the content layer with `cargo test -p holtburger-content`.
 - 2026-04-22: Validated the updated synthetic world bootstrap shape with `cargo test -p holtburger-world test_empty_world_uses_synthetic_reference_data`.
+- 2026-04-22: Implemented Phase 4 by adding `ClientCommand::SoulEmote`, a distinct `ClientViewEvent::SoulEmote { sender, token, resolved }`, and owned resolved soul-emote metadata in `holtburger-core`.
+- 2026-04-22: Preserved the downstream split by updating CLI event filtering and scripting projection to recognize soul emotes separately from plain emotes.
+- 2026-04-22: Validated the core split with `cargo test -p holtburger-core soul_emote`.
+- 2026-04-22: Validated CLI consumers with `cargo test -p holtburger-cli emote`.
+- 2026-04-22: Validated the scripting boundary with `cargo test -p holtburger-scripting`.
 
 ### Open Questions
-- None blocking Phase 4.
 - Persistent-state classification remains intentionally deferred until a concrete downstream consumer needs it.
-- Phase 4 should decide the minimum soul-emote event payload that preserves raw token plus resolved catalog metadata without re-collapsing plain and soul emotes into one lane.
+- Phase 5 should add an explicit outbound soul-emote app/script intent instead of inferring transport from freeform strings inside reducers.

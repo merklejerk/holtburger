@@ -958,6 +958,7 @@ pub enum ScriptChatChannelKind {
     Say,
     Tell,
     Emote,
+    SoulEmote,
     Fellowship,
     Allegiance,
     Vassals,

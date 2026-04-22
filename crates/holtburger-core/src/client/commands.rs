@@ -111,7 +111,8 @@ impl ClientRuntime {
             ClientCommand::Talk(_)
             | ClientCommand::Tell { .. }
             | ClientCommand::ChannelMessage { .. }
-            | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
+            | ClientCommand::Emote(_)
+            | ClientCommand::SoulEmote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
             | ClientCommand::ReadBookPage { .. }
@@ -335,6 +336,17 @@ impl ClientRuntime {
                         .send_game_action(GameAction::Emote(Box::new(EmoteActionData {
                             message: text,
                         })))
+                        .await;
+                }
+                Ok(())
+            }
+            ClientCommand::SoulEmote(token) => {
+                if matches!(self.state, ClientState::InWorld) {
+                    log::info!(">>> You soul emote: \"{}\"", token);
+                    return self
+                        .send_game_action(GameAction::SoulEmote(Box::new(
+                            SoulEmoteActionData { message: token },
+                        )))
                         .await;
                 }
                 Ok(())
@@ -1878,6 +1890,19 @@ mod tests {
 
         client
             .handle_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn soul_emote_command_sends_dedicated_game_action() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SoulEmote("*wave*".to_string()))
             .await
             .unwrap();
 

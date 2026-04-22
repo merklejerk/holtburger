@@ -277,8 +277,8 @@ pub enum GameActionOpcode {
     // ModifyGlobalSquelch = 0x005B,
     /// C2S: Perform a character emote.
     Emote = 0x01DF,
-    // /// C2S: Perform a visual "soul emote".
-    // SoulEmote = 0x01E1,
+    /// C2S: Perform a visual "soul emote".
+    SoulEmote = 0x01E1,
     /// C2S: Request a ping response.
     /// Used to measure latency and keep the connection alive.
     PingRequest = 0x01E9,

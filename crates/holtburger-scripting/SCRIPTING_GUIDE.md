@@ -271,7 +271,7 @@ The write side of the API emits frontend intents or direct client actions.
 - `HB.debugLog(message)` sends a message to the frontend debug log.
 - `HB.say(message)` sends in-game chat text.
 - `HB.emote(message)` sends an emote message.
-- `HB.soulEmote(token)` sends a retail soul emote on the dedicated soul-emote transport. Pass the full token, for example `*wave*`.
+- `HB.soulEmote(token)` sends a retail soul emote on the dedicated soul-emote transport. Pass the full token without surrounding asterisks, for example `wave`.
 
 ### Client Interaction
 

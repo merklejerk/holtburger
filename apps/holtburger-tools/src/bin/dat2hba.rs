@@ -42,8 +42,8 @@ struct Args {
     #[arg(required = true, num_args = 2.., value_name = "[NAMESPACE=]DAT ... HBA")]
     paths: Vec<String>,
 
-    /// Archive profile to emit: pruned, full, or micro.
-    #[arg(long, value_enum, default_value_t = ArchiveProfile::Pruned)]
+    /// Archive profile to emit: pruned, full, or micro. Defaults to full.
+    #[arg(long, value_enum, default_value_t = ArchiveProfile::Full)]
     profile: ArchiveProfile,
 }
 
@@ -92,14 +92,14 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn args_default_profile_is_pruned() {
+    fn args_default_profile_is_full() {
         let args = Args::try_parse_from(["dat2hba", "portal.dat", "portal.hba"])
             .expect("default args should parse");
         let options = args
             .into_options()
             .expect("args should convert into options");
 
-        assert_eq!(options.profile, ArchiveProfile::Pruned);
+        assert_eq!(options.profile, ArchiveProfile::Full);
         assert_eq!(options.inputs.len(), 1);
         assert_eq!(options.inputs[0].path, PathBuf::from("portal.dat"));
         assert_eq!(options.inputs[0].namespace, None);

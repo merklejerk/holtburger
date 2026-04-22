@@ -23,13 +23,20 @@ Used for public chat (Say).
 | `uint32` | `Type` | Chat message type (usually `1` for Speech). |
 
 ### `0x01E2` SoulEmote
-A short emote broadcast by a player (e.g., "waves.").
+A player soul-emote broadcast on the dedicated soul-emote wire lane.
+
+Important notes:
+
+- ACE accepts player soul emotes on client action `0x01E1`, not the plain emote action opcode.
+- The server rebroadcast payload is still string-first. In practice this field carries the raw soul-emote token such as `*wave*`, not a pre-resolved motion command.
+- Holtburger resolves that token against the mounted `ChatPoseTable` catalog at runtime to produce optional pose and display-text metadata.
+- Plain chat emotes and soul emotes are distinct transports and should not be collapsed back into one semantic lane.
 
 | Type | Name | Description |
 | :--- | :--- | :--- |
 | `uint32` | `SenderID` | GUID of the emoter. |
 | `String16L` | `SenderName` | Name of the emoter (may include prefixes like `+`). |
-| `String16L` | `EmoteText` | The emote text, e.g., `waves.`. |
+| `String16L` | `EmoteText` | Raw soul-emote token text, typically something like `*wave*`. |
 
 ### `0xF7E1` ServerName
 Sent during connection to provide server metadata.

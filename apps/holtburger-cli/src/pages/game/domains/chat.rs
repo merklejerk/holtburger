@@ -7,6 +7,9 @@ use holtburger_core::errors::is_actually_weenie_error;
 pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> UpdateResult {
     match action {
         AppAction::Emote { message } => UpdateResult::commands(vec![ClientCommand::Emote(message)]),
+        AppAction::SoulEmote { token } => {
+            UpdateResult::commands(vec![ClientCommand::SoulEmote(token)])
+        }
         _ => UpdateResult::new(),
     }
 }
@@ -104,6 +107,23 @@ mod tests {
         assert!(
             matches!(result.commands.as_slice(), [ClientCommand::Emote(text)] if text == "waves")
         );
+    }
+
+    #[test]
+    fn soul_emote_action_dispatches_soul_emote_command() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+
+        let result = reduce_action(
+            &mut state,
+            AppAction::SoulEmote {
+                token: "*wave*".to_string(),
+            },
+        );
+
+        assert!(matches!(
+            result.commands.as_slice(),
+            [ClientCommand::SoulEmote(token)] if token == "*wave*"
+        ));
     }
 
     #[test]

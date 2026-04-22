@@ -248,6 +248,7 @@ impl GameState {
             }),
             ScriptIntent::Use { guid } => Ok(AppAction::Use { guid }),
             ScriptIntent::Emote { message } => Ok(AppAction::Emote { message }),
+            ScriptIntent::SoulEmote { token } => Ok(AppAction::SoulEmote { token }),
             ScriptIntent::OpenTrade { guid } => Ok(AppAction::OpenTrade { guid }),
             ScriptIntent::AddToTrade { item } => Ok(AppAction::AddToTrade { guid: item }),
             ScriptIntent::AcceptTrade => Ok(AppAction::AcceptTrade),
@@ -684,6 +685,17 @@ mod tests {
             )
             .expect("emote should compile"),
             AppAction::Emote { message } if message == "waves"
+        ));
+
+        assert!(matches!(
+            GameState::compile_script_intent(
+                &view,
+                ScriptIntent::SoulEmote {
+                    token: "*wave*".to_string(),
+                },
+            )
+            .expect("soul emote should compile"),
+            AppAction::SoulEmote { token } if token == "*wave*"
         ));
 
         assert!(matches!(

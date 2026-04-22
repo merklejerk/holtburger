@@ -243,6 +243,16 @@ impl GameState {
                         });
                         return result;
                     }
+                    if command.starts_with('*') && command.ends_with('*') && command.len() >= 2 {
+                        result.actions.push(
+                            AppUiAction::FinishInputCommandSubmission {
+                                command: command.clone(),
+                            }
+                            .into(),
+                        );
+                        result.actions.push(AppAction::SoulEmote { token: command });
+                        return result;
+                    }
                     result.actions.push(
                         AppUiAction::FinishInputCommandSubmission {
                             command: command.clone(),
@@ -786,6 +796,22 @@ mod tests {
         assert!(matches!(
             result.actions.iter().find(|action| matches!(action, AppAction::Emote { .. })),
             Some(AppAction::Emote { message }) if message == " hello there"
+        ));
+    }
+
+    #[test]
+    fn enter_submits_star_wrapped_input_as_soul_emote() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("*wave*");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.iter().find(|action| matches!(action, AppAction::SoulEmote { .. })),
+            Some(AppAction::SoulEmote { token }) if token == "*wave*"
         ));
     }
 

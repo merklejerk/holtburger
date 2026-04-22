@@ -222,6 +222,8 @@ Status: completed 2026-04-22
 
 ### Phase 5: Update TUI Input And Chat Handling
 
+Status: completed 2026-04-22
+
 #### Deliverables
 - Define how TUI input chooses plain emote vs soul emote transport
 - Route recognized soul emote syntax through the dedicated client command
@@ -249,6 +251,8 @@ Status: completed 2026-04-22
 - The TUI does not grow feature-specific motion UI
 
 ### Phase 6: Documentation, Diagnostics, And Hardening
+
+Status: completed 2026-04-22
 
 #### Deliverables
 - Document the wire distinction between plain emotes and soul emotes
@@ -327,8 +331,8 @@ Mitigation:
 - [x] Phase 2: Parse `ChatPoseTable` in `holtburger-dat`
 - [x] Phase 3: Expose a shared soul-emote catalog in `holtburger-content`
 - [x] Phase 4: Preserve soul-emote semantics through `holtburger-core`
-- [ ] Phase 5: Update TUI input and chat handling without UI motion playback
-- [ ] Phase 6: Add docs, diagnostics, and hardening
+- [x] Phase 5: Update TUI input and chat handling without UI motion playback
+- [x] Phase 6: Add docs, diagnostics, and hardening
 
 ### Decisions Log
 - 2026-04-21: TUI motion playback or state badges are explicitly out of scope for this feature.
@@ -341,6 +345,10 @@ Mitigation:
 - 2026-04-22: The crate dependency direction for this seam should be `holtburger-world -> holtburger-content`, not `holtburger-content -> holtburger-world`.
 - 2026-04-22: The minimum Phase 4 soul-emote view payload should preserve the raw token plus optional resolved pose and display strings (`my_emote`, `other_emote`) rather than collapsing to a preformatted chat line.
 - 2026-04-22: Downstream scripting should preserve the semantic split with a dedicated soul-emote chat channel instead of folding soul emotes back into the generic emote lane.
+- 2026-04-22: First-pass TUI input should route `*token*` directly to a dedicated outbound soul-emote app intent instead of inferring transport later in reducers.
+- 2026-04-22: TUI chat logging should prefer resolved `other_emote` text for incoming soul emotes and fall back to the raw token when the catalog has no display string.
+- 2026-04-22: Phase 6 docs should describe `0x01E2` soul emotes as raw token transport plus runtime catalog resolution, not as an already-resolved display string on the wire.
+- 2026-04-22: The supported outbound surfaces are now explicitly documented as TUI `*token*` input, TUI `:emote` input, and scripting `HB.soulEmote(token)`.
 
 ### Verification Log
 - 2026-04-21: Verified ACE uses a dedicated `SoulEmote` client action opcode (`0x01E1`) and rebroadcast message opcode (`0x01E2`).
@@ -364,7 +372,15 @@ Mitigation:
 - 2026-04-22: Validated the core split with `cargo test -p holtburger-core soul_emote`.
 - 2026-04-22: Validated CLI consumers with `cargo test -p holtburger-cli emote`.
 - 2026-04-22: Validated the scripting boundary with `cargo test -p holtburger-scripting`.
+- 2026-04-22: Implemented Phase 5 by adding a dedicated `AppAction::SoulEmote`, routing retail `*token*` input through the TUI input path, and dispatching it to `ClientCommand::SoulEmote` from the chat domain.
+- 2026-04-22: Updated the chat panel to log incoming soul emotes via resolved `other_emote` text when available and fall back to the raw token otherwise.
+- 2026-04-22: Added an explicit outbound scripting `SoulEmote` intent and host API so scripts do not need to smuggle soul-emote transport through the plain emote lane.
+- 2026-04-22: Validated Phase 5 input, dispatch, and chat rendering with `cargo test -p holtburger-cli soul_emote`.
+- 2026-04-22: Revalidated the scripting surface after the new outbound intent with `cargo test -p holtburger-scripting`.
+- 2026-04-22: Implemented Phase 6 by correcting the soul-emote wire docs in `docs/messages.md`, documenting `ChatPoseTable` limits in `docs/dat_format.md`, and documenting the scripting `HB.soulEmote(token)` API in the scripting guide and typings.
+- 2026-04-22: Added a focused mounted-content diagnostic helper at `apps/holtburger-tools/src/bin/soul-emotes.rs` to inspect the resolved `SoulEmoteCatalog` through `ContentRepository`.
+- 2026-04-22: Validated the new diagnostic helper with `cargo check -p holtburger-tools --bin soul-emotes`.
 
 ### Open Questions
 - Persistent-state classification remains intentionally deferred until a concrete downstream consumer needs it.
-- Phase 5 should add an explicit outbound soul-emote app/script intent instead of inferring transport from freeform strings inside reducers.
+- A future protocol docs pass may want a dedicated client-action reference so the `0x01E1` plain-vs-soul emote distinction does not live only in plan history and inline notes.

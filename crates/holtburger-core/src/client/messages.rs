@@ -731,23 +731,24 @@ mod tests {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
 
-        client.world.soul_emote_catalog = std::sync::Arc::new(holtburger_content::SoulEmoteCatalog {
-            tokens: std::collections::BTreeMap::from([(
-                "wave".to_string(),
-                holtburger_content::SoulEmoteToken {
-                    token: "wave".to_string(),
-                    pose: "Wave".to_string(),
-                },
-            )]),
-            poses: std::collections::BTreeMap::from([(
-                "Wave".to_string(),
-                holtburger_content::SoulEmotePose {
-                    pose: "Wave".to_string(),
-                    my_emote: "wave.".to_string(),
-                    other_emote: "waves.".to_string(),
-                },
-            )]),
-        });
+        client.world.soul_emote_catalog =
+            std::sync::Arc::new(holtburger_content::SoulEmoteCatalog {
+                tokens: std::collections::BTreeMap::from([(
+                    "wave".to_string(),
+                    holtburger_content::SoulEmoteToken {
+                        token: "wave".to_string(),
+                        pose: "Wave".to_string(),
+                    },
+                )]),
+                poses: std::collections::BTreeMap::from([(
+                    "Wave".to_string(),
+                    holtburger_content::SoulEmotePose {
+                        pose: "Wave".to_string(),
+                        my_emote: "wave.".to_string(),
+                        other_emote: "waves.".to_string(),
+                    },
+                )]),
+            });
 
         let encoded = encode_message(&GameMessage::SoulEmote(Box::new(SoulEmoteData {
             sender: 0x5000_0002,

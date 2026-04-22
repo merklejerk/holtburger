@@ -7,8 +7,7 @@ use crate::client::types::ClientViewEvent;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_world::{
-    RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode,
-    entity::Entity,
+    RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode, entity::Entity,
 };
 use std::collections::HashMap;
 use std::time::Instant;

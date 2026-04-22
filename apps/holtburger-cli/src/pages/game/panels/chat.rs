@@ -158,11 +158,7 @@ impl ChatState {
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
             }
-            ClientViewEvent::SoulEmote {
-                sender,
-                text,
-                ..
-            } => {
+            ClientViewEvent::SoulEmote { sender, text, .. } => {
                 self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
             }
             ClientViewEvent::CombatFeedback(feedback) => {

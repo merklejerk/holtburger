@@ -132,7 +132,10 @@ fn test_dispatch_action_soul_emote() {
             return false;
         };
 
-        matches!(action.action, crate::messages::game_action::GameAction::SoulEmote(_))
+        matches!(
+            action.action,
+            crate::messages::game_action::GameAction::SoulEmote(_)
+        )
     });
 }
 

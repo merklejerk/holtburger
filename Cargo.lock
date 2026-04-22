@@ -1439,7 +1439,6 @@ dependencies = [
  "binrw",
  "holtburger-common",
  "holtburger-dat",
- "holtburger-world",
  "log",
  "tempfile",
 ]
@@ -1587,6 +1586,7 @@ dependencies = [
  "bitflags 2.11.0",
  "glam",
  "holtburger-common",
+ "holtburger-content",
  "holtburger-dat",
  "holtburger-protocol",
  "log",

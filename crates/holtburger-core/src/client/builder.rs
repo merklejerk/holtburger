@@ -259,12 +259,12 @@ mod tests {
         bytes.extend_from_slice(&ChatPoseTable::FILE_ID.to_le_bytes());
         bytes.extend_from_slice(&1u16.to_le_bytes());
         bytes.extend_from_slice(&1u16.to_le_bytes());
-        push_pstring_aligned(&mut bytes, "*wave*");
+        push_pstring_aligned(&mut bytes, "wave");
         push_pstring_aligned(&mut bytes, "Wave");
         bytes.extend_from_slice(&1u16.to_le_bytes());
         bytes.extend_from_slice(&1u16.to_le_bytes());
         push_pstring_aligned(&mut bytes, "Wave");
-        push_pstring_aligned(&mut bytes, "You wave.");
+        push_pstring_aligned(&mut bytes, "wave.");
         push_pstring_aligned(&mut bytes, "waves.");
         bytes
     }
@@ -388,7 +388,7 @@ mod tests {
 
         assert!(!client.world.skill_table.skill_base_hash.is_empty());
         assert!(!client.world.spell_catalog.spells.is_empty());
-        assert!(client.world.soul_emote_catalog.is_known_token("*wave*"));
+        assert!(client.world.soul_emote_catalog.is_known_token("wave"));
         assert_eq!(client.world.motion_kinematics.id, MotionKinematics::FILE_ID);
     }
 

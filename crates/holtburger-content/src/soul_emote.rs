@@ -55,6 +55,7 @@ impl SoulEmoteCatalog {
 
     pub fn resolve(&self, token: &str) -> Option<SoulEmoteResolution<'_>> {
         let token_entry = self.tokens.get(token)?;
+
         let pose_entry = self.poses.get(token_entry.pose.as_str());
 
         Some(SoulEmoteResolution {
@@ -97,21 +98,21 @@ mod tests {
     fn catalog_resolves_tokens_and_pose_text() {
         let table = ChatPoseTable {
             id: ChatPoseTable::FILE_ID,
-            chat_pose_hash: HashMap::from([("*wave*".to_string(), "Wave".to_string())]),
+            chat_pose_hash: HashMap::from([("wave".to_string(), "Wave".to_string())]),
             chat_emote_hash: HashMap::from([(
                 "Wave".to_string(),
                 ChatEmoteData {
-                    my_emote: "You wave.".to_string(),
+                    my_emote: "wave.".to_string(),
                     other_emote: "waves.".to_string(),
                 },
             )]),
         };
 
         let catalog = SoulEmoteCatalog::from_asset(&table);
-        let resolved = catalog.resolve("*wave*").expect("token should resolve");
+        let resolved = catalog.resolve("wave").expect("token should resolve");
 
         assert_eq!(resolved.pose, "Wave");
-        assert_eq!(resolved.my_emote, Some("You wave."));
+        assert_eq!(resolved.my_emote, Some("wave."));
         assert_eq!(resolved.other_emote, Some("waves."));
     }
 
@@ -119,13 +120,13 @@ mod tests {
     fn catalog_preserves_known_token_without_pose_text() {
         let table = ChatPoseTable {
             id: ChatPoseTable::FILE_ID,
-            chat_pose_hash: HashMap::from([("*mystery*".to_string(), "Mystery".to_string())]),
+            chat_pose_hash: HashMap::from([("mystery".to_string(), "Mystery".to_string())]),
             chat_emote_hash: HashMap::new(),
         };
 
         let catalog = SoulEmoteCatalog::from_asset(&table);
         let resolved = catalog
-            .resolve("*mystery*")
+            .resolve("mystery")
             .expect("token should still resolve by pose");
 
         assert_eq!(resolved.pose, "Mystery");

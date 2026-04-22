@@ -877,11 +877,11 @@ pub(crate) fn script_event_from_view_event(event: &ClientViewEvent) -> Option<Sc
                 message: text.clone(),
             }))
         }
-        ClientViewEvent::SoulEmote { sender, token, .. } => {
+        ClientViewEvent::SoulEmote { sender, text, .. } => {
             Some(ScriptEvent::ChatMessage(ScriptChatEvent {
                 channel: ScriptChatChannelKind::SoulEmote,
                 sender: Some(sender.clone()),
-                message: token.clone(),
+                message: text.clone(),
             }))
         }
         ClientViewEvent::ChannelMessage {

@@ -7,9 +7,7 @@ use holtburger_core::errors::is_actually_weenie_error;
 pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> UpdateResult {
     match action {
         AppAction::Emote { message } => UpdateResult::commands(vec![ClientCommand::Emote(message)]),
-        AppAction::SoulEmote { token } => {
-            UpdateResult::commands(vec![ClientCommand::SoulEmote(token)])
-        }
+        AppAction::SoulEmote { token } => UpdateResult::commands(vec![ClientCommand::SoulEmote(token)]),
         _ => UpdateResult::new(),
     }
 }
@@ -116,13 +114,13 @@ mod tests {
         let result = reduce_action(
             &mut state,
             AppAction::SoulEmote {
-                token: "*wave*".to_string(),
+                token: "wave".to_string(),
             },
         );
 
         assert!(matches!(
             result.commands.as_slice(),
-            [ClientCommand::SoulEmote(token)] if token == "*wave*"
+            [ClientCommand::SoulEmote(token)] if token == "wave"
         ));
     }
 

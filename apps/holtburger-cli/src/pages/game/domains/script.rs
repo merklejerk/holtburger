@@ -691,11 +691,11 @@ mod tests {
             GameState::compile_script_intent(
                 &view,
                 ScriptIntent::SoulEmote {
-                    token: "*wave*".to_string(),
+                    token: "wave".to_string(),
                 },
             )
             .expect("soul emote should compile"),
-            AppAction::SoulEmote { token } if token == "*wave*"
+            AppAction::SoulEmote { token } if token == "wave"
         ));
 
         assert!(matches!(

@@ -12,6 +12,13 @@ use crate::types::{
     AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult,
 };
 
+fn normalize_soul_emote_token(token: &str) -> &str {
+    token
+        .strip_prefix('*')
+        .and_then(|value| value.strip_suffix('*'))
+        .unwrap_or(token)
+}
+
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
@@ -250,7 +257,9 @@ impl GameState {
                             }
                             .into(),
                         );
-                        result.actions.push(AppAction::SoulEmote { token: command });
+                        result.actions.push(AppAction::SoulEmote {
+                            token: normalize_soul_emote_token(&command).to_string(),
+                        });
                         return result;
                     }
                     result.actions.push(
@@ -811,7 +820,7 @@ mod tests {
         assert!(result.commands.is_empty());
         assert!(matches!(
             result.actions.iter().find(|action| matches!(action, AppAction::SoulEmote { .. })),
-            Some(AppAction::SoulEmote { token }) if token == "*wave*"
+            Some(AppAction::SoulEmote { token }) if token == "wave"
         ));
     }
 

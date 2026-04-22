@@ -342,10 +342,27 @@ impl ClientRuntime {
             }
             ClientCommand::SoulEmote(token) => {
                 if matches!(self.state, ClientState::InWorld) {
-                    log::info!(">>> You soul emote: \"{}\"", token);
+                    let Some(message) = self.world.soul_emote_catalog.resolve(&token).map(|resolved| {
+                        resolved
+                            .other_emote
+                            .or(resolved.my_emote)
+                            .unwrap_or(resolved.token)
+                            .to_string()
+                    }) else {
+                        self.emit_action_result(
+                            ActionResultSource::Client,
+                            ActionResultReason::General(format!(
+                                "Unknown soul emote token: {}",
+                                token
+                            )),
+                        );
+                        return Ok(());
+                    };
+
+                    log::info!(">>> You soul emote: \"{}\"", message);
                     return self
                         .send_game_action(GameAction::SoulEmote(Box::new(
-                            SoulEmoteActionData { message: token },
+                            SoulEmoteActionData { message },
                         )))
                         .await;
                 }
@@ -1247,6 +1264,7 @@ mod tests {
         CharacterManagementOperation, ClientCommand, ClientViewEvent,
     };
     use crate::client::{ClientRuntime, ClientState};
+    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_protocol::messages::{
@@ -1265,7 +1283,25 @@ mod tests {
     use std::sync::Arc;
 
     fn build_test_client() -> ClientRuntime {
-        builder::build_test_client(ClientState::InWorld)
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.soul_emote_catalog = Arc::new(SoulEmoteCatalog {
+            tokens: std::collections::BTreeMap::from([(
+                "wave".to_string(),
+                SoulEmoteToken {
+                    token: "wave".to_string(),
+                    pose: "Wave".to_string(),
+                },
+            )]),
+            poses: std::collections::BTreeMap::from([(
+                "Wave".to_string(),
+                SoulEmotePose {
+                    pose: "Wave".to_string(),
+                    my_emote: "wave.".to_string(),
+                    other_emote: "waves.".to_string(),
+                },
+            )]),
+        });
+        client
     }
 
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
@@ -1902,12 +1938,41 @@ mod tests {
         let mut client = build_test_client();
 
         client
-            .handle_command(ClientCommand::SoulEmote("*wave*".to_string()))
+            .handle_command(ClientCommand::SoulEmote("wave".to_string()))
             .await
             .unwrap();
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn soul_emote_command_rejects_unknown_token() {
+        let mut client = build_test_client();
+        let mut view_events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::SoulEmote("ploop".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.session.bytes_out, 0);
+
+        let mut saw_result = false;
+        while let Ok(event) = view_events.try_recv() {
+            if let ClientViewEvent::ActionResult { source, reason } = event {
+                assert_eq!(source, ActionResultSource::Client);
+                assert_eq!(
+                    reason,
+                    ActionResultReason::General("Unknown soul emote token: ploop".to_string())
+                );
+                saw_result = true;
+                break;
+            }
+        }
+
+        assert!(saw_result);
     }
 
     #[tokio::test]

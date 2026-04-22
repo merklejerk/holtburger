@@ -272,6 +272,7 @@
     - [x] Add preferred spell IDs.
     - [x] Fix not using revitalize.
     - [x] Snap to target heading before casting?
+- [ ] TUI hangs w/100% CPU upon choosing character when started with verbosity >= `-vv`.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

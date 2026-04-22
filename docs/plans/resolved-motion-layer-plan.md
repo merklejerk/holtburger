@@ -198,15 +198,23 @@ The more achievable sequencing is:
 3. delete the TUI-local workaround and the runtime-body cache mutator
 4. only then generalize the abstraction beyond soul emotes
 
+### Phase 1 Implementation Notes
+- Phase 1 did not require a new public transient-motion type in `movement_types`; an internal `MovementSystem` transient queue was enough to move ownership without widening API surface early.
+- The command path now queues soul-emote motion into `MovementSystem` and still sends the dedicated `GameAction::SoulEmote` immediately.
+- The matching `MoveToState` now emits on the next movement tick, which keeps wire-edge ownership singular inside `MovementSystem` but means command-handler tests must validate the post-command tick rather than immediate dual-send behavior.
+
 ### Recommended Course Corrections
 - Treat the first implementation milestone as ownership correction, not full resolved-motion exposure. This keeps the first code slice small and testable.
 - Prefer an event-backed first resolved-motion bridge over a brand-new polling API because the runtime already projects state to frontends through `ClientViewEvent`.
 - Add an explicit intermediate phase for replacing the TUI workaround with shared-core event consumption before broad generalization.
 - Call out the cleanup of TUI `soul_emote_catalog` threading as part of the workaround-removal phase rather than leaving it implicit.
+- Keep transient-motion storage private to `MovementSystem` until a second caller proves that a shared public motion-intent type is buying us something.
 
 ## Phased Implementation
 
 ### Phase 1: Centralize Soul-Emote Motion Ownership
+
+Status: completed 2026-04-22
 
 #### Deliverables
 - Add a transient-motion representation to `holtburger-core` movement types or `MovementSystem` internals.
@@ -349,9 +357,9 @@ Add focused `holtburger-core` tests around:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: add transient motion intent support to `MovementSystem`
-- [ ] Phase 1: route soul-emote motion through `MovementSystem`
-- [ ] Phase 1: add regression test for pursuit resuming after soul emote
+- [x] Phase 1: add transient motion intent support to `MovementSystem`
+- [x] Phase 1: route soul-emote motion through `MovementSystem`
+- [x] Phase 1: add regression test for pursuit resuming after soul emote
 - [ ] Phase 2: add minimal event-backed resolved local-motion bridge
 - [ ] Phase 2: wire the bridge into runtime event projection
 - [ ] Phase 3: remove TUI-local soul-emote projection
@@ -367,9 +375,16 @@ Add focused `holtburger-core` tests around:
 - The dedicated `GameAction::SoulEmote` chat payload remains command-handler-owned in the first pass; only motion-edge emission moves under `MovementSystem`.
 - `RuntimeBodyViewCache::set_motion_state_for_guid` and the TUI-local soul-emote projection helper are migration targets to delete, not APIs to preserve.
 - A minimal event-backed bridge is more achievable than a brand-new polling surface as the first consumable resolved-motion API because the runtime already synchronizes frontend state through `ClientViewEvent`.
+- 2026-04-22: Phase 1 used an internal `MovementSystem` transient-motion queue instead of adding a new public shared motion-intent type up front.
+- 2026-04-22: The first ownership move keeps soul-emote chat payload dispatch in `ClientCommand::SoulEmote`, but the matching `MoveToState` now emits only from `MovementSystem::tick`.
+- 2026-04-22: A transient motion should suppress locomotion emission for that tick and clear the last-sent locomotion fingerprint so the next continuing drive tick reasserts locomotion cleanly.
 
 ### Verification Log
-- Pending implementation.
+- 2026-04-22: Implemented Phase 1 by adding an internal transient-motion queue to `MovementSystem`, routing soul-emote motion through `enqueue_transient_motion`, and deleting the command handler's direct `MoveToState` send.
+- 2026-04-22: Added a focused movement regression test proving a transient motion suppresses autonomous locomotion for one tick and forces locomotion to be reasserted on the next autonomous tick.
+- 2026-04-22: Validated the command path with `cargo test -p holtburger-core soul_emote_command_sends_dedicated_game_action`.
+- 2026-04-22: Validated transient locomotion reassertion with `cargo test -p holtburger-core transient_motion_reasserts_autonomous_locomotion_on_next_tick`.
+- 2026-04-22: Revalidated the broader soul-emote core slice with `cargo test -p holtburger-core soul_emote`.
 
 ### Open Questions
 - After the narrow bridge lands, should long-term `ResolvedMotion` be exposed as a pollable runtime snapshot, a `ClientViewEvent`, or both?

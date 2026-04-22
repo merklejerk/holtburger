@@ -1116,6 +1116,67 @@ async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
 }
 
 #[tokio::test]
+async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, position);
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    let autonomous_intent = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+
+    movement.enqueue_drive_intent(PlayerDriveIntent::Autonomous(autonomous_intent), start);
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("autonomous drive should emit a locomotion pulse");
+
+    assert_eq!(session.game_action_sequence, 1);
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(autonomous_intent),
+        start + Duration::from_millis(30),
+    );
+    movement.enqueue_transient_motion(
+        holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087),
+        MotionStyle::Explicit(MotionStance::NonCombat),
+        start + Duration::from_millis(30),
+    );
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("transient motion should replace the locomotion pulse for this tick");
+
+    assert_eq!(session.game_action_sequence, 2);
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(autonomous_intent),
+        start + Duration::from_millis(60),
+    );
+    movement
+        .tick(start + Duration::from_millis(60), &mut world, &mut session)
+        .await
+        .expect("locomotion should be reasserted after the transient motion clears");
+
+    assert_eq!(session.game_action_sequence, 3);
+}
+
+#[tokio::test]
 async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);

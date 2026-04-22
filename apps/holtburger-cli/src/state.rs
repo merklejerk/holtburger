@@ -1,7 +1,7 @@
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use holtburger_content::ContentRepository;
+use holtburger_content::{ContentRepository, SoulEmoteCatalog};
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
 use holtburger_scripting::ScriptHostConfig;
@@ -61,6 +61,7 @@ pub struct AppState {
     pub content: Option<Arc<ContentRepository>>,
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     pub skill_table: Option<Arc<SkillTable>>,
+    pub soul_emote_catalog: Option<Arc<SoulEmoteCatalog>>,
     pub verbosity: u8,
     pub quit_on_disconnect: bool,
     pub disconnect_reason: Option<String>,

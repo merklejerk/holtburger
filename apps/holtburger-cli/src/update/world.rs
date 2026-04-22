@@ -256,6 +256,7 @@ mod tests {
             content: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

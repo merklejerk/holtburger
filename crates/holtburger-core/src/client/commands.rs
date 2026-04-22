@@ -2,6 +2,7 @@ use crate::client::types::{
     ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, TargetSlot,
 };
 use crate::client::{ClientRuntime, ClientState};
+use crate::motion_command_for_soul_emote_pose;
 use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
@@ -48,6 +49,34 @@ fn normalize_spell_cast(
         None => NormalizedSpellCast::Untargeted { spell_id },
     }
 }
+
+fn build_soul_emote_motion_action(
+    world: &mut holtburger_world::WorldState,
+    pose: &str,
+) -> Option<MoveToStateActionData> {
+    let command = motion_command_for_soul_emote_pose(pose)?;
+    let movement_sequence = world.player.next_move_seq();
+    let motion_style = world
+        .player
+        .last_server_motion_style
+        .unwrap_or(MotionStance::NonCombat);
+
+    Some(MoveToStateActionData {
+        raw_motion_state: RawMotionState {
+            flags: RawMotionFlags::CURRENT_STYLE,
+            current_style: Some(motion_style as u32),
+            commands: vec![MotionItem::new(command, movement_sequence, true, 1.0)],
+            ..Default::default()
+        },
+        position: world.local_player_runtime_pose().unwrap_or_default(),
+        instance_sequence: world.player.instance_sequence,
+        server_control_sequence: world.player.server_control_sequence,
+        teleport_sequence: world.player.teleport_sequence,
+        force_position_sequence: world.player.force_position_sequence,
+        contact_long_jump: u8::from(world.player.last_server_grounded.unwrap_or(true)),
+    })
+}
+
 impl ClientRuntime {
     fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
         match kind {
@@ -342,13 +371,7 @@ impl ClientRuntime {
             }
             ClientCommand::SoulEmote(token) => {
                 if matches!(self.state, ClientState::InWorld) {
-                    let Some(message) = self.world.soul_emote_catalog.resolve(&token).map(|resolved| {
-                        resolved
-                            .other_emote
-                            .or(resolved.my_emote)
-                            .unwrap_or(resolved.token)
-                            .to_string()
-                    }) else {
+                    let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
                         self.emit_action_result(
                             ActionResultSource::Client,
                             ActionResultReason::General(format!(
@@ -358,6 +381,20 @@ impl ClientRuntime {
                         );
                         return Ok(());
                     };
+
+                    let pose = resolved.pose.to_string();
+                    let message = resolved
+                        .other_emote
+                        .or(resolved.my_emote)
+                        .unwrap_or(resolved.token)
+                        .to_string();
+
+                    if let Some(motion_action) =
+                        build_soul_emote_motion_action(&mut self.world, &pose)
+                    {
+                        self.send_game_action(GameAction::MoveToState(Box::new(motion_action)))
+                            .await?;
+                    }
 
                     log::info!(">>> You soul emote: \"{}\"", message);
                     return self
@@ -1942,7 +1979,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(client.session.game_action_sequence, 1);
+        assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.session.bytes_out > 0);
     }
 

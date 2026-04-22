@@ -45,6 +45,7 @@ impl AppState {
                 game.chat.chat_log = self.chat_log.take();
                 game.data.spell_catalog = self.spell_catalog.clone();
                 game.data.skill_table = self.skill_table.clone();
+                game.data.soul_emote_catalog = self.soul_emote_catalog.clone();
                 game.script.host_config = self.script_host_config.clone();
                 let queued_script_startup = self.queued_script_startup.take();
                 self.page = Page::Game(Box::new(game));
@@ -107,6 +108,7 @@ mod tests {
             content: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,
@@ -151,6 +153,7 @@ mod tests {
             content: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,
@@ -197,6 +200,7 @@ mod tests {
             content: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,
@@ -234,6 +238,7 @@ mod tests {
             content: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,
@@ -270,6 +275,7 @@ mod tests {
             content: None,
             spell_catalog: None,
             skill_table: None,
+            soul_emote_catalog: None,
             verbosity: 0,
             quit_on_disconnect: false,
             disconnect_reason: None,

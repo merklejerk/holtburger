@@ -7,7 +7,8 @@ use crate::client::types::ClientViewEvent;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_world::{
-    RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode, entity::Entity,
+    RuntimeSpatialBodyView, SpatialBodyId, SpatialEntitySample, SpatialSampleMode,
+    entity::{Entity, EntityMotionSnapshot},
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -64,6 +65,26 @@ impl RuntimeBodyViewCache {
         self.bodies
             .get(&SpatialBodyId::LocalPlayer(guid))
             .or_else(|| self.bodies.get(&SpatialBodyId::Entity(guid)))
+    }
+
+    pub fn set_motion_state_for_guid(
+        &mut self,
+        guid: Guid,
+        motion_state: Option<EntityMotionSnapshot>,
+    ) -> bool {
+        let mut changed = false;
+
+        if let Some(body) = self.bodies.get_mut(&SpatialBodyId::LocalPlayer(guid)) {
+            body.motion_state = motion_state;
+            changed = true;
+        }
+
+        if let Some(body) = self.bodies.get_mut(&SpatialBodyId::Entity(guid)) {
+            body.motion_state = motion_state;
+            changed = true;
+        }
+
+        changed
     }
 
     fn spatial_sample_from_cached(view: &RuntimeSpatialBodyView) -> Option<SpatialEntitySample> {

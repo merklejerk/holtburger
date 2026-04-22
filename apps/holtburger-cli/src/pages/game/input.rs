@@ -12,11 +12,13 @@ use crate::types::{
     AppAction, AppUiAction, ContextView, FocusedPane, RedrawPriority, SCROLL_STEP, UpdateResult,
 };
 
-fn normalize_soul_emote_token(token: &str) -> &str {
-    token
+fn normalize_soul_emote_token(command: &str) -> Option<&str> {
+    let token = command
         .strip_prefix('*')
         .and_then(|value| value.strip_suffix('*'))
-        .unwrap_or(token)
+        .filter(|token| !token.is_empty() && !token.contains('*'))?;
+
+    Some(token)
 }
 
 impl GameState {
@@ -250,7 +252,7 @@ impl GameState {
                         });
                         return result;
                     }
-                    if command.starts_with('*') && command.ends_with('*') && command.len() >= 2 {
+                    if let Some(token) = normalize_soul_emote_token(&command) {
                         result.actions.push(
                             AppUiAction::FinishInputCommandSubmission {
                                 command: command.clone(),
@@ -258,7 +260,7 @@ impl GameState {
                             .into(),
                         );
                         result.actions.push(AppAction::SoulEmote {
-                            token: normalize_soul_emote_token(&command).to_string(),
+                            token: token.to_string(),
                         });
                         return result;
                     }
@@ -822,6 +824,25 @@ mod tests {
             result.actions.iter().find(|action| matches!(action, AppAction::SoulEmote { .. })),
             Some(AppAction::SoulEmote { token }) if token == "wave"
         ));
+    }
+
+    #[test]
+    fn enter_rejects_empty_wrapped_soul_emote_token() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("**");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.as_slice(),
+            [ClientCommand::Talk(message)] if message == "**"
+        ));
+        assert!(result
+            .actions
+            .iter()
+            .all(|action| !matches!(action, AppAction::SoulEmote { .. })));
     }
 
     #[test]

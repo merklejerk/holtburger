@@ -12,7 +12,7 @@ use std::path::PathBuf;
 struct Cli {
     /// HBA directory or single HBA archive to inspect
     path: PathBuf,
-    /// Optional soul-emote token to resolve directly, such as *wave*
+    /// Optional soul-emote token to resolve directly, such as wave
     #[arg(long)]
     token: Option<String>,
     /// Limit the number of rows printed for full catalog output

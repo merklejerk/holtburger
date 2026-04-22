@@ -426,7 +426,7 @@ mod tests {
             .read_soul_emote_catalog()
             .expect("soul emote catalog should resolve from content repository");
 
-        let resolved = catalog.resolve("*wave*").expect("token should resolve");
+        let resolved = catalog.resolve("wave").expect("token should resolve");
         assert_eq!(resolved.pose, "Wave");
         assert_eq!(resolved.other_emote, Some("waves."));
     }

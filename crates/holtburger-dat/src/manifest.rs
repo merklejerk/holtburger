@@ -1,5 +1,5 @@
 use crate::EOR_PORTAL_NAMESPACE;
-use crate::file_type::{CharGen, DatFileType, SkillTable, SpellTable, XpTable};
+use crate::file_type::{ChatPoseTable, CharGen, DatFileType, SkillTable, SpellTable, XpTable};
 
 /// A manifest that defines which file IDs and file types should be kept when stripping archives.
 pub struct StripperManifest {
@@ -46,6 +46,7 @@ impl StripperManifest {
         let mut manifest = Self::new();
         for file_id in [
             CharGen::FILE_ID,
+            ChatPoseTable::FILE_ID,
             SkillTable::FILE_ID,
             SpellTable::FILE_ID,
             XpTable::FILE_ID,
@@ -141,6 +142,11 @@ mod tests {
         assert!(manifest.should_keep_entry(
             EOR_PORTAL_NAMESPACE,
             CharGen::FILE_ID,
+            DatFileType::Table
+        ));
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
+            ChatPoseTable::FILE_ID,
             DatFileType::Table
         ));
         assert!(manifest.should_keep_entry(

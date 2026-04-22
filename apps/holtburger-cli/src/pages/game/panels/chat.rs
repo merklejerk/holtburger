@@ -158,6 +158,18 @@ impl ChatState {
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
             }
+            ClientViewEvent::SoulEmote {
+                sender,
+                token,
+                resolved,
+            } => {
+                let text = resolved
+                    .as_ref()
+                    .and_then(|resolved| resolved.other_emote.as_deref())
+                    .map(|other_emote| format!("{} {}", sender, other_emote))
+                    .unwrap_or_else(|| format!("{} {}", sender, token));
+                self.log(ChatMessageTags::emote(), text);
+            }
             ClientViewEvent::CombatFeedback(feedback) => {
                 self.log_combat_feedback(feedback);
             }
@@ -982,6 +994,46 @@ mod tests {
             message.text,
             "Buff Dude has granted you access to their home's storage."
         );
+    }
+
+    #[test]
+    fn soul_emote_event_logs_resolved_other_emote_text() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            &holtburger_core::ClientViewEvent::SoulEmote {
+                sender: "Bestie".to_string(),
+                token: "*wave*".to_string(),
+                resolved: Some(holtburger_core::client::types::ResolvedSoulEmote {
+                    pose: "Wave".to_string(),
+                    my_emote: Some("You wave.".to_string()),
+                    other_emote: Some("waves.".to_string()),
+                }),
+            },
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("soul emote should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::EMOTE));
+        assert_eq!(message.text, "Bestie waves.");
+    }
+
+    #[test]
+    fn unknown_soul_emote_event_falls_back_to_raw_token() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            &holtburger_core::ClientViewEvent::SoulEmote {
+                sender: "Bestie".to_string(),
+                token: "*mystery*".to_string(),
+                resolved: None,
+            },
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("soul emote should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::EMOTE));
+        assert_eq!(message.text, "Bestie *mystery*");
     }
 
     #[test]

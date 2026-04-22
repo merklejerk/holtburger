@@ -575,6 +575,9 @@ pub enum AppAction {
     Emote {
         message: String,
     },
+    SoulEmote {
+        token: String,
+    },
     Read {
         guid: Guid,
     },

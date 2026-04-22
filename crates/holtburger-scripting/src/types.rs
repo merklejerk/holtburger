@@ -1037,6 +1037,9 @@ pub enum ScriptIntent {
     Emote {
         message: String,
     },
+    SoulEmote {
+        token: String,
+    },
     OpenTrade {
         guid: Guid,
     },

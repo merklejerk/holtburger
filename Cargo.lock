@@ -1563,6 +1563,7 @@ dependencies = [
  "clap",
  "env_logger",
  "holtburger-common",
+ "holtburger-content",
  "holtburger-dat",
  "indicatif",
  "log",

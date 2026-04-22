@@ -39,6 +39,7 @@ pub enum GameAction {
     AddPlayerPermission(Box<AddPlayerPermissionActionData>),
     RemovePlayerPermission(Box<RemovePlayerPermissionActionData>),
     Emote(Box<EmoteActionData>),
+    SoulEmote(Box<SoulEmoteActionData>),
     ChatChannel(Box<ChatChannelActionData>),
     FellowshipCreate(Box<FellowshipCreateActionData>),
     FellowshipQuit(Box<FellowshipQuitActionData>),
@@ -151,6 +152,9 @@ impl ProtocolUnpack for GameActionMessage {
                 ),
                 GameActionOpcode::Emote => {
                     GameAction::Emote(Box::new(EmoteActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::SoulEmote => {
+                    GameAction::SoulEmote(Box::new(SoulEmoteActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::ChatChannel => {
                     GameAction::ChatChannel(Box::new(ChatChannelActionData::unpack(data, offset)?))
@@ -388,6 +392,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::Emote(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Emote as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::SoulEmote(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::SoulEmote as u32)
                     .unwrap();
                 data.pack(buf);
             }

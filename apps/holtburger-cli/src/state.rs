@@ -165,4 +165,10 @@ impl AppState {
             game.chat.log(chat_tags, msg.into());
         }
     }
+
+    pub fn capture_log(&mut self, chat_tags: ChatMessageTags, msg: impl Into<String>) {
+        if let Some(game) = self.game_option_mut() {
+            game.chat.capture_log(chat_tags, msg.into());
+        }
+    }
 }

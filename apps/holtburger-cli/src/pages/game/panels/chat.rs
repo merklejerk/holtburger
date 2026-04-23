@@ -183,6 +183,10 @@ impl ChatState {
         self.log_with_channel(None, chat_tags, text, true);
     }
 
+    pub fn capture_log(&mut self, chat_tags: ChatMessageTags, text: String) {
+        self.log_with_channel(None, chat_tags, text, false);
+    }
+
     pub fn log_channel(
         &mut self,
         channel: ChatChannelInfo,
@@ -1186,6 +1190,24 @@ mod tests {
         chat.handle_event(
             &holtburger_core::ClientViewEvent::LogMessage("[INFO] logger message".to_string()),
             None,
+        );
+
+        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        assert!(
+            captured.is_empty(),
+            "expected no echoed debug log entries, got {:?}",
+            *captured
+        );
+    }
+
+    #[test]
+    fn captured_log_entries_do_not_re_echo_into_debug_log() {
+        init_test_logger();
+
+        let mut chat = ChatState::new(None);
+        chat.capture_log(
+            ChatMessageTags::system(),
+            "captured logger line".to_string(),
         );
 
         let captured = CAPTURED_LOGS.lock().expect("test logger should lock");

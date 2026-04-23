@@ -272,6 +272,7 @@ mod tests {
             }],
             selected_character_index: 0,
             character_preference: None,
+            account_name: "account".to_string(),
             screen: CharacterScreen::Dashboard,
             creation: crate::pages::selection::creation::CharacterCreationState::default(),
             pending_create: None,

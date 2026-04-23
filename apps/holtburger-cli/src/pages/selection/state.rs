@@ -1,6 +1,6 @@
 use holtburger_core::client::types::CharacterManagementOperation;
 use holtburger_core::errors::is_actually_weenie_error;
-use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
+use holtburger_core::{ActionResultReason, ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::{CharacterCreateResponseData, CharacterEntry};
 
 use crate::components::text_input::SingleLineTextInput;
@@ -60,6 +60,8 @@ pub struct SelectionState {
     pub selected_character_index: usize,
     /// Automated character dashboard preference via CLI argument.
     pub character_preference: Option<String>,
+    /// Account name used to complete the world-entry handshake.
+    pub account_name: String,
     pub screen: CharacterScreen,
     pub creation: CharacterCreationState,
     pub pending_create: Option<PendingCharacterCreation>,
@@ -149,13 +151,12 @@ impl SelectionState {
                 operation: Some(CharacterManagementOperation::Restore),
                 response,
             } => return self.handle_restore_response(response),
-            ClientViewEvent::StatusUpdate {
-                state: ClientState::EnteringWorld,
-            } => {
+            ClientViewEvent::CharacterEnterWorldServerReady => {
                 if let Some(char_info) = self.characters.get(self.selected_character_index) {
                     return UpdateResult::new().with_action(AppAction::TransitionToGame {
                         guid: char_info.character.guid,
                         name: char_info.character.name.clone(),
+                        account: self.account_name.clone(),
                     });
                 }
             }
@@ -405,6 +406,7 @@ mod tests {
             }],
             selected_character_index: 0,
             character_preference: None,
+            account_name: "account".to_string(),
             screen: CharacterScreen::Dashboard,
             creation: CharacterCreationState::default(),
             pending_create: None,
@@ -512,6 +514,22 @@ mod tests {
         assert!(matches!(
             result.commands.as_slice(),
             [ClientCommand::RestoreCharacter(Guid(0x5000_0001))]
+        ));
+    }
+
+    #[test]
+    fn character_enter_world_server_ready_transitions_to_game_with_selected_identity() {
+        let mut state = test_state();
+
+        let result = state.handle_view_event(ClientViewEvent::CharacterEnterWorldServerReady);
+
+        assert!(matches!(
+            result.actions.as_slice(),
+            [AppAction::TransitionToGame {
+                guid: Guid(0x5000_0001),
+                name,
+                account,
+            }] if name == "Sho Girl" && account == "account"
         ));
     }
 

@@ -182,13 +182,10 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
-                if let Some(char_id) = self.character_selection.character_id {
-                    self.character_selection
-                        .send_character_enter_world(char_id, &mut self.session)
-                        .await
-                } else {
-                    Ok(())
-                }
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterEnterWorldServerReady);
+                Ok(())
             }
             GameMessage::GameEvent(ev) => match &ev.event {
                 GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
@@ -835,6 +832,28 @@ mod tests {
 
         assert_eq!(client.state, ClientState::InWorld);
         assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.session.bytes_out, 0);
+    }
+
+    #[tokio::test]
+    async fn character_enter_world_server_ready_surfaces_view_event_without_auto_entering() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.character_selection.character_id = Some(holtburger_common::Guid(0x5000_0001));
+
+        let encoded = encode_message(&GameMessage::CharacterEnterWorldServerReady);
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_ready = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::CharacterEnterWorldServerReady) {
+                saw_ready = true;
+                break;
+            }
+        }
+
+        assert!(saw_ready);
         assert_eq!(client.session.bytes_out, 0);
     }
 

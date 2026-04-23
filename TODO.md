@@ -284,6 +284,7 @@
 - [x] Not pruning entities!
     - When they go out of range/teleported.
     - When a trade is closed?
+- [x] Empty nearby tab when tui logs in on live servers.
 - [ ] TUI hangs w/100% CPU upon choosing character when started with verbosity >= `-vv`.
 
 ### Stretch

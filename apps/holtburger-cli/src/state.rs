@@ -70,7 +70,6 @@ pub struct AppState {
 }
 
 pub struct RenderContext<'a> {
-    pub account_name: &'a str,
     pub client_state: &'a ClientState,
     pub net_stats: &'a NetStats,
     pub server_time: Option<(f64, Instant)>,

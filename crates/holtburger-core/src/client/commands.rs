@@ -109,6 +109,7 @@ impl ClientRuntime {
         match cmd {
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
+            | ClientCommand::SendCharacterEnterWorld { .. }
             | ClientCommand::CreateCharacter(_)
             | ClientCommand::DeleteCharacter { .. }
             | ClientCommand::RestoreCharacter(_)
@@ -222,6 +223,12 @@ impl ClientRuntime {
                 self.begin_world_entry_transition().await?;
                 self.character_selection
                     .select_character(id, &mut self.session)
+                    .await
+            }
+            ClientCommand::SendCharacterEnterWorld { guid, account } => {
+                log::info!("Entering world with character: 0x{:08X}", guid);
+                self.character_selection
+                    .send_character_enter_world(guid, account, &mut self.session)
                     .await
             }
             ClientCommand::CreateCharacter(request) => {

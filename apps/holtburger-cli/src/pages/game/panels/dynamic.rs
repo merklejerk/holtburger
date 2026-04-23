@@ -15,13 +15,7 @@ use unicode_width::UnicodeWidthStr;
 
 const TARGET_HEALTH_BAR_WIDTH: usize = 12;
 
-pub fn render_dynamic_pane(
-    f: &mut Frame,
-    data: &GameData,
-    view: &ViewState,
-    account_name: &str,
-    area: Rect,
-) {
+pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, area: Rect) {
     let combat_color = match data.combat_mode {
         CombatMode::Melee => Some(Color::LightRed),
         CombatMode::Missile => Some(Color::LightRed),
@@ -136,7 +130,7 @@ pub fn render_dynamic_pane(
 
         f.render_widget(Paragraph::new(line), chunks[0]);
     } else {
-        let info = format_world_info(data, account_name);
+        let info = format_world_info(data);
         f.render_widget(Paragraph::new(info), chunks[0]);
     }
 
@@ -161,12 +155,18 @@ fn busy_title() -> &'static str {
     " (BUSY...) "
 }
 
-fn format_world_info(data: &GameData, account_name: &str) -> String {
+fn format_world_info(data: &GameData) -> String {
     let current_char = data.character_name.as_deref().unwrap_or("In World");
     let server = if data.world_name.is_empty() {
         "Unknown Server"
     } else {
         &data.world_name
+    };
+
+    let account_name = if data.account_name.is_empty() {
+        "Unknown Account"
+    } else {
+        data.account_name.as_str()
     };
 
     let mut info = format!(" {}:{} on {} ", account_name, current_char, server);
@@ -481,6 +481,7 @@ mod tests {
             "Player".to_string(),
             "World".to_string(),
         );
+        data.account_name = "acct".to_string();
         data.party = Some(FellowshipState {
             name: "Raid Bus".to_string(),
             leader_guid: Guid(0x50000001),
@@ -494,7 +495,7 @@ mod tests {
         });
 
         assert_eq!(
-            format_world_info(&data, "acct"),
+            format_world_info(&data),
             " acct:Player on World | Party: Raid Bus "
         );
     }
@@ -506,6 +507,7 @@ mod tests {
             "Player".to_string(),
             "World".to_string(),
         );
+        data.account_name = "acct".to_string();
         data.party = Some(FellowshipState {
             name: "   ".to_string(),
             leader_guid: Guid(0x50000001),
@@ -519,7 +521,7 @@ mod tests {
         });
 
         assert_eq!(
-            format_world_info(&data, "acct"),
+            format_world_info(&data),
             " acct:Player on World | Party: (unnamed) "
         );
     }
@@ -545,7 +547,7 @@ mod tests {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
         terminal
-            .draw(|frame| render_dynamic_pane(frame, &data, &view, "acct", area))
+            .draw(|frame| render_dynamic_pane(frame, &data, &view, area))
             .expect("dynamic pane should render");
 
         let rendered = terminal
@@ -604,7 +606,7 @@ mod tests {
         let backend = TestBackend::new(area.width, area.height);
         let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
         terminal
-            .draw(|frame| render_dynamic_pane(frame, &data, &view, "acct", area))
+            .draw(|frame| render_dynamic_pane(frame, &data, &view, area))
             .expect("dynamic pane should render");
 
         let rendered = terminal

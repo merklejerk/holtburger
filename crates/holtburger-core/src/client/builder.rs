@@ -64,12 +64,16 @@ impl ClientRuntimeBuilder {
         let motion_kinematics = content
             .read_asset::<MotionKinematics>("motion kinematics table")
             .context("failed to load motion kinematics table for client runtime")?;
+        let soul_emote_catalog = content
+            .read_soul_emote_catalog()
+            .context("failed to load soul emote catalog for client runtime")?;
 
         self.world_bootstrap = Some(Arc::new(WorldBootstrap::new(
             skill_table,
             spell_table,
             xp_table,
             motion_kinematics,
+            soul_emote_catalog,
         )));
 
         Ok(())
@@ -183,7 +187,9 @@ mod tests {
     use super::*;
     use holtburger_common::{Guid, Vector3};
     use holtburger_content::ContentRepository;
-    use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
+    use holtburger_dat::file_type::{
+        ChatPoseTable, MotionKinematics, SkillTable, SpellTable, XpTable,
+    };
     use holtburger_dat::{
         DatFileType, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE, HbaReader, HbaWriter,
         ResourceSource,
@@ -248,6 +254,30 @@ mod tests {
         bytes.into_inner()
     }
 
+    fn test_chat_pose_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&ChatPoseTable::FILE_ID.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        push_pstring_aligned(&mut bytes, "wave");
+        push_pstring_aligned(&mut bytes, "Wave");
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        push_pstring_aligned(&mut bytes, "Wave");
+        push_pstring_aligned(&mut bytes, "wave.");
+        push_pstring_aligned(&mut bytes, "waves.");
+        bytes
+    }
+
+    fn push_pstring_aligned(buf: &mut Vec<u8>, value: &str) {
+        let bytes = value.as_bytes();
+        buf.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+        buf.extend_from_slice(bytes);
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
+    }
+
     fn write_hba(path: &Path, ids: &[u32]) -> bool {
         let source_path = repo_assets_hba_path();
         if !source_path.is_file() {
@@ -292,6 +322,15 @@ mod tests {
                 test_motion_kinematics_bytes(),
             )
             .expect("motion kinematics test HBA entry should be added");
+
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                ChatPoseTable::FILE_ID,
+                DatFileType::from_id(ChatPoseTable::FILE_ID) as u32,
+                test_chat_pose_table_bytes(),
+            )
+            .expect("chat pose table test HBA entry should be added");
 
         writer.write(path).expect("test HBA should be written");
 
@@ -349,6 +388,7 @@ mod tests {
 
         assert!(!client.world.skill_table.skill_base_hash.is_empty());
         assert!(!client.world.spell_catalog.spells.is_empty());
+        assert!(client.world.soul_emote_catalog.is_known_token("wave"));
         assert_eq!(client.world.motion_kinematics.id, MotionKinematics::FILE_ID);
     }
 

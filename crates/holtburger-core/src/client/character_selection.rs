@@ -110,11 +110,12 @@ impl CharacterSelectionState {
     pub(super) async fn send_character_enter_world(
         &mut self,
         char_id: Guid,
+        account: String,
         session: &mut Session,
     ) -> Result<()> {
         let msg = GameMessage::CharacterEnterWorld(Box::new(CharacterEnterWorldData {
             guid: char_id,
-            account: self.account_name.clone(),
+            account,
         }));
         session.send_message(&msg).await?;
         Ok(())

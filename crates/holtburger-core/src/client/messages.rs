@@ -182,13 +182,10 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
-                if let Some(char_id) = self.character_selection.character_id {
-                    self.character_selection
-                        .send_character_enter_world(char_id, &mut self.session)
-                        .await
-                } else {
-                    Ok(())
-                }
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterEnterWorldServerReady);
+                Ok(())
             }
             GameMessage::GameEvent(ev) => match &ev.event {
                 GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
@@ -558,7 +555,7 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::SoulEmote {
                     sender: data.sender_name.clone(),
                     text: data.text.clone(),
                 });
@@ -727,6 +724,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn soul_emote_message_projects_distinct_view_event_with_resolution() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client.world.soul_emote_catalog =
+            std::sync::Arc::new(holtburger_content::SoulEmoteCatalog {
+                tokens: std::collections::BTreeMap::from([(
+                    "wave".to_string(),
+                    holtburger_content::SoulEmoteToken {
+                        token: "wave".to_string(),
+                        pose: "Wave".to_string(),
+                    },
+                )]),
+                poses: std::collections::BTreeMap::from([(
+                    "Wave".to_string(),
+                    holtburger_content::SoulEmotePose {
+                        pose: "Wave".to_string(),
+                        my_emote: "wave.".to_string(),
+                        other_emote: "waves.".to_string(),
+                    },
+                )]),
+            });
+
+        let encoded = encode_message(&GameMessage::SoulEmote(Box::new(SoulEmoteData {
+            sender: 0x5000_0002,
+            sender_name: "Fellow".to_string(),
+            text: "wave.".to_string(),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_soul_emote = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::SoulEmote { sender, text } = event {
+                assert_eq!(sender, "Fellow");
+                assert_eq!(text, "wave.");
+                saw_soul_emote = true;
+                break;
+            }
+        }
+
+        assert!(saw_soul_emote);
+    }
+
+    #[tokio::test]
+    async fn unknown_soul_emote_message_preserves_raw_token_without_inventing_resolution() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        let encoded = encode_message(&GameMessage::SoulEmote(Box::new(SoulEmoteData {
+            sender: 0x5000_0002,
+            sender_name: "Fellow".to_string(),
+            text: "*mystery*".to_string(),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_soul_emote = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::SoulEmote { sender, text } = event {
+                assert_eq!(sender, "Fellow");
+                assert_eq!(text, "*mystery*");
+                saw_soul_emote = true;
+                break;
+            }
+        }
+
+        assert!(saw_soul_emote);
+    }
+
+    #[tokio::test]
     async fn test_current_server_controlled_update_motion_sends_heartbeat() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
@@ -764,6 +832,28 @@ mod tests {
 
         assert_eq!(client.state, ClientState::InWorld);
         assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.session.bytes_out, 0);
+    }
+
+    #[tokio::test]
+    async fn character_enter_world_server_ready_surfaces_view_event_without_auto_entering() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.character_selection.character_id = Some(holtburger_common::Guid(0x5000_0001));
+
+        let encoded = encode_message(&GameMessage::CharacterEnterWorldServerReady);
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_ready = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::CharacterEnterWorldServerReady) {
+                saw_ready = true;
+                break;
+            }
+        }
+
+        assert!(saw_ready);
         assert_eq!(client.session.bytes_out, 0);
     }
 

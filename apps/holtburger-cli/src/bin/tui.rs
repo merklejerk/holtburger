@@ -897,11 +897,8 @@ async fn run() -> Result<()> {
 
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
-            let res = app_state.reduce_app_action(holtburger_cli::types::AppAction::Log {
-                chat_tags: log.chat_tags,
-                message: log.text,
-            });
-            update_state(res, &mut pending_redraw, &server_cmd_tx, &mut should_quit);
+            app_state.capture_log(log.chat_tags, log.text);
+            pending_redraw.request(RedrawPriority::Immediate);
         }
 
         // 2. Process Network Events (Drain batch)

@@ -9,7 +9,6 @@ repository.workspace = true
 [dependencies]
 holtburger-common.workspace = true
 holtburger-dat.workspace = true
-holtburger-world.workspace = true
 anyhow.workspace = true
 binrw.workspace = true
 log.workspace = true

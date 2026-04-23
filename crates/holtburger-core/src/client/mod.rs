@@ -210,7 +210,7 @@ impl ClientRuntime {
             });
     }
 
-    pub(super) fn emit_initial_view_state_snapshot(&self) {
+    pub(super) fn emit_initial_view_state_snapshot(&mut self) {
         self.emit_fellowship_state_updated();
         self.emit_vendor_state_updated();
         self.emit_trade_state_updated();

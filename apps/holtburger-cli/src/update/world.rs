@@ -2,13 +2,13 @@ use crate::pages::selection::creation::CharacterCreationState;
 use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::state::EventContext;
-use crate::types::{AppAction, AppNotification, Page, UpdateResult};
+use crate::types::{Page, UpdateResult};
 use crate::utils::format_action_result_message;
 use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
 
 impl AppState {
-    fn handle_setup_event(&mut self, event: &ClientViewEvent, result: &mut UpdateResult) {
+    fn handle_setup_event(&mut self, event: &ClientViewEvent, _result: &mut UpdateResult) {
         match event {
             ClientViewEvent::WorldNameUpdated(name) => {
                 self.world_name = name.clone();
@@ -32,35 +32,33 @@ impl AppState {
                         .to_lowercase()
                         .cmp(&b.character.name.to_lowercase())
                 });
+                log::info!(
+                    "Page transition: {:?} -> Selection (character list received)",
+                    self.page_name()
+                );
                 self.page = Page::Selection(Box::new(SelectionState {
                     characters: chars,
                     selected_character_index: 0,
                     character_preference: self.character_preference.take(),
+                    account_name: self.account_name.clone(),
                     screen: Default::default(),
                     creation: CharacterCreationState::from_repository(self.content.as_ref()),
                     pending_create: None,
                     delete_confirmation: None,
                 }));
             }
-            ClientViewEvent::PlayerEntered { guid, name } => {
-                if let Page::Game(game) = &mut self.page {
-                    let was_ready = game.player_entity_is_ready();
-                    game.data.player_guid = Some(*guid);
-                    game.data.character_name = Some(name.clone());
-                    game.data.world_name = self.world_name.clone();
-
-                    if !was_ready && game.player_entity_is_ready() {
-                        result.actions.push(AppAction::Notification {
-                            notification: AppNotification::PlayerEntityReady { guid: *guid },
-                        });
-                    }
-                }
-            }
             ClientViewEvent::ServerTimeUpdated { time } => {
                 let value = Some((*time, std::time::Instant::now()));
                 self.server_time = value;
             }
             _ => {}
+        }
+    }
+
+    fn page_name(&self) -> &'static str {
+        match self.page {
+            Page::Selection(_) => "Selection",
+            Page::Game(_) => "Game",
         }
     }
 
@@ -124,7 +122,7 @@ impl AppState {
         // Handle setup and chat events regardless of being locally in-game
         match &event {
             ClientViewEvent::CharacterList(_)
-            | ClientViewEvent::PlayerEntered { .. }
+            | ClientViewEvent::CharacterEnterWorldServerReady
             | ClientViewEvent::ServerTimeUpdated { .. }
             | ClientViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event, &mut result);
@@ -138,7 +136,7 @@ impl AppState {
         if !matches!(
             event,
             ClientViewEvent::CharacterList(_)
-                | ClientViewEvent::PlayerEntered { .. }
+                | ClientViewEvent::CharacterEnterWorldServerReady
                 | ClientViewEvent::WorldNameUpdated(_)
                 | ClientViewEvent::CharacterManagementResponse { .. }
                 | ClientViewEvent::CharacterDeleteResponse
@@ -150,6 +148,7 @@ impl AppState {
                 | ClientViewEvent::ChannelMessage { .. }
                 | ClientViewEvent::Tell { .. }
                 | ClientViewEvent::Emote { .. }
+                | ClientViewEvent::SoulEmote { .. }
                 | ClientViewEvent::ItemManaResponse { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)

@@ -252,7 +252,7 @@ cargo run -p holtburger-tools --bin dat2hba -- \
     dats/assets.hba
 ```
 
-Use `--profile full` if you want an unpruned archive. The current `micro` profile is the release-oriented minimal bundle and contains the required portal tables plus the derived `holtburger/core:MotionKinematics` asset.
+`dat2hba` defaults to `--profile full`. Use `--profile micro` if you want the release-oriented minimal bundle; it contains the required portal tables plus the derived `holtburger/core:MotionKinematics` asset.
 
 At runtime, the frontend constructs a `holtburger-content::ContentRepository` from that HBA source, requests a parsed `WorldBootstrap` for `holtburger-core`, and may retain the repository for static reference-data lookups.
 

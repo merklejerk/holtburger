@@ -158,6 +158,9 @@ impl ChatState {
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
             }
+            ClientViewEvent::SoulEmote { sender, text, .. } => {
+                self.log(ChatMessageTags::emote(), format!("{} {}", sender, text));
+            }
             ClientViewEvent::CombatFeedback(feedback) => {
                 self.log_combat_feedback(feedback);
             }
@@ -178,6 +181,10 @@ impl ChatState {
 
     pub fn log(&mut self, chat_tags: ChatMessageTags, text: String) {
         self.log_with_channel(None, chat_tags, text, true);
+    }
+
+    pub fn capture_log(&mut self, chat_tags: ChatMessageTags, text: String) {
+        self.log_with_channel(None, chat_tags, text, false);
     }
 
     pub fn log_channel(
@@ -985,6 +992,23 @@ mod tests {
     }
 
     #[test]
+    fn soul_emote_event_logs_raw_inbound_text() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            &holtburger_core::ClientViewEvent::SoulEmote {
+                sender: "Bestie".to_string(),
+                text: "waves.".to_string(),
+            },
+            Some("Player"),
+        );
+
+        let message = chat.messages.last().expect("soul emote should log");
+        assert!(message.chat_tags.contains(ChatMessageTags::EMOTE));
+        assert_eq!(message.text, "Bestie waves.");
+    }
+
+    #[test]
     fn attacker_feedback_formats_damage_summary() {
         let mut chat = ChatState::new(None);
 
@@ -1166,6 +1190,24 @@ mod tests {
         chat.handle_event(
             &holtburger_core::ClientViewEvent::LogMessage("[INFO] logger message".to_string()),
             None,
+        );
+
+        let captured = CAPTURED_LOGS.lock().expect("test logger should lock");
+        assert!(
+            captured.is_empty(),
+            "expected no echoed debug log entries, got {:?}",
+            *captured
+        );
+    }
+
+    #[test]
+    fn captured_log_entries_do_not_re_echo_into_debug_log() {
+        init_test_logger();
+
+        let mut chat = ChatState::new(None);
+        chat.capture_log(
+            ChatMessageTags::system(),
+            "captured logger line".to_string(),
         );
 
         let captured = CAPTURED_LOGS.lock().expect("test logger should lock");

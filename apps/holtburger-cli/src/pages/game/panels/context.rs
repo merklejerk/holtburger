@@ -157,7 +157,7 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
 
             if resolve_inspectable_target(data, view, target).is_some() {
                 let projected_sample = match target {
-                    InspectTarget::Entity(guid) => data.runtime_body_cache.spatial_sample(guid),
+                    InspectTarget::Entity(guid) => data.runtime_sample_for_guid(guid),
                     InspectTarget::VendorItem(_) => None,
                 };
                 return debug::get_debug_info(

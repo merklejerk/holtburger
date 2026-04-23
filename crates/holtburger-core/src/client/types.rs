@@ -420,12 +420,17 @@ pub enum ClientViewEvent {
         response: CharacterCreateResponseData,
     },
     CharacterDeleteResponse,
+    CharacterEnterWorldServerReady,
     PlayerEntered {
         guid: Guid,
         name: String,
     },
     WorldNameUpdated(String),
     Emote {
+        sender: String,
+        text: String,
+    },
+    SoulEmote {
         sender: String,
         text: String,
     },
@@ -447,6 +452,10 @@ pub enum ClientViewEvent {
 pub enum ClientCommand {
     Login(String),
     SelectCharacter(Guid),
+    SendCharacterEnterWorld {
+        guid: Guid,
+        account: String,
+    },
     CreateCharacter(Box<CharacterCreateRequestData>),
     DeleteCharacter {
         slot: u32,
@@ -463,6 +472,7 @@ pub enum ClientCommand {
         message: String,
     },
     Emote(String),
+    SoulEmote(String),
     RecallLifestone,
     TeleportToPklArena,
     TeleportToMarketplace,

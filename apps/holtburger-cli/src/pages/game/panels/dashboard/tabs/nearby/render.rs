@@ -4,7 +4,7 @@ use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use super::tab::{NearbyTab, get_entities};
+use super::tab::NearbyTab;
 use crate::pages::game::panels::dashboard::tabs::classification::EntityClass;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
@@ -21,58 +21,6 @@ pub fn render_nearby_tab(
     area: Rect,
 ) {
     let entities = tab.visible_entities(data);
-    let candidate_count = if entities.is_empty() {
-        Some(get_entities(data))
-    } else {
-        None
-    };
-
-    if entities.is_empty() {
-        if !tab.logged_empty_diagnostic {
-            let player_guid = data.player_guid;
-            let player_runtime_position = data.runtime_player_position();
-            let player_entity_present =
-                player_guid.is_some_and(|guid| data.entities.contains_key(&guid));
-            let positioned_entities = data
-                .entities
-                .values()
-                .filter(|entity| entity.position.landblock_id != holtburger_common::Guid::NULL)
-                .count();
-            let sample_candidates = candidate_count
-                .as_ref()
-                .map(|candidates| {
-                    candidates
-                        .iter()
-                        .take(5)
-                        .map(|(entity, distance, depth)| {
-                            format!(
-                                "{} ({:?}, {:.1}m, depth {})",
-                                entity.name(),
-                                entity.guid,
-                                distance,
-                                depth
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                })
-                .unwrap_or_default();
-
-            log::warn!(
-                "Nearby tab empty: total_entities={}, positioned_entities={}, candidate_entities={}, player_guid={:?}, player_entity_present={}, player_runtime_position={:?}, sample_candidates=[{}]",
-                data.entities.len(),
-                positioned_entities,
-                candidate_count.as_ref().map_or(0, Vec::len),
-                player_guid,
-                player_entity_present,
-                player_runtime_position,
-                sample_candidates,
-            );
-            tab.logged_empty_diagnostic = true;
-        }
-    } else {
-        tab.logged_empty_diagnostic = false;
-    }
 
     let content_len = entities.len();
     let selected_index = if content_len == 0 {

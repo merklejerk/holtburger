@@ -29,7 +29,6 @@ pub struct NearbyTab {
     pub list_state: ratatui::widgets::ListState,
     active_filter: Option<TabFilterState>,
     filter_input: Option<FilterInputSession>,
-    pub(crate) logged_empty_diagnostic: bool,
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {

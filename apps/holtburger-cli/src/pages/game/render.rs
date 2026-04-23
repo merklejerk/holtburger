@@ -169,7 +169,7 @@ impl GameState {
         );
 
         // Dynamic Pane
-        render_dynamic_pane(f, &self.data, &self.view, ctx.account_name, dynamic_chunk);
+        render_dynamic_pane(f, &self.data, &self.view, dynamic_chunk);
 
         // Pulse Panel (Input Area)
         let input_chunks = Layout::default()
@@ -226,7 +226,6 @@ mod tests {
 
         let net_stats = NetStats::default();
         let ctx = RenderContext {
-            account_name: "account",
             client_state: &ClientState::InWorld,
             net_stats: &net_stats,
             server_time: None,
@@ -276,7 +275,6 @@ mod tests {
 
         let net_stats = NetStats::default();
         let ctx = RenderContext {
-            account_name: "account",
             client_state: &ClientState::InWorld,
             net_stats: &net_stats,
             server_time: None,
@@ -315,7 +313,6 @@ mod tests {
 
         let net_stats = NetStats::default();
         let ctx = RenderContext {
-            account_name: "account",
             client_state: &ClientState::InWorld,
             net_stats: &net_stats,
             server_time: None,

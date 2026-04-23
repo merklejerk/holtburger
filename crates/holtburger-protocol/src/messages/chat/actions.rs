@@ -60,6 +60,24 @@ impl ProtocolPack for EmoteActionData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct SoulEmoteActionData {
+    pub message: String,
+}
+
+impl ProtocolUnpack for SoulEmoteActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        Some(Self { message })
+    }
+}
+
+impl ProtocolPack for SoulEmoteActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ChatChannelActionData {
     pub channel: ChatChannelId,
     pub message: String,
@@ -131,6 +149,20 @@ mod tests {
         let fixture =
             hex::decode("04030201DF0100001600776176657320656E74687573696173746963616C6C79")
                 .unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_soul_emote_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x05060708,
+            action: GameAction::SoulEmote(Box::new(SoulEmoteActionData {
+                message: "*wave*".to_string(),
+            })),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode("08070605E101000006002A776176652A").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 

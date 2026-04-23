@@ -559,7 +559,9 @@ pub enum AppAction {
     TransitionToGame {
         guid: Guid,
         name: String,
+        account: String,
     },
+    SendCharacterEnterWorld,
     EnterSelectedCharacter,
     RestoreSelectedCharacter,
     SubmitCharacterCreation,
@@ -574,6 +576,9 @@ pub enum AppAction {
     },
     Emote {
         message: String,
+    },
+    SoulEmote {
+        token: String,
     },
     Read {
         guid: Guid,

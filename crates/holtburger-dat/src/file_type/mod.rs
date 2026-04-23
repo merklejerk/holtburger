@@ -1,5 +1,6 @@
 pub mod animation;
 pub mod char_gen;
+pub mod chat_pose_table;
 pub mod env_cell;
 pub mod gfx_obj;
 pub mod motion_kinematics;
@@ -11,6 +12,7 @@ pub mod xp_table;
 
 pub use animation::Animation;
 pub use char_gen::CharGen;
+pub use chat_pose_table::{ChatEmoteData, ChatPoseTable};
 pub use env_cell::EnvCell;
 pub use gfx_obj::GfxObj;
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};

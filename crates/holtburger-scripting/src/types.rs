@@ -958,6 +958,7 @@ pub enum ScriptChatChannelKind {
     Say,
     Tell,
     Emote,
+    SoulEmote,
     Fellowship,
     Allegiance,
     Vassals,
@@ -1035,6 +1036,9 @@ pub enum ScriptIntent {
     },
     Emote {
         message: String,
+    },
+    SoulEmote {
+        token: String,
     },
     OpenTrade {
         guid: Guid,

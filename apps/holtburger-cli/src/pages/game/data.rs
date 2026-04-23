@@ -259,6 +259,8 @@ impl CombatControlState {
 pub struct GameData {
     /// Current character name once selected.
     pub character_name: Option<String>,
+    /// Account name used for the world-entry handshake.
+    pub account_name: String,
     /// Unique ID of the player character.
     pub player_guid: Option<Guid>,
     /// Info about level, luminance, and XP.
@@ -322,6 +324,7 @@ impl Default for GameData {
     fn default() -> Self {
         Self {
             character_name: None,
+            account_name: String::new(),
             player_guid: None,
             level_info: None,
             attributes: HashMap::new(),
@@ -357,8 +360,18 @@ impl Default for GameData {
 
 impl GameData {
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
+        Self::new_with_account(guid, name, String::new(), world_name)
+    }
+
+    pub fn new_with_account(
+        guid: Guid,
+        name: String,
+        account_name: String,
+        world_name: String,
+    ) -> Self {
         Self {
             character_name: Some(name),
+            account_name,
             player_guid: Some(guid),
             world_name,
             ..Self::default()
@@ -415,9 +428,7 @@ impl GameData {
 
     pub fn runtime_player_position(&self) -> Option<WorldPosition> {
         let guid = self.player_guid?;
-        self.runtime_body_cache
-            .projected_pose(guid)
-            .or(self.player_pos)
+        preferred_runtime_pose(self.runtime_body_cache.projected_pose(guid)).or(self.player_pos)
     }
 
     pub fn runtime_position_for_guid(&self, guid: Guid) -> Option<WorldPosition> {
@@ -425,8 +436,7 @@ impl GameData {
             return self.runtime_player_position();
         }
 
-        self.runtime_body_cache
-            .projected_pose(guid)
+        preferred_runtime_pose(self.runtime_body_cache.projected_pose(guid))
             .or_else(|| self.entities.get(&guid).map(|entity| entity.position))
     }
 
@@ -509,6 +519,10 @@ impl GameData {
     }
 }
 
+fn preferred_runtime_pose(position: Option<WorldPosition>) -> Option<WorldPosition> {
+    position.filter(|position| position.landblock_id != Guid::NULL)
+}
+
 impl WorldContext for GameData {
     fn get_player_guid(&self) -> Option<Guid> {
         self.player_guid
@@ -560,8 +574,9 @@ mod tests {
     use holtburger_common::{CharacterOptions1, CharacterOptions2};
     use holtburger_core::ClientViewEvent;
     use holtburger_core::PlayerCharacterOptions;
+    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
     use holtburger_world::context::WorldContextExt;
-    use holtburger_world::entity::Entity;
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot};
     use holtburger_world::stats::{Attribute, AttributeType};
     use holtburger_world::{
         ContactState, RuntimeSpatialBodyView, SpatialBodyId, SpatialSampleMode,
@@ -680,6 +695,102 @@ mod tests {
             data.distance_position_for_guid(target_guid),
             Some(authoritative_target)
         );
+    }
+
+    #[test]
+    fn runtime_player_position_ignores_placeholder_runtime_pose() {
+        let player_guid = Guid(0x5000_0001);
+        let authoritative_player = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(12.0, 34.0, 56.0),
+            ..WorldPosition::default()
+        };
+        let placeholder_runtime = WorldPosition::default();
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(authoritative_player);
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::LocalPlayer(player_guid),
+            authoritative_player,
+            placeholder_runtime,
+        );
+
+        assert_eq!(data.runtime_player_position(), Some(authoritative_player));
+        assert_eq!(
+            data.distance_position_for_guid(player_guid),
+            Some(authoritative_player)
+        );
+    }
+
+    #[test]
+    fn runtime_position_for_guid_ignores_placeholder_runtime_pose() {
+        let target_guid = Guid(0x5000_0002);
+        let authoritative_target = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(90.0, 12.0, 1.0),
+            ..WorldPosition::default()
+        };
+        let mut data = GameData::default();
+        data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Target".to_string(), authoritative_target),
+        );
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::Entity(target_guid),
+            authoritative_target,
+            WorldPosition::default(),
+        );
+
+        assert_eq!(
+            data.runtime_position_for_guid(target_guid),
+            Some(authoritative_target)
+        );
+    }
+
+    #[test]
+    fn runtime_sample_for_local_player_uses_runtime_body_motion_snapshot() {
+        let player_guid = Guid(0x5000_0001);
+        let authoritative_player = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            ..WorldPosition::default()
+        };
+        let cached_motion = EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand(0x0001)),
+            ..Default::default()
+        };
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(authoritative_player);
+
+        data.runtime_body_cache.apply_view_event(
+            &ClientViewEvent::RuntimeBodyUpserted {
+                body: Box::new(RuntimeSpatialBodyView {
+                    body_id: SpatialBodyId::LocalPlayer(player_guid),
+                    authoritative_pose: Some(authoritative_player),
+                    runtime_pose: authoritative_player,
+                    velocity: Vector3::zero(),
+                    omega: Vector3::zero(),
+                    motion_state: Some(cached_motion),
+                    contact: ContactState::Grounded,
+                    sample_mode: SpatialSampleMode::SimulatingMotionState,
+                }),
+            },
+            Instant::now(),
+        );
+
+        assert!(matches!(
+            data.runtime_sample_for_guid(player_guid),
+            Some(holtburger_world::SpatialEntitySample {
+                motion_state: Some(EntityMotionSnapshot {
+                    forward_command: Some(InterpretedMotionCommand(0x0001)),
+                    ..
+                }),
+                ..
+            })
+        ));
     }
     #[test]
     fn curated_character_option_parses_aliases() {

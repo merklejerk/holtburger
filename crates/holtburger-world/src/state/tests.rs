@@ -18,6 +18,7 @@ use holtburger_common::properties::{
     WorldObjectProperties, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
+use holtburger_content::SoulEmoteCatalog;
 use holtburger_dat::file_type::{
     MotionCommandKinematics, MotionKinematics, MotionKinematicsTable, MotionTable, SkillTable,
     SpellTable, XpTable,
@@ -1048,6 +1049,7 @@ fn test_empty_world_uses_synthetic_reference_data() {
     assert_eq!(state.xp_table.character_level_xp_list, vec![0]);
     assert!(state.skill_table.skill_base_hash.is_empty());
     assert!(state.spell_catalog.spells.is_empty());
+    assert!(state.soul_emote_catalog.tokens.is_empty());
 }
 
 #[test]
@@ -1089,6 +1091,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         spell_table,
         xp_table,
         motion_kinematics,
+        SoulEmoteCatalog::default(),
     )));
 
     assert!(!state.skill_table.skill_base_hash.is_empty());

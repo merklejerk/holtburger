@@ -10,6 +10,7 @@ test-support = []
 
 [dependencies]
 holtburger-common = { workspace = true }
+holtburger-content = { workspace = true }
 holtburger-protocol = { workspace = true }
 holtburger-dat = { workspace = true }
 log = { workspace = true }

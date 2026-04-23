@@ -827,6 +827,7 @@ interface HoltburgerApi {
   debugLog(message: string): void;
   say(message: string): void;
   emote(message: string): void;
+  soulEmote(token: string): void;
 
   targetEntity(guid: Guid): void;
   approach(guid: Guid): void;

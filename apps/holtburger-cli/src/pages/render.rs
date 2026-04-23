@@ -7,7 +7,6 @@ pub fn render_app(f: &mut Frame, state: &mut AppState) {
     // This allows us to pass data to Page::render without borrowing the entire AppState,
     // which would conflict with the mutable borrow of state.page.
     let ctx = RenderContext {
-        account_name: &state.account_name,
         client_state: &state.client_state,
         net_stats: &state.net_stats,
         server_time: state.server_time,

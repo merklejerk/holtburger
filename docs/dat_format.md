@@ -111,3 +111,32 @@ Categorized by the **Lower 16-bits (Suffix)**. The top 16-bits are the `XXYY` la
 ### 3. Local DATs (`client_local_English.dat`)
 - `0x31`: Localized Strings (Windows-1252).
 - `0x40`: Font definitions.
+
+## Chat Pose Table (`0x0E000007`)
+
+The portal DAT also contains `ChatPoseTable`, which is the retail string-lookup table behind soul emotes.
+
+What it contains:
+
+- a command-token map from soul-emote input such as `*wave*` to a pose identifier such as `Wave`
+- a pose metadata map from pose identifier to two display strings:
+  - `my_emote` for the local-player phrasing such as `You wave.`
+  - `other_emote` for remote-player phrasing such as `waves.`
+
+What it does not contain:
+
+- retail `MotionCommand` ids
+- animation timing
+- stance or persistent-state classification
+
+That means the grounded first-pass contract is string-first:
+
+- wire transport carries the raw soul-emote token
+- `ChatPoseTable` resolves token -> pose -> display strings
+- higher layers may classify or play motions later, but that behavior is not proven by this table alone
+
+Parsing notes proven in holtburger and ACE-aligned tests:
+
+- `ChatPoseTable` lives under portal file id `0x0E000007`
+- its hash keys and values use padded 16-bit PStrings
+- nested `ChatEmoteData` strings use the same padded representation

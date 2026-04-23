@@ -108,8 +108,17 @@ impl GameState {
     }
 
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
+        Self::new_with_account(guid, name, String::new(), world_name)
+    }
+
+    pub fn new_with_account(
+        guid: Guid,
+        name: String,
+        account_name: String,
+        world_name: String,
+    ) -> Self {
         Self {
-            data: GameData::new(guid, name, world_name),
+            data: GameData::new_with_account(guid, name, account_name, world_name),
             dashboard: DashboardState::default(),
             view: ViewState::default(),
             script: GameScriptState::default(),

@@ -259,6 +259,8 @@ impl CombatControlState {
 pub struct GameData {
     /// Current character name once selected.
     pub character_name: Option<String>,
+    /// Account name used for the world-entry handshake.
+    pub account_name: String,
     /// Unique ID of the player character.
     pub player_guid: Option<Guid>,
     /// Info about level, luminance, and XP.
@@ -322,6 +324,7 @@ impl Default for GameData {
     fn default() -> Self {
         Self {
             character_name: None,
+            account_name: String::new(),
             player_guid: None,
             level_info: None,
             attributes: HashMap::new(),
@@ -357,8 +360,18 @@ impl Default for GameData {
 
 impl GameData {
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
+        Self::new_with_account(guid, name, String::new(), world_name)
+    }
+
+    pub fn new_with_account(
+        guid: Guid,
+        name: String,
+        account_name: String,
+        world_name: String,
+    ) -> Self {
         Self {
             character_name: Some(name),
+            account_name,
             player_guid: Some(guid),
             world_name,
             ..Self::default()
@@ -415,9 +428,7 @@ impl GameData {
 
     pub fn runtime_player_position(&self) -> Option<WorldPosition> {
         let guid = self.player_guid?;
-        self.runtime_body_cache
-            .projected_pose(guid)
-            .or(self.player_pos)
+        preferred_runtime_pose(self.runtime_body_cache.projected_pose(guid)).or(self.player_pos)
     }
 
     pub fn runtime_position_for_guid(&self, guid: Guid) -> Option<WorldPosition> {
@@ -425,8 +436,7 @@ impl GameData {
             return self.runtime_player_position();
         }
 
-        self.runtime_body_cache
-            .projected_pose(guid)
+        preferred_runtime_pose(self.runtime_body_cache.projected_pose(guid))
             .or_else(|| self.entities.get(&guid).map(|entity| entity.position))
     }
 
@@ -507,6 +517,10 @@ impl GameData {
     pub fn has_opened_container_before(&self, guid: Guid) -> bool {
         self.opened_container_history_set.contains(&guid)
     }
+}
+
+fn preferred_runtime_pose(position: Option<WorldPosition>) -> Option<WorldPosition> {
+    position.filter(|position| position.landblock_id != Guid::NULL)
 }
 
 impl WorldContext for GameData {
@@ -679,6 +693,59 @@ mod tests {
         );
         assert_eq!(
             data.distance_position_for_guid(target_guid),
+            Some(authoritative_target)
+        );
+    }
+
+    #[test]
+    fn runtime_player_position_ignores_placeholder_runtime_pose() {
+        let player_guid = Guid(0x5000_0001);
+        let authoritative_player = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(12.0, 34.0, 56.0),
+            ..WorldPosition::default()
+        };
+        let placeholder_runtime = WorldPosition::default();
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(authoritative_player);
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::LocalPlayer(player_guid),
+            authoritative_player,
+            placeholder_runtime,
+        );
+
+        assert_eq!(data.runtime_player_position(), Some(authoritative_player));
+        assert_eq!(
+            data.distance_position_for_guid(player_guid),
+            Some(authoritative_player)
+        );
+    }
+
+    #[test]
+    fn runtime_position_for_guid_ignores_placeholder_runtime_pose() {
+        let target_guid = Guid(0x5000_0002);
+        let authoritative_target = WorldPosition {
+            landblock_id: Guid(0x0100_0000),
+            coords: Vector3::new(90.0, 12.0, 1.0),
+            ..WorldPosition::default()
+        };
+        let mut data = GameData::default();
+        data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Target".to_string(), authoritative_target),
+        );
+
+        seed_runtime_body(
+            &mut data,
+            SpatialBodyId::Entity(target_guid),
+            authoritative_target,
+            WorldPosition::default(),
+        );
+
+        assert_eq!(
+            data.runtime_position_for_guid(target_guid),
             Some(authoritative_target)
         );
     }

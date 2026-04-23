@@ -70,7 +70,6 @@ pub struct AppState {
 }
 
 pub struct RenderContext<'a> {
-    pub account_name: &'a str,
     pub client_state: &'a ClientState,
     pub net_stats: &'a NetStats,
     pub server_time: Option<(f64, Instant)>,
@@ -164,6 +163,12 @@ impl AppState {
     pub fn log(&mut self, chat_tags: ChatMessageTags, msg: impl Into<String>) {
         if let Some(game) = self.game_option_mut() {
             game.chat.log(chat_tags, msg.into());
+        }
+    }
+
+    pub fn capture_log(&mut self, chat_tags: ChatMessageTags, msg: impl Into<String>) {
+        if let Some(game) = self.game_option_mut() {
+            game.chat.capture_log(chat_tags, msg.into());
         }
     }
 }

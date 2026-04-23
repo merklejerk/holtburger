@@ -2,12 +2,15 @@ use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
 use holtburger_dat::{
     HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
+    file_type::ChatPoseTable,
 };
 use std::ffi::OsStr;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use crate::SoulEmoteCatalog;
 
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
@@ -82,6 +85,13 @@ impl ContentRepository {
     {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
         read_asset_from_resources(&resources, self.source_description.as_deref(), asset_name)
+    }
+
+    pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
+        let chat_pose_table = self
+            .read_asset::<ChatPoseTable>("chat pose table")
+            .context("failed to load chat pose table for soul emote catalog")?;
+        Ok(SoulEmoteCatalog::from_asset(&chat_pose_table))
     }
 }
 
@@ -239,7 +249,9 @@ fn mount_archive_source(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::file_type::{CharGen, MotionKinematics, SkillTable, SpellTable, XpTable};
+    use holtburger_dat::file_type::{
+        CharGen, ChatPoseTable, MotionKinematics, SkillTable, SpellTable, XpTable,
+    };
     use holtburger_dat::{
         DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
         HbaWriter, LayeredResourceResolver,
@@ -256,6 +268,44 @@ mod tests {
             .write(&mut bytes)
             .expect("test motion kinematics asset should write");
         bytes.into_inner()
+    }
+
+    fn test_chat_pose_table_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&ChatPoseTable::FILE_ID.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        push_pstring_aligned(&mut bytes, "*wave*");
+        push_pstring_aligned(&mut bytes, "Wave");
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        push_pstring_aligned(&mut bytes, "Wave");
+        push_pstring_aligned(&mut bytes, "You wave.");
+        push_pstring_aligned(&mut bytes, "waves.");
+        bytes
+    }
+
+    fn push_pstring_aligned(buf: &mut Vec<u8>, value: &str) {
+        let bytes = value.as_bytes();
+        buf.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+        buf.extend_from_slice(bytes);
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
+    }
+
+    fn write_soul_emote_hba(path: &Path) {
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                ChatPoseTable::FILE_ID,
+                DatFileType::from_id(ChatPoseTable::FILE_ID) as u32,
+                test_chat_pose_table_bytes(),
+            )
+            .expect("chat pose table test HBA entry should be added");
+        writer.write(path).expect("test HBA should be written");
     }
 
     fn write_hba(path: &Path, ids: &[u32], include_cell_namespace: bool) -> bool {
@@ -363,6 +413,22 @@ mod tests {
             .expect("motion kinematics should resolve from content repository");
 
         assert_eq!(motion_kinematics.id, MotionKinematics::FILE_ID);
+    }
+
+    #[test]
+    fn read_soul_emote_catalog_loads_from_repository() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_soul_emote_hba(&dir.path().join("soul-emotes.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let catalog = repository
+            .read_soul_emote_catalog()
+            .expect("soul emote catalog should resolve from content repository");
+
+        let resolved = catalog.resolve("*wave*").expect("token should resolve");
+        assert_eq!(resolved.pose, "Wave");
+        assert_eq!(resolved.other_emote, Some("waves."));
     }
 
     #[test]

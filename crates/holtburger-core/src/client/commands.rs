@@ -2,6 +2,7 @@ use crate::client::types::{
     ActionResultReason, ActionResultSource, BusyOperationKind, ClientCommand, TargetSlot,
 };
 use crate::client::{ClientRuntime, ClientState};
+use crate::motion_command_for_soul_emote_pose;
 use anyhow::{Result, anyhow};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
@@ -48,6 +49,11 @@ fn normalize_spell_cast(
         None => NormalizedSpellCast::Untargeted { spell_id },
     }
 }
+
+fn render_soul_emote_text(text: &str) -> String {
+    text.replace("%p", "their")
+}
+
 impl ClientRuntime {
     fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
         match kind {
@@ -103,6 +109,7 @@ impl ClientRuntime {
         match cmd {
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
+            | ClientCommand::SendCharacterEnterWorld { .. }
             | ClientCommand::CreateCharacter(_)
             | ClientCommand::DeleteCharacter { .. }
             | ClientCommand::RestoreCharacter(_)
@@ -111,7 +118,8 @@ impl ClientRuntime {
             ClientCommand::Talk(_)
             | ClientCommand::Tell { .. }
             | ClientCommand::ChannelMessage { .. }
-            | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
+            | ClientCommand::Emote(_)
+            | ClientCommand::SoulEmote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
             | ClientCommand::ReadBookPage { .. }
@@ -215,6 +223,12 @@ impl ClientRuntime {
                 self.begin_world_entry_transition().await?;
                 self.character_selection
                     .select_character(id, &mut self.session)
+                    .await
+            }
+            ClientCommand::SendCharacterEnterWorld { guid, account } => {
+                log::info!("Entering world with character: 0x{:08X}", guid);
+                self.character_selection
+                    .send_character_enter_world(guid, account, &mut self.session)
                     .await
             }
             ClientCommand::CreateCharacter(request) => {
@@ -334,6 +348,47 @@ impl ClientRuntime {
                     return self
                         .send_game_action(GameAction::Emote(Box::new(EmoteActionData {
                             message: text,
+                        })))
+                        .await;
+                }
+                Ok(())
+            }
+            ClientCommand::SoulEmote(token) => {
+                if matches!(self.state, ClientState::InWorld) {
+                    let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
+                        self.emit_action_result(
+                            ActionResultSource::Client,
+                            ActionResultReason::General(format!(
+                                "Unknown soul emote token: {}",
+                                token
+                            )),
+                        );
+                        return Ok(());
+                    };
+
+                    let pose = resolved.pose.to_string();
+                    let message = resolved
+                        .other_emote
+                        .map(render_soul_emote_text)
+                        .or_else(|| resolved.my_emote.map(str::to_owned))
+                        .unwrap_or_else(|| resolved.token.to_string());
+
+                    if let Some(command) = motion_command_for_soul_emote_pose(&pose) {
+                        let motion_style = self
+                            .world
+                            .player
+                            .last_server_motion_style
+                            .unwrap_or(MotionStance::NonCombat);
+                        self.movement.enqueue_transient_motion(
+                            command,
+                            crate::client::movement_types::MotionStyle::Explicit(motion_style),
+                        );
+                    }
+
+                    log::info!(">>> You soul emote: \"{}\"", message);
+                    return self
+                        .send_game_action(GameAction::SoulEmote(Box::new(SoulEmoteActionData {
+                            message,
                         })))
                         .await;
                 }
@@ -1237,6 +1292,7 @@ mod tests {
     use crate::client::{ClientRuntime, ClientState};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
+    use holtburger_content::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteToken};
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
         SkillAdvancementClass,
@@ -1251,9 +1307,28 @@ mod tests {
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Instant;
 
     fn build_test_client() -> ClientRuntime {
-        builder::build_test_client(ClientState::InWorld)
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.soul_emote_catalog = Arc::new(SoulEmoteCatalog {
+            tokens: std::collections::BTreeMap::from([(
+                "wave".to_string(),
+                SoulEmoteToken {
+                    token: "wave".to_string(),
+                    pose: "Wave".to_string(),
+                },
+            )]),
+            poses: std::collections::BTreeMap::from([(
+                "Wave".to_string(),
+                SoulEmotePose {
+                    pose: "Wave".to_string(),
+                    my_emote: "wave.".to_string(),
+                    other_emote: "waves.".to_string(),
+                },
+            )]),
+        });
+        client
     }
 
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
@@ -1883,6 +1958,64 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn soul_emote_command_sends_dedicated_game_action() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SoulEmote("wave".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 2);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[test]
+    fn render_soul_emote_text_expands_possessive_placeholder() {
+        assert_eq!(
+            super::render_soul_emote_text("puts %p hands on %p hips."),
+            "puts their hands on their hips."
+        );
+    }
+
+    #[tokio::test]
+    async fn soul_emote_command_rejects_unknown_token() {
+        let mut client = build_test_client();
+        let mut view_events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::SoulEmote("ploop".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.session.bytes_out, 0);
+
+        let mut saw_result = false;
+        while let Ok(event) = view_events.try_recv() {
+            if let ClientViewEvent::ActionResult { source, reason } = event {
+                assert_eq!(source, ActionResultSource::Client);
+                assert_eq!(
+                    reason,
+                    ActionResultReason::General("Unknown soul emote token: ploop".to_string())
+                );
+                saw_result = true;
+                break;
+            }
+        }
+
+        assert!(saw_result);
     }
 
     #[tokio::test]

@@ -1116,6 +1116,231 @@ async fn explicit_stop_after_autonomous_drive_sends_stop_pulse() {
 }
 
 #[tokio::test]
+async fn transient_motion_reasserts_autonomous_locomotion_on_next_tick() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, position);
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    let autonomous_intent = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+
+    movement.enqueue_drive_intent(PlayerDriveIntent::Autonomous(autonomous_intent), start);
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("autonomous drive should emit a locomotion pulse");
+
+    assert_eq!(session.game_action_sequence, 1);
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(autonomous_intent),
+        start + Duration::from_millis(30),
+    );
+    movement.enqueue_transient_motion(
+        holtburger_protocol::messages::movement::InterpretedMotionCommand(0x0087),
+        MotionStyle::Explicit(MotionStance::NonCombat),
+    );
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("transient motion should replace the locomotion pulse for this tick");
+
+    assert_eq!(
+        movement.current_local_drive_control(&world, Duration::from_millis(33)),
+        Some(LocalDriveControl {
+            body_id: SpatialBodyId::LocalPlayer(guid),
+            desired_world_delta: autonomous_intent.desired_world_delta,
+            desired_heading: autonomous_intent.desired_heading,
+            target_hint: autonomous_intent.target_hint,
+            gait: holtburger_world::spatial::LocalDriveGait::Run,
+            force_grounded: true,
+        })
+    );
+    assert!(movement.server_motion_active);
+    assert!(movement.last_server_motion_intent.is_none());
+
+    assert_eq!(session.game_action_sequence, 2);
+
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(autonomous_intent),
+        start + Duration::from_millis(60),
+    );
+    movement
+        .tick(start + Duration::from_millis(60), &mut world, &mut session)
+        .await
+        .expect("locomotion should be reasserted after the transient motion clears");
+
+    assert_eq!(
+        movement.last_server_motion_intent,
+        MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
+            .map(|state| server_motion_intent(state, MotionStyle::PreserveServer))
+    );
+
+    assert_eq!(session.game_action_sequence, 3);
+}
+
+#[tokio::test]
+async fn manual_motion_updates_server_motion_tracking_state() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_1304);
+    let position = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+    };
+
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, position);
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+    let state = MotionState::builder().run().forward().build();
+
+    movement.enqueue_drive_intent(PlayerDriveIntent::ManualHeld(state), start);
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("manual locomotion should update server motion tracking");
+
+    assert!(movement.server_motion_active);
+    assert_eq!(
+        movement.last_server_motion_intent,
+        Some(server_motion_intent(state, MotionStyle::PreserveServer))
+    );
+}
+
+#[tokio::test]
+async fn server_controlled_projection_becomes_current_local_drive_control() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_2304);
+    let current_pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(0.0),
+    };
+    let target_pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(16.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(0.0),
+    };
+
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, current_pose);
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+
+    movement.set_server_controlled_projection(ServerControlledProjection {
+        target_pose,
+        speed_mps: 2.0,
+    });
+    movement.note_server_controlled_movement_started();
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(AutonomousDriveIntent {
+            desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+            desired_heading: Some(0.0),
+            target_hint: None,
+            gait: Gait::Run,
+            force_grounded: true,
+        }),
+        start,
+    );
+
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("server-controlled tick should expose a projected local drive");
+
+    assert_eq!(
+        movement.current_local_drive_control(&world, Duration::from_secs(1)),
+        Some(LocalDriveControl {
+            body_id: SpatialBodyId::LocalPlayer(guid),
+            desired_world_delta: Vector3::new(2.0, 0.0, 0.0),
+            desired_heading: Some(current_pose.heading_to(&target_pose)),
+            target_hint: Some(target_pose),
+            gait: holtburger_world::spatial::LocalDriveGait::Run,
+            force_grounded: true,
+        })
+    );
+    assert!(!movement.server_motion_active);
+}
+
+#[tokio::test]
+async fn clearing_server_controlled_projection_reasserts_autonomous_motion_intent() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_3304);
+    let current_pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(12.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(0.0),
+    };
+    let target_pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        coords: Vector3::new(16.0, -4.0, 1.5),
+        rotation: Quaternion::from_heading(0.0),
+    };
+
+    world.player.guid = guid;
+    seed_local_player(&mut world, guid, current_pose);
+
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let start = Instant::now();
+    let autonomous_intent = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: Some(0.0),
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+
+    movement.set_server_controlled_projection(ServerControlledProjection {
+        target_pose,
+        speed_mps: 2.0,
+    });
+    movement.note_server_controlled_movement_started();
+    movement.enqueue_drive_intent(PlayerDriveIntent::Autonomous(autonomous_intent), start);
+    movement
+        .tick(start, &mut world, &mut session)
+        .await
+        .expect("server-controlled takeover should succeed");
+
+    movement.clear_server_controlled_projection();
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::Autonomous(autonomous_intent),
+        start + Duration::from_millis(30),
+    );
+    movement
+        .tick(start + Duration::from_millis(30), &mut world, &mut session)
+        .await
+        .expect("autonomous handoff should restore locomotion emission");
+
+    assert_eq!(
+        movement.last_server_motion_intent,
+        MovementSystem::autonomous_wire_motion_state(&world, autonomous_intent)
+            .map(|state| server_motion_intent(state, MotionStyle::PreserveServer))
+    );
+}
+
+#[tokio::test]
 async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);

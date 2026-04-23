@@ -125,6 +125,21 @@ fn test_dispatch_action_tell() {
 }
 
 #[test]
+fn test_dispatch_action_soul_emote() {
+    let fixture = hex::decode("B1F7000008070605E101000006002A776176652A").unwrap();
+    assert_dispatch_match(&fixture, |msg| {
+        let GameMessage::GameAction(action) = msg else {
+            return false;
+        };
+
+        matches!(
+            action.action,
+            crate::messages::game_action::GameAction::SoulEmote(_)
+        )
+    });
+}
+
+#[test]
 fn test_dispatch_action_use() {
     assert_dispatch_match(test_fixtures::ACTION_USE, |msg| {
         matches!(msg, GameMessage::GameAction(_))

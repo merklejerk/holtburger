@@ -13,6 +13,7 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionState;
+use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionItem};
 use holtburger_session::Session;
 use holtburger_world::SolveBodyInput;
 use holtburger_world::spatial::{LocalDriveControl, LocalDriveGait};
@@ -120,6 +121,7 @@ impl MovementSequenceDiagnostics {
 pub(crate) struct MovementSystem {
     sequence_diagnostics: MovementSequenceDiagnostics,
     queued_drive_commands: Vec<QueuedDriveCommand>,
+    pending_transient_motion: Option<TransientMotionIntent>,
     pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
     pending_snap_facing: Option<f32>,
     active_drive: Option<ActiveDriveState>,
@@ -138,6 +140,7 @@ enum QueuedDriveCommand {
         duration: Duration,
     },
     Autonomous(AutonomousDriveIntent),
+    Transient(TransientMotionIntent),
     ArriveAtPose {
         pose: holtburger_common::position::WorldPosition,
     },
@@ -181,6 +184,12 @@ struct ServerMotionIntent {
     motion_style: MotionStyle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TransientMotionIntent {
+    command: InterpretedMotionCommand,
+    motion_style: MotionStyle,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct ServerControlledProjection {
     pub target_pose: holtburger_common::position::WorldPosition,
@@ -199,6 +208,7 @@ impl MovementSystem {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
             queued_drive_commands: Vec::new(),
+            pending_transient_motion: None,
             pending_arrival_pose: None,
             pending_snap_facing: None,
             active_drive: None,
@@ -258,6 +268,18 @@ impl MovementSystem {
         self.queued_drive_commands.push(command);
     }
 
+    pub(crate) fn enqueue_transient_motion(
+        &mut self,
+        command: InterpretedMotionCommand,
+        motion_style: MotionStyle,
+    ) {
+        self.queued_drive_commands
+            .push(QueuedDriveCommand::Transient(TransientMotionIntent {
+                command,
+                motion_style,
+            }));
+    }
+
     fn ingest_drive_command(&mut self, command: QueuedDriveCommand, now: Instant) {
         match command {
             QueuedDriveCommand::ManualSet(state) => {
@@ -268,6 +290,9 @@ impl MovementSystem {
             }
             QueuedDriveCommand::Autonomous(intent) => {
                 self.active_drive = Some(ActiveDriveState::autonomous(intent));
+            }
+            QueuedDriveCommand::Transient(intent) => {
+                self.pending_transient_motion = Some(intent);
             }
             QueuedDriveCommand::ArriveAtPose { pose } => {
                 self.pending_arrival_pose = Some(pose);
@@ -430,28 +455,38 @@ impl MovementSystem {
             );
         }
 
-        match self.active_drive.map(|active| active.intent) {
-            Some(ActiveDriveIntent::Manual(state)) => events.extend(
-                self.execute_motion_state_at(state, world, session, now)
-                    .await?,
-            ),
-            Some(ActiveDriveIntent::Autonomous(intent)) => events.extend(
-                self.execute_autonomous_drive_intent(intent, world, session, now)
-                    .await?,
-            ),
-            None if had_active_manual_motion || explicit_stop_requested => {
-                events.extend(
-                    self.execute_stop_at(
-                        now,
-                        world,
-                        session,
-                        MovementPacketMetadata::default(),
-                        had_active_manual_motion || explicit_stop_requested,
-                    )
-                    .await?,
-                );
+        let transient_sent = if let Some(intent) = self.pending_transient_motion.take() {
+            self.execute_transient_motion_at(intent, world, session)
+                .await?;
+            true
+        } else {
+            false
+        };
+
+        if !transient_sent {
+            match self.active_drive.map(|active| active.intent) {
+                Some(ActiveDriveIntent::Manual(state)) => events.extend(
+                    self.execute_motion_state_at(state, world, session, now)
+                        .await?,
+                ),
+                Some(ActiveDriveIntent::Autonomous(intent)) => events.extend(
+                    self.execute_autonomous_drive_intent(intent, world, session, now)
+                        .await?,
+                ),
+                None if had_active_manual_motion || explicit_stop_requested => {
+                    events.extend(
+                        self.execute_stop_at(
+                            now,
+                            world,
+                            session,
+                            MovementPacketMetadata::default(),
+                            had_active_manual_motion || explicit_stop_requested,
+                        )
+                        .await?,
+                    );
+                }
+                None => {}
             }
-            None => {}
         }
 
         let _ = self
@@ -632,6 +667,11 @@ impl MovementSystem {
         self.last_server_motion_intent = Some(intent);
     }
 
+    fn note_transient_motion_sent(&mut self) {
+        self.server_motion_active = true;
+        self.last_server_motion_intent = None;
+    }
+
     fn note_server_motion_cleared(&mut self) {
         self.server_motion_active = false;
         self.last_server_motion_intent = None;
@@ -698,6 +738,31 @@ impl MovementSystem {
         }
 
         Ok(state_events)
+    }
+
+    async fn execute_transient_motion_at(
+        &mut self,
+        intent: TransientMotionIntent,
+        world: &mut WorldState,
+        session: &mut Session,
+    ) -> Result<()> {
+        let movement_sequence = world.player.next_move_seq();
+        let raw_motion_state = raw_motion_state_with_motion_style(
+            world,
+            RawMotionState {
+                commands: vec![MotionItem::new(
+                    intent.command,
+                    movement_sequence,
+                    true,
+                    1.0,
+                )],
+                ..Default::default()
+            },
+            intent.motion_style,
+        );
+        Self::send_transient_motion_pulse(world, session, raw_motion_state).await?;
+        self.note_transient_motion_sent();
+        Ok(())
     }
 
     async fn execute_snap_facing(
@@ -878,6 +943,26 @@ impl MovementSystem {
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
             contact_long_jump: encode_contact_long_jump(world, metadata),
+        };
+
+        session
+            .send_action(GameAction::MoveToState(Box::new(data)))
+            .await
+    }
+
+    async fn send_transient_motion_pulse(
+        world: &WorldState,
+        session: &mut Session,
+        raw_motion_state: RawMotionState,
+    ) -> Result<()> {
+        let data = MoveToStateActionData {
+            raw_motion_state,
+            position: world.local_player_runtime_pose().unwrap_or_default(),
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+            contact_long_jump: encode_contact_long_jump(world, MovementPacketMetadata::default()),
         };
 
         session

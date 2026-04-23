@@ -21,6 +21,7 @@ pub fn render_nearby_tab(
     area: Rect,
 ) {
     let entities = tab.visible_entities(data);
+
     let content_len = entities.len();
     let selected_index = if content_len == 0 {
         0

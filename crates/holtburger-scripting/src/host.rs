@@ -747,6 +747,9 @@ globalThis.Holtburger = globalThis.HB = Object.freeze({
     emote(message) {
         Deno.core.ops.op_hb_emote(String(message));
     },
+    soulEmote(token) {
+        Deno.core.ops.op_hb_soul_emote(String(token));
+    },
     openTrade(guid) {
         Deno.core.ops.op_hb_open_trade(Number(guid) >>> 0);
     },
@@ -849,6 +852,7 @@ deno_core::extension!(
         op_hb_debug_log,
         op_hb_say,
         op_hb_emote,
+        op_hb_soul_emote,
         op_hb_combat_info,
         op_hb_current_interaction,
         op_hb_enchantments,
@@ -1369,6 +1373,15 @@ fn op_hb_emote(state: &mut OpState, #[string] message: String) {
         .outputs
         .borrow_mut()
         .push(ScriptIntent::Emote { message });
+}
+
+#[op2(fast)]
+fn op_hb_soul_emote(state: &mut OpState, #[string] token: String) {
+    state
+        .borrow::<HostRuntimeState>()
+        .outputs
+        .borrow_mut()
+        .push(ScriptIntent::SoulEmote { token });
 }
 
 #[op2(fast)]

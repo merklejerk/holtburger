@@ -1,28 +1,28 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Holtburger 3D",
-  "version": "0.1.0",
-  "identifier": "io.github.merklejerk.holtburger-3d",
-  "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "devUrl": "http://127.0.0.1:1420",
-    "frontendDist": "../dist"
-  },
-  "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Holtburger 3D",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 1100,
-        "minHeight": 700,
-        "resizable": true
-      }
-    ]
-  },
-  "bundle": {
-    "active": false
-  }
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "Holtburger 3D",
+	"version": "0.1.0",
+	"identifier": "io.github.merklejerk.holtburger-3d",
+	"build": {
+		"beforeDevCommand": "npm run dev",
+		"beforeBuildCommand": "npm run build",
+		"devUrl": "http://127.0.0.1:1420",
+		"frontendDist": "../dist"
+	},
+	"app": {
+		"windows": [
+			{
+				"label": "main",
+				"title": "Holtburger 3D",
+				"width": 1440,
+				"height": 900,
+				"minWidth": 1100,
+				"minHeight": 700,
+				"resizable": true
+			}
+		]
+	},
+	"bundle": {
+		"active": false
+	}
 }

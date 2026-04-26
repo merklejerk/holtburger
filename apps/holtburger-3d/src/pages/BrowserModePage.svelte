@@ -28,8 +28,8 @@
 
   <p>
     Browser mode now owns the first coordinate-driven location flow. The current runtime residency
-    is available as a frontend-selected destination, but the destination policy stays on the TS
-    side instead of leaking into the host boundary.
+    is available as a frontend-selected destination, and the selected destination now feeds the
+    shared WorldDisplay shell below without leaking browser policy back into the host boundary.
   </p>
 
   <dl class="data-list compact-data-list">

@@ -3,8 +3,9 @@ mod contracts;
 
 use adapter::{HostBoundaryAdapter, HostRuntimeService, RUNTIME_NOTIFICATION_EVENT};
 use contracts::{
-    AssetLookupRequestDto, AssetLookupResponseDto, FrontendStateFeedDto,
-    HostBoundaryOverviewDto, LifecycleStateDto, RuntimeBatchDto,
+    AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto, CameraHintDto,
+    FrontendStateFeedDto, HostBoundaryOverviewDto, LifecycleStateDto, RayPickRequestDto,
+    RayPickResponseDto, RuntimeBatchDto,
 };
 use tauri::Emitter;
 
@@ -33,6 +34,22 @@ fn lookup_asset(request: AssetLookupRequestDto) -> AssetLookupResponseDto {
 #[tauri::command]
 fn get_host_boundary_overview() -> HostBoundaryOverviewDto {
     HostBoundaryAdapter::boundary_overview()
+}
+
+#[tauri::command]
+fn submit_camera_hint(
+    runtime: tauri::State<'_, HostRuntimeService>,
+    hint: CameraHintDto,
+) -> CameraHintAckDto {
+    runtime.submit_camera_hint(hint)
+}
+
+#[tauri::command]
+fn resolve_ray_pick(
+    runtime: tauri::State<'_, HostRuntimeService>,
+    request: RayPickRequestDto,
+) -> RayPickResponseDto {
+    runtime.resolve_ray_pick(request)
 }
 
 fn main() {
@@ -75,6 +92,8 @@ fn main() {
             get_view_model_feed,
             lookup_asset,
             get_host_boundary_overview,
+            submit_camera_hint,
+            resolve_ray_pick,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Holtburger 3D host");

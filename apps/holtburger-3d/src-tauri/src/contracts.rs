@@ -147,3 +147,53 @@ pub struct HostBoundaryOverviewDto {
     pub asset_lookup_command: &'static str,
     pub notes: Vec<String>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraHintDto {
+    pub mode: ModeHintDto,
+    pub source: String,
+    pub position: Vec3Dto,
+    pub forward: Vec3Dto,
+    pub viewport_normalized_x: f32,
+    pub viewport_normalized_y: f32,
+    pub destination_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraHintAckDto {
+    pub accepted: bool,
+    pub sequence: u64,
+    pub summary: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RayPickRequestDto {
+    pub request_id: String,
+    pub origin: Vec3Dto,
+    pub direction: Vec3Dto,
+    pub screen_x_normalized: f32,
+    pub screen_y_normalized: f32,
+    pub destination_label: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RayPickHitDto {
+    pub entity_id: u64,
+    pub label: String,
+    pub location_label: String,
+    pub distance: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RayPickResponseDto {
+    pub request_id: String,
+    pub resolved: bool,
+    pub camera_hint_sequence: Option<u64>,
+    pub hit: Option<RayPickHitDto>,
+    pub summary: String,
+}

@@ -9,7 +9,7 @@ import type {
   RuntimeNotificationEnvelopeDto,
 } from './contracts';
 
-const RUNTIME_LIFECYCLE_EVENT = 'runtime:lifecycle-state';
+const RUNTIME_NOTIFICATION_EVENT = 'runtime:notification';
 
 declare global {
   interface Window {
@@ -36,17 +36,35 @@ function fallbackRuntimeBatch(): RuntimeBatchDto {
     entities: [
       {
         entityId: 0x01020304,
+        label: 'Browser Scout',
         position: { x: 12, y: -4.5, z: 1 },
         headingRadians: 0,
-        appearanceId: 'stub/world-anchor',
+        appearanceId: 'gfx/02000001',
+        landblockId: 0x01020003,
+        cellId: 3,
+        locationLabel: '100.40S, 101.55W, 1.0Z',
+        isLocalPlayer: true,
       },
       {
         entityId: 0x01020305,
+        label: 'Survey Drudge',
         position: { x: 18, y: -1, z: 0 },
         headingRadians: Math.PI / 2,
-        appearanceId: 'stub/browser-probe',
+        appearanceId: 'gfx/02000002',
+        landblockId: 0x0102001b,
+        cellId: 27,
+        locationLabel: '100.41S, 101.52W, 0.0Z',
+        isLocalPlayer: false,
       },
     ],
+    residency: {
+      focusEntityId: 0x01020304,
+      focusLandblockId: 0x01020003,
+      focusCellId: 3,
+      focusLocationLabel: '100.40S, 101.55W, 1.0Z',
+      indoors: false,
+      trackedBodyCount: 2,
+    },
   };
 }
 
@@ -61,6 +79,7 @@ function fallbackViewModelFeed(): FrontendStateFeedDto {
 function fallbackOverview(): HostBoundaryOverviewDto {
   return {
     runtimeChannel: 'runtime',
+    runtimeNotificationEvent: 'runtime:notification',
     runtimeLifecycleTopic: 'lifecycle.state',
     runtimeBatchCommand: 'get_runtime_batch',
     assetLookupCommand: 'lookup_asset',
@@ -79,7 +98,7 @@ async function invokeCommand<T>(command: string, args?: Record<string, unknown>)
 export async function readHostBoundarySnapshot(): Promise<HostBoundarySnapshot> {
   const assetRequest: AssetLookupRequestDto = {
     requestId: 'browser-preview-snapshot',
-    assetId: 'stub/world-anchor',
+    assetId: 'gfx/02000001',
     priority: 'bootstrap',
   };
 
@@ -94,7 +113,7 @@ export async function readHostBoundarySnapshot(): Promise<HostBoundarySnapshot> 
         assetId: assetRequest.assetId,
         payloadKind: 'json',
         payload: {
-          kind: 'stub-asset-metadata',
+          kind: 'diagnostic-asset-metadata',
           notes: ['Fallback payload for browser-only preview.'],
         },
       },
@@ -121,7 +140,7 @@ export async function readHostBoundarySnapshot(): Promise<HostBoundarySnapshot> 
 }
 
 export async function listenForRuntimeLifecycle(
-  onLifecycle: (notification: RuntimeNotificationEnvelopeDto) => void,
+  onNotification: (notification: RuntimeNotificationEnvelopeDto) => void,
 ): Promise<() => void> {
   if (!isTauriRuntime()) {
     return () => {};
@@ -129,8 +148,8 @@ export async function listenForRuntimeLifecycle(
 
   const { listen } = await import('@tauri-apps/api/event');
   const unlisten = await listen<RuntimeNotificationEnvelopeDto>(
-    RUNTIME_LIFECYCLE_EVENT,
-    (event) => onLifecycle(event.payload),
+    RUNTIME_NOTIFICATION_EVENT,
+    (event) => onNotification(event.payload),
   );
 
   return () => {

@@ -1050,6 +1050,8 @@ Resolved gate review:
 
 Purpose: prove that the frontend can subscribe to authoritative runtime or world-state feeds and derive presentation-facing models before there is a serious renderer.
 
+Status: completed on 2026-04-26.
+
 Deliverables:
 
 - wire the runtime channel to produce a small but real stream of authoritative data from Rust
@@ -1075,33 +1077,52 @@ Phase Gate Review Before Phase 3:
 - assess whether the runtime and asset channels are clean enough to support frontend work without immediate rewrites
 - decide whether frontend work should proceed as planned or whether additional Rust seam cleanup is required first
 
-### Phase 3: Top-Down Frontend App Shell, Mode Model, And Browser Flow
+Resolved gate review:
 
-Purpose: build the smallest real frontend that proves the app-shell shape, mode ownership, and browser-mode-first navigation without waiting for polished gameplay UI.
+- Phase 2 was sufficient to prove the runtime channel shape without moving shared-crate seams. The app-local host now builds a small authoritative `WorldState`, emits typed runtime notifications on a single runtime event with semantic topics, and surfaces real runtime-body plus residency facts to the frontend.
+- The runtime and asset channels are still cleanly separated in code shape. Runtime traffic now streams authoritative batches and view-model state; asset lookup remains demand-driven and diagnostic until real content delivery pressure exists.
+- The current runtime payload is good enough for browser-mode inspection but not yet for browser-mode control. Landblock, derived outdoor cell, indoor-vs-outdoor, and location strings are now present, but browser-mode location input and a dedicated frontend view-model store are still missing.
+- No additional Rust seam cleanup is required before moving on. The missing work is now predominantly frontend-owned, so the next phase should narrow to the missing frontend store plus browser-flow wiring instead of broadly redoing the app shell.
+
+### Phase 3: Top-Down Frontend Game-State Store And Browser Flow
+
+Purpose: finish the missing frontend-owned state boundaries on top of the already-running shell, then wire browser-mode-first navigation and inspection against the live Phase 2 runtime feed without waiting for polished gameplay UI.
 
 Deliverables:
 
-- implement the Svelte app shell with explicit top-level modes, with nested pages or routes inside each mode, such as:
-  - boot or loading
-  - browser mode
-  - client mode placeholder
-  - disconnected or reconnect state
-- map typed lifecycle facts and browser inputs into frontend-owned mode and page transitions
-- establish the frontend game-state or view-model store as the home for page-driving, browser-driving, and HUD-driving mirrored state
-- add placeholder UI surfaces that intentionally show state plainly instead of trying to look production-ready
+- keep the existing Svelte app shell and explicit top-level modes, then move host-boundary-derived mirrored state out of `App.svelte` into a dedicated frontend game-state or view-model store
+- map typed lifecycle facts plus browser-mode inputs into frontend-owned mode and page transitions
+- add the first browser-mode location input or selection flow on top of the live runtime residency data
+- make browser mode consume the new frontend store rather than reading raw host-boundary payloads directly in the root component
+- introduce the first TypeScript-side tests around behaviors and interfaces that are already stable enough to defend:
+  - browser-preview fallback shape in `src/lib/host/tauri.ts`
+  - runtime-notification merge behavior once the new frontend store owns that reconciliation logic
+  - contract typing expectations for `LifecycleStateDto`, `RuntimeBatchDto`, `RuntimeResidencyDto`, and `RuntimeNotificationEnvelopeDto`
+  - mode-routing decisions derived from lifecycle facts plus browser-mode inputs
+  - browser-mode location-input parsing, validation, and store updates
+- keep placeholder UI surfaces acceptable and intentionally plain instead of trying to look production-ready
 
 Acceptance Criteria:
 
-- launching the app shows a real frontend shell rather than a blank webview
+- the existing app shell remains intact while host-boundary-derived state moves behind an explicit frontend store boundary
 - mode and page transitions are driven by typed lifecycle state, browser inputs, and frontend policy, not imperative host-side page control
-- the frontend has an explicit store boundary for mirrored game state and view models
-- the app is visibly navigable and browser mode is a first-class path even if client mode is mostly placeholder driven
+- browser mode has a first-class location-input or location-selection flow that consumes the Phase 2 runtime residency data
+- browser mode and client mode remain clearly separated at the frontend-policy level even though they share the same runtime and world-display foundations
+- the first TypeScript tests target store and bridge behavior, contract-shape guarantees, and mode or location-input policy without pretending the render runtime or broader UI composition is stable yet
 
 Phase Gate Review Before Phase 4:
 
 - assess whether the shell, mode model, and view-model store boundaries feel stable enough to host shared world display infrastructure
 - review whether browser mode is staying clearly separate from client-mode semantics instead of quietly absorbing gameplay policy
 - decide whether `WorldDisplay` should be introduced as planned or whether its boundary still needs a narrower contract pass first
+
+Phase 3 TypeScript Test Agenda:
+
+- Set up an app-local TypeScript test runner only after the Phase 3 store boundary exists, so tests lock onto the durable boundary rather than the temporary root-component merge code.
+- Start with bridge and store tests, not renderer tests. The stable behaviors today are the browser-preview fallback path, typed snapshot loading, runtime-notification merge semantics, and lifecycle-to-mode policy.
+- Add pure policy tests for browser-mode location input before adding component-heavy tests. Coordinate parsing, validation, and destination-selection rules should be defendable without mounting the whole shell.
+- Treat `src/lib/host/contracts.ts` as a stable interface surface and add tests that fail loudly if required runtime fields such as residency, location labels, or selected-entity view-model data stop being propagated.
+- Defer `WorldDisplay`, worker, and richer page-composition tests until those boundaries exist as standalone units instead of incidental shell markup.
 
 ### Phase 4: Top-Down WorldDisplay Foundation And Browser Mode World Shell
 
@@ -1186,6 +1207,116 @@ Post-Phase Assessment:
 - list the seams that still need to move before client mode expands
 - rewrite the next-step plan based on what the runnable browser slice actually taught us
 
+## General Testing Strategy
+
+Testing for `holtburger-3d` should follow the same ownership rules as the architecture.
+
+That means:
+
+- shared crates keep owning tests for shared world, runtime-body, content, and protocol semantics
+- `apps/holtburger-3d/src-tauri` owns tests for the app-local adapter seam, host runtime service, DTO shaping, notification topics, and Tauri-facing command or event behavior that is specific to this app
+- `apps/holtburger-3d/src` owns tests for frontend store policy, bridge behavior, mode routing, location-input policy, and other frontend-owned interpretation that should not be pushed down into Rust
+- render-runtime, worker, and UI-composition tests should arrive only when those boundaries exist as stable standalone units rather than as incidental shell glue
+
+The default strategy should be phase-appropriate rather than uniform.
+
+### Testing Priorities By Layer
+
+#### 1. Rust App-Local Boundary Tests
+
+These should arrive earliest and stay closest to the host seam.
+
+Primary targets:
+
+- authoritative runtime-batch shaping from app-local world state
+- lifecycle and runtime notification topics plus payload composition
+- residency, landblock, cell, and location-label derivation that the frontend depends on
+- asset-channel request or response shaping while asset delivery is still diagnostic or synthetic
+- app-local service behavior that advances debug runtime state over time
+
+These tests should prefer narrow unit tests over broad integration harnesses unless the behavior specifically depends on Tauri wiring.
+
+#### 2. Frontend Store And Bridge Tests
+
+These should begin once the Phase 3 store boundary exists.
+
+Primary targets:
+
+- browser-preview fallback behavior in the Tauri bridge
+- host snapshot loading and runtime-notification merge behavior
+- lifecycle-to-mode routing policy
+- browser-mode location-input parsing, validation, and selection rules
+- store-owned mirrored state and view-model derivation that is intentionally frontend policy
+
+These tests should prefer pure store and bridge logic over component-mount tests whenever possible.
+
+#### 3. Component And UI Tests
+
+These should stay intentionally narrow until the app shell, store, and browser flow settle.
+
+Primary early targets:
+
+- mode-specific shell rendering that depends on stable store outputs
+- browser-mode forms or controls whose behavior is not already fully covered by store or policy tests
+- contract-driven display logic that is likely to regress even if the renderer is still placeholder-only
+
+These tests should not become the main place where business or runtime policy is verified.
+
+#### 4. Worker, Asset, And WorldDisplay Tests
+
+These should land when Phase 4 and Phase 5 make those seams real.
+
+Primary targets:
+
+- worker message contracts and queue policy
+- runtime-channel versus asset-channel separation
+- `WorldDisplay` ownership boundaries and mode-specific adapters
+- camera-hint throttling and authority-sensitive query plumbing once they exist
+
+Until those boundaries are introduced, the plan should avoid speculative tests that lock in temporary shell structure.
+
+### Testing Priorities By Phase
+
+- Phase 0: build, lint, and contract-shape validation only
+- Phase 1: host-boundary compile checks plus the first Rust seam tests when DTOs and adapter behavior stop being trivial
+- Phase 2: Rust tests for authoritative runtime batches, notifications, residency facts, and app-local debug-runtime advancement
+- Phase 3: introduce the TypeScript test runner and cover bridge, store, lifecycle-to-mode policy, and browser-mode location-input behavior
+- Phase 4: add tests around `WorldDisplay`, camera-hint plumbing, and first authority-sensitive query behavior
+- Phase 5: add worker and asset-channel tests, especially message-shape and ownership boundaries
+- Phase 6: add vertical-slice checks where they reveal boundary regressions that lower-level tests cannot catch alone
+
+### Validation Expectations
+
+Every meaningful phase should leave behind at least one durable automated test improvement in addition to compile and lint validation, unless the phase is purely scaffold or documentation work.
+
+Minimum expectation per implementation phase:
+
+- a narrow automated test for the new stable behavior or boundary introduced by that phase
+- a compile or typecheck pass for the touched slice
+- a lint pass for the touched slice
+- an integrated build check when the phase changes cross-boundary wiring or app boot behavior
+
+The plan should prefer testing stable seams over testing temporary composition.
+
+In practice, that means:
+
+- test adapters, stores, policy functions, and message contracts before testing page markup or placeholder scene structure
+- avoid snapshot-heavy UI tests until the shell and world-display boundaries settle
+- do not use end-to-end tests as a substitute for missing boundary tests
+
+### Definition Of Good Coverage For This Plan
+
+Coverage should be judged by boundary confidence, not raw percentages.
+
+For this project, good coverage means:
+
+- authoritative runtime facts are validated before they cross into the frontend
+- frontend policy is validated where the frontend owns that policy
+- renderer-facing and worker-facing seams are tested once they become first-class architectural units
+- each phase locks in the durable behavior it introduces before the next phase builds on top of it
+
+If a behavior is still too unstable to test cheaply, that is usually a sign to test the lower-level seam under it first rather than a reason to skip testing altogether.
+
 ### Implementation Risks Specific To This Plan
 
 #### Risk: We Accidentally Start With UI Or Renderer Polish
@@ -1257,6 +1388,10 @@ Mitigation:
 - Keep lifecycle mode hints advisory and keep nested page selection frontend-local in Phase 0.
 - Keep the first typed host DTOs and adapter layer app-local until a real runtime or content integration proves a reusable shared-crate seam.
 - Keep the Svelte bridge browser-safe by falling back to local preview data when the Tauri runtime is not active, so frontend iteration does not force a native boot for every UI check.
+- Keep the Phase 2 runtime feed app-local by building a small authoritative `WorldState` directly inside `apps/holtburger-3d/src-tauri` rather than widening shared crates prematurely.
+- Carry real landblock, derived outdoor cell, indoor-vs-outdoor, and location-string facts in the runtime batch now; defer browser-mode location input policy to the next frontend-focused phase.
+- Use one runtime notification event with typed topics rather than separate lifecycle-only and runtime-only transports.
+- Narrow the next phase to frontend store extraction and browser-flow wiring because the shell and mode model already exist.
 
 #### Verification Log
 
@@ -1270,6 +1405,9 @@ Mitigation:
 - 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the new browser-safe Tauri bridge.
 - 2026-04-26: `npm run build` in `apps/holtburger-3d` passed with the Phase 1 boundary panel and bridge code.
 - 2026-04-26: `npm run tauri build -- --debug` in `apps/holtburger-3d` passed and produced an integrated debug app build.
+- 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after replacing the app-local runtime DTO stub generator with a managed authoritative `WorldState` and streamed runtime notifications.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after widening the frontend contracts to carry runtime residency, richer entity snapshots, and runtime notification merging.
+- 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed after switching the bridge to a unified runtime notification event and removing stale lifecycle-event-only code.
 
 #### Phase Review Log
 
@@ -1279,11 +1417,14 @@ Mitigation:
 - 2026-04-26: Phase 1 completed with app-local Rust host modules for typed lifecycle, runtime, view-model, and asset DTOs; a small adapter layer; a startup runtime lifecycle event; and matching frontend bridge code that can consume the boundary under Tauri or fall back cleanly in browser preview.
 - 2026-04-26: Phase 1 did not require any shared-crate changes. That remains the right call until real runtime or content integration proves a reusable lower-level seam.
 - 2026-04-26: Gate review resolved in favor of moving to Phase 2 with the current app-local adapter boundary intact.
+- 2026-04-26: Phase 2 completed with a small authoritative app-local `WorldState`, real runtime-body-backed entity snapshots, residency metadata, typed runtime notifications, and frontend inspection of streamed runtime batches without same-turn reads.
+- 2026-04-26: Phase 2 did not require shared-crate changes. Using existing `holtburger-world` constructors and runtime-body view surfaces was sufficient for this proof, which strengthens the case for keeping the seam app-local until live session or content pressure says otherwise.
+- 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 3 focused on frontend store extraction and browser-mode flow wiring, rather than redoing the app shell work that is already in place.
 
 #### Open Execution Questions
 
-- Does the initial `RuntimeEntitySnapshot` need landcell or residency data in Phase 1, or can that wait until the browser-mode runtime feed is live?
-- Should the first asset-path proof use landblock metadata, world object appearance references, or a smaller synthetic asset fixture?
+- Should the first browser-mode location input start from raw coordinate entry, current-runtime residency anchors, or a thin list of canned debug destinations?
+- Should the first asset-path proof graduate from diagnostic metadata to real payload lookup using the Phase 2 runtime `gfx/*` appearance identifiers, or should it stay synthetic until the asset worker lands?
 
 ## Remaining Open Questions
 
@@ -1301,4 +1442,4 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phase 1 is complete. The next implementation step is Phase 2: replace the Phase 1 stub runtime payloads with a small but real authoritative runtime feed, then pressure-test whether residency, landcell, and asset-identity seams still belong inside the app-local adapter or should move into shared crates.
+Phase 2 is complete. The next implementation step is the narrowed Phase 3: extract an explicit frontend game-state or view-model store from the root shell, add the first browser-mode location-input flow on top of the live runtime residency feed, and keep pressure-testing whether browser policy stays frontend-owned while the runtime and asset seams remain app-local.

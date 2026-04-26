@@ -90,6 +90,8 @@ This phase matters because the TUI is not the end state, but the underlying stac
 
 With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current expectation is a Tauri-based client with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
 
+The current scoping direction for that work lives in [docs/plans/holtburger-3d-scoping-plan.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-scoping-plan.md).
+
 The TUI is therefore not a side project or disposable prototype. It is the shortest path to validating the complete client architecture, and it should continue to produce useful standalone value even after the 3D client exists.
 
 ## Disclaimers

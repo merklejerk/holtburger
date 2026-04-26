@@ -1175,6 +1175,8 @@ Resolved gate review:
 
 Purpose: prove the asset-side ownership model early enough that it does not get muddled with runtime events later.
 
+Status: completed on 2026-04-26.
+
 Deliverables:
 
 - implement the dedicated logical asset channel across the boundary
@@ -1203,13 +1205,22 @@ Resolved scope adjustment after Phase 4:
 - Keep Phase 5 focused on real worker and asset ownership validation. The world shell, camera-hint path, and first authority-sensitive query are already established, so the next architecture risk is whether asset preparation lands without collapsing back into the runtime channel.
 - Keep the current camera-hint seam provisional. Future camera collision, sensors, and similar spatial helpers should prefer expanding shared `SpatialBody` semantics rather than introducing a parallel probe abstraction, but that shared-crate work should wait until a real constraint or solve use case forces the right shape.
 
+Resolved gate review:
+
+- Phase 5 proved the dedicated asset path without widening shared crates. The host snapshot no longer carries asset payloads; runtime state stays on the runtime channel while asset lookup uses its own typed command and overview metadata.
+- The frontend worker now owns CPU-side preparation of a small appearance-manifest payload keyed from real runtime `gfx/*` identifiers. That is enough to prove demand-driven request, Rust response, worker processing, and frontend availability notification without pretending we already have real mesh or terrain decode.
+- Phase 6 should narrow slightly. Asset ownership is now legible enough, so the next pressure test is the runnable browser slice itself: boot the app, exercise both bootstrap and streaming asset requests in situ, and log the awkward seams that still block honest world-shell growth.
+
 ### Phase 6: Runnable Browser Vertical Slice And Gap-Hunting Pass
 
 Purpose: finish with a runnable browser-mode foundation app, then use the app from the top down to expose awkward boundaries that still need to move in Rust or shared crates before client mode wiring expands.
 
+Status: completed on 2026-04-26.
+
 Deliverables:
 
 - run the app as a cohesive vertical slice: host boots, frontend boots, modes exist, browser mode enters a world-facing shell, runtime or world-state feed arrives, asset path works, basic input or query path works
+- exercise the Phase 5 asset path in place, including the first bootstrap lookup plus at least one streaming refresh, so the runnable slice proves the worker and channel split under actual app flow instead of only under unit tests
 - document every awkward fit discovered while integrating from the app shell downward into Rust and shared crates
 - move only the seams that truly belong below the app boundary; keep presentation-shaped policy in `holtburger-3d`
 - leave behind a small backlog of next-step architecture tasks for client mode rather than continuing into feature creep
@@ -1232,6 +1243,135 @@ Post-Phase Assessment:
 - write down the concrete boundary decisions that survived first contact with implementation
 - list the seams that still need to move before client mode expands
 - rewrite the next-step plan based on what the runnable browser slice actually taught us
+
+Resolved gate review:
+
+- Phase 6 produced a runnable browser vertical slice with a real app shell, browser-mode world shell, runtime-to-store flow, worker-backed asset preparation, and authority-sensitive input plumbing. The browser preview now also emits synthetic runtime notifications so the vertical slice can exercise bootstrap plus streaming asset refreshes without waiting on a native boot for every frontend iteration.
+- The slice stayed app-local. No shared-crate seams moved in Phase 6, which is still the right call because the newly exposed pressure points are frontend scene ownership, asset-cache policy, and real asset decode rather than missing reusable Rust abstractions.
+- The current slice is still visually primitive and semantically partial. It remains outdoor-residency-anchored with indoor asset identifiers flowing through the same channel, but it does not yet own a real local scene-membership model for env cells or visible-cell expansion.
+- The next schedule should shift toward the world-shell blockers the runnable slice exposed. Prioritize local scene residency and visible-cell semantics first, then landblock geometry decode and first terrain rendering, and leave shared `SpatialBody` expansion for the first concrete non-world constraint use case rather than treating it as the immediate next phase.
+
+### Roadmap Adjustment: Incremental Evolution Into A Proper World Browser
+
+The current app should now stop behaving like a host-boundary dashboard that happens to contain a world shell.
+
+The near-term product direction should be:
+
+- keep the current diagnostics and boundary inspection surfaces available, but demote them to support tooling rather than the center of the app experience
+- make `WorldDisplay` evolve from a debug marker viewport into the primary browser-mode surface
+- target a visibly primitive but recognizably world-browser-shaped milestone as soon as possible, even before indoor scene semantics, richer object rendering, or mature asset cache policy land
+
+Recommended incremental path from here:
+
+1. define the first honest outdoor local scene-context model, so browser mode can answer "which landblock or chunk should exist in the scene right now?" instead of only showing runtime markers
+2. identify the real outdoor terrain or landblock geometry source, payload shape, and decode seam before promising visible terrain
+3. use that outdoor-first scene context plus the proven decode seam to drive the first barebones terrain payload request and render one real landblock or terrain mesh in `WorldDisplay`
+4. keep entity markers, boundary telemetry, and debug overlays as optional companions to the terrain slice instead of the main visual product
+5. expand from that outdoor terrain slice into explicit indoor env-cell / visible-cell semantics rather than pretending one flat scene model will scale to both cases
+
+This means the next work should optimize for visible world progress, not more dashboard depth. A primitive terrain viewer with debug overlays is a better near-term target than a richer inspection panel with no actual terrain.
+
+### Mapped Next Phases After Phase 6
+
+The appended follow-up work should now be treated as an explicit execution roadmap rather than a loose backlog.
+
+#### Phase 7: Outdoor Scene Context And Terrain Ground Truth
+
+Adapts and narrows the existing local scene residency follow-up into the first immediate milestone, while explicitly stopping before promising terrain rendering.
+
+Purpose:
+
+- make browser mode answer the outdoor-first question "which landblock or terrain chunk should exist in the local scene right now?"
+- identify the authoritative source and minimum decode seam for outdoor terrain or landblock geometry
+- leave the app with an honest outdoor scene context plus a proven terrain-facing decode plan, even if no terrain is rendered yet
+
+Primary deliverables:
+
+- the first app-local outdoor scene-context model for `WorldDisplay`
+- ground-truth references and an explicit app-local contract for the first terrain or landblock geometry payload
+- a clear decision about where the first decode step belongs: Rust, JavaScript, or a split path
+
+Acceptance criteria:
+
+- the app can explain which outdoor chunk or landblock should be locally present and why
+- the first terrain or landblock geometry source is identified against ACE and ACViewer ground truth rather than guessed from placeholder code
+- the next phase can implement first terrain rendering without first reopening the source-data and decode-location question
+
+#### Phase 8: First Terrain Payload And Barebones World Browser Render
+
+Turns the Phase 7 scene-context and decode findings into the first visibly terrain-backed browser milestone.
+
+Purpose:
+
+- request, decode, and render one real outdoor terrain or landblock geometry slice in `WorldDisplay`
+- make the browser read as a primitive world viewer instead of a marker-only viewport while keeping diagnostics available
+
+Primary deliverables:
+
+- one terrain or landblock geometry payload traced from source data into the frontend render path
+- a barebones world-browser milestone where terrain is visible even if objects, materials, and indoor semantics are still primitive
+- debug markers and boundary telemetry retained as optional overlays rather than the main visual product
+
+Acceptance criteria:
+
+- browser mode renders at least one real terrain or landblock geometry slice
+- the terrain slice is driven by explicit local outdoor scene context rather than an ad hoc hardcoded mesh
+- `WorldDisplay` reads as a primitive world surface first and a diagnostics surface second
+
+#### Phase 9: Terrain Coverage And Browser-Facing World Shell Consolidation
+
+Extends the first terrain slice into something that behaves more like a primitive world browser and less like a diagnostics viewport.
+
+Purpose:
+
+- broaden from one proof chunk to a small outdoor browsing loop with camera movement, neighboring coverage, and clearer scene ownership
+- consolidate the app so browser mode leads with the world surface while diagnostics move into supporting panels or overlays
+
+Primary deliverables:
+
+- modest expansion beyond the first terrain chunk, enough to make movement through outdoor space legible
+- a clearer separation between primary world-view UI and secondary diagnostics
+- initial asset-cache and terrain-refresh policy that is still simple but no longer purely single-slice
+
+Acceptance criteria:
+
+- the app reads as a primitive outdoor world browser first and a diagnostics surface second
+- moving through the outdoor scene can trigger at least one additional terrain or scene refresh beyond the initial slice
+- `WorldDisplay` remains the primary browser-mode surface
+
+#### Phase 10: Indoor Scene Membership And Visible-Cell Expansion
+
+Adapts the remaining local scene residency follow-up into the point where indoor representation stops being an acknowledged gap and becomes a real model.
+
+Purpose:
+
+- extend the outdoor-first scene model into an honest indoor env-cell / visible-cell scene-membership model
+- stop implying that one flat outdoor chunk model can scale to both outdoor and indoor spaces
+
+Primary deliverables:
+
+- explicit indoor scene-membership semantics in app code and docs
+- a clear mapping between runtime residency facts, local scene context, and visible-cell-driven representation
+- a follow-up-ready split between outdoor terrain coverage and indoor local-scene visibility
+
+Acceptance criteria:
+
+- the code and docs can explain why an indoor scene element is locally present
+- outdoor and indoor local scene membership are distinct concepts, not one overloaded label
+- the terrain viewer path from earlier phases is still coherent after indoor semantics are introduced
+
+#### Phase 11: Shared SpatialBody Constraint And Non-World Body Semantics
+
+Keep the existing shared `SpatialBody` expansion as a later follow-up phase rather than forcing it ahead of visible world progress.
+
+Purpose:
+
+- introduce the first real shared non-world constraint use case, such as camera collision or sensor-style helpers, only once the browser has enough real world geometry and scene semantics to justify it
+
+Acceptance criteria:
+
+- the first concrete non-world constraint use case is proven against shared `SpatialBody` semantics
+- the phase is driven by a real browser need instead of speculative shared-crate design
 
 ### Appended Fast-Follow: Shared SpatialBody Constraint And Non-World Body Semantics
 
@@ -1514,8 +1654,8 @@ Mitigation:
 - [x] add `WorldDisplay` and the browser-mode world shell with placeholder render host
 - [x] add camera-position hints from frontend to Rust
 - [x] add the first authority-sensitive query for ray picks
-- [ ] validate the asset worker pattern
-- [ ] run the browser vertical slice and log awkward seams for follow-up
+- [x] validate the asset worker pattern
+- [x] run the browser vertical slice and log awkward seams for follow-up
 
 #### Decisions Log
 
@@ -1539,6 +1679,13 @@ Mitigation:
 - Let `WorldDisplay` own the first app-local camera-hint throttle and authority-sensitive debug-pick path, while keeping browser destination selection and routing policy in the frontend store.
 - Treat the current app-local camera-hint DTO as provisional. When real shared constraint solving arrives, prefer expanding shared `SpatialBody` semantics for non-world bodies over introducing a parallel spatial-probe abstraction.
 - Treat the current browser shell’s residency model as provisional. The first runnable slice may remain outdoor-leaning, but later world work should distinguish outdoor landblock residency from indoor env-cell / visible-cell scene membership explicitly.
+- Keep asset payloads out of the host boundary snapshot once the dedicated asset path exists. Runtime snapshots should carry authoritative world facts only; asset preparation should start from demand-driven lookups keyed by runtime-owned appearance identifiers.
+- Let the Phase 5 worker own CPU-side preparation of small appearance-manifest intermediates while keeping final renderer or GPU resource creation on the main render side.
+- Keep browser preview capable of synthetic runtime notifications so the frontend can exercise runtime-driven streaming asset flows without a native boot, while still treating Tauri runs as the real IPC and host-lifecycle proof.
+- Preserve prepared-asset observations by priority separately from bounded asset activity history so the vertical-slice report can remember bootstrap and streaming facts even after the scrolling log rolls over.
+- Treat current appearance-manifest payloads as explicit stubs. They are useful worker intermediates, but real mesh, texture, terrain decode, and scene-wide cache policy remain follow-up work.
+- Shift the browser-mode product target from "debuggable world shell" toward "primitive but real world browser". Diagnostics should support that surface, not define it.
+- Treat barebones outdoor terrain rendering as the next visible milestone, even if indoor scene membership, richer objects, and mature cache policy remain deferred.
 
 #### Verification Log
 
@@ -1566,6 +1713,18 @@ Mitigation:
 - 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after adding app-local camera-hint commands and authority-sensitive debug pick resolution.
 - 2026-04-26: `npm run lint:rust` in `apps/holtburger-3d` passed with the new app-local Phase 4 host contracts and adapter tests.
 - 2026-04-26: `npm run build` in `apps/holtburger-3d` passed after the Phase 4 world shell and typed camera-hint / ray-pick integration.
+- 2026-04-26: `npm run test:ts` in `apps/holtburger-3d` passed after splitting asset lookup out of the host snapshot and adding the Phase 5 asset-channel plus worker tests.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after wiring the dedicated asset channel into the frontend store, app shell, and worker-backed preparation path.
+- 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after reshaping the app-local asset lookup contract around typed appearance manifests and dedicated asset-channel overview metadata.
+- 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the new Phase 5 asset-channel controller, asset worker, and prepared-asset frontend state.
+- 2026-04-26: `npm run lint:rust` in `apps/holtburger-3d` passed after tightening the Phase 5 asset-channel host contract and manifest builder.
+- 2026-04-26: `npm run build` in `apps/holtburger-3d` passed with the new dedicated asset channel and worker bundle.
+- 2026-04-26: `npm run test:ts` in `apps/holtburger-3d` passed after adding the Phase 6 browser-preview runtime-notification simulation, asset-activity history, and vertical-slice report tests.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after wiring the Phase 6 vertical-slice report panel and preview runtime streaming path.
+- 2026-04-26: `npm run build` in `apps/holtburger-3d` passed after the Phase 6 vertical-slice telemetry and preview runtime updates.
+- 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed after tightening the Phase 6 preview-runtime and report code paths.
+- 2026-04-26: `npm run tauri:build -- --debug` in `apps/holtburger-3d` passed after the Phase 6 browser vertical-slice work and produced `/home/cluracan/code/holtburger/target/debug/holtburger-3d`.
+- 2026-04-26: Live browser-preview inspection at `http://127.0.0.1:1420/` showed the vertical-slice panel observing both bootstrap asset `gfx/02000001` and streaming asset `gfx/02000003`, plus the current awkward seams for stub payloads, cache policy, and scene membership.
 
 #### Phase Review Log
 
@@ -1584,10 +1743,17 @@ Mitigation:
 - 2026-04-26: Phase 4 completed with a real `WorldDisplay` shell that consumes the frontend store, stages asset-worker ingress, renders mirrored runtime entities in a world-facing debug viewport, and owns the first app-local camera-hint plus authority-sensitive debug-pick path.
 - 2026-04-26: Phase 4 did not require shared-crate changes. The new camera-hint and pick seams are still app-local Tauri host concerns, which keeps renderer-shaped policy and debug-world-shell behavior out of shared crates.
 - 2026-04-26: Gate review resolved in favor of moving to a tightened Phase 5 focused on asset-channel and worker-pattern validation, since the world shell, camera hints, and first authority-sensitive query are already in place.
+- 2026-04-26: Phase 5 completed with a dedicated asset channel that no longer piggybacks on the host snapshot, a worker-owned CPU preparation path for typed appearance-manifest payloads keyed from runtime `gfx/*` identifiers, and frontend asset state that reports availability separately from authoritative runtime state.
+- 2026-04-26: Phase 5 did not require shared-crate changes. The asset path is still app-local and honest about its current scope: it proves channel split and worker ownership without pretending that final render asset decode belongs in shared crates yet.
+- 2026-04-26: Gate review resolved in favor of moving to a slightly tightened Phase 6 focused on the runnable browser vertical slice, including explicit bootstrap-versus-streaming asset-path pressure plus documentation of remaining indoor scene-membership gaps.
+- 2026-04-26: Phase 6 completed with a runnable browser slice that now exposes a vertical-slice report panel, runtime-driven asset activity history, and a browser-preview runtime simulation that proves both bootstrap and streaming asset refreshes through the worker path.
+- 2026-04-26: Phase 6 did not require shared-crate changes. The remaining awkward seams are still app-local: scene cache policy is minimal, appearance payloads are still stubs, and the local world shell still lacks explicit env-cell / visible-cell scene membership.
+- 2026-04-26: Gate review resolved in favor of reordering the appended fast-follow work. The next pressure point is local scene residency and visible-cell semantics, followed by first terrain rendering, while shared `SpatialBody` expansion should wait for the first concrete non-world constraint use case.
 
 #### Open Execution Questions
 
-- Should the first asset-path proof graduate from diagnostic metadata to real payload lookup using the Phase 2 runtime `gfx/*` appearance identifiers, or should it stay synthetic until the asset worker lands?
+- When the slice is exercised under live Tauri instead of browser preview, what additional cache invalidation, worker lifecycle, or IPC backpressure seams will show up that the synthetic preview path does not expose yet?
+- What is the narrowest outdoor-first local scene context that is honest enough to drive first terrain rendering without prematurely locking the client into an outdoor-only worldview?
 
 ## Remaining Open Questions
 
@@ -1606,10 +1772,12 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phase 4 is complete. The next implementation step is the tightened Phase 5: validate the dedicated asset channel and worker pattern with a real worker-owned preparation path while keeping the new world shell, camera-hint path, and debug query seam stable.
+Phase 6 is complete. The next implementation step should be the new Phase 7: outdoor scene context and terrain ground truth. That is the shortest honest path from the current debug-heavy world shell toward a real world browser because we do not yet have landblock geometry parsing or decode location nailed down.
 
 After the browser-foundation phases land, the next appended fast-follow work should likely split in this order:
 
-1. shared `SpatialBody` constraint and non-world body semantics, so camera collision and similar helpers reuse the existing solving domain instead of inventing a second one
-2. local scene residency and visible-cell semantics, so outdoor landblock residency and indoor env-cell visibility stop being conflated in the client’s local world model
-3. landblock geometry decode and first terrain rendering, once the shared asset and spatial seams are stable enough to carry real scene data
+1. Phase 7: outdoor scene context and terrain ground truth
+2. Phase 8: first terrain payload and barebones world browser render
+3. Phase 9: terrain coverage and browser-facing world shell consolidation
+4. Phase 10: indoor scene membership and visible-cell expansion
+5. Phase 11: shared `SpatialBody` constraint and non-world body semantics

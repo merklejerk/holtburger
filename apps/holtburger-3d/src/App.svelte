@@ -1,11 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { appShellState, availableModes } from './app/state';
   import { frontendState } from './app/frontend-state';
+  import {
+    AssetChannelController,
+    createFocusedAssetRequest,
+  } from './lib/assets/asset-channel';
+  import { deriveVerticalSliceReport } from './lib/vertical-slice/report';
   import {
     listenForRuntimeLifecycle,
     readHostBoundarySnapshot,
   } from './lib/host/tauri';
+  import type { AssetPriority, RuntimeBatchDto } from './lib/host/contracts';
   import WorldDisplay from './lib/world-display/WorldDisplay.svelte';
   import BrowserModePage from './pages/BrowserModePage.svelte';
   import ClientModePage from './pages/ClientModePage.svelte';
@@ -19,20 +26,90 @@
     'ray-pick query contract',
   ] as const;
 
+  const verticalSliceReport = $derived(
+    deriveVerticalSliceReport(
+      $frontendState.host.boundarySnapshot,
+      $frontendState.asset,
+    ),
+  );
+
   onMount(() => {
     let dispose = () => {};
+    let disposed = false;
+    const assetChannel = new AssetChannelController();
+
+    async function syncFocusedAsset(
+      runtimeBatch: RuntimeBatchDto | null,
+      selectedEntityId: number | null,
+      priority: AssetPriority,
+    ): Promise<void> {
+      const request = createFocusedAssetRequest(
+        runtimeBatch,
+        selectedEntityId === null
+          ? null
+          : {
+              selectedEntityId,
+              interactionMode: 'inspect',
+              busyState: 'idle',
+            },
+        priority,
+      );
+
+      if (!request) {
+        return;
+      }
+
+      const assetState = get(frontendState).asset;
+      if (
+        assetState.preparedAsset?.request.assetId === request.assetId ||
+        (assetState.activeRequest?.assetId === request.assetId &&
+          assetState.status === 'pending')
+      ) {
+        return;
+      }
+
+      frontendState.markAssetPending(request);
+
+      try {
+        const preparedAsset = await assetChannel.prepareAsset(request);
+        if (!disposed) {
+          frontendState.applyPreparedAsset(preparedAsset);
+        }
+      } catch (error) {
+        if (!disposed) {
+          frontendState.applyAssetError(
+            request,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+    }
 
     void (async () => {
       dispose = await listenForRuntimeLifecycle((notification) => {
         frontendState.applyRuntimeNotification(notification);
+        if (notification.runtimeBatch) {
+          void syncFocusedAsset(
+            notification.runtimeBatch,
+            notification.viewModelFeed?.selectedEntityId ?? null,
+            'streaming',
+          );
+        }
       });
 
       const snapshot = await readHostBoundarySnapshot();
       frontendState.loadSnapshot(snapshot);
+      await syncFocusedAsset(
+        snapshot.runtimeBatch,
+        snapshot.viewModelFeed.selectedEntityId ?? null,
+        'bootstrap',
+      );
     })();
 
     return () => {
+      disposed = true;
       dispose();
+      assetChannel.dispose();
     };
   });
 </script>
@@ -173,15 +250,31 @@
 
           <section>
             <h3>Asset channel</h3>
+            <dl class="data-list compact-data-list">
+              <div>
+                <dt>Channel</dt>
+                <dd>{$frontendState.asset.channel}</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd>{$frontendState.asset.status}</dd>
+              </div>
+              <div>
+                <dt>Request</dt>
+                <dd>{$frontendState.asset.activeRequest?.assetId ?? 'none yet'}</dd>
+              </div>
+            </dl>
             <p>
-              {$frontendState.host.boundarySnapshot.assetResponse.assetId} via {$frontendState.host.boundarySnapshot.assetResponse.payloadKind}
+              {$frontendState.asset.preparedAsset?.summary ?? $frontendState.asset.errorMessage ?? 'Waiting for the first demand-driven asset preparation result.'}
             </p>
-            <pre>{JSON.stringify($frontendState.host.boundarySnapshot.assetResponse.payload, null, 2)}</pre>
+            {#if $frontendState.asset.preparedAsset}
+              <pre>{JSON.stringify($frontendState.asset.preparedAsset.response.payload, null, 2)}</pre>
+            {/if}
           </section>
         </div>
 
         <section class="boundary-notes">
-          <h3>Boundary notes</h3>
+          <h3>Boundary capabilities</h3>
           <ul>
             {#each $frontendState.host.boundarySnapshot.overview.notes as note}
               <li>{note}</li>
@@ -205,9 +298,54 @@
         hostStatus={$frontendState.host.boundaryStatus}
         runtimeBatch={$frontendState.host.boundarySnapshot?.runtimeBatch ?? null}
         viewModelFeed={$frontendState.host.boundarySnapshot?.viewModelFeed ?? null}
-        assetResponse={$frontendState.host.boundarySnapshot?.assetResponse ?? null}
+        assetState={$frontendState.asset}
         browserDestination={$frontendState.browserMode.destination}
       />
+    </article>
+
+    <article class="panel panel-wide">
+      <header class="panel-header">
+        <div>
+          <p class="kicker">Vertical slice</p>
+          <h2>{verticalSliceReport.headline}</h2>
+        </div>
+        <span class="badge">{$frontendState.asset.history.length} asset events</span>
+      </header>
+
+      <p>{verticalSliceReport.runtimeSummary}</p>
+      <p>{verticalSliceReport.assetSummary}</p>
+
+      <div class="boundary-grid">
+        <section>
+          <h3>Observed flows</h3>
+          <ul>
+            {#each verticalSliceReport.observedFlows as flow}
+              <li>{flow}</li>
+            {/each}
+          </ul>
+        </section>
+
+        <section>
+          <h3>Recent asset activity</h3>
+          <ul>
+            {#each [...$frontendState.asset.history].reverse() as activity}
+              <li>
+                <strong>{activity.priority}</strong>
+                {` ${activity.status} ${activity.assetId} via ${activity.channel}`}
+              </li>
+            {/each}
+          </ul>
+        </section>
+
+        <section>
+          <h3>Awkward seams</h3>
+          <ul>
+            {#each verticalSliceReport.awkwardSeams as seam}
+              <li>{seam}</li>
+            {/each}
+          </ul>
+        </section>
+      </div>
     </article>
 
     <article class="panel">

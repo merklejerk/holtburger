@@ -74,6 +74,7 @@ export interface RuntimeNotificationEnvelopeDto {
 }
 
 export interface HostBoundaryOverviewDto {
+	assetChannel: string;
 	runtimeChannel: string;
 	runtimeNotificationEvent: string;
 	runtimeLifecycleTopic: string;
@@ -127,6 +128,5 @@ export interface HostBoundarySnapshot {
 	lifecycleState: LifecycleStateDto;
 	runtimeBatch: RuntimeBatchDto;
 	viewModelFeed: FrontendStateFeedDto;
-	assetResponse: AssetLookupResponseDto;
 	overview: HostBoundaryOverviewDto;
 }

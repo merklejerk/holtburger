@@ -1,7 +1,7 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { AppModeId } from "../../app/modes";
+import type { AssetChannelState } from "../assets/types";
 import type {
-	AssetLookupResponseDto,
 	CameraHintAckDto,
 	CameraHintDto,
 	FrontendStateFeedDto,
@@ -41,7 +41,7 @@ interface WorldDisplayModelInput {
 	hostStatus: string;
 	runtimeBatch: RuntimeBatchDto | null;
 	viewModelFeed: FrontendStateFeedDto | null;
-	assetResponse: AssetLookupResponseDto | null;
+	assetState: AssetChannelState;
 	browserDestination: BrowserLocationSelection | null;
 	cameraAck: CameraHintAckDto | null;
 	rayPickResponse: RayPickResponseDto | null;
@@ -60,7 +60,7 @@ export function deriveWorldDisplayModel({
 	hostStatus,
 	runtimeBatch,
 	viewModelFeed,
-	assetResponse,
+	assetState,
 	browserDestination,
 	cameraAck,
 	rayPickResponse,
@@ -75,9 +75,7 @@ export function deriveWorldDisplayModel({
 			renderCacheSummary: hostStatus,
 			inputSummary:
 				"Camera hints and authority-sensitive picks activate once runtime data arrives.",
-			assetSummary: assetResponse
-				? `Asset worker ingress is staged around ${assetResponse.assetId}.`
-				: "Asset worker ingress is waiting for the next runtime-backed asset reference.",
+			assetSummary: deriveAssetSummary(assetState),
 			entities: [],
 		};
 	}
@@ -101,11 +99,25 @@ export function deriveWorldDisplayModel({
 			: (rayPickResponse?.summary ??
 				cameraAck?.summary ??
 				"Viewport input is ready to send camera hints and authoritative debug picks."),
-		assetSummary: assetResponse
-			? `Asset worker ingress is staged around ${assetResponse.assetId} via ${assetResponse.payloadKind}.`
-			: "Asset worker ingress is waiting for the next demand-driven asset response.",
+			assetSummary: deriveAssetSummary(assetState),
 		entities: projectDebugEntities(runtimeBatch.entities, selectedEntityId),
 	};
+}
+
+function deriveAssetSummary(assetState: AssetChannelState): string {
+	if (assetState.status === "error") {
+		return assetState.errorMessage ?? "Asset preparation failed.";
+	}
+
+	if (assetState.status === "pending") {
+		return `Asset worker is preparing ${assetState.activeRequest?.assetId ?? "the next request"} on the ${assetState.channel} channel.`;
+	}
+
+	if (assetState.preparedAsset) {
+		return `${assetState.preparedAsset.summary} Channel: ${assetState.channel}.`;
+	}
+
+	return "Asset worker ingress is waiting for the next demand-driven asset response.";
 }
 
 export function normalizeViewportPoint(

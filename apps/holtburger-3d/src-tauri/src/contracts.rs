@@ -140,6 +140,7 @@ pub struct RuntimeNotificationEnvelopeDto {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostBoundaryOverviewDto {
+    pub asset_channel: &'static str,
     pub runtime_channel: &'static str,
     pub runtime_notification_event: &'static str,
     pub runtime_lifecycle_topic: &'static str,

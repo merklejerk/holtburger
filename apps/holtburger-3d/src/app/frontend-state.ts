@@ -9,7 +9,14 @@ import {
 	updateBrowserDraft,
 	type BrowserModeState,
 } from "./browser-mode";
+import {
+	createInitialAssetChannelState,
+	type AssetActivityRecord,
+	type AssetChannelState,
+	type PreparedAssetRecord,
+} from "../lib/assets/types";
 import type {
+	AssetLookupRequestDto,
 	HostBoundarySnapshot,
 	LifecycleStateDto,
 	RuntimeNotificationEnvelopeDto,
@@ -31,11 +38,13 @@ export interface ModeState {
 
 export interface FrontendAppState {
 	host: HostConnectionState;
+	asset: AssetChannelState;
 	browserMode: BrowserModeState;
 	mode: ModeState;
 }
 
 const DEFAULT_BOUNDARY_STATUS = "Loading host boundary...";
+const MAX_ASSET_ACTIVITY = 8;
 
 export function createInitialFrontendState(): FrontendAppState {
 	return reconcileModeState({
@@ -44,6 +53,7 @@ export function createInitialFrontendState(): FrontendAppState {
 			latestRuntimeNotification: null,
 			boundaryStatus: DEFAULT_BOUNDARY_STATUS,
 		},
+			asset: createInitialAssetChannelState(),
 		browserMode: createBrowserModeState(),
 		mode: createModeState(
 			"browser",
@@ -140,6 +150,72 @@ export function createFrontendStateStore() {
 				}),
 			);
 		},
+		markAssetPending(request: AssetLookupRequestDto): void {
+			update((state) => ({
+				...state,
+				asset: {
+					...state.asset,
+					status: "pending",
+					activeRequest: request,
+					errorMessage: null,
+					history: appendAssetActivity(state.asset.history, {
+						requestId: request.requestId,
+						assetId: request.assetId,
+						priority: request.priority,
+						status: "requested",
+						channel: state.asset.channel,
+						summary: `Queued ${request.assetId} for ${request.priority} preparation.`,
+						timestamp: new Date().toISOString(),
+					}),
+				},
+			}));
+		},
+		applyPreparedAsset(asset: PreparedAssetRecord): void {
+			update((state) => ({
+				...state,
+				asset: {
+					...state.asset,
+					status: "ready",
+					activeRequest: asset.request,
+					preparedAsset: asset,
+					preparedByPriority: {
+						...state.asset.preparedByPriority,
+						[asset.request.priority]: asset,
+					},
+					lastResponse: asset.response,
+					errorMessage: null,
+					history: appendAssetActivity(state.asset.history, {
+						requestId: asset.request.requestId,
+						assetId: asset.request.assetId,
+						priority: asset.request.priority,
+						status: "prepared",
+						channel: state.asset.channel,
+						summary: asset.summary,
+						timestamp: asset.preparedAt,
+					}),
+				},
+			}));
+		},
+		applyAssetError(request: AssetLookupRequestDto, errorMessage: string): void {
+			update((state) => ({
+				...state,
+				asset: {
+					...state.asset,
+					status: "error",
+					activeRequest: request,
+					errorMessage,
+					history: appendAssetActivity(state.asset.history, {
+						requestId: request.requestId,
+						assetId: request.assetId,
+						priority: request.priority,
+						status: "failed",
+						channel: state.asset.channel,
+						summary: errorMessage,
+						timestamp: new Date().toISOString(),
+					}),
+				},
+			}));
+		},
 		useRuntimeResidencyDestination(): void {
 			update((state) => {
 				const residency = state.host.boundarySnapshot?.runtimeBatch.residency;
@@ -175,6 +251,10 @@ function applyLoadedSnapshot(
 				snapshot.source === "tauri"
 					? "Connected to the Tauri host boundary with a live authoritative runtime feed."
 					: "Showing browser-preview fallback data until the Tauri runtime is active.",
+		},
+		asset: {
+			...state.asset,
+			channel: snapshot.overview.assetChannel,
 		},
 		browserMode: seedBrowserDraftFromResidency(
 			state.browserMode,
@@ -245,4 +325,11 @@ function createModeState(
 		activePageId,
 		routingReason,
 	};
+}
+
+function appendAssetActivity(
+	history: AssetActivityRecord[],
+	entry: AssetActivityRecord,
+): AssetActivityRecord[] {
+	return [...history, entry].slice(-MAX_ASSET_ACTIVITY);
 }

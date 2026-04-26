@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+	AssetLookupRequestDto,
+	AssetLookupResponseDto,
 	CameraHintAckDto,
 	CameraHintDto,
 	FrontendStateFeedDto,
+	HostBoundaryOverviewDto,
 	LifecycleStateDto,
 	RayPickResponseDto,
 	RuntimeBatchDto,
@@ -62,6 +65,38 @@ describe("host contracts", () => {
 			"100.40S, 101.55W, 1.0Z",
 		);
 		expect(notification.viewModelFeed?.interactionMode).toBe("inspect");
+	});
+
+	it("keeps the asset channel contract distinct from runtime snapshot typing", () => {
+		const request: AssetLookupRequestDto = {
+			requestId: "bootstrap-asset",
+			assetId: "gfx/02000001",
+			priority: "bootstrap",
+		};
+		const response: AssetLookupResponseDto = {
+			requestId: request.requestId,
+			assetId: request.assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "appearance-manifest",
+				residencyKind: "outdoor-landblock",
+			},
+		};
+		const overview: HostBoundaryOverviewDto = {
+			assetChannel: "asset",
+			runtimeChannel: "runtime",
+			runtimeNotificationEvent: "runtime:notification",
+			runtimeLifecycleTopic: "lifecycle.state",
+			runtimeBatchCommand: "get_runtime_batch",
+			assetLookupCommand: "lookup_asset",
+			notes: [],
+		};
+
+		expect(overview.assetChannel).toBe("asset");
+		expect(response.assetId).toBe(request.assetId);
+		expect(response.payload).toMatchObject({
+			kind: "appearance-manifest",
+		});
 	});
 
 	it("keeps camera-hint and authority-sensitive pick contracts typed", () => {

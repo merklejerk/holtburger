@@ -969,6 +969,8 @@ The plan is intentionally allowed to change at those gates. That is a feature, n
 
 Purpose: create the app’s physical home in the repo and freeze the smallest contract list needed to start coding without prematurely designing the whole client.
 
+Status: completed on 2026-04-25.
+
 Deliverables:
 
 - create `apps/holtburger-3d/` as the app root
@@ -984,6 +986,10 @@ Deliverables:
   - the first authority-sensitive query shape for ray picks
   - the `WorldDisplay` boundary between shared world presentation infrastructure and mode-specific state sources
 
+Completed artifact:
+
+- [docs/plans/holtburger-3d-phase-0-contract-worksheet.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-phase-0-contract-worksheet.md)
+
 Acceptance Criteria:
 
 - the repo has a stable location for the new app
@@ -996,6 +1002,12 @@ Phase Gate Review Before Phase 1:
 - confirm the app layout still feels right once the real toolchains are wired up
 - confirm the initial contract worksheet is small enough to start implementation rather than pretending to solve the whole client
 - decide whether any contract areas should be deferred, split, or reworded before Rust adapter work begins
+
+Resolved gate review:
+
+- The colocated `apps/holtburger-3d` layout held up in practice. Keeping the Svelte app and `src-tauri` host under one app root, with an app-local Tauri CLI, left the ownership model explicit and avoided creating a second project root.
+- The worksheet stayed small enough to start implementation. It names the minimum contract vocabulary without trying to lock in animation semantics, final asset payload typing, or mature routing details.
+- The following areas are explicitly deferred before Phase 1: named location pickers, detailed asset payload typing, camera-hint throttling policy, and nested page selection driven from Rust. Phase 1 should treat those as app-local concerns unless a reusable shared-crate seam becomes obvious.
 
 ### Phase 1: Bottom-Up Rust Adapter And Host Boundary
 
@@ -1212,9 +1224,9 @@ Mitigation:
 
 #### Task Checklist
 
-- [ ] create `apps/holtburger-3d` app root and workspace membership
-- [ ] scaffold `src-tauri` host and Svelte-plus-TypeScript frontend
-- [ ] write the initial frontend contract worksheet
+- [x] create `apps/holtburger-3d` app root and workspace membership
+- [x] scaffold `src-tauri` host and Svelte-plus-TypeScript frontend
+- [x] write the initial frontend contract worksheet
 - [ ] implement typed lifecycle feed across the boundary
 - [ ] define browser-mode location input and world-load flow
 - [ ] implement the first runtime snapshot or delta feed
@@ -1234,19 +1246,26 @@ Mitigation:
 - Keep raw or lightly decoded asset handling frontend-first unless profiling proves a specific Rust-side need.
 - Colocate the Svelte-plus-TypeScript app with the Tauri app under `apps/holtburger-3d`.
 - Use browser mode as the first implementation target and treat client mode as a second consumer of the shared `WorldDisplay` foundation.
+- Use an app-local Tauri CLI and lint scripts under `apps/holtburger-3d` rather than depending on global tooling.
+- Start browser-mode entry with direct coordinate input only; defer named location picking until a real runtime feed exists.
+- Keep lifecycle mode hints advisory and keep nested page selection frontend-local in Phase 0.
 
 #### Verification Log
 
-- Pending implementation.
+- 2026-04-25: `npm run lint:ts` in `apps/holtburger-3d` passed.
+- 2026-04-25: `npm run check` in `apps/holtburger-3d` passed.
+- 2026-04-25: `npm run check:rust` in `apps/holtburger-3d` passed.
+- 2026-04-25: `npm run lint:rust` in `apps/holtburger-3d` passed.
 
 #### Phase Review Log
 
-- Pending implementation.
+- 2026-04-25: Phase 0 completed. The app root, workspace membership, frontend scaffold, Tauri host scaffold, TS linting, Rust clippy wiring, and initial contract worksheet are all in place.
+- 2026-04-25: The first Rust validation failed on a missing Tauri icon input, then on a non-RGBA PNG. Both were resolved locally by wiring a valid RGBA icon into `src-tauri/icons/icon.png`.
+- 2026-04-25: Gate review resolved in favor of moving to Phase 1 with the current layout and worksheet scope.
 
 #### Open Execution Questions
 
-- Should browser mode start from a direct coordinate entry, a named location picker, or both?
-- What exact runtime snapshot shape is small enough for Phase 2 while still exercising the right shared-crate seams?
+- Does the initial `RuntimeEntitySnapshot` need landcell or residency data in Phase 1, or can that wait until the browser-mode runtime feed is live?
 - Should the first asset-path proof use landblock metadata, world object appearance references, or a smaller synthetic asset fixture?
 
 ## Remaining Open Questions
@@ -1265,4 +1284,4 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-The next concrete planning artifact should be the Phase 0 contract worksheet, captured either in this document or in a short sibling doc, naming the exact frontend contracts for runtime-body snapshots and deltas, authoritative state feeds, demand-driven asset lookup, camera-position hints, mode-driving lifecycle state, and the initial Rust-to-Tauri batching shape.
+Phase 0 is complete. The next implementation step is Phase 1: build the thinnest Rust adapter and Tauri host boundary that can publish typed lifecycle, runtime, and asset services against the worksheet in [docs/plans/holtburger-3d-phase-0-contract-worksheet.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-phase-0-contract-worksheet.md).

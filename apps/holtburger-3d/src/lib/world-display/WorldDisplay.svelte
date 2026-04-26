@@ -3,13 +3,8 @@
 
   import type { BrowserLocationSelection } from '../../app/browser-mode';
   import type { AppModeId } from '../../app/modes';
-  import type {
-    AssetLookupResponseDto,
-    CameraHintAckDto,
-    FrontendStateFeedDto,
-    RayPickResponseDto,
-    RuntimeBatchDto,
-  } from '../host/contracts';
+  import type { AssetChannelState } from '../assets/types';
+  import type { CameraHintAckDto, FrontendStateFeedDto, RayPickResponseDto, RuntimeBatchDto } from '../host/contracts';
   import { resolveRayPick, submitCameraHint } from '../host/tauri';
   import {
     buildCameraHint,
@@ -26,7 +21,7 @@
     hostStatus,
     runtimeBatch,
     viewModelFeed,
-    assetResponse,
+    assetState,
     browserDestination,
   }: {
     activeMode: AppModeId;
@@ -34,7 +29,7 @@
     hostStatus: string;
     runtimeBatch: RuntimeBatchDto | null;
     viewModelFeed: FrontendStateFeedDto | null;
-    assetResponse: AssetLookupResponseDto | null;
+    assetState: AssetChannelState;
     browserDestination: BrowserLocationSelection | null;
   } = $props();
 
@@ -53,7 +48,7 @@
       hostStatus,
       runtimeBatch,
       viewModelFeed,
-      assetResponse,
+      assetState,
       browserDestination,
       cameraAck,
       rayPickResponse,

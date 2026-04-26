@@ -16,6 +16,7 @@ use crate::contracts::{
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
+pub const ASSET_CHANNEL: &str = "asset";
 pub const RUNTIME_LIFECYCLE_TOPIC: &str = "lifecycle.state";
 pub const RUNTIME_BATCH_TOPIC: &str = "runtime.batch";
 pub const RUNTIME_NOTIFICATION_EVENT: &str = "runtime:notification";
@@ -222,24 +223,64 @@ impl HostBoundaryAdapter {
     }
 
     pub fn asset_lookup(request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        let (residency_kind, debug_primitive, palette_key, notes) =
+            match request.asset_id.as_str() {
+                "gfx/02000001" => (
+                    "outdoor-landblock",
+                    "survey-billboard",
+                    "bronze-scout",
+                    vec![
+                        "Matches the Browser Scout appearance carried by the local player runtime body.",
+                        "This payload is intentionally small but now looks like a real manifest for worker-owned CPU preparation.",
+                    ],
+                ),
+                "gfx/02000002" => (
+                    "outdoor-landblock",
+                    "drudge-proxy-mesh",
+                    "rust-drudge",
+                    vec![
+                        "Matches the Survey Drudge runtime appearance identifier.",
+                        "The asset channel stays separate from runtime notifications even when both cross the same IPC transport.",
+                    ],
+                ),
+                "gfx/02000003" => (
+                    "indoor-env-cell",
+                    "sentinel-proxy-volume",
+                    "dungeon-sentinel",
+                    vec![
+                        "Matches the Dungeon Sentinel runtime appearance identifier.",
+                        "This indoor hint exists so the frontend asset path does not assume one flat outdoor scene bucket.",
+                    ],
+                ),
+                _ => (
+                    "unknown",
+                    "debug-placeholder",
+                    "unknown-asset",
+                    vec![
+                        "Unknown asset identifiers still return a typed manifest so the worker path can stay demand-driven.",
+                    ],
+                ),
+            };
+
         AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id.clone(),
             payload_kind: AssetPayloadKindDto::Json,
             payload: serde_json::json!({
+                "kind": "appearance-manifest",
                 "assetId": request.asset_id,
                 "priority": request.priority,
-                "kind": "diagnostic-asset-metadata",
-                "notes": [
-                    "Asset lookup remains demand-driven while the runtime channel moves to authoritative world-backed snapshots.",
-                    "Shared crate seams are not widened until real runtime or content pressure proves they belong below the app boundary."
-                ]
+                "residencyKind": residency_kind,
+                "debugPrimitive": debug_primitive,
+                "paletteKey": palette_key,
+                "notes": notes
             }),
         }
     }
 
     pub fn boundary_overview() -> HostBoundaryOverviewDto {
         HostBoundaryOverviewDto {
+            asset_channel: ASSET_CHANNEL,
             runtime_channel: RUNTIME_CHANNEL,
             runtime_notification_event: RUNTIME_NOTIFICATION_EVENT,
             runtime_lifecycle_topic: RUNTIME_LIFECYCLE_TOPIC,
@@ -249,11 +290,11 @@ impl HostBoundaryAdapter {
                 "DTOs live in the app-local host crate, not shared crates.".to_string(),
                 "Lifecycle state and runtime batches are emitted over one runtime notification event with typed topics."
                     .to_string(),
-                "Phase 2 runtime batches are built from an authoritative WorldState plus runtime-body views instead of hardcoded DTO stubs."
+                "Runtime batches are built from the app-local authoritative WorldState plus runtime-body views."
                     .to_string(),
-                "Phase 4 adds app-local camera hints and authority-sensitive debug picks without moving browser policy back into Rust."
+                "Camera hints and authority-sensitive debug picks stay app-local host concerns instead of shared-crate contracts."
                     .to_string(),
-                "Asset lookup still returns typed diagnostic metadata so the asset channel remains demand-driven while content plumbing catches up."
+                "Demand-driven asset lookups use the dedicated asset channel rather than piggybacking on runtime snapshots."
                     .to_string(),
             ],
         }
@@ -562,16 +603,18 @@ mod tests {
         });
 
         assert_eq!(overview.runtime_channel, RUNTIME_CHANNEL);
+        assert_eq!(overview.asset_channel, ASSET_CHANNEL);
         assert_eq!(overview.runtime_notification_event, RUNTIME_NOTIFICATION_EVENT);
         assert_eq!(overview.runtime_lifecycle_topic, RUNTIME_LIFECYCLE_TOPIC);
         assert_eq!(overview.runtime_batch_command, "get_runtime_batch");
         assert_eq!(overview.asset_lookup_command, "lookup_asset");
-        assert!(overview.notes.iter().any(|note| note.contains("authoritative WorldState")));
+        assert!(overview.notes.iter().any(|note| note.contains("Runtime batches are built")));
 
         assert_eq!(asset.request_id, "test-request");
         assert_eq!(asset.asset_id, "gfx/02000001");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
-        assert_eq!(asset.payload["kind"], "diagnostic-asset-metadata");
+        assert_eq!(asset.payload["kind"], "appearance-manifest");
+        assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
     }
 
     #[test]

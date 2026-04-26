@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+	listenForRuntimeLifecycle,
+	lookupAsset,
 	readHostBoundarySnapshot,
 	resolveRayPick,
 	submitCameraHint,
 } from "./tauri";
+import type { RuntimeNotificationEnvelopeDto } from "./contracts";
+
+afterEach(() => {
+	vi.useRealTimers();
+});
 
 describe("readHostBoundarySnapshot", () => {
 	it("returns the browser-preview fallback shape outside the Tauri runtime", async () => {
@@ -15,6 +22,7 @@ describe("readHostBoundarySnapshot", () => {
 		expect(snapshot.runtimeBatch.tick).toBeGreaterThan(0);
 		expect(snapshot.runtimeBatch.residency.focusLocationLabel).toMatch(/Z$/);
 		expect(snapshot.viewModelFeed.interactionMode).toBe("inspect");
+		expect(snapshot.overview.assetChannel).toBe("asset");
 		expect(snapshot.overview.runtimeNotificationEvent).toBe(
 			"runtime:notification",
 		);
@@ -42,5 +50,36 @@ describe("readHostBoundarySnapshot", () => {
 		expect(cameraAck.accepted).toBe(true);
 		expect(response.resolved).toBe(true);
 		expect(response.hit?.label).toBe("Survey Drudge");
+	});
+
+	it("keeps asset lookup on a dedicated fallback path outside Tauri", async () => {
+		const response = await lookupAsset({
+			requestId: "bootstrap-asset",
+			assetId: "gfx/02000003",
+			priority: "bootstrap",
+		});
+
+		expect(response.assetId).toBe("gfx/02000003");
+		expect(response.payloadKind).toBe("json");
+		expect(response.payload).toMatchObject({
+			kind: "appearance-manifest",
+			residencyKind: "indoor-env-cell",
+		});
+	});
+
+	it("emits fallback runtime notifications so browser preview can exercise streaming flows", async () => {
+		vi.useFakeTimers();
+		const notifications: RuntimeNotificationEnvelopeDto[] = [];
+		const dispose = await listenForRuntimeLifecycle((notification) => {
+			notifications.push(notification);
+		});
+
+		await vi.advanceTimersByTimeAsync(2_100);
+		dispose();
+
+		expect(notifications).toHaveLength(2);
+		expect(notifications[0].runtimeBatch?.tick).toBe(2);
+		expect(notifications[0].viewModelFeed?.selectedEntityId).toBe(0x01020305);
+		expect(notifications[1].viewModelFeed?.selectedEntityId).toBe(0x01020306);
 	});
 });

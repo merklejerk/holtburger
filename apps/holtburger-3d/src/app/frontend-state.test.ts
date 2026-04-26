@@ -61,13 +61,8 @@ function createSnapshot(): HostBoundarySnapshot {
 		},
 		runtimeBatch: createRuntimeBatch(),
 		viewModelFeed: createViewModelFeed(),
-		assetResponse: {
-			requestId: "fixture",
-			assetId: "gfx/02000001",
-			payloadKind: "json",
-			payload: { kind: "diagnostic" },
-		},
 		overview: {
+			assetChannel: "asset",
 			runtimeChannel: "runtime",
 			runtimeNotificationEvent: "runtime:notification",
 			runtimeLifecycleTopic: "lifecycle.state",
@@ -86,6 +81,7 @@ describe("frontend state store", () => {
 
 		expect(get(store).browserMode.draftInput).toBe("100.40S, 101.55W, 1.0Z");
 		expect(get(store).mode.activeMode).toBe("browser");
+		expect(get(store).asset.channel).toBe("asset");
 	});
 
 	it("merges runtime notifications inside the store boundary", () => {
@@ -121,6 +117,48 @@ describe("frontend state store", () => {
 		expect(get(store).host.latestRuntimeNotification?.topic).toBe(
 			"runtime.batch",
 		);
+	});
+
+	it("tracks asset preparation state separately from the host boundary snapshot", () => {
+		const store = createFrontendStateStore();
+
+		store.loadSnapshot(createSnapshot());
+		store.markAssetPending({
+			requestId: "bootstrap-asset",
+			assetId: "gfx/02000001",
+			priority: "bootstrap",
+		});
+		store.applyPreparedAsset({
+			request: {
+				requestId: "bootstrap-asset",
+				assetId: "gfx/02000001",
+				priority: "bootstrap",
+			},
+			response: {
+				requestId: "bootstrap-asset",
+				assetId: "gfx/02000001",
+				payloadKind: "json",
+				payload: { kind: "appearance-manifest" },
+			},
+			residencyKind: "outdoor-landblock",
+			debugPrimitive: "survey-billboard",
+			paletteKey: "bronze-scout",
+			summary: "Prepared gfx/02000001 as survey-billboard for outdoor-landblock.",
+			notes: [],
+			preparedAt: "2026-04-26T00:00:00.000Z",
+		});
+
+		expect(get(store).asset.status).toBe("ready");
+		expect(get(store).asset.preparedAsset?.request.assetId).toBe(
+			"gfx/02000001",
+		);
+		expect(get(store).asset.preparedByPriority.bootstrap?.request.assetId).toBe(
+			"gfx/02000001",
+		);
+		expect(get(store).asset.history.map((entry) => entry.status)).toEqual([
+			"requested",
+			"prepared",
+		]);
 	});
 
 	it("prefers an explicit browser destination over a connected client-mode hint", () => {

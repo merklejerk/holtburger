@@ -7,6 +7,7 @@ import {
 	normalizeViewportPoint,
 	shouldSendThrottledCameraHint,
 } from "./model";
+import { createInitialAssetChannelState } from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
 
 function createRuntimeBatch(): RuntimeBatchDto {
@@ -58,11 +59,40 @@ describe("world display model helpers", () => {
 				interactionMode: "inspect",
 				busyState: "idle",
 			},
-			assetResponse: {
-				requestId: "fixture",
-				assetId: "gfx/02000001",
-				payloadKind: "json",
-				payload: { kind: "diagnostic" },
+			assetState: {
+				...createInitialAssetChannelState(),
+				status: "ready",
+				activeRequest: {
+					requestId: "fixture",
+					assetId: "gfx/02000001",
+					priority: "bootstrap",
+				},
+				preparedAsset: {
+					request: {
+						requestId: "fixture",
+						assetId: "gfx/02000001",
+						priority: "bootstrap",
+					},
+					response: {
+						requestId: "fixture",
+						assetId: "gfx/02000001",
+						payloadKind: "json",
+						payload: { kind: "appearance-manifest" },
+					},
+					residencyKind: "outdoor-landblock",
+					debugPrimitive: "survey-billboard",
+					paletteKey: "bronze-scout",
+					summary: "Prepared gfx/02000001 as survey-billboard for outdoor-landblock.",
+					notes: [],
+					preparedAt: "2026-04-26T00:00:00.000Z",
+				},
+				lastResponse: {
+					requestId: "fixture",
+					assetId: "gfx/02000001",
+					payloadKind: "json",
+					payload: { kind: "appearance-manifest" },
+				},
+				errorMessage: null,
 			},
 			browserDestination: {
 				label: "100.55S, 101.65W, 2.0Z",
@@ -84,6 +114,7 @@ describe("world display model helpers", () => {
 		expect(model.entities.find((entity) => entity.isSelected)?.label).toBe(
 			"Survey Drudge",
 		);
+		expect(model.assetSummary).toMatch(/Prepared gfx\/02000001/);
 	});
 
 	it("builds camera hints and pick requests from viewport input", () => {

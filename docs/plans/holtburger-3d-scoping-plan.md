@@ -1040,6 +1040,12 @@ Phase Gate Review Before Phase 2:
 - review whether the current contract shapes are too broad, too chatty, or too renderer-shaped
 - decide whether the next step should stay focused on runtime feeds or whether a smaller intermediate phase is needed first
 
+Resolved gate review:
+
+- The adapter layer stayed app-local in `apps/holtburger-3d/src-tauri`. No shared-crate seam moved in Phase 1 because the lifecycle, runtime, and asset proofs did not yet establish a reusable lower-level contract that belongs outside the app.
+- The current DTO shapes are narrow enough for Phase 1. They carry lifecycle state, a stub runtime batch, a stub view-model feed, and a stub asset lookup response without introducing renderer terms, scene graph ownership, or frontend-specific route control.
+- The next step should stay focused on a real runtime feed in Phase 2. There is not enough pressure yet to split Phase 2 further, but the first real runtime payloads should be the point where residency or landcell data and real asset identity needs are reassessed.
+
 ### Phase 2: Bottom-Up Runtime Feed And Debug-First Game Data
 
 Purpose: prove that the frontend can subscribe to authoritative runtime or world-state feeds and derive presentation-facing models before there is a serious renderer.
@@ -1227,11 +1233,11 @@ Mitigation:
 - [x] create `apps/holtburger-3d` app root and workspace membership
 - [x] scaffold `src-tauri` host and Svelte-plus-TypeScript frontend
 - [x] write the initial frontend contract worksheet
-- [ ] implement typed lifecycle feed across the boundary
+- [x] implement typed lifecycle feed across the boundary
 - [ ] define browser-mode location input and world-load flow
-- [ ] implement the first runtime snapshot or delta feed
-- [ ] implement the first asset query and response flow
-- [ ] add the frontend mode model and app shell
+- [x] implement the first runtime snapshot or delta feed
+- [x] implement the first asset query and response flow
+- [x] add the frontend mode model and app shell
 - [ ] add the frontend game-state or view-model store
 - [ ] add `WorldDisplay` and the browser-mode world shell with placeholder render host
 - [ ] add camera-position hints from frontend to Rust
@@ -1249,6 +1255,8 @@ Mitigation:
 - Use an app-local Tauri CLI and lint scripts under `apps/holtburger-3d` rather than depending on global tooling.
 - Start browser-mode entry with direct coordinate input only; defer named location picking until a real runtime feed exists.
 - Keep lifecycle mode hints advisory and keep nested page selection frontend-local in Phase 0.
+- Keep the first typed host DTOs and adapter layer app-local until a real runtime or content integration proves a reusable shared-crate seam.
+- Keep the Svelte bridge browser-safe by falling back to local preview data when the Tauri runtime is not active, so frontend iteration does not force a native boot for every UI check.
 
 #### Verification Log
 
@@ -1256,12 +1264,21 @@ Mitigation:
 - 2026-04-25: `npm run check` in `apps/holtburger-3d` passed.
 - 2026-04-25: `npm run check:rust` in `apps/holtburger-3d` passed.
 - 2026-04-25: `npm run lint:rust` in `apps/holtburger-3d` passed.
+- 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after introducing app-local Phase 1 contracts, adapter modules, typed commands, and startup lifecycle emission.
+- 2026-04-26: `npm run lint:rust` in `apps/holtburger-3d` passed after tightening the Phase 1 host boundary for dead-code and constant hygiene.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after wiring the Svelte shell into the typed host boundary.
+- 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the new browser-safe Tauri bridge.
+- 2026-04-26: `npm run build` in `apps/holtburger-3d` passed with the Phase 1 boundary panel and bridge code.
+- 2026-04-26: `npm run tauri build -- --debug` in `apps/holtburger-3d` passed and produced an integrated debug app build.
 
 #### Phase Review Log
 
 - 2026-04-25: Phase 0 completed. The app root, workspace membership, frontend scaffold, Tauri host scaffold, TS linting, Rust clippy wiring, and initial contract worksheet are all in place.
 - 2026-04-25: The first Rust validation failed on a missing Tauri icon input, then on a non-RGBA PNG. Both were resolved locally by wiring a valid RGBA icon into `src-tauri/icons/icon.png`.
 - 2026-04-25: Gate review resolved in favor of moving to Phase 1 with the current layout and worksheet scope.
+- 2026-04-26: Phase 1 completed with app-local Rust host modules for typed lifecycle, runtime, view-model, and asset DTOs; a small adapter layer; a startup runtime lifecycle event; and matching frontend bridge code that can consume the boundary under Tauri or fall back cleanly in browser preview.
+- 2026-04-26: Phase 1 did not require any shared-crate changes. That remains the right call until real runtime or content integration proves a reusable lower-level seam.
+- 2026-04-26: Gate review resolved in favor of moving to Phase 2 with the current app-local adapter boundary intact.
 
 #### Open Execution Questions
 
@@ -1284,4 +1301,4 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phase 0 is complete. The next implementation step is Phase 1: build the thinnest Rust adapter and Tauri host boundary that can publish typed lifecycle, runtime, and asset services against the worksheet in [docs/plans/holtburger-3d-phase-0-contract-worksheet.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-phase-0-contract-worksheet.md).
+Phase 1 is complete. The next implementation step is Phase 2: replace the Phase 1 stub runtime payloads with a small but real authoritative runtime feed, then pressure-test whether residency, landcell, and asset-identity seams still belong inside the app-local adapter or should move into shared crates.

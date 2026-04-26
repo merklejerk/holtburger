@@ -21,14 +21,29 @@ export interface LifecycleStateDto {
 
 export interface RuntimeEntitySnapshotDto {
   entityId: number;
+  label: string;
   position: Vec3Dto;
   headingRadians: number;
   appearanceId: string;
+  landblockId: number;
+  cellId: number | null;
+  locationLabel: string;
+  isLocalPlayer: boolean;
+}
+
+export interface RuntimeResidencyDto {
+  focusEntityId: number | null;
+  focusLandblockId: number;
+  focusCellId: number | null;
+  focusLocationLabel: string;
+  indoors: boolean;
+  trackedBodyCount: number;
 }
 
 export interface RuntimeBatchDto {
   tick: number;
   entities: RuntimeEntitySnapshotDto[];
+  residency: RuntimeResidencyDto;
 }
 
 export interface FrontendStateFeedDto {
@@ -60,6 +75,7 @@ export interface RuntimeNotificationEnvelopeDto {
 
 export interface HostBoundaryOverviewDto {
   runtimeChannel: string;
+  runtimeNotificationEvent: string;
   runtimeLifecycleTopic: string;
   runtimeBatchCommand: string;
   assetLookupCommand: string;

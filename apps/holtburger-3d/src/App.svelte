@@ -23,22 +23,37 @@
   ] as const;
 
   let boundarySnapshot: HostBoundarySnapshot | null = null;
-  let startupNotification: RuntimeNotificationEnvelopeDto | null = null;
+  let latestRuntimeNotification: RuntimeNotificationEnvelopeDto | null = null;
   let boundaryStatus = 'Loading host boundary...';
+
+  function applyRuntimeNotification(notification: RuntimeNotificationEnvelopeDto): void {
+    latestRuntimeNotification = notification;
+
+    if (!boundarySnapshot) {
+      return;
+    }
+
+    boundarySnapshot = {
+      ...boundarySnapshot,
+      lifecycleState: notification.lifecycleState ?? boundarySnapshot.lifecycleState,
+      runtimeBatch: notification.runtimeBatch ?? boundarySnapshot.runtimeBatch,
+      viewModelFeed: notification.viewModelFeed ?? boundarySnapshot.viewModelFeed,
+    };
+  }
 
   onMount(() => {
     let dispose = () => {};
 
     void (async () => {
       dispose = await listenForRuntimeLifecycle((notification) => {
-        startupNotification = notification;
+        applyRuntimeNotification(notification);
       });
 
       const snapshot = await readHostBoundarySnapshot();
       boundarySnapshot = snapshot;
       boundaryStatus =
         snapshot.source === 'tauri'
-          ? 'Connected to the Tauri host boundary.'
+          ? 'Connected to the Tauri host boundary with a live authoritative runtime feed.'
           : 'Showing browser-preview fallback data until the Tauri runtime is active.';
     })();
 
@@ -52,7 +67,7 @@
   <title>Holtburger 3D Host Boundary</title>
   <meta
     name="description"
-    content="Host boundary for the Holtburger 3D app shell, with typed lifecycle, runtime, and asset contract stubs."
+    content="Host boundary for the Holtburger 3D app shell, with typed lifecycle, authoritative runtime, and demand-driven asset contracts."
   />
 </svelte:head>
 
@@ -61,8 +76,9 @@
     <p class="eyebrow">Host boundary</p>
     <h1>Holtburger 3D Host Boundary</h1>
     <p class="lede">
-      This app shell now exposes a typed Tauri boundary with startup lifecycle, runtime, and
-      asset-contract stubs while keeping renderer details out of the host seam.
+      This app shell now exposes a typed Tauri boundary with streamed authoritative runtime data,
+      lifecycle notifications, and a demand-driven asset channel while keeping renderer details out
+      of the host seam.
     </p>
   </section>
 
@@ -129,13 +145,34 @@
           </section>
 
           <section>
-            <h3>Runtime stub</h3>
+            <h3>Runtime feed</h3>
             <p>Tick {boundarySnapshot.runtimeBatch.tick}</p>
+            <dl class="data-list compact-data-list">
+              <div>
+                <dt>Focus landblock</dt>
+                <dd>{boundarySnapshot.runtimeBatch.residency.focusLandblockId.toString(16)}</dd>
+              </div>
+              <div>
+                <dt>Residency</dt>
+                <dd>
+                  {boundarySnapshot.runtimeBatch.residency.indoors ? 'indoor' : 'outdoor'} / {boundarySnapshot.runtimeBatch.residency.trackedBodyCount} bodies
+                </dd>
+              </div>
+              <div>
+                <dt>Location</dt>
+                <dd>{boundarySnapshot.runtimeBatch.residency.focusLocationLabel}</dd>
+              </div>
+            </dl>
             <ul>
               {#each boundarySnapshot.runtimeBatch.entities as entity}
                 <li>
+                  <strong>{entity.label}</strong>
+                  {#if entity.isLocalPlayer}
+                    (local)
+                  {/if}
+                  <br />
                   {entity.appearanceId} at ({entity.position.x}, {entity.position.y},
-                  {entity.position.z})
+                  {entity.position.z}) in {entity.locationLabel}
                 </li>
               {/each}
             </ul>
@@ -160,7 +197,7 @@
           </section>
 
           <section>
-            <h3>Asset stub</h3>
+            <h3>Asset channel</h3>
             <p>
               {boundarySnapshot.assetResponse.assetId} via {boundarySnapshot.assetResponse.payloadKind}
             </p>
@@ -176,7 +213,8 @@
             {/each}
           </ul>
           <p class="event-note">
-            Startup event topic: {startupNotification?.topic ?? boundarySnapshot.overview.runtimeLifecycleTopic}
+            Runtime event: {boundarySnapshot.overview.runtimeNotificationEvent} / latest topic:{' '}
+            {latestRuntimeNotification?.topic ?? boundarySnapshot.overview.runtimeLifecycleTopic}
           </p>
         </section>
       {/if}
@@ -186,8 +224,8 @@
       <p class="kicker">Shared foundation</p>
       <WorldDisplay
         modeLabel={selectedModeLabel}
-        status={boundarySnapshot ? 'Host boundary is feeding typed stubs' : 'Waiting for host boundary'}
-        detail="Shared world-facing infrastructure starts here; browser mode remains the first consumer, now with a real host seam behind it."
+        status={boundarySnapshot ? 'Host boundary is feeding authoritative runtime snapshots' : 'Waiting for host boundary'}
+        detail="Shared world-facing infrastructure starts here; browser mode remains the first consumer, now backed by a real world-state-to-runtime feed instead of app-local DTO stubs."
       />
     </article>
 

@@ -44,9 +44,25 @@ pub struct LifecycleStateDto {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeEntitySnapshotDto {
     pub entity_id: u64,
+    pub label: String,
     pub position: Vec3Dto,
     pub heading_radians: f32,
     pub appearance_id: String,
+    pub landblock_id: u32,
+    pub cell_id: Option<u32>,
+    pub location_label: String,
+    pub is_local_player: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeResidencyDto {
+    pub focus_entity_id: Option<u64>,
+    pub focus_landblock_id: u32,
+    pub focus_cell_id: Option<u32>,
+    pub focus_location_label: String,
+    pub indoors: bool,
+    pub tracked_body_count: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -54,6 +70,7 @@ pub struct RuntimeEntitySnapshotDto {
 pub struct RuntimeBatchDto {
     pub tick: u64,
     pub entities: Vec<RuntimeEntitySnapshotDto>,
+    pub residency: RuntimeResidencyDto,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -124,6 +141,7 @@ pub struct RuntimeNotificationEnvelopeDto {
 #[serde(rename_all = "camelCase")]
 pub struct HostBoundaryOverviewDto {
     pub runtime_channel: &'static str,
+    pub runtime_notification_event: &'static str,
     pub runtime_lifecycle_topic: &'static str,
     pub runtime_batch_command: &'static str,
     pub asset_lookup_command: &'static str,

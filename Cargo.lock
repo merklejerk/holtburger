@@ -2154,8 +2154,10 @@ name = "holtburger-3d"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "holtburger-common",
  "holtburger-content",
  "holtburger-core",
+ "holtburger-dat",
  "holtburger-world",
  "serde",
  "serde_json",

@@ -9,8 +9,9 @@ use holtburger_world::{WorldBootstrap, WorldState, entity::Entity};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
-    FrontendStateFeedDto, HostBoundaryOverviewDto, InteractionModeDto, LifecyclePhaseDto,
-    LifecycleStateDto, ModeHintDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
+    CameraHintAckDto, CameraHintDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
+    InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, RayPickHitDto,
+    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
     RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
 };
 
@@ -38,6 +39,8 @@ struct HostRuntimeState {
     tick: u64,
     world: WorldState,
     selected_entity_id: Option<u64>,
+    last_camera_hint: Option<CameraHintDto>,
+    camera_hint_sequence: u64,
 }
 
 impl HostRuntimeService {
@@ -74,6 +77,16 @@ impl HostRuntimeService {
         let mut state = self.state.lock().expect("host runtime state lock poisoned");
         state.advance();
         HostBoundaryAdapter::runtime_notification(&state)
+    }
+
+    pub fn submit_camera_hint(&self, hint: CameraHintDto) -> CameraHintAckDto {
+        let mut state = self.state.lock().expect("host runtime state lock poisoned");
+        HostBoundaryAdapter::accept_camera_hint(&mut state, hint)
+    }
+
+    pub fn resolve_ray_pick(&self, request: RayPickRequestDto) -> RayPickResponseDto {
+        let state = self.state.lock().expect("host runtime state lock poisoned");
+        HostBoundaryAdapter::resolve_ray_pick(&state, request)
     }
 }
 
@@ -118,6 +131,8 @@ impl HostRuntimeState {
             tick: 1,
             world,
             selected_entity_id: Some(u32::from(REMOTE_SCOUT_GUID) as u64),
+            last_camera_hint: None,
+            camera_hint_sequence: 0,
         }
     }
 
@@ -236,9 +251,100 @@ impl HostBoundaryAdapter {
                     .to_string(),
                 "Phase 2 runtime batches are built from an authoritative WorldState plus runtime-body views instead of hardcoded DTO stubs."
                     .to_string(),
+                "Phase 4 adds app-local camera hints and authority-sensitive debug picks without moving browser policy back into Rust."
+                    .to_string(),
                 "Asset lookup still returns typed diagnostic metadata so the asset channel remains demand-driven while content plumbing catches up."
                     .to_string(),
             ],
+        }
+    }
+
+    fn accept_camera_hint(
+        state: &mut HostRuntimeState,
+        hint: CameraHintDto,
+    ) -> CameraHintAckDto {
+        state.camera_hint_sequence += 1;
+        let sequence = state.camera_hint_sequence;
+        let destination_label = hint
+            .destination_label
+            .clone()
+            .unwrap_or_else(|| "the current runtime focus".to_string());
+        let mode = match hint.mode {
+            ModeHintDto::Browser => "browser",
+            ModeHintDto::Client => "client",
+        };
+
+        state.last_camera_hint = Some(hint);
+
+        CameraHintAckDto {
+            accepted: true,
+            sequence,
+            summary: format!(
+                "Accepted {mode} camera hint #{sequence} toward {destination_label}."
+            ),
+        }
+    }
+
+    fn resolve_ray_pick(
+        state: &HostRuntimeState,
+        request: RayPickRequestDto,
+    ) -> RayPickResponseDto {
+        let batch = Self::runtime_batch(state);
+        let direction = normalize_vec3(request.direction.clone());
+
+        let best_hit = batch
+            .entities
+            .iter()
+            .filter_map(|entity| {
+                let offset = Vec3Dto {
+                    x: entity.position.x - request.origin.x,
+                    y: entity.position.y - request.origin.y,
+                    z: entity.position.z - request.origin.z,
+                };
+                let distance = vec3_length(&offset);
+
+                if distance <= f32::EPSILON {
+                    return None;
+                }
+
+                let alignment = vec3_dot(&normalize_vec3(offset), &direction);
+
+                (alignment > 0.2).then_some((entity, alignment, distance))
+            })
+            .max_by(|(_, left_alignment, left_distance), (_, right_alignment, right_distance)| {
+                let left_score = *left_alignment - (*left_distance * 0.001);
+                let right_score = *right_alignment - (*right_distance * 0.001);
+                left_score
+                    .partial_cmp(&right_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+        if let Some((entity, _alignment, distance)) = best_hit {
+            return RayPickResponseDto {
+                request_id: request.request_id,
+                resolved: true,
+                camera_hint_sequence: Some(state.camera_hint_sequence)
+                    .filter(|_| state.last_camera_hint.is_some()),
+                hit: Some(RayPickHitDto {
+                    entity_id: entity.entity_id,
+                    label: entity.label.clone(),
+                    location_label: entity.location_label.clone(),
+                    distance,
+                }),
+                summary: format!(
+                    "Resolved the authority-sensitive debug pick against {} at {}.",
+                    entity.label, entity.location_label
+                ),
+            };
+        }
+
+        RayPickResponseDto {
+            request_id: request.request_id,
+            resolved: false,
+            camera_hint_sequence: Some(state.camera_hint_sequence)
+                .filter(|_| state.last_camera_hint.is_some()),
+            hit: None,
+            summary: "No authoritative debug entity intersected the current pick ray.".to_string(),
         }
     }
 
@@ -315,6 +421,32 @@ fn make_entity(guid: Guid, name: &str, position: WorldPosition, gfx_id: u32) -> 
     let mut entity = Entity::new(guid, name.to_string(), position);
     entity.gfx_id = Some(gfx_id);
     entity
+}
+
+fn normalize_vec3(vector: Vec3Dto) -> Vec3Dto {
+    let length = vec3_length(&vector);
+
+    if length <= f32::EPSILON {
+        return Vec3Dto {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+    }
+
+    Vec3Dto {
+        x: vector.x / length,
+        y: vector.y / length,
+        z: vector.z / length,
+    }
+}
+
+fn vec3_length(vector: &Vec3Dto) -> f32 {
+    (vector.x.powi(2) + vector.y.powi(2) + vector.z.powi(2)).sqrt()
+}
+
+fn vec3_dot(left: &Vec3Dto, right: &Vec3Dto) -> f32 {
+    (left.x * right.x) + (left.y * right.y) + (left.z * right.z)
 }
 
 #[cfg(test)]
@@ -440,5 +572,50 @@ mod tests {
         assert_eq!(asset.asset_id, "gfx/02000001");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
         assert_eq!(asset.payload["kind"], "diagnostic-asset-metadata");
+    }
+
+    #[test]
+    fn camera_hints_are_accepted_and_picks_resolve_against_authoritative_debug_entities() {
+        let runtime = HostRuntimeService::new();
+        let batch = runtime.runtime_batch();
+        let local_player = batch
+            .entities
+            .iter()
+            .find(|entity| entity.is_local_player)
+            .expect("local player should be present");
+        let remote_scout = batch
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == u32::from(REMOTE_SCOUT_GUID) as u64)
+            .expect("remote scout should be present");
+        let direction = normalize_vec3(Vec3Dto {
+            x: remote_scout.position.x - local_player.position.x,
+            y: remote_scout.position.y - local_player.position.y,
+            z: remote_scout.position.z - local_player.position.z,
+        });
+
+        let ack = runtime.submit_camera_hint(CameraHintDto {
+            mode: ModeHintDto::Browser,
+            source: "world-display".to_string(),
+            position: local_player.position.clone(),
+            forward: direction.clone(),
+            viewport_normalized_x: 0.75,
+            viewport_normalized_y: 0.5,
+            destination_label: Some(batch.residency.focus_location_label.clone()),
+        });
+        let response = runtime.resolve_ray_pick(RayPickRequestDto {
+            request_id: "pick-1".to_string(),
+            origin: local_player.position.clone(),
+            direction,
+            screen_x_normalized: 0.75,
+            screen_y_normalized: 0.5,
+            destination_label: Some(batch.residency.focus_location_label),
+        });
+
+        assert!(ack.accepted);
+        assert_eq!(ack.sequence, 1);
+        assert!(response.resolved);
+        assert_eq!(response.camera_hint_sequence, Some(1));
+        assert_eq!(response.hit.as_ref().map(|hit| hit.entity_id), Some(remote_scout.entity_id));
     }
 }

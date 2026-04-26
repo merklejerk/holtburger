@@ -1136,6 +1136,8 @@ Phase 3 TypeScript Test Agenda:
 
 Purpose: establish the shared `WorldDisplay` foundation as a real architectural host for both browser mode and future client mode while deliberately stopping short of a fully runnable end-to-end vertical slice.
 
+Status: completed on 2026-04-26.
+
 Deliverables:
 
 - implement `WorldDisplay` as the composition point for:
@@ -1163,6 +1165,12 @@ Phase Gate Review Before Phase 5:
 - assess whether the camera-hint and authority-sensitive query seams are appropriately narrow
 - decide whether asset-worker validation can proceed on the current surface or whether `WorldDisplay` and asset ownership need another design pass first
 
+Resolved gate review:
+
+- `WorldDisplay` now exists as a real shared shell instead of a string-only placeholder. It consumes the frontend store boundary, stages asset-worker ingress explicitly, renders mirrored runtime entities in a world-facing debug viewport, and owns the first app-local input mapping path for throttled camera hints plus debug picks.
+- Browser mode is still frontend-owned. The selected destination is handed into `WorldDisplay` as policy data from the frontend store, while Rust only accepts typed camera hints and resolves a narrow authority-sensitive query against authoritative debug runtime entities.
+- Phase 5 should narrow slightly. Camera hints and the first authority-sensitive query are already in place, so the next risk to validate is the asset-worker ownership model and whether real asset preparation can stay separate from the runtime channel.
+
 ### Phase 5: Asset Channel And Worker Pattern Validation
 
 Purpose: prove the asset-side ownership model early enough that it does not get muddled with runtime events later.
@@ -1173,6 +1181,7 @@ Deliverables:
 - add a frontend worker that receives raw or lightly decoded asset payloads and performs CPU-side preparation
 - keep final GPU upload or live Three.js resource creation on the main render side
 - demonstrate at least one demand-driven asset lookup path from frontend request to Rust response to worker processing to frontend availability notification
+- keep the asset-path shape compatible with more than one scene-membership model: outdoor landblock residency first, with room for future indoor env-cell or visible-cell-driven residency instead of assuming one flat scene bucket
 
 Acceptance Criteria:
 
@@ -1180,12 +1189,19 @@ Acceptance Criteria:
 - the worker handles asset preparation without becoming a second renderer
 - a concrete asset path proves the demand-driven contract shape
 - no giant bootstrap payload is required to bring the app up
+- the asset path does not bake in assumptions that would block a later split between outdoor landblock residency and indoor visible-cell residency
 
 Phase Gate Review Before Phase 6:
 
 - assess whether the asset path actually supports the browser-mode vertical slice or whether it still relies on too much scaffolding
 - review whether runtime and asset ownership are staying legible in code, not just in the plan
+- assess whether the current local scene shell is still implicitly outdoor-only, or whether it already leaves enough room for indoor env-cell and visible-cell semantics
 - decide whether the vertical-slice phase should focus purely on browser mode or include a very small client-mode probe as well
+
+Resolved scope adjustment after Phase 4:
+
+- Keep Phase 5 focused on real worker and asset ownership validation. The world shell, camera-hint path, and first authority-sensitive query are already established, so the next architecture risk is whether asset preparation lands without collapsing back into the runtime channel.
+- Keep the current camera-hint seam provisional. Future camera collision, sensors, and similar spatial helpers should prefer expanding shared `SpatialBody` semantics rather than introducing a parallel probe abstraction, but that shared-crate work should wait until a real constraint or solve use case forces the right shape.
 
 ### Phase 6: Runnable Browser Vertical Slice And Gap-Hunting Pass
 
@@ -1197,6 +1213,7 @@ Deliverables:
 - document every awkward fit discovered while integrating from the app shell downward into Rust and shared crates
 - move only the seams that truly belong below the app boundary; keep presentation-shaped policy in `holtburger-3d`
 - leave behind a small backlog of next-step architecture tasks for client mode rather than continuing into feature creep
+- explicitly record whether the first runnable browser slice is outdoor-residency-only, and log the missing indoor env-cell / visible-cell scene-membership work instead of leaving that gap implicit
 
 Acceptance Criteria:
 
@@ -1208,12 +1225,126 @@ Acceptance Criteria:
   - asset query to worker-prepared result
   - frontend hint or query back into Rust
 - the remaining gaps are documented as specific follow-up work rather than hidden in ad hoc code
+- the resulting browser slice makes its current scene-membership assumptions explicit, especially whether it only supports outdoor landblock-style residency or also begins to account for indoor visible-cell semantics
 
 Post-Phase Assessment:
 
 - write down the concrete boundary decisions that survived first contact with implementation
 - list the seams that still need to move before client mode expands
 - rewrite the next-step plan based on what the runnable browser slice actually taught us
+
+### Appended Fast-Follow: Shared SpatialBody Constraint And Non-World Body Semantics
+
+Purpose: extend the shared `SpatialBody` model to cover non-world solving participants such as camera bodies, sensors, and other frontend-requested spatial helpers without creating a parallel spatial-probe abstraction.
+
+This phase is intentionally appended rather than pulled into the current browser-foundation phases.
+
+Why this is separate:
+
+- the current plan only proves an app-local camera-hint seam and a debug authority-sensitive query; it does not yet exercise real shared constraint solving for non-world bodies
+- `holtburger-core` and `holtburger-world` already lean heavily on `SpatialBody` as the solving medium, so if we broaden that medium it should happen deliberately against real use cases rather than by guessing from placeholder camera behavior
+- the risk here is semantic, not just mechanical: we need one body-solving pipeline without accidentally making every helper body look like an authoritative world member
+
+Ground-truth anchors for this phase:
+
+- [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md)
+- [crates/holtburger-world/src/spatial/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/types.rs)
+- [crates/holtburger-world/src/spatial/scene.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/scene.rs)
+- [crates/holtburger-core/src/client/simulation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/simulation.rs)
+
+Deliverables:
+
+- document the intended meaning of shared `SpatialBody` after expansion: one solving substrate that can represent both authoritative world members and non-world solving bodies
+- identify the minimum additional body semantics needed for non-world bodies, such as role or kind, world-membership participation, and collision or query masks
+- decide whether frontend-requested non-world bodies should be persistent registered bodies, stateless solve requests, or a staged progression between those two models
+- implement the first real shared constraint path using expanded `SpatialBody` semantics rather than a camera-only path, ideally with one non-world body case that proves the seam end to end
+- add shared tests that prove non-world bodies can participate in solving without being mistaken for authoritative world membership or breaking existing local-player and entity solving behavior
+
+Acceptance Criteria:
+
+- the shared solver still talks in `SpatialBody` terms for both world-member and non-world solving cases
+- at least one non-world body use case, such as camera collision or a sensor-style constraint, is implemented without introducing a separate parallel abstraction
+- the additional semantics needed for non-world bodies are explicit in shared code and docs rather than hidden behind ad hoc exceptions
+- existing authoritative runtime-body feeds and local-player solving behavior remain correct after the expansion
+
+Phase Gate Review Before Terrain Or Broader Spatial Features:
+
+- assess whether the expanded `SpatialBody` semantics are honest enough to carry future camera collision, sensors, and similar helpers without additional parallel abstractions
+- assess whether non-world bodies should appear in runtime-body view feeds or remain solver-local unless specifically surfaced
+- decide whether the next step should focus on camera collision, richer sensors, editor-style helpers, or terrain-aware constraints
+
+### Appended Fast-Follow: Local Scene Residency And Visible-Cell Semantics
+
+Purpose: define the client-local scene membership model so browser mode and future client mode know what should be loaded, represented, and considered visible in outdoor versus indoor spaces without inventing renderer-local rules from scratch.
+
+This phase is intentionally appended rather than folded into the current browser-foundation phases.
+
+Why this is separate:
+
+- the current browser-foundation work only proves a world shell, asset path, and debug runtime feed; it does not yet force a full local scene-membership model
+- AC and ACViewer ground truth suggest that outdoor and indoor representation are not the same problem: outdoor work leans on landblock residency, while indoor work is strongly shaped by env cells and visible-cell relationships
+- baking one scene-membership rule into the browser foundation too early would make later dungeon and interior work harder to correct
+
+Ground-truth anchors for this phase:
+
+- [ACViewer/ACViewer/WorldViewer.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/WorldViewer.cs)
+- [ACViewer/ACViewer/Picker.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Picker.cs)
+- [ACE/Source/ACE.Server/Physics/PhysicsObj.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/PhysicsObj.cs)
+- [docs/plans/holtburger-3d-scoping-plan.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-scoping-plan.md)
+
+Deliverables:
+
+- define the first honest local scene-membership model for `holtburger-3d`, including outdoor landblock-driven residency and the intended indoor env-cell / visible-cell expansion model
+- decide which parts of that scene-membership model remain frontend-owned and which parts need to become shared or host-owned seams
+- document how runtime residency facts, asset requests, and future pick or collision queries relate to local scene membership rather than treating them as unrelated subsystems
+- implement or at least stub the first explicit local scene-context shape in app code so the browser shell stops implying one flat scene model
+- leave behind a clear follow-up list for which remaining visibility or residency behaviors are still debug-only, outdoor-only, or intentionally deferred
+
+Acceptance Criteria:
+
+- the code and docs can explain why a given scene chunk, env cell, or debug world element is locally present
+- outdoor and indoor scene-membership rules are explicitly distinguished instead of hidden behind one generic residency label
+- future terrain, indoor rendering, and constraint work can build on the scene-membership model without first rewriting the client’s notion of what is loaded
+- any remaining gaps in visible-cell-driven local representation are called out explicitly rather than implied away
+
+Phase Gate Review Before Broader World Rendering:
+
+- assess whether the local scene-membership model is honest enough to host both outdoor and indoor rendering work
+- assess whether visible-cell expansion belongs entirely in frontend-local scene ownership or whether some part of it should eventually become a shared or host-owned seam
+- decide whether the next world-facing step should prioritize indoor scene membership, terrain coverage, richer object residency, or visibility-aware picking and constraints
+
+### Appended Fast-Follow: Landblock Geometry Decode And First Terrain Rendering
+
+Purpose: add the first real terrain-facing rendering milestone after the runnable browser foundation exists, without smuggling reverse-engineering and decode risk into the core browser-mode architecture phases.
+
+This phase is intentionally appended rather than folded into the main browser-foundation definition of done.
+
+Why this is separate:
+
+- the current plan is primarily about proving ownership boundaries, host/runtime contracts, browser-mode flow, and the asset-worker pattern
+- landblock geometry rendering introduces a second problem space: ground-truth decode, intermediate representation design, and terrain-specific render integration
+- combining those concerns would make the current plan less falsifiable and would blur whether a failure came from app architecture or missing terrain decode support
+
+Deliverables:
+
+- identify the current ground truth for landblock geometry and terrain-adjacent asset decoding using ACE and ACViewer references
+- document the minimum app-local decode or adapter path required to get one terrain or landblock chunk into the frontend render pipeline
+- decide whether the first decode step belongs in Rust, JavaScript, or a split path, and record that decision explicitly before broadening the asset worker
+- extend the asset channel or worker path only as much as needed to request, prepare, and surface one real terrain-facing payload
+- render the first real browser-mode terrain or landblock geometry in the shared `WorldDisplay` foundation, even if materials, lighting, and scene composition remain primitive
+
+Acceptance Criteria:
+
+- one real landblock or terrain-facing geometry payload can be traced from authoritative source data through the chosen decode path into browser-mode rendering
+- the asset-worker and runtime-channel ownership split remains legible in code after terrain support is introduced
+- the first visible terrain rendering can coexist with the current browser-mode debug shell instead of replacing it with a special-case path
+- any new decode seam is justified against ground truth and documented well enough that future terrain work can extend it without rediscovering the format from scratch
+
+Phase Gate Review Before Any Broader Terrain Or Scene Work:
+
+- assess whether the chosen terrain decode location actually fits the ownership model, or whether decode responsibilities landed in the wrong layer
+- assess whether the terrain payload shape is honest enough for future chunk streaming, materials, and collision work without prematurely over-designing the format
+- decide whether the next terrain step should focus on more chunk coverage, better materials, collision integration, or moving decode seams into shared crates
 
 ## General Testing Strategy
 
@@ -1375,13 +1506,14 @@ Mitigation:
 - [x] implement typed lifecycle feed across the boundary
 - [x] define browser-mode location input flow
 - [ ] define browser-mode world-load handoff into `WorldDisplay`
+- [x] define browser-mode world-load handoff into `WorldDisplay`
 - [x] implement the first runtime snapshot or delta feed
 - [x] implement the first asset query and response flow
 - [x] add the frontend mode model and app shell
 - [x] add the frontend game-state or view-model store
-- [ ] add `WorldDisplay` and the browser-mode world shell with placeholder render host
-- [ ] add camera-position hints from frontend to Rust
-- [ ] add the first authority-sensitive query for ray picks
+- [x] add `WorldDisplay` and the browser-mode world shell with placeholder render host
+- [x] add camera-position hints from frontend to Rust
+- [x] add the first authority-sensitive query for ray picks
 - [ ] validate the asset worker pattern
 - [ ] run the browser vertical slice and log awkward seams for follow-up
 
@@ -1404,6 +1536,9 @@ Mitigation:
 - Keep host-boundary snapshot loading and runtime-notification merge behavior inside an app-local frontend store rather than inside `App.svelte`.
 - Use AC-style coordinate labels as the first browser-mode input shape, with a frontend-owned shortcut that promotes the current runtime residency into the selected browser destination.
 - Add an app-local Vitest runner in `apps/holtburger-3d` now that the bridge and store seams are stable enough to defend with TypeScript tests.
+- Let `WorldDisplay` own the first app-local camera-hint throttle and authority-sensitive debug-pick path, while keeping browser destination selection and routing policy in the frontend store.
+- Treat the current app-local camera-hint DTO as provisional. When real shared constraint solving arrives, prefer expanding shared `SpatialBody` semantics for non-world bodies over introducing a parallel spatial-probe abstraction.
+- Treat the current browser shell’s residency model as provisional. The first runnable slice may remain outdoor-leaning, but later world work should distinguish outdoor landblock residency from indoor env-cell / visible-cell scene membership explicitly.
 
 #### Verification Log
 
@@ -1424,6 +1559,13 @@ Mitigation:
 - 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after moving host-boundary-derived state into a dedicated frontend store and wiring the browser-mode location flow on top of runtime residency data.
 - 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the new frontend store, browser-mode form, and Vitest config.
 - 2026-04-26: `npm run build` in `apps/holtburger-3d` passed after the Phase 3 store extraction, mode-routing policy, and browser destination preview flow.
+- 2026-04-26: `npm run test:ts` in `apps/holtburger-3d` passed after adding the Phase 4 world-display model tests and host-bridge fallback tests for camera hints plus debug ray picks.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after wiring `WorldDisplay` to consume the frontend store, selected browser destination, and world-facing debug shell.
+- 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the Phase 4 `WorldDisplay` shell, world-display model helpers, and typed camera-hint/query bridge additions.
+- 2026-04-26: `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml camera_hints_are_accepted_and_picks_resolve_against_authoritative_debug_entities` passed.
+- 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after adding app-local camera-hint commands and authority-sensitive debug pick resolution.
+- 2026-04-26: `npm run lint:rust` in `apps/holtburger-3d` passed with the new app-local Phase 4 host contracts and adapter tests.
+- 2026-04-26: `npm run build` in `apps/holtburger-3d` passed after the Phase 4 world shell and typed camera-hint / ray-pick integration.
 
 #### Phase Review Log
 
@@ -1439,17 +1581,20 @@ Mitigation:
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
+- 2026-04-26: Phase 4 completed with a real `WorldDisplay` shell that consumes the frontend store, stages asset-worker ingress, renders mirrored runtime entities in a world-facing debug viewport, and owns the first app-local camera-hint plus authority-sensitive debug-pick path.
+- 2026-04-26: Phase 4 did not require shared-crate changes. The new camera-hint and pick seams are still app-local Tauri host concerns, which keeps renderer-shaped policy and debug-world-shell behavior out of shared crates.
+- 2026-04-26: Gate review resolved in favor of moving to a tightened Phase 5 focused on asset-channel and worker-pattern validation, since the world shell, camera hints, and first authority-sensitive query are already in place.
 
 #### Open Execution Questions
 
-- Should the first `WorldDisplay` handoff treat the selected browser destination as a passive debug preview, or should it immediately become the first camera/bootstrap target for the world shell?
 - Should the first asset-path proof graduate from diagnostic metadata to real payload lookup using the Phase 2 runtime `gfx/*` appearance identifiers, or should it stay synthetic until the asset worker lands?
 
 ## Remaining Open Questions
 
 - How raw should the asset payload contract be before JS starts paying too much duplicated parsing or transformation cost?
 - What is the smallest authoritative state surface that still gives JS enough information to infer animations and build coherent frontend game-state projections without inventing hidden gameplay semantics?
-- Exactly how should camera-position hints be shaped, throttled, and prioritized on the runtime channel?
+- What is the minimum additional shared `SpatialBody` semantics needed to support non-world bodies such as camera-collision helpers or sensors without blurring world membership?
+- What is the right local scene-membership model for indoor spaces: pure frontend-owned visible-cell expansion, a host-assisted residency feed, or some staged hybrid?
 - What global freshness budget feels good in practice once the first walkaround scene exists?
 
 ## Definition Of Done For This Scoping Document
@@ -1461,4 +1606,10 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phase 3 is complete. The next implementation step is the narrowed Phase 4: make `WorldDisplay` consume the new frontend store and selected browser destination, add the first world-facing debug shell, and wire camera hints plus the first authority-sensitive query without moving browser policy back into Rust.
+Phase 4 is complete. The next implementation step is the tightened Phase 5: validate the dedicated asset channel and worker pattern with a real worker-owned preparation path while keeping the new world shell, camera-hint path, and debug query seam stable.
+
+After the browser-foundation phases land, the next appended fast-follow work should likely split in this order:
+
+1. shared `SpatialBody` constraint and non-world body semantics, so camera collision and similar helpers reuse the existing solving domain instead of inventing a second one
+2. local scene residency and visible-cell semantics, so outdoor landblock residency and indoor env-cell visibility stop being conflated in the client’s local world model
+3. landblock geometry decode and first terrain rendering, once the shared asset and spatial seams are stable enough to carry real scene data

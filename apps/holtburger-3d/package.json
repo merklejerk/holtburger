@@ -1,41 +1,41 @@
 {
-  "name": "holtburger-3d",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test:ts": "vitest run",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-    "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
-    "lint": "npm run lint:ts && npm run lint:rust",
-    "lint:ts": "eslint src vite.config.ts eslint.config.mjs",
-    "lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
-  },
-  "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@sveltejs/vite-plugin-svelte": "^7.0.0",
-    "@tauri-apps/cli": "^2.10.1",
-    "@tsconfig/svelte": "^5.0.8",
-    "@types/node": "^24.12.2",
-    "eslint": "^10.2.1",
-    "globals": "^17.5.0",
-    "prettier": "^3.8.3",
-    "svelte": "^5.55.4",
-    "svelte-check": "^4.4.6",
-    "typescript": "~6.0.2",
-    "typescript-eslint": "^8.59.0",
-    "vite": "^8.0.10",
-    "vitest": "^4.0.7"
-  },
-  "dependencies": {
-    "@tauri-apps/api": "^2.10.1"
-  }
+	"name": "holtburger-3d",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+		"build": "vite build",
+		"preview": "vite preview",
+		"test:ts": "vitest run",
+		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+		"check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
+		"lint": "npm run lint:ts && npm run lint:rust",
+		"lint:ts": "eslint src vite.config.ts eslint.config.mjs",
+		"lint:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"tauri": "tauri",
+		"tauri:dev": "tauri dev",
+		"tauri:build": "tauri build"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"@sveltejs/vite-plugin-svelte": "^7.0.0",
+		"@tauri-apps/cli": "^2.10.1",
+		"@tsconfig/svelte": "^5.0.8",
+		"@types/node": "^24.12.2",
+		"eslint": "^10.2.1",
+		"globals": "^17.5.0",
+		"prettier": "^3.8.3",
+		"svelte": "^5.55.4",
+		"svelte-check": "^4.4.6",
+		"typescript": "~6.0.2",
+		"typescript-eslint": "^8.59.0",
+		"vite": "^8.0.10",
+		"vitest": "^4.0.7"
+	},
+	"dependencies": {
+		"@tauri-apps/api": "^2.10.1"
+	}
 }

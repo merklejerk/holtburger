@@ -200,9 +200,13 @@
     <article class="panel panel-world">
       <p class="kicker">Shared foundation</p>
       <WorldDisplay
-        modeLabel={$frontendState.mode.activeModeLabel}
-        status={$frontendState.host.boundarySnapshot ? 'Host boundary is feeding authoritative runtime snapshots' : 'Waiting for host boundary'}
-        detail={`Shared world-facing infrastructure starts here. Active page: ${$frontendState.mode.activePageId}. ${$frontendState.mode.activeModeSummary}`}
+        activeMode={$frontendState.mode.activeMode}
+        activeModeLabel={$frontendState.mode.activeModeLabel}
+        hostStatus={$frontendState.host.boundaryStatus}
+        runtimeBatch={$frontendState.host.boundarySnapshot?.runtimeBatch ?? null}
+        viewModelFeed={$frontendState.host.boundarySnapshot?.viewModelFeed ?? null}
+        assetResponse={$frontendState.host.boundarySnapshot?.assetResponse ?? null}
+        browserDestination={$frontendState.browserMode.destination}
       />
     </article>
 

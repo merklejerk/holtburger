@@ -1088,6 +1088,8 @@ Resolved gate review:
 
 Purpose: finish the missing frontend-owned state boundaries on top of the already-running shell, then wire browser-mode-first navigation and inspection against the live Phase 2 runtime feed without waiting for polished gameplay UI.
 
+Status: completed on 2026-04-26.
+
 Deliverables:
 
 - keep the existing Svelte app shell and explicit top-level modes, then move host-boundary-derived mirrored state out of `App.svelte` into a dedicated frontend game-state or view-model store
@@ -1116,6 +1118,12 @@ Phase Gate Review Before Phase 4:
 - review whether browser mode is staying clearly separate from client-mode semantics instead of quietly absorbing gameplay policy
 - decide whether `WorldDisplay` should be introduced as planned or whether its boundary still needs a narrower contract pass first
 
+Resolved gate review:
+
+- The shell, mode model, and host-boundary-derived mirrored state now live behind an explicit frontend store boundary. `App.svelte` no longer owns runtime notification merge logic, which is the right precondition for introducing `WorldDisplay` as a real consumer in the next phase.
+- Browser mode stayed frontend-owned. The first location flow uses AC-style coordinate input plus a "use current residency" shortcut derived from runtime data, but no host-side page control or gameplay authority leaked across the boundary.
+- Phase 4 should narrow slightly. It no longer needs to introduce the first location-input flow because Phase 3 delivered that. The next step is to make `WorldDisplay` consume the new store boundary and selected browser destination, then add camera hints and the first authority-sensitive query without pretending that free-navigation UX is already mature.
+
 Phase 3 TypeScript Test Agenda:
 
 - Set up an app-local TypeScript test runner only after the Phase 3 store boundary exists, so tests lock onto the durable boundary rather than the temporary root-component merge code.
@@ -1136,7 +1144,7 @@ Deliverables:
   - input mapping shell
   - asset worker plumbing
   - a minimal scene or canvas host
-- implement browser mode as the first consumer of `WorldDisplay`, including initial coordinate entry or selection and free navigation controls
+- implement browser mode as the first consumer of `WorldDisplay`, including selected-destination handoff from the Phase 3 store and a world-facing debug shell
 - render simple placeholders, diagnostics, or test geometry only if needed to prove ownership boundaries
 - wire camera-position hints from the frontend to Rust on a throttled path
 - wire the first authority-sensitive query for ray-pick resolution, even if it only targets placeholder objects or debug entities
@@ -1144,7 +1152,7 @@ Deliverables:
 Acceptance Criteria:
 
 - `WorldDisplay` exists as a stable shared shell with the right subsystems in the right place
-- browser mode can reach a navigable world-facing view from an initial coordinate or location input
+- browser mode can hand off its selected destination into a world-facing debug shell without pushing location policy back into Rust
 - camera hints travel from frontend to Rust through a typed runtime path
 - the first authority-sensitive query round-trip works end to end
 - the renderer or canvas surface remains a consumer of mirrored state rather than a source of authority
@@ -1365,11 +1373,12 @@ Mitigation:
 - [x] scaffold `src-tauri` host and Svelte-plus-TypeScript frontend
 - [x] write the initial frontend contract worksheet
 - [x] implement typed lifecycle feed across the boundary
-- [ ] define browser-mode location input and world-load flow
+- [x] define browser-mode location input flow
+- [ ] define browser-mode world-load handoff into `WorldDisplay`
 - [x] implement the first runtime snapshot or delta feed
 - [x] implement the first asset query and response flow
 - [x] add the frontend mode model and app shell
-- [ ] add the frontend game-state or view-model store
+- [x] add the frontend game-state or view-model store
 - [ ] add `WorldDisplay` and the browser-mode world shell with placeholder render host
 - [ ] add camera-position hints from frontend to Rust
 - [ ] add the first authority-sensitive query for ray picks
@@ -1392,6 +1401,9 @@ Mitigation:
 - Carry real landblock, derived outdoor cell, indoor-vs-outdoor, and location-string facts in the runtime batch now; defer browser-mode location input policy to the next frontend-focused phase.
 - Use one runtime notification event with typed topics rather than separate lifecycle-only and runtime-only transports.
 - Narrow the next phase to frontend store extraction and browser-flow wiring because the shell and mode model already exist.
+- Keep host-boundary snapshot loading and runtime-notification merge behavior inside an app-local frontend store rather than inside `App.svelte`.
+- Use AC-style coordinate labels as the first browser-mode input shape, with a frontend-owned shortcut that promotes the current runtime residency into the selected browser destination.
+- Add an app-local Vitest runner in `apps/holtburger-3d` now that the bridge and store seams are stable enough to defend with TypeScript tests.
 
 #### Verification Log
 
@@ -1408,6 +1420,10 @@ Mitigation:
 - 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after replacing the app-local runtime DTO stub generator with a managed authoritative `WorldState` and streamed runtime notifications.
 - 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after widening the frontend contracts to carry runtime residency, richer entity snapshots, and runtime notification merging.
 - 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed after switching the bridge to a unified runtime notification event and removing stale lifecycle-event-only code.
+- 2026-04-26: `npm run test:ts` in `apps/holtburger-3d` passed after adding the Phase 3 Vitest suite for bridge fallback behavior, frontend store merge logic, lifecycle-to-mode routing, contract fixtures, and browser-mode location policy.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after moving host-boundary-derived state into a dedicated frontend store and wiring the browser-mode location flow on top of runtime residency data.
+- 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the new frontend store, browser-mode form, and Vitest config.
+- 2026-04-26: `npm run build` in `apps/holtburger-3d` passed after the Phase 3 store extraction, mode-routing policy, and browser destination preview flow.
 
 #### Phase Review Log
 
@@ -1420,10 +1436,13 @@ Mitigation:
 - 2026-04-26: Phase 2 completed with a small authoritative app-local `WorldState`, real runtime-body-backed entity snapshots, residency metadata, typed runtime notifications, and frontend inspection of streamed runtime batches without same-turn reads.
 - 2026-04-26: Phase 2 did not require shared-crate changes. Using existing `holtburger-world` constructors and runtime-body view surfaces was sufficient for this proof, which strengthens the case for keeping the seam app-local until live session or content pressure says otherwise.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 3 focused on frontend store extraction and browser-mode flow wiring, rather than redoing the app shell work that is already in place.
+- 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
+- 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
+- 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
 
 #### Open Execution Questions
 
-- Should the first browser-mode location input start from raw coordinate entry, current-runtime residency anchors, or a thin list of canned debug destinations?
+- Should the first `WorldDisplay` handoff treat the selected browser destination as a passive debug preview, or should it immediately become the first camera/bootstrap target for the world shell?
 - Should the first asset-path proof graduate from diagnostic metadata to real payload lookup using the Phase 2 runtime `gfx/*` appearance identifiers, or should it stay synthetic until the asset worker lands?
 
 ## Remaining Open Questions
@@ -1442,4 +1461,4 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phase 2 is complete. The next implementation step is the narrowed Phase 3: extract an explicit frontend game-state or view-model store from the root shell, add the first browser-mode location-input flow on top of the live runtime residency feed, and keep pressure-testing whether browser policy stays frontend-owned while the runtime and asset seams remain app-local.
+Phase 3 is complete. The next implementation step is the narrowed Phase 4: make `WorldDisplay` consume the new frontend store and selected browser destination, add the first world-facing debug shell, and wire camera hints plus the first authority-sensitive query without moving browser policy back into Rust.

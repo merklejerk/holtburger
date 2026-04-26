@@ -9,11 +9,8 @@ export interface AppShellState {
 export const appShellState: AppShellState = {
   title: 'Mode-first app shell is wired for boundary-driven growth.',
   summary:
-    'The frontend owns top-level mode state and page composition, while Rust will own lifecycle facts and authoritative runtime feeds.',
+    'The frontend now owns top-level mode routing, page composition, and browser-flow policy on top of Rust lifecycle facts and authoritative runtime feeds.',
   activeMode: 'browser',
 };
 
 export { availableModes };
-
-export const selectedModeLabel =
-  availableModes.find((mode) => mode.id === appShellState.activeMode)?.label ?? 'Unknown Mode';

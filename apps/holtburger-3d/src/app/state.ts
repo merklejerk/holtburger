@@ -7,7 +7,7 @@ export interface AppShellState {
 }
 
 export const appShellState: AppShellState = {
-  title: 'Phase 0 scaffold is wired for mode-first growth.',
+  title: 'Mode-first app shell is wired for boundary-driven growth.',
   summary:
     'The frontend owns top-level mode state and page composition, while Rust will own lifecycle facts and authoritative runtime feeds.',
   activeMode: 'browser',

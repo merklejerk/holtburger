@@ -19,7 +19,7 @@ function createRuntimeBatch(): RuntimeBatchDto {
 				label: "Browser Scout",
 				position: { x: 10, y: 15, z: 2 },
 				headingRadians: 0.25,
-				appearanceId: "gfx/02000001",
+				visualAssetId: "gfx/02000001",
 				landblockId: 0x01020003,
 				cellId: 3,
 				locationLabel: "100.40S, 101.55W, 1.0Z",
@@ -30,7 +30,7 @@ function createRuntimeBatch(): RuntimeBatchDto {
 				label: "Survey Drudge",
 				position: { x: 22, y: 30, z: 0 },
 				headingRadians: 1.1,
-				appearanceId: "gfx/02000002",
+				visualAssetId: "gfx/02000002",
 				landblockId: 0x0102001b,
 				cellId: 27,
 				locationLabel: "100.41S, 101.52W, 0.0Z",
@@ -111,10 +111,38 @@ describe("world display model helpers", () => {
 		expect(model.headline).toMatch(/destination preview/i);
 		expect(model.destinationLabel).toBe("100.55S, 101.65W, 2.0Z");
 		expect(model.entities).toHaveLength(2);
+		expect(model.sceneContext.kind).toBe("outdoor-landblock-ring");
+		expect(model.sceneContext.chunks).toHaveLength(9);
+		expect(model.sceneContext.focusLandblockLabel).toBe("0x0102ffff");
+		expect(model.terrainContract.requestKey).toBe("terrain/0102ffff");
+		expect(model.terrainContract.decodeOwner).toBe("rust-host-adapter");
 		expect(model.entities.find((entity) => entity.isSelected)?.label).toBe(
 			"Survey Drudge",
 		);
 		expect(model.assetSummary).toMatch(/Prepared gfx\/02000001/);
+	});
+
+	it("makes the outdoor-first limit explicit when runtime residency is indoors", () => {
+		const runtimeBatch = createRuntimeBatch();
+		runtimeBatch.residency.indoors = true;
+		runtimeBatch.residency.focusLandblockId = 0x016c0155;
+
+		const model = deriveWorldDisplayModel({
+			activeModeLabel: "Browser Mode",
+			hostStatus: "Connected to the host.",
+			runtimeBatch,
+			viewModelFeed: null,
+			assetState: createInitialAssetChannelState(),
+			browserDestination: null,
+			cameraAck: null,
+			rayPickResponse: null,
+			pendingCameraHint: false,
+		});
+
+		expect(model.sceneContext.kind).toBe("indoor-gap");
+		expect(model.sceneContext.chunks).toHaveLength(0);
+		expect(model.sceneContext.gapSummary).toMatch(/visible-cell/i);
+		expect(model.terrainContract.requestKey).toBeNull();
 	});
 
 	it("builds camera hints and pick requests from viewport input", () => {

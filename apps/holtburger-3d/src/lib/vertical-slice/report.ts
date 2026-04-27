@@ -43,9 +43,9 @@ export function deriveVerticalSliceReport(
 	];
 
 	const awkwardSeams = [
-		"Asset payloads are still typed appearance manifests with debug primitives and palette keys; real DAT/HBA mesh, texture, and terrain decode is still deferred.",
+		"Asset payloads are still typed visual-asset stubs with debug primitives and palette keys; real DAT/HBA models, textures, animations, and terrain payload families are still deferred.",
 		"The frontend currently keeps an activity log plus one live prepared-asset record, not a real scene-wide asset cache with eviction or invalidation policy.",
-		"The world shell still projects debug markers from runtime state; it does not yet carry honest outdoor terrain or indoor env-cell / visible-cell scene membership.",
+		"WorldDisplay now owns an explicit outdoor landblock-ring scene context, but the first terrain payload and indoor env-cell / visible-cell scene membership are still deferred.",
 	];
 
 	if (snapshot?.source === "browser-preview") {

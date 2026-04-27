@@ -115,8 +115,8 @@ export function createFocusedAssetRequest(
 	}
 
 	return {
-		requestId: `${priority}-${runtimeBatch.tick}-${focusEntity.appearanceId}`,
-		assetId: focusEntity.appearanceId,
+		requestId: `${priority}-${runtimeBatch.tick}-${focusEntity.visualAssetId}`,
+		assetId: focusEntity.visualAssetId,
 		priority,
 	};
 }

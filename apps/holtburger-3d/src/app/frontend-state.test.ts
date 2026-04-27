@@ -20,7 +20,7 @@ function createRuntimeBatch(
 				label: "Browser Scout",
 				position: { x: 12, y: -4.5, z: 1 },
 				headingRadians: 0,
-				appearanceId: "gfx/02000001",
+				visualAssetId: "gfx/02000001",
 				landblockId: 0x01020003,
 				cellId: 3,
 				locationLabel: "100.40S, 101.55W, 1.0Z",

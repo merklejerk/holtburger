@@ -24,7 +24,7 @@ export interface RuntimeEntitySnapshotDto {
 	label: string;
 	position: Vec3Dto;
 	headingRadians: number;
-	appearanceId: string;
+	visualAssetId: string;
 	landblockId: number;
 	cellId: number | null;
 	locationLabel: string;

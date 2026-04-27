@@ -62,7 +62,7 @@ describe("readHostBoundarySnapshot", () => {
 		expect(response.assetId).toBe("gfx/02000003");
 		expect(response.payloadKind).toBe("json");
 		expect(response.payload).toMatchObject({
-			kind: "appearance-manifest",
+			kind: "visual-asset-stub",
 			residencyKind: "indoor-env-cell",
 		});
 	});

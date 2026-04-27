@@ -199,6 +199,67 @@
     </section>
   </div>
 
+  <div class="world-display__status-grid">
+    <section class="world-display__status-card world-display__status-card--wide">
+      <h3>Outdoor scene context</h3>
+      <p>{worldDisplay.sceneContext.summary}</p>
+      <dl class="data-list compact-data-list">
+        <div>
+          <dt>Focus landblock</dt>
+          <dd>{worldDisplay.sceneContext.focusLandblockLabel}</dd>
+        </div>
+        <div>
+          <dt>Coverage</dt>
+          <dd>{worldDisplay.sceneContext.coverageSummary}</dd>
+        </div>
+      </dl>
+      <p>{worldDisplay.sceneContext.destinationSummary}</p>
+      {#if worldDisplay.sceneContext.gapSummary}
+        <p>{worldDisplay.sceneContext.gapSummary}</p>
+      {/if}
+
+      {#if worldDisplay.sceneContext.chunks.length > 0}
+        <ul class="world-display__chunk-list">
+          {#each worldDisplay.sceneContext.chunks as chunk}
+            <li>
+              <strong>{chunk.label}</strong>
+              {' '}
+              ({chunk.role === 'focus' ? 'focus' : `offset ${chunk.offsetX}, ${chunk.offsetY}`})
+              <br />
+              {chunk.reason}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section class="world-display__status-card world-display__status-card--wide">
+      <h3>Terrain ground truth</h3>
+      <p>{worldDisplay.terrainContract.summary}</p>
+      <dl class="data-list compact-data-list">
+        <div>
+          <dt>Request key</dt>
+          <dd>{worldDisplay.terrainContract.requestKey ?? 'pending outdoor focus landblock'}</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd>{worldDisplay.terrainContract.sourceAssetKind}</dd>
+        </div>
+        <div>
+          <dt>Decode owner</dt>
+          <dd>{worldDisplay.terrainContract.decodeOwner}</dd>
+        </div>
+        <div>
+          <dt>Render owner</dt>
+          <dd>{worldDisplay.terrainContract.renderOwner}</dd>
+        </div>
+      </dl>
+      <p>Load anchor: {worldDisplay.terrainContract.loadAnchor}</p>
+      <p>Geometry anchor: {worldDisplay.terrainContract.geometryAnchor}</p>
+      <p>{worldDisplay.terrainContract.indoorBranchSummary}</p>
+    </section>
+  </div>
+
   <button
     class="world-display__viewport-button"
     type="button"

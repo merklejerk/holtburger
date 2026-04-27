@@ -38,7 +38,7 @@ describe("host contracts", () => {
 					label: "Browser Scout",
 					position: { x: 12, y: -4.5, z: 1 },
 					headingRadians: 0,
-					appearanceId: "gfx/02000001",
+					visualAssetId: "gfx/02000001",
 					landblockId: residency.focusLandblockId,
 					cellId: residency.focusCellId,
 					locationLabel: residency.focusLocationLabel,

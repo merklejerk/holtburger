@@ -21,7 +21,7 @@ function createSnapshot(): HostBoundarySnapshot {
 					label: "Browser Scout",
 					position: { x: 0, y: 0, z: 0 },
 					headingRadians: 0,
-					appearanceId: "gfx/02000001",
+					visualAssetId: "gfx/02000001",
 					landblockId: 0x01020003,
 					cellId: 3,
 					locationLabel: "100.40S, 101.55W, 1.0Z",
@@ -125,6 +125,6 @@ describe("vertical slice report", () => {
 		expect(report.assetSummary).toMatch(/bootstrap plus streaming/);
 		expect(report.observedFlows).toContain("Bootstrap asset: gfx/02000001.");
 		expect(report.observedFlows).toContain("Streaming asset: gfx/02000003.");
-		expect(report.awkwardSeams[0]).toMatch(/Asset payloads are still typed appearance manifests/);
+		expect(report.awkwardSeams[0]).toMatch(/Asset payloads are still typed visual-asset stubs/);
 	});
 });

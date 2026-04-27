@@ -375,8 +375,8 @@ sequenceDiagram
   participant GPU as Three.js / GPU Resources
 
   Content->>Core: WorldBootstrap for runtime startup
-  Core-->>IPC: world/entity/appearance deltas reference asset ids
-  IPC-->>Scene: notify scene of renderable ids and asset ids
+  Core-->>IPC: world/entity visual facts reference stable asset ids
+  IPC-->>Scene: notify scene of entity visual state and relevant asset ids
 
   Scene->>Cache: check renderer-side cache
   alt asset missing or stale
@@ -402,7 +402,7 @@ The default rule should be:
 
 Instead:
 
-1. Rust publishes semantic world/entity/appearance deltas that reference stable asset IDs.
+1. Rust publishes semantic world/entity visual facts that reference stable asset IDs.
 2. JS decides which referenced assets are needed for the current scene, camera, cache state, and quality policy.
 3. JS requests missing asset payloads from Rust by ID.
 4. Rust answers the request from `ContentRepository`.
@@ -413,13 +413,13 @@ There may eventually be narrow preload or prefetch paths, but those should be ex
 This same architecture should support both major loading modes the client needs:
 
 - bootstrap burst loading: entering the world, teleporting, or any other hard scene transition where JS rapidly requests a large set of assets for the new authoritative area or scene state
-- steady-state streaming: incremental asset fetches while moving through the world or when new entity types, appearances, or nearby content become relevant
+- steady-state streaming: incremental asset fetches while moving through the world or when new entity types, visual states, or nearby content become relevant
 
 Those are not two different systems. They are two request policies over the same asset channel.
 
 Recommended framing:
 
-- the semantic runtime channel tells JS what world state, residency, and appearance facts changed
+- the semantic runtime channel tells JS what world state, residency, and visual facts changed
 - the asset channel lets JS choose whether to respond with a bulk fetch wave or a small incremental fetch
 - the worker and cache layers absorb most of the difference between those two modes
 
@@ -680,7 +680,7 @@ The current architecture already points toward a split where `holtburger-content
 The first 3D-client scope should assume:
 
 - Rust owns archive mounting and asset identity.
-- Rust exposes queryable raw or lightly decoded payload access for terrain, models, textures, animations, and appearance composition inputs.
+- Rust exposes queryable raw or lightly decoded payload access for terrain, models, textures, animations, and other concrete render asset inputs.
 - JavaScript requests the assets it needs for the current scene and interprets those payloads into Three.js resources.
 - caching, GPU upload, and scene residency policy initially live in JavaScript, with room to move selected decode work to Rust later if profiling justifies it.
 
@@ -743,7 +743,7 @@ Even if both channels are multiplexed through the same IPC implementation at fir
 `holtburger-3d` should not wait for a perfect long-term API before starting. It needs a minimal contract that is honest about ownership.
 
 ### Contract A: Runtime Entity Feed
-- spawn, despawn, authoritative transform snapshots, velocity or motion updates, appearance identity, basic interaction flags, and other authoritative game-state facts that let the frontend derive presentation
+- spawn, despawn, authoritative transform snapshots, velocity or motion updates, stable visual asset references, basic interaction flags, and other authoritative game-state facts that let the frontend derive presentation and choose concrete asset requests
 
 ### Contract B: Local Player Feed
 - authoritative local-player transform, movement mode, action or combat state, forced movement, corrected position, interaction affordances
@@ -752,7 +752,7 @@ Even if both channels are multiplexed through the same IPC implementation at fir
 - spell metadata, item or weenie metadata, icon lookup, names, presentation descriptions
 
 ### Contract D: Heavy Asset Queries
-- raw or lightly decoded models, textures, animation clips, terrain or level chunks, appearance composition inputs
+- raw or lightly decoded models, textures, animation clips, terrain or level chunks, and other concrete render asset payloads chosen by the frontend from authoritative runtime facts
 
 This contract should ride a dedicated logical asset channel, not the same semantics-first path used for world and runtime deltas.
 
@@ -1208,7 +1208,7 @@ Resolved scope adjustment after Phase 4:
 Resolved gate review:
 
 - Phase 5 proved the dedicated asset path without widening shared crates. The host snapshot no longer carries asset payloads; runtime state stays on the runtime channel while asset lookup uses its own typed command and overview metadata.
-- The frontend worker now owns CPU-side preparation of a small appearance-manifest payload keyed from real runtime `gfx/*` identifiers. That is enough to prove demand-driven request, Rust response, worker processing, and frontend availability notification without pretending we already have real mesh or terrain decode.
+- The frontend worker now owns CPU-side preparation of a small visual-asset stub payload keyed from real runtime `gfx/*` identifiers. That is enough to prove demand-driven request, Rust response, worker processing, and frontend availability notification without pretending we already have real mesh or terrain decode or that Rust is choosing full renderer bundles.
 - Phase 6 should narrow slightly. Asset ownership is now legible enough, so the next pressure test is the runnable browser slice itself: boot the app, exercise both bootstrap and streaming asset requests in situ, and log the awkward seams that still block honest world-shell growth.
 
 ### Phase 6: Runnable Browser Vertical Slice And Gap-Hunting Pass
@@ -1265,11 +1265,12 @@ Recommended incremental path from here:
 
 1. define the first honest outdoor local scene-context model, so browser mode can answer "which landblock or chunk should exist in the scene right now?" instead of only showing runtime markers
 2. identify the real outdoor terrain or landblock geometry source, payload shape, and decode seam before promising visible terrain
-3. use that outdoor-first scene context plus the proven decode seam to drive the first barebones terrain payload request and render one real landblock or terrain mesh in `WorldDisplay`
-4. keep entity markers, boundary telemetry, and debug overlays as optional companions to the terrain slice instead of the main visual product
-5. expand from that outdoor terrain slice into explicit indoor env-cell / visible-cell semantics rather than pretending one flat scene model will scale to both cases
+3. pause for a dedicated AC scene research and fit audit so outdoor and indoor scene assumptions are grounded before more rendering code lands
+4. use the corrected outdoor-first scene context plus the validated decode seam to drive the first barebones terrain payload request and render one real landblock or terrain mesh in `WorldDisplay`
+5. keep entity markers, boundary telemetry, and debug overlays as optional companions to the terrain slice instead of the main visual product
+6. expand from that outdoor terrain slice into explicit indoor env-cell / visible-cell semantics rather than pretending one flat scene model will scale to both cases
 
-This means the next work should optimize for visible world progress, not more dashboard depth. A primitive terrain viewer with debug overlays is a better near-term target than a richer inspection panel with no actual terrain.
+This still means the plan should optimize for visible world progress, not more dashboard depth. But the immediate next step is to earn that progress with better AC-specific research rather than by hardening generic terrain assumptions into code.
 
 ### Mapped Next Phases After Phase 6
 
@@ -1278,6 +1279,8 @@ The appended follow-up work should now be treated as an explicit execution roadm
 #### Phase 7: Outdoor Scene Context And Terrain Ground Truth
 
 Adapts and narrows the existing local scene residency follow-up into the first immediate milestone, while explicitly stopping before promising terrain rendering.
+
+Status: completed on 2026-04-26.
 
 Purpose:
 
@@ -1297,28 +1300,144 @@ Acceptance criteria:
 - the first terrain or landblock geometry source is identified against ACE and ACViewer ground truth rather than guessed from placeholder code
 - the next phase can implement first terrain rendering without first reopening the source-data and decode-location question
 
-#### Phase 8: First Terrain Payload And Barebones World Browser Render
+Resolved gate review:
 
-Turns the Phase 7 scene-context and decode findings into the first visibly terrain-backed browser milestone.
+- Phase 7 delivered the first honest app-local outdoor scene context in `WorldDisplay`. The browser shell now normalizes authoritative outdoor residency to a landblock-centered `0xFFFF` chunk ID, then lets the frontend apply a provisional radius-1 outdoor landblock neighborhood policy for early rendering coverage. That matches ACViewer's first outdoor world-load assumption closely enough for browser-mode exploration without implying that simulation owns render-load selection or that one flat debug scene is correct.
+- The first terrain source and geometry anchors are now explicit enough to start real research, not explicit enough to count as settled architecture. ACE `CellLandblock` is the current strongest terrain data anchor, while ACViewer `WorldViewer.LoadLandblock`, `R_Landblock`, and `TerrainBatchDraw.AddTerrain` are useful implementation references that still need corroboration against retail AC behavior and any stronger repo-local evidence before we treat them as canonical.
+- The current decode-location idea is only a working hypothesis now: the app-local Rust host adapter may be the right first place to decode `CellLandblock` terrain data into a terrain asset payload for `holtburger-3d`, but the next phase must validate that assumption against how AC actually defines outdoor and indoor scene composition before we lock in DTOs or subsystem seams.
+- Phase 7 also resolves the transport question: terrain is a renderable asset family derived from DAT content, so it belongs on the dedicated asset channel. The runtime channel should only publish the visual facts and scene relevance that let the frontend decide which concrete terrain, model, texture, and animation assets to request.
+- No shared-crate seam should move yet. Phase 7 pressure is still app-local and frontend-facing, but the next missing work is not immediate terrain payload wiring. The next missing work is a dedicated research and fit pass that proves which AC scene concepts are actually natural before we widen asset DTOs or render-side assumptions.
+- Phase 8 should now be a research and ideation phase focused on AC scene composition, cell visibility, and natural asset or scene contracts. Do not fold first terrain rendering, broader terrain coverage, or generalized streaming policy into that next step.
+
+#### Phase 8: AC Scene Ground-Truth Research And Fit Audit
+
+Inserts a deliberate research gate before more terrain or indoor implementation so the next DTOs and subsystem seams are shaped around AC rather than around generic world-rendering instincts.
+
+Status: completed on 2026-04-26.
 
 Purpose:
 
-- request, decode, and render one real outdoor terrain or landblock geometry slice in `WorldDisplay`
-- make the browser read as a primitive world viewer instead of a marker-only viewport while keeping diagnostics available
+- identify how AC outdoor and indoor scene composition actually works, including what is authoritative, what is derived, and what is merely an ACViewer implementation choice
+- build an explicit inventory of what we still do not know about landblocks, env cells, visible cells, PVS-shaped behavior, portal adjacency, terrain composition, object placement, and scene-relevance rules
+- audit the current and planned `holtburger-3d` scene models, asset DTOs, and subsystem seams against that ground truth so we can keep natural AC-shaped contracts and discard generic assumptions
 
 Primary deliverables:
 
-- one terrain or landblock geometry payload traced from source data into the frontend render path
+- a source-backed research write-up inside this plan that distinguishes stronger anchors, weaker hypotheses, and still-open questions for outdoor and indoor rendering
+- a confidence-ranked ground-truth matrix covering ACE, project docs, observed retail-client behavior when known, and ACViewer references used only with explicit justification
+- a fit audit of the current app-local scene-context model, terrain asset-request assumptions, and planned indoor visible-cell expansion model
+- an updated recommendation for which data types and system seams should stay, which should be renamed or reframed, and which should not be implemented yet because the AC-specific truth is still unclear
+
+Acceptance criteria:
+
+- the plan can explain how outdoor and indoor scene composition appear to work in AC without pretending ACViewer is canonical by default
+- the document explicitly lists what evidence supports each major claim and what remains unresolved
+- any current or planned DTO or subsystem that looks too generic or too renderer-shaped is called out explicitly with a proposed correction or a research follow-up
+- the next implementation phase can request and render first terrain geometry without simultaneously reopening basic questions about landblocks, visible cells, or asset-family ownership
+
+Research rules for this phase:
+
+- treat ACE and repo-local docs as stronger behavioral anchors than ACViewer rendering structure unless proven otherwise
+- use ACViewer for inspiration and comparative reading, not as automatic canonical truth
+- when retail AC behavior is known or can be inferred from stronger evidence, record that separately from ACViewer behavior
+- prefer documenting uncertainty over silently hardening a guess into a contract
+
+Phase gate review before more rendering work:
+
+- decide whether the current radius-1 outdoor landblock neighborhood policy is a useful early frontend rendering default or whether horizon-aware camera policy should replace it sooner
+- decide whether visible-cell or PVS-shaped behavior belongs in frontend-local scene ownership, host-assisted scene relevance, or some staged hybrid
+- decide whether the first terrain asset payload should stay Rust-decoded, become JS-decoded, or remain unresolved pending one narrower spike
+- decide which existing phase assumptions are now solid enough to implement and which must be rewritten before Phase 9 starts
+
+Research findings:
+
+Strong anchors:
+
+- Outdoor scene composition is landblock-shaped, not generic chunk-shaped. ACE `CellLandblock` stores one `xxyyFFFF` outdoor terrain payload as a 9x9 terrain-type grid plus a 9x9 height grid, and `LandblockInfo` stores the companion `xxyyFFFE` building, object, and interior-cell metadata. Relevant anchors: [ACE/Source/ACE.DatLoader/FileTypes/CellLandblock.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/CellLandblock.cs), [ACE/Source/ACE.DatLoader/FileTypes/LandblockInfo.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/LandblockInfo.cs), and [ACViewer/docs/index.html](/home/cluracan/code/holtburger/ACViewer/docs/index.html).
+- Terrain is not just an arbitrary mesh blob. The source shape is AC-specific terrain data from `client_cell_1.dat`, and ACViewer's terrain batching shows that render geometry is derived from landblock polygons plus terrain, road, and alpha overlay surface data rather than from a pre-authored scene mesh. Relevant anchors: [ACViewer/ACViewer/Render/TerrainBatchDraw.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/TerrainBatchDraw.cs) and [ACViewer/ACViewer/Render/R_Landblock.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/R_Landblock.cs).
+- Indoor scene composition is env-cell-shaped, not landblock-shaped. ACE `EnvCell` carries per-cell surfaces, one `EnvironmentId`, one `CellStructure`, `CellPortals`, `VisibleCells`, static objects, and the `SeenOutside` flag. The geometry source is the `0x0D......` environment asset referenced by the env cell, while the env cell itself supplies the texture or surface bindings. Relevant anchors: [ACE/Source/ACE.DatLoader/FileTypes/EnvCell.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/EnvCell.cs), [ACViewer/ACViewer/Render/R_EnvCell.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/R_EnvCell.cs), and [ACViewer/docs/index.html](/home/cluracan/code/holtburger/ACViewer/docs/index.html).
+- The indoor level format has a real second layer below `EnvCell`, and that layer matters architecturally. `Environment` is a portal-DAT prefab container of `CellStruct`s, and each `CellStruct` contains render polygons, portal indices, cell BSP, physics polygons, physics BSP, and an optional drawing BSP. That means indoor level data is not just "an env cell with textures"; it is env-cell metadata plus a reusable geometry or collision structure with multiple spatial trees. Relevant anchors: [ACE/Source/ACE.DatLoader/FileTypes/Environment.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Environment.cs), [ACE/Source/ACE.DatLoader/Entity/CellStruct.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CellStruct.cs), [ACE/Source/ACE.DatLoader/Entity/CellPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/BSPPortal.cs), and [ACViewer/docs/index.html](/home/cluracan/code/holtburger/ACViewer/docs/index.html).
+- ACE server physics treats `VisibleCells` as a real indoor visibility or PVS-style input, not just debug metadata. `ObjectMaint` uses current cell plus `VisibleCells` for indoor visibility and adds outdoor landblock objects when `SeenOutside` is set. `PhysicsObj.handle_visible_cells()` uses that visibility set to maintain create or destroy state. Relevant anchors: [ACE/Source/ACE.Server/Physics/Common/ObjectMaint.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/Common/ObjectMaint.cs), [ACE/Source/ACE.Server/Physics/Common/EnvCell.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/Common/EnvCell.cs), and [ACE/Source/ACE.Server/Physics/PhysicsObj.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/PhysicsObj.cs).
+- Indoor visibility is not safely assumed to be symmetric. ACE's own player command comments call out a case where one room contains another in its `VisibleCells` list while the inverse is missing. That is strong evidence against replacing AC's visible-cell data with naive graph symmetry or portal-derived adjacency. Relevant anchor: [ACE/Source/ACE.Server/Command/Handlers/PlayerCommands.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Command/Handlers/PlayerCommands.cs).
+- `Scene` records are part of outdoor level data, not a separate unrelated curiosity. ACViewer docs and ACE-side scenery generation show that pseudo-random outdoor scenery is selected by combining terrain-type scene tables from region data with `0x12` `Scene` records that hold object descriptions. That means outdoor world composition is also two-layered: terrain grids plus scene-table-driven scenery selection. Relevant anchors: [ACViewer/docs/index.html](/home/cluracan/code/holtburger/ACViewer/docs/index.html), [ACE/Source/ACE.DatLoader/FileTypes/Scene.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Scene.cs), [ACE/Source/ACE.DatLoader/Entity/SceneType.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/SceneType.cs), and [ACViewer/ACE/Source/ACE.Server/Entity/Scenery.cs](/home/cluracan/code/holtburger/ACViewer/ACE/Source/ACE.Server/Entity/Scenery.cs).
+
+Weaker or inferential anchors:
+
+- ACViewer `WorldViewer.LoadLandblock()` loads a radius-1 outdoor neighborhood by default and eagerly builds every env cell in the selected landblock. That is a useful browser or inspection policy, but it is not strong evidence for retail runtime visibility, streaming behavior, or long-term render-load ownership. Relevant anchors: [ACViewer/ACViewer/WorldViewer.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/WorldViewer.cs) and [ACViewer/ACViewer/Render/Buffer.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/Buffer.cs).
+- `CBldPortal` and `CellPortals` prove that AC stores portal or passage data, but the current evidence does not prove that indoor visible sets can or should be derived from portals alone. The portal data is real; the replacement of `VisibleCells` with a portal walk is not yet justified. Relevant anchors: [ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs) and [ACE/Source/ACE.DatLoader/FileTypes/EnvCell.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/EnvCell.cs).
+- The exact frontend-facing role of indoor BSP data is still unresolved. The sources prove `CellStruct` contains cell, physics, and optional drawing BSP trees, but they do not yet tell us which parts Phase 11 should expose directly, flatten into a host-built intermediate, or ignore for the first indoor render pass.
+- The current Rust-host-first terrain decode idea remains plausible but unproven. The sources prove the data families and render ingredients, but they do not by themselves force the first decode layer to be Rust rather than JavaScript.
+
+Fit audit of current and planned models:
+
+- The current outdoor landblock-centered scene-context model is a natural first fit for AC outdoor browsing. Keeping the local outdoor scene contract in landblock terms is better than talking about generic terrain chunks.
+- The current plan was still too generic about indoor rendering. Indoor work should be described in terms of env cells, visible cells, `SeenOutside`, environment references, cell structures, and BSP-bearing level structures, not generic scene chunks or a flat shared residency label.
+- The world model should stay broadly isomorphic across outdoor and indoor scenes, but that does not mean both sides collapse into one generic asset shape. The natural shared abstraction is a scene composed from authoritative residency plus referenced level assets, where outdoors resolves through landblock terrain plus scene-table-driven scenery and indoors resolves through env-cell metadata plus environment or cell-structure geometry.
+- The asset split is still directionally correct, but the asset taxonomy should become more AC-shaped. Outdoor requests should distinguish landblock terrain from scene-table or scenery-derived object references. Indoor structural requests should be env-cell-scoped requests that resolve `EnvironmentId`, `CellStructure`, surfaces, and any later BSP-derived helpers rather than one vague appearance bundle.
+- The runtime channel should not push renderer-shaped bundles. It should publish authoritative residency, current cell context, indoor-versus-outdoor facts, `SeenOutside`-style relevance hints when available, and stable asset references that let the frontend choose concrete terrain, environment, model, texture, and animation asset requests.
+- The current Phase 11 indoor plan should not assume frontend-only derivation of indoor visibility from topology. The safest next design target is a staged hybrid: keep render-scene ownership in the frontend, but allow the host to publish authoritative indoor visible-cell relevance once the app moves beyond preview data.
+
+Resolved Phase 8 decisions:
+
+- Keep the outdoor scene contract landblock-first. Do not rename it to a generic chunk system in later phases.
+- Treat `VisibleCells` as the current canonical indoor visibility data source. Do not derive indoor visibility from portal topology or symmetric adjacency unless stronger evidence appears.
+- Treat `Environment` plus `CellStruct` as first-class indoor level assets, not as opaque details hidden behind env-cell DTOs. Future indoor planning should assume env-cell metadata and environment geometry are separate but linked concerns.
+- Treat `Scene` records as part of outdoor level composition. Outdoor planning should leave room for scene-table-driven pseudo-random scenery instead of assuming all outdoor content is either terrain or explicitly placed statics.
+- Treat ACViewer's loading policy as a viewer convenience, not retail runtime truth. Use it for decode inspiration and inspection ergonomics, not as the default source of scene-membership policy.
+- Keep the terrain asset family on the asset channel, but delay hardening the exact terrain decode layer until Phase 9's narrower payload spike. The research phase did not produce enough evidence to make Rust-host decode canonical.
+- Reframe future indoor DTOs away from generic scene buckets or appearance bundles. Favor AC-shaped terms such as landblock terrain, env cell, visible-cell set, environment reference, cell structure, and surface bindings.
+
+Remaining unknowns after Phase 8:
+
+- How much of retail indoor relevance is represented directly by `VisibleCells` versus additional runtime behavior not surfaced clearly in ACE or ACViewer.
+- Which parts of indoor level format need to cross the host boundary explicitly for the first indoor-capable world model: environment references only, cell-structure identifiers, decoded polygon buffers, BSP-derived helpers, or some staged subset.
+- How much of outdoor pseudo-random scenery selection should become an explicit asset or content-query concern before the world model is considered structurally honest for outdoor scenes.
+- Whether the first terrain payload should expose raw height and terrain grids, a lightly decoded structural intermediate, or a host-produced mesh-oriented intermediate.
+- How much host assistance Phase 11 should provide for indoor visible-cell relevance once the app uses live runtime state rather than the current preview path.
+
+Resolved gate review:
+
+- The Phase 7 radius-1 outdoor landblock neighborhood policy is a defensible AC-shaped browser starting point, but it should remain explicitly a frontend rendering policy rather than a simulation rule or a claim about retail streaming radius.
+- Visible-cell or PVS-shaped indoor relevance should not be modeled as frontend-only guesswork. The updated plan should assume a staged hybrid where frontend owns scene assembly and render policy while host or authoritative runtime surfaces may publish indoor visible-cell relevance.
+- The first terrain asset payload stays on the asset channel, but decode-layer ownership remains intentionally open for one narrower Phase 9 spike rather than being frozen by Phase 8 research.
+- Phase 9 can now proceed with a narrower target: one outdoor landblock terrain asset path. Phase 11 should be rewritten around env-cell, visible-cell, and `SeenOutside` semantics instead of generic indoor scene expansion.
+
+#### Phase 9: First Terrain Payload And Barebones World Browser Render
+
+Turns the Phase 7 scene-context work plus the Phase 8 research findings into the first visibly terrain-backed browser milestone.
+
+This phase must be treated as an outdoor rendering spike, not as permission to freeze the general scene model around outdoor-only assumptions.
+
+Purpose:
+
+- request, decode, and render one real outdoor terrain or landblock geometry slice in `WorldDisplay` over the dedicated asset channel
+- make the browser read as a primitive world viewer instead of a marker-only viewport while keeping diagnostics available
+- prove one outdoor asset path without accidentally hardening shared scene DTOs that cannot also host indoor env-cell and environment-backed scenes
+
+Primary deliverables:
+
+- one terrain or landblock geometry asset payload traced from source data through the asset channel into the frontend render path
+- an explicit Phase 9 request shape where the frontend chooses a terrain asset request from runtime visual facts, camera needs, and local scene context rather than Rust pushing a renderer-shaped bundle
 - a barebones world-browser milestone where terrain is visible even if objects, materials, and indoor semantics are still primitive
 - debug markers and boundary telemetry retained as optional overlays rather than the main visual product
+- an explicit app-local scene-model guardrail stating which Phase 9 data types are outdoor-specialized and which scene concepts must remain indoor-capable from the start
 
 Acceptance criteria:
 
 - browser mode renders at least one real terrain or landblock geometry slice
 - the terrain slice is driven by explicit local outdoor scene context rather than an ad hoc hardcoded mesh
+- the terrain slice travels on the asset channel as a concrete terrain asset family, not as runtime-channel data and not as a Rust-chosen renderer bundle
+- the frontend is the layer that chooses the terrain asset request and render-coverage set from runtime visual facts, camera policy, and local scene context
 - `WorldDisplay` reads as a primitive world surface first and a diagnostics surface second
+- no newly introduced scene DTO or shared semantic label implies that outdoor landblocks are the universal scene unit for both outdoor and indoor representation
 
-#### Phase 9: Terrain Coverage And Browser-Facing World Shell Consolidation
+Phase 9 design guardrails:
+
+- keep outdoor payloads explicitly landblock-specific when they are landblock-specific; do not rename them into fake-generic chunk or scene-node abstractions
+- keep any reusable scene model one level above concrete asset families: authoritative residency plus referenced level assets, not pre-bundled renderer payloads
+- if a type cannot plausibly represent indoor env-cell residency plus environment or cell-structure-backed geometry later, do not let Phase 9 promote it into the long-term shared model
+
+#### Phase 10: Terrain Coverage And Browser-Facing World Shell Consolidation
 
 Extends the first terrain slice into something that behaves more like a primitive world browser and less like a diagnostics viewport.
 
@@ -1326,41 +1445,47 @@ Purpose:
 
 - broaden from one proof chunk to a small outdoor browsing loop with camera movement, neighboring coverage, and clearer scene ownership
 - consolidate the app so browser mode leads with the world surface while diagnostics move into supporting panels or overlays
+- harden only the outdoor-specific pieces that are actually outdoor-specific, while keeping the core scene-model seams compatible with later indoor env-cell composition and transitions
 
 Primary deliverables:
 
 - modest expansion beyond the first terrain chunk, enough to make movement through outdoor space legible
 - a clearer separation between primary world-view UI and secondary diagnostics
 - initial asset-cache and terrain-refresh policy that is still simple but no longer purely single-slice
+- a first explicit statement of how outdoor scene residency, indoor scene residency, and scene transitions will map onto one higher-level app scene model without collapsing them into one fake-generic asset type
 
 Acceptance criteria:
 
 - the app reads as a primitive outdoor world browser first and a diagnostics surface second
 - moving through the outdoor scene can trigger at least one additional terrain or scene refresh beyond the initial slice
 - `WorldDisplay` remains the primary browser-mode surface
+- the plan and touched code can explain which seams are intentionally outdoor-only and which seams are being preserved as future indoor-capable scene abstractions
 
-#### Phase 10: Indoor Scene Membership And Visible-Cell Expansion
+#### Phase 11: Indoor Level Assets, Scene Membership, And Visible-Cell Expansion
 
 Adapts the remaining local scene residency follow-up into the point where indoor representation stops being an acknowledged gap and becomes a real model.
 
 Purpose:
 
-- extend the outdoor-first scene model into an honest indoor env-cell / visible-cell scene-membership model
+- introduce the first honest indoor-capable scene model built around env cells, visible cells, `SeenOutside`, environment references, cell structures, and any required BSP-aware helpers
 - stop implying that one flat outdoor chunk model can scale to both outdoor and indoor spaces
+- make indoor level assets a first-class part of the plan instead of treating indoor work as visibility expansion on top of an already-set outdoor model
 
 Primary deliverables:
 
 - explicit indoor scene-membership semantics in app code and docs
-- a clear mapping between runtime residency facts, local scene context, and visible-cell-driven representation
-- a follow-up-ready split between outdoor terrain coverage and indoor local-scene visibility
+- a clear mapping between runtime residency facts, local scene context, visible-cell-driven representation, and indoor level assets such as `Environment` plus `CellStruct`
+- the first concrete decision about whether indoor geometry crosses the host boundary as references, structural decode output, or a narrower staged intermediate
+- a follow-up-ready split between outdoor terrain coverage, outdoor scene-driven scenery, and indoor local-scene composition
 
 Acceptance criteria:
 
 - the code and docs can explain why an indoor scene element is locally present
 - outdoor and indoor local scene membership are distinct concepts, not one overloaded label
 - the terrain viewer path from earlier phases is still coherent after indoor semantics are introduced
+- the indoor phase does not smuggle indoor level structure behind vague payload names; the plan names the actual AC-shaped level assets involved
 
-#### Phase 11: Shared SpatialBody Constraint And Non-World Body Semantics
+#### Phase 12: Shared SpatialBody Constraint And Non-World Body Semantics
 
 Keep the existing shared `SpatialBody` expansion as a later follow-up phase rather than forcing it ahead of visible world progress.
 
@@ -1563,6 +1688,8 @@ Until those boundaries are introduced, the plan should avoid speculative tests t
 - Phase 4: add tests around `WorldDisplay`, camera-hint plumbing, and first authority-sensitive query behavior
 - Phase 5: add worker and asset-channel tests, especially message-shape and ownership boundaries
 - Phase 6: add vertical-slice checks where they reveal boundary regressions that lower-level tests cannot catch alone
+- Phase 7: add tests around outdoor scene-context policy and terrain request derivation without pretending terrain decode or indoor visibility semantics are already settled
+- Phase 8: prioritize source cross-checks, plan updates, and narrow validation spikes over broad implementation; any code touched during the research phase should prove or falsify one AC-specific assumption cheaply
 
 ### Validation Expectations
 
@@ -1656,6 +1783,8 @@ Mitigation:
 - [x] add the first authority-sensitive query for ray picks
 - [x] validate the asset worker pattern
 - [x] run the browser vertical slice and log awkward seams for follow-up
+- [x] define the first app-local outdoor scene context and terrain request contract
+- [x] perform an AC scene ground-truth research and fit audit for outdoor landblocks, indoor env cells, visible cells, and PVS-shaped scene relevance before more rendering work
 
 #### Decisions Log
 
@@ -1679,13 +1808,22 @@ Mitigation:
 - Let `WorldDisplay` own the first app-local camera-hint throttle and authority-sensitive debug-pick path, while keeping browser destination selection and routing policy in the frontend store.
 - Treat the current app-local camera-hint DTO as provisional. When real shared constraint solving arrives, prefer expanding shared `SpatialBody` semantics for non-world bodies over introducing a parallel spatial-probe abstraction.
 - Treat the current browser shell’s residency model as provisional. The first runnable slice may remain outdoor-leaning, but later world work should distinguish outdoor landblock residency from indoor env-cell / visible-cell scene membership explicitly.
-- Keep asset payloads out of the host boundary snapshot once the dedicated asset path exists. Runtime snapshots should carry authoritative world facts only; asset preparation should start from demand-driven lookups keyed by runtime-owned appearance identifiers.
-- Let the Phase 5 worker own CPU-side preparation of small appearance-manifest intermediates while keeping final renderer or GPU resource creation on the main render side.
+- Keep asset payloads out of the host boundary snapshot once the dedicated asset path exists. Runtime snapshots should carry authoritative world facts only; asset preparation should start from demand-driven lookups keyed by runtime-owned visual asset references.
+- Let the Phase 5 worker own CPU-side preparation of small visual-asset stub intermediates while keeping final renderer or GPU resource creation on the main render side.
 - Keep browser preview capable of synthetic runtime notifications so the frontend can exercise runtime-driven streaming asset flows without a native boot, while still treating Tauri runs as the real IPC and host-lifecycle proof.
 - Preserve prepared-asset observations by priority separately from bounded asset activity history so the vertical-slice report can remember bootstrap and streaming facts even after the scrolling log rolls over.
-- Treat current appearance-manifest payloads as explicit stubs. They are useful worker intermediates, but real mesh, texture, terrain decode, and scene-wide cache policy remain follow-up work.
+- Treat current visual-asset stub payloads as explicit stubs. They are useful worker intermediates, but real mesh, texture, terrain decode, and scene-wide cache policy remain follow-up work.
 - Shift the browser-mode product target from "debuggable world shell" toward "primitive but real world browser". Diagnostics should support that surface, not define it.
-- Treat barebones outdoor terrain rendering as the next visible milestone, even if indoor scene membership, richer objects, and mature cache policy remain deferred.
+- Treat barebones outdoor terrain rendering as the next visible implementation milestone after the dedicated AC scene research gate, even if indoor scene membership, richer objects, and mature cache policy remain deferred.
+- Normalize the Phase 7 outdoor scene anchor to a landblock-centered `0xFFFF` ID before selecting renderable outdoor terrain assets. Runtime residency can carry outdoor cell-flavored IDs, but the frontend's early outdoor rendering policy should reason in landblock terms while keeping the final render-load set camera-owned.
+- Anchor the first outdoor terrain source to ACE `CellLandblock` and ACViewer's outdoor landblock load path instead of reusing the existing `gfx/*` visual-asset stub path.
+- Treat ACViewer as an implementation reference, not canonical truth by default. When it informs a plan decision, corroborate it against ACE, repo-local docs, or stronger behavioral evidence.
+- Treat the current Rust-host-first terrain decode idea as provisional. Phase 8 research must confirm whether that ownership split is natural for AC scene data before Phase 9 hardens it into DTOs or app structure.
+- Keep the indoor scene model AC-shaped. Future indoor contracts should talk about env cells, visible-cell sets, `SeenOutside`, environment references, cell structures, and surface bindings rather than generic scene chunks or appearance bundles.
+- Treat ACE `VisibleCells` as the current canonical indoor visibility input even if the exact generation rules remain unknown. Do not replace it with symmetric adjacency or portal-derived guesses.
+- Treat ACViewer's default radius-1 landblock load and eager env-cell rendering as viewer policy, not as proof of retail client scene-membership behavior or proof that Rust should own render-load selection.
+- Do not let outdoor rendering milestones canonize the shared scene model. Outdoor landblocks, terrain payloads, and outdoor browsing policy may be phase-local specializations, while the higher-level scene model must stay compatible with indoor env-cell and environment-backed composition plus transitions.
+- Prefer explicit AC-shaped special cases over fake-generic abstractions. If a concept is honestly landblock-only, env-cell-only, or scene-table-only right now, name it that way instead of promoting a misleading universal DTO.
 
 #### Verification Log
 
@@ -1715,7 +1853,7 @@ Mitigation:
 - 2026-04-26: `npm run build` in `apps/holtburger-3d` passed after the Phase 4 world shell and typed camera-hint / ray-pick integration.
 - 2026-04-26: `npm run test:ts` in `apps/holtburger-3d` passed after splitting asset lookup out of the host snapshot and adding the Phase 5 asset-channel plus worker tests.
 - 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after wiring the dedicated asset channel into the frontend store, app shell, and worker-backed preparation path.
-- 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after reshaping the app-local asset lookup contract around typed appearance manifests and dedicated asset-channel overview metadata.
+- 2026-04-26: `npm run check:rust` in `apps/holtburger-3d` passed after reshaping the app-local asset lookup contract around typed visual-asset stubs and dedicated asset-channel overview metadata.
 - 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed with the new Phase 5 asset-channel controller, asset worker, and prepared-asset frontend state.
 - 2026-04-26: `npm run lint:rust` in `apps/holtburger-3d` passed after tightening the Phase 5 asset-channel host contract and manifest builder.
 - 2026-04-26: `npm run build` in `apps/holtburger-3d` passed with the new dedicated asset channel and worker bundle.
@@ -1725,6 +1863,9 @@ Mitigation:
 - 2026-04-26: `npm run lint:ts` in `apps/holtburger-3d` passed after tightening the Phase 6 preview-runtime and report code paths.
 - 2026-04-26: `npm run tauri:build -- --debug` in `apps/holtburger-3d` passed after the Phase 6 browser vertical-slice work and produced `/home/cluracan/code/holtburger/target/debug/holtburger-3d`.
 - 2026-04-26: Live browser-preview inspection at `http://127.0.0.1:1420/` showed the vertical-slice panel observing both bootstrap asset `gfx/02000001` and streaming asset `gfx/02000003`, plus the current awkward seams for stub payloads, cache policy, and scene membership.
+- 2026-04-26: `npx vitest run src/lib/world-display/model.test.ts` in `apps/holtburger-3d` passed after adding the Phase 7 outdoor scene-context model, indoor-gap guardrails, and terrain request-contract derivation.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after surfacing the Phase 7 outdoor scene context and terrain ground-truth contract in `WorldDisplay` and promoting the world shell ahead of the host-boundary panels.
+- 2026-04-26: Phase 8 research completed by cross-reading ACE DAT loaders, ACE server physics visibility handling, ACViewer world and render paths, ACViewer docs, and repo-local pruning notes, then recording the resulting fit audit and gate review in this plan.
 
 #### Phase Review Log
 
@@ -1743,17 +1884,26 @@ Mitigation:
 - 2026-04-26: Phase 4 completed with a real `WorldDisplay` shell that consumes the frontend store, stages asset-worker ingress, renders mirrored runtime entities in a world-facing debug viewport, and owns the first app-local camera-hint plus authority-sensitive debug-pick path.
 - 2026-04-26: Phase 4 did not require shared-crate changes. The new camera-hint and pick seams are still app-local Tauri host concerns, which keeps renderer-shaped policy and debug-world-shell behavior out of shared crates.
 - 2026-04-26: Gate review resolved in favor of moving to a tightened Phase 5 focused on asset-channel and worker-pattern validation, since the world shell, camera hints, and first authority-sensitive query are already in place.
-- 2026-04-26: Phase 5 completed with a dedicated asset channel that no longer piggybacks on the host snapshot, a worker-owned CPU preparation path for typed appearance-manifest payloads keyed from runtime `gfx/*` identifiers, and frontend asset state that reports availability separately from authoritative runtime state.
+- 2026-04-26: Phase 5 completed with a dedicated asset channel that no longer piggybacks on the host snapshot, a worker-owned CPU preparation path for typed visual-asset stub payloads keyed from runtime `gfx/*` identifiers, and frontend asset state that reports availability separately from authoritative runtime state.
 - 2026-04-26: Phase 5 did not require shared-crate changes. The asset path is still app-local and honest about its current scope: it proves channel split and worker ownership without pretending that final render asset decode belongs in shared crates yet.
 - 2026-04-26: Gate review resolved in favor of moving to a slightly tightened Phase 6 focused on the runnable browser vertical slice, including explicit bootstrap-versus-streaming asset-path pressure plus documentation of remaining indoor scene-membership gaps.
 - 2026-04-26: Phase 6 completed with a runnable browser slice that now exposes a vertical-slice report panel, runtime-driven asset activity history, and a browser-preview runtime simulation that proves both bootstrap and streaming asset refreshes through the worker path.
-- 2026-04-26: Phase 6 did not require shared-crate changes. The remaining awkward seams are still app-local: scene cache policy is minimal, appearance payloads are still stubs, and the local world shell still lacks explicit env-cell / visible-cell scene membership.
+- 2026-04-26: Phase 6 did not require shared-crate changes. The remaining awkward seams are still app-local: scene cache policy is minimal, visual-asset payloads are still stubs, and the local world shell still lacks explicit env-cell / visible-cell scene membership.
 - 2026-04-26: Gate review resolved in favor of reordering the appended fast-follow work. The next pressure point is local scene residency and visible-cell semantics, followed by first terrain rendering, while shared `SpatialBody` expansion should wait for the first concrete non-world constraint use case.
+- 2026-04-26: Phase 7 completed with an explicit outdoor scene-context model in `WorldDisplay`, a provisional frontend-owned radius-1 outdoor landblock neighborhood policy normalized to outdoor `0xFFFF` chunk IDs, and an app-local terrain request contract that points at ACE `CellLandblock` plus ACViewer's outdoor landblock render path as the first terrain ground truth.
+- 2026-04-26: Phase 7 did not require shared-crate changes. The new information tightened the ownership decision rather than widening it: the first terrain decode belongs in the app-local Rust host adapter, while the frontend still owns final terrain mesh and GPU hydration.
+- 2026-04-26: Gate review was reopened after Phase 7. The next pressure point is not immediate terrain rendering; it is a dedicated Phase 8 research and fit pass to validate AC outdoor and indoor scene assumptions before Phase 9 hardens terrain payloads, DTOs, or ownership seams.
+- 2026-04-26: Phase 8 completed with a source-backed scene-composition audit. ACE data and physics confirm that outdoor space is landblock-shaped, indoor space is env-cell-shaped, and indoor visibility is driven by `VisibleCells` plus `SeenOutside` semantics rather than by a generic scene graph.
+- 2026-04-26: Phase 8 also narrowed the architectural risk. ACViewer remains useful for decode and render inspiration, but its eager landblock or env-cell loading is viewer policy, not canonical proof of retail runtime scene membership.
+- 2026-04-26: Gate review resolved in favor of moving to Phase 9 with a narrower scope: request and render one outdoor landblock terrain asset while keeping decode ownership provisional, forbidding outdoor-only DTOs from hardening into the shared scene model, and rewriting later indoor work around env-cell, environment, cell-structure, and visible-cell semantics instead of generic scene buckets.
 
 #### Open Execution Questions
 
 - When the slice is exercised under live Tauri instead of browser preview, what additional cache invalidation, worker lifecycle, or IPC backpressure seams will show up that the synthetic preview path does not expose yet?
-- What is the narrowest outdoor-first local scene context that is honest enough to drive first terrain rendering without prematurely locking the client into an outdoor-only worldview?
+- Which current assumptions are genuinely grounded versus merely convenient: the provisional radius-1 outdoor landblock neighborhood policy, the Rust-host-first terrain decode idea, the current terrain asset-family split, and the planned indoor visible-cell expansion model.
+- What is the narrowest app-local terrain payload shape that can carry one decoded `CellLandblock` through the chosen decode layer into frontend mesh creation without prematurely locking in chunk streaming, materials, or collision semantics?
+- What is the narrowest typed terrain asset request and response shape we can add to the existing asset channel for Phase 9 without overfitting the whole future asset taxonomy up front?
+- What additional runtime facts, if any, will we need from the host to represent indoor `VisibleCells` and indoor level-asset relevance cleanly once the app moves past preview data and into real session-driven scene relevance?
 
 ## Remaining Open Questions
 
@@ -1761,6 +1911,9 @@ Mitigation:
 - What is the smallest authoritative state surface that still gives JS enough information to infer animations and build coherent frontend game-state projections without inventing hidden gameplay semantics?
 - What is the minimum additional shared `SpatialBody` semantics needed to support non-world bodies such as camera-collision helpers or sensors without blurring world membership?
 - What is the right local scene-membership model for indoor spaces: pure frontend-owned visible-cell expansion, a host-assisted residency feed, or some staged hybrid?
+- Where should we draw the line between AC-shaped scene facts and renderer policy so the host does not smuggle presentation bundles across the boundary while still surfacing enough truth for natural asset selection?
+- What exact intermediate should Phase 9 use for the first terrain asset payload: raw `CellLandblock` data, a structural terrain description, or a lightly mesh-oriented host intermediate?
+- Which scene concepts should be promoted as durable app or shared abstractions after Phase 9, and which should stay explicitly outdoor-specialized until the indoor level-asset phase proves the broader shape?
 - What global freshness budget feels good in practice once the first walkaround scene exists?
 
 ## Definition Of Done For This Scoping Document
@@ -1772,12 +1925,11 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phase 6 is complete. The next implementation step should be the new Phase 7: outdoor scene context and terrain ground truth. That is the shortest honest path from the current debug-heavy world shell toward a real world browser because we do not yet have landblock geometry parsing or decode location nailed down.
+Phases 7 and 8 are complete. The next step should now be Phase 9: request, decode, and render one outdoor landblock terrain asset over the existing asset channel using the Phase 8 findings as constraints. That phase should keep the outdoor contract landblock-shaped, keep terrain on the asset channel, avoid Rust-chosen renderer bundles, and explicitly avoid promoting outdoor-only data types into the long-term shared scene model before the indoor level-asset phase lands.
 
 After the browser-foundation phases land, the next appended fast-follow work should likely split in this order:
 
-1. Phase 7: outdoor scene context and terrain ground truth
-2. Phase 8: first terrain payload and barebones world browser render
-3. Phase 9: terrain coverage and browser-facing world shell consolidation
-4. Phase 10: indoor scene membership and visible-cell expansion
-5. Phase 11: shared `SpatialBody` constraint and non-world body semantics
+1. Phase 9: first terrain payload and barebones world browser render
+2. Phase 10: terrain coverage and browser-facing world shell consolidation
+3. Phase 11: indoor level assets, scene membership, and visible-cell expansion
+4. Phase 12: shared `SpatialBody` constraint and non-world body semantics

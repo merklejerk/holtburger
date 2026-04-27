@@ -115,25 +115,38 @@
 </script>
 
 <svelte:head>
-  <title>Holtburger 3D Host Boundary</title>
+  <title>Holtburger 3D World Browser Foundation</title>
   <meta
     name="description"
-    content="Host boundary for the Holtburger 3D app shell, with typed lifecycle, authoritative runtime, and demand-driven asset contracts."
+    content="World-browser foundation for Holtburger 3D, with typed lifecycle, authoritative runtime, and demand-driven asset contracts behind a shared world shell."
   />
 </svelte:head>
 
 <main class="shell">
   <section class="hero">
-    <p class="eyebrow">Host boundary</p>
-    <h1>Holtburger 3D Host Boundary</h1>
+    <p class="eyebrow">World browser foundation</p>
+    <h1>Holtburger 3D World Browser Foundation</h1>
     <p class="lede">
-      This app shell now exposes a typed Tauri boundary with streamed authoritative runtime data,
-      lifecycle notifications, and a demand-driven asset channel while keeping renderer details out
-      of the host seam.
+      The app now leads with a shared world shell and an explicit outdoor scene context, while the
+      typed host boundary, runtime feed, and asset channel stay visible as support seams instead of
+      pretending to be the product.
     </p>
   </section>
 
   <section class="grid">
+    <article class="panel panel-world">
+      <p class="kicker">Shared foundation</p>
+      <WorldDisplay
+        activeMode={$frontendState.mode.activeMode}
+        activeModeLabel={$frontendState.mode.activeModeLabel}
+        hostStatus={$frontendState.host.boundaryStatus}
+        runtimeBatch={$frontendState.host.boundarySnapshot?.runtimeBatch ?? null}
+        viewModelFeed={$frontendState.host.boundarySnapshot?.viewModelFeed ?? null}
+        assetState={$frontendState.asset}
+        browserDestination={$frontendState.browserMode.destination}
+      />
+    </article>
+
     <article class="panel panel-wide">
       <header class="panel-header">
         <div>
@@ -223,7 +236,7 @@
                     (local)
                   {/if}
                   <br />
-                  {entity.appearanceId} at ({entity.position.x}, {entity.position.y},
+                  visual asset ref {entity.visualAssetId} at ({entity.position.x}, {entity.position.y},
                   {entity.position.z}) in {entity.locationLabel}
                 </li>
               {/each}
@@ -288,19 +301,6 @@
           </p>
         </section>
       {/if}
-    </article>
-
-    <article class="panel panel-world">
-      <p class="kicker">Shared foundation</p>
-      <WorldDisplay
-        activeMode={$frontendState.mode.activeMode}
-        activeModeLabel={$frontendState.mode.activeModeLabel}
-        hostStatus={$frontendState.host.boundaryStatus}
-        runtimeBatch={$frontendState.host.boundarySnapshot?.runtimeBatch ?? null}
-        viewModelFeed={$frontendState.host.boundarySnapshot?.viewModelFeed ?? null}
-        assetState={$frontendState.asset}
-        browserDestination={$frontendState.browserMode.destination}
-      />
     </article>
 
     <article class="panel panel-wide">

@@ -22,12 +22,16 @@ export interface BrowserModeState {
 const LOCATION_INPUT_PATTERN =
 	/^\s*(\d+(?:\.\d+)?)\s*([NS])\s*,\s*(\d+(?:\.\d+)?)\s*([EW])\s*,\s*(-?\d+(?:\.\d+)?)\s*Z\s*$/i;
 
+const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
+	"29.90S, 65.90W, 0.0Z",
+);
+
 export function createBrowserModeState(): BrowserModeState {
 	return {
-		draftInput: "",
+		draftInput: DEFAULT_BROWSER_DESTINATION?.label ?? "",
 		validationMessage: null,
-		destination: null,
-		page: "location-entry",
+		destination: DEFAULT_BROWSER_DESTINATION,
+		page: DEFAULT_BROWSER_DESTINATION ? "destination-preview" : "location-entry",
 	};
 }
 
@@ -149,6 +153,27 @@ export function selectRuntimeResidencyDestination(
 	};
 }
 
+export function browserLocationToLandblockId(
+	location: BrowserLocationSelection,
+): number {
+	const signedLatitude =
+		location.northSouthHemisphere === "N"
+			? location.northSouth
+			: -location.northSouth;
+	const signedLongitude =
+		location.eastWestHemisphere === "E"
+			? location.eastWest
+			: -location.eastWest;
+	const landblockX = clampLandblockAxis(
+		Math.floor(((signedLongitude + 102) * 240) / 192),
+	);
+	const landblockY = clampLandblockAxis(
+		Math.floor(((signedLatitude + 102) * 240) / 192),
+	);
+
+	return ((landblockX & 0xff) << 24) | ((landblockY & 0xff) << 16) | 0xffff;
+}
+
 function formatBrowserLocationLabel(
 	northSouth: number,
 	northSouthHemisphere: BrowserLocationSelection["northSouthHemisphere"],
@@ -157,4 +182,8 @@ function formatBrowserLocationLabel(
 	elevation: number,
 ): string {
 	return `${northSouth.toFixed(2)}${northSouthHemisphere}, ${eastWest.toFixed(2)}${eastWestHemisphere}, ${elevation.toFixed(1)}Z`;
+}
+
+function clampLandblockAxis(value: number): number {
+	return Math.min(Math.max(value, 0), 0xfe);
 }

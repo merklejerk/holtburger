@@ -1,6 +1,11 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { AppModeId } from "../../app/modes";
-import type { AssetChannelState } from "../assets/types";
+import { browserLocationToLandblockId } from "../../app/browser-mode";
+import type {
+	AssetChannelState,
+	PreparedAssetRecord,
+	PreparedTerrainMesh,
+} from "../assets/types";
 import type {
 	CameraHintAckDto,
 	CameraHintDto,
@@ -8,7 +13,6 @@ import type {
 	RayPickRequestDto,
 	RayPickResponseDto,
 	RuntimeBatchDto,
-	RuntimeEntitySnapshotDto,
 } from "../host/contracts";
 
 export interface NormalizedViewportPoint {
@@ -54,6 +58,21 @@ export interface WorldDisplayTerrainContract {
 	geometryAnchor: string;
 	indoorBranchSummary: string;
 	summary: string;
+}
+
+export interface WorldDisplayTerrainPolygon {
+	key: string;
+	points: string;
+	fill: string;
+	stroke: string;
+}
+
+export interface WorldDisplayTerrainViewport {
+	ready: boolean;
+	landblockLabel: string | null;
+	summary: string;
+	viewBox: string;
+	polygons: WorldDisplayTerrainPolygon[];
 }
 
 export interface WorldDisplayModel {
@@ -114,10 +133,7 @@ export function deriveWorldDisplayModel({
 		};
 	}
 
-	const selectedEntityId = viewModelFeed?.selectedEntityId ?? null;
-	const selectedEntityLabel =
-		runtimeBatch.entities.find((entity) => entity.entityId === selectedEntityId)
-			?.label ?? "none";
+	void viewModelFeed;
 	const destinationLabel =
 		browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel;
 	const sceneContext = deriveSceneContext(runtimeBatch, browserDestination);
@@ -126,18 +142,19 @@ export function deriveWorldDisplayModel({
 		headline: browserDestination
 			? "Browser destination preview is now driving the shared world shell."
 			: "The shared world shell is anchored to live runtime residency.",
-		focusLocationLabel: runtimeBatch.residency.focusLocationLabel,
+		focusLocationLabel:
+			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
 		destinationLabel,
-		renderCacheSummary: `Runtime tick ${runtimeBatch.tick} with ${runtimeBatch.entities.length} mirrored entities. Selected entity: ${selectedEntityLabel}.`,
+		renderCacheSummary: `Runtime tick ${runtimeBatch.tick} with terrain coverage selected from authoritative residency instead of fixture entities.`,
 		inputSummary: pendingCameraHint
 			? "Camera hints are being throttled through the app-local runtime channel."
 			: (rayPickResponse?.summary ??
 				cameraAck?.summary ??
-				"Viewport input is ready to send camera hints and authoritative debug picks."),
+				"Viewport input is ready to send camera hints. Picks stay dormant until real world entities exist."),
 			assetSummary: deriveAssetSummary(assetState),
 			sceneContext,
 			terrainContract: createTerrainContract(sceneContext),
-		entities: projectDebugEntities(runtimeBatch.entities, selectedEntityId),
+		entities: [],
 	};
 }
 
@@ -164,12 +181,12 @@ function deriveSceneContext(
 	runtimeBatch: RuntimeBatchDto,
 	browserDestination: BrowserLocationSelection | null,
 ): WorldDisplaySceneContext {
-	const focusLandblockId = normalizeLandblockId(
-		runtimeBatch.residency.focusLandblockId,
-	);
+	const focusLandblockId = browserDestination
+		? browserLocationToLandblockId(browserDestination)
+		: normalizeLandblockId(runtimeBatch.residency.focusLandblockId);
 	const focusLandblockLabel = formatLandblockLabel(focusLandblockId);
 	const destinationSummary = browserDestination
-		? `Destination preview is ${browserDestination.label}, but Phase 7 still anchors local terrain coverage to authoritative runtime landblock ${focusLandblockLabel} until a coordinate-to-landblock seam exists.`
+		? `Destination preview is ${browserDestination.label}, and local terrain coverage now anchors to browser-selected landblock ${focusLandblockLabel}.`
 		: `No manual destination override is active, so local terrain coverage follows authoritative runtime landblock ${focusLandblockLabel}.`;
 
 	if (runtimeBatch.residency.indoors) {
@@ -203,7 +220,7 @@ function deriveSceneContext(
 		destinationSummary,
 		coverageSummary: `Outdoor coverage currently selects ${chunks.length} landblocks in a radius-1 ring around ${focusLandblockLabel}.`,
 		gapSummary:
-			"The app still lacks real terrain payload requests and indoor visible-cell expansion, so this scene context is selection policy only for now.",
+			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
 	};
 }
@@ -226,8 +243,8 @@ function createTerrainContract(
 		indoorBranchSummary:
 			"Outdoor terrain should come from normalized landblock loads first; indoor env cells stay on a separate visible-cell expansion track.",
 		summary: requestKey
-			? `Phase 7 records the first terrain request contract as ${requestKey}: Rust should decode CellLandblock terrain data into an app-local payload, and WorldDisplay should keep final mesh and GPU hydration on the frontend.`
-			: "Phase 7 records the terrain contract shape, but it still needs a focus outdoor landblock before the first request key can be selected.",
+			? `Phase 9 now exercises ${requestKey} end to end: Rust decodes CellLandblock terrain data into an app-local payload, and WorldDisplay keeps final mesh and GPU hydration on the frontend.`
+			: "The terrain contract shape is in place, but it still needs a focus outdoor landblock before the first request key can be selected.",
 	};
 }
 
@@ -284,6 +301,80 @@ function deriveAssetSummary(assetState: AssetChannelState): string {
 	return "Asset worker ingress is waiting for the next demand-driven asset response.";
 }
 
+export function deriveTerrainViewport(
+	preparedAsset: PreparedAssetRecord | null,
+): WorldDisplayTerrainViewport {
+	if (!preparedAsset?.terrainMesh) {
+		return {
+			ready: false,
+			landblockLabel: null,
+			summary: preparedAsset
+				? `Most recent asset ${preparedAsset.request.assetId} does not carry a terrain mesh yet.`
+				: "Waiting for the first outdoor terrain asset to be prepared.",
+			viewBox: "0 0 360 240",
+			polygons: [],
+		};
+	}
+
+	return buildTerrainViewport(preparedAsset.terrainMesh);
+}
+
+function buildTerrainViewport(
+	terrainMesh: PreparedTerrainMesh,
+): WorldDisplayTerrainViewport {
+	const projectedVertices = terrainMesh.vertices.map(projectTerrainVertex);
+	const bounds = projectedVertices.reduce(
+		(accumulator, vertex) => ({
+			minX: Math.min(accumulator.minX, vertex.x),
+			maxX: Math.max(accumulator.maxX, vertex.x),
+			minY: Math.min(accumulator.minY, vertex.y),
+			maxY: Math.max(accumulator.maxY, vertex.y),
+		}),
+		{
+			minX: Number.POSITIVE_INFINITY,
+			maxX: Number.NEGATIVE_INFINITY,
+			minY: Number.POSITIVE_INFINITY,
+			maxY: Number.NEGATIVE_INFINITY,
+		},
+	);
+	const padding = 20;
+	const width = bounds.maxX - bounds.minX + padding * 2;
+	const height = bounds.maxY - bounds.minY + padding * 2;
+	const heightSpan = Math.max(terrainMesh.maxHeight - terrainMesh.minHeight, 1);
+
+	const polygons = terrainMesh.triangles.map((triangle, index) => {
+		const vertices = [triangle.a, triangle.b, triangle.c].map((vertexIndex) => {
+			const vertex = projectedVertices[vertexIndex];
+			return `${(vertex.x - bounds.minX + padding).toFixed(2)},${(vertex.y - bounds.minY + padding).toFixed(2)}`;
+		});
+		const heightRatio = (triangle.averageHeight - terrainMesh.minHeight) / heightSpan;
+		const hue = 86 + (triangle.terrainType % 6) * 14;
+		const lightness = 28 + heightRatio * 26;
+
+		return {
+			key: `${terrainMesh.landblockId}-${index}`,
+			points: vertices.join(" "),
+			fill: `hsl(${hue} 34% ${lightness}%)`,
+			stroke: `hsl(${hue} 28% ${Math.max(lightness - 10, 18)}%)`,
+		};
+	});
+
+	return {
+		ready: true,
+		landblockLabel: formatLandblockLabel(terrainMesh.landblockId),
+		summary: `Prepared landblock ${formatLandblockLabel(terrainMesh.landblockId)} with ${terrainMesh.triangles.length} terrain triangles and a height range of ${terrainMesh.minHeight.toFixed(1)}-${terrainMesh.maxHeight.toFixed(1)}.`,
+		viewBox: `0 0 ${width.toFixed(2)} ${height.toFixed(2)}`,
+		polygons,
+	};
+}
+
+function projectTerrainVertex(vertex: { x: number; y: number; z: number }) {
+	return {
+		x: (vertex.x - vertex.y) * 0.92,
+		y: (vertex.x + vertex.y) * 0.46 - vertex.z * 1.25,
+	};
+}
+
 export function normalizeViewportPoint(
 	offsetX: number,
 	offsetY: number,
@@ -316,20 +407,19 @@ export function buildCameraHint(
 
 	const focusEntity =
 		runtimeBatch.entities.find((entity) => entity.isLocalPlayer) ??
-		runtimeBatch.entities[0];
-
-	if (!focusEntity) {
-		return null;
-	}
+		runtimeBatch.entities[0] ??
+		null;
+	const anchorPosition = focusEntity?.position ?? { x: 96, y: 96, z: 24 };
+	const anchorHeading = focusEntity?.headingRadians ?? 0;
 
 	const yaw =
-		focusEntity.headingRadians + (viewportPoint.normalizedX - 0.5) * 1.4;
+		anchorHeading + (viewportPoint.normalizedX - 0.5) * 1.4;
 	const pitch = (0.5 - viewportPoint.normalizedY) * 0.65;
 
 	return {
 		mode: activeMode,
 		source: "world-display",
-		position: focusEntity.position,
+		position: anchorPosition,
 		forward: normalizeVec3({
 			x: Math.cos(yaw),
 			y: Math.sin(yaw),
@@ -354,34 +444,6 @@ export function buildRayPickRequest(
 		screenYNormalized: cameraHint.viewportNormalizedY,
 		destinationLabel: cameraHint.destinationLabel,
 	};
-}
-
-function projectDebugEntities(
-	entities: RuntimeEntitySnapshotDto[],
-	selectedEntityId: number | null,
-): WorldDisplayDebugEntity[] {
-	if (entities.length === 0) {
-		return [];
-	}
-
-	const xs = entities.map((entity) => entity.position.x);
-	const ys = entities.map((entity) => entity.position.y);
-	const minX = Math.min(...xs);
-	const maxX = Math.max(...xs);
-	const minY = Math.min(...ys);
-	const maxY = Math.max(...ys);
-	const spanX = Math.max(maxX - minX, 1);
-	const spanY = Math.max(maxY - minY, 1);
-
-	return entities.map((entity) => ({
-		entityId: entity.entityId,
-		label: entity.label,
-		locationLabel: entity.locationLabel,
-		isLocalPlayer: entity.isLocalPlayer,
-		isSelected: entity.entityId === selectedEntityId,
-		screenXPercent: 10 + ((entity.position.x - minX) / spanX) * 80,
-		screenYPercent: 10 + ((entity.position.y - minY) / spanY) * 80,
-	}));
 }
 
 function clamp(value: number, min: number, max: number): number {

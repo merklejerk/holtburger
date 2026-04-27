@@ -70,7 +70,7 @@ describe("host contracts", () => {
 	it("keeps the asset channel contract distinct from runtime snapshot typing", () => {
 		const request: AssetLookupRequestDto = {
 			requestId: "bootstrap-asset",
-			assetId: "gfx/02000001",
+			assetId: "terrain/0102ffff",
 			priority: "bootstrap",
 		};
 		const response: AssetLookupResponseDto = {
@@ -78,8 +78,9 @@ describe("host contracts", () => {
 			assetId: request.assetId,
 			payloadKind: "json",
 			payload: {
-				kind: "appearance-manifest",
+				kind: "terrain-landblock",
 				residencyKind: "outdoor-landblock",
+				landblockId: 0x0102ffff,
 			},
 		};
 		const overview: HostBoundaryOverviewDto = {
@@ -95,7 +96,7 @@ describe("host contracts", () => {
 		expect(overview.assetChannel).toBe("asset");
 		expect(response.assetId).toBe(request.assetId);
 		expect(response.payload).toMatchObject({
-			kind: "appearance-manifest",
+			kind: "terrain-landblock",
 		});
 	});
 

@@ -43,9 +43,9 @@ export function deriveVerticalSliceReport(
 	];
 
 	const awkwardSeams = [
-		"Asset payloads are still typed visual-asset stubs with debug primitives and palette keys; real DAT/HBA models, textures, animations, and terrain payload families are still deferred.",
-		"The frontend currently keeps an activity log plus one live prepared-asset record, not a real scene-wide asset cache with eviction or invalidation policy.",
-		"WorldDisplay now owns an explicit outdoor landblock-ring scene context, but the first terrain payload and indoor env-cell / visible-cell scene membership are still deferred.",
+		"Phase 9 now proves one outdoor terrain payload family, but models, textures, animations, scene-driven outdoor scenery, and indoor env-cell geometry still need their own AC-shaped asset paths.",
+		"Phase 10 now keeps a terrain cache keyed by landblock asset ID, but it still lacks eviction, invalidation, and scene-driven scenery or material policy.",
+		"WorldDisplay now renders a real Three.js outdoor terrain scene, but indoor env-cell / visible-cell scene membership is still deferred.",
 	];
 
 	if (snapshot?.source === "browser-preview") {

@@ -15,9 +15,6 @@ import type {
 
 const RUNTIME_NOTIFICATION_EVENT = "runtime:notification";
 const PREVIEW_RUNTIME_INTERVAL_MS = 1_000;
-const PREVIEW_LOCAL_PLAYER_ID = 0x01020304;
-const PREVIEW_DRUDGE_ID = 0x01020305;
-const PREVIEW_SENTINEL_ID = 0x01020306;
 
 declare global {
 	interface Window {
@@ -43,69 +40,24 @@ function fallbackLifecycleState(): LifecycleStateDto {
 }
 
 function fallbackRuntimeBatch(tick = 1): RuntimeBatchDto {
-	const orbit = tick * 0.2;
-
 	return {
 		tick,
-		entities: [
-			{
-				entityId: PREVIEW_LOCAL_PLAYER_ID,
-				label: "Browser Scout",
-				position: {
-					x: 12 + Math.cos(orbit) * 1.5,
-					y: -4.5 + Math.sin(orbit) * 1.2,
-					z: 1,
-				},
-				headingRadians: orbit,
-				visualAssetId: "gfx/02000001",
-				landblockId: 0x01020003,
-				cellId: 3,
-				locationLabel: "100.40S, 101.55W, 1.0Z",
-				isLocalPlayer: true,
-			},
-			{
-				entityId: PREVIEW_DRUDGE_ID,
-				label: "Survey Drudge",
-				position: { x: 18, y: -1 + Math.sin(orbit) * 0.6, z: 0 },
-				headingRadians: Math.PI / 2 + orbit * 0.25,
-				visualAssetId: "gfx/02000002",
-				landblockId: 0x0102001b,
-				cellId: 27,
-				locationLabel: "100.41S, 101.52W, 0.0Z",
-				isLocalPlayer: false,
-			},
-			{
-				entityId: PREVIEW_SENTINEL_ID,
-				label: "Dungeon Sentinel",
-				position: { x: 9, y: 14, z: -6 + Math.cos(orbit) * 0.3 },
-				headingRadians: Math.PI + orbit * 0.15,
-				visualAssetId: "gfx/02000003",
-				landblockId: 0x016c0155,
-				cellId: 0x155,
-				locationLabel: "Dungeon approach",
-				isLocalPlayer: false,
-			},
-		],
+		entities: [],
 		residency: {
-			focusEntityId: PREVIEW_LOCAL_PLAYER_ID,
+			focusEntityId: null,
 			focusLandblockId: 0x01020003,
 			focusCellId: 3,
 			focusLocationLabel: "100.40S, 101.55W, 1.0Z",
 			indoors: false,
-			trackedBodyCount: 3,
+			trackedBodyCount: 0,
 		},
 	};
 }
 
 
-function fallbackViewModelFeed(tick = 1): FrontendStateFeedDto {
+function fallbackViewModelFeed(_tick = 1): FrontendStateFeedDto {
 	return {
-		selectedEntityId:
-			tick <= 1
-				? PREVIEW_LOCAL_PLAYER_ID
-				: tick % 2 === 0
-					? PREVIEW_DRUDGE_ID
-					: PREVIEW_SENTINEL_ID,
+		selectedEntityId: null,
 		interactionMode: "inspect",
 		busyState: "idle",
 	};
@@ -139,6 +91,11 @@ function fallbackOverview(): HostBoundaryOverviewDto {
 function fallbackAssetResponse(
 	request: AssetLookupRequestDto,
 ): AssetLookupResponseDto {
+	const terrainLandblockId = parseTerrainAssetId(request.assetId);
+	if (terrainLandblockId !== null) {
+		return createFallbackTerrainResponse(request, terrainLandblockId);
+	}
+
 	const residencyKind =
 		request.assetId === "gfx/02000003"
 			? "indoor-env-cell"
@@ -172,6 +129,52 @@ function fallbackAssetResponse(
 			],
 		},
 	};
+}
+
+function createFallbackTerrainResponse(
+	request: AssetLookupRequestDto,
+	landblockId: number,
+): AssetLookupResponseDto {
+	const heights: number[] = [];
+	const terrainTypes: number[] = [];
+	for (let row = 0; row < 9; row += 1) {
+		for (let col = 0; col < 9; col += 1) {
+			const height =
+				18 +
+				Math.sin((landblockId & 0xff) * 0.015 + col * 0.42) * 10 +
+				Math.cos(((landblockId >>> 8) & 0xff) * 0.02 + row * 0.37) * 8;
+			heights.push(Number(height.toFixed(3)));
+			terrainTypes.push((row + col + (landblockId & 0x0f)) % 6);
+		}
+	}
+
+	return {
+		requestId: request.requestId,
+		assetId: request.assetId,
+		payloadKind: 'json',
+		payload: {
+			kind: 'terrain-landblock',
+			residencyKind: 'outdoor-landblock',
+			landblockId,
+			gridSize: 9,
+			tileSize: 24,
+			heights,
+			terrainTypes,
+			notes: [
+				'Browser preview uses a deterministic generated placeholder terrain surface so the Phase 9 world browser stays visible outside Tauri.',
+				'Live Tauri terrain requests should resolve CellLandblock data from repo-local content instead of this preview placeholder surface.',
+			],
+		},
+	};
+}
+
+function parseTerrainAssetId(assetId: string): number | null {
+	if (!assetId.startsWith('terrain/')) {
+		return null;
+	}
+
+	const hex = assetId.slice('terrain/'.length);
+	return /^[0-9a-fA-F]{8}$/.test(hex) ? Number.parseInt(hex, 16) : null;
 }
 
 async function invokeCommand<T>(
@@ -266,25 +269,12 @@ export async function resolveRayPick(
 	request: RayPickRequestDto,
 ): Promise<RayPickResponseDto> {
 	if (!isTauriRuntime()) {
-		const batch = fallbackRuntimeBatch();
-		const hit =
-			request.screenXNormalized >= 0.5 ? batch.entities[1] : batch.entities[0];
-
 		return {
 			requestId: request.requestId,
-			resolved: true,
+			resolved: false,
 			cameraHintSequence: null,
-			hit: {
-				entityId: hit.entityId,
-				label: hit.label,
-				locationLabel: hit.locationLabel,
-				distance: Math.hypot(
-					hit.position.x - request.origin.x,
-					hit.position.y - request.origin.y,
-					hit.position.z - request.origin.z,
-				),
-			},
-			summary: `Browser preview resolved the debug ray pick against ${hit.label}.`,
+			hit: null,
+			summary: "Browser preview has no runtime fixture entities to resolve against.",
 		};
 	}
 

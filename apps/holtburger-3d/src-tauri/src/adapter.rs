@@ -1,18 +1,21 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::{Guid, properties::PropertyString, properties::WorldObjectPropertyAccessors};
+use holtburger_common::Guid;
 use holtburger_content::SoulEmoteCatalog;
+use holtburger_dat::landblock::CellLandblock;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
-use holtburger_world::{WorldBootstrap, WorldState, entity::Entity};
+use holtburger_dat::{EOR_CELL_NAMESPACE, HbaReader};
+use holtburger_world::{WorldBootstrap, WorldState};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
     CameraHintAckDto, CameraHintDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
     InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, RayPickHitDto,
-    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
-    RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
+    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeNotificationEnvelopeDto,
+    RuntimeResidencyDto, SessionStateDto, Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -22,11 +25,6 @@ pub const RUNTIME_BATCH_TOPIC: &str = "runtime.batch";
 pub const RUNTIME_NOTIFICATION_EVENT: &str = "runtime:notification";
 
 const LOCAL_PLAYER_GUID: Guid = Guid(0x5000_0001);
-const REMOTE_SCOUT_GUID: Guid = Guid(0x5000_0100);
-const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0200);
-const PLAYER_GFX_ID: u32 = 0x0200_0001;
-const SCOUT_GFX_ID: u32 = 0x0200_0002;
-const SENTINEL_GFX_ID: u32 = 0x0200_0003;
 
 #[derive(Default)]
 pub struct HostBoundaryAdapter;
@@ -39,7 +37,6 @@ pub struct HostRuntimeService {
 struct HostRuntimeState {
     tick: u64,
     world: WorldState,
-    selected_entity_id: Option<u64>,
     last_camera_hint: Option<CameraHintDto>,
     camera_hint_sequence: u64,
 }
@@ -106,32 +103,11 @@ impl HostRuntimeState {
         )));
 
         world.player.guid = LOCAL_PLAYER_GUID;
-        world.add_entity(make_entity(
-            LOCAL_PLAYER_GUID,
-            "Browser Scout",
-            make_world_position(Guid(0x0102_0003), 44.0, 84.0, 2.0, 0.0),
-            PLAYER_GFX_ID,
-        ));
         world.sync_player_position(make_world_position(Guid(0x0102_0003), 44.0, 84.0, 2.0, 0.0));
-        let _ = world.set_player_vector(Vector3::new(0.8, 0.3, 0.0), Vector3::zero());
-
-        world.add_entity(make_entity(
-            REMOTE_SCOUT_GUID,
-            "Survey Drudge",
-            make_world_position(Guid(0x0102_001B), 132.0, 60.0, 0.0, 1.2),
-            SCOUT_GFX_ID,
-        ));
-        world.add_entity(make_entity(
-            REMOTE_SENTINEL_GUID,
-            "Dungeon Sentinel",
-            make_world_position(Guid(0x016C_0155), 12.0, 28.0, -6.0, 2.4),
-            SENTINEL_GFX_ID,
-        ));
 
         Self {
             tick: 1,
             world,
-            selected_entity_id: Some(u32::from(REMOTE_SCOUT_GUID) as u64),
             last_camera_hint: None,
             camera_hint_sequence: 0,
         }
@@ -139,25 +115,6 @@ impl HostRuntimeState {
 
     fn advance(&mut self) {
         self.tick += 1;
-
-        let orbit = self.tick as f32 * 0.18;
-        let next_position = make_world_position(
-            Guid(0x0102_0003),
-            96.0 + orbit.cos() * 18.0,
-            96.0 + orbit.sin() * 22.0,
-            2.0 + (orbit * 0.5).sin() * 0.5,
-            orbit + 0.6,
-        );
-        let tangent = Vector3::new(-orbit.sin() * 3.2, orbit.cos() * 3.8, 0.0);
-
-        let _ = self.world.set_player_position(next_position);
-        let _ = self.world.set_player_vector(tangent, Vector3::new(0.0, 0.0, 0.18));
-
-        self.selected_entity_id = if self.tick.is_multiple_of(2) {
-            Some(u32::from(REMOTE_SCOUT_GUID) as u64)
-        } else {
-            Some(u32::from(REMOTE_SENTINEL_GUID) as u64)
-        };
     }
 }
 
@@ -177,26 +134,16 @@ impl HostBoundaryAdapter {
     }
 
     fn runtime_batch(state: &HostRuntimeState) -> RuntimeBatchDto {
-        let mut entities = state.world.runtime_body_views();
-        entities.sort_by_key(|view| match view.body_id {
-            holtburger_world::SpatialBodyId::LocalPlayer(guid) => (0_u8, u32::from(guid) as u64),
-            holtburger_world::SpatialBodyId::Entity(guid) => (1_u8, u32::from(guid) as u64),
-            holtburger_world::SpatialBodyId::Ephemeral(id) => (2_u8, id),
-        });
-
         RuntimeBatchDto {
             tick: state.tick,
-            entities: entities
-                .into_iter()
-                .filter_map(|view| Self::runtime_entity_snapshot(state, view))
-                .collect(),
+            entities: Vec::new(),
             residency: Self::runtime_residency(state),
         }
     }
 
-    fn view_model_feed(state: &HostRuntimeState) -> FrontendStateFeedDto {
+    fn view_model_feed(_state: &HostRuntimeState) -> FrontendStateFeedDto {
         FrontendStateFeedDto {
-            selected_entity_id: state.selected_entity_id,
+            selected_entity_id: None,
             interaction_mode: InteractionModeDto::Inspect,
             busy_state: BusyStateDto::Idle,
         }
@@ -223,6 +170,10 @@ impl HostBoundaryAdapter {
     }
 
     pub fn asset_lookup(request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        if let Some(landblock_id) = parse_terrain_asset_id(&request.asset_id) {
+            return build_terrain_lookup_response(request, landblock_id);
+        }
+
         let (residency_kind, debug_primitive, palette_key, notes) =
             match request.asset_id.as_str() {
                 "gfx/02000001" => (
@@ -389,58 +340,114 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn runtime_entity_snapshot(
-        state: &HostRuntimeState,
-        view: holtburger_world::RuntimeSpatialBodyView,
-    ) -> Option<RuntimeEntitySnapshotDto> {
-        let guid = view.body_id.authoritative_guid()?;
-        let entity = state.world.entities.get(guid)?;
-        let position = view.authoritative_pose.unwrap_or(view.runtime_pose);
-
-        Some(RuntimeEntitySnapshotDto {
-            entity_id: u32::from(guid) as u64,
-            label: entity
-                .properties
-                .get_string_prop(PropertyString::Name)
-                .unwrap_or("Unknown")
-                .to_string(),
-            position: Vec3Dto {
-                x: position.coords.x,
-                y: position.coords.y,
-                z: position.coords.z,
-            },
-            heading_radians: position.rotation.to_heading(),
-            appearance_id: entity
-                .gfx_id
-                .map(|gfx_id| format!("gfx/{gfx_id:08X}"))
-                .unwrap_or_else(|| format!("entity/{:08X}", u32::from(guid))),
-            landblock_id: u32::from(position.landblock_id),
-            cell_id: position.derived_outdoor_cell_id(),
-            location_label: position.to_world_coords().to_string_with_precision(2),
-            is_local_player: matches!(view.body_id, holtburger_world::SpatialBodyId::LocalPlayer(_)),
-        })
-    }
-
     fn runtime_residency(state: &HostRuntimeState) -> RuntimeResidencyDto {
-        let focus_position = state
-            .world
-            .player_position()
-            .or_else(|| {
-                state
-                    .selected_entity_id
-                    .and_then(|entity_id| state.world.entities.get(Guid(entity_id as u32)).map(|entity| entity.position))
-            })
-            .unwrap_or_default();
+        let focus_position = state.world.player_position().unwrap_or_default();
 
         RuntimeResidencyDto {
-            focus_entity_id: Some(u32::from(LOCAL_PLAYER_GUID) as u64),
+            focus_entity_id: None,
             focus_landblock_id: u32::from(focus_position.landblock_id),
             focus_cell_id: focus_position.derived_outdoor_cell_id(),
             focus_location_label: focus_position.to_world_coords().to_string_with_precision(2),
             indoors: focus_position.is_indoors(),
-            tracked_body_count: state.world.runtime_body_views().len(),
+            tracked_body_count: 0,
         }
     }
+}
+
+fn build_terrain_lookup_response(
+    request: AssetLookupRequestDto,
+    landblock_id: u32,
+) -> AssetLookupResponseDto {
+    let payload = load_cell_landblock_payload(landblock_id).unwrap_or_else(|error| {
+        generated_preview_terrain_payload(
+            landblock_id,
+            vec![
+                "Fell back to an app-local generated preview placeholder terrain surface because repo-local CellLandblock data was unavailable.".to_string(),
+                error,
+            ],
+        )
+    });
+
+    AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload,
+    }
+}
+
+fn load_cell_landblock_payload(landblock_id: u32) -> Result<serde_json::Value, String> {
+    let path = repo_assets_hba_path();
+    let archive = HbaReader::open(&path)
+        .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
+    let bytes = archive
+        .get_file_in_namespace(EOR_CELL_NAMESPACE, landblock_id)
+        .map_err(|error| {
+            format!(
+                "Could not read {}:0x{landblock_id:08X} from {}: {error}",
+                EOR_CELL_NAMESPACE,
+                path.display()
+            )
+        })?;
+    let landblock = CellLandblock::unpack(&bytes)
+        .map_err(|error| format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"))?;
+
+    Ok(serde_json::json!({
+        "kind": "terrain-landblock",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "cell-landblock",
+        "landblockId": landblock_id,
+        "gridSize": 9,
+        "tileSize": 24,
+        "heights": landblock.height.iter().map(|height| f32::from(*height) * 2.0).collect::<Vec<_>>(),
+        "terrainTypes": landblock.terrain,
+        "notes": [
+            format!("Loaded CellLandblock 0x{landblock_id:08X} from repo-local {}.", path.display()),
+            "Phase 9 keeps the outdoor terrain payload on the asset channel while the frontend remains responsible for coverage selection and final rendering.".to_string(),
+        ],
+    }))
+}
+
+fn generated_preview_terrain_payload(landblock_id: u32, mut notes: Vec<String>) -> serde_json::Value {
+    let landblock_x = ((landblock_id >> 24) & 0xff) as f32;
+    let landblock_y = ((landblock_id >> 16) & 0xff) as f32;
+    let mut heights = Vec::with_capacity(81);
+    let mut terrain_types = Vec::with_capacity(81);
+
+    for row in 0..9 {
+        for col in 0..9 {
+            let height = 18.0
+                + ((landblock_x * 0.015) + col as f32 * 0.42).sin() * 10.0
+                + ((landblock_y * 0.02) + row as f32 * 0.37).cos() * 8.0;
+            heights.push(height);
+            terrain_types.push(((row + col + (landblock_id as usize & 0x0f)) % 6) as u16);
+        }
+    }
+
+    notes.push("This generated preview placeholder keeps the Phase 9 world browser visible when repo-local content fixtures are missing, but it is not a replacement for real CellLandblock data.".to_string());
+
+    serde_json::json!({
+        "kind": "terrain-landblock",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "cell-landblock",
+        "landblockId": landblock_id,
+        "gridSize": 9,
+        "tileSize": 24,
+        "heights": heights,
+        "terrainTypes": terrain_types,
+        "notes": notes,
+    })
+}
+
+fn parse_terrain_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("terrain/")
+        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+}
+
+fn repo_assets_hba_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../dats/assets.hba")
 }
 
 fn make_world_position(
@@ -456,12 +463,6 @@ fn make_world_position(
         rotation: Quaternion::from_heading(heading_radians),
     }
     .normalize_outdoor_cell()
-}
-
-fn make_entity(guid: Guid, name: &str, position: WorldPosition, gfx_id: u32) -> Entity {
-    let mut entity = Entity::new(guid, name.to_string(), position);
-    entity.gfx_id = Some(gfx_id);
-    entity
 }
 
 fn normalize_vec3(vector: Vec3Dto) -> Vec3Dto {
@@ -598,7 +599,7 @@ mod tests {
         let overview = HostBoundaryAdapter::boundary_overview();
         let asset = HostBoundaryAdapter::asset_lookup(AssetLookupRequestDto {
             request_id: "test-request".to_string(),
-            asset_id: "gfx/02000001".to_string(),
+            asset_id: "terrain/0102ffff".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
         });
 
@@ -611,10 +612,11 @@ mod tests {
         assert!(overview.notes.iter().any(|note| note.contains("Runtime batches are built")));
 
         assert_eq!(asset.request_id, "test-request");
-        assert_eq!(asset.asset_id, "gfx/02000001");
+        assert_eq!(asset.asset_id, "terrain/0102ffff");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
-        assert_eq!(asset.payload["kind"], "appearance-manifest");
+        assert_eq!(asset.payload["kind"], "terrain-landblock");
         assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
+        assert_eq!(asset.payload["landblockId"], 0x0102ffff);
     }
 
     #[test]

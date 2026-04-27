@@ -14,26 +14,14 @@ function createRuntimeBatch(
 ): RuntimeBatchDto {
 	return {
 		tick: 1,
-		entities: [
-			{
-				entityId: 0x01020304,
-				label: "Browser Scout",
-				position: { x: 12, y: -4.5, z: 1 },
-				headingRadians: 0,
-				visualAssetId: "gfx/02000001",
-				landblockId: 0x01020003,
-				cellId: 3,
-				locationLabel: "100.40S, 101.55W, 1.0Z",
-				isLocalPlayer: true,
-			},
-		],
+		entities: [],
 		residency: {
-			focusEntityId: 0x01020304,
+			focusEntityId: null,
 			focusLandblockId: 0x01020003,
 			focusCellId: 3,
 			focusLocationLabel: "100.40S, 101.55W, 1.0Z",
 			indoors: false,
-			trackedBodyCount: 1,
+			trackedBodyCount: 0,
 		},
 		...overrides,
 	};
@@ -43,7 +31,7 @@ function createViewModelFeed(
 	overrides: Partial<FrontendStateFeedDto> = {},
 ): FrontendStateFeedDto {
 	return {
-		selectedEntityId: 0x01020304,
+		selectedEntityId: null,
 		interactionMode: "inspect",
 		busyState: "idle",
 		...overrides,
@@ -79,8 +67,10 @@ describe("frontend state store", () => {
 
 		store.loadSnapshot(createSnapshot());
 
-		expect(get(store).browserMode.draftInput).toBe("100.40S, 101.55W, 1.0Z");
+		expect(get(store).browserMode.draftInput).toBe("29.90S, 65.90W, 0.0Z");
+		expect(get(store).browserMode.destination?.label).toBe("29.90S, 65.90W, 0.0Z");
 		expect(get(store).mode.activeMode).toBe("browser");
+		expect(get(store).mode.activePageId).toBe("destination-preview");
 		expect(get(store).asset.channel).toBe("asset");
 	});
 
@@ -93,12 +83,12 @@ describe("frontend state store", () => {
 			runtimeBatch: createRuntimeBatch({
 				tick: 2,
 				residency: {
-					focusEntityId: 0x01020304,
+					focusEntityId: null,
 					focusLandblockId: 0x0102001b,
 					focusCellId: 27,
 					focusLocationLabel: "100.41S, 101.52W, 0.0Z",
 					indoors: true,
-					trackedBodyCount: 2,
+					trackedBodyCount: 0,
 				},
 			}),
 			viewModelFeed: createViewModelFeed({ busyState: "loading" }),
@@ -125,35 +115,48 @@ describe("frontend state store", () => {
 		store.loadSnapshot(createSnapshot());
 		store.markAssetPending({
 			requestId: "bootstrap-asset",
-			assetId: "gfx/02000001",
+			assetId: "terrain/0102ffff",
 			priority: "bootstrap",
 		});
 		store.applyPreparedAsset({
 			request: {
 				requestId: "bootstrap-asset",
-				assetId: "gfx/02000001",
+				assetId: "terrain/0102ffff",
 				priority: "bootstrap",
 			},
 			response: {
 				requestId: "bootstrap-asset",
-				assetId: "gfx/02000001",
+				assetId: "terrain/0102ffff",
 				payloadKind: "json",
-				payload: { kind: "appearance-manifest" },
+				payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
 			},
+			assetKind: "terrain-landblock",
 			residencyKind: "outdoor-landblock",
-			debugPrimitive: "survey-billboard",
-			paletteKey: "bronze-scout",
-			summary: "Prepared gfx/02000001 as survey-billboard for outdoor-landblock.",
+			debugPrimitive: "terrain-landblock-mesh",
+			paletteKey: "terrain-0102ffff",
+			terrainMesh: {
+				landblockId: 0x0102ffff,
+				gridSize: 9,
+				tileSize: 24,
+				vertices: [],
+				triangles: [],
+				minHeight: 0,
+				maxHeight: 24,
+			},
+			summary: "Prepared terrain/0102ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
 			notes: [],
 			preparedAt: "2026-04-26T00:00:00.000Z",
 		});
 
 		expect(get(store).asset.status).toBe("ready");
 		expect(get(store).asset.preparedAsset?.request.assetId).toBe(
-			"gfx/02000001",
+			"terrain/0102ffff",
+		);
+		expect(get(store).asset.preparedByAssetId["terrain/0102ffff"]?.request.assetId).toBe(
+			"terrain/0102ffff",
 		);
 		expect(get(store).asset.preparedByPriority.bootstrap?.request.assetId).toBe(
-			"gfx/02000001",
+			"terrain/0102ffff",
 		);
 		expect(get(store).asset.history.map((entry) => entry.status)).toEqual([
 			"requested",

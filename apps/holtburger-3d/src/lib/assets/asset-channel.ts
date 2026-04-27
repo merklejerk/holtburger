@@ -2,9 +2,9 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	AssetPriority,
-	FrontendStateFeedDto,
 	RuntimeBatchDto,
 } from "../host/contracts";
+import { browserLocationToLandblockId, type BrowserLocationSelection } from "../../app/browser-mode";
 import { lookupAsset } from "../host/tauri";
 import type { PreparedAssetRecord } from "./types";
 import type {
@@ -101,51 +101,126 @@ export class AssetChannelController {
 
 export function createFocusedAssetRequest(
 	runtimeBatch: RuntimeBatchDto | null,
-	viewModelFeed: FrontendStateFeedDto | null,
+	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 ): AssetLookupRequestDto | null {
-	if (!runtimeBatch) {
+	if (!runtimeBatch || runtimeBatch.residency.indoors) {
 		return null;
 	}
 
-	const focusEntity = selectFocusedAssetEntity(runtimeBatch, viewModelFeed, priority);
-
-	if (!focusEntity) {
-		return null;
-	}
+	const landblockId = deriveTerrainFocusLandblockId(runtimeBatch, browserDestination);
+	const assetId = `terrain/${landblockId.toString(16).padStart(8, "0")}`;
+	const requestScope = browserDestination ? "destination" : "runtime";
 
 	return {
-		requestId: `${priority}-${runtimeBatch.tick}-${focusEntity.visualAssetId}`,
-		assetId: focusEntity.visualAssetId,
+		requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
+		assetId,
 		priority,
 	};
 }
 
-function selectFocusedAssetEntity(
-	runtimeBatch: RuntimeBatchDto,
-	viewModelFeed: FrontendStateFeedDto | null,
+export function createTerrainCoverageRequest(
+	runtimeBatch: RuntimeBatchDto | null,
+	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
-) {
-	if (priority === "streaming") {
-		const selectedEntity = runtimeBatch.entities.find(
-			(entity) => entity.entityId === viewModelFeed?.selectedEntityId,
-		);
-		if (selectedEntity) {
-			return selectedEntity;
-		}
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetId: string | null,
+): AssetLookupRequestDto | null {
+	const requests = createTerrainCoverageRequests(
+		runtimeBatch,
+		browserDestination,
+		priority,
+		preparedByAssetId,
+		pendingAssetId ? [pendingAssetId] : [],
+	);
 
-		const nonLocalEntity = runtimeBatch.entities.find(
-			(entity) => !entity.isLocalPlayer,
-		);
-		if (nonLocalEntity) {
-			return nonLocalEntity;
+	return requests[0] ?? null;
+}
+
+export function createTerrainCoverageRequests(
+	runtimeBatch: RuntimeBatchDto | null,
+	browserDestination: BrowserLocationSelection | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[] = [],
+): AssetLookupRequestDto[] {
+	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+		return [];
+	}
+
+	const focusLandblockId = deriveTerrainFocusLandblockId(runtimeBatch, browserDestination);
+	const requestScope = browserDestination ? "destination" : "runtime";
+	const coverageAssetIds = buildOutdoorCoverageAssetIds(focusLandblockId, priority);
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+
+	return coverageAssetIds
+		.filter((assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId))
+		.map((assetId) => ({
+			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
+			assetId,
+			priority,
+		}));
+}
+
+export function deriveTerrainFocusLandblockId(
+	runtimeBatch: RuntimeBatchDto,
+	browserDestination: BrowserLocationSelection | null,
+): number {
+	return browserDestination
+		? browserLocationToLandblockId(browserDestination)
+		: normalizeLandblockId(runtimeBatch.residency.focusLandblockId);
+}
+
+function normalizeLandblockId(rawLandblockId: number): number {
+	return (rawLandblockId & 0xffff0000) | 0xffff;
+}
+
+function buildOutdoorCoverageAssetIds(
+	focusLandblockId: number,
+	priority: AssetPriority,
+): string[] {
+	if (priority === "bootstrap") {
+		return [formatTerrainAssetId(focusLandblockId)];
+	}
+
+	const centerX = (focusLandblockId >>> 24) & 0xff;
+	const centerY = (focusLandblockId >>> 16) & 0xff;
+	const candidates: Array<{ assetId: string; distance: number; offsetX: number; offsetY: number }> = [];
+
+	for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+		for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+			const nextX = centerX + offsetX;
+			const nextY = centerY + offsetY;
+
+			if (nextX < 0 || nextX > 0xfe || nextY < 0 || nextY > 0xfe) {
+				continue;
+			}
+
+			const landblockId = ((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
+			candidates.push({
+				assetId: formatTerrainAssetId(landblockId),
+				distance: Math.abs(offsetX) + Math.abs(offsetY),
+				offsetX,
+				offsetY,
+			});
 		}
 	}
 
-	return (
-		runtimeBatch.entities.find((entity) => entity.isLocalPlayer) ??
-		runtimeBatch.entities[0]
-	);
+	return candidates
+		.sort((left, right) => {
+			if (left.distance !== right.distance) {
+				return left.distance - right.distance;
+			}
+			if (left.offsetY !== right.offsetY) {
+				return left.offsetY - right.offsetY;
+			}
+			return left.offsetX - right.offsetX;
+		})
+		.map((candidate) => candidate.assetId);
+}
+
+function formatTerrainAssetId(landblockId: number): string {
+	return `terrain/${landblockId.toString(16).padStart(8, "0")}`;
 }
 
 function createAssetWorker(): AssetWorkerLike {

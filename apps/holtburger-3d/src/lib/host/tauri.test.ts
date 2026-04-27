@@ -20,6 +20,7 @@ describe("readHostBoundarySnapshot", () => {
 		expect(snapshot.source).toBe("browser-preview");
 		expect(snapshot.lifecycleState.activeModeHint).toBe("browser");
 		expect(snapshot.runtimeBatch.tick).toBeGreaterThan(0);
+		expect(snapshot.runtimeBatch.entities).toHaveLength(0);
 		expect(snapshot.runtimeBatch.residency.focusLocationLabel).toMatch(/Z$/);
 		expect(snapshot.viewModelFeed.interactionMode).toBe("inspect");
 		expect(snapshot.overview.assetChannel).toBe("asset");
@@ -28,7 +29,7 @@ describe("readHostBoundarySnapshot", () => {
 		);
 	});
 
-	it("accepts fallback camera hints and resolves fallback debug picks outside Tauri", async () => {
+	it("accepts fallback camera hints and leaves debug picks unresolved outside Tauri", async () => {
 		const cameraAck = await submitCameraHint({
 			mode: "browser",
 			source: "world-display",
@@ -48,22 +49,23 @@ describe("readHostBoundarySnapshot", () => {
 		});
 
 		expect(cameraAck.accepted).toBe(true);
-		expect(response.resolved).toBe(true);
-		expect(response.hit?.label).toBe("Survey Drudge");
+		expect(response.resolved).toBe(false);
+		expect(response.hit).toBeNull();
 	});
 
 	it("keeps asset lookup on a dedicated fallback path outside Tauri", async () => {
 		const response = await lookupAsset({
 			requestId: "bootstrap-asset",
-			assetId: "gfx/02000003",
+			assetId: "terrain/0102ffff",
 			priority: "bootstrap",
 		});
 
-		expect(response.assetId).toBe("gfx/02000003");
+		expect(response.assetId).toBe("terrain/0102ffff");
 		expect(response.payloadKind).toBe("json");
 		expect(response.payload).toMatchObject({
-			kind: "visual-asset-stub",
-			residencyKind: "indoor-env-cell",
+			kind: "terrain-landblock",
+			residencyKind: "outdoor-landblock",
+			landblockId: 0x0102ffff,
 		});
 	});
 
@@ -79,7 +81,8 @@ describe("readHostBoundarySnapshot", () => {
 
 		expect(notifications).toHaveLength(2);
 		expect(notifications[0].runtimeBatch?.tick).toBe(2);
-		expect(notifications[0].viewModelFeed?.selectedEntityId).toBe(0x01020305);
-		expect(notifications[1].viewModelFeed?.selectedEntityId).toBe(0x01020306);
+		expect(notifications[0].runtimeBatch?.entities).toHaveLength(0);
+		expect(notifications[0].viewModelFeed?.selectedEntityId).toBeNull();
+		expect(notifications[1].viewModelFeed?.selectedEntityId).toBeNull();
 	});
 });

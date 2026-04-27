@@ -15,30 +15,18 @@ function createSnapshot(): HostBoundarySnapshot {
 		},
 		runtimeBatch: {
 			tick: 6,
-			entities: [
-				{
-					entityId: 0x01020304,
-					label: "Browser Scout",
-					position: { x: 0, y: 0, z: 0 },
-					headingRadians: 0,
-					visualAssetId: "gfx/02000001",
-					landblockId: 0x01020003,
-					cellId: 3,
-					locationLabel: "100.40S, 101.55W, 1.0Z",
-					isLocalPlayer: true,
-				},
-			],
+			entities: [],
 			residency: {
-				focusEntityId: 0x01020304,
+				focusEntityId: null,
 				focusLandblockId: 0x01020003,
 				focusCellId: 3,
 				focusLocationLabel: "100.40S, 101.55W, 1.0Z",
 				indoors: false,
-				trackedBodyCount: 1,
+				trackedBodyCount: 0,
 			},
 		},
 		viewModelFeed: {
-			selectedEntityId: 0x01020304,
+			selectedEntityId: null,
 			interactionMode: "inspect",
 			busyState: "idle",
 		},
@@ -60,40 +48,60 @@ describe("vertical slice report", () => {
 			...createInitialAssetChannelState(),
 			preparedByPriority: {
 				bootstrap: {
+					assetKind: "terrain-landblock",
 					request: {
-						requestId: "bootstrap-1-gfx/02000001",
-						assetId: "gfx/02000001",
+						requestId: "bootstrap-1-runtime-terrain/0102ffff",
+						assetId: "terrain/0102ffff",
 						priority: "bootstrap",
 					},
 					response: {
-						requestId: "bootstrap-1-gfx/02000001",
-						assetId: "gfx/02000001",
+						requestId: "bootstrap-1-runtime-terrain/0102ffff",
+						assetId: "terrain/0102ffff",
 						payloadKind: "json",
-						payload: { kind: "appearance-manifest" },
+						payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
 					},
 					residencyKind: "outdoor-landblock",
-					debugPrimitive: "survey-billboard",
-					paletteKey: "bronze-scout",
-					summary: "Prepared gfx/02000001 as survey-billboard for outdoor-landblock.",
+					debugPrimitive: "terrain-landblock-mesh",
+					paletteKey: "terrain-0102ffff",
+					terrainMesh: {
+						landblockId: 0x0102ffff,
+						gridSize: 9,
+						tileSize: 24,
+						vertices: [],
+						triangles: [],
+						minHeight: 0,
+						maxHeight: 30,
+					},
+					summary: "Prepared terrain/0102ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
 					notes: [],
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
 				streaming: {
+					assetKind: "terrain-landblock",
 					request: {
-						requestId: "streaming-2-gfx/02000003",
-						assetId: "gfx/02000003",
+						requestId: "streaming-2-runtime-terrain/0103ffff",
+						assetId: "terrain/0103ffff",
 						priority: "streaming",
 					},
 					response: {
-						requestId: "streaming-2-gfx/02000003",
-						assetId: "gfx/02000003",
+						requestId: "streaming-2-runtime-terrain/0103ffff",
+						assetId: "terrain/0103ffff",
 						payloadKind: "json",
-						payload: { kind: "appearance-manifest" },
+						payload: { kind: "terrain-landblock", landblockId: 0x0103ffff },
 					},
-					residencyKind: "indoor-env-cell",
-					debugPrimitive: "sentinel-proxy-volume",
-					paletteKey: "dungeon-sentinel",
-					summary: "Prepared gfx/02000003 as sentinel-proxy-volume for indoor-env-cell.",
+					residencyKind: "outdoor-landblock",
+					debugPrimitive: "terrain-landblock-mesh",
+					paletteKey: "terrain-0103ffff",
+					terrainMesh: {
+						landblockId: 0x0103ffff,
+						gridSize: 9,
+						tileSize: 24,
+						vertices: [],
+						triangles: [],
+						minHeight: 2,
+						maxHeight: 24,
+					},
+					summary: "Prepared terrain/0103ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
 					notes: [],
 					preparedAt: "2026-04-26T00:00:01.000Z",
 				},
@@ -101,21 +109,21 @@ describe("vertical slice report", () => {
 			},
 			history: [
 				{
-					requestId: "bootstrap-1-gfx/02000001",
-					assetId: "gfx/02000001",
+					requestId: "bootstrap-1-runtime-terrain/0102ffff",
+					assetId: "terrain/0102ffff",
 					priority: "bootstrap",
 					status: "prepared",
 					channel: "asset",
-					summary: "Prepared gfx/02000001 as survey-billboard for outdoor-landblock.",
+					summary: "Prepared terrain/0102ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
 					timestamp: "2026-04-26T00:00:00.000Z",
 				},
 				{
-					requestId: "streaming-2-gfx/02000003",
-					assetId: "gfx/02000003",
+					requestId: "streaming-2-runtime-terrain/0103ffff",
+					assetId: "terrain/0103ffff",
 					priority: "streaming",
 					status: "prepared",
 					channel: "asset",
-					summary: "Prepared gfx/02000003 as sentinel-proxy-volume for indoor-env-cell.",
+					summary: "Prepared terrain/0103ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
 					timestamp: "2026-04-26T00:00:01.000Z",
 				},
 			],
@@ -123,8 +131,8 @@ describe("vertical slice report", () => {
 
 		expect(report.headline).toMatch(/live host/);
 		expect(report.assetSummary).toMatch(/bootstrap plus streaming/);
-		expect(report.observedFlows).toContain("Bootstrap asset: gfx/02000001.");
-		expect(report.observedFlows).toContain("Streaming asset: gfx/02000003.");
-		expect(report.awkwardSeams[0]).toMatch(/Asset payloads are still typed visual-asset stubs/);
+		expect(report.observedFlows).toContain("Bootstrap asset: terrain/0102ffff.");
+		expect(report.observedFlows).toContain("Streaming asset: terrain/0103ffff.");
+		expect(report.awkwardSeams[0]).toMatch(/Phase 9 now proves one outdoor terrain payload family/);
 	});
 });

@@ -1406,6 +1406,8 @@ Resolved gate review:
 
 Turns the Phase 7 scene-context work plus the Phase 8 research findings into the first visibly terrain-backed browser milestone.
 
+Status: completed on 2026-04-26.
+
 This phase must be treated as an outdoor rendering spike, not as permission to freeze the general scene model around outdoor-only assumptions.
 
 Purpose:
@@ -1437,29 +1439,58 @@ Phase 9 design guardrails:
 - keep any reusable scene model one level above concrete asset families: authoritative residency plus referenced level assets, not pre-bundled renderer payloads
 - if a type cannot plausibly represent indoor env-cell residency plus environment or cell-structure-backed geometry later, do not let Phase 9 promote it into the long-term shared model
 
+Resolved gate review:
+
+- Phase 9 proved the first honest outdoor terrain asset path without widening shared crates. `WorldDisplay` now derives a landblock-shaped `terrain/xxyyffff` request from the app-local outdoor scene context, the asset channel carries that request independently of the runtime channel, the worker prepares a terrain mesh intermediate, and the frontend renders a primitive terrain surface while keeping final view coverage and rendering policy in JavaScript.
+- The Phase 8 ownership split held up under implementation. Rust publishes an app-local `CellLandblock`-shaped terrain payload and never chooses a renderer bundle, while the frontend remains the layer that decides when the current focus landblock needs terrain and how that prepared payload is turned into a visible world surface.
+- The current visual result is not yet renderer progress in the sense the project actually needs. Phase 9 ended up proving the asset-request, decode, and mesh-preparation seams, but the visible terrain surface is still an SVG-based debug projection rather than a Three.js scene. That means the code currently demonstrates one real outdoor terrain data path, not the first real 3D renderer milestone.
+- The strongest newly exposed gap is therefore more fundamental than outdoor coverage alone: `WorldDisplay` still lacks a real 3D scene host. Neighboring landblocks remain policy-only, the asset state still remembers one prepared record instead of a terrain-capable scene cache, browser preview still uses generated placeholder terrain outside Tauri, and the viewport itself is still a debug visualization rather than the renderer the plan was supposed to be driving toward.
+- Phase 10 should be rewritten around that correction. The next step must start by replacing the SVG viewport with a real Three.js render host that consumes the existing terrain mesh intermediate, then broaden into neighboring outdoor coverage and live-host parity once the real renderer loop exists. Do not fold indoor env-cell work into that next step yet.
+- Recommended course correction: explicitly demote the current Phase 9 viewport to temporary diagnostic scaffolding, make a real Three.js scene host the first acceptance criterion of the next phase, and only count subsequent terrain coverage work as renderer progress once geometry is being drawn through that scene runtime.
+
 #### Phase 10: Terrain Coverage And Browser-Facing World Shell Consolidation
 
-Extends the first terrain slice into something that behaves more like a primitive world browser and less like a diagnostics viewport.
+Replaces the Phase 9 SVG terrain viewport with a real Three.js scene host, then extends the first terrain slice into something that behaves more like a primitive world browser and less like a diagnostics viewport.
+
+Status: completed on 2026-04-26.
 
 Purpose:
 
-- broaden from one proof chunk to a small outdoor browsing loop with camera movement, neighboring coverage, and clearer scene ownership
+- replace the Phase 9 debug SVG projection with a real Three.js render host inside `WorldDisplay`
+- prove that the existing terrain mesh intermediate can be uploaded into renderer-native geometry buffers and viewed through a real camera or scene loop
+- broaden from one proof landblock to a small outdoor browsing loop with neighboring landblock coverage, a terrain-capable asset cache, and clearer scene ownership
 - consolidate the app so browser mode leads with the world surface while diagnostics move into supporting panels or overlays
 - harden only the outdoor-specific pieces that are actually outdoor-specific, while keeping the core scene-model seams compatible with later indoor env-cell composition and transitions
+- verify that live Tauri runs are exercising repo-local `CellLandblock` payloads rather than only the browser-preview generated placeholder fallback
 
 Primary deliverables:
 
-- modest expansion beyond the first terrain chunk, enough to make movement through outdoor space legible
+- a real Three.js scene host owned by `WorldDisplay`, including camera setup, renderer loop, and terrain-geometry upload from the prepared terrain mesh intermediate
+- explicit retirement or demotion of the SVG terrain viewport to debug-only scaffolding instead of the primary world surface
+- modest expansion beyond the first focus landblock, enough to make outdoor movement and neighboring terrain refresh legible
+- a small terrain-capable asset cache keyed by outdoor landblock asset IDs instead of one live prepared-asset record
 - a clearer separation between primary world-view UI and secondary diagnostics
-- initial asset-cache and terrain-refresh policy that is still simple but no longer purely single-slice
+- initial terrain-refresh policy that remains simple but is no longer purely single-slice
+- explicit live-host verification notes describing what the Tauri path loaded from repo-local content and what still differs from browser preview
 - a first explicit statement of how outdoor scene residency, indoor scene residency, and scene transitions will map onto one higher-level app scene model without collapsing them into one fake-generic asset type
 
 Acceptance criteria:
 
+- `WorldDisplay` owns a real Three.js scene host rather than an SVG or DOM-based terrain projection
+- the first focus landblock terrain mesh is rendered through the actual scene runtime with a real camera and renderer loop
 - the app reads as a primitive outdoor world browser first and a diagnostics surface second
-- moving through the outdoor scene can trigger at least one additional terrain or scene refresh beyond the initial slice
+- moving through the outdoor scene can trigger at least one additional neighboring terrain refresh beyond the initial focus landblock slice
+- live Tauri runs are observed loading real repo-local outdoor terrain payloads through the asset channel
 - `WorldDisplay` remains the primary browser-mode surface
 - the plan and touched code can explain which seams are intentionally outdoor-only and which seams are being preserved as future indoor-capable scene abstractions
+
+Resolved gate review:
+
+- Phase 10 completed the first real renderer milestone. `WorldDisplay` now owns a live Three.js scene host, uploads the worker-prepared terrain mesh intermediate into renderer-native geometry buffers, and renders outdoor terrain through a real camera and render loop instead of an SVG projection.
+- The outdoor browser shell now behaves like a primitive world browser rather than a single-slice proof. The frontend keeps a terrain cache keyed by `terrain/*` landblock asset IDs and fills the radius-1 neighborhood over time, which is enough to render nine cached outdoor landblocks in browser preview without pushing coverage policy back into Rust.
+- The strongest remaining gap is now live-host parity, not renderer absence. Browser preview proves the Three.js scene, request policy, and cache shape with generated placeholder terrain, but a real Tauri run still needs to be observed loading the same render path from repo-local `CellLandblock` payloads in `dats/assets.hba`.
+- Indoor work must still remain a separate seam. Phase 10 kept the scene model landblock-first only where the data is honestly outdoor-only; Phase 11 should continue to focus on env-cell, visible-cell, `SeenOutside`, environment, and cell-structure semantics rather than widening the outdoor cache model into a fake-universal scene type.
+- Recommended course correction: insert a short live-host parity and renderer-observability phase before the indoor expansion phase. That keeps the new Three.js renderer honest and prevents preview-only confidence from hiding Tauri-specific regressions.
 
 #### Phase 11: Indoor Level Assets, Scene Membership, And Visible-Cell Expansion
 
@@ -1785,6 +1816,9 @@ Mitigation:
 - [x] run the browser vertical slice and log awkward seams for follow-up
 - [x] define the first app-local outdoor scene context and terrain request contract
 - [x] perform an AC scene ground-truth research and fit audit for outdoor landblocks, indoor env cells, visible cells, and PVS-shaped scene relevance before more rendering work
+- [x] request, prepare, and render the first outdoor landblock terrain payload over the dedicated asset channel without promoting landblocks into the long-term universal scene DTO
+- [x] replace the SVG terrain viewport with a real Three.js scene host in `WorldDisplay`
+- [x] add a terrain-capable asset cache keyed by `terrain/*` landblock IDs and stream the radius-1 outdoor neighborhood in browser preview
 
 #### Decisions Log
 
@@ -1824,6 +1858,13 @@ Mitigation:
 - Treat ACViewer's default radius-1 landblock load and eager env-cell rendering as viewer policy, not as proof of retail client scene-membership behavior or proof that Rust should own render-load selection.
 - Do not let outdoor rendering milestones canonize the shared scene model. Outdoor landblocks, terrain payloads, and outdoor browsing policy may be phase-local specializations, while the higher-level scene model must stay compatible with indoor env-cell and environment-backed composition plus transitions.
 - Prefer explicit AC-shaped special cases over fake-generic abstractions. If a concept is honestly landblock-only, env-cell-only, or scene-table-only right now, name it that way instead of promoting a misleading universal DTO.
+- Keep outdoor terrain requests landblock-shaped and frontend-driven. Phase 9 now proves `terrain/xxyyffff` as an app-local outdoor asset family chosen from runtime residency plus local scene context, not as a Rust-pushed render bundle.
+- Let the worker prepare a CPU-side terrain mesh intermediate while keeping the final world-surface render and coverage policy in `WorldDisplay`. That keeps the asset path honest without committing the long-term renderer to this exact mesh-preparation shape.
+- Treat browser-preview generated placeholder terrain as a development fallback only. Phase 10 must validate the same terrain request path against live Tauri loads from repo-local `CellLandblock` data so the plan does not drift into preview-only confidence.
+- Do not count SVG or DOM terrain projections as renderer progress. The next phase must treat the current viewport as disposable debug scaffolding and only count terrain rendering milestones once geometry is being drawn by the actual Three.js scene runtime.
+- Count renderer progress only when geometry is drawn through the actual Three.js scene runtime. Phase 10 satisfies that bar; the deleted SVG projection does not.
+- Keep outdoor terrain coverage frontend-owned. The frontend now decides which `terrain/*` landblock assets to request and cache for the radius-1 neighborhood, while Rust remains responsible only for authoritative residency plus terrain payload lookup.
+- Surface terrain provenance explicitly in the app shell. The browser must keep distinguishing repo-local `CellLandblock` loads from preview-placeholder fallback terrain so live-host parity stays observable.
 
 #### Verification Log
 
@@ -1866,6 +1907,12 @@ Mitigation:
 - 2026-04-26: `npx vitest run src/lib/world-display/model.test.ts` in `apps/holtburger-3d` passed after adding the Phase 7 outdoor scene-context model, indoor-gap guardrails, and terrain request-contract derivation.
 - 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after surfacing the Phase 7 outdoor scene context and terrain ground-truth contract in `WorldDisplay` and promoting the world shell ahead of the host-boundary panels.
 - 2026-04-26: Phase 8 research completed by cross-reading ACE DAT loaders, ACE server physics visibility handling, ACViewer world and render paths, ACViewer docs, and repo-local pruning notes, then recording the resulting fit audit and gate review in this plan.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after switching the frontend asset path to landblock-shaped `terrain/*` requests, adding terrain-mesh preparation in the asset worker, and rendering the first barebones terrain surface in `WorldDisplay`.
+- 2026-04-26: `cargo test -p holtburger-3d` passed after teaching the app-local Tauri host to answer `terrain/*` asset requests with `CellLandblock`-shaped terrain payloads and updating the host-boundary terrain tests.
+- 2026-04-26: Live browser inspection at `http://127.0.0.1:1420/` confirmed the updated world shell was requesting `terrain/0102ffff`, preparing a terrain mesh with 81 vertices and 128 triangles, and rendering a primitive terrain-backed viewport instead of only marker overlays.
+- 2026-04-26: `npm run test:ts -- --run` in `apps/holtburger-3d` passed after adding the Phase 10 terrain-scene model tests, landblock-coverage request tests, and cache-by-asset-id state assertions.
+- 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after replacing the SVG terrain viewport with a real Three.js render host and cached-landblock terrain scene runtime.
+- 2026-04-26: Browser-preview inspection at `http://127.0.0.1:1420/` confirmed the updated world shell was rendering the new Three.js surface and had filled the radius-1 outdoor terrain cache to nine landblocks around focus `0x0102ffff`.
 
 #### Phase Review Log
 
@@ -1878,6 +1925,12 @@ Mitigation:
 - 2026-04-26: Phase 2 completed with a small authoritative app-local `WorldState`, real runtime-body-backed entity snapshots, residency metadata, typed runtime notifications, and frontend inspection of streamed runtime batches without same-turn reads.
 - 2026-04-26: Phase 2 did not require shared-crate changes. Using existing `holtburger-world` constructors and runtime-body view surfaces was sufficient for this proof, which strengthens the case for keeping the seam app-local until live session or content pressure says otherwise.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 3 focused on frontend store extraction and browser-mode flow wiring, rather than redoing the app shell work that is already in place.
+- 2026-04-26: Phase 9 completed with the first outdoor terrain payload path: `WorldDisplay` now derives a focus-landblock terrain request, the asset worker prepares a terrain mesh intermediate, browser preview can render a deterministic fallback terrain surface, and the Tauri host can answer the same request shape with repo-local `CellLandblock` data when available.
+- 2026-04-26: Phase 9 gate review resolved in favor of narrowing Phase 10 to outdoor coverage consolidation and live-host parity rather than jumping to indoor scene membership too early. The next highest-value work is neighboring terrain coverage plus a terrain-capable cache, while indoor env-cell and visible-cell semantics remain the first explicit goal of Phase 11.
+- 2026-04-26: Phase 10 completed with the first real Three.js world renderer in `WorldDisplay`, a terrain cache keyed by `terrain/*` landblock asset ID, and a streaming outdoor coverage policy that grows from the focus landblock to the full radius-1 neighborhood in browser preview.
+- 2026-04-26: Phase 10 resolved the main honesty gap in the old plan. The app is no longer counting an SVG debug projection as renderer progress; geometry now reaches a real scene runtime. The remaining parity gap is specifically live Tauri verification against repo-local `CellLandblock` payloads.
+- 2026-04-26: Phase 10 did not require shared-crate changes. The new pressure stayed app-local: renderer ownership, terrain cache policy, and terrain provenance surfacing still belong in `apps/holtburger-3d`, while indoor scene semantics remain a separate AC-shaped design problem.
+- 2026-04-26: Gate review resolved in favor of inserting a short live-host parity phase before indoor expansion. Now that the renderer exists, the next highest-value work is proving the same path under Tauri with repo-local terrain data and better renderer observability before widening scene ownership to env cells and visible cells.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -1925,11 +1978,10 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 7 and 8 are complete. The next step should now be Phase 9: request, decode, and render one outdoor landblock terrain asset over the existing asset channel using the Phase 8 findings as constraints. That phase should keep the outdoor contract landblock-shaped, keep terrain on the asset channel, avoid Rust-chosen renderer bundles, and explicitly avoid promoting outdoor-only data types into the long-term shared scene model before the indoor level-asset phase lands.
+Phases 7 through 10 are complete. The next step should now be a short live-host parity pass: run the same Three.js terrain scene under Tauri against repo-local `CellLandblock` payloads from `dats/assets.hba`, surface terrain provenance and renderer telemetry more explicitly in the app shell, and close the remaining preview-versus-live confidence gap without changing ownership.
 
 After the browser-foundation phases land, the next appended fast-follow work should likely split in this order:
 
-1. Phase 9: first terrain payload and barebones world browser render
-2. Phase 10: terrain coverage and browser-facing world shell consolidation
-3. Phase 11: indoor level assets, scene membership, and visible-cell expansion
-4. Phase 12: shared `SpatialBody` constraint and non-world body semantics
+1. Additional phase recommendation: live Tauri terrain parity and renderer observability
+2. Phase 11: indoor level assets, scene membership, and visible-cell expansion
+3. Phase 12: shared `SpatialBody` constraint and non-world body semantics

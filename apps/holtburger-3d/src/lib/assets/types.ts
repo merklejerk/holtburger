@@ -1,6 +1,7 @@
 import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
+	Vec3Dto,
 } from "../host/contracts";
 
 export type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
@@ -10,12 +11,32 @@ export type AssetResidencyKind =
 	| "indoor-env-cell"
 	| "unknown";
 
+export interface PreparedTerrainTriangle {
+	a: number;
+	b: number;
+	c: number;
+	terrainType: number;
+	averageHeight: number;
+}
+
+export interface PreparedTerrainMesh {
+	landblockId: number;
+	gridSize: number;
+	tileSize: number;
+	vertices: Vec3Dto[];
+	triangles: PreparedTerrainTriangle[];
+	minHeight: number;
+	maxHeight: number;
+}
+
 export interface PreparedAssetRecord {
 	request: AssetLookupRequestDto;
 	response: AssetLookupResponseDto;
+	assetKind: "terrain-landblock" | "visual-asset-stub" | "unknown";
 	residencyKind: AssetResidencyKind;
 	debugPrimitive: string;
 	paletteKey: string;
+	terrainMesh: PreparedTerrainMesh | null;
 	summary: string;
 	notes: string[];
 	preparedAt: string;
@@ -39,6 +60,7 @@ export interface AssetChannelState {
 	activeRequest: AssetLookupRequestDto | null;
 	preparedAsset: PreparedAssetRecord | null;
 	preparedByPriority: Record<AssetLookupRequestDto["priority"], PreparedAssetRecord | null>;
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
 	lastResponse: AssetLookupResponseDto | null;
 	errorMessage: string | null;
 	history: AssetActivityRecord[];
@@ -57,6 +79,7 @@ export function createInitialAssetChannelState(
 			streaming: null,
 			prefetch: null,
 		},
+		preparedByAssetId: {},
 		lastResponse: null,
 		errorMessage: null,
 		history: [],

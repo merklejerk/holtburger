@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildCameraHint,
 	buildRayPickRequest,
+	deriveTerrainViewport,
 	deriveWorldDisplayModel,
 	normalizeViewportPoint,
 	shouldSendThrottledCameraHint,
@@ -13,37 +14,14 @@ import type { RuntimeBatchDto } from "../host/contracts";
 function createRuntimeBatch(): RuntimeBatchDto {
 	return {
 		tick: 7,
-		entities: [
-			{
-				entityId: 0x01020304,
-				label: "Browser Scout",
-				position: { x: 10, y: 15, z: 2 },
-				headingRadians: 0.25,
-				visualAssetId: "gfx/02000001",
-				landblockId: 0x01020003,
-				cellId: 3,
-				locationLabel: "100.40S, 101.55W, 1.0Z",
-				isLocalPlayer: true,
-			},
-			{
-				entityId: 0x01020305,
-				label: "Survey Drudge",
-				position: { x: 22, y: 30, z: 0 },
-				headingRadians: 1.1,
-				visualAssetId: "gfx/02000002",
-				landblockId: 0x0102001b,
-				cellId: 27,
-				locationLabel: "100.41S, 101.52W, 0.0Z",
-				isLocalPlayer: false,
-			},
-		],
+		entities: [],
 		residency: {
-			focusEntityId: 0x01020304,
+			focusEntityId: null,
 			focusLandblockId: 0x01020003,
 			focusCellId: 3,
 			focusLocationLabel: "100.40S, 101.55W, 1.0Z",
 			indoors: false,
-			trackedBodyCount: 2,
+			trackedBodyCount: 0,
 		},
 	};
 }
@@ -55,7 +33,7 @@ describe("world display model helpers", () => {
 			hostStatus: "Connected to the host.",
 			runtimeBatch: createRuntimeBatch(),
 			viewModelFeed: {
-				selectedEntityId: 0x01020305,
+				selectedEntityId: null,
 				interactionMode: "inspect",
 				busyState: "idle",
 			},
@@ -68,29 +46,49 @@ describe("world display model helpers", () => {
 					priority: "bootstrap",
 				},
 				preparedAsset: {
+					assetKind: "terrain-landblock",
 					request: {
 						requestId: "fixture",
-						assetId: "gfx/02000001",
+						assetId: "terrain/0102ffff",
 						priority: "bootstrap",
 					},
 					response: {
 						requestId: "fixture",
-						assetId: "gfx/02000001",
+						assetId: "terrain/0102ffff",
 						payloadKind: "json",
-						payload: { kind: "appearance-manifest" },
+						payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
 					},
 					residencyKind: "outdoor-landblock",
-					debugPrimitive: "survey-billboard",
-					paletteKey: "bronze-scout",
-					summary: "Prepared gfx/02000001 as survey-billboard for outdoor-landblock.",
+					debugPrimitive: "terrain-landblock-mesh",
+					paletteKey: "terrain-0102ffff",
+					terrainMesh: {
+						landblockId: 0x0102ffff,
+						gridSize: 9,
+						tileSize: 24,
+						vertices: Array.from({ length: 81 }, (_, index) => ({
+							x: (index % 9) * 24,
+							y: Math.floor(index / 9) * 24,
+							z: index % 12,
+						})),
+						triangles: Array.from({ length: 128 }, (_, index) => ({
+							a: index % 40,
+							b: (index % 40) + 1,
+							c: (index % 40) + 9,
+							terrainType: index % 6,
+							averageHeight: (index % 10) + 2,
+						})),
+						minHeight: 0,
+						maxHeight: 11,
+					},
+					summary: "Prepared terrain/0102ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
 					notes: [],
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
 				lastResponse: {
 					requestId: "fixture",
-					assetId: "gfx/02000001",
+					assetId: "terrain/0102ffff",
 					payloadKind: "json",
-					payload: { kind: "appearance-manifest" },
+					payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
 				},
 				errorMessage: null,
 			},
@@ -110,16 +108,58 @@ describe("world display model helpers", () => {
 
 		expect(model.headline).toMatch(/destination preview/i);
 		expect(model.destinationLabel).toBe("100.55S, 101.65W, 2.0Z");
-		expect(model.entities).toHaveLength(2);
+		expect(model.entities).toHaveLength(0);
 		expect(model.sceneContext.kind).toBe("outdoor-landblock-ring");
-		expect(model.sceneContext.chunks).toHaveLength(9);
-		expect(model.sceneContext.focusLandblockLabel).toBe("0x0102ffff");
-		expect(model.terrainContract.requestKey).toBe("terrain/0102ffff");
+		expect(model.sceneContext.chunks).toHaveLength(6);
+		expect(model.sceneContext.focusLandblockLabel).toBe("0x0001ffff");
+		expect(model.terrainContract.requestKey).toBe("terrain/0001ffff");
 		expect(model.terrainContract.decodeOwner).toBe("rust-host-adapter");
-		expect(model.entities.find((entity) => entity.isSelected)?.label).toBe(
-			"Survey Drudge",
-		);
-		expect(model.assetSummary).toMatch(/Prepared gfx\/02000001/);
+		expect(model.renderCacheSummary).toMatch(/authoritative residency/);
+		expect(model.assetSummary).toMatch(/Prepared terrain\/0102ffff/);
+	});
+
+	it("projects a prepared terrain mesh into viewport polygons", () => {
+		const viewport = deriveTerrainViewport({
+			request: {
+				requestId: "fixture",
+				assetId: "terrain/0102ffff",
+				priority: "bootstrap",
+			},
+			response: {
+				requestId: "fixture",
+				assetId: "terrain/0102ffff",
+				payloadKind: "json",
+				payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
+			},
+			assetKind: "terrain-landblock",
+			residencyKind: "outdoor-landblock",
+			debugPrimitive: "terrain-landblock-mesh",
+			paletteKey: "terrain-0102ffff",
+			terrainMesh: {
+				landblockId: 0x0102ffff,
+				gridSize: 9,
+				tileSize: 24,
+				vertices: Array.from({ length: 81 }, (_, index) => ({
+					x: (index % 9) * 24,
+					y: Math.floor(index / 9) * 24,
+					z: (index % 9) + Math.floor(index / 9),
+				})),
+				triangles: [
+					{ a: 0, b: 9, c: 1, terrainType: 1, averageHeight: 4 },
+					{ a: 1, b: 9, c: 10, terrainType: 2, averageHeight: 5 },
+				],
+				minHeight: 0,
+				maxHeight: 12,
+			},
+			summary: "Prepared terrain/0102ffff as a landblock terrain mesh.",
+			notes: [],
+			preparedAt: "2026-04-26T00:00:00.000Z",
+		});
+
+		expect(viewport.ready).toBe(true);
+		expect(viewport.landblockLabel).toBe("0x0102ffff");
+		expect(viewport.polygons).toHaveLength(2);
+		expect(viewport.polygons[0].points).toMatch(/,/);
 	});
 
 	it("makes the outdoor-first limit explicit when runtime residency is indoors", () => {

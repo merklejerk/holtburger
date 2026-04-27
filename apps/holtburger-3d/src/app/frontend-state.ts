@@ -182,6 +182,10 @@ export function createFrontendStateStore() {
 						...state.asset.preparedByPriority,
 						[asset.request.priority]: asset,
 					},
+					preparedByAssetId: {
+						...state.asset.preparedByAssetId,
+						[asset.request.assetId]: asset,
+					},
 					lastResponse: asset.response,
 					errorMessage: null,
 					history: appendAssetActivity(state.asset.history, {

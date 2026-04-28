@@ -31,7 +31,6 @@ export interface HostConnectionState {
 export interface ModeState {
 	activeMode: AppModeId;
 	activeModeLabel: string;
-	activeModeSummary: string;
 	activePageId: string;
 	routingReason: string;
 }
@@ -56,9 +55,9 @@ export function createInitialFrontendState(): FrontendAppState {
 			asset: createInitialAssetChannelState(),
 		browserMode: createBrowserModeState(),
 		mode: createModeState(
-			"browser",
-			"location-entry",
-			"Browser mode is the default until lifecycle facts say otherwise.",
+			"client",
+			"world-viewer",
+			"The app runs as a Tauri-backed world viewer; plain browser preview is intentionally unsupported.",
 		),
 	});
 }
@@ -80,38 +79,12 @@ export function deriveModeState(
 	lifecycleState: LifecycleStateDto | null,
 	browserMode: BrowserModeState,
 ): ModeState {
-	if (browserMode.destination) {
-		return createModeState(
-			"browser",
-			browserMode.page,
-			"A browser-mode destination has been selected, so frontend policy keeps the browser flow active.",
-		);
-	}
-
-	if (
-		lifecycleState?.activeModeHint === "client" &&
-		lifecycleState.phase === "ready" &&
-		lifecycleState.sessionState === "connected"
-	) {
-		return createModeState(
-			"client",
-			"session-live",
-			"The host lifecycle reports a ready connected client session, so frontend policy routes to client mode.",
-		);
-	}
-
-	if (lifecycleState?.activeModeHint === "client") {
-		return createModeState(
-			"client",
-			"client-placeholder",
-			"The host is steering toward client mode, but the browser flow remains dormant until a connected session exists.",
-		);
-	}
-
 	return createModeState(
-		"browser",
-		browserMode.page,
-		"Browser mode stays frontend-owned and remains the default when lifecycle facts do not require client mode.",
+		"client",
+		browserMode.destination ? browserMode.page : "world-viewer",
+		lifecycleState?.phase === "ready" && lifecycleState.sessionState === "connected"
+			? "The host lifecycle reports a ready connected client session, so the world viewer is live."
+			: "The app stays in one world-viewer mode; navigation overlays can change focus without becoming a separate app mode.",
 	);
 }
 
@@ -164,7 +137,6 @@ export function createFrontendStateStore() {
 						priority: request.priority,
 						status: "requested",
 						channel: state.asset.channel,
-						summary: `Queued ${request.assetId} for ${request.priority} preparation.`,
 						timestamp: new Date().toISOString(),
 					}),
 				},
@@ -194,7 +166,6 @@ export function createFrontendStateStore() {
 						priority: asset.request.priority,
 						status: "prepared",
 						channel: state.asset.channel,
-						summary: asset.summary,
 						timestamp: asset.preparedAt,
 					}),
 				},
@@ -214,7 +185,6 @@ export function createFrontendStateStore() {
 						priority: request.priority,
 						status: "failed",
 						channel: state.asset.channel,
-						summary: errorMessage,
 						timestamp: new Date().toISOString(),
 					}),
 				},
@@ -254,7 +224,7 @@ function applyLoadedSnapshot(
 			boundaryStatus:
 				snapshot.source === "tauri"
 					? "Connected to the Tauri host boundary with a live authoritative runtime feed."
-					: "Showing browser-preview fallback data until the Tauri runtime is active.",
+						: "Tauri runtime is unavailable. Start the app with npm run tauri:dev.",
 		},
 		asset: {
 			...state.asset,
@@ -315,9 +285,6 @@ function createModeState(
 	activePageId: string,
 	routingReason: string,
 ): ModeState {
-	const activeModeSummary =
-		availableModes.find((mode) => mode.id === activeMode)?.summary ??
-		"Unknown mode summary.";
 	const activeModeLabel =
 		availableModes.find((mode) => mode.id === activeMode)?.label ??
 		"Unknown Mode";
@@ -325,7 +292,6 @@ function createModeState(
 	return {
 		activeMode,
 		activeModeLabel,
-		activeModeSummary,
 		activePageId,
 		routingReason,
 	};

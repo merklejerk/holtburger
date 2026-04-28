@@ -27,9 +27,9 @@ function createRuntimeBatch(): RuntimeBatchDto {
 }
 
 describe("world display model helpers", () => {
-	it("derives a world-shell summary from the runtime batch and browser destination", () => {
+	it("derives a world-shell model from the runtime batch and browser destination", () => {
 		const model = deriveWorldDisplayModel({
-			activeModeLabel: "Browser Mode",
+			activeModeLabel: "World Viewer",
 			hostStatus: "Connected to the host.",
 			runtimeBatch: createRuntimeBatch(),
 			viewModelFeed: {
@@ -61,6 +61,12 @@ describe("world display model helpers", () => {
 					residencyKind: "outdoor-landblock",
 					debugPrimitive: "terrain-landblock-mesh",
 					paletteKey: "terrain-0102ffff",
+					provenance: {
+						source: "unknown",
+						sourceAssetKind: "cell-landblock",
+						errorCode: null,
+						detail: null,
+					},
 					terrainMesh: {
 						landblockId: 0x0102ffff,
 						gridSize: 9,
@@ -80,8 +86,6 @@ describe("world display model helpers", () => {
 						minHeight: 0,
 						maxHeight: 11,
 					},
-					summary: "Prepared terrain/0102ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
-					notes: [],
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
 				lastResponse: {
@@ -106,7 +110,7 @@ describe("world display model helpers", () => {
 			pendingCameraHint: false,
 		});
 
-		expect(model.headline).toMatch(/destination preview/i);
+		expect(model.headline).toMatch(/manual destination/i);
 		expect(model.destinationLabel).toBe("100.55S, 101.65W, 2.0Z");
 		expect(model.entities).toHaveLength(0);
 		expect(model.sceneContext.kind).toBe("outdoor-landblock-ring");
@@ -114,8 +118,8 @@ describe("world display model helpers", () => {
 		expect(model.sceneContext.focusLandblockLabel).toBe("0x0001ffff");
 		expect(model.terrainContract.requestKey).toBe("terrain/0001ffff");
 		expect(model.terrainContract.decodeOwner).toBe("rust-host-adapter");
-		expect(model.renderCacheSummary).toMatch(/authoritative residency/);
-		expect(model.assetSummary).toMatch(/Prepared terrain\/0102ffff/);
+		expect(model.renderCacheText).toMatch(/authoritative residency/);
+		expect(model.assetText).toMatch(/Prepared terrain\/0102ffff/);
 	});
 
 	it("projects a prepared terrain mesh into viewport polygons", () => {
@@ -135,6 +139,12 @@ describe("world display model helpers", () => {
 			residencyKind: "outdoor-landblock",
 			debugPrimitive: "terrain-landblock-mesh",
 			paletteKey: "terrain-0102ffff",
+			provenance: {
+				source: "unknown",
+				sourceAssetKind: "cell-landblock",
+				errorCode: null,
+				detail: null,
+			},
 			terrainMesh: {
 				landblockId: 0x0102ffff,
 				gridSize: 9,
@@ -151,8 +161,6 @@ describe("world display model helpers", () => {
 				minHeight: 0,
 				maxHeight: 12,
 			},
-			summary: "Prepared terrain/0102ffff as a landblock terrain mesh.",
-			notes: [],
 			preparedAt: "2026-04-26T00:00:00.000Z",
 		});
 
@@ -168,7 +176,7 @@ describe("world display model helpers", () => {
 		runtimeBatch.residency.focusLandblockId = 0x016c0155;
 
 		const model = deriveWorldDisplayModel({
-			activeModeLabel: "Browser Mode",
+			activeModeLabel: "World Viewer",
 			hostStatus: "Connected to the host.",
 			runtimeBatch,
 			viewModelFeed: null,
@@ -181,20 +189,20 @@ describe("world display model helpers", () => {
 
 		expect(model.sceneContext.kind).toBe("indoor-gap");
 		expect(model.sceneContext.chunks).toHaveLength(0);
-		expect(model.sceneContext.gapSummary).toMatch(/visible-cell/i);
+		expect(model.sceneContext.gapText).toMatch(/visible-cell/i);
 		expect(model.terrainContract.requestKey).toBeNull();
 	});
 
 	it("builds camera hints and pick requests from viewport input", () => {
 		const cameraHint = buildCameraHint(
-			"browser",
+			"client",
 			createRuntimeBatch(),
 			null,
 			normalizeViewportPoint(180, 60, 240, 120),
 		);
 
 		expect(cameraHint).not.toBeNull();
-		expect(cameraHint?.mode).toBe("browser");
+		expect(cameraHint?.mode).toBe("client");
 		expect(cameraHint?.viewportNormalizedX).toBeCloseTo(0.75);
 		expect(cameraHint?.destinationLabel).toBe("100.40S, 101.55W, 1.0Z");
 

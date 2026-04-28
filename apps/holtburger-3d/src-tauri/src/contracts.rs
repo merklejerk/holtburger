@@ -19,8 +19,25 @@ pub enum LifecyclePhaseDto {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModeHintDto {
-    Browser,
     Client,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndoorRuntimeFieldIdDto {
+    FocusEnvCellId,
+    VisibleCellIds,
+    SeenOutside,
+    EnvironmentId,
+    CellStructureId,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndoorAssetFamilyIdDto {
+    IndoorEnvCell,
+    Environment,
+    CellStructure,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -37,7 +54,6 @@ pub struct LifecycleStateDto {
     pub phase: LifecyclePhaseDto,
     pub active_mode_hint: Option<ModeHintDto>,
     pub session_state: SessionStateDto,
-    pub summary: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +155,13 @@ pub struct RuntimeNotificationEnvelopeDto {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct IndoorContractBacklogDto {
+    pub runtime_field_ids: Vec<IndoorRuntimeFieldIdDto>,
+    pub asset_family_ids: Vec<IndoorAssetFamilyIdDto>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HostBoundaryOverviewDto {
     pub asset_channel: &'static str,
     pub runtime_channel: &'static str,
@@ -146,7 +169,7 @@ pub struct HostBoundaryOverviewDto {
     pub runtime_lifecycle_topic: &'static str,
     pub runtime_batch_command: &'static str,
     pub asset_lookup_command: &'static str,
-    pub notes: Vec<String>,
+    pub indoor_contract_backlog: IndoorContractBacklogDto,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -166,7 +189,6 @@ pub struct CameraHintDto {
 pub struct CameraHintAckDto {
     pub accepted: bool,
     pub sequence: u64,
-    pub summary: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -196,5 +218,4 @@ pub struct RayPickResponseDto {
     pub resolved: bool,
     pub camera_hint_sequence: Option<u64>,
     pub hit: Option<RayPickHitDto>,
-    pub summary: String,
 }

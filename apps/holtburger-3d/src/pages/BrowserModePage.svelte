@@ -19,17 +19,17 @@
   <header class="mode-panel__header">
     <div>
       <p class="kicker">Navigation</p>
-      <h2>World browser</h2>
+      <h2>World navigation</h2>
     </div>
-    <span class:active={$frontendState.mode.activeMode === 'browser'} class="mode-chip">
-      {$frontendState.mode.activeMode === 'browser' ? 'active' : 'standby'}
+    <span class:active={$frontendState.host.boundarySnapshot?.source === 'tauri'} class="mode-chip">
+      {$frontendState.host.boundarySnapshot?.source === 'tauri' ? 'live' : 'offline'}
     </span>
   </header>
 
   <dl class="data-list compact-data-list">
     <div>
-      <dt>Mode</dt>
-      <dd>{$frontendState.browserMode.page}</dd>
+      <dt>Panel</dt>
+      <dd>{$frontendState.browserMode.destination ? 'destination-focus' : 'location-entry'}</dd>
     </div>
     <div>
       <dt>Anchor</dt>
@@ -51,7 +51,7 @@
     </label>
 
     <div class="browser-form__actions">
-      <button type="submit">Preview destination</button>
+      <button type="submit">Set destination</button>
       <button
         type="button"
         on:click={useCurrentRuntimeResidency}
@@ -68,7 +68,7 @@
 
   {#if $frontendState.browserMode.destination}
     <div class="destination-preview">
-      <p class="kicker">Destination</p>
+      <p class="kicker">Focus</p>
       <h3>{$frontendState.browserMode.destination.label}</h3>
       <p>
         Source: {$frontendState.browserMode.destination.source}.

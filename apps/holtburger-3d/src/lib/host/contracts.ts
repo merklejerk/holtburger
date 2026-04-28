@@ -1,130 +1,237 @@
-export type LifecyclePhase = "booting" | "ready" | "disconnected";
-export type ModeHint = "browser" | "client";
-export type SessionState = "unavailable" | "disconnected" | "connected";
-export type InteractionMode = "none" | "inspect";
-export type BusyState = "idle" | "loading";
-export type AssetPriority = "bootstrap" | "streaming" | "prefetch";
-export type AssetPayloadKind = "bytes" | "json";
+import { z } from "zod";
 
-export interface Vec3Dto {
-	x: number;
-	y: number;
-	z: number;
-}
+const lifecyclePhaseValueSchema = z.enum(["booting", "ready", "disconnected"]);
+export type LifecyclePhase = z.infer<typeof lifecyclePhaseValueSchema>;
 
-export interface LifecycleStateDto {
-	phase: LifecyclePhase;
-	activeModeHint: ModeHint | null;
-	sessionState: SessionState;
-	summary: string;
-}
+const modeHintValueSchema = z.enum(["client"]);
+export type ModeHint = z.infer<typeof modeHintValueSchema>;
 
-export interface RuntimeEntitySnapshotDto {
-	entityId: number;
-	label: string;
-	position: Vec3Dto;
-	headingRadians: number;
-	visualAssetId: string;
-	landblockId: number;
-	cellId: number | null;
-	locationLabel: string;
-	isLocalPlayer: boolean;
-}
+const sessionStateValueSchema = z.enum(["unavailable", "disconnected", "connected"]);
+export type SessionState = z.infer<typeof sessionStateValueSchema>;
 
-export interface RuntimeResidencyDto {
-	focusEntityId: number | null;
-	focusLandblockId: number;
-	focusCellId: number | null;
-	focusLocationLabel: string;
-	indoors: boolean;
-	trackedBodyCount: number;
-}
+const interactionModeValueSchema = z.enum(["none", "inspect"]);
+export type InteractionMode = z.infer<typeof interactionModeValueSchema>;
 
-export interface RuntimeBatchDto {
-	tick: number;
-	entities: RuntimeEntitySnapshotDto[];
-	residency: RuntimeResidencyDto;
-}
+const busyStateValueSchema = z.enum(["idle", "loading"]);
+export type BusyState = z.infer<typeof busyStateValueSchema>;
 
-export interface FrontendStateFeedDto {
-	selectedEntityId: number | null;
-	interactionMode: InteractionMode;
-	busyState: BusyState;
-}
+const assetPriorityValueSchema = z.enum(["bootstrap", "streaming", "prefetch"]);
+export type AssetPriority = z.infer<typeof assetPriorityValueSchema>;
 
-export interface AssetLookupRequestDto {
-	requestId: string;
-	assetId: string;
-	priority: AssetPriority;
-}
+const assetPayloadKindValueSchema = z.enum(["bytes", "json"]);
+export type AssetPayloadKind = z.infer<typeof assetPayloadKindValueSchema>;
 
-export interface AssetLookupResponseDto {
-	requestId: string;
-	assetId: string;
-	payloadKind: AssetPayloadKind;
-	payload: unknown;
-}
+const assetProvenanceSourceValueSchema = z.enum([
+	"repo-local-hba",
+	"generated-fallback",
+	"app-local-stub",
+	"unknown",
+]);
+export type AssetProvenanceSource = z.infer<typeof assetProvenanceSourceValueSchema>;
 
-export interface RuntimeNotificationEnvelopeDto {
-	channel: string;
-	topic: string;
-	lifecycleState: LifecycleStateDto | null;
-	runtimeBatch: RuntimeBatchDto | null;
-	viewModelFeed: FrontendStateFeedDto | null;
-}
+const assetErrorCodeValueSchema = z.enum([
+	"asset-id-unknown",
+	"asset-archive-open-failed",
+	"asset-read-failed",
+	"asset-decode-failed",
+	"cell-landblock-unavailable",
+]);
+export type AssetErrorCode = z.infer<typeof assetErrorCodeValueSchema>;
 
-export interface HostBoundaryOverviewDto {
-	assetChannel: string;
-	runtimeChannel: string;
-	runtimeNotificationEvent: string;
-	runtimeLifecycleTopic: string;
-	runtimeBatchCommand: string;
-	assetLookupCommand: string;
-	notes: string[];
-}
+const indoorRuntimeFieldIdValueSchema = z.enum([
+	"focus-env-cell-id",
+	"visible-cell-ids",
+	"seen-outside",
+	"environment-id",
+	"cell-structure-id",
+]);
+export type IndoorRuntimeFieldId = z.infer<typeof indoorRuntimeFieldIdValueSchema>;
 
-export interface CameraHintDto {
-	mode: ModeHint;
-	source: string;
-	position: Vec3Dto;
-	forward: Vec3Dto;
-	viewportNormalizedX: number;
-	viewportNormalizedY: number;
-	destinationLabel: string | null;
-}
+const indoorAssetFamilyIdValueSchema = z.enum([
+	"indoor-env-cell",
+	"environment",
+	"cell-structure",
+]);
+export type IndoorAssetFamilyId = z.infer<typeof indoorAssetFamilyIdValueSchema>;
 
-export interface CameraHintAckDto {
-	accepted: boolean;
-	sequence: number;
-	summary: string;
-}
+export const vec3DtoSchema = z.object({
+	x: z.number().finite(),
+	y: z.number().finite(),
+	z: z.number().finite(),
+});
+export type Vec3Dto = z.infer<typeof vec3DtoSchema>;
 
-export interface RayPickRequestDto {
-	requestId: string;
-	origin: Vec3Dto;
-	direction: Vec3Dto;
-	screenXNormalized: number;
-	screenYNormalized: number;
-	destinationLabel: string | null;
-}
+export const lifecycleStateDtoSchema = z.object({
+	phase: lifecyclePhaseValueSchema,
+	activeModeHint: modeHintValueSchema.nullable(),
+	sessionState: sessionStateValueSchema,
+});
+export type LifecycleStateDto = z.infer<typeof lifecycleStateDtoSchema>;
 
-export interface RayPickHitDto {
-	entityId: number;
-	label: string;
-	locationLabel: string;
-	distance: number;
-}
+export const runtimeEntitySnapshotDtoSchema = z.object({
+	entityId: z.number().int().nonnegative(),
+	label: z.string(),
+	position: vec3DtoSchema,
+	headingRadians: z.number().finite(),
+	appearanceId: z.string(),
+	landblockId: z.number().int().nonnegative(),
+	cellId: z.number().int().nonnegative().nullable(),
+	locationLabel: z.string(),
+	isLocalPlayer: z.boolean(),
+});
+export type RuntimeEntitySnapshotDto = z.infer<typeof runtimeEntitySnapshotDtoSchema>;
 
-export interface RayPickResponseDto {
-	requestId: string;
-	resolved: boolean;
-	cameraHintSequence: number | null;
-	hit: RayPickHitDto | null;
-	summary: string;
-}
+export const runtimeResidencyDtoSchema = z.object({
+	focusEntityId: z.number().int().nonnegative().nullable(),
+	focusLandblockId: z.number().int().nonnegative(),
+	focusCellId: z.number().int().nonnegative().nullable(),
+	focusLocationLabel: z.string(),
+	indoors: z.boolean(),
+	trackedBodyCount: z.number().int().nonnegative(),
+});
+export type RuntimeResidencyDto = z.infer<typeof runtimeResidencyDtoSchema>;
+
+export const runtimeBatchDtoSchema = z.object({
+	tick: z.number().int().nonnegative(),
+	entities: z.array(runtimeEntitySnapshotDtoSchema),
+	residency: runtimeResidencyDtoSchema,
+});
+export type RuntimeBatchDto = z.infer<typeof runtimeBatchDtoSchema>;
+
+export const frontendStateFeedDtoSchema = z.object({
+	selectedEntityId: z.number().int().nonnegative().nullable(),
+	interactionMode: interactionModeValueSchema,
+	busyState: busyStateValueSchema,
+});
+export type FrontendStateFeedDto = z.infer<typeof frontendStateFeedDtoSchema>;
+
+export const assetLookupRequestDtoSchema = z.object({
+	requestId: z.string().min(1),
+	assetId: z.string().min(1),
+	priority: assetPriorityValueSchema,
+});
+export type AssetLookupRequestDto = z.infer<typeof assetLookupRequestDtoSchema>;
+
+export const assetLookupResponseDtoSchema = z.object({
+	requestId: z.string().min(1),
+	assetId: z.string().min(1),
+	payloadKind: assetPayloadKindValueSchema,
+	payload: z.unknown(),
+});
+export type AssetLookupResponseDto = z.infer<typeof assetLookupResponseDtoSchema>;
+
+export const assetProvenanceDtoSchema = z.object({
+	source: assetProvenanceSourceValueSchema,
+	sourceAssetKind: z.string().nullable(),
+	errorCode: assetErrorCodeValueSchema.nullable(),
+	detail: z.string().nullable(),
+});
+export type AssetProvenanceDto = z.infer<typeof assetProvenanceDtoSchema>;
+
+export const terrainLandblockPayloadDtoSchema = z.object({
+	kind: z.literal("terrain-landblock"),
+	residencyKind: z.string(),
+	sourceAssetKind: z.literal("cell-landblock"),
+	landblockId: z.number().int().nonnegative(),
+	gridSize: z.number().int().positive(),
+	tileSize: z.number().finite().positive(),
+	heights: z.array(z.number().finite()),
+	terrainTypes: z.array(z.number().finite()),
+	provenance: assetProvenanceDtoSchema,
+});
+export type TerrainLandblockPayloadDto = z.infer<typeof terrainLandblockPayloadDtoSchema>;
+
+export const appearanceManifestPayloadDtoSchema = z.object({
+	kind: z.literal("appearance-manifest"),
+	assetId: z.string().min(1),
+	priority: assetPriorityValueSchema,
+	residencyKind: z.string(),
+	debugPrimitive: z.string().min(1),
+	paletteKey: z.string().min(1),
+	provenance: assetProvenanceDtoSchema,
+});
+export type AppearanceManifestPayloadDto = z.infer<typeof appearanceManifestPayloadDtoSchema>;
+
+export const genericAssetPayloadDtoSchema = z.object({
+	kind: z.string().min(1),
+	residencyKind: z.string().optional(),
+	debugPrimitive: z.string().optional(),
+	paletteKey: z.string().optional(),
+	provenance: assetProvenanceDtoSchema.optional(),
+}).passthrough();
+export type GenericAssetPayloadDto = z.infer<typeof genericAssetPayloadDtoSchema>;
+
+export const runtimeNotificationEnvelopeDtoSchema = z.object({
+	channel: z.string().min(1),
+	topic: z.string().min(1),
+	lifecycleState: lifecycleStateDtoSchema.nullable(),
+	runtimeBatch: runtimeBatchDtoSchema.nullable(),
+	viewModelFeed: frontendStateFeedDtoSchema.nullable(),
+});
+export type RuntimeNotificationEnvelopeDto = z.infer<typeof runtimeNotificationEnvelopeDtoSchema>;
+
+export const indoorContractBacklogDtoSchema = z.object({
+	runtimeFieldIds: z.array(indoorRuntimeFieldIdValueSchema),
+	assetFamilyIds: z.array(indoorAssetFamilyIdValueSchema),
+});
+export type IndoorContractBacklogDto = z.infer<typeof indoorContractBacklogDtoSchema>;
+
+export const hostBoundaryOverviewDtoSchema = z.object({
+	assetChannel: z.string().min(1),
+	runtimeChannel: z.string().min(1),
+	runtimeNotificationEvent: z.string().min(1),
+	runtimeLifecycleTopic: z.string().min(1),
+	runtimeBatchCommand: z.string().min(1),
+	assetLookupCommand: z.string().min(1),
+	indoorContractBacklog: indoorContractBacklogDtoSchema,
+});
+export type HostBoundaryOverviewDto = z.infer<typeof hostBoundaryOverviewDtoSchema>;
+
+export const cameraHintDtoSchema = z.object({
+	mode: modeHintValueSchema,
+	source: z.string().min(1),
+	position: vec3DtoSchema,
+	forward: vec3DtoSchema,
+	viewportNormalizedX: z.number().finite(),
+	viewportNormalizedY: z.number().finite(),
+	destinationLabel: z.string().nullable(),
+});
+export type CameraHintDto = z.infer<typeof cameraHintDtoSchema>;
+
+export const cameraHintAckDtoSchema = z.object({
+	accepted: z.boolean(),
+	sequence: z.number().int().nonnegative(),
+});
+export type CameraHintAckDto = z.infer<typeof cameraHintAckDtoSchema>;
+
+export const rayPickRequestDtoSchema = z.object({
+	requestId: z.string().min(1),
+	origin: vec3DtoSchema,
+	direction: vec3DtoSchema,
+	screenXNormalized: z.number().finite(),
+	screenYNormalized: z.number().finite(),
+	destinationLabel: z.string().nullable(),
+});
+export type RayPickRequestDto = z.infer<typeof rayPickRequestDtoSchema>;
+
+export const rayPickHitDtoSchema = z.object({
+	entityId: z.number().int().nonnegative(),
+	label: z.string(),
+	locationLabel: z.string(),
+	distance: z.number().finite(),
+});
+export type RayPickHitDto = z.infer<typeof rayPickHitDtoSchema>;
+
+export const rayPickResponseDtoSchema = z.object({
+	requestId: z.string().min(1),
+	resolved: z.boolean(),
+	cameraHintSequence: z.number().int().nonnegative().nullable(),
+	hit: rayPickHitDtoSchema.nullable(),
+});
+export type RayPickResponseDto = z.infer<typeof rayPickResponseDtoSchema>;
 
 export interface HostBoundarySnapshot {
-	source: "browser-preview" | "tauri";
+	source: "tauri";
 	lifecycleState: LifecycleStateDto;
 	runtimeBatch: RuntimeBatchDto;
 	viewModelFeed: FrontendStateFeedDto;

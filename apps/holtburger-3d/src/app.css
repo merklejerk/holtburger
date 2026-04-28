@@ -28,6 +28,16 @@ body {
 	overflow: hidden;
 }
 
+.viewer-unavailable {
+	display: grid;
+	align-content: center;
+	gap: 1rem;
+	min-height: 100vh;
+	max-width: 42rem;
+	padding: 2rem;
+	margin: 0 auto;
+}
+
 .viewer-overlay {
 	position: absolute;
 	z-index: 5;
@@ -410,10 +420,6 @@ button:disabled {
 }
 
 @media (max-width: 820px) {
-	.viewer-overlay--top {
-		padding: 0.75rem 0.75rem 0;
-	}
-
 	.viewer-overlay--right {
 		left: 0;
 		right: 0;

@@ -28,7 +28,7 @@ function createRuntimeBatch(): RuntimeBatchDto {
 				label: "Browser Scout",
 				position: { x: 12, y: -4.5, z: 1 },
 				headingRadians: 0,
-				visualAssetId: "gfx/02000001",
+				appearanceId: "gfx/02000001",
 				landblockId: 0x01020003,
 				cellId: 3,
 				locationLabel: "100.40S, 101.55W, 1.0Z",
@@ -111,7 +111,7 @@ describe("asset channel controller", () => {
 						label: "Dungeon Sentinel",
 						position: { x: 16, y: 8, z: -3 },
 						headingRadians: 0,
-						visualAssetId: "gfx/02000003",
+						appearanceId: "gfx/02000003",
 						landblockId: 0x016c0155,
 						cellId: 0x155,
 						locationLabel: "Dungeon depth",
@@ -172,6 +172,12 @@ describe("asset channel controller", () => {
 					residencyKind: "outdoor-landblock",
 					debugPrimitive: "terrain-landblock-mesh",
 					paletteKey: "terrain-0102ffff",
+					provenance: {
+						source: "unknown",
+						sourceAssetKind: "cell-landblock",
+						errorCode: null,
+						detail: null,
+					},
 					terrainMesh: {
 						landblockId: 0x0102ffff,
 						gridSize: 9,
@@ -181,8 +187,6 @@ describe("asset channel controller", () => {
 						minHeight: 0,
 						maxHeight: 12,
 					},
-					summary: "focus",
-					notes: [],
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
 			},
@@ -216,6 +220,12 @@ describe("asset channel controller", () => {
 					residencyKind: "outdoor-landblock",
 					debugPrimitive: "terrain-landblock-mesh",
 					paletteKey: "terrain-0102ffff",
+					provenance: {
+						source: "unknown",
+						sourceAssetKind: "cell-landblock",
+						errorCode: null,
+						detail: null,
+					},
 					terrainMesh: {
 						landblockId: 0x0102ffff,
 						gridSize: 9,
@@ -225,8 +235,6 @@ describe("asset channel controller", () => {
 						minHeight: 0,
 						maxHeight: 12,
 					},
-					summary: "focus",
-					notes: [],
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
 			},
@@ -260,12 +268,18 @@ describe("asset channel controller", () => {
 				payload: {
 					kind: "terrain-landblock",
 					residencyKind: "outdoor-landblock",
+					sourceAssetKind: "cell-landblock",
 					landblockId: 0x0102ffff,
 					gridSize: 9,
 					tileSize: 24,
 					heights: Array.from({ length: 81 }, (_, index) => index % 9),
 					terrainTypes: Array.from({ length: 81 }, (_, index) => index % 6),
-					notes: ["Prepared in a fake worker for test coverage."],
+					provenance: {
+						source: "unknown",
+						sourceAssetKind: "cell-landblock",
+						errorCode: null,
+						detail: null,
+					},
 				},
 			}),
 			() => new FakeAssetWorker(),
@@ -280,7 +294,7 @@ describe("asset channel controller", () => {
 		expect(preparedAsset.request.assetId).toBe("terrain/0102ffff");
 		expect(preparedAsset.assetKind).toBe("terrain-landblock");
 		expect(preparedAsset.residencyKind).toBe("outdoor-landblock");
-		expect(preparedAsset.summary).toMatch(/Prepared terrain\/0102ffff/);
+		expect(preparedAsset.debugPrimitive).toBe("terrain-landblock-mesh");
 		expect(preparedAsset.terrainMesh?.triangles).toHaveLength(128);
 		expect(preparedAsset.response.payloadKind).toBe("json");
 
@@ -301,12 +315,18 @@ describe("asset channel controller", () => {
 				payload: {
 					kind: "terrain-landblock",
 					residencyKind: "outdoor-landblock",
+					sourceAssetKind: "cell-landblock",
 					landblockId: 0x0102ffff,
 					gridSize: 9,
 					tileSize: 24,
 					heights: Array.from({ length: 81 }, (_, index) => index),
 					terrainTypes: Array.from({ length: 81 }, (_, index) => index),
-					notes: ["Prepared in a fake worker for ordering coverage."],
+					provenance: {
+						source: "unknown",
+						sourceAssetKind: "cell-landblock",
+						errorCode: null,
+						detail: null,
+					},
 				},
 			},
 		);
@@ -316,5 +336,23 @@ describe("asset channel controller", () => {
 		expect(preparedAsset.terrainMesh?.vertices[9]?.z).toBe(1);
 		expect(preparedAsset.terrainMesh?.triangles[0]?.terrainType).toBe(0);
 		expect(preparedAsset.terrainMesh?.triangles[2]?.terrainType).toBe(9);
+	});
+
+	it("rejects malformed json payloads before cpu-side asset preparation continues", () => {
+		expect(() =>
+			prepareAssetPayload(
+				{
+					requestId: "bootstrap-invalid-runtime-terrain/0102ffff",
+					assetId: "terrain/0102ffff",
+					priority: "bootstrap",
+				},
+				{
+					requestId: "bootstrap-invalid-runtime-terrain/0102ffff",
+					assetId: "terrain/0102ffff",
+					payloadKind: "json",
+					payload: "not-an-object",
+				},
+			),
+		).toThrow();
 	});
 });

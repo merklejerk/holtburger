@@ -8,14 +8,16 @@ use holtburger_content::SoulEmoteCatalog;
 use holtburger_dat::landblock::CellLandblock;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{EOR_CELL_NAMESPACE, HbaReader};
+use holtburger_world::entity::Entity;
 use holtburger_world::{WorldBootstrap, WorldState};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
     CameraHintAckDto, CameraHintDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
+    IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto,
     InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, RayPickHitDto,
-    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeNotificationEnvelopeDto,
-    RuntimeResidencyDto, SessionStateDto, Vec3Dto,
+    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
+    RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -25,6 +27,8 @@ pub const RUNTIME_BATCH_TOPIC: &str = "runtime.batch";
 pub const RUNTIME_NOTIFICATION_EVENT: &str = "runtime:notification";
 
 const LOCAL_PLAYER_GUID: Guid = Guid(0x5000_0001);
+const REMOTE_SCOUT_GUID: Guid = Guid(0x5000_0002);
+const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
 
 #[derive(Default)]
 pub struct HostBoundaryAdapter;
@@ -103,6 +107,11 @@ impl HostRuntimeState {
         )));
 
         world.player.guid = LOCAL_PLAYER_GUID;
+        world.entities.insert(Entity::new(
+            LOCAL_PLAYER_GUID,
+            "Browser Scout".to_string(),
+            WorldPosition::default(),
+        ));
         world.sync_player_position(make_world_position(Guid(0x0102_0003), 44.0, 84.0, 2.0, 0.0));
 
         Self {
@@ -119,31 +128,29 @@ impl HostRuntimeState {
 }
 
 impl HostBoundaryAdapter {
-    fn lifecycle_state(state: &HostRuntimeState) -> LifecycleStateDto {
-        let residency = Self::runtime_residency(state);
+    fn lifecycle_state(_state: &HostRuntimeState) -> LifecycleStateDto {
         LifecycleStateDto {
             phase: LifecyclePhaseDto::Ready,
-            active_mode_hint: Some(ModeHintDto::Browser),
+            active_mode_hint: Some(ModeHintDto::Client),
             session_state: SessionStateDto::Unavailable,
-            summary: format!(
-                "Host boundary is online with a real app-local authoritative runtime feed. Focus landblock {:08X} is tracking {} runtime bodies.",
-                residency.focus_landblock_id,
-                residency.tracked_body_count,
-            ),
         }
     }
 
     fn runtime_batch(state: &HostRuntimeState) -> RuntimeBatchDto {
         RuntimeBatchDto {
             tick: state.tick,
-            entities: Vec::new(),
+            entities: Self::runtime_entities(state),
             residency: Self::runtime_residency(state),
         }
     }
 
-    fn view_model_feed(_state: &HostRuntimeState) -> FrontendStateFeedDto {
+    fn view_model_feed(state: &HostRuntimeState) -> FrontendStateFeedDto {
         FrontendStateFeedDto {
-            selected_entity_id: None,
+            selected_entity_id: Some(if state.tick % 2 == 0 {
+                u32::from(REMOTE_SCOUT_GUID) as u64
+            } else {
+                u32::from(REMOTE_SENTINEL_GUID) as u64
+            }),
             interaction_mode: InteractionModeDto::Inspect,
             busy_state: BusyStateDto::Idle,
         }
@@ -174,42 +181,51 @@ impl HostBoundaryAdapter {
             return build_terrain_lookup_response(request, landblock_id);
         }
 
-        let (residency_kind, debug_primitive, palette_key, notes) =
+        let (residency_kind, debug_primitive, palette_key, provenance) =
             match request.asset_id.as_str() {
                 "gfx/02000001" => (
                     "outdoor-landblock",
                     "survey-billboard",
                     "bronze-scout",
-                    vec![
-                        "Matches the Browser Scout appearance carried by the local player runtime body.",
-                        "This payload is intentionally small but now looks like a real manifest for worker-owned CPU preparation.",
-                    ],
+                    serde_json::json!({
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "appearance-manifest",
+                        "errorCode": null,
+                        "detail": "App-local debug manifest for the Browser Scout appearance."
+                    }),
                 ),
                 "gfx/02000002" => (
                     "outdoor-landblock",
                     "drudge-proxy-mesh",
                     "rust-drudge",
-                    vec![
-                        "Matches the Survey Drudge runtime appearance identifier.",
-                        "The asset channel stays separate from runtime notifications even when both cross the same IPC transport.",
-                    ],
+                    serde_json::json!({
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "appearance-manifest",
+                        "errorCode": null,
+                        "detail": "App-local debug manifest for the Survey Drudge appearance."
+                    }),
                 ),
                 "gfx/02000003" => (
                     "indoor-env-cell",
                     "sentinel-proxy-volume",
                     "dungeon-sentinel",
-                    vec![
-                        "Matches the Dungeon Sentinel runtime appearance identifier.",
-                        "This indoor hint exists so the frontend asset path does not assume one flat outdoor scene bucket.",
-                    ],
+                    serde_json::json!({
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "appearance-manifest",
+                        "errorCode": null,
+                        "detail": "App-local debug manifest for the Dungeon Sentinel appearance."
+                    }),
                 ),
                 _ => (
                     "unknown",
                     "debug-placeholder",
                     "unknown-asset",
-                    vec![
-                        "Unknown asset identifiers still return a typed manifest so the worker path can stay demand-driven.",
-                    ],
+                    serde_json::json!({
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "appearance-manifest",
+                        "errorCode": "asset-id-unknown",
+                        "detail": format!("No app-local debug manifest is registered for {}.", request.asset_id)
+                    }),
                 ),
             };
 
@@ -224,7 +240,7 @@ impl HostBoundaryAdapter {
                 "residencyKind": residency_kind,
                 "debugPrimitive": debug_primitive,
                 "paletteKey": palette_key,
-                "notes": notes
+                "provenance": provenance
             }),
         }
     }
@@ -237,17 +253,20 @@ impl HostBoundaryAdapter {
             runtime_lifecycle_topic: RUNTIME_LIFECYCLE_TOPIC,
             runtime_batch_command: "get_runtime_batch",
             asset_lookup_command: "lookup_asset",
-            notes: vec![
-                "DTOs live in the app-local host crate, not shared crates.".to_string(),
-                "Lifecycle state and runtime batches are emitted over one runtime notification event with typed topics."
-                    .to_string(),
-                "Runtime batches are built from the app-local authoritative WorldState plus runtime-body views."
-                    .to_string(),
-                "Camera hints and authority-sensitive debug picks stay app-local host concerns instead of shared-crate contracts."
-                    .to_string(),
-                "Demand-driven asset lookups use the dedicated asset channel rather than piggybacking on runtime snapshots."
-                    .to_string(),
-            ],
+            indoor_contract_backlog: IndoorContractBacklogDto {
+                runtime_field_ids: vec![
+                    IndoorRuntimeFieldIdDto::FocusEnvCellId,
+                    IndoorRuntimeFieldIdDto::VisibleCellIds,
+                    IndoorRuntimeFieldIdDto::SeenOutside,
+                    IndoorRuntimeFieldIdDto::EnvironmentId,
+                    IndoorRuntimeFieldIdDto::CellStructureId,
+                ],
+                asset_family_ids: vec![
+                    IndoorAssetFamilyIdDto::IndoorEnvCell,
+                    IndoorAssetFamilyIdDto::Environment,
+                    IndoorAssetFamilyIdDto::CellStructure,
+                ],
+            },
         }
     }
 
@@ -257,23 +276,12 @@ impl HostBoundaryAdapter {
     ) -> CameraHintAckDto {
         state.camera_hint_sequence += 1;
         let sequence = state.camera_hint_sequence;
-        let destination_label = hint
-            .destination_label
-            .clone()
-            .unwrap_or_else(|| "the current runtime focus".to_string());
-        let mode = match hint.mode {
-            ModeHintDto::Browser => "browser",
-            ModeHintDto::Client => "client",
-        };
 
         state.last_camera_hint = Some(hint);
 
         CameraHintAckDto {
             accepted: true,
             sequence,
-            summary: format!(
-                "Accepted {mode} camera hint #{sequence} toward {destination_label}."
-            ),
         }
     }
 
@@ -323,10 +331,6 @@ impl HostBoundaryAdapter {
                     location_label: entity.location_label.clone(),
                     distance,
                 }),
-                summary: format!(
-                    "Resolved the authority-sensitive debug pick against {} at {}.",
-                    entity.label, entity.location_label
-                ),
             };
         }
 
@@ -336,7 +340,6 @@ impl HostBoundaryAdapter {
             camera_hint_sequence: Some(state.camera_hint_sequence)
                 .filter(|_| state.last_camera_hint.is_some()),
             hit: None,
-            summary: "No authoritative debug entity intersected the current pick ray.".to_string(),
         }
     }
 
@@ -344,13 +347,68 @@ impl HostBoundaryAdapter {
         let focus_position = state.world.player_position().unwrap_or_default();
 
         RuntimeResidencyDto {
-            focus_entity_id: None,
+            focus_entity_id: Some(u32::from(LOCAL_PLAYER_GUID) as u64),
             focus_landblock_id: u32::from(focus_position.landblock_id),
             focus_cell_id: focus_position.derived_outdoor_cell_id(),
             focus_location_label: focus_position.to_world_coords().to_string_with_precision(2),
             indoors: focus_position.is_indoors(),
-            tracked_body_count: 0,
+            tracked_body_count: 3,
         }
+    }
+
+    fn runtime_entities(state: &HostRuntimeState) -> Vec<RuntimeEntitySnapshotDto> {
+        let focus_position = state.world.player_position().unwrap_or_default();
+        let tick_offset = (state.tick.saturating_sub(1)) as f32;
+        let heading = tick_offset * 0.1;
+        let local_position = Vec3Dto {
+            x: focus_position.coords.x + (tick_offset * 0.75),
+            y: focus_position.coords.y + (tick_offset * 0.5),
+            z: focus_position.coords.z,
+        };
+
+        vec![
+            RuntimeEntitySnapshotDto {
+                entity_id: u32::from(LOCAL_PLAYER_GUID) as u64,
+                label: "Browser Scout".to_string(),
+                position: local_position.clone(),
+                heading_radians: heading,
+                appearance_id: "gfx/02000001".to_string(),
+                landblock_id: u32::from(focus_position.landblock_id),
+                cell_id: focus_position.derived_outdoor_cell_id(),
+                location_label: focus_position.to_world_coords().to_string_with_precision(2),
+                is_local_player: true,
+            },
+            RuntimeEntitySnapshotDto {
+                entity_id: u32::from(REMOTE_SCOUT_GUID) as u64,
+                label: "Survey Drudge".to_string(),
+                position: Vec3Dto {
+                    x: local_position.x + 12.0,
+                    y: local_position.y + 6.0,
+                    z: local_position.z,
+                },
+                heading_radians: 1.2,
+                appearance_id: "gfx/02000002".to_string(),
+                landblock_id: u32::from(focus_position.landblock_id),
+                cell_id: focus_position.derived_outdoor_cell_id(),
+                location_label: focus_position.to_world_coords().to_string_with_precision(2),
+                is_local_player: false,
+            },
+            RuntimeEntitySnapshotDto {
+                entity_id: u32::from(REMOTE_SENTINEL_GUID) as u64,
+                label: "Dungeon Sentinel".to_string(),
+                position: Vec3Dto {
+                    x: 18.0,
+                    y: -7.5,
+                    z: 0.0,
+                },
+                heading_radians: -0.35,
+                appearance_id: "gfx/02000003".to_string(),
+                landblock_id: 0x016C_0155,
+                cell_id: None,
+                location_label: "Indoors 0x016C0155".to_string(),
+                is_local_player: false,
+            },
+        ]
     }
 }
 
@@ -359,13 +417,7 @@ fn build_terrain_lookup_response(
     landblock_id: u32,
 ) -> AssetLookupResponseDto {
     let payload = load_cell_landblock_payload(landblock_id).unwrap_or_else(|error| {
-        generated_preview_terrain_payload(
-            landblock_id,
-            vec![
-                "Fell back to an app-local generated preview placeholder terrain surface because repo-local CellLandblock data was unavailable.".to_string(),
-                error,
-            ],
-        )
+        generated_fallback_terrain_payload(landblock_id, error)
     });
 
     AssetLookupResponseDto {
@@ -376,21 +428,21 @@ fn build_terrain_lookup_response(
     }
 }
 
-fn load_cell_landblock_payload(landblock_id: u32) -> Result<serde_json::Value, String> {
+fn load_cell_landblock_payload(landblock_id: u32) -> Result<serde_json::Value, (String, &'static str)> {
     let path = repo_assets_hba_path();
     let archive = HbaReader::open(&path)
-        .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
+        .map_err(|error| (format!("Could not open {}: {error}", path.display()), "asset-archive-open-failed"))?;
     let bytes = archive
         .get_file_in_namespace(EOR_CELL_NAMESPACE, landblock_id)
         .map_err(|error| {
-            format!(
+            (format!(
                 "Could not read {}:0x{landblock_id:08X} from {}: {error}",
                 EOR_CELL_NAMESPACE,
                 path.display()
-            )
+            ), "asset-read-failed")
         })?;
     let landblock = CellLandblock::unpack(&bytes)
-        .map_err(|error| format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"))?;
+        .map_err(|error| (format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"), "asset-decode-failed"))?;
 
     Ok(serde_json::json!({
         "kind": "terrain-landblock",
@@ -401,14 +453,19 @@ fn load_cell_landblock_payload(landblock_id: u32) -> Result<serde_json::Value, S
         "tileSize": 24,
         "heights": landblock.height.iter().map(|height| f32::from(*height) * 2.0).collect::<Vec<_>>(),
         "terrainTypes": landblock.terrain,
-        "notes": [
-            format!("Loaded CellLandblock 0x{landblock_id:08X} from repo-local {}.", path.display()),
-            "Phase 9 keeps the outdoor terrain payload on the asset channel while the frontend remains responsible for coverage selection and final rendering.".to_string(),
-        ],
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "cell-landblock",
+            "errorCode": null,
+            "detail": path.display().to_string()
+        }
     }))
 }
 
-fn generated_preview_terrain_payload(landblock_id: u32, mut notes: Vec<String>) -> serde_json::Value {
+fn generated_fallback_terrain_payload(
+    landblock_id: u32,
+    (detail, error_code): (String, &'static str),
+) -> serde_json::Value {
     let landblock_x = ((landblock_id >> 24) & 0xff) as f32;
     let landblock_y = ((landblock_id >> 16) & 0xff) as f32;
     let mut heights = Vec::with_capacity(81);
@@ -424,8 +481,6 @@ fn generated_preview_terrain_payload(landblock_id: u32, mut notes: Vec<String>) 
         }
     }
 
-    notes.push("This generated preview placeholder keeps the Phase 9 world browser visible when repo-local content fixtures are missing, but it is not a replacement for real CellLandblock data.".to_string());
-
     serde_json::json!({
         "kind": "terrain-landblock",
         "residencyKind": "outdoor-landblock",
@@ -435,7 +490,12 @@ fn generated_preview_terrain_payload(landblock_id: u32, mut notes: Vec<String>) 
         "tileSize": 24,
         "heights": heights,
         "terrainTypes": terrain_types,
-        "notes": notes,
+        "provenance": {
+            "source": "generated-fallback",
+            "sourceAssetKind": "cell-landblock",
+            "errorCode": error_code,
+            "detail": detail,
+        }
     })
 }
 
@@ -609,8 +669,14 @@ mod tests {
         assert_eq!(overview.runtime_lifecycle_topic, RUNTIME_LIFECYCLE_TOPIC);
         assert_eq!(overview.runtime_batch_command, "get_runtime_batch");
         assert_eq!(overview.asset_lookup_command, "lookup_asset");
-        assert!(overview.notes.iter().any(|note| note.contains("Runtime batches are built")));
-
+        assert!(overview
+            .indoor_contract_backlog
+            .runtime_field_ids
+            .contains(&IndoorRuntimeFieldIdDto::VisibleCellIds));
+        assert!(overview
+            .indoor_contract_backlog
+            .asset_family_ids
+            .contains(&IndoorAssetFamilyIdDto::CellStructure));
         assert_eq!(asset.request_id, "test-request");
         assert_eq!(asset.asset_id, "terrain/0102ffff");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
@@ -640,7 +706,7 @@ mod tests {
         });
 
         let ack = runtime.submit_camera_hint(CameraHintDto {
-            mode: ModeHintDto::Browser,
+            mode: ModeHintDto::Client,
             source: "world-display".to_string(),
             position: local_player.position.clone(),
             forward: direction.clone(),

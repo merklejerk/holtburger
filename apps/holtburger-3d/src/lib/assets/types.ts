@@ -1,6 +1,8 @@
 import type {
+	AssetErrorCode,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
+	AssetProvenanceSource,
 	Vec3Dto,
 } from "../host/contracts";
 
@@ -10,6 +12,13 @@ export type AssetResidencyKind =
 	| "outdoor-landblock"
 	| "indoor-env-cell"
 	| "unknown";
+
+export interface PreparedAssetProvenance {
+	source: AssetProvenanceSource;
+	sourceAssetKind: string | null;
+	errorCode: AssetErrorCode | null;
+	detail: string | null;
+}
 
 export interface PreparedTerrainTriangle {
 	a: number;
@@ -36,9 +45,8 @@ export interface PreparedAssetRecord {
 	residencyKind: AssetResidencyKind;
 	debugPrimitive: string;
 	paletteKey: string;
+	provenance: PreparedAssetProvenance;
 	terrainMesh: PreparedTerrainMesh | null;
-	summary: string;
-	notes: string[];
 	preparedAt: string;
 }
 
@@ -50,7 +58,6 @@ export interface AssetActivityRecord {
 	priority: AssetLookupRequestDto["priority"];
 	status: AssetActivityStatus;
 	channel: string;
-	summary: string;
 	timestamp: string;
 }
 

@@ -1490,31 +1490,78 @@ Resolved gate review:
 - The outdoor browser shell now behaves like a primitive world browser rather than a single-slice proof. The frontend keeps a terrain cache keyed by `terrain/*` landblock asset IDs and fills the radius-1 neighborhood over time, which is enough to render nine cached outdoor landblocks in browser preview without pushing coverage policy back into Rust.
 - The strongest remaining gap is now live-host parity, not renderer absence. Browser preview proves the Three.js scene, request policy, and cache shape with generated placeholder terrain, but a real Tauri run still needs to be observed loading the same render path from repo-local `CellLandblock` payloads in `dats/assets.hba`.
 - Indoor work must still remain a separate seam. Phase 10 kept the scene model landblock-first only where the data is honestly outdoor-only; Phase 11 should continue to focus on env-cell, visible-cell, `SeenOutside`, environment, and cell-structure semantics rather than widening the outdoor cache model into a fake-universal scene type.
-- Recommended course correction: insert a short live-host parity and renderer-observability phase before the indoor expansion phase. That keeps the new Three.js renderer honest and prevents preview-only confidence from hiding Tauri-specific regressions.
+- Recommended course correction: insert a short live-host parity, fail-fast host cleanup, and indoor-contract-groundwork phase before the indoor expansion phase. That keeps the new Three.js renderer honest, removes preview-only scaffolding from the app path, and prevents Phase 11 from promising indoor scene ownership before the runtime and asset contracts exist.
 
-#### Phase 11: Indoor Level Assets, Scene Membership, And Visible-Cell Expansion
+#### Phase 10.5: Live-Host Parity, Fail-Fast Boundary Cleanup, And Indoor Contract Groundwork
 
-Adapts the remaining local scene residency follow-up into the point where indoor representation stops being an acknowledged gap and becomes a real model.
+Status: completed on 2026-04-27.
+
+Bridges the gap between the outdoor renderer milestone and any honest indoor scene phase.
 
 Purpose:
 
-- introduce the first honest indoor-capable scene model built around env cells, visible cells, `SeenOutside`, environment references, cell structures, and any required BSP-aware helpers
-- stop implying that one flat outdoor chunk model can scale to both outdoor and indoor spaces
-- make indoor level assets a first-class part of the plan instead of treating indoor work as visibility expansion on top of an already-set outdoor model
+- verify that the current Three.js terrain path is actually exercised through the live Tauri host with repo-local `CellLandblock` payloads rather than only through preview-time scaffolding
+- remove the remaining browser-preview and fallback assumptions from the TypeScript app so plain browser runs fail early and visibly instead of synthesizing host behavior
+- establish the minimum indoor-capable runtime and asset contract vocabulary that a later indoor scene phase will need, without pretending indoor rendering is ready yet
 
 Primary deliverables:
 
-- explicit indoor scene-membership semantics in app code and docs
-- a clear mapping between runtime residency facts, local scene context, visible-cell-driven representation, and indoor level assets such as `Environment` plus `CellStruct`
-- the first concrete decision about whether indoor geometry crosses the host boundary as references, structural decode output, or a narrower staged intermediate
-- a follow-up-ready split between outdoor terrain coverage, outdoor scene-driven scenery, and indoor local-scene composition
+- explicit live-host verification notes showing which terrain landblocks were loaded from repo-local content, how provenance was observed in the UI, and which gaps still differ from the old preview path
+- host-boundary cleanup that removes app-local preview fallback behavior from the TypeScript bridge and leaves non-Tauri runs as an honest startup failure
+- the first app-local indoor contract worksheet in code and docs, naming the minimum next-step fields required for indoor work such as current env-cell identity, visible-cell membership, `SeenOutside`-style relevance hints, and environment or cell-structure references
+- a rewritten asset taxonomy for indoor groundwork, distinguishing outdoor `terrain/*` payloads from future indoor env-cell, environment, and cell-structure asset families instead of hiding them behind one vague asset bucket
+- a clear decision about which parts of indoor groundwork belong in the next runtime DTO expansion versus which parts should stay deferred until the first indoor asset spike
 
 Acceptance criteria:
 
-- the code and docs can explain why an indoor scene element is locally present
-- outdoor and indoor local scene membership are distinct concepts, not one overloaded label
-- the terrain viewer path from earlier phases is still coherent after indoor semantics are introduced
-- the indoor phase does not smuggle indoor level structure behind vague payload names; the plan names the actual AC-shaped level assets involved
+- a live Tauri run is observed using the same world-view path as the browser shell, with terrain provenance explicitly identifying repo-local `CellLandblock` payloads
+- the TypeScript app no longer depends on preview fallback snapshots, synthetic runtime notifications, or generated placeholder terrain in its normal startup path
+- the plan and code can name the missing indoor runtime and asset fields explicitly instead of representing indoor state as only `indoors: true`
+- the next indoor phase can start from a concrete contract backlog rather than from a generic "indoor gap" placeholder
+
+Completed artifact:
+
+- [docs/plans/holtburger-3d-phase-10-5-indoor-contract-worksheet.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-phase-10-5-indoor-contract-worksheet.md)
+
+Resolved gate review:
+
+- The live-host parity gap is now narrow enough to proceed. The app no longer synthesizes preview host snapshots or placeholder terrain in its normal startup path; non-Tauri runs fail fast and the live world-view path is the only supported route.
+- Phase 10.5 named the missing indoor runtime facts explicitly instead of pretending `indoors: true` was a sufficient scene contract. The host boundary overview and the new worksheet now freeze the first backlog as env-cell identity, visible-cell membership, `SeenOutside`, environment id, and cell-structure id.
+- The asset taxonomy is now explicit enough for Phase 11. Outdoor terrain remains `terrain/*`, while the first indoor families are named as `indoor-env-cell/*`, `environment/*`, and `cell-structure/*` instead of one vague indoor bundle.
+- The remaining unresolved choice is payload shape, not vocabulary. Phase 11 can now decide whether those indoor asset families cross the boundary as references only or as lightly decoded structural intermediates without reopening the naming or ownership split.
+
+#### Phase 11: Indoor Runtime Contracts, Asset Taxonomy, And Scene-Context Adoption
+
+Status: planned.
+
+Rewrites the old indoor-expansion phase around the code we actually have today: outdoor rendering exists, but indoor runtime and asset seams do not.
+
+Purpose:
+
+- replace the current boolean-only indoor signal with the first honest indoor-capable runtime DTO surface built around env cells, visible cells, `SeenOutside`, environment references, and cell-structure references
+- make indoor level assets first-class on the asset channel before asking `WorldDisplay` to render or retain them
+- replace the current `indoor-gap` placeholder with a real frontend-owned indoor scene-context model that can explain why an indoor scene element is present, even if first-pass indoor rendering stays primitive
+
+Primary deliverables:
+
+- runtime DTO expansion for the first indoor-capable host facts, including at least the current env-cell anchor plus whichever visible-cell, `SeenOutside`, environment, and cell-structure identifiers Phase 10.5 proved are necessary
+- the first indoor asset families on the asset channel, with explicit naming for env-cell metadata and indoor structural assets rather than reusing outdoor terrain or generic appearance-bundle language
+- a frontend indoor scene-context model that consumes those host facts and makes indoor scene-membership decisions explicit in app code and telemetry
+- a follow-up-ready split between outdoor terrain coverage, outdoor scene-driven scenery, indoor structural assets, and any later indoor render-geometry decode intermediates
+
+Acceptance criteria:
+
+- the runtime boundary carries more than `indoors: true`; it carries enough AC-shaped indoor facts that the frontend can reason about indoor scene membership honestly
+- outdoor and indoor local scene membership are distinct concepts in code, docs, and telemetry rather than one overloaded label plus an indoor TODO branch
+- `WorldDisplay` can replace the current `indoor-gap` placeholder with a real indoor scene context, even if first-pass indoor rendering remains diagnostic or incomplete
+- the indoor asset path names the actual AC-shaped level assets involved and does not smuggle indoor structure behind vague payload names or outdoor-specialized abstractions
+- the outdoor terrain viewer path remains coherent after the indoor-capable runtime and asset contracts are introduced
+
+Phase 11 guardrails:
+
+- do not promise full indoor rendering, portal traversal, or BSP-driven picking unless the runtime and asset seams for them are actually landed
+- do not derive indoor visibility purely from frontend-local topology guesses while authoritative `VisibleCells` behavior remains the stronger anchor
+- do not widen outdoor landblock DTOs into fake-universal scene units just to make the TypeScript types look tidier
 
 #### Phase 12: Shared SpatialBody Constraint And Non-World Body Semantics
 
@@ -1819,6 +1866,7 @@ Mitigation:
 - [x] request, prepare, and render the first outdoor landblock terrain payload over the dedicated asset channel without promoting landblocks into the long-term universal scene DTO
 - [x] replace the SVG terrain viewport with a real Three.js scene host in `WorldDisplay`
 - [x] add a terrain-capable asset cache keyed by `terrain/*` landblock IDs and stream the radius-1 outdoor neighborhood in browser preview
+- [x] remove preview-host fallback behavior, surface the indoor contract backlog explicitly, and record the Phase 10.5 indoor worksheet before Phase 11
 
 #### Decisions Log
 
@@ -1831,7 +1879,7 @@ Mitigation:
 - Start browser-mode entry with direct coordinate input only; defer named location picking until a real runtime feed exists.
 - Keep lifecycle mode hints advisory and keep nested page selection frontend-local in Phase 0.
 - Keep the first typed host DTOs and adapter layer app-local until a real runtime or content integration proves a reusable shared-crate seam.
-- Keep the Svelte bridge browser-safe by falling back to local preview data when the Tauri runtime is not active, so frontend iteration does not force a native boot for every UI check.
+- Fail fast outside Tauri instead of synthesizing preview host behavior. The supported app path is now the real world viewer under `npm run tauri:dev`.
 - Keep the Phase 2 runtime feed app-local by building a small authoritative `WorldState` directly inside `apps/holtburger-3d/src-tauri` rather than widening shared crates prematurely.
 - Carry real landblock, derived outdoor cell, indoor-vs-outdoor, and location-string facts in the runtime batch now; defer browser-mode location input policy to the next frontend-focused phase.
 - Use one runtime notification event with typed topics rather than separate lifecycle-only and runtime-only transports.
@@ -1844,7 +1892,6 @@ Mitigation:
 - Treat the current browser shell’s residency model as provisional. The first runnable slice may remain outdoor-leaning, but later world work should distinguish outdoor landblock residency from indoor env-cell / visible-cell scene membership explicitly.
 - Keep asset payloads out of the host boundary snapshot once the dedicated asset path exists. Runtime snapshots should carry authoritative world facts only; asset preparation should start from demand-driven lookups keyed by runtime-owned visual asset references.
 - Let the Phase 5 worker own CPU-side preparation of small visual-asset stub intermediates while keeping final renderer or GPU resource creation on the main render side.
-- Keep browser preview capable of synthetic runtime notifications so the frontend can exercise runtime-driven streaming asset flows without a native boot, while still treating Tauri runs as the real IPC and host-lifecycle proof.
 - Preserve prepared-asset observations by priority separately from bounded asset activity history so the vertical-slice report can remember bootstrap and streaming facts even after the scrolling log rolls over.
 - Treat current visual-asset stub payloads as explicit stubs. They are useful worker intermediates, but real mesh, texture, terrain decode, and scene-wide cache policy remain follow-up work.
 - Shift the browser-mode product target from "debuggable world shell" toward "primitive but real world browser". Diagnostics should support that surface, not define it.
@@ -1860,11 +1907,11 @@ Mitigation:
 - Prefer explicit AC-shaped special cases over fake-generic abstractions. If a concept is honestly landblock-only, env-cell-only, or scene-table-only right now, name it that way instead of promoting a misleading universal DTO.
 - Keep outdoor terrain requests landblock-shaped and frontend-driven. Phase 9 now proves `terrain/xxyyffff` as an app-local outdoor asset family chosen from runtime residency plus local scene context, not as a Rust-pushed render bundle.
 - Let the worker prepare a CPU-side terrain mesh intermediate while keeping the final world-surface render and coverage policy in `WorldDisplay`. That keeps the asset path honest without committing the long-term renderer to this exact mesh-preparation shape.
-- Treat browser-preview generated placeholder terrain as a development fallback only. Phase 10 must validate the same terrain request path against live Tauri loads from repo-local `CellLandblock` data so the plan does not drift into preview-only confidence.
+- Freeze the first indoor Phase 11 backlog explicitly in code and docs before widening the runtime DTO. Phase 10.5 names env-cell, visible-cell, `SeenOutside`, environment, and cell-structure seams without pretending they already cross the boundary.
 - Do not count SVG or DOM terrain projections as renderer progress. The next phase must treat the current viewport as disposable debug scaffolding and only count terrain rendering milestones once geometry is being drawn by the actual Three.js scene runtime.
 - Count renderer progress only when geometry is drawn through the actual Three.js scene runtime. Phase 10 satisfies that bar; the deleted SVG projection does not.
 - Keep outdoor terrain coverage frontend-owned. The frontend now decides which `terrain/*` landblock assets to request and cache for the radius-1 neighborhood, while Rust remains responsible only for authoritative residency plus terrain payload lookup.
-- Surface terrain provenance explicitly in the app shell. The browser must keep distinguishing repo-local `CellLandblock` loads from preview-placeholder fallback terrain so live-host parity stays observable.
+- Surface terrain provenance explicitly in the app shell. The browser must keep identifying repo-local `CellLandblock` loads so live-host parity stays observable under the supported Tauri path.
 
 #### Verification Log
 
@@ -1913,6 +1960,9 @@ Mitigation:
 - 2026-04-26: `npm run test:ts -- --run` in `apps/holtburger-3d` passed after adding the Phase 10 terrain-scene model tests, landblock-coverage request tests, and cache-by-asset-id state assertions.
 - 2026-04-26: `npm run check` in `apps/holtburger-3d` passed after replacing the SVG terrain viewport with a real Three.js render host and cached-landblock terrain scene runtime.
 - 2026-04-26: Browser-preview inspection at `http://127.0.0.1:1420/` confirmed the updated world shell was rendering the new Three.js surface and had filled the radius-1 outdoor terrain cache to nine landblocks around focus `0x0102ffff`.
+- 2026-04-27: `cargo test -p holtburger-3d boundary_overview_and_asset_lookup_remain_runtime_asset_split camera_hints_are_accepted_and_picks_resolve_against_authoritative_debug_entities` passed after collapsing the stale Rust-side browser mode hint and adding the Phase 10.5 indoor contract backlog to the host overview.
+- 2026-04-27: `npm run test:ts -- --run src/lib/host/contracts.test.ts src/lib/host/tauri.test.ts src/lib/world-display/terrain-scene.test.ts` in `apps/holtburger-3d` passed after removing dead preview-placeholder terrain provenance handling and typing the new indoor contract backlog in the frontend contracts.
+- 2026-04-27: `npm run check` in `apps/holtburger-3d` passed after the Phase 10.5 host-contract, terrain-provenance, and documentation updates.
 
 #### Phase Review Log
 
@@ -1931,6 +1981,8 @@ Mitigation:
 - 2026-04-26: Phase 10 resolved the main honesty gap in the old plan. The app is no longer counting an SVG debug projection as renderer progress; geometry now reaches a real scene runtime. The remaining parity gap is specifically live Tauri verification against repo-local `CellLandblock` payloads.
 - 2026-04-26: Phase 10 did not require shared-crate changes. The new pressure stayed app-local: renderer ownership, terrain cache policy, and terrain provenance surfacing still belong in `apps/holtburger-3d`, while indoor scene semantics remain a separate AC-shaped design problem.
 - 2026-04-26: Gate review resolved in favor of inserting a short live-host parity phase before indoor expansion. Now that the renderer exists, the next highest-value work is proving the same path under Tauri with repo-local terrain data and better renderer observability before widening scene ownership to env cells and visible cells.
+- 2026-04-27: Phase 10.5 completed with the fail-fast Tauri-only host bridge, removal of dead preview-placeholder terrain provenance handling, an explicit host-published indoor contract backlog, and a dedicated worksheet that freezes the first Phase 11 runtime-field and asset-family vocabulary.
+- 2026-04-27: Phase 10.5 stayed app-local. No shared-crate seam moved; the work was boundary cleanup, contract naming, and plan hardening so Phase 11 can start from explicit env-cell, visible-cell, `SeenOutside`, environment, and cell-structure seams instead of from a boolean indoor flag.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.

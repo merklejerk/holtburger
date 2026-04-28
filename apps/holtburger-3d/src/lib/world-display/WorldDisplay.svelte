@@ -24,6 +24,8 @@
   import {
     buildCameraHint,
     buildRayPickRequest,
+    describeCameraHintAck,
+    describeRayPickResponse,
     deriveWorldDisplayModel,
     normalizeViewportPoint,
     shouldSendThrottledCameraHint,
@@ -63,9 +65,9 @@
   let camera: PerspectiveCamera | null = null;
   let terrainRoot: Group | null = null;
   let resizeObserver: ResizeObserver | null = null;
-  let sceneGeometrySummary = $state('No terrain geometry is cached yet.');
-  let sceneBoundsSummary = $state('Scene bounds are unavailable until terrain is framed.');
-  let cameraFrameSummary = $state('Camera frame is waiting for terrain.');
+  let sceneGeometryText = $state('No terrain geometry is cached yet.');
+  let sceneBoundsText = $state('Scene bounds are unavailable until terrain is framed.');
+  let cameraFrameText = $state('Camera frame is waiting for terrain.');
   const terrainMeshes = new Map<string, Mesh>();
 
   const terrainScene = $derived(deriveTerrainSceneModel(runtimeBatch, assetState, browserDestination));
@@ -86,7 +88,7 @@
       ? null
       : Math.max(...terrainScene.tiles.map((tile) => tile.mesh.maxHeight)),
   );
-  const terrainHeightSummary = $derived(
+  const terrainHeightText = $derived(
     terrainMinHeight === null || terrainMaxHeight === null
       ? 'No terrain heights are cached yet.'
       : `Height range ${terrainMinHeight.toFixed(1)} to ${terrainMaxHeight.toFixed(1)} across cached tiles.`,
@@ -331,7 +333,7 @@
       terrainMeshes.set(tile.assetId, mesh);
     }
 
-    sceneGeometrySummary = terrainScene.tiles.length === 0
+    sceneGeometryText = terrainScene.tiles.length === 0
       ? 'No terrain geometry is cached yet.'
       : `${terrainScene.tiles.length} tile${terrainScene.tiles.length === 1 ? '' : 's'}, ${terrainVertexCount} vertices, ${terrainTriangleCount} triangles.`;
 
@@ -346,8 +348,8 @@
     if (terrainScene.tiles.length === 0) {
       camera.position.set(180, 220, 180);
       camera.lookAt(0, 0, 0);
-      sceneBoundsSummary = 'Scene bounds are unavailable until terrain is framed.';
-      cameraFrameSummary = 'Camera parked at (180.0, 220.0, 180.0) looking at (0.0, 0.0, 0.0).';
+      sceneBoundsText = 'Scene bounds are unavailable until terrain is framed.';
+      cameraFrameText = 'Camera parked at (180.0, 220.0, 180.0) looking at (0.0, 0.0, 0.0).';
       return;
     }
 
@@ -363,8 +365,8 @@
       center.z + span * 0.9,
     );
     camera.lookAt(center.x, center.y, center.z);
-    sceneBoundsSummary = `Center (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}) span (${size.x.toFixed(1)}, ${size.y.toFixed(1)}, ${size.z.toFixed(1)}).`;
-    cameraFrameSummary = `Camera (${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}) looking at (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}).`;
+    sceneBoundsText = `Center (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}) span (${size.x.toFixed(1)}, ${size.y.toFixed(1)}, ${size.z.toFixed(1)}).`;
+    cameraFrameText = `Camera (${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}) looking at (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}).`;
   }
 
   function createTerrainTileMesh(tile: TerrainSceneTile): Mesh {
@@ -463,27 +465,27 @@
           </div>
           <div>
             <dt>Coverage</dt>
-            <dd>{terrainScene.cacheSummary}</dd>
+            <dd>{terrainScene.cacheText}</dd>
           </div>
           <div>
             <dt>Source</dt>
-            <dd>{terrainScene.dataSourceSummary}</dd>
+            <dd>{terrainScene.dataSourceText}</dd>
           </div>
           <div>
             <dt>Geometry</dt>
-            <dd>{sceneGeometrySummary}</dd>
+            <dd>{sceneGeometryText}</dd>
           </div>
           <div>
             <dt>Heights</dt>
-            <dd>{terrainHeightSummary}</dd>
+            <dd>{terrainHeightText}</dd>
           </div>
           <div>
             <dt>Bounds</dt>
-            <dd>{sceneBoundsSummary}</dd>
+            <dd>{sceneBoundsText}</dd>
           </div>
           <div>
             <dt>Camera</dt>
-            <dd>{cameraFrameSummary}</dd>
+            <dd>{cameraFrameText}</dd>
           </div>
         </dl>
       </div>
@@ -491,8 +493,8 @@
       <div class="world-display__reticle"></div>
 
       <div class="world-display__viewport-copy">
-        <p>{terrainScene.summary}</p>
-        <p>{worldDisplay.inputSummary}</p>
+        <p>{terrainScene.statusText}</p>
+        <p>{worldDisplay.inputText}</p>
       </div>
     </div>
   </button>
@@ -500,11 +502,11 @@
   <div class="world-display__telemetry">
     <p>
       Camera hint:{' '}
-      {cameraAck?.summary ?? 'Waiting for the first world-display camera hint acknowledgement.'}
+      {describeCameraHintAck(cameraAck) ?? 'Waiting for the first world-display camera hint acknowledgement.'}
     </p>
     <p>
       Ray pick:{' '}
-      {rayPickResponse?.summary ?? 'No authority-sensitive debug pick has been resolved yet.'}
+      {describeRayPickResponse(rayPickResponse) ?? 'No authority-sensitive debug pick has been resolved yet.'}
     </p>
   </div>
 </div>

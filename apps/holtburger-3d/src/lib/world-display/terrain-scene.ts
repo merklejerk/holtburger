@@ -13,14 +13,14 @@ export interface TerrainSceneTile {
 	worldOffsetX: number;
 	worldOffsetY: number;
 	mesh: PreparedTerrainMesh;
-	dataSource: "repo-local-cell-landblock" | "preview-placeholder" | "unknown";
+	dataSource: "repo-local-cell-landblock" | "generated-fallback" | "unknown";
 }
 
 export interface TerrainSceneModel {
 	focusLandblockId: number | null;
-	summary: string;
-	cacheSummary: string;
-	dataSourceSummary: string;
+	statusText: string;
+	cacheText: string;
+	dataSourceText: string;
 	tiles: TerrainSceneTile[];
 }
 
@@ -32,9 +32,9 @@ export function deriveTerrainSceneModel(
 	if (!runtimeBatch) {
 		return {
 			focusLandblockId: null,
-			summary: "Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
-			cacheSummary: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
-			dataSourceSummary: "No terrain provenance available yet.",
+			statusText: "Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
+			cacheText: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
+			dataSourceText: "No terrain provenance available yet.",
 			tiles: [],
 		};
 	}
@@ -42,9 +42,9 @@ export function deriveTerrainSceneModel(
 	if (runtimeBatch.residency.indoors) {
 		return {
 			focusLandblockId: null,
-			summary: "Indoor runtime residency is active, so the outdoor Three.js terrain scene is intentionally dormant until env-cell scene ownership lands.",
-			cacheSummary: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(assetState.preparedByAssetId)} landblocks while indoor scene work remains deferred.`,
-			dataSourceSummary: summarizeDataSources([]),
+			statusText: "Indoor runtime residency is active, so the outdoor Three.js terrain scene is intentionally dormant until env-cell scene ownership lands.",
+			cacheText: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(assetState.preparedByAssetId)} landblocks while indoor scene work remains deferred.`,
+			dataSourceText: describeTerrainDataSources([]),
 			tiles: [],
 		};
 	}
@@ -89,15 +89,15 @@ export function deriveTerrainSceneModel(
 		});
 
 	const focusTile = tiles.find((tile) => tile.isFocus) ?? null;
-	const dataSourceSummary = summarizeDataSources(tiles.map((tile) => tile.dataSource));
+	const dataSourceText = describeTerrainDataSources(tiles.map((tile) => tile.dataSource));
 
 	return {
 		focusLandblockId,
-		summary: focusTile
+		statusText: focusTile
 			? `Three.js is rendering ${tiles.length} cached outdoor landblock${tiles.length === 1 ? "" : "s"} around focus ${focusTile.label}.`
 			: `Three.js is waiting for the focus landblock ${formatLandblockLabel(focusLandblockId)} while ${tiles.length} neighbor tile${tiles.length === 1 ? " is" : "s are"} cached.`,
-		cacheSummary: `Terrain cache contains ${countPreparedTerrainAssets(assetState.preparedByAssetId)} prepared landblock payload${countPreparedTerrainAssets(assetState.preparedByAssetId) === 1 ? "" : "s"}.`,
-		dataSourceSummary,
+		cacheText: `Terrain cache contains ${countPreparedTerrainAssets(assetState.preparedByAssetId)} prepared landblock payload${countPreparedTerrainAssets(assetState.preparedByAssetId) === 1 ? "" : "s"}.`,
+		dataSourceText,
 		tiles,
 	};
 }
@@ -108,18 +108,15 @@ function countPreparedTerrainAssets(preparedByAssetId: Record<string, PreparedAs
 	).length;
 }
 
-function summarizeDataSources(
+function describeTerrainDataSources(
 	dataSources: Array<TerrainSceneTile["dataSource"]>,
 ): string {
 	if (dataSources.includes("repo-local-cell-landblock")) {
-		const previewSuffix = dataSources.includes("preview-placeholder")
-			? " Preview-placeholder terrain is still present in browser-preview mode only."
-			: "";
-		return `Live repo-local CellLandblock payloads are present in the terrain cache.${previewSuffix}`;
+		return "Live repo-local CellLandblock payloads are present in the terrain cache.";
 	}
 
-	if (dataSources.includes("preview-placeholder")) {
-		return "The terrain cache is currently populated by generated browser-preview placeholder landblocks rather than repo-local content.";
+	if (dataSources.includes("generated-fallback")) {
+		return "Terrain cache entries are using generated fallback payloads because repo-local CellLandblock data could not be loaded.";
 	}
 
 	return "No terrain provenance is available yet.";
@@ -128,12 +125,12 @@ function summarizeDataSources(
 function inferTerrainDataSource(
 	asset: PreparedAssetRecord,
 ): TerrainSceneTile["dataSource"] {
-	if (asset.notes.some((note) => note.includes("preview placeholder") || note.includes("Browser preview"))) {
-		return "preview-placeholder";
+	if (asset.provenance.source === "repo-local-hba") {
+		return "repo-local-cell-landblock";
 	}
 
-	if (asset.notes.some((note) => note.startsWith("Loaded CellLandblock ") && note.includes("repo-local"))) {
-		return "repo-local-cell-landblock";
+	if (asset.provenance.source === "generated-fallback") {
+		return "generated-fallback";
 	}
 
 	return "unknown";

@@ -13,14 +13,17 @@ import type {
 	RuntimeNotificationEnvelopeDto,
 	RuntimeResidencyDto,
 } from "./contracts";
+import {
+	hostBoundaryOverviewDtoSchema,
+	runtimeNotificationEnvelopeDtoSchema,
+} from "./contracts";
 
 describe("host contracts", () => {
 	it("keeps the stable runtime contract fields visible to TypeScript tests", () => {
 		const lifecycleState: LifecycleStateDto = {
 			phase: "ready",
-			activeModeHint: "browser",
+			activeModeHint: "client",
 			sessionState: "disconnected",
-			summary: "Ready for browser mode.",
 		};
 		const residency: RuntimeResidencyDto = {
 			focusEntityId: 0x01020304,
@@ -38,7 +41,7 @@ describe("host contracts", () => {
 					label: "Browser Scout",
 					position: { x: 12, y: -4.5, z: 1 },
 					headingRadians: 0,
-					visualAssetId: "gfx/02000001",
+					appearanceId: "gfx/02000001",
 					landblockId: residency.focusLandblockId,
 					cellId: residency.focusCellId,
 					locationLabel: residency.focusLocationLabel,
@@ -90,10 +93,29 @@ describe("host contracts", () => {
 			runtimeLifecycleTopic: "lifecycle.state",
 			runtimeBatchCommand: "get_runtime_batch",
 			assetLookupCommand: "lookup_asset",
-			notes: [],
+			indoorContractBacklog: {
+				runtimeFieldIds: [
+					"focus-env-cell-id",
+					"visible-cell-ids",
+					"seen-outside",
+					"environment-id",
+					"cell-structure-id",
+				],
+				assetFamilyIds: [
+					"indoor-env-cell",
+					"environment",
+					"cell-structure",
+				],
+			},
 		};
 
 		expect(overview.assetChannel).toBe("asset");
+		expect(overview.indoorContractBacklog.runtimeFieldIds).toContain(
+			"visible-cell-ids",
+		);
+		expect(overview.indoorContractBacklog.assetFamilyIds).toContain(
+			"cell-structure",
+		);
 		expect(response.assetId).toBe(request.assetId);
 		expect(response.payload).toMatchObject({
 			kind: "terrain-landblock",
@@ -102,7 +124,7 @@ describe("host contracts", () => {
 
 	it("keeps camera-hint and authority-sensitive pick contracts typed", () => {
 		const cameraHint: CameraHintDto = {
-			mode: "browser",
+			mode: "client",
 			source: "world-display",
 			position: { x: 12, y: -4.5, z: 1 },
 			forward: { x: 0, y: 1, z: 0 },
@@ -113,7 +135,6 @@ describe("host contracts", () => {
 		const cameraAck: CameraHintAckDto = {
 			accepted: true,
 			sequence: 3,
-			summary: "Accepted camera hint.",
 		};
 		const response: RayPickResponseDto = {
 			requestId: "pick-1",
@@ -125,11 +146,66 @@ describe("host contracts", () => {
 				locationLabel: "100.40S, 101.55W, 1.0Z",
 				distance: 14.5,
 			},
-			summary: "Resolved pick.",
 		};
 
 		expect(cameraHint.destinationLabel).toMatch(/Z$/);
 		expect(response.cameraHintSequence).toBe(cameraAck.sequence);
 		expect(response.hit?.label).toBe("Browser Scout");
+	});
+
+	it("parses raw runtime notifications and host overview payloads through zod schemas", () => {
+		const notification = runtimeNotificationEnvelopeDtoSchema.parse({
+			channel: "runtime",
+			topic: "runtime.batch",
+			lifecycleState: null,
+			runtimeBatch: {
+				tick: 1,
+				entities: [],
+				residency: {
+					focusEntityId: null,
+					focusLandblockId: 0x0102ffff,
+					focusCellId: null,
+					focusLocationLabel: "100.40S, 101.55W, 1.0Z",
+					indoors: false,
+					trackedBodyCount: 0,
+				},
+			},
+			viewModelFeed: {
+				selectedEntityId: null,
+				interactionMode: "inspect",
+				busyState: "idle",
+			},
+		});
+		const overview = hostBoundaryOverviewDtoSchema.parse({
+			assetChannel: "asset",
+			runtimeChannel: "runtime",
+			runtimeNotificationEvent: "runtime:notification",
+			runtimeLifecycleTopic: "lifecycle.state",
+			runtimeBatchCommand: "get_runtime_batch",
+			assetLookupCommand: "lookup_asset",
+			indoorContractBacklog: {
+				runtimeFieldIds: ["visible-cell-ids"],
+				assetFamilyIds: ["cell-structure"],
+			},
+		});
+
+		expect(notification.runtimeBatch?.tick).toBe(1);
+		expect(overview.indoorContractBacklog.assetFamilyIds).toContain("cell-structure");
+	});
+
+	it("rejects malformed runtime notifications instead of trusting invoke generics", () => {
+		expect(() =>
+			runtimeNotificationEnvelopeDtoSchema.parse({
+				channel: "runtime",
+				topic: "runtime.batch",
+				lifecycleState: null,
+				runtimeBatch: {
+					tick: "one",
+					entities: [],
+					residency: null,
+				},
+				viewModelFeed: null,
+			}),
+		).toThrow();
 	});
 });

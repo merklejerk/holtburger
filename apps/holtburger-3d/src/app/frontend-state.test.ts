@@ -43,9 +43,8 @@ function createSnapshot(): HostBoundarySnapshot {
 		source: "tauri",
 		lifecycleState: {
 			phase: "ready",
-			activeModeHint: "browser",
+			activeModeHint: "client",
 			sessionState: "disconnected",
-			summary: "Browser mode is available.",
 		},
 		runtimeBatch: createRuntimeBatch(),
 		viewModelFeed: createViewModelFeed(),
@@ -56,20 +55,33 @@ function createSnapshot(): HostBoundarySnapshot {
 			runtimeLifecycleTopic: "lifecycle.state",
 			runtimeBatchCommand: "get_runtime_batch",
 			assetLookupCommand: "lookup_asset",
-			notes: [],
+			indoorContractBacklog: {
+				runtimeFieldIds: [
+					"focus-env-cell-id",
+					"visible-cell-ids",
+					"seen-outside",
+					"environment-id",
+					"cell-structure-id",
+				],
+				assetFamilyIds: [
+					"indoor-env-cell",
+					"environment",
+					"cell-structure",
+				],
+			},
 		},
 	};
 }
 
 describe("frontend state store", () => {
-	it("seeds the browser draft from the runtime residency snapshot", () => {
+	it("seeds the navigation draft from the runtime residency snapshot", () => {
 		const store = createFrontendStateStore();
 
 		store.loadSnapshot(createSnapshot());
 
 		expect(get(store).browserMode.draftInput).toBe("29.90S, 65.90W, 0.0Z");
 		expect(get(store).browserMode.destination?.label).toBe("29.90S, 65.90W, 0.0Z");
-		expect(get(store).mode.activeMode).toBe("browser");
+		expect(get(store).mode.activeMode).toBe("client");
 		expect(get(store).mode.activePageId).toBe("destination-preview");
 		expect(get(store).asset.channel).toBe("asset");
 	});
@@ -134,6 +146,12 @@ describe("frontend state store", () => {
 			residencyKind: "outdoor-landblock",
 			debugPrimitive: "terrain-landblock-mesh",
 			paletteKey: "terrain-0102ffff",
+			provenance: {
+				source: "unknown",
+				sourceAssetKind: "cell-landblock",
+				errorCode: null,
+				detail: null,
+			},
 			terrainMesh: {
 				landblockId: 0x0102ffff,
 				gridSize: 9,
@@ -143,8 +161,6 @@ describe("frontend state store", () => {
 				minHeight: 0,
 				maxHeight: 24,
 			},
-			summary: "Prepared terrain/0102ffff as a landblock terrain mesh with 81 vertices and 128 triangles.",
-			notes: [],
 			preparedAt: "2026-04-26T00:00:00.000Z",
 		});
 
@@ -164,7 +180,7 @@ describe("frontend state store", () => {
 		]);
 	});
 
-	it("prefers an explicit browser destination over a connected client-mode hint", () => {
+	it("keeps the app in world-viewer mode even when a destination override is active", () => {
 		const browserModeStore = createFrontendStateStore();
 
 		browserModeStore.loadSnapshot({
@@ -173,22 +189,20 @@ describe("frontend state store", () => {
 				phase: "ready",
 				activeModeHint: "client",
 				sessionState: "connected",
-				summary: "A client session is available.",
 			},
 		});
 		browserModeStore.useRuntimeResidencyDestination();
 
-		expect(get(browserModeStore).mode.activeMode).toBe("browser");
+		expect(get(browserModeStore).mode.activeMode).toBe("client");
 		expect(get(browserModeStore).mode.activePageId).toBe("destination-preview");
 	});
 
-	it("routes to client mode when lifecycle facts are ready and connected", () => {
+	it("keeps the world-viewer page active when lifecycle facts are ready and connected", () => {
 		const mode = deriveModeState(
 			{
 				phase: "ready",
 				activeModeHint: "client",
 				sessionState: "connected",
-				summary: "Connected.",
 			},
 			{
 				draftInput: "",
@@ -199,6 +213,6 @@ describe("frontend state store", () => {
 		);
 
 		expect(mode.activeMode).toBe("client");
-		expect(mode.activePageId).toBe("session-live");
+		expect(mode.activePageId).toBe("world-viewer");
 	});
 });

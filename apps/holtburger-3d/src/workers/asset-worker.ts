@@ -1,10 +1,20 @@
 import type {
+	AppearanceManifestPayloadDto,
+	AssetErrorCode,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
+	TerrainLandblockPayloadDto,
+} from "../lib/host/contracts";
+import {
+	appearanceManifestPayloadDtoSchema,
+	assetProvenanceDtoSchema,
+	genericAssetPayloadDtoSchema,
+	terrainLandblockPayloadDtoSchema,
 } from "../lib/host/contracts";
 import type {
 	AssetResidencyKind,
 	PreparedAssetRecord,
+	PreparedAssetProvenance,
 	PreparedTerrainMesh,
 	PreparedTerrainTriangle,
 } from "../lib/assets/types";
@@ -36,17 +46,22 @@ export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
 ): PreparedAssetRecord {
-	const payload = asRecord(response.payload);
-	const assetKind = asString(payload.kind) ?? "unknown";
-
-	if (assetKind === "terrain-landblock") {
-		return prepareTerrainLandblock(request, response, payload);
+	const terrainPayload = terrainLandblockPayloadDtoSchema.safeParse(response.payload);
+	if (terrainPayload.success) {
+		return prepareTerrainLandblock(request, response, terrainPayload.data);
 	}
 
+	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(response.payload);
+	if (appearancePayload.success) {
+		return prepareAppearanceManifest(request, response, appearancePayload.data);
+	}
+
+	const payload = genericAssetPayloadDtoSchema.parse(response.payload);
+	const assetKind = payload.kind;
+	const provenance = parseProvenance(payload.provenance);
 	const residencyKind = parseResidencyKind(payload.residencyKind);
-	const debugPrimitive = asString(payload.debugPrimitive) ?? "json-manifest";
-	const paletteKey = asString(payload.paletteKey) ?? "debug-default";
-	const notes = asStringArray(payload.notes);
+	const debugPrimitive = payload.debugPrimitive ?? "json-manifest";
+	const paletteKey = payload.paletteKey ?? "debug-default";
 
 	return {
 		request,
@@ -55,9 +70,26 @@ export function prepareAssetPayload(
 		residencyKind,
 		debugPrimitive,
 		paletteKey,
+		provenance,
 		terrainMesh: null,
-		summary: `Prepared ${request.assetId} as ${debugPrimitive} for ${residencyKind}.`,
-		notes,
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareAppearanceManifest(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: AppearanceManifestPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		assetKind: "unknown",
+		residencyKind: parseResidencyKind(payload.residencyKind),
+		debugPrimitive: payload.debugPrimitive,
+		paletteKey: payload.paletteKey,
+		provenance: parseProvenance(payload.provenance),
+		terrainMesh: null,
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -65,21 +97,17 @@ export function prepareAssetPayload(
 function prepareTerrainLandblock(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
-	payload: Record<string, unknown>,
+	payload: TerrainLandblockPayloadDto,
 ): PreparedAssetRecord {
-	const landblockId = asNumber(payload.landblockId);
-	if (landblockId === null) {
-		throw new Error("Terrain payload is missing a numeric landblockId.");
-	}
-
-	const gridSize = asNumber(payload.gridSize) ?? 9;
+	const landblockId = payload.landblockId;
+	const gridSize = payload.gridSize;
 	if (gridSize !== 9) {
 		throw new Error(`Terrain payload gridSize ${gridSize} is unsupported.`);
 	}
 
-	const tileSize = asNumber(payload.tileSize) ?? 24;
-	const heights = asNumberArray(payload.heights);
-	const terrainTypes = asNumberArray(payload.terrainTypes);
+	const tileSize = payload.tileSize;
+	const heights = payload.heights;
+	const terrainTypes = payload.terrainTypes;
 	if (heights.length !== gridSize * gridSize) {
 		throw new Error("Terrain payload must provide 81 height samples for a landblock.");
 	}
@@ -88,7 +116,7 @@ function prepareTerrainLandblock(
 	}
 
 	const terrainMesh = buildTerrainMesh(landblockId, gridSize, tileSize, heights, terrainTypes);
-	const notes = asStringArray(payload.notes);
+	const provenance = parseProvenance(payload.provenance);
 
 	return {
 		request,
@@ -97,10 +125,28 @@ function prepareTerrainLandblock(
 		residencyKind: parseResidencyKind(payload.residencyKind),
 		debugPrimitive: "terrain-landblock-mesh",
 		paletteKey: `terrain-${landblockId.toString(16).padStart(8, "0")}`,
+		provenance,
 		terrainMesh,
-		summary: `Prepared ${request.assetId} as a landblock terrain mesh with ${terrainMesh.vertices.length} vertices and ${terrainMesh.triangles.length} triangles.`,
-		notes,
 		preparedAt: new Date().toISOString(),
+	};
+}
+
+function parseProvenance(value: unknown): PreparedAssetProvenance {
+	const provenance = assetProvenanceDtoSchema.safeParse(value);
+	if (!provenance.success) {
+		return {
+			source: "unknown",
+			sourceAssetKind: null,
+			errorCode: null,
+			detail: null,
+		};
+	}
+
+	return {
+		source: parseProvenanceSource(provenance.data.source),
+		sourceAssetKind: provenance.data.sourceAssetKind,
+		errorCode: parseErrorCode(provenance.data.errorCode),
+		detail: provenance.data.detail,
 	};
 }
 
@@ -176,38 +222,6 @@ function buildTerrainMesh(
 	};
 }
 
-function asRecord(value: unknown): Record<string, unknown> {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new Error("Asset worker expected an object payload for CPU-side preparation.");
-	}
-
-	return value as Record<string, unknown>;
-}
-
-function asString(value: unknown): string | null {
-	return typeof value === "string" ? value : null;
-}
-
-function asStringArray(value: unknown): string[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-
-	return value.filter((entry): entry is string => typeof entry === "string");
-}
-
-function asNumber(value: unknown): number | null {
-	return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asNumberArray(value: unknown): number[] {
-	if (!Array.isArray(value)) {
-		return [];
-	}
-
-	return value.filter((entry): entry is number => typeof entry === "number");
-}
-
 function parseResidencyKind(value: unknown): AssetResidencyKind {
 	if (
 		value === "outdoor-landblock" ||
@@ -218,6 +232,35 @@ function parseResidencyKind(value: unknown): AssetResidencyKind {
 	}
 
 	return "unknown";
+}
+
+function parseProvenanceSource(
+	value: unknown,
+): PreparedAssetProvenance["source"] {
+	if (
+		value === "repo-local-hba" ||
+		value === "generated-fallback" ||
+		value === "app-local-stub" ||
+		value === "unknown"
+	) {
+		return value;
+	}
+
+	return "unknown";
+}
+
+function parseErrorCode(value: unknown): AssetErrorCode | null {
+	if (
+		value === "asset-id-unknown" ||
+		value === "asset-archive-open-failed" ||
+		value === "asset-read-failed" ||
+		value === "asset-decode-failed" ||
+		value === "cell-landblock-unavailable"
+	) {
+		return value;
+	}
+
+	return null;
 }
 
 const workerScope = globalThis as typeof globalThis & {

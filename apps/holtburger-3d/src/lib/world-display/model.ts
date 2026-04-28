@@ -41,11 +41,11 @@ export interface WorldDisplaySceneChunk {
 
 export interface WorldDisplaySceneContext {
 	kind: "outdoor-landblock-ring" | "indoor-gap";
-	summary: string;
+	statusText: string;
 	focusLandblockLabel: string;
-	destinationSummary: string;
-	coverageSummary: string;
-	gapSummary: string | null;
+	destinationText: string;
+	coverageText: string;
+	gapText: string | null;
 	chunks: WorldDisplaySceneChunk[];
 }
 
@@ -56,8 +56,8 @@ export interface WorldDisplayTerrainContract {
 	renderOwner: "frontend-world-display";
 	loadAnchor: string;
 	geometryAnchor: string;
-	indoorBranchSummary: string;
-	summary: string;
+	indoorBranchText: string;
+	statusText: string;
 }
 
 export interface WorldDisplayTerrainPolygon {
@@ -70,7 +70,7 @@ export interface WorldDisplayTerrainPolygon {
 export interface WorldDisplayTerrainViewport {
 	ready: boolean;
 	landblockLabel: string | null;
-	summary: string;
+	statusText: string;
 	viewBox: string;
 	polygons: WorldDisplayTerrainPolygon[];
 }
@@ -79,9 +79,9 @@ export interface WorldDisplayModel {
 	headline: string;
 	focusLocationLabel: string;
 	destinationLabel: string;
-	renderCacheSummary: string;
-	inputSummary: string;
-	assetSummary: string;
+	renderCacheText: string;
+	inputText: string;
+	assetText: string;
 	sceneContext: WorldDisplaySceneContext;
 	terrainContract: WorldDisplayTerrainContract;
 	entities: WorldDisplayDebugEntity[];
@@ -122,11 +122,11 @@ export function deriveWorldDisplayModel({
 			headline: `${activeModeLabel} is waiting for a runtime-backed world shell.`,
 			focusLocationLabel: "No runtime residency available yet.",
 			destinationLabel:
-				browserDestination?.label ?? "No browser destination selected yet.",
-			renderCacheSummary: hostStatus,
-			inputSummary:
+				browserDestination?.label ?? "No manual destination selected yet.",
+			renderCacheText: hostStatus,
+			inputText:
 				"Camera hints and authority-sensitive picks activate once runtime data arrives.",
-			assetSummary: deriveAssetSummary(assetState),
+			assetText: describeAssetState(assetState),
 			sceneContext: createPendingSceneContext(browserDestination),
 			terrainContract: createTerrainContract(null),
 			entities: [],
@@ -140,18 +140,18 @@ export function deriveWorldDisplayModel({
 
 	return {
 		headline: browserDestination
-			? "Browser destination preview is now driving the shared world shell."
+			? "Manual destination focus is now driving the shared world shell."
 			: "The shared world shell is anchored to live runtime residency.",
 		focusLocationLabel:
 			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
 		destinationLabel,
-		renderCacheSummary: `Runtime tick ${runtimeBatch.tick} with terrain coverage selected from authoritative residency instead of fixture entities.`,
-		inputSummary: pendingCameraHint
+		renderCacheText: `Runtime tick ${runtimeBatch.tick} with terrain coverage selected from authoritative residency instead of fixture entities.`,
+		inputText: pendingCameraHint
 			? "Camera hints are being throttled through the app-local runtime channel."
-			: (rayPickResponse?.summary ??
-				cameraAck?.summary ??
+			: (describeRayPickResponse(rayPickResponse) ??
+				describeCameraHintAck(cameraAck) ??
 				"Viewport input is ready to send camera hints. Picks stay dormant until real world entities exist."),
-			assetSummary: deriveAssetSummary(assetState),
+		assetText: describeAssetState(assetState),
 			sceneContext,
 			terrainContract: createTerrainContract(sceneContext),
 		entities: [],
@@ -163,16 +163,16 @@ function createPendingSceneContext(
 ): WorldDisplaySceneContext {
 	return {
 		kind: "outdoor-landblock-ring",
-		summary:
+		statusText:
 			"Local outdoor scene context will lock in once authoritative runtime residency arrives.",
 		focusLandblockLabel: "No focus landblock yet.",
-		destinationSummary: browserDestination
-			? `Destination preview is staged for ${browserDestination.label}, but chunk selection still waits on authoritative residency.`
-			: "No browser destination preview is staged yet.",
-		coverageSummary:
+		destinationText: browserDestination
+			? `Manual destination focus is staged for ${browserDestination.label}, but chunk selection still waits on authoritative residency.`
+			: "No manual destination focus is staged yet.",
+		coverageText:
 			"Phase 7 keeps chunk selection app-local and outdoor-first; indoor visible-cell expansion remains deferred.",
-		gapSummary:
-			"The app still needs an authoritative coordinate-to-landblock query before manual browser destinations can choose terrain chunks directly.",
+		gapText:
+			"The app still needs an authoritative coordinate-to-landblock query before manual destinations can choose terrain chunks directly.",
 		chunks: [],
 	};
 }
@@ -185,20 +185,20 @@ function deriveSceneContext(
 		? browserLocationToLandblockId(browserDestination)
 		: normalizeLandblockId(runtimeBatch.residency.focusLandblockId);
 	const focusLandblockLabel = formatLandblockLabel(focusLandblockId);
-	const destinationSummary = browserDestination
-		? `Destination preview is ${browserDestination.label}, and local terrain coverage now anchors to browser-selected landblock ${focusLandblockLabel}.`
+	const destinationText = browserDestination
+		? `Manual destination focus is ${browserDestination.label}, and local terrain coverage now anchors to the selected landblock ${focusLandblockLabel}.`
 		: `No manual destination override is active, so local terrain coverage follows authoritative runtime landblock ${focusLandblockLabel}.`;
 
 	if (runtimeBatch.residency.indoors) {
 		return {
 			kind: "indoor-gap",
-			summary:
+			statusText:
 				"The local scene contract is now explicit about its outdoor-first limit: indoor env-cell and visible-cell membership are still future work.",
 			focusLandblockLabel,
-			destinationSummary,
-			coverageSummary:
+			destinationText,
+			coverageText:
 				"No outdoor landblock ring is selected while runtime residency is indoors.",
-			gapSummary:
+			gapText:
 				"Indoor scene membership needs env-cell and visible-cell semantics before terrain or room geometry can be requested honestly.",
 			chunks: [],
 		};
@@ -214,12 +214,12 @@ function deriveSceneContext(
 
 	return {
 		kind: "outdoor-landblock-ring",
-		summary:
+		statusText:
 			"Phase 7 gives WorldDisplay an honest outdoor scene context: one focus landblock plus its immediate neighbor ring, matching the first outdoor browsing assumption used by ACViewer.",
 		focusLandblockLabel,
-		destinationSummary,
-		coverageSummary: `Outdoor coverage currently selects ${chunks.length} landblocks in a radius-1 ring around ${focusLandblockLabel}.`,
-		gapSummary:
+		destinationText,
+		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks in a radius-1 ring around ${focusLandblockLabel}.`,
+		gapText:
 			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
 	};
@@ -240,9 +240,9 @@ function createTerrainContract(
 		renderOwner: "frontend-world-display",
 		loadAnchor: "ACViewer.WorldViewer.LoadLandblock + ACE.DatLoader.CellLandblock",
 		geometryAnchor: "ACViewer.Render.R_Landblock + TerrainBatchDraw.AddTerrain",
-		indoorBranchSummary:
+		indoorBranchText:
 			"Outdoor terrain should come from normalized landblock loads first; indoor env cells stay on a separate visible-cell expansion track.",
-		summary: requestKey
+		statusText: requestKey
 			? `Phase 9 now exercises ${requestKey} end to end: Rust decodes CellLandblock terrain data into an app-local payload, and WorldDisplay keeps final mesh and GPU hydration on the frontend.`
 			: "The terrain contract shape is in place, but it still needs a focus outdoor landblock before the first request key can be selected.",
 	};
@@ -285,7 +285,7 @@ function formatLandblockLabel(landblockId: number): string {
 	return `0x${landblockId.toString(16).padStart(8, "0")}`;
 }
 
-function deriveAssetSummary(assetState: AssetChannelState): string {
+function describeAssetState(assetState: AssetChannelState): string {
 	if (assetState.status === "error") {
 		return assetState.errorMessage ?? "Asset preparation failed.";
 	}
@@ -295,7 +295,7 @@ function deriveAssetSummary(assetState: AssetChannelState): string {
 	}
 
 	if (assetState.preparedAsset) {
-		return `${assetState.preparedAsset.summary} Channel: ${assetState.channel}.`;
+		return `Prepared ${assetState.preparedAsset.request.assetId} as ${assetState.preparedAsset.debugPrimitive} for ${assetState.preparedAsset.residencyKind}. Channel: ${assetState.channel}.`;
 	}
 
 	return "Asset worker ingress is waiting for the next demand-driven asset response.";
@@ -308,7 +308,7 @@ export function deriveTerrainViewport(
 		return {
 			ready: false,
 			landblockLabel: null,
-			summary: preparedAsset
+			statusText: preparedAsset
 				? `Most recent asset ${preparedAsset.request.assetId} does not carry a terrain mesh yet.`
 				: "Waiting for the first outdoor terrain asset to be prepared.",
 			viewBox: "0 0 360 240",
@@ -362,10 +362,34 @@ function buildTerrainViewport(
 	return {
 		ready: true,
 		landblockLabel: formatLandblockLabel(terrainMesh.landblockId),
-		summary: `Prepared landblock ${formatLandblockLabel(terrainMesh.landblockId)} with ${terrainMesh.triangles.length} terrain triangles and a height range of ${terrainMesh.minHeight.toFixed(1)}-${terrainMesh.maxHeight.toFixed(1)}.`,
+		statusText: `Prepared landblock ${formatLandblockLabel(terrainMesh.landblockId)} with ${terrainMesh.triangles.length} terrain triangles and a height range of ${terrainMesh.minHeight.toFixed(1)}-${terrainMesh.maxHeight.toFixed(1)}.`,
 		viewBox: `0 0 ${width.toFixed(2)} ${height.toFixed(2)}`,
 		polygons,
 	};
+}
+
+export function describeCameraHintAck(cameraAck: CameraHintAckDto | null): string | null {
+	if (!cameraAck) {
+		return null;
+	}
+
+	return cameraAck.accepted
+		? `Accepted camera hint #${cameraAck.sequence}.`
+		: `Rejected camera hint #${cameraAck.sequence}.`;
+}
+
+export function describeRayPickResponse(
+	rayPickResponse: RayPickResponseDto | null,
+): string | null {
+	if (!rayPickResponse) {
+		return null;
+	}
+
+	if (rayPickResponse.resolved && rayPickResponse.hit) {
+		return `Resolved the authority-sensitive debug pick against ${rayPickResponse.hit.label} at ${rayPickResponse.hit.locationLabel}.`;
+	}
+
+	return "No authoritative debug entity intersected the current pick ray.";
 }
 
 function projectTerrainVertex(vertex: { x: number; y: number; z: number }) {

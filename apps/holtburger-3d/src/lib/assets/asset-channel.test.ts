@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	AssetChannelController,
+	createSceneCoverageRequests,
 	deriveTerrainFocusLandblockId,
 	createTerrainCoverageRequest,
 	createTerrainCoverageRequests,
@@ -39,6 +40,11 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			focusEntityId: 0x01020304,
 			focusLandblockId: 0x01020003,
 			focusCellId: 3,
+			focusEnvCellId: null,
+			visibleCellIds: [],
+			seenOutside: null,
+			environmentId: null,
+			cellStructureId: null,
 			focusLocationLabel: "100.40S, 101.55W, 1.0Z",
 			indoors: false,
 			trackedBodyCount: 1,
@@ -259,6 +265,33 @@ describe("asset channel controller", () => {
 		expect(requests).toHaveLength(7);
 	});
 
+	it("requests indoor env-cell metadata plus first-class indoor family assets when runtime residency is indoors", () => {
+		const runtimeBatch = createRuntimeBatch();
+		runtimeBatch.residency.indoors = true;
+		runtimeBatch.residency.focusCellId = null;
+		runtimeBatch.residency.focusEnvCellId = 0x016c0155;
+		runtimeBatch.residency.visibleCellIds = [0x016c0156, 0x016c0157];
+		runtimeBatch.residency.seenOutside = false;
+		runtimeBatch.residency.environmentId = 0x0d000001;
+		runtimeBatch.residency.cellStructureId = 1;
+
+		const requests = createSceneCoverageRequests(
+			runtimeBatch,
+			null,
+			"streaming",
+			{},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"indoor-env-cell/016c0155",
+			"indoor-env-cell/016c0156",
+			"indoor-env-cell/016c0157",
+			"environment/0d000001",
+			"cell-structure/0001",
+		]);
+	});
+
 	it("prepares a looked-up asset through the worker before returning it to the frontend", async () => {
 		const controller = new AssetChannelController(
 			async (request) => ({
@@ -354,5 +387,70 @@ describe("asset channel controller", () => {
 				},
 			),
 		).toThrow();
+	});
+
+	it("prepares indoor env-cell and reference-first indoor structure payloads as first-class assets", () => {
+		const indoorEnvCell = prepareAssetPayload(
+			{
+				requestId: "indoor-1",
+				assetId: "indoor-env-cell/016c0155",
+				priority: "bootstrap",
+			},
+			{
+				requestId: "indoor-1",
+				assetId: "indoor-env-cell/016c0155",
+				payloadKind: "json",
+				payload: {
+					kind: "indoor-env-cell",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "env-cell",
+					envCellId: 0x016c0155,
+					environmentId: 0x0d000001,
+					cellStructureId: 1,
+					visibleCellIds: [0x016c0156],
+					seenOutside: false,
+					surfaceIds: [0x08000001],
+					portalCount: 2,
+					staticObjectCount: 1,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "env-cell",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		const environment = prepareAssetPayload(
+			{
+				requestId: "environment-1",
+				assetId: "environment/0d000001",
+				priority: "streaming",
+			},
+			{
+				requestId: "environment-1",
+				assetId: "environment/0d000001",
+				payloadKind: "json",
+				payload: {
+					kind: "environment",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "environment",
+					environmentId: 0x0d000001,
+					cellStructureIds: [],
+					provenance: {
+						source: "app-local-stub",
+						sourceAssetKind: "environment",
+						errorCode: null,
+						detail: "reference-first",
+					},
+				},
+			},
+		);
+
+		expect(indoorEnvCell.assetKind).toBe("indoor-env-cell");
+		expect(indoorEnvCell.debugPrimitive).toBe("indoor-env-cell-metadata");
+		expect(environment.assetKind).toBe("environment");
+		expect(environment.debugPrimitive).toBe("environment-reference");
 	});
 });

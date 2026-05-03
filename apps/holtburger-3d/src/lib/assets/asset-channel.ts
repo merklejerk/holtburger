@@ -119,6 +119,35 @@ export function createFocusedAssetRequest(
 	};
 }
 
+export function createSceneCoverageRequests(
+	runtimeBatch: RuntimeBatchDto | null,
+	browserDestination: BrowserLocationSelection | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[] = [],
+): AssetLookupRequestDto[] {
+	if (!runtimeBatch) {
+		return [];
+	}
+
+	if (runtimeBatch.residency.indoors) {
+		return createIndoorCoverageRequests(
+			runtimeBatch,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+		);
+	}
+
+	return createTerrainCoverageRequests(
+		runtimeBatch,
+		browserDestination,
+		priority,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
 export function createTerrainCoverageRequest(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
@@ -221,6 +250,47 @@ function buildOutdoorCoverageAssetIds(
 
 function formatTerrainAssetId(landblockId: number): string {
 	return `terrain/${landblockId.toString(16).padStart(8, "0")}`;
+}
+
+function createIndoorCoverageRequests(
+	runtimeBatch: RuntimeBatchDto,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+): AssetLookupRequestDto[] {
+	const { focusEnvCellId, visibleCellIds, environmentId, cellStructureId } =
+		runtimeBatch.residency;
+	if (focusEnvCellId === null) {
+		return [];
+	}
+
+	const assetIds = [
+		formatIndoorEnvCellAssetId(focusEnvCellId),
+		...visibleCellIds.map((cellId) => formatIndoorEnvCellAssetId(cellId)),
+		environmentId === null ? null : formatEnvironmentAssetId(environmentId),
+		cellStructureId === null ? null : formatCellStructureAssetId(cellStructureId),
+	].filter((assetId): assetId is string => assetId !== null);
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+
+	return [...new Set(assetIds)]
+		.filter((assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId))
+		.map((assetId) => ({
+			requestId: `${priority}-${runtimeBatch.tick}-runtime-${assetId}`,
+			assetId,
+			priority,
+		}));
+}
+
+function formatIndoorEnvCellAssetId(envCellId: number): string {
+	return `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
+}
+
+function formatEnvironmentAssetId(environmentId: number): string {
+	return `environment/${environmentId.toString(16).padStart(8, "0")}`;
+}
+
+function formatCellStructureAssetId(cellStructureId: number): string {
+	return `cell-structure/${cellStructureId.toString(16).padStart(4, "0")}`;
 }
 
 function createAssetWorker(): AssetWorkerLike {

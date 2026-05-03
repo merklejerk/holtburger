@@ -41,7 +41,13 @@ export interface PreparedTerrainMesh {
 export interface PreparedAssetRecord {
 	request: AssetLookupRequestDto;
 	response: AssetLookupResponseDto;
-	assetKind: "terrain-landblock" | "visual-asset-stub" | "unknown";
+	assetKind:
+		| "terrain-landblock"
+		| "indoor-env-cell"
+		| "environment"
+		| "cell-structure"
+		| "visual-asset-stub"
+		| "unknown";
 	residencyKind: AssetResidencyKind;
 	debugPrimitive: string;
 	paletteKey: string;

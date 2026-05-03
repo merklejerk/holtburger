@@ -85,6 +85,11 @@ export const runtimeResidencyDtoSchema = z.object({
 	focusEntityId: z.number().int().nonnegative().nullable(),
 	focusLandblockId: z.number().int().nonnegative(),
 	focusCellId: z.number().int().nonnegative().nullable(),
+	focusEnvCellId: z.number().int().nonnegative().nullable(),
+	visibleCellIds: z.array(z.number().int().nonnegative()),
+	seenOutside: z.boolean().nullable(),
+	environmentId: z.number().int().nonnegative().nullable(),
+	cellStructureId: z.number().int().nonnegative().nullable(),
 	focusLocationLabel: z.string(),
 	indoors: z.boolean(),
 	trackedBodyCount: z.number().int().nonnegative(),
@@ -140,6 +145,47 @@ export const terrainLandblockPayloadDtoSchema = z.object({
 	provenance: assetProvenanceDtoSchema,
 });
 export type TerrainLandblockPayloadDto = z.infer<typeof terrainLandblockPayloadDtoSchema>;
+
+export const indoorEnvCellPayloadDtoSchema = z.object({
+	kind: z.literal("indoor-env-cell"),
+	residencyKind: z.literal("indoor-env-cell"),
+	sourceAssetKind: z.literal("env-cell"),
+	envCellId: z.number().int().nonnegative(),
+	environmentId: z.number().int().nonnegative().nullable(),
+	cellStructureId: z.number().int().nonnegative().nullable(),
+	visibleCellIds: z.array(z.number().int().nonnegative()),
+	seenOutside: z.boolean().nullable(),
+	surfaceIds: z.array(z.number().int().nonnegative()),
+	portalCount: z.number().int().nonnegative(),
+	staticObjectCount: z.number().int().nonnegative(),
+	provenance: assetProvenanceDtoSchema,
+});
+export type IndoorEnvCellPayloadDto = z.infer<typeof indoorEnvCellPayloadDtoSchema>;
+
+export const environmentPayloadDtoSchema = z.object({
+	kind: z.literal("environment"),
+	residencyKind: z.literal("indoor-env-cell"),
+	sourceAssetKind: z.literal("environment"),
+	environmentId: z.number().int().nonnegative(),
+	cellStructureIds: z.array(z.number().int().nonnegative()),
+	provenance: assetProvenanceDtoSchema,
+});
+export type EnvironmentPayloadDto = z.infer<typeof environmentPayloadDtoSchema>;
+
+export const cellStructurePayloadDtoSchema = z.object({
+	kind: z.literal("cell-structure"),
+	residencyKind: z.literal("indoor-env-cell"),
+	sourceAssetKind: z.literal("cell-structure"),
+	environmentId: z.number().int().nonnegative().nullable(),
+	cellStructureId: z.number().int().nonnegative(),
+	polygonCount: z.number().int().nonnegative().nullable(),
+	portalCount: z.number().int().nonnegative().nullable(),
+	hasCellBsp: z.boolean(),
+	hasPhysicsBsp: z.boolean(),
+	hasDrawingBsp: z.boolean(),
+	provenance: assetProvenanceDtoSchema,
+});
+export type CellStructurePayloadDto = z.infer<typeof cellStructurePayloadDtoSchema>;
 
 export const appearanceManifestPayloadDtoSchema = z.object({
 	kind: z.literal("appearance-manifest"),

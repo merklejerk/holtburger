@@ -40,9 +40,9 @@ export interface WorldDisplaySceneChunk {
 }
 
 export interface WorldDisplaySceneContext {
-	kind: "outdoor-landblock-ring" | "indoor-gap";
+	kind: "outdoor-landblock-ring" | "indoor-visible-cell-set";
 	statusText: string;
-	focusLandblockLabel: string;
+	focusAnchorLabel: string;
 	destinationText: string;
 	coverageText: string;
 	gapText: string | null;
@@ -136,7 +136,7 @@ export function deriveWorldDisplayModel({
 	void viewModelFeed;
 	const destinationLabel =
 		browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel;
-	const sceneContext = deriveSceneContext(runtimeBatch, browserDestination);
+	const sceneContext = deriveSceneContext(runtimeBatch, browserDestination, assetState);
 
 	return {
 		headline: browserDestination
@@ -165,7 +165,7 @@ function createPendingSceneContext(
 		kind: "outdoor-landblock-ring",
 		statusText:
 			"Local outdoor scene context will lock in once authoritative runtime residency arrives.",
-		focusLandblockLabel: "No focus landblock yet.",
+		focusAnchorLabel: "No focus landblock yet.",
 		destinationText: browserDestination
 			? `Manual destination focus is staged for ${browserDestination.label}, but chunk selection still waits on authoritative residency.`
 			: "No manual destination focus is staged yet.",
@@ -180,6 +180,7 @@ function createPendingSceneContext(
 function deriveSceneContext(
 	runtimeBatch: RuntimeBatchDto,
 	browserDestination: BrowserLocationSelection | null,
+	assetState: AssetChannelState,
 ): WorldDisplaySceneContext {
 	const focusLandblockId = browserDestination
 		? browserLocationToLandblockId(browserDestination)
@@ -190,16 +191,32 @@ function deriveSceneContext(
 		: `No manual destination override is active, so local terrain coverage follows authoritative runtime landblock ${focusLandblockLabel}.`;
 
 	if (runtimeBatch.residency.indoors) {
+		const focusEnvCellLabel = runtimeBatch.residency.focusEnvCellId
+			? formatEnvCellLabel(runtimeBatch.residency.focusEnvCellId)
+			: "Unknown env cell";
+		const visibleCount = runtimeBatch.residency.visibleCellIds.length;
+		const preparedIndoorAssets = Object.keys(assetState.preparedByAssetId).filter(
+			(assetId) =>
+				assetId.startsWith("indoor-env-cell/") ||
+				assetId.startsWith("environment/") ||
+				assetId.startsWith("cell-structure/"),
+		);
+		const seenOutsideText =
+			runtimeBatch.residency.seenOutside === null
+				? "SeenOutside is not available yet."
+				: runtimeBatch.residency.seenOutside
+					? "SeenOutside is set, so outdoor relevance may still matter."
+					: "SeenOutside is clear, so indoor visible-cell relevance stays local to env cells.";
+
 		return {
-			kind: "indoor-gap",
+			kind: "indoor-visible-cell-set",
 			statusText:
-				"The local scene contract is now explicit about its outdoor-first limit: indoor env-cell and visible-cell membership are still future work.",
-			focusLandblockLabel,
+				"Indoor scene context is now explicit: WorldDisplay tracks env-cell and visible-cell membership separately from outdoor landblock terrain.",
+			focusAnchorLabel: focusEnvCellLabel,
 			destinationText,
 			coverageText:
-				"No outdoor landblock ring is selected while runtime residency is indoors.",
-			gapText:
-				"Indoor scene membership needs env-cell and visible-cell semantics before terrain or room geometry can be requested honestly.",
+				`Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
+			gapText: null,
 			chunks: [],
 		};
 	}
@@ -216,7 +233,7 @@ function deriveSceneContext(
 		kind: "outdoor-landblock-ring",
 		statusText:
 			"Phase 7 gives WorldDisplay an honest outdoor scene context: one focus landblock plus its immediate neighbor ring, matching the first outdoor browsing assumption used by ACViewer.",
-		focusLandblockLabel,
+		focusAnchorLabel: focusLandblockLabel,
 		destinationText,
 		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks in a radius-1 ring around ${focusLandblockLabel}.`,
 		gapText:
@@ -283,6 +300,10 @@ function normalizeLandblockId(rawLandblockId: number): number {
 
 function formatLandblockLabel(landblockId: number): string {
 	return `0x${landblockId.toString(16).padStart(8, "0")}`;
+}
+
+function formatEnvCellLabel(envCellId: number): string {
+	return `0x${envCellId.toString(16).padStart(8, "0")}`;
 }
 
 function describeAssetState(assetState: AssetChannelState): string {

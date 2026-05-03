@@ -3,12 +3,18 @@ import type {
 	AssetErrorCode,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
+	CellStructurePayloadDto,
+	EnvironmentPayloadDto,
+	IndoorEnvCellPayloadDto,
 	TerrainLandblockPayloadDto,
 } from "../lib/host/contracts";
 import {
 	appearanceManifestPayloadDtoSchema,
 	assetProvenanceDtoSchema,
+	cellStructurePayloadDtoSchema,
+	environmentPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
+	indoorEnvCellPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
 } from "../lib/host/contracts";
 import type {
@@ -51,6 +57,21 @@ export function prepareAssetPayload(
 		return prepareTerrainLandblock(request, response, terrainPayload.data);
 	}
 
+	const indoorEnvCellPayload = indoorEnvCellPayloadDtoSchema.safeParse(response.payload);
+	if (indoorEnvCellPayload.success) {
+		return prepareIndoorEnvCell(request, response, indoorEnvCellPayload.data);
+	}
+
+	const environmentPayload = environmentPayloadDtoSchema.safeParse(response.payload);
+	if (environmentPayload.success) {
+		return prepareEnvironment(request, response, environmentPayload.data);
+	}
+
+	const cellStructurePayload = cellStructurePayloadDtoSchema.safeParse(response.payload);
+	if (cellStructurePayload.success) {
+		return prepareCellStructure(request, response, cellStructurePayload.data);
+	}
+
 	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(response.payload);
 	if (appearancePayload.success) {
 		return prepareAppearanceManifest(request, response, appearancePayload.data);
@@ -71,6 +92,60 @@ export function prepareAssetPayload(
 		debugPrimitive,
 		paletteKey,
 		provenance,
+		terrainMesh: null,
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareIndoorEnvCell(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: IndoorEnvCellPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		assetKind: "indoor-env-cell",
+		residencyKind: payload.residencyKind,
+		debugPrimitive: "indoor-env-cell-metadata",
+		paletteKey: `env-cell-${payload.envCellId.toString(16).padStart(8, "0")}`,
+		provenance: parseProvenance(payload.provenance),
+		terrainMesh: null,
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareEnvironment(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: EnvironmentPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		assetKind: "environment",
+		residencyKind: payload.residencyKind,
+		debugPrimitive: "environment-reference",
+		paletteKey: `environment-${payload.environmentId.toString(16).padStart(8, "0")}`,
+		provenance: parseProvenance(payload.provenance),
+		terrainMesh: null,
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareCellStructure(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: CellStructurePayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		assetKind: "cell-structure",
+		residencyKind: payload.residencyKind,
+		debugPrimitive: "cell-structure-summary",
+		paletteKey: `cell-structure-${payload.cellStructureId.toString(16).padStart(4, "0")}`,
+		provenance: parseProvenance(payload.provenance),
 		terrainMesh: null,
 		preparedAt: new Date().toISOString(),
 	};

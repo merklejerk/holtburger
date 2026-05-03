@@ -19,6 +19,11 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			focusEntityId: null,
 			focusLandblockId: 0x01020003,
 			focusCellId: 3,
+			focusEnvCellId: null,
+			visibleCellIds: [],
+			seenOutside: null,
+			environmentId: null,
+			cellStructureId: null,
 			focusLocationLabel: "100.40S, 101.55W, 1.0Z",
 			indoors: false,
 			trackedBodyCount: 0,
@@ -115,7 +120,7 @@ describe("world display model helpers", () => {
 		expect(model.entities).toHaveLength(0);
 		expect(model.sceneContext.kind).toBe("outdoor-landblock-ring");
 		expect(model.sceneContext.chunks).toHaveLength(6);
-		expect(model.sceneContext.focusLandblockLabel).toBe("0x0001ffff");
+		expect(model.sceneContext.focusAnchorLabel).toBe("0x0001ffff");
 		expect(model.terrainContract.requestKey).toBe("terrain/0001ffff");
 		expect(model.terrainContract.decodeOwner).toBe("rust-host-adapter");
 		expect(model.renderCacheText).toMatch(/authoritative residency/);
@@ -170,26 +175,63 @@ describe("world display model helpers", () => {
 		expect(viewport.polygons[0].points).toMatch(/,/);
 	});
 
-	it("makes the outdoor-first limit explicit when runtime residency is indoors", () => {
+	it("builds an explicit indoor env-cell scene context when runtime residency is indoors", () => {
 		const runtimeBatch = createRuntimeBatch();
 		runtimeBatch.residency.indoors = true;
 		runtimeBatch.residency.focusLandblockId = 0x016c0155;
+		runtimeBatch.residency.focusCellId = null;
+		runtimeBatch.residency.focusEnvCellId = 0x016c0155;
+		runtimeBatch.residency.visibleCellIds = [0x016c0156, 0x016c0157];
+		runtimeBatch.residency.seenOutside = false;
+		runtimeBatch.residency.environmentId = 0x0d000001;
+		runtimeBatch.residency.cellStructureId = 1;
 
 		const model = deriveWorldDisplayModel({
 			activeModeLabel: "World Viewer",
 			hostStatus: "Connected to the host.",
 			runtimeBatch,
 			viewModelFeed: null,
-			assetState: createInitialAssetChannelState(),
+			assetState: {
+				...createInitialAssetChannelState(),
+				preparedByAssetId: {
+					"indoor-env-cell/016c0155": {
+						request: {
+							requestId: "fixture-indoor",
+							assetId: "indoor-env-cell/016c0155",
+							priority: "bootstrap",
+						},
+						response: {
+							requestId: "fixture-indoor",
+							assetId: "indoor-env-cell/016c0155",
+							payloadKind: "json",
+							payload: { kind: "indoor-env-cell", envCellId: 0x016c0155 },
+						},
+						assetKind: "indoor-env-cell",
+						residencyKind: "indoor-env-cell",
+						debugPrimitive: "indoor-env-cell-metadata",
+						paletteKey: "env-cell-016c0155",
+						provenance: {
+							source: "repo-local-hba",
+							sourceAssetKind: "env-cell",
+							errorCode: null,
+							detail: "dats/assets.hba",
+						},
+						terrainMesh: null,
+						preparedAt: "2026-04-28T00:00:00.000Z",
+					},
+				},
+			},
 			browserDestination: null,
 			cameraAck: null,
 			rayPickResponse: null,
 			pendingCameraHint: false,
 		});
 
-		expect(model.sceneContext.kind).toBe("indoor-gap");
+		expect(model.sceneContext.kind).toBe("indoor-visible-cell-set");
 		expect(model.sceneContext.chunks).toHaveLength(0);
-		expect(model.sceneContext.gapText).toMatch(/visible-cell/i);
+		expect(model.sceneContext.focusAnchorLabel).toBe("0x016c0155");
+		expect(model.sceneContext.coverageText).toMatch(/visible cell/i);
+		expect(model.sceneContext.gapText).toBeNull();
 		expect(model.terrainContract.requestKey).toBeNull();
 	});
 

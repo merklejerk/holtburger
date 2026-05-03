@@ -5,6 +5,7 @@ use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
 use holtburger_content::SoulEmoteCatalog;
+use holtburger_dat::file_type::EnvCell;
 use holtburger_dat::landblock::CellLandblock;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::{EOR_CELL_NAMESPACE, HbaReader};
@@ -181,6 +182,18 @@ impl HostBoundaryAdapter {
             return build_terrain_lookup_response(request, landblock_id);
         }
 
+        if let Some(env_cell_id) = parse_indoor_env_cell_asset_id(&request.asset_id) {
+            return build_indoor_env_cell_lookup_response(request, env_cell_id);
+        }
+
+        if let Some(environment_id) = parse_environment_asset_id(&request.asset_id) {
+            return build_environment_lookup_response(request, environment_id);
+        }
+
+        if let Some(cell_structure_id) = parse_cell_structure_asset_id(&request.asset_id) {
+            return build_cell_structure_lookup_response(request, cell_structure_id);
+        }
+
         let (residency_kind, debug_primitive, palette_key, provenance) =
             match request.asset_id.as_str() {
                 "gfx/02000001" => (
@@ -345,11 +358,27 @@ impl HostBoundaryAdapter {
 
     fn runtime_residency(state: &HostRuntimeState) -> RuntimeResidencyDto {
         let focus_position = state.world.player_position().unwrap_or_default();
+        let indoor_metadata = focus_position
+            .is_indoors()
+            .then(|| load_env_cell_metadata(u32::from(focus_position.landblock_id)).ok())
+            .flatten();
 
         RuntimeResidencyDto {
             focus_entity_id: Some(u32::from(LOCAL_PLAYER_GUID) as u64),
             focus_landblock_id: u32::from(focus_position.landblock_id),
             focus_cell_id: focus_position.derived_outdoor_cell_id(),
+            focus_env_cell_id: focus_position
+                .is_indoors()
+                .then_some(u32::from(focus_position.landblock_id)),
+            visible_cell_ids: indoor_metadata
+                .as_ref()
+                .map(|metadata| metadata.visible_cell_ids.clone())
+                .unwrap_or_default(),
+            seen_outside: indoor_metadata.as_ref().map(|metadata| metadata.seen_outside),
+            environment_id: indoor_metadata.as_ref().map(|metadata| metadata.environment_id),
+            cell_structure_id: indoor_metadata
+                .as_ref()
+                .map(|metadata| metadata.cell_structure_id),
             focus_location_label: focus_position.to_world_coords().to_string_with_precision(2),
             indoors: focus_position.is_indoors(),
             tracked_body_count: 3,
@@ -428,6 +457,142 @@ fn build_terrain_lookup_response(
     }
 }
 
+fn build_indoor_env_cell_lookup_response(
+    request: AssetLookupRequestDto,
+    env_cell_id: u32,
+) -> AssetLookupResponseDto {
+    let payload = load_indoor_env_cell_payload(env_cell_id).unwrap_or_else(|(detail, error_code)| {
+        serde_json::json!({
+            "kind": "indoor-env-cell",
+            "residencyKind": "indoor-env-cell",
+            "sourceAssetKind": "env-cell",
+            "envCellId": env_cell_id,
+            "environmentId": null,
+            "cellStructureId": null,
+            "visibleCellIds": [],
+            "seenOutside": null,
+            "surfaceIds": [],
+            "portalCount": 0,
+            "staticObjectCount": 0,
+            "provenance": {
+                "source": "app-local-stub",
+                "sourceAssetKind": "env-cell",
+                "errorCode": error_code,
+                "detail": detail
+            }
+        })
+    });
+
+    AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload,
+    }
+}
+
+fn build_environment_lookup_response(
+    request: AssetLookupRequestDto,
+    environment_id: u32,
+) -> AssetLookupResponseDto {
+    AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload: serde_json::json!({
+            "kind": "environment",
+            "residencyKind": "indoor-env-cell",
+            "sourceAssetKind": "environment",
+            "environmentId": environment_id,
+            "cellStructureIds": [],
+            "provenance": {
+                "source": "app-local-stub",
+                "sourceAssetKind": "environment",
+                "errorCode": null,
+                "detail": "Environment decoding is not implemented in holtburger-dat yet, so Phase 11 exposes a reference-first payload."
+            }
+        }),
+    }
+}
+
+fn build_cell_structure_lookup_response(
+    request: AssetLookupRequestDto,
+    cell_structure_id: u32,
+) -> AssetLookupResponseDto {
+    AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload: serde_json::json!({
+            "kind": "cell-structure",
+            "residencyKind": "indoor-env-cell",
+            "sourceAssetKind": "cell-structure",
+            "environmentId": null,
+            "cellStructureId": cell_structure_id,
+            "polygonCount": null,
+            "portalCount": null,
+            "hasCellBsp": false,
+            "hasPhysicsBsp": false,
+            "hasDrawingBsp": false,
+            "provenance": {
+                "source": "app-local-stub",
+                "sourceAssetKind": "cell-structure",
+                "errorCode": null,
+                "detail": "Cell-structure summaries stay reference-first in Phase 11 until a structural parser lands."
+            }
+        }),
+    }
+}
+
+#[derive(Clone)]
+struct IndoorEnvCellMetadata {
+    environment_id: u32,
+    cell_structure_id: u32,
+    visible_cell_ids: Vec<u32>,
+    seen_outside: bool,
+}
+
+fn load_env_cell_metadata(
+    env_cell_id: u32,
+) -> Result<IndoorEnvCellMetadata, (String, &'static str)> {
+    let path = repo_assets_hba_path();
+    let archive = HbaReader::open(&path).map_err(|error| {
+        (
+            format!("Could not open {}: {error}", path.display()),
+            "asset-archive-open-failed",
+        )
+    })?;
+    let bytes = archive
+        .get_file_in_namespace(EOR_CELL_NAMESPACE, env_cell_id)
+        .map_err(|error| {
+            (
+                format!(
+                    "Could not read {}:0x{env_cell_id:08X} from {}: {error}",
+                    EOR_CELL_NAMESPACE,
+                    path.display()
+                ),
+                "asset-read-failed",
+            )
+        })?;
+    let env_cell = EnvCell::unpack(&mut std::io::Cursor::new(bytes)).map_err(|error| {
+        (
+            format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
+            "asset-decode-failed",
+        )
+    })?;
+
+    Ok(IndoorEnvCellMetadata {
+        environment_id: 0x0D00_0000 | u32::from(env_cell.environment_id),
+        cell_structure_id: u32::from(env_cell.cell_structure),
+        visible_cell_ids: env_cell
+            .visible_cells
+            .into_iter()
+            .map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(cell_id))
+            .collect(),
+        seen_outside: (env_cell.flags & 0x01) != 0,
+    })
+}
+
 fn load_cell_landblock_payload(landblock_id: u32) -> Result<serde_json::Value, (String, &'static str)> {
     let path = repo_assets_hba_path();
     let archive = HbaReader::open(&path)
@@ -499,10 +664,81 @@ fn generated_fallback_terrain_payload(
     })
 }
 
+fn load_indoor_env_cell_payload(
+    env_cell_id: u32,
+) -> Result<serde_json::Value, (String, &'static str)> {
+    let path = repo_assets_hba_path();
+    let archive = HbaReader::open(&path).map_err(|error| {
+        (
+            format!("Could not open {}: {error}", path.display()),
+            "asset-archive-open-failed",
+        )
+    })?;
+    let bytes = archive
+        .get_file_in_namespace(EOR_CELL_NAMESPACE, env_cell_id)
+        .map_err(|error| {
+            (
+                format!(
+                    "Could not read {}:0x{env_cell_id:08X} from {}: {error}",
+                    EOR_CELL_NAMESPACE,
+                    path.display()
+                ),
+                "asset-read-failed",
+            )
+        })?;
+    let env_cell = EnvCell::unpack(&mut std::io::Cursor::new(bytes)).map_err(|error| {
+        (
+            format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
+            "asset-decode-failed",
+        )
+    })?;
+
+    Ok(serde_json::json!({
+        "kind": "indoor-env-cell",
+        "residencyKind": "indoor-env-cell",
+        "sourceAssetKind": "env-cell",
+        "envCellId": env_cell_id,
+        "environmentId": 0x0D00_0000 | u32::from(env_cell.environment_id),
+        "cellStructureId": u32::from(env_cell.cell_structure),
+        "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
+        "seenOutside": (env_cell.flags & 0x01) != 0,
+        "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
+        "portalCount": env_cell.portals.len(),
+        "staticObjectCount": env_cell.static_objects.len(),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "env-cell",
+            "errorCode": null,
+            "detail": path.display().to_string()
+        }
+    }))
+}
+
 fn parse_terrain_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("terrain/")
         .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+}
+
+fn parse_indoor_env_cell_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("indoor-env-cell/")
+        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+}
+
+fn parse_environment_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("environment/")
+        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+}
+
+fn parse_cell_structure_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("cell-structure/")
+        .filter(|hex| !hex.is_empty() && hex.len() <= 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
 }
 

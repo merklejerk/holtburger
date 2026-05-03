@@ -67,7 +67,7 @@ impl EnvCell {
         }
 
         let mut static_objects = Vec::new();
-        if (flags & 0x01) != 0 {
+        if (flags & 0x02) != 0 {
             // HasStaticObjs
             let num_objs = u32::read_le(reader)?;
             for _ in 0..num_objs {
@@ -76,7 +76,7 @@ impl EnvCell {
         }
 
         let mut restriction_obj = None;
-        if (flags & 0x02) != 0 {
+        if (flags & 0x08) != 0 {
             // HasRestrictionObj
             restriction_obj = Some(u32::read_le(reader)?);
         }
@@ -137,14 +137,14 @@ impl EnvCell {
             vis.write_le(writer)?;
         }
 
-        if (self.flags & 0x01) != 0 {
+        if (self.flags & 0x02) != 0 {
             (self.static_objects.len() as u32).write_le(writer)?;
             for obj in &self.static_objects {
                 obj.write_le(writer)?;
             }
         }
 
-        if let Some(res) = self.restriction_obj.filter(|_| (self.flags & 0x02) != 0) {
+        if let Some(res) = self.restriction_obj.filter(|_| (self.flags & 0x08) != 0) {
             res.write_le(writer)?;
         }
 

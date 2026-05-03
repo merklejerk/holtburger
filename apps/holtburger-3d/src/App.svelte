@@ -4,7 +4,7 @@
   import { frontendState } from './app/frontend-state';
   import {
     AssetChannelController,
-    createTerrainCoverageRequests,
+    createSceneCoverageRequests,
   } from './lib/assets/asset-channel';
   import {
     listenForRuntimeLifecycle,
@@ -21,20 +21,20 @@
     let dispose = () => {};
     let disposed = false;
     const assetChannel = new AssetChannelController();
-    const inFlightTerrainAssetIds = new Set<string>();
+    const inFlightSceneAssetIds = new Set<string>();
 
-    async function syncTerrainCoverage(
+    async function syncSceneCoverage(
       runtimeBatch: RuntimeBatchDto | null,
       browserDestination: typeof $frontendState.browserMode.destination,
       priority: AssetPriority,
     ): Promise<void> {
       const assetState = get(frontendState).asset;
-      const requests = createTerrainCoverageRequests(
+      const requests = createSceneCoverageRequests(
         runtimeBatch,
         browserDestination,
         priority,
         assetState.preparedByAssetId,
-        [...inFlightTerrainAssetIds],
+        [...inFlightSceneAssetIds],
       );
 
       if (requests.length === 0) {
@@ -43,7 +43,7 @@
 
       await Promise.allSettled(
         requests.map(async (request) => {
-          inFlightTerrainAssetIds.add(request.assetId);
+          inFlightSceneAssetIds.add(request.assetId);
           frontendState.markAssetPending(request);
 
           try {
@@ -59,7 +59,7 @@
               );
             }
           } finally {
-            inFlightTerrainAssetIds.delete(request.assetId);
+            inFlightSceneAssetIds.delete(request.assetId);
           }
         }),
       );
@@ -70,7 +70,7 @@
         dispose = await listenForRuntimeLifecycle((notification) => {
           frontendState.applyRuntimeNotification(notification);
           if (notification.runtimeBatch) {
-            void syncTerrainCoverage(
+            void syncSceneCoverage(
               notification.runtimeBatch,
               $frontendState.browserMode.destination,
               'streaming',
@@ -83,12 +83,12 @@
         startupError = null;
 
         await Promise.all([
-          syncTerrainCoverage(
+          syncSceneCoverage(
             snapshot.runtimeBatch,
             $frontendState.browserMode.destination,
             'bootstrap',
           ),
-          syncTerrainCoverage(
+          syncSceneCoverage(
             snapshot.runtimeBatch,
             $frontendState.browserMode.destination,
             'streaming',

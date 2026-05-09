@@ -631,21 +631,6 @@ fn generated_fallback_terrain_payload(
     landblock_id: u32,
     (detail, error_code): (String, &'static str),
 ) -> serde_json::Value {
-    let landblock_x = ((landblock_id >> 24) & 0xff) as f32;
-    let landblock_y = ((landblock_id >> 16) & 0xff) as f32;
-    let mut heights = Vec::with_capacity(81);
-    let mut terrain_types = Vec::with_capacity(81);
-
-    for row in 0..9 {
-        for col in 0..9 {
-            let height = 18.0
-                + ((landblock_x * 0.015) + col as f32 * 0.42).sin() * 10.0
-                + ((landblock_y * 0.02) + row as f32 * 0.37).cos() * 8.0;
-            heights.push(height);
-            terrain_types.push(((row + col + (landblock_id as usize & 0x0f)) % 6) as u16);
-        }
-    }
-
     serde_json::json!({
         "kind": "terrain-landblock",
         "residencyKind": "outdoor-landblock",
@@ -653,8 +638,8 @@ fn generated_fallback_terrain_payload(
         "landblockId": landblock_id,
         "gridSize": 9,
         "tileSize": 24,
-        "heights": heights,
-        "terrainTypes": terrain_types,
+        "heights": vec![0.0_f32; 81],
+        "terrainTypes": vec![0_u16; 81],
         "provenance": {
             "source": "generated-fallback",
             "sourceAssetKind": "cell-landblock",

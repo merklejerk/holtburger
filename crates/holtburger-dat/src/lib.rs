@@ -26,7 +26,15 @@ pub const DAT_MAGIC: u32 = 0x0000_5442;
 pub const RESOURCE_NAMESPACE_LEN: usize = 32;
 pub const EOR_PORTAL_NAMESPACE: &str = "eor/portal";
 pub const EOR_CELL_NAMESPACE: &str = "eor/cell";
+pub const EOR_LANGUAGE_NAMESPACE: &str = "eor/language";
 pub const HOLTBURGER_CORE_NAMESPACE: &str = "holtburger/core";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RetailDatKind {
+    Portal,
+    Cell,
+    Language,
+}
 
 #[derive(Debug, Clone)]
 pub struct FileMetadata {
@@ -184,11 +192,21 @@ pub struct DatHeader {
 }
 
 impl DatHeader {
-    pub fn retail_namespace_hint(&self) -> Option<&'static str> {
+    pub fn retail_kind(&self) -> Option<RetailDatKind> {
         match (self.magic, self.block_size, self.dataset) {
-            (DAT_MAGIC, 1024, 1) => Some(EOR_PORTAL_NAMESPACE),
-            (DAT_MAGIC, 256, 2) => Some(EOR_CELL_NAMESPACE),
+            (DAT_MAGIC, 1024, 1) => Some(RetailDatKind::Portal),
+            (DAT_MAGIC, 256, 2) => Some(RetailDatKind::Cell),
+            (DAT_MAGIC, 1024, 3) => Some(RetailDatKind::Language),
             _ => None,
+        }
+    }
+
+    pub fn retail_namespace_hint(&self) -> Option<&'static str> {
+        match self.retail_kind() {
+            Some(RetailDatKind::Portal) => Some(EOR_PORTAL_NAMESPACE),
+            Some(RetailDatKind::Cell) => Some(EOR_CELL_NAMESPACE),
+            Some(RetailDatKind::Language) => Some(EOR_LANGUAGE_NAMESPACE),
+            None => None,
         }
     }
 }
@@ -701,6 +719,7 @@ mod tests {
         };
 
         assert_eq!(header.retail_namespace_hint(), Some(EOR_PORTAL_NAMESPACE));
+        assert_eq!(header.retail_kind(), Some(RetailDatKind::Portal));
     }
 
     #[test]
@@ -726,6 +745,33 @@ mod tests {
         };
 
         assert_eq!(header.retail_namespace_hint(), Some(EOR_CELL_NAMESPACE));
+        assert_eq!(header.retail_kind(), Some(RetailDatKind::Cell));
+    }
+
+    #[test]
+    fn test_dat_header_retail_kind_for_language() {
+        let header = DatHeader {
+            magic: DAT_MAGIC,
+            block_size: 1024,
+            file_size: 0,
+            dataset: 3,
+            subset: 0,
+            free_head: 0,
+            free_tail: 0,
+            free_count: 0,
+            root_offset: 0,
+            new_lru: 0,
+            old_lru: 0,
+            use_lru: 0,
+            master_map_id: 0,
+            engine_version: 0,
+            game_version: 0,
+            version_string: vec![0; 16],
+            version_minor: 0,
+        };
+
+        assert_eq!(header.retail_kind(), Some(RetailDatKind::Language));
+        assert_eq!(header.retail_namespace_hint(), Some(EOR_LANGUAGE_NAMESPACE));
     }
 
     #[test]

@@ -1581,30 +1581,233 @@ Phase 11 course correction:
 - keep `environment/*` and `cell-structure/*` metadata-first and reference-first for now, because this repo still lacks shared parsers that can expose those structures honestly without guessing.
 - treat deeper indoor geometry, BSP exposure, and portal-driven render membership as a follow-up phase rather than inflating Phase 11 beyond the contract and scene-membership seam it needed to land.
 
-#### Phase 12: Shared SpatialBody Constraint And Non-World Body Semantics
+#### Phase 12: Outdoor Scenery And The `gfx-obj` / `setup-model` Asset Family Seam
 
-Keep the existing shared `SpatialBody` expansion as a later follow-up phase rather than forcing it ahead of visible world progress.
+Status: planned.
+
+Replaces the old "Phase 12 = SpatialBody expansion" stub. Phase 11's gate review and the post-Phase 11 readiness check both concluded that browser mode lacks any honest driver for shared non-world body semantics: the world is currently terrain-only, the camera is a free fly-cam by design, and ray pick is a stubbed entity-distance heuristic that never touches `SpatialScene`. Forcing a shared-crate constraint expansion now would design role / membership / mask vocabulary against imagined demand.
+
+The actual highest-leverage next step is to grow renderable variety so that future physics work has surfaces to interact with. This phase introduces the foundational `gfx-obj/*` and `setup-model/*` asset families, surfaces outdoor static scenery placements on the runtime channel, and renders the first non-terrain visible elements in browser mode. Materials and textures are intentionally deferred; first-pass scenery uses per-object debug coloring so the renderer pipeline does not need surface decoding to make progress.
+
+Crucially, every new boundary type introduced here must preserve AC's native drawing-versus-physics geometry split from day one, even though no physics consumer exists yet. This "physics witness" discipline is what keeps Phase 14 from becoming a retrofit.
+
+Ground-truth anchors for this phase:
+
+- [ACE/Source/ACE.Server/Physics/Common/Landblock.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/Common/Landblock.cs) — `init_static_objs()` shows how `LandblockInfo.Objects` and `Buildings` are consumed
+- [ACE/Source/ACE.Server/Physics/PhysicsObj.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/PhysicsObj.cs) — `makeObject` / `InitPartArrayObject` show DID dispatch
+- [ACE/Source/ACE.Server/Physics/Common/MasterDBMap.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/Common/MasterDBMap.cs) — `DivineType` proves dispatch is purely on the high byte of the DID
+- [ACE/Source/ACE.Server/Physics/PartArray.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/PartArray.cs) — `CreateMesh` / `CreateSetup` / `SetMeshID` / `SetSetupID` show the mesh-vs-setup leaf paths
+- [crates/holtburger-dat/src/landblock.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/landblock.rs) — `LandblockInfo`, `Stab`, `BuildInfo` are already decoded
+- [crates/holtburger-dat/src/file_type/setup_model.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/file_type/setup_model.rs) — `SetupModel` and `CylSphere` already decoded
+- [crates/holtburger-dat/src/file_type/gfx_obj.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/file_type/gfx_obj.rs) — `GfxObj` already decoded with both drawing and physics BSP trees
+
+Verified ID resolution chain (matches ACE 1:1):
+
+- `LandblockInfo.Objects[i] = Stab { id, frame }` and `LandblockInfo.Buildings[i].BuildInfo { model_id, frame, ... }` carry polymorphic DIDs
+- the high byte of the DID dispatches the load:
+  - `0x01XXXXXX` → `GfxObj` DID; ACE wraps it in a synthetic single-part setup via `Setup.MakeSimpleSetup`
+  - `0x02XXXXXX` → `SetupModel` DID; resolved via `Setup.Get`, exposing N parts where each part references a `GfxObj`
+  - other prefixes → animation-coerced setup (`did | 0x02000000`); not required for first-pass static scenery
+- a `SetupModel` carries per-part placement frames, scales, parent links, and `CylSphere` collision proxies
+- a `GfxObj` carries the actual `CVertexArray`, drawing polygons + drawing BSP, physics polygons + physics BSP, surface ids, and a sort center
+
+Phase 12.0 prerequisite — asset-shape cleanup (do this before any new resolution code lands):
+
+The current 3D adapter calls `holtburger_dat::HbaReader::open` directly ([apps/holtburger-3d/src-tauri/src/adapter.rs:558,597,655](/home/cluracan/code/holtburger/apps/holtburger-3d/src-tauri/src/adapter.rs)) and reimplements asset-source policy locally. Worse, the prepared-asset shape on the frontend ([apps/holtburger-3d/src/lib/assets/types.ts:41-57](/home/cluracan/code/holtburger/apps/holtburger-3d/src/lib/assets/types.ts)) carries flat sibling fields per asset kind (`terrainMesh: PreparedTerrainMesh | null`, `paletteKey`, `debugPrimitive`) that will not generalize to scenery, indoor cell geometry, textures, animations, manifests, etc. And the worker protocol ([apps/holtburger-3d/src/workers/asset-worker.ts:28-48](/home/cluracan/code/holtburger/apps/holtburger-3d/src/workers/asset-worker.ts)) is strictly one-shot: it receives a fully resolved `AssetLookupResponseDto` and posts back `asset-ready` or `asset-error`, with no facility to request follow-up assets.
+
+These three are the wrong abstractions to lock in before introducing `gfx-obj/*` and `setup-model/*` (which require dynamic DID lookup, polymorphic payload shapes, and inherently dependency-laden resolution).
+
+The canonical asset-substrate pattern is set by the TUI client ([apps/holtburger-cli/src/bin/tui.rs:548-556](/home/cluracan/code/holtburger/apps/holtburger-cli/src/bin/tui.rs), [apps/holtburger-cli/src/state.rs:61](/home/cluracan/code/holtburger/apps/holtburger-cli/src/state.rs)): the app constructs and owns `Arc<ContentRepository>` and queries it directly for runtime lookups. Core consumes a `&ContentRepository` only at startup via `ClientRuntimeBuilder::load_assets`. There is intentionally no asset message channel in core — `ClientCommand` and `ClientViewEvent` carry zero asset variants — so direct `ContentRepository` ownership *is* the golden path, not a workaround. However, `ContentRepository`'s current public API ([crates/holtburger-content/src/repository.rs:82](/home/cluracan/code/holtburger/crates/holtburger-content/src/repository.rs)) only exposes `read_asset<T: StaticResourceKey>`, which is enough for named bootstrap assets but not for the dynamic-key lookups (`gfx-obj/0x01XXXXXX`, `setup-model/0x02XXXXXX`, `cell-structure/<env-cell-id>`) that Phase 12 and Phase 13 will require. That gap must be closed in this prerequisite, not retrofitted later.
+
+Phase 12.0 splits into three reviewable sub-phases that ship in order. 12.0a unblocks 12.0b; 12.0b unblocks 12.0c; only after 12.0c lands may the rest of Phase 12 begin.
+
+A discipline that applies across all three sub-phases: **authoritative collision and physics interpretation stays Rust-side.** TypeScript prepared-payload shapes may carry capability flags, source refs, opaque physics-witness metadata (counts, byte spans, dat-side identifiers), and debug-only witnesses for tooling. They must not carry interpretable triangle-mesh / BSP traversal logic or anything a renderer would mistake for an authoritative collision query. Phase 14 brings authoritative collision into the spatial substrate Rust-side. Each sub-phase's acceptance includes verifying nothing it ships violates this rule.
+
+##### Phase 12.0a — `ContentRepository` dynamic-key lookup and adapter migration
+
+Scope: Rust-only. Adds the missing public primitive on the asset substrate and uses it to retire raw `HbaReader::open` from the 3D adapter. Touches no TypeScript and changes no boundary DTOs.
+
+Deliverables:
+
+- public dynamic-key lookup on `ContentRepository` that takes an arbitrary `ResourceKey<'_>` (or moral equivalent) and returns the underlying bytes plus enough provenance metadata for the adapter's existing source-description plumbing
+- explicit error contract for "key not present in any mount" and "key present but malformed," wired through the existing `Result` plumbing without inventing a new error taxonomy
+- `read_asset<T: StaticResourceKey>` reimplemented on top of the new primitive so we do not maintain two parallel resolvers
+- replace every raw `HbaReader::open` call site in `apps/holtburger-3d/src-tauri/src/adapter.rs` with a single `Arc<ContentRepository>` constructed via `ContentRepository::from_hba_path` or `from_hba_dir` at adapter startup
+- route every existing asset-family resolution path (terrain, env-cell metadata, environment / cell-structure stubs) through the new dynamic-key API; behavior is preserved exactly, no DTO changes
+
+Acceptance:
+
+- `ContentRepository` exposes a documented public dynamic-key lookup; unit tests cover hit, miss, and malformed-bytes cases against the repo-local fixture HBA
+- existing `read_asset<T>`-based call sites (TUI, character-gen, soul-emote catalog) continue to pass their tests unchanged because the shim is preserved
+- no `HbaReader::open` call remains in `apps/holtburger-3d/src-tauri/src/adapter.rs`
+- the adapter holds a single `Arc<ContentRepository>` and all asset-family resolution paths consume it
+- the asset-source description surfaced to the frontend (currently `"repo-local-hba"`) accurately reflects the underlying repository configuration so future layered mounts surface honestly without DTO changes
+- no TypeScript file changes; no boundary DTO changes
+
+##### Phase 12.0b — Discriminated `PreparedAssetPayload` taxonomy
+
+Scope: TypeScript-only. Refactors the prepared-asset shape into a real discriminated union without yet adding any new asset families. Depends on 12.0a only insofar as the adapter is now stable on `ContentRepository`; otherwise self-contained.
+
+Deliverables:
+
+- refactor `PreparedAssetRecord` so payload shape is a discriminated union organized by *asset domain*, not by *visual role*; the current flat sibling fields (`terrainMesh`, `paletteKey`, `debugPrimitive`) get folded into per-variant payload bodies
+- top-level domains, at minimum, cover what is needed by Phase 12 and 13 plus reasonable headroom: geometry (terrain, gfx-obj-derived, cell-structure-derived), composite (setup-model, environment), surface / texture / palette, manifest (e.g., appearance), and metadata (env-cell, landblock-info)
+- composition rule: variants that depend on other assets reference them by id, not inline; e.g., the future setup-model variant references gfx-obj geometry variants by id so the same gfx-obj feeds both standalone and setup-derived consumers without duplication
+- update all existing prepared-asset call sites (`frontend-state.ts`, `WorldDisplay.svelte`, `model.ts`) to switch on the new discriminator rather than null-checking shared sibling fields
+- migrate the corresponding tests in `apps/holtburger-3d/src/app/frontend-state.test.ts` and `apps/holtburger-3d/src/lib/world-display/model.test.ts` to the new shape
+
+Acceptance:
+
+- `PreparedAssetRecord` is gone or relegated to a thin compatibility wrapper; its replacement is a discriminated `PreparedAssetPayload` with explicit per-variant payload bodies and zero sibling-field padding for non-applicable kinds
+- existing asset-channel behavior (terrain, indoor env-cell metadata, environment / cell-structure stubs) is functionally unchanged; the refactor reshapes types, not behavior
+- TypeScript and Svelte tests pass against the new shape; no new asset families are introduced in this sub-phase
+- nothing in the new payload shape leaks authoritative collision interpretation into TypeScript
+
+##### Phase 12.0c — Dependency-orchestration protocol decision and any required protocol changes
+
+Scope: Plan-time decision plus whichever code changes the chosen option requires. Depends on 12.0b so the chosen orchestration model can be expressed cleanly in the new payload taxonomy.
+
+Decision: pick exactly one of the following before any setup-model code begins, and amend this section of the plan with the choice and its trade-offs:
+
+- **Host aggregate**: the host-side adapter eagerly resolves `setup-model` → per-part `gfx-obj` dependencies and returns one composite payload. Pros: workers stay one-shot. Cons: payload size grows; dependency caching becomes a host concern; partial reuse of shared `gfx-obj`s across multiple `setup-model`s is harder.
+- **Main-thread orchestration**: the worker emits the parsed `setup-model` with its part DID list and stops; the main thread schedules follow-up `gfx-obj` requests and stitches results in scene-context state. Pros: workers stay one-shot; per-asset cache reuse is natural. Cons: more main-thread coordination; partial-ready states must be modeled.
+- **Worker request-back**: extend the worker protocol with a third inbound message kind (`asset-fragment-ready` or similar) and a new outbound message kind (`worker-fetch-request`) proxied by the main thread. Pros: dependency walks live with the decoder. Cons: protocol complexity; back-pressure / cancellation semantics require explicit design.
+
+Deliverables:
+
+- the chosen option is recorded in this plan section with its trade-offs and the reasoning for the choice
+- if the choice is "host aggregate": adapter-side aggregate-payload contracts are added to support the future setup-model resolution path; no worker changes; no new asset families introduced yet
+- if the choice is "main-thread orchestration": scene-context state model gains explicit partial-ready / awaiting-dependency states; asset-channel API gains a way to express "this prepared asset depends on these other asset ids before it can be applied"; no worker protocol changes
+- if the choice is "worker request-back": worker protocol grows the new inbound + outbound message kinds with documented back-pressure and cancellation semantics; main-thread proxy implementation lands; tests cover request fan-out and error propagation
+- regardless of choice, document how the existing one-shot terrain path remains valid under the new model so 12.0c is not a regression for already-shipped behavior
+
+Acceptance:
+
+- the orchestration choice is recorded in the plan and the corresponding scoped code changes have shipped
+- no new asset families (`gfx-obj/*`, `setup-model/*`, `cell-structure/*`, `environment/*` real payloads) are introduced in this sub-phase; that is the work of the rest of Phase 12 and Phase 13
+- the new mechanism is exercised by at least one test that simulates a multi-asset dependency walk end-to-end against synthetic inputs
+- nothing in the new mechanism leaks authoritative collision interpretation into TypeScript
+
+Once 12.0a, 12.0b, and 12.0c have all landed, the remainder of Phase 12 (the actual `gfx-obj/*` / `setup-model/*` work and outdoor scenery rendering) may begin.
 
 Purpose:
 
-- introduce the first real shared non-world constraint use case, such as camera collision or sensor-style helpers, only once the browser has enough real world geometry and scene semantics to justify it
+- introduce `gfx-obj/*` and `setup-model/*` as first-class asset families on the dedicated asset channel, with boundary payloads that preserve AC's native drawing-versus-physics split
+- surface outdoor static scenery placements (`LandblockInfo.Objects` and `Buildings`) on the runtime channel as scenery instances tied to their owning landblock
+- prove the full landblock → setup → gfx leaf chain end-to-end by rendering at least one real non-terrain instance in browser mode
+- keep materials and textures explicitly out of scope; use per-object debug coloring derived from a stable hash of the `setup-model/gfx-obj` id so neighboring instances are visually distinguishable
+- preserve the free fly-cam; do not introduce camera collision or any spatial-solver consumer in this phase
+
+Primary deliverables:
+
+- `gfx-obj/*` and `setup-model/*` asset family discriminants in the host adapter contracts and the frontend asset channel
+- prepared boundary payloads that explicitly name the AC-shaped split: `setup-model` carries `parts: [{ gfx_obj_id, placement_frame, scale, cyl_spheres, parent_index, ... }]`; `gfx-obj` carries `{ vertex_array, drawing_polygons, drawing_bsp, physics_polygons, physics_bsp, surface_refs, sort_center }`
+- runtime DTO expansion publishing per-landblock `scenery_instances: [{ source_did, frame, instance_id, owning_landblock_id }]` derived from `LandblockInfo.Objects` (and a parallel `building_instances` derived from `Buildings`) for the focus + neighborhood landblocks already covered by Phase 7's outdoor ring
+- worker-side decode that, for each individual asset request, parses the resolved bytes into the appropriate decoded payload (gfx-obj geometry intermediates, setup-model parts list, etc.) and emits Three.js-ready `BufferGeometry` data; the cross-asset dependency walk (setup-model → per-part gfx-obj) is handled per the orchestration option chosen in Phase 12.0 deliverable (4), not by the worker fetching follow-ups itself
+- frontend scene-context model gains a `sceneryInstanceSet` alongside the existing terrain ring, with explicit cache eviction tied to landblock residency
+- `WorldDisplay` renders scenery via `InstancedMesh` per unique `gfx-obj` so duplicates of the same model do not multiply draw calls
+- a deterministic per-instance debug color derived from a stable hash of `(setup_id, gfx_obj_id, part_index)` so the first-pass scene reads as recognizable distinct objects without requiring `Surface`/`Texture` decode
 
 Acceptance criteria:
 
-- the first concrete non-world constraint use case is proven against shared `SpatialBody` semantics
-- the phase is driven by a real browser need instead of speculative shared-crate design
+- a real Tauri run renders at least one outdoor landblock with both terrain and at least one decoded scenery instance from repo-local `LandblockInfo` data
+- duplicate scenery instances of the same source DID share a single uploaded `BufferGeometry` and render through `InstancedMesh`
+- the boundary payload for both `setup-model/*` and `gfx-obj/*` carries the AC-shaped drawing-versus-physics split intact, including `physics_polygons`, `physics_bsp`, and `cyl_spheres`, even though no consumer reads them
+- the scenery cache evicts in step with landblock residency rather than growing unboundedly
+- camera behavior is unchanged: free fly-cam everywhere, no collision, no solver participation
+- ray pick continues to work on entity DTOs as today; this phase does not migrate it onto the spatial substrate
+- frontend rendering uses per-instance debug coloring; no `Surface`/`Texture` decode is introduced
 
-### Appended Fast-Follow: Shared SpatialBody Constraint And Non-World Body Semantics
+Phase 12 design guardrails:
 
-Purpose: extend the shared `SpatialBody` model to cover non-world solving participants such as camera bodies, sensors, and other frontend-requested spatial helpers without creating a parallel spatial-probe abstraction.
+- do not collapse drawing geometry and physics geometry into a single "mesh" payload at the boundary; these are distinct sub-structures in AC and must remain distinct in DTOs
+- do not push DID dispatch *policy* into the host adapter unless the dependency-orchestration option chosen in Phase 12.0 deliverable (4) is "host aggregate"; under "main-thread orchestration" or "worker request-back," the adapter remains a thin pass-through that resolves DIDs to repo-local bytes and dispatch lives with the decoder
+- do not introduce a `gfx-obj` instance abstraction in shared crates; instances live in app-local frontend scene state
+- do not invent a "scenery body" concept in `holtburger-world`; scenery instances are runtime-channel facts plus asset-channel payloads, nothing more
+- do not let the per-object debug coloring leak into shared types; it is a frontend rendering policy
 
-This phase is intentionally appended rather than pulled into the current browser-foundation phases.
+Phase Gate Review Before Phase 13:
 
-Why this is separate:
+- assess whether the `gfx-obj/*` and `setup-model/*` payload shapes are honest enough to also carry indoor `CellStruct`-derived geometry without renaming, since Phase 13 will reuse the same intermediate-to-`BufferGeometry` worker path
+- assess whether the runtime channel's scenery-instance shape generalizes cleanly to indoor static-object stabs published via `EnvCell.static_objects`
+- assess whether per-instance debug coloring is good enough to defer materials further or whether a minimum `Surface` decode should be folded into Phase 13
+- decide whether the physics-witness fields (`physics_bsp`, `cyl_spheres`) need any shared documentation pass before Phase 14 starts attaching real consumers
 
-- the current plan only proves an app-local camera-hint seam and a debug authority-sensitive query; it does not yet exercise real shared constraint solving for non-world bodies
-- `holtburger-core` and `holtburger-world` already lean heavily on `SpatialBody` as the solving medium, so if we broaden that medium it should happen deliberately against real use cases rather than by guessing from placeholder camera behavior
-- the risk here is semantic, not just mechanical: we need one body-solving pipeline without accidentally making every helper body look like an authoritative world member
+Phase 12 testing expectations:
+
+- Rust adapter tests covering scenery-instance derivation from `LandblockInfo`, including the Objects + Buildings split
+- Rust adapter tests covering `setup-model/*` and `gfx-obj/*` request resolution against a fixture HBA
+- worker tests covering DID high-byte dispatch (gfx-obj vs setup-model branches) for the per-asset decode path, plus the synthetic single-part wrapper case for bare `gfx-obj` inputs
+- worker tests covering `GfxObj` polygon-set → `BufferGeometry` triangulation for at least one non-trivial fixture
+- frontend store tests covering the scenery-instance cache and landblock-residency-driven eviction
+- one component or integration test that confirms `InstancedMesh` deduplication occurs for duplicate source DIDs
+
+#### Phase 13: `Environment` / `CellStruct` Decoder And First Indoor Interior Render
+
+Status: planned.
+
+Closes the Phase 11 indoor-gap debt by adding the missing decoder for indoor cell geometry and rendering the first real indoor interior. Reuses the entire Phase 12 mesh pipeline because `CellStruct` is structurally analogous to `GfxObj` from a render-prep standpoint.
+
+Ground-truth anchors for this phase:
+
+- [ACE/Source/ACE.DatLoader/FileTypes/Environment.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Environment.cs) — `Environment = { Id, Cells: Map<u32, CellStruct> }`
+- [ACE/Source/ACE.DatLoader/Entity/CellStruct.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CellStruct.cs) — `CellStruct = { VertexArray, Polygons, Portals, CellBSP, PhysicsPolygons, PhysicsBSP, optional DrawingBSP }`
+- [ACViewer/ACViewer/Render/R_EnvCell.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/R_EnvCell.cs) and [ACViewer/ACViewer/Render/R_Environment.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/R_Environment.cs) — reference render path for indoor cells
+- [crates/holtburger-dat/src/file_type/env_cell.rs](/home/cluracan/code/holtburger/crates/holtburger-dat/src/file_type/env_cell.rs) — `EnvCell` already references `environment_id` and `cell_structure`
+
+Purpose:
+
+- add `Environment` and `CellStruct` decoders to `holtburger-dat` so `environment/*` and `cell-structure/*` asset families can stop being reference-only metadata
+- promote the boundary payloads for `environment/*` and `cell-structure/*` to honest decoded shapes that mirror Phase 12's drawing-versus-physics discipline
+- render the first real indoor interior in browser mode, replacing the current Phase 11 indoor visible-cell-set placeholder behavior with actual geometry
+- continue the physics-witness discipline: cell `PhysicsBSP` and `CellBSP` plus portal stabs travel the boundary even though nothing solves against them
+- continue to defer materials; indoor surfaces use the same per-instance debug coloring Phase 12 introduced
+
+Primary deliverables:
+
+- `Environment` decoder in `holtburger-dat` producing `Environment { id, cells: HashMap<u32, CellStruct> }`
+- `CellStruct` decoder producing `CellStruct { vertex_array, polygons, portals, cell_bsp, physics_polygons, physics_bsp, drawing_bsp: Option<_> }`
+- adapter changes promoting `environment/*` and `cell-structure/*` from stubs to real payloads carrying that decoded structure
+- worker reuses the Phase 12 polygon-set → `BufferGeometry` path for indoor cell geometry, choosing `DrawingBSP` polygons when present and falling back to `Polygons` otherwise (mirroring ACViewer)
+- `WorldDisplay` renders indoor visible-cell geometry per `EnvCell.visible_cells`; the existing indoor scene-context drives membership without introducing new shared-crate semantics
+- indoor `EnvCell.static_objects` Stabs flow through the Phase 12 scenery-instance path so the indoor scene picks up decoration objects at no extra renderer cost
+
+Acceptance criteria:
+
+- a real Tauri run loads an indoor env-cell from repo-local data, decodes its `CellStruct`-backed geometry, and renders the visible-cell set with debug coloring
+- `environment/*` and `cell-structure/*` boundary payloads carry the full drawing + physics + cell BSP split, including portals, even though no consumer queries them yet
+- `WorldDisplay`'s indoor branch no longer carries an indoor-gap or visible-cell-set placeholder
+- outdoor terrain and Phase 12 scenery rendering remain coherent when the browser focus moves between outdoor landblocks and indoor env-cells
+- the Phase 12 mesh pipeline is genuinely reused; no parallel indoor-only geometry intermediate is introduced
+- the free fly-cam still works in indoor scenes; no portal-driven visibility culling is enforced yet
+
+Phase 13 design guardrails:
+
+- do not enforce portal-driven visibility culling in this phase; expose portals on the boundary as data, leave culling for the spatial follow-up
+- do not derive indoor visible-cell relevance from frontend-local topology guesses; continue to rely on authoritative `EnvCell.visible_cells`
+- do not let `cell-structure/*` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should look like "vertex array + polygons + drawing BSP + physics BSP + portals where applicable"
+- do not introduce shared-crate types for cell-structure consumers; this stays an asset-channel + frontend-scene concern
+
+Phase Gate Review Before Phase 14:
+
+- assess whether the cumulative physics-witness data (per-`gfx-obj` physics BSP, `setup-model` cyl-spheres, per-`cell-struct` physics BSP and portals) is rich enough that Phase 14 becomes a wiring exercise rather than a decode exercise
+- assess whether camera collision against indoor walls (not outdoor terrain) is the right first non-world body driver, given that browser mode keeps a free cam by design
+- decide whether materials should be promoted to a parallel phase before or after Phase 14
+
+Phase 13 testing expectations:
+
+- `holtburger-dat` round-trip tests for `Environment` and `CellStruct` against fixture data
+- adapter tests covering `environment/*` and `cell-structure/*` request resolution
+- worker tests covering `CellStruct` polygon-set → `BufferGeometry` parity with the Phase 12 path
+- frontend tests covering indoor visible-cell-set rendering replacing the placeholder branch
+
+#### Phase 14: Shared `SpatialBody` Expansion And First Non-World Body Consumer
+
+Status: planned. Replaces and supersedes the old "Phase 12 = SpatialBody expansion" stub.
+
+By the time this phase starts, the world has terrain (Phase 9–10), outdoor scenery with physics-witness data (Phase 12), and indoor cell geometry with physics BSP plus portals (Phase 13). The boundary types already carry the physics surfaces a non-world body would need to query. A real driver also exists: client mode (when introduced) will need a third-person camera that occludes against indoor walls and scenery without becoming an authoritative world member.
+
+The expansion must therefore land as wiring, not as design-from-scratch.
 
 Ground-truth anchors for this phase:
 
@@ -1612,27 +1815,70 @@ Ground-truth anchors for this phase:
 - [crates/holtburger-world/src/spatial/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/types.rs)
 - [crates/holtburger-world/src/spatial/scene.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/scene.rs)
 - [crates/holtburger-core/src/client/simulation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/simulation.rs)
+- the Phase 12 and Phase 13 physics-witness payloads as the real surface population the new bodies query against
+
+Purpose:
+
+- expand shared `SpatialBody` so it can represent both authoritative world members and non-world solving participants under one solver substrate
+- prove the expansion against one real non-world body case driven by an actual visible need in the 3D app, not by speculation
+- promote the existing `SpatialBodyId::Ephemeral` variant from a tests-only construct to a first-class non-world body identity with explicit semantics for role, world-membership participation, and collision or query masks
 
 Deliverables:
 
-- document the intended meaning of shared `SpatialBody` after expansion: one solving substrate that can represent both authoritative world members and non-world solving bodies
-- identify the minimum additional body semantics needed for non-world bodies, such as role or kind, world-membership participation, and collision or query masks
-- decide whether frontend-requested non-world bodies should be persistent registered bodies, stateless solve requests, or a staged progression between those two models
-- implement the first real shared constraint path using expanded `SpatialBody` semantics rather than a camera-only path, ideally with one non-world body case that proves the seam end to end
-- add shared tests that prove non-world bodies can participate in solving without being mistaken for authoritative world membership or breaking existing local-player and entity solving behavior
+- shared `SpatialBody` semantics covering role / kind, world-membership participation, and collision or query masks, documented in shared crate docs and reflected in `holtburger-world` types
+- the first real non-world body consumer end-to-end (most likely client-mode third-person camera collision against indoor walls and scenery surfaced by Phase 13's physics-witness payloads)
+- shared tests proving non-world bodies can participate in solving without being mistaken for authoritative world membership and without breaking existing local-player and entity solving behavior
+- explicit documentation of how the Phase 12 and Phase 13 physics-witness payloads are wired into the spatial substrate at this point, so future renderer-side queries do not need to reinvent that bridge
 
-Acceptance Criteria:
+Acceptance criteria:
 
 - the shared solver still talks in `SpatialBody` terms for both world-member and non-world solving cases
-- at least one non-world body use case, such as camera collision or a sensor-style constraint, is implemented without introducing a separate parallel abstraction
-- the additional semantics needed for non-world bodies are explicit in shared code and docs rather than hidden behind ad hoc exceptions
+- at least one non-world body use case is implemented without introducing a separate parallel abstraction
+- additional semantics needed for non-world bodies are explicit in shared code and docs rather than hidden behind ad hoc exceptions
 - existing authoritative runtime-body feeds and local-player solving behavior remain correct after the expansion
+- browser mode is unaffected: free fly-cam stays free; the new body kind is exercised only by the new consumer (e.g., client-mode third-person cam)
 
-Phase Gate Review Before Terrain Or Broader Spatial Features:
+Phase 14 guardrails:
 
-- assess whether the expanded `SpatialBody` semantics are honest enough to carry future camera collision, sensors, and similar helpers without additional parallel abstractions
-- assess whether non-world bodies should appear in runtime-body view feeds or remain solver-local unless specifically surfaced
-- decide whether the next step should focus on camera collision, richer sensors, editor-style helpers, or terrain-aware constraints
+- do not migrate ray pick onto the spatial substrate as part of this phase unless the new body semantics make it the obvious move; ray pick stays out-of-scope unless it is the chosen first consumer
+- do not retrofit `SpatialBody` shape merely to suit one consumer; keep the role / mask vocabulary general enough that the next consumer slots in without renaming
+- do not start surfacing non-world bodies in runtime-body view feeds unless a real consumer needs them; default is solver-local
+
+Phase Gate Review Before Any Broader Spatial Or Renderer Features:
+
+- assess whether the expanded `SpatialBody` semantics are honest enough to carry future camera collision, sensors, and editor-style helpers without further parallel abstractions
+- decide whether the next step should focus on richer client-mode controls, materials and surface decoding, animation, or networked authoritative simulation hookup
+
+#### Materials And Surface Decoding Track (Parallel, Not Blocking Phases 12–14)
+
+Decoding `Surface`, `Texture`, and `Palette` and adding `texture/*` and `surface/*` asset families is a meaningful workstream of its own, but Phases 12 and 13 explicitly avoid it by using deterministic per-instance debug coloring. The materials track can interleave any time after Phase 12. It should not be folded into the renderable-variety phases unless a Phase 12 or Phase 13 gate review concludes that flat debug coloring is actively obscuring renderer correctness.
+
+#### Cross-Phase Boundary Guardrail: Dual-Source DTO Shape (Applies To Phases 12, 13, 14)
+
+Browser mode in the 3D app is currently the only source feeding the boundary, but it must not be the only conceivable source. When client mode lands later, `holtburger-core::ClientRuntime` will become a parallel emitter of the same kinds of facts: scenery instances, indoor cell residency, and (eventually) authoritative entity bodies. Phases 12 / 13 / 14 must therefore shape every new boundary DTO so that it is **emittable from either a static browser-mode adapter or a `ClientRuntime`-driven adapter, without renaming and without policy bleed**.
+
+Why this matters now even though no `ClientRuntime` integration is planned for these phases: once the 3D frontend's scene-context model and asset-cache eviction policies are written against a particular DTO shape, that shape is hard to change. Designing in dual-source compatibility costs almost nothing if done up front and prevents a later "ClientRuntime adapter" from being a parallel rewrite of the browser adapter rather than a peer of it.
+
+Concrete rules:
+
+- runtime-channel DTOs (scenery instances, building instances, indoor visible-cell residency, etc.) must describe the *fact* — "an instance of source DID X with frame Y belongs to landblock Z at time T" — without baking in *who* observed the fact or *how* it was discovered (filesystem walk, server view event, predicted simulation result)
+- DTO shape must not assume the source has on-demand random access to disk; a `ClientRuntime`-fed adapter only knows what the server has told it about, so any "and here is its full neighborhood pre-resolved" semantics belong to a separate query path, not to the runtime DTO
+- DTO shape must not assume the source has authoritative ground truth either; a static browser adapter is reading repo-local archives and is just as valid a source as a server stream, so DTOs must not require server-only fields like authoritative ownership tokens or session-scoped guids
+- asset-channel DTOs (`gfx-obj/*`, `setup-model/*`, `cell-structure/*`, `environment/*`) are inherently dual-source already because both adapters resolve them through the same `ContentRepository`; no additional discipline is required there beyond preserving the AC-shaped drawing-versus-physics split
+- frontend scene-context state must subscribe to typed channels rather than inspect the adapter directly, so that swapping the adapter implementation under it does not require frontend changes
+- Phase 14's non-world body design must in particular keep the new `SpatialBody` semantics describable in terms of either source: a browser-mode camera body and a future client-mode third-person camera body should both be expressible without one being a special case of the other
+
+Verification at each phase gate:
+
+- Phase 12 gate review: confirm that the new scenery-instance and building-instance runtime DTOs would still be accurate facts if a future `ClientRuntime` adapter emitted them from server-side static-object spawn events instead of repo-local `LandblockInfo` reads
+- Phase 13 gate review: confirm that the indoor visible-cell-set and `EnvCell.static_objects` flows would still be accurate facts if a future `ClientRuntime` adapter emitted them from server-side cell-residency events instead of static `EnvCell.visible_cells` reads
+- Phase 14 gate review: confirm that the expanded `SpatialBody` semantics describe the new non-world body kinds in source-neutral terms, so a future `ClientRuntime`-fed scene can register the same body kinds without inventing new variants
+
+This guardrail is a discipline, not a deliverable: it does not require building a `ClientRuntime` adapter during these phases. It only requires that nothing introduced during these phases would *prevent* one from being added later as a peer of the browser adapter.
+
+### Appended Fast-Follow: Shared SpatialBody Constraint And Non-World Body Semantics
+
+Superseded by the new Phase 14. The original fast-follow assumed the shared `SpatialBody` expansion would land before visible world geometry was rich enough to drive it. The post-Phase 11 readiness check inverted that: physics-witness data must travel the boundary through Phase 12 (outdoor scenery) and Phase 13 (indoor cell geometry) first so that Phase 14 lands as wiring rather than design-from-scratch. See "Phase 14: Shared `SpatialBody` Expansion And First Non-World Body Consumer" above for the active definition of done.
 
 ### Appended Fast-Follow: Local Scene Residency And Visible-Cell Semantics
 

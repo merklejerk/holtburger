@@ -3,13 +3,9 @@ import type {
 	AssetLookupResponseDto,
 	CameraHintAckDto,
 	CameraHintDto,
-	FrontendStateFeedDto,
-	HostBoundaryOverviewDto,
 	HostBoundarySnapshot,
-	LifecycleStateDto,
 	RayPickRequestDto,
 	RayPickResponseDto,
-	RuntimeBatchDto,
 	RuntimeNotificationEnvelopeDto,
 } from "./contracts";
 import {
@@ -65,7 +61,10 @@ export async function readHostBoundarySnapshot(): Promise<HostBoundarySnapshot> 
 			invokeCommand("get_lifecycle_state", lifecycleStateDtoSchema),
 			invokeCommand("get_runtime_batch", runtimeBatchDtoSchema),
 			invokeCommand("get_view_model_feed", frontendStateFeedDtoSchema),
-			invokeCommand("get_host_boundary_overview", hostBoundaryOverviewDtoSchema),
+			invokeCommand(
+				"get_host_boundary_overview",
+				hostBoundaryOverviewDtoSchema,
+			),
 		]);
 
 	return {
@@ -82,7 +81,9 @@ export async function lookupAsset(
 ): Promise<AssetLookupResponseDto> {
 	requireTauriRuntime();
 
-	return invokeCommand("lookup_asset", assetLookupResponseDtoSchema, { request });
+	return invokeCommand("lookup_asset", assetLookupResponseDtoSchema, {
+		request,
+	});
 }
 
 export async function listenForRuntimeLifecycle(
@@ -115,5 +116,7 @@ export async function resolveRayPick(
 ): Promise<RayPickResponseDto> {
 	requireTauriRuntime();
 
-	return invokeCommand("resolve_ray_pick", rayPickResponseDtoSchema, { request });
+	return invokeCommand("resolve_ray_pick", rayPickResponseDtoSchema, {
+		request,
+	});
 }

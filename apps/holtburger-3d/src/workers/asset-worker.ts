@@ -21,6 +21,7 @@ import type {
 	AssetResidencyKind,
 	PreparedAssetRecord,
 	PreparedAssetProvenance,
+	PreparedAssetPayload,
 	PreparedTerrainMesh,
 	PreparedTerrainTriangle,
 } from "../lib/assets/types";
@@ -52,27 +53,37 @@ export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
 ): PreparedAssetRecord {
-	const terrainPayload = terrainLandblockPayloadDtoSchema.safeParse(response.payload);
+	const terrainPayload = terrainLandblockPayloadDtoSchema.safeParse(
+		response.payload,
+	);
 	if (terrainPayload.success) {
 		return prepareTerrainLandblock(request, response, terrainPayload.data);
 	}
 
-	const indoorEnvCellPayload = indoorEnvCellPayloadDtoSchema.safeParse(response.payload);
+	const indoorEnvCellPayload = indoorEnvCellPayloadDtoSchema.safeParse(
+		response.payload,
+	);
 	if (indoorEnvCellPayload.success) {
 		return prepareIndoorEnvCell(request, response, indoorEnvCellPayload.data);
 	}
 
-	const environmentPayload = environmentPayloadDtoSchema.safeParse(response.payload);
+	const environmentPayload = environmentPayloadDtoSchema.safeParse(
+		response.payload,
+	);
 	if (environmentPayload.success) {
 		return prepareEnvironment(request, response, environmentPayload.data);
 	}
 
-	const cellStructurePayload = cellStructurePayloadDtoSchema.safeParse(response.payload);
+	const cellStructurePayload = cellStructurePayloadDtoSchema.safeParse(
+		response.payload,
+	);
 	if (cellStructurePayload.success) {
 		return prepareCellStructure(request, response, cellStructurePayload.data);
 	}
 
-	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(response.payload);
+	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(
+		response.payload,
+	);
 	if (appearancePayload.success) {
 		return prepareAppearanceManifest(request, response, appearancePayload.data);
 	}
@@ -87,12 +98,26 @@ export function prepareAssetPayload(
 	return {
 		request,
 		response,
-		assetKind: assetKind === "visual-asset-stub" ? "visual-asset-stub" : "unknown",
-		residencyKind,
-		debugPrimitive,
-		paletteKey,
-		provenance,
-		terrainMesh: null,
+		payload:
+			assetKind === "visual-asset-stub"
+				? {
+						kind: "visual-asset-stub",
+						sourceAssetKind: provenance.sourceAssetKind,
+						residencyKind,
+						provenance,
+						debugPresentation: {
+							primitive: debugPrimitive,
+							paletteKey,
+						},
+					}
+				: createUnknownAssetPayload({
+						rawKind: assetKind,
+						sourceAssetKind: provenance.sourceAssetKind,
+						residencyKind,
+						debugPrimitive,
+						paletteKey,
+						provenance,
+					}),
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -105,12 +130,24 @@ function prepareIndoorEnvCell(
 	return {
 		request,
 		response,
-		assetKind: "indoor-env-cell",
-		residencyKind: payload.residencyKind,
-		debugPrimitive: "indoor-env-cell-metadata",
-		paletteKey: `env-cell-${payload.envCellId.toString(16).padStart(8, "0")}`,
-		provenance: parseProvenance(payload.provenance),
-		terrainMesh: null,
+		payload: {
+			kind: "indoor-env-cell",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			debugPresentation: {
+				primitive: "indoor-env-cell-metadata",
+				paletteKey: `env-cell-${payload.envCellId.toString(16).padStart(8, "0")}`,
+			},
+			envCellId: payload.envCellId,
+			environmentId: payload.environmentId,
+			cellStructureId: payload.cellStructureId,
+			visibleCellIds: payload.visibleCellIds,
+			seenOutside: payload.seenOutside,
+			surfaceIds: payload.surfaceIds,
+			portalCount: payload.portalCount,
+			staticObjectCount: payload.staticObjectCount,
+		},
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -123,12 +160,18 @@ function prepareEnvironment(
 	return {
 		request,
 		response,
-		assetKind: "environment",
-		residencyKind: payload.residencyKind,
-		debugPrimitive: "environment-reference",
-		paletteKey: `environment-${payload.environmentId.toString(16).padStart(8, "0")}`,
-		provenance: parseProvenance(payload.provenance),
-		terrainMesh: null,
+		payload: {
+			kind: "environment",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			debugPresentation: {
+				primitive: "environment-reference",
+				paletteKey: `environment-${payload.environmentId.toString(16).padStart(8, "0")}`,
+			},
+			environmentId: payload.environmentId,
+			cellStructureIds: payload.cellStructureIds,
+		},
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -141,12 +184,23 @@ function prepareCellStructure(
 	return {
 		request,
 		response,
-		assetKind: "cell-structure",
-		residencyKind: payload.residencyKind,
-		debugPrimitive: "cell-structure-summary",
-		paletteKey: `cell-structure-${payload.cellStructureId.toString(16).padStart(4, "0")}`,
-		provenance: parseProvenance(payload.provenance),
-		terrainMesh: null,
+		payload: {
+			kind: "cell-structure",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			debugPresentation: {
+				primitive: "cell-structure-summary",
+				paletteKey: `cell-structure-${payload.cellStructureId.toString(16).padStart(4, "0")}`,
+			},
+			environmentId: payload.environmentId,
+			cellStructureId: payload.cellStructureId,
+			polygonCount: payload.polygonCount,
+			portalCount: payload.portalCount,
+			hasCellBsp: payload.hasCellBsp,
+			hasPhysicsBsp: payload.hasPhysicsBsp,
+			hasDrawingBsp: payload.hasDrawingBsp,
+		},
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -159,12 +213,14 @@ function prepareAppearanceManifest(
 	return {
 		request,
 		response,
-		assetKind: "unknown",
-		residencyKind: parseResidencyKind(payload.residencyKind),
-		debugPrimitive: payload.debugPrimitive,
-		paletteKey: payload.paletteKey,
-		provenance: parseProvenance(payload.provenance),
-		terrainMesh: null,
+		payload: createUnknownAssetPayload({
+			rawKind: payload.kind,
+			sourceAssetKind: payload.provenance.sourceAssetKind,
+			residencyKind: parseResidencyKind(payload.residencyKind),
+			debugPrimitive: payload.debugPrimitive,
+			paletteKey: payload.paletteKey,
+			provenance: parseProvenance(payload.provenance),
+		}),
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -184,25 +240,68 @@ function prepareTerrainLandblock(
 	const heights = payload.heights;
 	const terrainTypes = payload.terrainTypes;
 	if (heights.length !== gridSize * gridSize) {
-		throw new Error("Terrain payload must provide 81 height samples for a landblock.");
+		throw new Error(
+			"Terrain payload must provide 81 height samples for a landblock.",
+		);
 	}
 	if (terrainTypes.length !== gridSize * gridSize) {
-		throw new Error("Terrain payload must provide 81 terrain-type samples for a landblock.");
+		throw new Error(
+			"Terrain payload must provide 81 terrain-type samples for a landblock.",
+		);
 	}
 
-	const terrainMesh = buildTerrainMesh(landblockId, gridSize, tileSize, heights, terrainTypes);
+	const terrainMesh = buildTerrainMesh(
+		landblockId,
+		gridSize,
+		tileSize,
+		heights,
+		terrainTypes,
+	);
 	const provenance = parseProvenance(payload.provenance);
 
 	return {
 		request,
 		response,
-		assetKind: "terrain-landblock",
-		residencyKind: parseResidencyKind(payload.residencyKind),
-		debugPrimitive: "terrain-landblock-mesh",
-		paletteKey: `terrain-${landblockId.toString(16).padStart(8, "0")}`,
-		provenance,
-		terrainMesh,
+		payload: {
+			kind: "terrain-landblock",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: parseResidencyKind(payload.residencyKind),
+			provenance,
+			debugPresentation: {
+				primitive: "terrain-landblock-mesh",
+				paletteKey: `terrain-${landblockId.toString(16).padStart(8, "0")}`,
+			},
+			terrainMesh,
+		},
 		preparedAt: new Date().toISOString(),
+	};
+}
+
+function createUnknownAssetPayload({
+	rawKind,
+	sourceAssetKind,
+	residencyKind,
+	debugPrimitive,
+	paletteKey,
+	provenance,
+}: {
+	rawKind: string;
+	sourceAssetKind: string | null;
+	residencyKind: AssetResidencyKind;
+	debugPrimitive: string;
+	paletteKey: string;
+	provenance: PreparedAssetProvenance;
+}): PreparedAssetPayload {
+	return {
+		kind: "unknown",
+		rawKind,
+		sourceAssetKind,
+		residencyKind,
+		provenance,
+		debugPresentation: {
+			primitive: debugPrimitive,
+			paletteKey,
+		},
 	};
 }
 
@@ -261,12 +360,10 @@ function buildTerrainMesh(
 			const bottomRight = bottomLeft + 1;
 			const terrainType = normalizedTerrainTypes[topLeft] ?? 0;
 			const averageHeight =
-				(
-					normalizedHeights[topLeft] +
+				(normalizedHeights[topLeft] +
 					normalizedHeights[topRight] +
 					normalizedHeights[bottomLeft] +
-					normalizedHeights[bottomRight]
-				) /
+					normalizedHeights[bottomRight]) /
 				4;
 
 			triangles.push({
@@ -350,7 +447,10 @@ if (
 ) {
 	workerScope.onmessage = (event: MessageEvent<AssetWorkerRequestMessage>) => {
 		try {
-			const asset = prepareAssetPayload(event.data.request, event.data.response);
+			const asset = prepareAssetPayload(
+				event.data.request,
+				event.data.response,
+			);
 			workerScope.postMessage?.({
 				type: "asset-ready",
 				asset,

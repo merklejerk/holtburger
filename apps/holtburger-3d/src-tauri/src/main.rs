@@ -1,7 +1,7 @@
 mod adapter;
 mod contracts;
 
-use adapter::{HostBoundaryAdapter, HostRuntimeService, RUNTIME_NOTIFICATION_EVENT};
+use adapter::{HostRuntimeService, RUNTIME_NOTIFICATION_EVENT};
 use contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto, CameraHintDto,
     FrontendStateFeedDto, HostBoundaryOverviewDto, LifecycleStateDto, RayPickRequestDto,
@@ -27,13 +27,18 @@ fn get_view_model_feed(runtime: tauri::State<'_, HostRuntimeService>) -> Fronten
 }
 
 #[tauri::command]
-fn lookup_asset(request: AssetLookupRequestDto) -> AssetLookupResponseDto {
-    HostBoundaryAdapter::asset_lookup(request)
+fn lookup_asset(
+    runtime: tauri::State<'_, HostRuntimeService>,
+    request: AssetLookupRequestDto,
+) -> AssetLookupResponseDto {
+    runtime.asset_lookup(request)
 }
 
 #[tauri::command]
-fn get_host_boundary_overview() -> HostBoundaryOverviewDto {
-    HostBoundaryAdapter::boundary_overview()
+fn get_host_boundary_overview(
+    runtime: tauri::State<'_, HostRuntimeService>,
+) -> HostBoundaryOverviewDto {
+    runtime.boundary_overview()
 }
 
 #[tauri::command]
@@ -75,9 +80,10 @@ fn main() {
                 loop {
                     interval.tick().await;
 
-                    if let Err(error) =
-                        app_handle.emit(RUNTIME_NOTIFICATION_EVENT, runtime.advance_runtime_notification())
-                    {
+                    if let Err(error) = app_handle.emit(
+                        RUNTIME_NOTIFICATION_EVENT,
+                        runtime.advance_runtime_notification(),
+                    ) {
                         eprintln!("failed to emit runtime notification: {error}");
                         break;
                     }

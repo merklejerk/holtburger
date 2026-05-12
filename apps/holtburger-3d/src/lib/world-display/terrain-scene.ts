@@ -1,5 +1,10 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
-import type { AssetChannelState, PreparedAssetRecord, PreparedTerrainMesh } from "../assets/types";
+import type {
+	AssetChannelState,
+	PreparedAssetRecord,
+	PreparedTerrainMesh,
+} from "../assets/types";
+import { isPreparedTerrainLandblock } from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
 import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
 
@@ -32,7 +37,8 @@ export function deriveTerrainSceneModel(
 	if (!runtimeBatch) {
 		return {
 			focusLandblockId: null,
-			statusText: "Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
+			statusText:
+				"Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
 			cacheText: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
 			dataSourceText: "No terrain provenance available yet.",
 			tiles: [],
@@ -42,27 +48,37 @@ export function deriveTerrainSceneModel(
 	if (runtimeBatch.residency.indoors) {
 		return {
 			focusLandblockId: null,
-			statusText: "Indoor runtime residency is active, so the outdoor Three.js terrain scene is intentionally dormant until env-cell scene ownership lands.",
+			statusText:
+				"Indoor runtime residency is active, so the outdoor Three.js terrain scene is intentionally dormant until env-cell scene ownership lands.",
 			cacheText: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(assetState.preparedByAssetId)} landblocks while indoor scene work remains deferred.`,
 			dataSourceText: describeTerrainDataSources([]),
 			tiles: [],
 		};
 	}
 
-	const focusLandblockId = deriveTerrainFocusLandblockId(runtimeBatch, browserDestination);
+	const focusLandblockId = deriveTerrainFocusLandblockId(
+		runtimeBatch,
+		browserDestination,
+	);
 	const focusX = (focusLandblockId >>> 24) & 0xff;
 	const focusY = (focusLandblockId >>> 16) & 0xff;
 	const tiles = Object.values(assetState.preparedByAssetId)
-		.filter((asset): asset is PreparedAssetRecord & { terrainMesh: PreparedTerrainMesh } =>
-			asset.assetKind === "terrain-landblock" && asset.terrainMesh !== null,
+		.filter(
+			(
+				asset,
+			): asset is PreparedAssetRecord & {
+				payload: { terrainMesh: PreparedTerrainMesh };
+			} => isPreparedTerrainLandblock(asset),
 		)
 		.map((asset) => {
-			const landblockId = asset.terrainMesh.landblockId;
+			const landblockId = asset.payload.terrainMesh.landblockId;
 			const landblockX = (landblockId >>> 24) & 0xff;
 			const landblockY = (landblockId >>> 16) & 0xff;
 			const offsetX = landblockX - focusX;
 			const offsetY = landblockY - focusY;
-			const landblockSpan = (asset.terrainMesh.gridSize - 1) * asset.terrainMesh.tileSize;
+			const landblockSpan =
+				(asset.payload.terrainMesh.gridSize - 1) *
+				asset.payload.terrainMesh.tileSize;
 
 			return {
 				assetId: asset.request.assetId,
@@ -73,11 +89,13 @@ export function deriveTerrainSceneModel(
 				offsetY,
 				worldOffsetX: offsetX * landblockSpan,
 				worldOffsetY: offsetY * landblockSpan,
-				mesh: asset.terrainMesh,
+				mesh: asset.payload.terrainMesh,
 				dataSource: inferTerrainDataSource(asset),
 			};
 		})
-		.filter((tile) => Math.abs(tile.offsetX) <= 1 && Math.abs(tile.offsetY) <= 1)
+		.filter(
+			(tile) => Math.abs(tile.offsetX) <= 1 && Math.abs(tile.offsetY) <= 1,
+		)
 		.sort((left, right) => {
 			if (left.isFocus !== right.isFocus) {
 				return left.isFocus ? -1 : 1;
@@ -89,7 +107,9 @@ export function deriveTerrainSceneModel(
 		});
 
 	const focusTile = tiles.find((tile) => tile.isFocus) ?? null;
-	const dataSourceText = describeTerrainDataSources(tiles.map((tile) => tile.dataSource));
+	const dataSourceText = describeTerrainDataSources(
+		tiles.map((tile) => tile.dataSource),
+	);
 
 	return {
 		focusLandblockId,
@@ -102,9 +122,11 @@ export function deriveTerrainSceneModel(
 	};
 }
 
-function countPreparedTerrainAssets(preparedByAssetId: Record<string, PreparedAssetRecord>): number {
-	return Object.values(preparedByAssetId).filter(
-		(asset) => asset.assetKind === "terrain-landblock" && asset.terrainMesh !== null,
+function countPreparedTerrainAssets(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): number {
+	return Object.values(preparedByAssetId).filter((asset) =>
+		isPreparedTerrainLandblock(asset),
 	).length;
 }
 
@@ -125,11 +147,11 @@ function describeTerrainDataSources(
 function inferTerrainDataSource(
 	asset: PreparedAssetRecord,
 ): TerrainSceneTile["dataSource"] {
-	if (asset.provenance.source === "repo-local-hba") {
+	if (asset.payload.provenance.source === "repo-local-hba") {
 		return "repo-local-cell-landblock";
 	}
 
-	if (asset.provenance.source === "generated-fallback") {
+	if (asset.payload.provenance.source === "generated-fallback") {
 		return "generated-fallback";
 	}
 

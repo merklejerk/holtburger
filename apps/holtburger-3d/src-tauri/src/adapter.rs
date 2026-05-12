@@ -1,24 +1,24 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
-use holtburger_common::Guid;
-use holtburger_content::SoulEmoteCatalog;
+use holtburger_content::{ContentRepository, SoulEmoteCatalog};
 use holtburger_dat::file_type::EnvCell;
-use holtburger_dat::landblock::CellLandblock;
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
-use holtburger_dat::{EOR_CELL_NAMESPACE, HbaReader};
+use holtburger_dat::landblock::CellLandblock;
+use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::entity::Entity;
 use holtburger_world::{WorldBootstrap, WorldState};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
     CameraHintAckDto, CameraHintDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
-    IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto,
-    InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, RayPickHitDto,
-    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
-    RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
+    IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto, InteractionModeDto,
+    LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, RayPickHitDto, RayPickRequestDto,
+    RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto,
+    RuntimeResidencyDto, SessionStateDto, Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -31,12 +31,14 @@ const LOCAL_PLAYER_GUID: Guid = Guid(0x5000_0001);
 const REMOTE_SCOUT_GUID: Guid = Guid(0x5000_0002);
 const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
 
-#[derive(Default)]
-pub struct HostBoundaryAdapter;
+pub struct HostBoundaryAdapter {
+    content: Arc<ContentRepository>,
+}
 
 #[derive(Clone)]
 pub struct HostRuntimeService {
     state: Arc<Mutex<HostRuntimeState>>,
+    adapter: Arc<HostBoundaryAdapter>,
 }
 
 struct HostRuntimeState {
@@ -48,48 +50,58 @@ struct HostRuntimeState {
 
 impl HostRuntimeService {
     pub fn new() -> Self {
+        let adapter = Arc::new(HostBoundaryAdapter::new());
         Self {
             state: Arc::new(Mutex::new(HostRuntimeState::new())),
+            adapter,
         }
     }
 
     pub fn lifecycle_state(&self) -> LifecycleStateDto {
         let state = self.state.lock().expect("host runtime state lock poisoned");
-        HostBoundaryAdapter::lifecycle_state(&state)
+        self.adapter.lifecycle_state(&state)
     }
 
     pub fn runtime_batch(&self) -> RuntimeBatchDto {
         let state = self.state.lock().expect("host runtime state lock poisoned");
-        HostBoundaryAdapter::runtime_batch(&state)
+        self.adapter.runtime_batch(&state)
     }
 
     pub fn view_model_feed(&self) -> FrontendStateFeedDto {
         let state = self.state.lock().expect("host runtime state lock poisoned");
-        HostBoundaryAdapter::view_model_feed(&state)
+        self.adapter.view_model_feed(&state)
     }
 
     pub fn startup_notifications(&self) -> Vec<RuntimeNotificationEnvelopeDto> {
         let state = self.state.lock().expect("host runtime state lock poisoned");
         vec![
-            HostBoundaryAdapter::lifecycle_notification(&state),
-            HostBoundaryAdapter::runtime_notification(&state),
+            self.adapter.lifecycle_notification(&state),
+            self.adapter.runtime_notification(&state),
         ]
     }
 
     pub fn advance_runtime_notification(&self) -> RuntimeNotificationEnvelopeDto {
         let mut state = self.state.lock().expect("host runtime state lock poisoned");
         state.advance();
-        HostBoundaryAdapter::runtime_notification(&state)
+        self.adapter.runtime_notification(&state)
     }
 
     pub fn submit_camera_hint(&self, hint: CameraHintDto) -> CameraHintAckDto {
         let mut state = self.state.lock().expect("host runtime state lock poisoned");
-        HostBoundaryAdapter::accept_camera_hint(&mut state, hint)
+        self.adapter.accept_camera_hint(&mut state, hint)
     }
 
     pub fn resolve_ray_pick(&self, request: RayPickRequestDto) -> RayPickResponseDto {
         let state = self.state.lock().expect("host runtime state lock poisoned");
-        HostBoundaryAdapter::resolve_ray_pick(&state, request)
+        self.adapter.resolve_ray_pick(&state, request)
+    }
+
+    pub fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        self.adapter.asset_lookup(request)
+    }
+
+    pub fn boundary_overview(&self) -> HostBoundaryOverviewDto {
+        self.adapter.boundary_overview()
     }
 }
 
@@ -129,7 +141,15 @@ impl HostRuntimeState {
 }
 
 impl HostBoundaryAdapter {
-    fn lifecycle_state(_state: &HostRuntimeState) -> LifecycleStateDto {
+    pub fn new() -> Self {
+        let content = ContentRepository::from_hba_path(repo_assets_hba_path())
+            .expect("failed to open repo-local 3D app content repository");
+        Self {
+            content: Arc::new(content),
+        }
+    }
+
+    fn lifecycle_state(&self, _state: &HostRuntimeState) -> LifecycleStateDto {
         LifecycleStateDto {
             phase: LifecyclePhaseDto::Ready,
             active_mode_hint: Some(ModeHintDto::Client),
@@ -137,17 +157,17 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn runtime_batch(state: &HostRuntimeState) -> RuntimeBatchDto {
+    fn runtime_batch(&self, state: &HostRuntimeState) -> RuntimeBatchDto {
         RuntimeBatchDto {
             tick: state.tick,
             entities: Self::runtime_entities(state),
-            residency: Self::runtime_residency(state),
+            residency: self.runtime_residency(state),
         }
     }
 
-    fn view_model_feed(state: &HostRuntimeState) -> FrontendStateFeedDto {
+    fn view_model_feed(&self, state: &HostRuntimeState) -> FrontendStateFeedDto {
         FrontendStateFeedDto {
-            selected_entity_id: Some(if state.tick % 2 == 0 {
+            selected_entity_id: Some(if state.tick.is_multiple_of(2) {
                 u32::from(REMOTE_SCOUT_GUID) as u64
             } else {
                 u32::from(REMOTE_SENTINEL_GUID) as u64
@@ -157,90 +177,92 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn lifecycle_notification(state: &HostRuntimeState) -> RuntimeNotificationEnvelopeDto {
+    fn lifecycle_notification(&self, state: &HostRuntimeState) -> RuntimeNotificationEnvelopeDto {
         RuntimeNotificationEnvelopeDto {
             channel: RUNTIME_CHANNEL,
             topic: RUNTIME_LIFECYCLE_TOPIC,
-            lifecycle_state: Some(Self::lifecycle_state(state)),
+            lifecycle_state: Some(self.lifecycle_state(state)),
             runtime_batch: None,
             view_model_feed: None,
         }
     }
 
-    fn runtime_notification(state: &HostRuntimeState) -> RuntimeNotificationEnvelopeDto {
+    fn runtime_notification(&self, state: &HostRuntimeState) -> RuntimeNotificationEnvelopeDto {
         RuntimeNotificationEnvelopeDto {
             channel: RUNTIME_CHANNEL,
             topic: RUNTIME_BATCH_TOPIC,
             lifecycle_state: None,
-            runtime_batch: Some(Self::runtime_batch(state)),
-            view_model_feed: Some(Self::view_model_feed(state)),
+            runtime_batch: Some(self.runtime_batch(state)),
+            view_model_feed: Some(self.view_model_feed(state)),
         }
     }
 
-    pub fn asset_lookup(request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+    pub fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
         if let Some(landblock_id) = parse_terrain_asset_id(&request.asset_id) {
-            return build_terrain_lookup_response(request, landblock_id);
+            return self.build_terrain_lookup_response(request, landblock_id);
         }
 
         if let Some(env_cell_id) = parse_indoor_env_cell_asset_id(&request.asset_id) {
-            return build_indoor_env_cell_lookup_response(request, env_cell_id);
+            return self.build_indoor_env_cell_lookup_response(request, env_cell_id);
         }
 
         if let Some(environment_id) = parse_environment_asset_id(&request.asset_id) {
-            return build_environment_lookup_response(request, environment_id);
+            return self.build_environment_lookup_response(request, environment_id);
         }
 
         if let Some(cell_structure_id) = parse_cell_structure_asset_id(&request.asset_id) {
             return build_cell_structure_lookup_response(request, cell_structure_id);
         }
 
-        let (residency_kind, debug_primitive, palette_key, provenance) =
-            match request.asset_id.as_str() {
-                "gfx/02000001" => (
-                    "outdoor-landblock",
-                    "survey-billboard",
-                    "bronze-scout",
-                    serde_json::json!({
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "appearance-manifest",
-                        "errorCode": null,
-                        "detail": "App-local debug manifest for the Browser Scout appearance."
-                    }),
-                ),
-                "gfx/02000002" => (
-                    "outdoor-landblock",
-                    "drudge-proxy-mesh",
-                    "rust-drudge",
-                    serde_json::json!({
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "appearance-manifest",
-                        "errorCode": null,
-                        "detail": "App-local debug manifest for the Survey Drudge appearance."
-                    }),
-                ),
-                "gfx/02000003" => (
-                    "indoor-env-cell",
-                    "sentinel-proxy-volume",
-                    "dungeon-sentinel",
-                    serde_json::json!({
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "appearance-manifest",
-                        "errorCode": null,
-                        "detail": "App-local debug manifest for the Dungeon Sentinel appearance."
-                    }),
-                ),
-                _ => (
-                    "unknown",
-                    "debug-placeholder",
-                    "unknown-asset",
-                    serde_json::json!({
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "appearance-manifest",
-                        "errorCode": "asset-id-unknown",
-                        "detail": format!("No app-local debug manifest is registered for {}.", request.asset_id)
-                    }),
-                ),
-            };
+        let (residency_kind, debug_primitive, palette_key, provenance) = match request
+            .asset_id
+            .as_str()
+        {
+            "gfx/02000001" => (
+                "outdoor-landblock",
+                "survey-billboard",
+                "bronze-scout",
+                serde_json::json!({
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "appearance-manifest",
+                    "errorCode": null,
+                    "detail": "App-local debug manifest for the Browser Scout appearance."
+                }),
+            ),
+            "gfx/02000002" => (
+                "outdoor-landblock",
+                "drudge-proxy-mesh",
+                "rust-drudge",
+                serde_json::json!({
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "appearance-manifest",
+                    "errorCode": null,
+                    "detail": "App-local debug manifest for the Survey Drudge appearance."
+                }),
+            ),
+            "gfx/02000003" => (
+                "indoor-env-cell",
+                "sentinel-proxy-volume",
+                "dungeon-sentinel",
+                serde_json::json!({
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "appearance-manifest",
+                    "errorCode": null,
+                    "detail": "App-local debug manifest for the Dungeon Sentinel appearance."
+                }),
+            ),
+            _ => (
+                "unknown",
+                "debug-placeholder",
+                "unknown-asset",
+                serde_json::json!({
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "appearance-manifest",
+                    "errorCode": "asset-id-unknown",
+                    "detail": format!("No app-local debug manifest is registered for {}.", request.asset_id)
+                }),
+            ),
+        };
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -258,7 +280,7 @@ impl HostBoundaryAdapter {
         }
     }
 
-    pub fn boundary_overview() -> HostBoundaryOverviewDto {
+    pub fn boundary_overview(&self) -> HostBoundaryOverviewDto {
         HostBoundaryOverviewDto {
             asset_channel: ASSET_CHANNEL,
             runtime_channel: RUNTIME_CHANNEL,
@@ -284,6 +306,7 @@ impl HostBoundaryAdapter {
     }
 
     fn accept_camera_hint(
+        &self,
         state: &mut HostRuntimeState,
         hint: CameraHintDto,
     ) -> CameraHintAckDto {
@@ -299,10 +322,11 @@ impl HostBoundaryAdapter {
     }
 
     fn resolve_ray_pick(
+        &self,
         state: &HostRuntimeState,
         request: RayPickRequestDto,
     ) -> RayPickResponseDto {
-        let batch = Self::runtime_batch(state);
+        let batch = self.runtime_batch(state);
         let direction = normalize_vec3(request.direction.clone());
 
         let best_hit = batch
@@ -324,13 +348,15 @@ impl HostBoundaryAdapter {
 
                 (alignment > 0.2).then_some((entity, alignment, distance))
             })
-            .max_by(|(_, left_alignment, left_distance), (_, right_alignment, right_distance)| {
-                let left_score = *left_alignment - (*left_distance * 0.001);
-                let right_score = *right_alignment - (*right_distance * 0.001);
-                left_score
-                    .partial_cmp(&right_score)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            .max_by(
+                |(_, left_alignment, left_distance), (_, right_alignment, right_distance)| {
+                    let left_score = *left_alignment - (*left_distance * 0.001);
+                    let right_score = *right_alignment - (*right_distance * 0.001);
+                    left_score
+                        .partial_cmp(&right_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                },
+            );
 
         if let Some((entity, _alignment, distance)) = best_hit {
             return RayPickResponseDto {
@@ -356,11 +382,14 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn runtime_residency(state: &HostRuntimeState) -> RuntimeResidencyDto {
+    fn runtime_residency(&self, state: &HostRuntimeState) -> RuntimeResidencyDto {
         let focus_position = state.world.player_position().unwrap_or_default();
         let indoor_metadata = focus_position
             .is_indoors()
-            .then(|| load_env_cell_metadata(u32::from(focus_position.landblock_id)).ok())
+            .then(|| {
+                self.load_env_cell_metadata(u32::from(focus_position.landblock_id))
+                    .ok()
+            })
             .flatten();
 
         RuntimeResidencyDto {
@@ -374,8 +403,12 @@ impl HostBoundaryAdapter {
                 .as_ref()
                 .map(|metadata| metadata.visible_cell_ids.clone())
                 .unwrap_or_default(),
-            seen_outside: indoor_metadata.as_ref().map(|metadata| metadata.seen_outside),
-            environment_id: indoor_metadata.as_ref().map(|metadata| metadata.environment_id),
+            seen_outside: indoor_metadata
+                .as_ref()
+                .map(|metadata| metadata.seen_outside),
+            environment_id: indoor_metadata
+                .as_ref()
+                .map(|metadata| metadata.environment_id),
             cell_structure_id: indoor_metadata
                 .as_ref()
                 .map(|metadata| metadata.cell_structure_id),
@@ -441,77 +474,59 @@ impl HostBoundaryAdapter {
     }
 }
 
-fn build_terrain_lookup_response(
-    request: AssetLookupRequestDto,
-    landblock_id: u32,
-) -> AssetLookupResponseDto {
-    let payload = load_cell_landblock_payload(landblock_id).unwrap_or_else(|error| {
-        generated_fallback_terrain_payload(landblock_id, error)
-    });
+impl HostBoundaryAdapter {
+    fn build_terrain_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+    ) -> AssetLookupResponseDto {
+        let payload = self
+            .load_cell_landblock_payload(landblock_id)
+            .unwrap_or_else(|error| generated_fallback_terrain_payload(landblock_id, error));
 
-    AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload,
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
     }
-}
 
-fn build_indoor_env_cell_lookup_response(
-    request: AssetLookupRequestDto,
-    env_cell_id: u32,
-) -> AssetLookupResponseDto {
-    let payload = load_indoor_env_cell_payload(env_cell_id).unwrap_or_else(|(detail, error_code)| {
-        serde_json::json!({
-            "kind": "indoor-env-cell",
-            "residencyKind": "indoor-env-cell",
-            "sourceAssetKind": "env-cell",
-            "envCellId": env_cell_id,
-            "environmentId": null,
-            "cellStructureId": null,
-            "visibleCellIds": [],
-            "seenOutside": null,
-            "surfaceIds": [],
-            "portalCount": 0,
-            "staticObjectCount": 0,
-            "provenance": {
-                "source": "app-local-stub",
-                "sourceAssetKind": "env-cell",
-                "errorCode": error_code,
-                "detail": detail
-            }
-        })
-    });
+    fn build_indoor_env_cell_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        env_cell_id: u32,
+    ) -> AssetLookupResponseDto {
+        let payload = self
+            .load_indoor_env_cell_payload(env_cell_id)
+            .unwrap_or_else(|(detail, error_code)| {
+                serde_json::json!({
+                    "kind": "indoor-env-cell",
+                    "residencyKind": "indoor-env-cell",
+                    "sourceAssetKind": "env-cell",
+                    "envCellId": env_cell_id,
+                    "environmentId": null,
+                    "cellStructureId": null,
+                    "visibleCellIds": [],
+                    "seenOutside": null,
+                    "surfaceIds": [],
+                    "portalCount": 0,
+                    "staticObjectCount": 0,
+                    "provenance": {
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "env-cell",
+                        "errorCode": error_code,
+                        "detail": detail
+                    }
+                })
+            });
 
-    AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload,
-    }
-}
-
-fn build_environment_lookup_response(
-    request: AssetLookupRequestDto,
-    environment_id: u32,
-) -> AssetLookupResponseDto {
-    AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload: serde_json::json!({
-            "kind": "environment",
-            "residencyKind": "indoor-env-cell",
-            "sourceAssetKind": "environment",
-            "environmentId": environment_id,
-            "cellStructureIds": [],
-            "provenance": {
-                "source": "app-local-stub",
-                "sourceAssetKind": "environment",
-                "errorCode": null,
-                "detail": "Environment decoding is not implemented in holtburger-dat yet, so Phase 11 exposes a reference-first payload."
-            }
-        }),
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
     }
 }
 
@@ -552,79 +567,128 @@ struct IndoorEnvCellMetadata {
     seen_outside: bool,
 }
 
-fn load_env_cell_metadata(
-    env_cell_id: u32,
-) -> Result<IndoorEnvCellMetadata, (String, &'static str)> {
-    let path = repo_assets_hba_path();
-    let archive = HbaReader::open(&path).map_err(|error| {
-        (
-            format!("Could not open {}: {error}", path.display()),
-            "asset-archive-open-failed",
-        )
-    })?;
-    let bytes = archive
-        .get_file_in_namespace(EOR_CELL_NAMESPACE, env_cell_id)
-        .map_err(|error| {
+impl HostBoundaryAdapter {
+    fn build_environment_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        environment_id: u32,
+    ) -> AssetLookupResponseDto {
+        let provenance = match self.content.read_resource(
+            ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id),
+            "environment reference asset",
+        ) {
+            Ok(resource) => serde_json::json!({
+                "source": "repo-local-hba",
+                "sourceAssetKind": "environment",
+                "errorCode": null,
+                "detail": resource.source_description
+            }),
+            Err(error) => serde_json::json!({
+                "source": "app-local-stub",
+                "sourceAssetKind": "environment",
+                "errorCode": "asset-read-failed",
+                "detail": format!("Environment decoding is not implemented in holtburger-dat yet, and the raw reference could not be resolved: {error}")
+            }),
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serde_json::json!({
+                "kind": "environment",
+                "residencyKind": "indoor-env-cell",
+                "sourceAssetKind": "environment",
+                "environmentId": environment_id,
+                "cellStructureIds": [],
+                "provenance": provenance
+            }),
+        }
+    }
+
+    fn load_env_cell_metadata(
+        &self,
+        env_cell_id: u32,
+    ) -> Result<IndoorEnvCellMetadata, (String, &'static str)> {
+        let resource = self
+            .content
+            .read_resource(
+                ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id),
+                "indoor env cell metadata",
+            )
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not read {}:0x{env_cell_id:08X} from content repository: {error}",
+                        EOR_CELL_NAMESPACE
+                    ),
+                    "asset-read-failed",
+                )
+            })?;
+        let env_cell =
+            EnvCell::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
+                (
+                    format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
+                    "asset-decode-failed",
+                )
+            })?;
+
+        Ok(IndoorEnvCellMetadata {
+            environment_id: 0x0D00_0000 | u32::from(env_cell.environment_id),
+            cell_structure_id: u32::from(env_cell.cell_structure),
+            visible_cell_ids: env_cell
+                .visible_cells
+                .into_iter()
+                .map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(cell_id))
+                .collect(),
+            seen_outside: (env_cell.flags & 0x01) != 0,
+        })
+    }
+
+    fn load_cell_landblock_payload(
+        &self,
+        landblock_id: u32,
+    ) -> Result<serde_json::Value, (String, &'static str)> {
+        let resource = self
+            .content
+            .read_resource(
+                ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id),
+                "cell landblock terrain",
+            )
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not read {}:0x{landblock_id:08X} from content repository: {error}",
+                        EOR_CELL_NAMESPACE
+                    ),
+                    "asset-read-failed",
+                )
+            })?;
+        let source_detail = resource.source_description.clone();
+        let landblock = CellLandblock::unpack(&resource.bytes).map_err(|error| {
             (
-                format!(
-                    "Could not read {}:0x{env_cell_id:08X} from {}: {error}",
-                    EOR_CELL_NAMESPACE,
-                    path.display()
-                ),
-                "asset-read-failed",
+                format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"),
+                "asset-decode-failed",
             )
         })?;
-    let env_cell = EnvCell::unpack(&mut std::io::Cursor::new(bytes)).map_err(|error| {
-        (
-            format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
-            "asset-decode-failed",
-        )
-    })?;
 
-    Ok(IndoorEnvCellMetadata {
-        environment_id: 0x0D00_0000 | u32::from(env_cell.environment_id),
-        cell_structure_id: u32::from(env_cell.cell_structure),
-        visible_cell_ids: env_cell
-            .visible_cells
-            .into_iter()
-            .map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(cell_id))
-            .collect(),
-        seen_outside: (env_cell.flags & 0x01) != 0,
-    })
-}
-
-fn load_cell_landblock_payload(landblock_id: u32) -> Result<serde_json::Value, (String, &'static str)> {
-    let path = repo_assets_hba_path();
-    let archive = HbaReader::open(&path)
-        .map_err(|error| (format!("Could not open {}: {error}", path.display()), "asset-archive-open-failed"))?;
-    let bytes = archive
-        .get_file_in_namespace(EOR_CELL_NAMESPACE, landblock_id)
-        .map_err(|error| {
-            (format!(
-                "Could not read {}:0x{landblock_id:08X} from {}: {error}",
-                EOR_CELL_NAMESPACE,
-                path.display()
-            ), "asset-read-failed")
-        })?;
-    let landblock = CellLandblock::unpack(&bytes)
-        .map_err(|error| (format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"), "asset-decode-failed"))?;
-
-    Ok(serde_json::json!({
-        "kind": "terrain-landblock",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "cell-landblock",
-        "landblockId": landblock_id,
-        "gridSize": 9,
-        "tileSize": 24,
-        "heights": landblock.height.iter().map(|height| f32::from(*height) * 2.0).collect::<Vec<_>>(),
-        "terrainTypes": landblock.terrain,
-        "provenance": {
-            "source": "repo-local-hba",
+        Ok(serde_json::json!({
+            "kind": "terrain-landblock",
+            "residencyKind": "outdoor-landblock",
             "sourceAssetKind": "cell-landblock",
-            "errorCode": null,
-            "detail": path.display().to_string()
-        }
-    }))
+            "landblockId": landblock_id,
+            "gridSize": 9,
+            "tileSize": 24,
+            "heights": landblock.height.iter().map(|height| f32::from(*height) * 2.0).collect::<Vec<_>>(),
+            "terrainTypes": landblock.terrain,
+            "provenance": {
+                "source": "repo-local-hba",
+                "sourceAssetKind": "cell-landblock",
+                "errorCode": null,
+                "detail": source_detail
+            }
+        }))
+    }
 }
 
 fn generated_fallback_terrain_payload(
@@ -649,54 +713,55 @@ fn generated_fallback_terrain_payload(
     })
 }
 
-fn load_indoor_env_cell_payload(
-    env_cell_id: u32,
-) -> Result<serde_json::Value, (String, &'static str)> {
-    let path = repo_assets_hba_path();
-    let archive = HbaReader::open(&path).map_err(|error| {
-        (
-            format!("Could not open {}: {error}", path.display()),
-            "asset-archive-open-failed",
-        )
-    })?;
-    let bytes = archive
-        .get_file_in_namespace(EOR_CELL_NAMESPACE, env_cell_id)
-        .map_err(|error| {
-            (
-                format!(
-                    "Could not read {}:0x{env_cell_id:08X} from {}: {error}",
-                    EOR_CELL_NAMESPACE,
-                    path.display()
-                ),
-                "asset-read-failed",
+impl HostBoundaryAdapter {
+    fn load_indoor_env_cell_payload(
+        &self,
+        env_cell_id: u32,
+    ) -> Result<serde_json::Value, (String, &'static str)> {
+        let resource = self
+            .content
+            .read_resource(
+                ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id),
+                "indoor env cell asset",
             )
-        })?;
-    let env_cell = EnvCell::unpack(&mut std::io::Cursor::new(bytes)).map_err(|error| {
-        (
-            format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
-            "asset-decode-failed",
-        )
-    })?;
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not read {}:0x{env_cell_id:08X} from content repository: {error}",
+                        EOR_CELL_NAMESPACE
+                    ),
+                    "asset-read-failed",
+                )
+            })?;
+        let source_detail = resource.source_description.clone();
+        let env_cell =
+            EnvCell::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
+                (
+                    format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
+                    "asset-decode-failed",
+                )
+            })?;
 
-    Ok(serde_json::json!({
-        "kind": "indoor-env-cell",
-        "residencyKind": "indoor-env-cell",
-        "sourceAssetKind": "env-cell",
-        "envCellId": env_cell_id,
-        "environmentId": 0x0D00_0000 | u32::from(env_cell.environment_id),
-        "cellStructureId": u32::from(env_cell.cell_structure),
-        "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
-        "seenOutside": (env_cell.flags & 0x01) != 0,
-        "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
-        "portalCount": env_cell.portals.len(),
-        "staticObjectCount": env_cell.static_objects.len(),
-        "provenance": {
-            "source": "repo-local-hba",
+        Ok(serde_json::json!({
+            "kind": "indoor-env-cell",
+            "residencyKind": "indoor-env-cell",
             "sourceAssetKind": "env-cell",
-            "errorCode": null,
-            "detail": path.display().to_string()
-        }
-    }))
+            "envCellId": env_cell_id,
+            "environmentId": 0x0D00_0000 | u32::from(env_cell.environment_id),
+            "cellStructureId": u32::from(env_cell.cell_structure),
+            "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
+            "seenOutside": (env_cell.flags & 0x01) != 0,
+            "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
+            "portalCount": env_cell.portals.len(),
+            "staticObjectCount": env_cell.static_objects.len(),
+            "provenance": {
+                "source": "repo-local-hba",
+                "sourceAssetKind": "env-cell",
+                "errorCode": null,
+                "detail": source_detail
+            }
+        }))
+    }
 }
 
 fn parse_terrain_asset_id(asset_id: &str) -> Option<u32> {
@@ -723,7 +788,9 @@ fn parse_environment_asset_id(asset_id: &str) -> Option<u32> {
 fn parse_cell_structure_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("cell-structure/")
-        .filter(|hex| !hex.is_empty() && hex.len() <= 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .filter(|hex| {
+            !hex.is_empty() && hex.len() <= 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit())
+        })
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
 }
 
@@ -804,7 +871,10 @@ mod tests {
 
         assert_eq!(batch.tick, 1);
         assert_eq!(batch.entities.len(), 3);
-        assert_eq!(batch.residency.focus_entity_id, Some(u32::from(LOCAL_PLAYER_GUID) as u64));
+        assert_eq!(
+            batch.residency.focus_entity_id,
+            Some(u32::from(LOCAL_PLAYER_GUID) as u64)
+        );
         assert_eq!(batch.residency.focus_landblock_id, 0x0102_000C);
         assert_eq!(batch.residency.focus_cell_id, Some(12));
         assert!(!batch.residency.indoors);
@@ -856,8 +926,14 @@ mod tests {
         assert_eq!(first.topic, RUNTIME_BATCH_TOPIC);
         assert_eq!(first_batch.tick, initial_batch.tick + 1);
         assert_eq!(second_batch.tick, first_batch.tick + 1);
-        assert_eq!(first_view_model.selected_entity_id, Some(u32::from(REMOTE_SCOUT_GUID) as u64));
-        assert_eq!(second_view_model.selected_entity_id, Some(u32::from(REMOTE_SENTINEL_GUID) as u64));
+        assert_eq!(
+            first_view_model.selected_entity_id,
+            Some(u32::from(REMOTE_SCOUT_GUID) as u64)
+        );
+        assert_eq!(
+            second_view_model.selected_entity_id,
+            Some(u32::from(REMOTE_SENTINEL_GUID) as u64)
+        );
 
         let initial_local_player = initial_batch
             .entities
@@ -870,15 +946,25 @@ mod tests {
             .find(|entity| entity.is_local_player)
             .expect("advanced local player should be present");
 
-        assert_ne!(advanced_local_player.position.x, initial_local_player.position.x);
-        assert_ne!(advanced_local_player.position.y, initial_local_player.position.y);
-        assert_ne!(advanced_local_player.heading_radians, initial_local_player.heading_radians);
+        assert_ne!(
+            advanced_local_player.position.x,
+            initial_local_player.position.x
+        );
+        assert_ne!(
+            advanced_local_player.position.y,
+            initial_local_player.position.y
+        );
+        assert_ne!(
+            advanced_local_player.heading_radians,
+            initial_local_player.heading_radians
+        );
     }
 
     #[test]
     fn boundary_overview_and_asset_lookup_remain_runtime_asset_split() {
-        let overview = HostBoundaryAdapter::boundary_overview();
-        let asset = HostBoundaryAdapter::asset_lookup(AssetLookupRequestDto {
+        let runtime = HostRuntimeService::new();
+        let overview = runtime.boundary_overview();
+        let asset = runtime.asset_lookup(AssetLookupRequestDto {
             request_id: "test-request".to_string(),
             asset_id: "terrain/0102ffff".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
@@ -886,18 +972,25 @@ mod tests {
 
         assert_eq!(overview.runtime_channel, RUNTIME_CHANNEL);
         assert_eq!(overview.asset_channel, ASSET_CHANNEL);
-        assert_eq!(overview.runtime_notification_event, RUNTIME_NOTIFICATION_EVENT);
+        assert_eq!(
+            overview.runtime_notification_event,
+            RUNTIME_NOTIFICATION_EVENT
+        );
         assert_eq!(overview.runtime_lifecycle_topic, RUNTIME_LIFECYCLE_TOPIC);
         assert_eq!(overview.runtime_batch_command, "get_runtime_batch");
         assert_eq!(overview.asset_lookup_command, "lookup_asset");
-        assert!(overview
-            .indoor_contract_backlog
-            .runtime_field_ids
-            .contains(&IndoorRuntimeFieldIdDto::VisibleCellIds));
-        assert!(overview
-            .indoor_contract_backlog
-            .asset_family_ids
-            .contains(&IndoorAssetFamilyIdDto::CellStructure));
+        assert!(
+            overview
+                .indoor_contract_backlog
+                .runtime_field_ids
+                .contains(&IndoorRuntimeFieldIdDto::VisibleCellIds)
+        );
+        assert!(
+            overview
+                .indoor_contract_backlog
+                .asset_family_ids
+                .contains(&IndoorAssetFamilyIdDto::CellStructure)
+        );
         assert_eq!(asset.request_id, "test-request");
         assert_eq!(asset.asset_id, "terrain/0102ffff");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
@@ -948,6 +1041,9 @@ mod tests {
         assert_eq!(ack.sequence, 1);
         assert!(response.resolved);
         assert_eq!(response.camera_hint_sequence, Some(1));
-        assert_eq!(response.hit.as_ref().map(|hit| hit.entity_id), Some(remote_scout.entity_id));
+        assert_eq!(
+            response.hit.as_ref().map(|hit| hit.entity_id),
+            Some(remote_scout.entity_id)
+        );
     }
 }

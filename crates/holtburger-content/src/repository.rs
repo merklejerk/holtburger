@@ -17,6 +17,15 @@ pub struct ContentRepository {
     source_description: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct RepositoryResource {
+    pub namespace: String,
+    pub file_id: u32,
+    pub bytes: Vec<u8>,
+    pub metadata: Option<holtburger_dat::FileMetadata>,
+    pub source_description: Option<String>,
+}
+
 impl std::fmt::Debug for ContentRepository {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ContentRepository")
@@ -83,8 +92,56 @@ impl ContentRepository {
     where
         T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
     {
+        let resource = self.read_resource(T::RESOURCE_KEY, asset_name)?;
+        T::read_options(&mut Cursor::new(resource.bytes), Endian::Little, ())
+            .with_context(|| format!("failed to parse {asset_name}"))
+    }
+
+    /// Reads raw resource bytes by dynamic namespace and file id.
+    ///
+    /// Use this for app-local asset lookups whose keys are discovered at runtime,
+    /// such as terrain, setup-model, gfx-obj, or env-cell requests.
+    pub fn read_resource(
+        &self,
+        key: ResourceKey<'_>,
+        asset_name: &'static str,
+    ) -> Result<RepositoryResource> {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
-        read_asset_from_resources(&resources, self.source_description.as_deref(), asset_name)
+        let metadata = resources.get_metadata_by_key(key);
+
+        if let Some(metadata) = &metadata
+            && !metadata.is_pruned
+        {
+            let bytes = resources
+                .get_file_by_key(key)
+                .map_err(anyhow::Error::from)?;
+            return Ok(RepositoryResource {
+                namespace: key.namespace.to_string(),
+                file_id: key.file_id,
+                bytes,
+                metadata: Some(metadata.clone()),
+                source_description: self.source_description.clone(),
+            });
+        }
+
+        if metadata.is_some() {
+            let bytes = resources
+                .get_file_by_key(key)
+                .map_err(anyhow::Error::from)?;
+            return Ok(RepositoryResource {
+                namespace: key.namespace.to_string(),
+                file_id: key.file_id,
+                bytes,
+                metadata,
+                source_description: self.source_description.clone(),
+            });
+        }
+
+        Err(missing_asset_error(
+            key,
+            asset_name,
+            self.source_description.as_deref(),
+        ))
     }
 
     pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
@@ -95,44 +152,8 @@ impl ContentRepository {
     }
 }
 
-fn read_asset_from_resources<T>(
-    resources: &LayeredResourceResolver,
-    source_description: Option<&str>,
-    asset_name: &'static str,
-) -> Result<T>
-where
-    T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
-{
-    let bytes = read_asset_bytes::<T>(resources, source_description, asset_name)?;
-    T::read_options(&mut Cursor::new(bytes), Endian::Little, ())
-        .with_context(|| format!("failed to parse {asset_name}"))
-}
-
-fn read_asset_bytes<T>(
-    resources: &LayeredResourceResolver,
-    source_description: Option<&str>,
-    asset_name: &'static str,
-) -> Result<Vec<u8>>
-where
-    T: StaticResourceKey,
-{
-    let key = T::RESOURCE_KEY;
-
-    if let Some(metadata) = resources.get_metadata_by_key(key)
-        && !metadata.is_pruned
-    {
-        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
-    }
-
-    if resources.get_metadata_by_key(key).is_some() {
-        return resources.get_file_by_key(key).map_err(anyhow::Error::from);
-    }
-
-    Err(missing_asset_error(key, asset_name, source_description))
-}
-
 fn missing_asset_error(
-    key: ResourceKey<'static>,
+    key: ResourceKey<'_>,
     asset_name: &'static str,
     source_description: Option<&str>,
 ) -> anyhow::Error {
@@ -369,6 +390,20 @@ mod tests {
         true
     }
 
+    fn write_malformed_static_asset_hba(path: &Path) {
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                SpellTable::FILE_ID,
+                DatFileType::from_id(SpellTable::FILE_ID) as u32,
+                vec![0xCC],
+            )
+            .expect("malformed spell table test HBA entry should be added");
+        writer.write(path).expect("test HBA should be written");
+    }
+
     #[test]
     fn read_asset_loads_char_gen_from_repository() {
         let dir = tempdir().expect("tempdir should be created");
@@ -452,6 +487,36 @@ mod tests {
     }
 
     #[test]
+    fn read_resource_loads_dynamic_key_from_repository() {
+        let dir = tempdir().expect("tempdir should be created");
+        if !write_hba(
+            &dir.path().join("bundle.hba"),
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            true,
+        ) {
+            return;
+        }
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let resource = repository
+            .read_resource(
+                ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001),
+                "test cell resource",
+            )
+            .expect("dynamic resource should resolve from content repository");
+
+        assert_eq!(resource.namespace, EOR_CELL_NAMESPACE);
+        assert_eq!(resource.file_id, 0x0000_0001);
+        assert_eq!(resource.bytes, vec![0xCC]);
+        assert!(resource.metadata.is_some());
+        assert_eq!(
+            resource.source_description.as_deref(),
+            Some(dir.path().to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
     fn read_asset_fails_when_spell_table_is_missing() {
         let dir = tempdir().expect("tempdir should be created");
         if !write_hba(
@@ -469,5 +534,43 @@ mod tests {
             .expect_err("spell table load should fail when the asset is missing");
 
         assert!(error.to_string().contains("spell table"));
+    }
+
+    #[test]
+    fn read_resource_fails_when_dynamic_key_is_missing() {
+        let dir = tempdir().expect("tempdir should be created");
+        if !write_hba(
+            &dir.path().join("bundle.hba"),
+            &[SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID],
+            false,
+        ) {
+            return;
+        }
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let error = repository
+            .read_resource(
+                ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001),
+                "missing test cell resource",
+            )
+            .expect_err("missing dynamic resource should fail");
+
+        assert!(error.to_string().contains("missing test cell resource"));
+        assert!(error.to_string().contains(EOR_CELL_NAMESPACE));
+    }
+
+    #[test]
+    fn read_asset_reports_malformed_static_asset_bytes() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_malformed_static_asset_hba(&dir.path().join("bundle.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let error = repository
+            .read_asset::<SpellTable>("spell table")
+            .expect_err("malformed spell table should fail");
+
+        assert!(error.to_string().contains("failed to parse spell table"));
     }
 }

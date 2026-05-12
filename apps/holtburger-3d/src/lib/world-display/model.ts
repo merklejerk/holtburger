@@ -6,6 +6,10 @@ import type {
 	PreparedAssetRecord,
 	PreparedTerrainMesh,
 } from "../assets/types";
+import {
+	describePreparedAssetPayload,
+	isPreparedTerrainLandblock,
+} from "../assets/types";
 import type {
 	CameraHintAckDto,
 	CameraHintDto,
@@ -136,7 +140,11 @@ export function deriveWorldDisplayModel({
 	void viewModelFeed;
 	const destinationLabel =
 		browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel;
-	const sceneContext = deriveSceneContext(runtimeBatch, browserDestination, assetState);
+	const sceneContext = deriveSceneContext(
+		runtimeBatch,
+		browserDestination,
+		assetState,
+	);
 
 	return {
 		headline: browserDestination
@@ -152,8 +160,8 @@ export function deriveWorldDisplayModel({
 				describeCameraHintAck(cameraAck) ??
 				"Viewport input is ready to send camera hints. Picks stay dormant until real world entities exist."),
 		assetText: describeAssetState(assetState),
-			sceneContext,
-			terrainContract: createTerrainContract(sceneContext),
+		sceneContext,
+		terrainContract: createTerrainContract(sceneContext),
 		entities: [],
 	};
 }
@@ -195,7 +203,9 @@ function deriveSceneContext(
 			? formatEnvCellLabel(runtimeBatch.residency.focusEnvCellId)
 			: "Unknown env cell";
 		const visibleCount = runtimeBatch.residency.visibleCellIds.length;
-		const preparedIndoorAssets = Object.keys(assetState.preparedByAssetId).filter(
+		const preparedIndoorAssets = Object.keys(
+			assetState.preparedByAssetId,
+		).filter(
 			(assetId) =>
 				assetId.startsWith("indoor-env-cell/") ||
 				assetId.startsWith("environment/") ||
@@ -214,8 +224,7 @@ function deriveSceneContext(
 				"Indoor scene context is now explicit: WorldDisplay tracks env-cell and visible-cell membership separately from outdoor landblock terrain.",
 			focusAnchorLabel: focusEnvCellLabel,
 			destinationText,
-			coverageText:
-				`Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
+			coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
 			gapText: null,
 			chunks: [],
 		};
@@ -245,7 +254,8 @@ function deriveSceneContext(
 function createTerrainContract(
 	sceneContext: WorldDisplaySceneContext | null,
 ): WorldDisplayTerrainContract {
-	const focusChunk = sceneContext?.chunks.find((chunk) => chunk.role === "focus") ?? null;
+	const focusChunk =
+		sceneContext?.chunks.find((chunk) => chunk.role === "focus") ?? null;
 	const requestKey = focusChunk
 		? `terrain/${focusChunk.landblockId.toString(16).padStart(8, "0")}`
 		: null;
@@ -255,7 +265,8 @@ function createTerrainContract(
 		sourceAssetKind: "cell-landblock",
 		decodeOwner: "rust-host-adapter",
 		renderOwner: "frontend-world-display",
-		loadAnchor: "ACViewer.WorldViewer.LoadLandblock + ACE.DatLoader.CellLandblock",
+		loadAnchor:
+			"ACViewer.WorldViewer.LoadLandblock + ACE.DatLoader.CellLandblock",
 		geometryAnchor: "ACViewer.Render.R_Landblock + TerrainBatchDraw.AddTerrain",
 		indoorBranchText:
 			"Outdoor terrain should come from normalized landblock loads first; indoor env cells stay on a separate visible-cell expansion track.",
@@ -265,7 +276,9 @@ function createTerrainContract(
 	};
 }
 
-function buildOutdoorChunkRing(focusLandblockId: number): WorldDisplaySceneChunk[] {
+function buildOutdoorChunkRing(
+	focusLandblockId: number,
+): WorldDisplaySceneChunk[] {
 	const centerX = (focusLandblockId >>> 24) & 0xff;
 	const centerY = (focusLandblockId >>> 16) & 0xff;
 	const chunks: WorldDisplaySceneChunk[] = [];
@@ -279,7 +292,8 @@ function buildOutdoorChunkRing(focusLandblockId: number): WorldDisplaySceneChunk
 				continue;
 			}
 
-			const landblockId = ((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
+			const landblockId =
+				((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
 			chunks.push({
 				landblockId,
 				label: formatLandblockLabel(landblockId),
@@ -316,7 +330,7 @@ function describeAssetState(assetState: AssetChannelState): string {
 	}
 
 	if (assetState.preparedAsset) {
-		return `Prepared ${assetState.preparedAsset.request.assetId} as ${assetState.preparedAsset.debugPrimitive} for ${assetState.preparedAsset.residencyKind}. Channel: ${assetState.channel}.`;
+		return `Prepared ${assetState.preparedAsset.request.assetId} as ${describePreparedAssetPayload(assetState.preparedAsset.payload)} for ${assetState.preparedAsset.payload.residencyKind}. Channel: ${assetState.channel}.`;
 	}
 
 	return "Asset worker ingress is waiting for the next demand-driven asset response.";
@@ -325,7 +339,7 @@ function describeAssetState(assetState: AssetChannelState): string {
 export function deriveTerrainViewport(
 	preparedAsset: PreparedAssetRecord | null,
 ): WorldDisplayTerrainViewport {
-	if (!preparedAsset?.terrainMesh) {
+	if (!preparedAsset || !isPreparedTerrainLandblock(preparedAsset)) {
 		return {
 			ready: false,
 			landblockLabel: null,
@@ -337,7 +351,7 @@ export function deriveTerrainViewport(
 		};
 	}
 
-	return buildTerrainViewport(preparedAsset.terrainMesh);
+	return buildTerrainViewport(preparedAsset.payload.terrainMesh);
 }
 
 function buildTerrainViewport(
@@ -368,7 +382,8 @@ function buildTerrainViewport(
 			const vertex = projectedVertices[vertexIndex];
 			return `${(vertex.x - bounds.minX + padding).toFixed(2)},${(vertex.y - bounds.minY + padding).toFixed(2)}`;
 		});
-		const heightRatio = (triangle.averageHeight - terrainMesh.minHeight) / heightSpan;
+		const heightRatio =
+			(triangle.averageHeight - terrainMesh.minHeight) / heightSpan;
 		const hue = 86 + (triangle.terrainType % 6) * 14;
 		const lightness = 28 + heightRatio * 26;
 
@@ -389,7 +404,9 @@ function buildTerrainViewport(
 	};
 }
 
-export function describeCameraHintAck(cameraAck: CameraHintAckDto | null): string | null {
+export function describeCameraHintAck(
+	cameraAck: CameraHintAckDto | null,
+): string | null {
 	if (!cameraAck) {
 		return null;
 	}
@@ -457,8 +474,7 @@ export function buildCameraHint(
 	const anchorPosition = focusEntity?.position ?? { x: 96, y: 96, z: 24 };
 	const anchorHeading = focusEntity?.headingRadians ?? 0;
 
-	const yaw =
-		anchorHeading + (viewportPoint.normalizedX - 0.5) * 1.4;
+	const yaw = anchorHeading + (viewportPoint.normalizedX - 0.5) * 1.4;
 	const pitch = (0.5 - viewportPoint.normalizedY) * 0.65;
 
 	return {

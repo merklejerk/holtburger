@@ -68,11 +68,7 @@ function createSnapshot(): HostBoundarySnapshot {
 					"environment-id",
 					"cell-structure-id",
 				],
-				assetFamilyIds: [
-					"indoor-env-cell",
-					"environment",
-					"cell-structure",
-				],
+				assetFamilyIds: ["indoor-env-cell", "environment", "cell-structure"],
 			},
 		},
 	};
@@ -85,7 +81,9 @@ describe("frontend state store", () => {
 		store.loadSnapshot(createSnapshot());
 
 		expect(get(store).browserMode.draftInput).toBe("29.90S, 65.90W, 0.0Z");
-		expect(get(store).browserMode.destination?.label).toBe("29.90S, 65.90W, 0.0Z");
+		expect(get(store).browserMode.destination?.label).toBe(
+			"29.90S, 65.90W, 0.0Z",
+		);
 		expect(get(store).mode.activeMode).toBe("client");
 		expect(get(store).mode.activePageId).toBe("destination-preview");
 		expect(get(store).asset.channel).toBe("asset");
@@ -152,24 +150,29 @@ describe("frontend state store", () => {
 				payloadKind: "json",
 				payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
 			},
-			assetKind: "terrain-landblock",
-			residencyKind: "outdoor-landblock",
-			debugPrimitive: "terrain-landblock-mesh",
-			paletteKey: "terrain-0102ffff",
-			provenance: {
-				source: "unknown",
+			payload: {
+				kind: "terrain-landblock",
 				sourceAssetKind: "cell-landblock",
-				errorCode: null,
-				detail: null,
-			},
-			terrainMesh: {
-				landblockId: 0x0102ffff,
-				gridSize: 9,
-				tileSize: 24,
-				vertices: [],
-				triangles: [],
-				minHeight: 0,
-				maxHeight: 24,
+				residencyKind: "outdoor-landblock",
+				provenance: {
+					source: "unknown",
+					sourceAssetKind: "cell-landblock",
+					errorCode: null,
+					detail: null,
+				},
+				debugPresentation: {
+					primitive: "terrain-landblock-mesh",
+					paletteKey: "terrain-0102ffff",
+				},
+				terrainMesh: {
+					landblockId: 0x0102ffff,
+					gridSize: 9,
+					tileSize: 24,
+					vertices: [],
+					triangles: [],
+					minHeight: 0,
+					maxHeight: 24,
+				},
 			},
 			preparedAt: "2026-04-26T00:00:00.000Z",
 		});
@@ -178,9 +181,9 @@ describe("frontend state store", () => {
 		expect(get(store).asset.preparedAsset?.request.assetId).toBe(
 			"terrain/0102ffff",
 		);
-		expect(get(store).asset.preparedByAssetId["terrain/0102ffff"]?.request.assetId).toBe(
-			"terrain/0102ffff",
-		);
+		expect(
+			get(store).asset.preparedByAssetId["terrain/0102ffff"]?.request.assetId,
+		).toBe("terrain/0102ffff");
 		expect(get(store).asset.preparedByPriority.bootstrap?.request.assetId).toBe(
 			"terrain/0102ffff",
 		);

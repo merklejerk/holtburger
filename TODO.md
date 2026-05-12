@@ -301,3 +301,4 @@
 - [x] Strange login issues when indoors.
 - [x] Iffy trade behavior against trade bots.
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
+- [ ] What's the static resource key used for? seems fishy

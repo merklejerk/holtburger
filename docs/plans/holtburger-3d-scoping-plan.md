@@ -1627,6 +1627,8 @@ A discipline that applies across all three sub-phases: **authoritative collision
 
 Scope: Rust-only. Adds the missing public primitive on the asset substrate and uses it to retire raw `HbaReader::open` from the 3D adapter. Touches no TypeScript and changes no boundary DTOs.
 
+Status: completed on 2026-05-12.
+
 Deliverables:
 
 - public dynamic-key lookup on `ContentRepository` that takes an arbitrary `ResourceKey<'_>` (or moral equivalent) and returns the underlying bytes plus enough provenance metadata for the adapter's existing source-description plumbing
@@ -1644,9 +1646,30 @@ Acceptance:
 - the asset-source description surfaced to the frontend (currently `"repo-local-hba"`) accurately reflects the underlying repository configuration so future layered mounts surface honestly without DTO changes
 - no TypeScript file changes; no boundary DTO changes
 
+Delivered in this phase:
+
+- `ContentRepository` now exposes `read_resource(ResourceKey<'_>, asset_name)` as the public dynamic-key lookup primitive. It returns raw bytes plus namespace, file id, optional file metadata, and the repository source description.
+- `read_asset<T: StaticResourceKey>` now uses the dynamic lookup path before typed parsing, so static and runtime-discovered assets no longer maintain separate resolver logic.
+- `apps/holtburger-3d/src-tauri` now constructs one `Arc<ContentRepository>` at adapter startup and routes terrain payloads, indoor env-cell metadata, indoor env-cell payloads, and raw environment-reference checks through it.
+- All direct `HbaReader::open` calls were removed from the 3D adapter. `environment/*` remains reference-first but verifies the raw environment asset through the repository when possible. `cell-structure/*` remains a true stub because cell structures are not standalone HBA resources and Phase 13 owns the parser/model work.
+- No TypeScript files or boundary DTOs changed.
+
+Course corrections and notes:
+
+- The source-description plumbing is now repository-owned, but the existing frontend-facing provenance enum still uses `"repo-local-hba"` as the stable source label. The detailed provenance string now comes from the repository's configured HBA path, which is enough for the current single-mount setup and leaves room for layered mounts later without DTO churn.
+- The adapter now fails at startup if the repo-local content repository cannot be opened. That is consistent with the post-10.5 fail-fast host direction and better than silently synthesizing a supported Tauri run.
+- The npm `check:rust` / `lint:rust` wrappers failed under this sandbox with a Cargo `.cargo-lock` read-only error when invoked via `--manifest-path`. Running the equivalent workspace-root Cargo commands succeeded, so this looks like a harness/path issue rather than a code issue.
+
+Phase gate before 12.0b:
+
+- Phase 12.0b still makes sense as the next step. The Rust asset substrate is stable enough now, and the remaining blocker is genuinely TypeScript-shaped: `PreparedAssetRecord` still uses flat sibling fields that will not scale to `gfx-obj/*`, `setup-model/*`, or later cell-structure geometry.
+- Do not begin `gfx-obj/*` / `setup-model/*` family work yet. The prepared-payload taxonomy and dependency-orchestration decision are still required guardrails.
+
 ##### Phase 12.0b — Discriminated `PreparedAssetPayload` taxonomy
 
 Scope: TypeScript-only. Refactors the prepared-asset shape into a real discriminated union without yet adding any new asset families. Depends on 12.0a only insofar as the adapter is now stable on `ContentRepository`; otherwise self-contained.
+
+Status: completed on 2026-05-12.
 
 Deliverables:
 
@@ -1662,6 +1685,28 @@ Acceptance:
 - existing asset-channel behavior (terrain, indoor env-cell metadata, environment / cell-structure stubs) is functionally unchanged; the refactor reshapes types, not behavior
 - TypeScript and Svelte tests pass against the new shape; no new asset families are introduced in this sub-phase
 - nothing in the new payload shape leaks authoritative collision interpretation into TypeScript
+
+Delivered in this phase:
+
+- `PreparedAssetRecord` is now a thin envelope containing request, response, `preparedAt`, and a discriminated `payload`.
+- Existing flat sibling fields (`assetKind`, `residencyKind`, `debugPrimitive`, `paletteKey`, `provenance`, `terrainMesh`) moved into explicit payload variants.
+- Current variants cover the asset families that already exist: `terrain-landblock`, `indoor-env-cell`, `environment`, `cell-structure`, `visual-asset-stub`, and `unknown`.
+- Terrain consumers now narrow through `isPreparedTerrainLandblock(...)` and read the mesh from `asset.payload.terrainMesh`.
+- The worker preserves existing behavior while carrying richer per-variant metadata for env-cell, environment, and cell-structure payloads.
+- A follow-up cleanup moved debug-only presentation metadata into `debugPresentation` on the current debug-capable variants instead of requiring it on the shared payload base.
+- No Rust files, host DTOs, or new asset families were introduced in this sub-phase.
+
+Course corrections and notes:
+
+- The plan's broad domain vocabulary (geometry, composite, surface, manifest, metadata) was intentionally not encoded as a second discriminator yet. The concrete `payload.kind` variants are enough for current behavior, and 12.0c can decide dependency orchestration without committing to a generic domain layer too early.
+- `appearance-manifest` remains represented as an `unknown` prepared payload with `rawKind: "appearance-manifest"` because this phase was a taxonomy refactor, not a new manifest-family implementation.
+- `debugPrimitive` and `paletteKey` were replaced in prepared payloads by `debugPresentation: { primitive, paletteKey }`. That keeps current debug rendering behavior available without making future textures, animations, fonts, or other non-debug asset payloads carry fake display fields.
+- `npm run format:check` still reports pre-existing formatting drift across unrelated app files. The files changed in this phase were formatted directly with Prettier and pass a targeted Prettier check.
+
+Phase gate before 12.0c:
+
+- Phase 12.0c still makes sense as the next step. The prepared payload shape can now express dependency-aware assets cleanly, but the code still needs an explicit orchestration choice before `setup-model/*` or `gfx-obj/*` work starts.
+- The next step does not need a major plan adjustment. The main refinement is to keep 12.0c focused on choosing dependency orchestration rather than broadening the payload taxonomy again.
 
 ##### Phase 12.0c — Dependency-orchestration protocol decision and any required protocol changes
 
@@ -2178,6 +2223,13 @@ Mitigation:
 - Surface terrain provenance explicitly in the app shell. The browser must keep identifying repo-local `CellLandblock` loads so live-host parity stays observable under the supported Tauri path.
 - Keep Phase 11 indoor env-cell payloads real and repo-backed, but keep `environment/*` and `cell-structure/*` reference-first until shared DAT parsers exist for them.
 - Fix parser parity bugs when new contract work exposes them. Phase 11 uncovered mismatched `EnvCell` flag masks in `holtburger-dat`, and the right response was to correct the shared parser rather than normalizing bad semantics in app-local code.
+- Use `ContentRepository::read_resource(...)` as the shared dynamic-key asset substrate for runtime-discovered content lookups. App-local adapters should not reopen HBA archives directly for each asset family.
+- Keep Phase 12.0a Rust-only. The repository migration did not justify TypeScript shape changes or boundary DTO churn; those remain the explicit job of Phase 12.0b.
+- Keep the 3D host fail-fast when the repo-local content repository cannot be opened. Supported Tauri runs should not silently fall back to synthetic archive behavior.
+- Keep `PreparedAssetRecord` as an envelope rather than deleting the name outright. The behavioral improvement comes from moving variant data into `PreparedAssetPayload`; request/response/prepared timestamp metadata still belong at the envelope level.
+- Keep the first `PreparedAssetPayload` discriminator concrete (`payload.kind`) instead of adding an abstract domain discriminator before dependency orchestration proves it is needed.
+- Preserve `appearance-manifest` as an unknown/raw prepared payload for now. Do not treat it as a first-class manifest family until a later phase actually consumes it.
+- Keep debug-render presentation metadata out of `PreparedAssetPayloadBase`. Future non-geometry asset payloads should add `debugPresentation` only when the frontend intentionally exposes a debug display for that variant.
 
 #### Verification Log
 
@@ -2232,6 +2284,13 @@ Mitigation:
 - 2026-04-28: `npm run test:ts -- --run src/lib/assets/asset-channel.test.ts src/lib/world-display/model.test.ts` in `apps/holtburger-3d` passed after replacing the `indoor-gap` branch with an explicit indoor visible-cell scene context and adding scene-aware indoor asset-request coverage.
 - 2026-04-28: `cargo test -p holtburger-dat -p holtburger-3d` passed after adding Phase 11 indoor asset lookup handlers and correcting `EnvCell` flag decoding to match ACE `SeenOutside`, static-object, and restriction-object semantics.
 - 2026-04-28: `npm run check` in `apps/holtburger-3d` passed after wiring the scene-level indoor asset request path, the new indoor payload DTOs, and the updated world-display scene-context model.
+- 2026-05-12: `cargo test -p holtburger-content --lib` passed after adding `ContentRepository::read_resource(...)`, dynamic-key hit/miss coverage, malformed static-asset coverage, and the `read_asset<T>` reimplementation on top of the dynamic lookup primitive.
+- 2026-05-12: `cargo test -p holtburger-3d` passed after migrating the 3D adapter to one `Arc<ContentRepository>` and removing direct `HbaReader::open` usage from `apps/holtburger-3d/src-tauri/src/adapter.rs`.
+- 2026-05-12: `cargo check -p holtburger-3d`, `cargo clippy -p holtburger-3d --all-targets -- -D warnings`, and `cargo clippy -p holtburger-content --all-targets -- -D warnings` passed from the workspace root.
+- 2026-05-12: `npm run check:rust` and `npm run lint:rust` in `apps/holtburger-3d` could not be used for validation in this sandbox because Cargo failed to open `target/debug/.cargo-lock` with a read-only filesystem error when invoked through the app-local `--manifest-path` wrapper. The equivalent workspace-root Cargo commands passed.
+- 2026-05-12: `npm run check`, `npm run test:ts`, and `npm run lint:ts` in `apps/holtburger-3d` passed after the Phase 12.0b prepared-payload taxonomy refactor.
+- 2026-05-12: Targeted Prettier verification passed for the TypeScript files changed by Phase 12.0b. Full `npm run format:check` still reports unrelated pre-existing formatting drift in app files outside this phase's write set.
+- 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving debug presentation metadata out of `PreparedAssetPayloadBase`.
 
 #### Phase Review Log
 
@@ -2254,6 +2313,11 @@ Mitigation:
 - 2026-04-27: Phase 10.5 stayed app-local. No shared-crate seam moved; the work was boundary cleanup, contract naming, and plan hardening so Phase 11 can start from explicit env-cell, visible-cell, `SeenOutside`, environment, and cell-structure seams instead of from a boolean indoor flag.
 - 2026-04-28: Phase 11 completed with widened indoor-capable runtime DTOs, first-class indoor asset families on the dedicated asset channel, a frontend indoor visible-cell scene context, and scene-aware indoor asset request policy in the app shell.
 - 2026-04-28: Phase 11 remained mostly app-local, but it did justify one shared-crate fix: `holtburger-dat` had mismatched `EnvCell` flag masks relative to ACE, and correcting that parser was necessary to keep `SeenOutside` and env-cell-derived metadata honest.
+- 2026-05-12: Phase 12.0a completed with a public dynamic-key lookup on `ContentRepository`, `read_asset<T>` rebuilt on top of that primitive, and the 3D adapter migrated to a single repository-owned asset substrate instead of direct `HbaReader::open` calls.
+- 2026-05-12: Phase 12.0a stayed Rust-only and did not move boundary DTOs or TypeScript shapes. That confirms the next planned step should remain Phase 12.0b: fix the frontend prepared-asset taxonomy before adding `gfx-obj/*`, `setup-model/*`, or dependency orchestration.
+- 2026-05-12: Phase 12.0b completed with a TypeScript-only prepared-asset taxonomy refactor. The frontend now switches on `asset.payload.kind` and keeps per-variant data inside explicit payload bodies.
+- 2026-05-12: Phase 12.0b follow-up cleanup moved debug-only presentation metadata out of the prepared-payload base. This prevents upcoming texture, animation, font, or other non-debug payloads from inheriting renderer-debug fields by default.
+- 2026-05-12: Phase 12.0b intentionally did not add `gfx-obj/*`, `setup-model/*`, real `environment/*`, or real `cell-structure/*` payload families. The next step remains Phase 12.0c: choose dependency orchestration before asset-family expansion.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2301,10 +2365,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 7 through 10 are complete. The next step should now be a short live-host parity pass: run the same Three.js terrain scene under Tauri against repo-local `CellLandblock` payloads from `dats/assets.hba`, surface terrain provenance and renderer telemetry more explicitly in the app shell, and close the remaining preview-versus-live confidence gap without changing ownership.
+Phases 0 through 11 and Phases 12.0a through 12.0b are complete. The next step should be Phase 12.0c: choose and implement the dependency-orchestration model for `setup-model` to `gfx-obj` walks without adding the actual new asset families yet.
 
-After the browser-foundation phases land, the next appended fast-follow work should likely split in this order:
-
-1. Additional phase recommendation: live Tauri terrain parity and renderer observability
-2. Phase 11: indoor level assets, scene membership, and visible-cell expansion
-3. Phase 12: shared `SpatialBody` constraint and non-world body semantics
+After 12.0c, the rest of Phase 12 still makes sense: `gfx-obj/*`, `setup-model/*`, outdoor scenery instances, and first non-terrain rendering. The plan does not need a large course correction yet; the only adjustment is to keep the next step narrowly focused on orchestration instead of expanding the payload taxonomy again.

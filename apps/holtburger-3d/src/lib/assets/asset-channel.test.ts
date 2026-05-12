@@ -16,7 +16,6 @@ import {
 import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
-	FrontendStateFeedDto,
 	RuntimeBatchDto,
 } from "../host/contracts";
 
@@ -52,17 +51,10 @@ function createRuntimeBatch(): RuntimeBatchDto {
 	};
 }
 
-function createViewModelFeed(selectedEntityId = 0x01020304): FrontendStateFeedDto {
-	return {
-		selectedEntityId,
-		interactionMode: "inspect",
-		busyState: "idle",
-	};
-}
-
 class FakeAssetWorker implements AssetWorkerLike {
-	onmessage: ((event: MessageEvent<AssetWorkerResponseMessage>) => void) | null =
-		null;
+	onmessage:
+		| ((event: MessageEvent<AssetWorkerResponseMessage>) => void)
+		| null = null;
 	onerror: ((event: Event | ErrorEvent) => void) | null = null;
 
 	postMessage(message: {
@@ -174,24 +166,29 @@ describe("asset channel controller", () => {
 						payloadKind: "json",
 						payload: {},
 					},
-					assetKind: "terrain-landblock",
-					residencyKind: "outdoor-landblock",
-					debugPrimitive: "terrain-landblock-mesh",
-					paletteKey: "terrain-0102ffff",
-					provenance: {
-						source: "unknown",
+					payload: {
+						kind: "terrain-landblock",
 						sourceAssetKind: "cell-landblock",
-						errorCode: null,
-						detail: null,
-					},
-					terrainMesh: {
-						landblockId: 0x0102ffff,
-						gridSize: 9,
-						tileSize: 24,
-						vertices: [],
-						triangles: [],
-						minHeight: 0,
-						maxHeight: 12,
+						residencyKind: "outdoor-landblock",
+						provenance: {
+							source: "unknown",
+							sourceAssetKind: "cell-landblock",
+							errorCode: null,
+							detail: null,
+						},
+						debugPresentation: {
+							primitive: "terrain-landblock-mesh",
+							paletteKey: "terrain-0102ffff",
+						},
+						terrainMesh: {
+							landblockId: 0x0102ffff,
+							gridSize: 9,
+							tileSize: 24,
+							vertices: [],
+							triangles: [],
+							minHeight: 0,
+							maxHeight: 12,
+						},
 					},
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
@@ -222,24 +219,29 @@ describe("asset channel controller", () => {
 						payloadKind: "json",
 						payload: {},
 					},
-					assetKind: "terrain-landblock",
-					residencyKind: "outdoor-landblock",
-					debugPrimitive: "terrain-landblock-mesh",
-					paletteKey: "terrain-0102ffff",
-					provenance: {
-						source: "unknown",
+					payload: {
+						kind: "terrain-landblock",
 						sourceAssetKind: "cell-landblock",
-						errorCode: null,
-						detail: null,
-					},
-					terrainMesh: {
-						landblockId: 0x0102ffff,
-						gridSize: 9,
-						tileSize: 24,
-						vertices: [],
-						triangles: [],
-						minHeight: 0,
-						maxHeight: 12,
+						residencyKind: "outdoor-landblock",
+						provenance: {
+							source: "unknown",
+							sourceAssetKind: "cell-landblock",
+							errorCode: null,
+							detail: null,
+						},
+						debugPresentation: {
+							primitive: "terrain-landblock-mesh",
+							paletteKey: "terrain-0102ffff",
+						},
+						terrainMesh: {
+							landblockId: 0x0102ffff,
+							gridSize: 9,
+							tileSize: 24,
+							vertices: [],
+							triangles: [],
+							minHeight: 0,
+							maxHeight: 12,
+						},
 					},
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
@@ -248,7 +250,9 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests).toHaveLength(8);
-		expect(requests.every((request) => request.assetId !== "terrain/0102ffff")).toBe(true);
+		expect(
+			requests.every((request) => request.assetId !== "terrain/0102ffff"),
+		).toBe(true);
 	});
 
 	it("excludes already in-flight terrain assets from the immediate coverage enqueue set", () => {
@@ -260,8 +264,12 @@ describe("asset channel controller", () => {
 			["terrain/0102ffff", "terrain/0101ffff"],
 		);
 
-		expect(requests.some((request) => request.assetId === "terrain/0102ffff")).toBe(false);
-		expect(requests.some((request) => request.assetId === "terrain/0101ffff")).toBe(false);
+		expect(
+			requests.some((request) => request.assetId === "terrain/0102ffff"),
+		).toBe(false);
+		expect(
+			requests.some((request) => request.assetId === "terrain/0101ffff"),
+		).toBe(false);
 		expect(requests).toHaveLength(7);
 	});
 
@@ -325,10 +333,19 @@ describe("asset channel controller", () => {
 		});
 
 		expect(preparedAsset.request.assetId).toBe("terrain/0102ffff");
-		expect(preparedAsset.assetKind).toBe("terrain-landblock");
-		expect(preparedAsset.residencyKind).toBe("outdoor-landblock");
-		expect(preparedAsset.debugPrimitive).toBe("terrain-landblock-mesh");
-		expect(preparedAsset.terrainMesh?.triangles).toHaveLength(128);
+		expect(preparedAsset.payload.kind).toBe("terrain-landblock");
+		if (preparedAsset.payload.kind !== "terrain-landblock") {
+			throw new Error("expected terrain-landblock payload");
+		}
+		expect(preparedAsset.payload.residencyKind).toBe("outdoor-landblock");
+		expect(preparedAsset.payload.debugPresentation.primitive).toBe(
+			"terrain-landblock-mesh",
+		);
+		expect(
+			preparedAsset.payload.kind === "terrain-landblock"
+				? preparedAsset.payload.terrainMesh.triangles
+				: [],
+		).toHaveLength(128);
 		expect(preparedAsset.response.payloadKind).toBe("json");
 
 		controller.dispose();
@@ -364,11 +381,15 @@ describe("asset channel controller", () => {
 			},
 		);
 
-		expect(preparedAsset.terrainMesh?.vertices[0]?.z).toBe(0);
-		expect(preparedAsset.terrainMesh?.vertices[1]?.z).toBe(9);
-		expect(preparedAsset.terrainMesh?.vertices[9]?.z).toBe(1);
-		expect(preparedAsset.terrainMesh?.triangles[0]?.terrainType).toBe(0);
-		expect(preparedAsset.terrainMesh?.triangles[2]?.terrainType).toBe(9);
+		expect(preparedAsset.payload.kind).toBe("terrain-landblock");
+		if (preparedAsset.payload.kind !== "terrain-landblock") {
+			throw new Error("expected terrain-landblock payload");
+		}
+		expect(preparedAsset.payload.terrainMesh.vertices[0]?.z).toBe(0);
+		expect(preparedAsset.payload.terrainMesh.vertices[1]?.z).toBe(9);
+		expect(preparedAsset.payload.terrainMesh.vertices[9]?.z).toBe(1);
+		expect(preparedAsset.payload.terrainMesh.triangles[0]?.terrainType).toBe(0);
+		expect(preparedAsset.payload.terrainMesh.triangles[2]?.terrainType).toBe(9);
 	});
 
 	it("rejects malformed json payloads before cpu-side asset preparation continues", () => {
@@ -448,9 +469,19 @@ describe("asset channel controller", () => {
 			},
 		);
 
-		expect(indoorEnvCell.assetKind).toBe("indoor-env-cell");
-		expect(indoorEnvCell.debugPrimitive).toBe("indoor-env-cell-metadata");
-		expect(environment.assetKind).toBe("environment");
-		expect(environment.debugPrimitive).toBe("environment-reference");
+		expect(indoorEnvCell.payload.kind).toBe("indoor-env-cell");
+		if (indoorEnvCell.payload.kind !== "indoor-env-cell") {
+			throw new Error("expected indoor-env-cell payload");
+		}
+		expect(indoorEnvCell.payload.debugPresentation.primitive).toBe(
+			"indoor-env-cell-metadata",
+		);
+		expect(environment.payload.kind).toBe("environment");
+		if (environment.payload.kind !== "environment") {
+			throw new Error("expected environment payload");
+		}
+		expect(environment.payload.debugPresentation.primitive).toBe(
+			"environment-reference",
+		);
 	});
 });

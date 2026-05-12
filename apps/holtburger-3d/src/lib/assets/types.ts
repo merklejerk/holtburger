@@ -38,22 +38,97 @@ export interface PreparedTerrainMesh {
 	maxHeight: number;
 }
 
+interface PreparedAssetPayloadBase {
+	kind: string;
+	residencyKind: AssetResidencyKind;
+	provenance: PreparedAssetProvenance;
+}
+
+export interface PreparedDebugPresentation {
+	primitive: string;
+	paletteKey: string;
+}
+
+export interface PreparedTerrainLandblockPayload extends PreparedAssetPayloadBase {
+	kind: "terrain-landblock";
+	sourceAssetKind: "cell-landblock";
+	debugPresentation: PreparedDebugPresentation;
+	terrainMesh: PreparedTerrainMesh;
+}
+
+export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
+	kind: "indoor-env-cell";
+	sourceAssetKind: "env-cell";
+	debugPresentation: PreparedDebugPresentation;
+	envCellId: number;
+	environmentId: number | null;
+	cellStructureId: number | null;
+	visibleCellIds: number[];
+	seenOutside: boolean | null;
+	surfaceIds: number[];
+	portalCount: number;
+	staticObjectCount: number;
+}
+
+export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
+	kind: "environment";
+	sourceAssetKind: "environment";
+	debugPresentation: PreparedDebugPresentation;
+	environmentId: number;
+	cellStructureIds: number[];
+}
+
+export interface PreparedCellStructurePayload extends PreparedAssetPayloadBase {
+	kind: "cell-structure";
+	sourceAssetKind: "cell-structure";
+	debugPresentation: PreparedDebugPresentation;
+	environmentId: number | null;
+	cellStructureId: number;
+	polygonCount: number | null;
+	portalCount: number | null;
+	hasCellBsp: boolean;
+	hasPhysicsBsp: boolean;
+	hasDrawingBsp: boolean;
+}
+
+export interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
+	kind: "visual-asset-stub";
+	sourceAssetKind: string | null;
+	debugPresentation: PreparedDebugPresentation;
+}
+
+export interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
+	kind: "unknown";
+	sourceAssetKind: string | null;
+	rawKind: string;
+	debugPresentation: PreparedDebugPresentation | null;
+}
+
+export type PreparedAssetPayload =
+	| PreparedTerrainLandblockPayload
+	| PreparedIndoorEnvCellPayload
+	| PreparedEnvironmentPayload
+	| PreparedCellStructurePayload
+	| PreparedVisualAssetStubPayload
+	| PreparedUnknownAssetPayload;
+
 export interface PreparedAssetRecord {
 	request: AssetLookupRequestDto;
 	response: AssetLookupResponseDto;
-	assetKind:
-		| "terrain-landblock"
-		| "indoor-env-cell"
-		| "environment"
-		| "cell-structure"
-		| "visual-asset-stub"
-		| "unknown";
-	residencyKind: AssetResidencyKind;
-	debugPrimitive: string;
-	paletteKey: string;
-	provenance: PreparedAssetProvenance;
-	terrainMesh: PreparedTerrainMesh | null;
+	payload: PreparedAssetPayload;
 	preparedAt: string;
+}
+
+export function isPreparedTerrainLandblock(
+	asset: PreparedAssetRecord,
+): asset is PreparedAssetRecord & { payload: PreparedTerrainLandblockPayload } {
+	return asset.payload.kind === "terrain-landblock";
+}
+
+export function describePreparedAssetPayload(
+	payload: PreparedAssetPayload,
+): string {
+	return payload.debugPresentation?.primitive ?? payload.kind;
 }
 
 export type AssetActivityStatus = "requested" | "prepared" | "failed";
@@ -72,7 +147,10 @@ export interface AssetChannelState {
 	status: AssetPreparationStatus;
 	activeRequest: AssetLookupRequestDto | null;
 	preparedAsset: PreparedAssetRecord | null;
-	preparedByPriority: Record<AssetLookupRequestDto["priority"], PreparedAssetRecord | null>;
+	preparedByPriority: Record<
+		AssetLookupRequestDto["priority"],
+		PreparedAssetRecord | null
+	>;
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 	lastResponse: AssetLookupResponseDto | null;
 	errorMessage: string | null;

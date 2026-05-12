@@ -1712,10 +1712,21 @@ Phase gate before 12.0c:
 
 Scope: Plan-time decision plus whichever code changes the chosen option requires. Depends on 12.0b so the chosen orchestration model can be expressed cleanly in the new payload taxonomy.
 
-Decision: pick exactly one of the following before any setup-model code begins, and amend this section of the plan with the choice and its trade-offs:
+Status: completed on 2026-05-12.
+
+Decision: **Main-thread orchestration** is the selected model.
+
+Reasoning:
+
+- It preserves the existing frontend-reconciled asset model: Rust publishes world/runtime facts, while the frontend decides which asset ids are needed and when to request them.
+- It keeps the worker protocol one-shot. The worker prepares exactly the response it receives and returns payload data from which the frontend can derive dependency ids; it does not call back into the host or own request scheduling.
+- It preserves per-asset cache reuse. Future `setup-model/*` payloads can name required `gfx-obj/*` ids, and the main thread can request only missing leaves while reusing cached geometry across multiple setup models.
+- It avoids making the host aggregate renderer-shaped bundles too early. The host remains responsible for lookup and decode surfaces, not scene-level dependency bundle policy.
+- The trade-off is explicit partial state in frontend asset orchestration. The frontend now has to model `ready`, `awaiting-dependency`, and `partial-ready` dependency states, but that cost is local to the render/cache side where the policy already lives.
+
+Rejected options:
 
 - **Host aggregate**: the host-side adapter eagerly resolves `setup-model` → per-part `gfx-obj` dependencies and returns one composite payload. Pros: workers stay one-shot. Cons: payload size grows; dependency caching becomes a host concern; partial reuse of shared `gfx-obj`s across multiple `setup-model`s is harder.
-- **Main-thread orchestration**: the worker emits the parsed `setup-model` with its part DID list and stops; the main thread schedules follow-up `gfx-obj` requests and stitches results in scene-context state. Pros: workers stay one-shot; per-asset cache reuse is natural. Cons: more main-thread coordination; partial-ready states must be modeled.
 - **Worker request-back**: extend the worker protocol with a third inbound message kind (`asset-fragment-ready` or similar) and a new outbound message kind (`worker-fetch-request`) proxied by the main thread. Pros: dependency walks live with the decoder. Cons: protocol complexity; back-pressure / cancellation semantics require explicit design.
 
 Deliverables:
@@ -1732,6 +1743,26 @@ Acceptance:
 - no new asset families (`gfx-obj/*`, `setup-model/*`, `cell-structure/*`, `environment/*` real payloads) are introduced in this sub-phase; that is the work of the rest of Phase 12 and Phase 13
 - the new mechanism is exercised by at least one test that simulates a multi-asset dependency walk end-to-end against synthetic inputs
 - nothing in the new mechanism leaks authoritative collision interpretation into TypeScript
+
+Delivered in this phase:
+
+- Generic JSON payload preparation accepts synthetic `dependencyAssetIds` on the prepared payload. Existing terrain, indoor env-cell, environment, and cell-structure paths continue to derive no dependencies.
+- `derivePreparedAssetDependencyStatus(...)` models dependency readiness as `ready`, `awaiting-dependency`, or `partial-ready`, with ready, missing, and pending dependency id lists.
+- `AssetChannelController.prepareAssetGraph(...)` performs main-thread dependency scheduling by preparing the root asset, deriving dependency ids from the prepared payload, requesting missing dependencies through the existing `lookupAsset` + one-shot worker path, and returning the prepared graph plus dependency status.
+- The existing one-shot terrain path remains valid: callers can still use `prepareAsset(...)` exactly as before, and terrain records have no dependencies.
+- Tests now exercise a synthetic root asset with two synthetic leaf dependencies end to end, plus explicit partial and awaiting dependency-state derivation.
+
+Course corrections and notes:
+
+- 12.0c did not add real `setup-model/*` or `gfx-obj/*` families. The synthetic payload path exists only to prove the orchestration seam before real AC asset families land.
+- Dependency ids were moved out of the prepared-record envelope after review. The record stays an envelope; `getPreparedAssetDependencies(...)` derives ids from payload variants so payload data remains the source of truth.
+- Dependency ids were also removed from the generic/unknown fallback. The synthetic orchestration test now uses an explicit `dependency-manifest` payload so `unknown` remains an unsupported/diagnostic path, not a dependency-bearing normal path.
+- Dependency ordering is normalized in worker preparation for deterministic scheduling and tests. Future real setup-model payloads should preserve AC part order inside their own payload body while exposing dependency ids for cache scheduling.
+
+Phase gate before the rest of Phase 12:
+
+- The next Phase 12 steps still make sense: add real `gfx-obj/*` and `setup-model/*` families, then use the main-thread dependency orchestration path for setup-to-gfx walks.
+- The main adjustment is sequencing discipline: add the real leaf `gfx-obj/*` payload first, then `setup-model/*` references to those ids, then outdoor scenery instances. Jumping straight to aggregate scene rendering would bypass the cache and dependency seams that 12.0c just established.
 
 Once 12.0a, 12.0b, and 12.0c have all landed, the remainder of Phase 12 (the actual `gfx-obj/*` / `setup-model/*` work and outdoor scenery rendering) may begin.
 
@@ -2230,6 +2261,9 @@ Mitigation:
 - Keep the first `PreparedAssetPayload` discriminator concrete (`payload.kind`) instead of adding an abstract domain discriminator before dependency orchestration proves it is needed.
 - Preserve `appearance-manifest` as an unknown/raw prepared payload for now. Do not treat it as a first-class manifest family until a later phase actually consumes it.
 - Keep debug-render presentation metadata out of `PreparedAssetPayloadBase`. Future non-geometry asset payloads should add `debugPresentation` only when the frontend intentionally exposes a debug display for that variant.
+- Use main-thread orchestration for future multi-asset setup-model to gfx-obj walks. Workers stay one-shot, the host does not aggregate renderer bundles, and the frontend asset cache owns dependency readiness.
+- Derive dependency ids from prepared payload data rather than from `PreparedAssetRecord` envelope fields. The envelope owns request/response/timestamp context; payload variants own asset-specific references.
+- Keep dependency behavior out of `PreparedUnknownAssetPayload` and `genericAssetPayloadDtoSchema`. Unknown payloads should remain diagnostic fallback payloads, not a shortcut for real asset-family behavior.
 
 #### Verification Log
 
@@ -2291,6 +2325,9 @@ Mitigation:
 - 2026-05-12: `npm run check`, `npm run test:ts`, and `npm run lint:ts` in `apps/holtburger-3d` passed after the Phase 12.0b prepared-payload taxonomy refactor.
 - 2026-05-12: Targeted Prettier verification passed for the TypeScript files changed by Phase 12.0b. Full `npm run format:check` still reports unrelated pre-existing formatting drift in app files outside this phase's write set.
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving debug presentation metadata out of `PreparedAssetPayloadBase`.
+- 2026-05-12: `npm run check`, `npm run test:ts`, and `npm run lint:ts` passed after adding Phase 12.0c main-thread dependency orchestration and synthetic dependency-walk tests. Targeted Prettier verification passed for the formatted asset-channel, asset-type, and worker files; `contracts.ts` was intentionally kept narrowly edited to avoid broad pre-existing formatting churn.
+- 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving dependency ids out of `PreparedAssetRecord` and deriving them from prepared payload variants.
+- 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving synthetic dependency orchestration from generic/unknown payloads to an explicit `dependency-manifest` payload.
 
 #### Phase Review Log
 
@@ -2318,6 +2355,10 @@ Mitigation:
 - 2026-05-12: Phase 12.0b completed with a TypeScript-only prepared-asset taxonomy refactor. The frontend now switches on `asset.payload.kind` and keeps per-variant data inside explicit payload bodies.
 - 2026-05-12: Phase 12.0b follow-up cleanup moved debug-only presentation metadata out of the prepared-payload base. This prevents upcoming texture, animation, font, or other non-debug payloads from inheriting renderer-debug fields by default.
 - 2026-05-12: Phase 12.0b intentionally did not add `gfx-obj/*`, `setup-model/*`, real `environment/*`, or real `cell-structure/*` payload families. The next step remains Phase 12.0c: choose dependency orchestration before asset-family expansion.
+- 2026-05-12: Phase 12.0c completed with main-thread dependency orchestration. The asset channel can now prepare a root asset, schedule missing dependency ids through the existing lookup/worker path, and report ready, awaiting-dependency, or partial-ready state without changing the worker protocol.
+- 2026-05-12: Phase 12.0c follow-up cleanup removed dependency declarations from `PreparedAssetRecord`. The frontend now derives dependency ids from payload data, which keeps the record envelope from becoming a second source of truth.
+- 2026-05-12: Phase 12.0c follow-up cleanup also removed dependency behavior from the generic/unknown fallback. The synthetic dependency test path now uses an explicit `dependency-manifest`, preserving `unknown` as a diagnostic fallback.
+- 2026-05-12: Phase 12.0c intentionally used synthetic dependency payloads and did not add real `gfx-obj/*` or `setup-model/*` families. The next work should add real leaf geometry first, then setup-model references, then outdoor scenery instances.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2365,6 +2406,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0b are complete. The next step should be Phase 12.0c: choose and implement the dependency-orchestration model for `setup-model` to `gfx-obj` walks without adding the actual new asset families yet.
+Phases 0 through 11 and Phases 12.0a through 12.0c are complete. The next step should be the real Phase 12 asset-family expansion, starting with `gfx-obj/*` leaf geometry payloads before `setup-model/*` composites.
 
-After 12.0c, the rest of Phase 12 still makes sense: `gfx-obj/*`, `setup-model/*`, outdoor scenery instances, and first non-terrain rendering. The plan does not need a large course correction yet; the only adjustment is to keep the next step narrowly focused on orchestration instead of expanding the payload taxonomy again.
+The rest of Phase 12 still makes sense: `gfx-obj/*`, `setup-model/*`, outdoor scenery instances, and first non-terrain rendering. The course correction is sequencing: prove reusable `gfx-obj/*` leaves first, then `setup-model/*` dependencies through the main-thread orchestration path, then scenery placement/rendering.

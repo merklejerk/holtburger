@@ -18,6 +18,11 @@ import type {
 	AssetLookupResponseDto,
 	RuntimeBatchDto,
 } from "../host/contracts";
+import {
+	derivePreparedAssetDependencyStatus,
+	getPreparedAssetDependencies,
+	type PreparedAssetRecord,
+} from "./types";
 
 function createRuntimeBatch(): RuntimeBatchDto {
 	return {
@@ -351,6 +356,114 @@ describe("asset channel controller", () => {
 		controller.dispose();
 	});
 
+	it("orchestrates a synthetic dependency walk on the main thread without worker request-back", async () => {
+		const responsesByAssetId: Record<
+			string,
+			AssetLookupResponseDto["payload"]
+		> = {
+			"synthetic/root": {
+				kind: "dependency-manifest",
+				residencyKind: "unknown",
+				dependencyAssetIds: ["synthetic/leaf-b", "synthetic/leaf-a"],
+				provenance: {
+					source: "unknown",
+					sourceAssetKind: "dependency-manifest",
+					errorCode: null,
+					detail: "synthetic dependency root",
+				},
+			},
+			"synthetic/leaf-a": {
+				kind: "synthetic-leaf",
+				residencyKind: "unknown",
+				provenance: {
+					source: "unknown",
+					sourceAssetKind: "synthetic-leaf",
+					errorCode: null,
+					detail: "synthetic dependency leaf",
+				},
+			},
+			"synthetic/leaf-b": {
+				kind: "synthetic-leaf",
+				residencyKind: "unknown",
+				provenance: {
+					source: "unknown",
+					sourceAssetKind: "synthetic-leaf",
+					errorCode: null,
+					detail: "synthetic dependency leaf",
+				},
+			},
+		};
+		const lookupOrder: string[] = [];
+		const controller = new AssetChannelController(
+			async (request) => {
+				lookupOrder.push(request.assetId);
+				const payload = responsesByAssetId[request.assetId];
+				if (!payload) {
+					throw new Error(`missing synthetic payload for ${request.assetId}`);
+				}
+
+				return {
+					requestId: request.requestId,
+					assetId: request.assetId,
+					payloadKind: "json",
+					payload,
+				};
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const result = await controller.prepareAssetGraph({
+			requestId: "synthetic-root",
+			assetId: "synthetic/root",
+			priority: "streaming",
+		});
+
+		expect(lookupOrder).toEqual([
+			"synthetic/root",
+			"synthetic/leaf-a",
+			"synthetic/leaf-b",
+		]);
+		expect(result.preparedAssets.map((asset) => asset.request.assetId)).toEqual(
+			["synthetic/root", "synthetic/leaf-a", "synthetic/leaf-b"],
+		);
+		expect(
+			getPreparedAssetDependencies(result.rootAsset).map(
+				(dependency) => dependency.assetId,
+			),
+		).toEqual(["synthetic/leaf-a", "synthetic/leaf-b"]);
+		expect(result.dependencyStatus).toMatchObject({
+			status: "ready",
+			dependencyAssetIds: ["synthetic/leaf-a", "synthetic/leaf-b"],
+			readyAssetIds: ["synthetic/leaf-a", "synthetic/leaf-b"],
+			missingAssetIds: [],
+			pendingAssetIds: [],
+		});
+
+		controller.dispose();
+	});
+
+	it("derives explicit dependency readiness for partial and awaiting states", () => {
+		const rootAsset = createSyntheticPreparedAsset("synthetic/root", [
+			"synthetic/leaf-a",
+			"synthetic/leaf-b",
+		]);
+		const leafAsset = createSyntheticPreparedAsset("synthetic/leaf-a", []);
+
+		expect(derivePreparedAssetDependencyStatus(rootAsset, {})).toMatchObject({
+			status: "awaiting-dependency",
+			missingAssetIds: ["synthetic/leaf-a", "synthetic/leaf-b"],
+		});
+		expect(
+			derivePreparedAssetDependencyStatus(rootAsset, {
+				"synthetic/leaf-a": leafAsset,
+			}),
+		).toMatchObject({
+			status: "partial-ready",
+			readyAssetIds: ["synthetic/leaf-a"],
+			missingAssetIds: ["synthetic/leaf-b"],
+		});
+	});
+
 	it("maps CellLandblock samples using ACViewer's x-by-y ordering instead of a transposed row-major assumption", () => {
 		const preparedAsset = prepareAssetPayload(
 			{
@@ -485,3 +598,35 @@ describe("asset channel controller", () => {
 		);
 	});
 });
+
+function createSyntheticPreparedAsset(
+	assetId: string,
+	dependencyAssetIds: string[],
+): PreparedAssetRecord {
+	return {
+		request: {
+			requestId: `synthetic-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		response: {
+			requestId: `synthetic-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: {},
+		},
+		payload: {
+			kind: "dependency-manifest",
+			sourceAssetKind: "dependency-manifest",
+			residencyKind: "unknown",
+			dependencyAssetIds,
+			provenance: {
+				source: "unknown",
+				sourceAssetKind: "dependency-manifest",
+				errorCode: null,
+				detail: null,
+			},
+		},
+		preparedAt: "2026-05-12T00:00:00.000Z",
+	};
+}

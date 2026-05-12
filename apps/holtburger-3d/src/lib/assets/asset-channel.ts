@@ -4,18 +4,24 @@ import type {
 	AssetPriority,
 	RuntimeBatchDto,
 } from "../host/contracts";
-import { browserLocationToLandblockId, type BrowserLocationSelection } from "../../app/browser-mode";
+import {
+	browserLocationToLandblockId,
+	type BrowserLocationSelection,
+} from "../../app/browser-mode";
 import { lookupAsset } from "../host/tauri";
-import type { PreparedAssetRecord } from "./types";
+import {
+	derivePreparedAssetDependencyStatus,
+	getPreparedAssetDependencies,
+	type PreparedAssetDependencyStatus,
+	type PreparedAssetRecord,
+} from "./types";
 import type {
 	AssetWorkerRequestMessage,
 	AssetWorkerResponseMessage,
 } from "../../workers/asset-worker";
 
 export interface AssetWorkerLike {
-	onmessage:
-		| ((event: MessageEvent<AssetWorkerResponseMessage>) => void)
-		| null;
+	onmessage: ((event: MessageEvent<AssetWorkerResponseMessage>) => void) | null;
 	onerror: ((event: Event | ErrorEvent) => void) | null;
 	postMessage(message: AssetWorkerRequestMessage): void;
 	terminate(): void;
@@ -30,6 +36,13 @@ type PendingAssetRequest = {
 	reject: (error: Error) => void;
 };
 
+export interface AssetGraphPreparationResult {
+	rootAsset: PreparedAssetRecord;
+	preparedAssets: PreparedAssetRecord[];
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	dependencyStatus: PreparedAssetDependencyStatus;
+}
+
 export class AssetChannelController {
 	private readonly worker: AssetWorkerLike;
 
@@ -43,7 +56,9 @@ export class AssetChannelController {
 		this.worker.onmessage = (event) => {
 			const message = event.data;
 			if (message.type === "asset-ready") {
-				const pending = this.pendingRequests.get(message.asset.request.requestId);
+				const pending = this.pendingRequests.get(
+					message.asset.request.requestId,
+				);
 				if (!pending) {
 					return;
 				}
@@ -89,9 +104,94 @@ export class AssetChannelController {
 		});
 	}
 
+	async prepareAssetGraph(
+		rootRequest: AssetLookupRequestDto,
+		preparedByAssetId: Record<string, PreparedAssetRecord> = {},
+	): Promise<AssetGraphPreparationResult> {
+		const preparedAssets: PreparedAssetRecord[] = [];
+		const nextRequests: AssetLookupRequestDto[] = [rootRequest];
+		const scheduledAssetIds = new Set<string>([
+			rootRequest.assetId,
+			...Object.keys(preparedByAssetId),
+		]);
+		let rootAsset: PreparedAssetRecord | null =
+			preparedByAssetId[rootRequest.assetId] ?? null;
+		if (rootAsset) {
+			this.enqueueMissingDependencyRequests(
+				rootRequest,
+				rootAsset,
+				preparedByAssetId,
+				scheduledAssetIds,
+				nextRequests,
+			);
+		}
+
+		while (nextRequests.length > 0) {
+			const request = nextRequests.shift();
+			if (!request || preparedByAssetId[request.assetId]) {
+				continue;
+			}
+
+			const asset = await this.prepareAsset(request);
+			preparedAssets.push(asset);
+			preparedByAssetId[asset.request.assetId] = asset;
+			if (asset.request.assetId === rootRequest.assetId) {
+				rootAsset = asset;
+			}
+
+			this.enqueueMissingDependencyRequests(
+				rootRequest,
+				asset,
+				preparedByAssetId,
+				scheduledAssetIds,
+				nextRequests,
+			);
+		}
+
+		if (!rootAsset) {
+			throw new Error(`Root asset ${rootRequest.assetId} was not prepared.`);
+		}
+
+		return {
+			rootAsset,
+			preparedAssets,
+			preparedByAssetId,
+			dependencyStatus: derivePreparedAssetDependencyStatus(
+				rootAsset,
+				preparedByAssetId,
+			),
+		};
+	}
+
+	private enqueueMissingDependencyRequests(
+		rootRequest: AssetLookupRequestDto,
+		asset: PreparedAssetRecord,
+		preparedByAssetId: Record<string, PreparedAssetRecord>,
+		scheduledAssetIds: Set<string>,
+		nextRequests: AssetLookupRequestDto[],
+	): void {
+		for (const dependency of getPreparedAssetDependencies(asset)) {
+			if (
+				scheduledAssetIds.has(dependency.assetId) ||
+				preparedByAssetId[dependency.assetId]
+			) {
+				continue;
+			}
+
+			scheduledAssetIds.add(dependency.assetId);
+			nextRequests.push({
+				requestId: `${rootRequest.requestId}-dependency-${dependency.assetId}`,
+				assetId: dependency.assetId,
+				priority: rootRequest.priority,
+			});
+		}
+	}
+
 	dispose(): void {
 		this.worker.terminate();
-		const error = new Error("Asset channel was disposed before preparation completed.");
+		const error = new Error(
+			"Asset channel was disposed before preparation completed.",
+		);
 		for (const pending of this.pendingRequests.values()) {
 			pending.reject(error);
 		}
@@ -108,7 +208,10 @@ export function createFocusedAssetRequest(
 		return null;
 	}
 
-	const landblockId = deriveTerrainFocusLandblockId(runtimeBatch, browserDestination);
+	const landblockId = deriveTerrainFocusLandblockId(
+		runtimeBatch,
+		browserDestination,
+	);
 	const assetId = `terrain/${landblockId.toString(16).padStart(8, "0")}`;
 	const requestScope = browserDestination ? "destination" : "runtime";
 
@@ -177,13 +280,22 @@ export function createTerrainCoverageRequests(
 		return [];
 	}
 
-	const focusLandblockId = deriveTerrainFocusLandblockId(runtimeBatch, browserDestination);
+	const focusLandblockId = deriveTerrainFocusLandblockId(
+		runtimeBatch,
+		browserDestination,
+	);
 	const requestScope = browserDestination ? "destination" : "runtime";
-	const coverageAssetIds = buildOutdoorCoverageAssetIds(focusLandblockId, priority);
+	const coverageAssetIds = buildOutdoorCoverageAssetIds(
+		focusLandblockId,
+		priority,
+	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
 	return coverageAssetIds
-		.filter((assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId))
+		.filter(
+			(assetId) =>
+				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+		)
 		.map((assetId) => ({
 			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
 			assetId,
@@ -214,7 +326,12 @@ function buildOutdoorCoverageAssetIds(
 
 	const centerX = (focusLandblockId >>> 24) & 0xff;
 	const centerY = (focusLandblockId >>> 16) & 0xff;
-	const candidates: Array<{ assetId: string; distance: number; offsetX: number; offsetY: number }> = [];
+	const candidates: Array<{
+		assetId: string;
+		distance: number;
+		offsetX: number;
+		offsetY: number;
+	}> = [];
 
 	for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
 		for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
@@ -225,7 +342,8 @@ function buildOutdoorCoverageAssetIds(
 				continue;
 			}
 
-			const landblockId = ((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
+			const landblockId =
+				((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
 			candidates.push({
 				assetId: formatTerrainAssetId(landblockId),
 				distance: Math.abs(offsetX) + Math.abs(offsetY),
@@ -268,12 +386,17 @@ function createIndoorCoverageRequests(
 		formatIndoorEnvCellAssetId(focusEnvCellId),
 		...visibleCellIds.map((cellId) => formatIndoorEnvCellAssetId(cellId)),
 		environmentId === null ? null : formatEnvironmentAssetId(environmentId),
-		cellStructureId === null ? null : formatCellStructureAssetId(cellStructureId),
+		cellStructureId === null
+			? null
+			: formatCellStructureAssetId(cellStructureId),
 	].filter((assetId): assetId is string => assetId !== null);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
 	return [...new Set(assetIds)]
-		.filter((assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId))
+		.filter(
+			(assetId) =>
+				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+		)
 		.map((assetId) => ({
 			requestId: `${priority}-${runtimeBatch.tick}-runtime-${assetId}`,
 			assetId,

@@ -198,6 +198,14 @@ export const appearanceManifestPayloadDtoSchema = z.object({
 });
 export type AppearanceManifestPayloadDto = z.infer<typeof appearanceManifestPayloadDtoSchema>;
 
+export const dependencyManifestPayloadDtoSchema = z.object({
+	kind: z.literal("dependency-manifest"),
+	residencyKind: z.string().optional(),
+	dependencyAssetIds: z.array(z.string().min(1)),
+	provenance: assetProvenanceDtoSchema.optional(),
+});
+export type DependencyManifestPayloadDto = z.infer<typeof dependencyManifestPayloadDtoSchema>;
+
 export const genericAssetPayloadDtoSchema = z.object({
 	kind: z.string().min(1),
 	residencyKind: z.string().optional(),

@@ -71,6 +71,26 @@ export const vec3DtoSchema = z.object({
 });
 export type Vec3Dto = z.infer<typeof vec3DtoSchema>;
 
+export const quaternionDtoSchema = z.object({
+	w: z.number().finite(),
+	x: z.number().finite(),
+	y: z.number().finite(),
+	z: z.number().finite(),
+});
+export type QuaternionDto = z.infer<typeof quaternionDtoSchema>;
+
+export const frameDtoSchema = z.object({
+	origin: vec3DtoSchema,
+	orientation: quaternionDtoSchema,
+});
+export type FrameDto = z.infer<typeof frameDtoSchema>;
+
+export const sphereDtoSchema = z.object({
+	center: vec3DtoSchema,
+	radius: z.number().finite(),
+});
+export type SphereDto = z.infer<typeof sphereDtoSchema>;
+
 export const lifecycleStateDtoSchema = z.object({
 	phase: lifecyclePhaseValueSchema,
 	activeModeHint: modeHintValueSchema.nullable(),
@@ -304,6 +324,76 @@ export const gfxObjPayloadDtoSchema = z.object({
 	provenance: assetProvenanceDtoSchema,
 });
 export type GfxObjPayloadDto = z.infer<typeof gfxObjPayloadDtoSchema>;
+
+const setupModelPartDtoSchema = z.object({
+	partIndex: z.number().int().nonnegative(),
+	gfxObjId: z.number().int().nonnegative(),
+	gfxObjAssetId: z.string().min(1),
+	parentIndex: z.number().int().nonnegative().nullable(),
+	scale: vec3DtoSchema.nullable(),
+});
+export type SetupModelPartDto = z.infer<typeof setupModelPartDtoSchema>;
+
+const setupModelLocationDtoSchema = z.object({
+	key: z.number().int(),
+	partId: z.number().int(),
+	frame: frameDtoSchema,
+});
+export type SetupModelLocationDto = z.infer<typeof setupModelLocationDtoSchema>;
+
+const setupModelPlacementFrameDtoSchema = z.object({
+	key: z.number().int(),
+	frames: z.array(frameDtoSchema),
+	hookCount: z.number().int().nonnegative(),
+});
+export type SetupModelPlacementFrameDto = z.infer<
+	typeof setupModelPlacementFrameDtoSchema
+>;
+
+const setupModelCollisionWitnessDtoSchema = z.object({
+	cylSphereCount: z.number().int().nonnegative(),
+	sphereCount: z.number().int().nonnegative(),
+});
+export type SetupModelCollisionWitnessDto = z.infer<
+	typeof setupModelCollisionWitnessDtoSchema
+>;
+
+const setupModelLightDtoSchema = z.object({
+	key: z.number().int(),
+	viewerSpaceLocation: frameDtoSchema,
+	color: z.number().int().nonnegative(),
+	intensity: z.number().finite(),
+	falloff: z.number().finite(),
+	coneAngle: z.number().finite(),
+});
+export type SetupModelLightDto = z.infer<typeof setupModelLightDtoSchema>;
+
+export const setupModelPayloadDtoSchema = z.object({
+	kind: z.literal("setup-model"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("setup-model"),
+	setupModelId: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative().nullable(),
+	parts: z.array(setupModelPartDtoSchema),
+	holdingLocations: z.array(setupModelLocationDtoSchema),
+	connectionPoints: z.array(setupModelLocationDtoSchema),
+	placementFrames: z.array(setupModelPlacementFrameDtoSchema),
+	collisionWitness: setupModelCollisionWitnessDtoSchema,
+	height: z.number().finite().nullable(),
+	radius: z.number().finite().nullable(),
+	stepUp: z.number().finite().nullable(),
+	stepDown: z.number().finite().nullable(),
+	sortingSphere: sphereDtoSchema.nullable(),
+	selectionSphere: sphereDtoSchema.nullable(),
+	lights: z.array(setupModelLightDtoSchema),
+	defaultAnimation: z.number().int().nonnegative().nullable(),
+	defaultScript: z.number().int().nonnegative().nullable(),
+	defaultMotionTable: z.number().int().nonnegative().nullable(),
+	defaultSoundTable: z.number().int().nonnegative().nullable(),
+	defaultScriptTable: z.number().int().nonnegative().nullable(),
+	provenance: assetProvenanceDtoSchema,
+});
+export type SetupModelPayloadDto = z.infer<typeof setupModelPayloadDtoSchema>;
 
 export const appearanceManifestPayloadDtoSchema = z.object({
 	kind: z.literal("appearance-manifest"),

@@ -5,7 +5,7 @@ use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_content::{ContentRepository, SoulEmoteCatalog};
-use holtburger_dat::file_type::{EnvCell, GfxObj};
+use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::landblock::CellLandblock;
@@ -218,6 +218,10 @@ impl HostBoundaryAdapter {
 
         if let Some(gfx_obj_id) = parse_gfx_obj_asset_id(&request.asset_id) {
             return self.build_gfx_obj_lookup_response(request, gfx_obj_id);
+        }
+
+        if let Some(setup_model_id) = parse_setup_model_asset_id(&request.asset_id) {
+            return self.build_setup_model_lookup_response(request, setup_model_id);
         }
 
         let (residency_kind, debug_primitive, palette_key, provenance) = match request
@@ -579,6 +583,57 @@ impl HostBoundaryAdapter {
             payload,
         }
     }
+
+    fn build_setup_model_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        setup_model_id: u32,
+    ) -> AssetLookupResponseDto {
+        let payload = self
+            .load_setup_model_payload(setup_model_id)
+            .unwrap_or_else(|(detail, error_code)| {
+                serde_json::json!({
+                    "kind": "setup-model",
+                    "residencyKind": "unknown",
+                    "sourceAssetKind": "setup-model",
+                    "setupModelId": setup_model_id,
+                    "flags": null,
+                    "parts": [],
+                    "holdingLocations": [],
+                    "connectionPoints": [],
+                    "placementFrames": [],
+                    "collisionWitness": {
+                        "cylSphereCount": 0,
+                        "sphereCount": 0
+                    },
+                    "height": null,
+                    "radius": null,
+                    "stepUp": null,
+                    "stepDown": null,
+                    "sortingSphere": null,
+                    "selectionSphere": null,
+                    "lights": [],
+                    "defaultAnimation": null,
+                    "defaultScript": null,
+                    "defaultMotionTable": null,
+                    "defaultSoundTable": null,
+                    "defaultScriptTable": null,
+                    "provenance": {
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "setup-model",
+                        "errorCode": error_code,
+                        "detail": detail
+                    }
+                })
+            });
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
 }
 
 fn build_cell_structure_lookup_response(
@@ -784,6 +839,66 @@ impl HostBoundaryAdapter {
             }
         }))
     }
+
+    fn load_setup_model_payload(
+        &self,
+        setup_model_id: u32,
+    ) -> Result<serde_json::Value, (String, &'static str)> {
+        let resource = self
+            .content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not read {}:0x{setup_model_id:08X} from content repository: {error}",
+                        EOR_PORTAL_NAMESPACE
+                    ),
+                    "asset-read-failed",
+                )
+            })?;
+        let source_detail = resource.source_description.clone();
+        let setup_model =
+            SetupModel::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
+                (
+                    format!("Could not decode SetupModel 0x{setup_model_id:08X}: {error}"),
+                    "asset-decode-failed",
+                )
+            })?;
+
+        Ok(serde_json::json!({
+            "kind": "setup-model",
+            "residencyKind": "unknown",
+            "sourceAssetKind": "setup-model",
+            "setupModelId": setup_model.id,
+            "flags": setup_model.flags,
+            "parts": serialize_setup_model_parts(&setup_model),
+            "holdingLocations": serialize_location_map(&setup_model.holding_locations),
+            "connectionPoints": serialize_location_map(&setup_model.connection_points),
+            "placementFrames": serialize_placement_frames(&setup_model),
+            "collisionWitness": {
+                "cylSphereCount": setup_model.cyl_spheres.len(),
+                "sphereCount": setup_model.spheres.len(),
+            },
+            "height": setup_model.height,
+            "radius": setup_model.radius,
+            "stepUp": setup_model.step_up,
+            "stepDown": setup_model.step_down,
+            "sortingSphere": serialize_sphere(&setup_model.sorting_sphere),
+            "selectionSphere": serialize_sphere(&setup_model.selection_sphere),
+            "lights": serialize_lights(&setup_model.lights),
+            "defaultAnimation": setup_model.default_animation,
+            "defaultScript": setup_model.default_script,
+            "defaultMotionTable": setup_model.default_motion_table,
+            "defaultSoundTable": setup_model.default_sound_table,
+            "defaultScriptTable": setup_model.default_script_table,
+            "provenance": {
+                "source": "repo-local-hba",
+                "sourceAssetKind": "setup-model",
+                "errorCode": null,
+                "detail": source_detail
+            }
+        }))
+    }
 }
 
 fn generated_fallback_terrain_payload(
@@ -899,12 +1014,125 @@ fn parse_gfx_obj_asset_id(asset_id: &str) -> Option<u32> {
         .filter(|id| (id >> 24) == 0x01)
 }
 
+fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
+    let raw_hex = asset_id.strip_prefix("setup-model/")?;
+    let hex = raw_hex
+        .strip_prefix("0x")
+        .or_else(|| raw_hex.strip_prefix("0X"))
+        .unwrap_or(raw_hex);
+
+    (hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
+        .filter(|id| (id >> 24) == 0x02)
+}
+
 fn serialize_vector3(vector: &Vector3) -> serde_json::Value {
     serde_json::json!({
         "x": vector.x,
         "y": vector.y,
         "z": vector.z,
     })
+}
+
+fn serialize_quaternion(quaternion: &Quaternion) -> serde_json::Value {
+    serde_json::json!({
+        "w": quaternion.w,
+        "x": quaternion.x,
+        "y": quaternion.y,
+        "z": quaternion.z,
+    })
+}
+
+fn serialize_frame(frame: &holtburger_dat::graphics::Frame) -> serde_json::Value {
+    serde_json::json!({
+        "origin": serialize_vector3(&frame.origin),
+        "orientation": serialize_quaternion(&frame.orientation),
+    })
+}
+
+fn serialize_sphere(sphere: &holtburger_common::Sphere) -> serde_json::Value {
+    serde_json::json!({
+        "center": serialize_vector3(&sphere.center),
+        "radius": sphere.radius,
+    })
+}
+
+fn serialize_setup_model_parts(setup_model: &SetupModel) -> Vec<serde_json::Value> {
+    setup_model
+        .parts
+        .iter()
+        .enumerate()
+        .map(|(index, gfx_obj_id)| {
+            serde_json::json!({
+                "partIndex": index,
+                "gfxObjId": gfx_obj_id,
+                "gfxObjAssetId": format!("gfx-obj/{gfx_obj_id:08x}"),
+                "parentIndex": setup_model.parent_index.get(index).copied(),
+                "scale": setup_model.default_scale.get(index).map(serialize_vector3),
+            })
+        })
+        .collect()
+}
+
+fn serialize_location_map(
+    locations: &std::collections::HashMap<
+        i32,
+        holtburger_dat::file_type::setup_model::LocationType,
+    >,
+) -> Vec<serde_json::Value> {
+    let mut entries = locations.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| **key);
+    entries
+        .into_iter()
+        .map(|(key, location)| {
+            serde_json::json!({
+                "key": key,
+                "partId": location.part_id,
+                "frame": serialize_frame(&location.frame),
+            })
+        })
+        .collect()
+}
+
+fn serialize_placement_frames(setup_model: &SetupModel) -> Vec<serde_json::Value> {
+    let mut entries = setup_model.placement_frames.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| **key);
+    entries
+        .into_iter()
+        .map(|(key, placement)| {
+            serde_json::json!({
+                "key": key,
+                "frames": placement
+                    .anim_frame
+                    .frames
+                    .iter()
+                    .map(serialize_frame)
+                    .collect::<Vec<_>>(),
+                "hookCount": placement.anim_frame.hooks.len(),
+            })
+        })
+        .collect()
+}
+
+fn serialize_lights(
+    lights: &std::collections::HashMap<i32, holtburger_dat::file_type::setup_model::LightInfo>,
+) -> Vec<serde_json::Value> {
+    let mut entries = lights.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(key, _)| **key);
+    entries
+        .into_iter()
+        .map(|(key, light)| {
+            serde_json::json!({
+                "key": key,
+                "viewerSpaceLocation": serialize_frame(&light.viewer_space_location),
+                "color": light.color,
+                "intensity": light.intensity,
+                "falloff": light.falloff,
+                "coneAngle": light.cone_angle,
+            })
+        })
+        .collect()
 }
 
 fn serialize_vertex_array(vertex_array: &CVertexArray) -> serde_json::Value {
@@ -1247,6 +1475,37 @@ mod tests {
                 .is_some()
         );
         assert!(asset.payload["physicsWitness"]["hasBsp"].is_boolean());
+    }
+
+    #[test]
+    fn setup_model_lookup_returns_composite_payload() {
+        let runtime = HostRuntimeService::new();
+        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-setup-model".to_string(),
+            asset_id: "setup-model/02000001".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.request_id, "test-setup-model");
+        assert_eq!(asset.asset_id, "setup-model/02000001");
+        assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
+        assert_eq!(asset.payload["kind"], "setup-model");
+        assert_eq!(asset.payload["sourceAssetKind"], "setup-model");
+        assert_eq!(asset.payload["setupModelId"], 0x02000001);
+        assert_eq!(asset.payload["residencyKind"], "unknown");
+        assert_eq!(asset.payload["provenance"]["source"], "repo-local-hba");
+        assert!(asset.payload["parts"].as_array().is_some());
+        assert!(
+            asset.payload["collisionWitness"]["cylSphereCount"]
+                .as_u64()
+                .is_some()
+        );
+        assert!(
+            asset.payload["collisionWitness"]["sphereCount"]
+                .as_u64()
+                .is_some()
+        );
+        assert!(asset.payload["placementFrames"].as_array().is_some());
     }
 
     #[test]

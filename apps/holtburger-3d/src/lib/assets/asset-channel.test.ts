@@ -618,20 +618,45 @@ describe("asset channel controller", () => {
 					surfaceIds: [0x08000001],
 					vertexArray: {
 						vertexType: 1,
-						vertexCount: 3,
-						vertices: [],
+						vertexCount: 4,
+						vertices: [
+							{
+								id: 0,
+								origin: { x: 0, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 0 }],
+							},
+							{
+								id: 1,
+								origin: { x: 2, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 1, v: 0 }],
+							},
+							{
+								id: 2,
+								origin: { x: 2, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 1, v: 1 }],
+							},
+							{
+								id: 3,
+								origin: { x: 0, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 1 }],
+							},
+						],
 					},
 					drawingPolygons: [
 						{
 							id: 1,
-							numPts: 3,
+							numPts: 4,
 							stippling: 0,
 							sidesType: 1,
-							posSurface: 0,
+							posSurface: 0x08000001,
 							negSurface: 0,
-							vertexIds: [0, 1, 2],
-							posUvIndices: [0, 0, 0],
-							negUvIndices: [0, 0, 0],
+							vertexIds: [0, 1, 2, 3],
+							posUvIndices: [0, 0, 0, 0],
+							negUvIndices: [0, 0, 0, 0],
 						},
 					],
 					drawingBsp: null,
@@ -656,12 +681,60 @@ describe("asset channel controller", () => {
 			throw new Error("expected gfx-obj payload");
 		}
 		expect(gfxObj.payload.gfxObjId).toBe(0x01000001);
-		expect(gfxObj.payload.vertexArray.vertexCount).toBe(3);
+		expect(gfxObj.payload.vertexArray.vertexCount).toBe(4);
 		expect(gfxObj.payload.drawingPolygons).toHaveLength(1);
+		expect(gfxObj.payload.renderGeometry).toMatchObject({
+			gfxObjId: 0x01000001,
+			vertexCount: 6,
+			triangleCount: 2,
+			surfaceIds: [0x08000001],
+			bounds: {
+				min: { x: 0, y: 0, z: 0 },
+				max: { x: 2, y: 2, z: 0 },
+			},
+		});
+		expect(gfxObj.payload.renderGeometry.positions).toEqual([
+			0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 0, 0, 2, 2, 0, 0, 2, 0,
+		]);
+		expect(gfxObj.payload.renderGeometry.uvs).toEqual([
+			0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1,
+		]);
+		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 0 },
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 3 },
+		]);
 		expect(gfxObj.payload.physicsWitness).toEqual({
 			polygonCount: 2,
 			hasBsp: true,
 		});
+	});
+
+	it("reuses cached gfx-obj preparation when a duplicate graph request arrives", async () => {
+		const cachedAsset = createPreparedGfxObjAsset("gfx-obj/01000001");
+		let lookupCount = 0;
+		const controller = new AssetChannelController(
+			async () => {
+				lookupCount += 1;
+				throw new Error("lookup should not run for cached assets");
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const result = await controller.prepareAssetGraph(
+			{
+				requestId: "duplicate-gfx-obj",
+				assetId: "gfx-obj/01000001",
+				priority: "streaming",
+			},
+			{
+				"gfx-obj/01000001": cachedAsset,
+			},
+		);
+
+		expect(lookupCount).toBe(0);
+		expect(result.rootAsset).toBe(cachedAsset);
+		expect(result.preparedAssets).toEqual([]);
+		controller.dispose();
 	});
 });
 
@@ -695,4 +768,77 @@ function createSyntheticPreparedAsset(
 		},
 		preparedAt: "2026-05-12T00:00:00.000Z",
 	};
+}
+
+function createPreparedGfxObjAsset(assetId: string): PreparedAssetRecord {
+	return prepareAssetPayload(
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "gfx-obj",
+				residencyKind: "unknown",
+				sourceAssetKind: "gfx-obj",
+				gfxObjId: 0x01000001,
+				flags: null,
+				surfaceIds: [0x08000001],
+				vertexArray: {
+					vertexType: null,
+					vertexCount: 3,
+					vertices: [
+						{
+							id: 0,
+							origin: { x: 0, y: 0, z: 0 },
+							normal: { x: 0, y: 0, z: 1 },
+							uvs: [{ u: 0, v: 0 }],
+						},
+						{
+							id: 1,
+							origin: { x: 1, y: 0, z: 0 },
+							normal: { x: 0, y: 0, z: 1 },
+							uvs: [{ u: 1, v: 0 }],
+						},
+						{
+							id: 2,
+							origin: { x: 0, y: 1, z: 0 },
+							normal: { x: 0, y: 0, z: 1 },
+							uvs: [{ u: 0, v: 1 }],
+						},
+					],
+				},
+				drawingPolygons: [
+					{
+						id: 1,
+						numPts: 3,
+						stippling: 0,
+						sidesType: 1,
+						posSurface: 0x08000001,
+						negSurface: 0,
+						vertexIds: [0, 1, 2],
+						posUvIndices: [0, 0, 0],
+						negUvIndices: [0, 0, 0],
+					},
+				],
+				drawingBsp: null,
+				physicsWitness: {
+					polygonCount: 1,
+					hasBsp: false,
+				},
+				sortCenter: null,
+				didDegrade: null,
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "gfx-obj",
+					errorCode: null,
+					detail: "test-cache",
+				},
+			},
+		},
+	);
 }

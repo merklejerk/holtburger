@@ -1821,22 +1821,41 @@ Phase gate before 12.2:
 
 ##### Phase 12.2 — `GfxObj` render-geometry preparation
 
-Status: planned.
+Status: completed on 2026-05-12.
 
-Scope: Turn the decoded `GfxObj` drawing polygon data into a reusable renderer-facing geometry intermediate while keeping the physics polygon/BSP data separate and intact.
+Scope: Turn the decoded `GfxObj` drawing polygon data into a reusable renderer-facing geometry intermediate while keeping drawing data, drawing BSP, compact physics witness metadata, and surface refs separate.
 
 Deliverables:
 
-- worker-side polygon-set to `BufferGeometry`-ready intermediate for `GfxObj` drawing polygons
-- deterministic triangulation behavior covered by fixture tests, including at least one non-trivial polygon set
-- prepared payload shape that keeps drawing geometry, drawing BSP, physics polygons, physics BSP, and surface refs distinct
-- debug color or material placeholder derived on the frontend side only, without introducing `Surface` / `Texture` decode
+- worker-side polygon-set to `BufferGeometry`-ready intermediate for `GfxObj` drawing polygons: delivered via `PreparedGfxObjRenderGeometry`
+- deterministic triangulation behavior covered by fixture tests, including at least one non-trivial polygon set: delivered with quad fan-triangulation coverage
+- prepared payload shape that keeps render geometry, decoded drawing polygons, drawing BSP, compact physics witness metadata, and surface refs distinct
+- debug color or material placeholder derived on the frontend side only, without introducing `Surface` / `Texture` decode: preserved by carrying surface ids and triangle metadata without decoding material assets
 
 Acceptance:
 
 - `gfx-obj/*` assets can be prepared into reusable geometry intermediates keyed by asset id
 - duplicate requests for the same `gfx-obj/*` can reuse the same prepared geometry cache entry
 - no setup-model composition, scenery runtime facts, or visible scene instances are required yet
+
+Delivered:
+
+- Added `PreparedGfxObjRenderGeometry` to the prepared asset payload. The worker now emits flat `positions`, `normals`, and `uvs` arrays suitable for later `BufferGeometry` upload, plus per-triangle `polygonId`, `surfaceId`, `firstVertex`, unique surface ids, and bounds.
+- Kept the original decoded drawing payload (`vertexArray`, `drawingPolygons`, `drawingBsp`) on the `gfx-obj` payload. The render geometry is an added derived intermediate, not a lossy replacement.
+- Preserved the Phase 12.1 physics decision: the frontend still receives only `physicsWitness`, not full physics polygons or physics BSPs.
+- Added tests for non-trivial quad triangulation and duplicate `gfx-obj/*` graph requests reusing the prepared-by-asset-id cache.
+
+Course corrections:
+
+- The accepted boundary is drawing geometry plus compact physics witness metadata. Full physics structures remain Rust-owned and should not be promoted into frontend DTOs for normal rendering.
+- Triangulation uses deterministic fan triangulation over each drawing polygon's vertex order. That is intentionally simple for this phase; if later AC parity work proves some polygon class needs special handling, it should be corrected in the shared decoding or worker geometry-prep path with fixture coverage.
+- The render intermediate duplicates triangle vertices instead of using indexed geometry. That keeps the first upload shape straightforward and allows per-triangle surface/debug metadata without inventing material grouping yet.
+- Missing polygon vertex references and mismatched `numPts` now fail preparation loudly. Missing UV entries fall back to `(0, 0)` because materials/textures are explicitly out of scope for Phase 12.2.
+
+Phase gate before 12.3:
+
+- Phase 12.3 still makes sense as the next step. The leaf `gfx-obj/*` family now has both decoded drawing data and reusable render geometry, so `setup-model/*` can focus on composition and dependency references instead of geometry preparation.
+- Keep 12.3 scoped to setup-model payloads and main-thread dependency orchestration. Do not publish outdoor scenery runtime facts or render visible scene instances until setup models can reference prepared `gfx-obj/*` leaves cleanly.
 
 ##### Phase 12.3 — `setup-model/*` composite asset family
 
@@ -1985,12 +2004,12 @@ Phase 13 design guardrails:
 
 - do not enforce portal-driven visibility culling in this phase; expose portals on the boundary as data, leave culling for the spatial follow-up
 - do not derive indoor visible-cell relevance from frontend-local topology guesses; continue to rely on authoritative `EnvCell.visible_cells`
-- do not let `cell-structure/*` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should look like "vertex array + polygons + drawing BSP + physics BSP + portals where applicable"
+- do not let `cell-structure/*` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should expose drawing geometry for rendering, drawing BSP or portal witnesses where useful, surface refs, and compact physics witnesses while keeping full physics structures Rust-owned
 - do not introduce shared-crate types for cell-structure consumers; this stays an asset-channel + frontend-scene concern
 
 Phase Gate Review Before Phase 14:
 
-- assess whether the cumulative physics-witness data (per-`gfx-obj` physics BSP, `setup-model` cyl-spheres, per-`cell-struct` physics BSP and portals) is rich enough that Phase 14 becomes a wiring exercise rather than a decode exercise
+- assess whether Rust-owned physics data already decoded for `gfx-obj`, `setup-model` cyl-spheres, and `cell-struct` geometry is rich enough that Phase 14 becomes a spatial wiring exercise rather than a decode exercise
 - assess whether camera collision against indoor walls (not outdoor terrain) is the right first non-world body driver, given that browser mode keeps a free cam by design
 - decide whether materials should be promoted to a parallel phase before or after Phase 14
 
@@ -2005,7 +2024,7 @@ Phase 13 testing expectations:
 
 Status: planned. Replaces and supersedes the old "Phase 12 = SpatialBody expansion" stub.
 
-By the time this phase starts, the world has terrain (Phase 9–10), outdoor scenery with physics-witness data (Phase 12), and indoor cell geometry with physics BSP plus portals (Phase 13). The boundary types already carry the physics surfaces a non-world body would need to query. A real driver also exists: client mode (when introduced) will need a third-person camera that occludes against indoor walls and scenery without becoming an authoritative world member.
+By the time this phase starts, the world has terrain (Phase 9–10), outdoor scenery with physics-witness metadata (Phase 12), and indoor cell geometry with Rust-owned physics BSP plus portals (Phase 13). The decoded Rust-side content should carry the physics surfaces a non-world body would need to query, while frontend boundary DTOs remain render-oriented. A real driver also exists: client mode (when introduced) will need a third-person camera that occludes against indoor walls and scenery without becoming an authoritative world member.
 
 The expansion must therefore land as wiring, not as design-from-scratch.
 
@@ -2015,7 +2034,7 @@ Ground-truth anchors for this phase:
 - [crates/holtburger-world/src/spatial/types.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/types.rs)
 - [crates/holtburger-world/src/spatial/scene.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/spatial/scene.rs)
 - [crates/holtburger-core/src/client/simulation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/simulation.rs)
-- the Phase 12 and Phase 13 physics-witness payloads as the real surface population the new bodies query against
+- the Phase 12 and Phase 13 Rust-owned decoded physics data as the real surface population the new bodies query against
 
 Purpose:
 
@@ -2026,9 +2045,9 @@ Purpose:
 Deliverables:
 
 - shared `SpatialBody` semantics covering role / kind, world-membership participation, and collision or query masks, documented in shared crate docs and reflected in `holtburger-world` types
-- the first real non-world body consumer end-to-end (most likely client-mode third-person camera collision against indoor walls and scenery surfaced by Phase 13's physics-witness payloads)
+- the first real non-world body consumer end-to-end (most likely client-mode third-person camera collision against indoor walls and scenery surfaced by Phase 13's Rust-owned physics data)
 - shared tests proving non-world bodies can participate in solving without being mistaken for authoritative world membership and without breaking existing local-player and entity solving behavior
-- explicit documentation of how the Phase 12 and Phase 13 physics-witness payloads are wired into the spatial substrate at this point, so future renderer-side queries do not need to reinvent that bridge
+- explicit documentation of how Phase 12 and Phase 13 decoded physics data is wired into the spatial substrate at this point, so future renderer-side queries do not need to reinvent that bridge or request full physics DTOs
 
 Acceptance criteria:
 
@@ -2392,6 +2411,8 @@ Mitigation:
 - Keep `gfx-obj/*` leaves residency-neutral. They are reusable decoded geometry assets, so placement-specific outdoor/indoor residency should come from later setup/scenery or env-cell consumers rather than the leaf asset itself.
 - Keep full physics `GfxObj` payload data Rust-owned. Frontend-facing `gfx-obj/*` payloads may carry drawing data and compact physics witness metadata, but they should not expose physics polygons/BSPs unless a dedicated debug/export feature explicitly needs that data.
 - Keep dynamic `ContentRepository::read_resource(...)` keyed only by `ResourceKey`. Human-readable asset labels belong on higher-level typed loaders or call-site error context, not in the raw resource lookup API.
+- Prepare `GfxObj` render geometry as a frontend-owned derived intermediate. The worker uses deterministic fan triangulation into flat `BufferGeometry`-ready arrays while preserving decoded drawing data and surface references separately.
+- Keep the first `GfxObj` render intermediate non-indexed. Duplicating triangle vertices is acceptable at this stage because it keeps cache reuse, surface-debug metadata, and later renderer upload straightforward before material grouping exists.
 
 #### Verification Log
 
@@ -2458,6 +2479,7 @@ Mitigation:
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving synthetic dependency orchestration from generic/unknown payloads to an explicit `dependency-manifest` payload.
 - 2026-05-12: `cargo check -p holtburger-3d`, `cargo test -p holtburger-3d`, `cargo clippy -p holtburger-3d --all-targets -- -D warnings`, `npm run check`, `npm run test:ts`, and `npm run lint:ts` passed after adding Phase 12.1 `gfx-obj/*` host lookup, TypeScript contract parsing, and worker preparation.
 - 2026-05-12: `cargo test -p holtburger-content --lib`, `cargo check -p holtburger-3d`, `cargo test -p holtburger-3d`, `cargo clippy -p holtburger-content --all-targets -- -D warnings`, and `cargo clippy -p holtburger-3d --all-targets -- -D warnings` passed after removing the human-readable label parameter from dynamic `ContentRepository::read_resource(...)`.
+- 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after adding Phase 12.2 `GfxObj` render-geometry preparation.
 
 #### Phase Review Log
 
@@ -2493,6 +2515,9 @@ Mitigation:
 - 2026-05-12: Phase 12.1 follow-up cleanup removed full physics polygons and physics BSPs from the frontend-facing `gfx-obj` payload. The boundary now exposes drawing data plus compact physics witness metadata, keeping authoritative physics structures Rust-owned.
 - 2026-05-12: Phase 12.1 follow-up cleanup simplified dynamic content lookup. `ContentRepository::read_resource(...)` now takes only a `ResourceKey`; friendly labels remain on typed loaders like `read_asset(...)` and on call-site context where they add real diagnostic value.
 - 2026-05-12: Phase 12.1 deliberately did not triangulate `GfxObj` polygons, add `setup-model/*`, publish scenery runtime facts, or render scene instances. The next work should remain Phase 12.2: render-geometry preparation for the decoded `GfxObj` drawing polygons.
+- 2026-05-12: Phase 12.2 completed with worker-side `GfxObj` render geometry. Prepared `gfx-obj/*` payloads now carry flat positions, normals, UVs, triangle metadata, surface refs, and bounds while retaining decoded drawing data and compact physics witness metadata separately.
+- 2026-05-12: Phase 12.2 corrected stale plan wording around physics payloads. The frontend should not receive full `GfxObj` physics polygons/BSPs for normal rendering; Rust remains the owner of those structures unless a future explicit debug/export feature needs them.
+- 2026-05-12: Phase 12.2 did not add `setup-model/*`, outdoor scenery facts, or scene rendering. The next step should remain Phase 12.3: setup-model composites using the main-thread dependency orchestration path.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2540,6 +2565,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phase 12.1 are complete. The next step should be Phase 12.2: `GfxObj` render-geometry preparation.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 and 12.2 are complete. The next step should be Phase 12.3: `setup-model/*` composite asset family.
 
-The rest of Phase 12 still makes sense as a parent milestone. The refined sequence remains: prepare reusable `GfxObj` render geometry, add `setup-model/*` composites through main-thread dependency orchestration, publish outdoor scenery runtime facts, then render first non-terrain scenery.
+The rest of Phase 12 still makes sense as a parent milestone. The refined sequence now is: add `setup-model/*` composites through main-thread dependency orchestration, publish outdoor scenery runtime facts, then render first non-terrain scenery.

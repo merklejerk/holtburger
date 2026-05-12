@@ -3,6 +3,8 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	AssetProvenanceSource,
+	FrameDto,
+	SphereDto,
 	Vec3Dto,
 } from "../host/contracts";
 
@@ -169,6 +171,62 @@ export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	didDegrade: number | null;
 }
 
+export interface PreparedSetupModelPart {
+	partIndex: number;
+	gfxObjId: number;
+	gfxObjAssetId: string;
+	parentIndex: number | null;
+	scale: Vec3Dto | null;
+}
+
+export interface PreparedSetupModelLocation {
+	key: number;
+	partId: number;
+	frame: FrameDto;
+}
+
+export interface PreparedSetupModelPlacementFrame {
+	key: number;
+	frames: FrameDto[];
+	hookCount: number;
+}
+
+export interface PreparedSetupModelLight {
+	key: number;
+	viewerSpaceLocation: FrameDto;
+	color: number;
+	intensity: number;
+	falloff: number;
+	coneAngle: number;
+}
+
+export interface PreparedSetupModelPayload extends PreparedAssetPayloadBase {
+	kind: "setup-model";
+	sourceAssetKind: "setup-model";
+	setupModelId: number;
+	flags: number | null;
+	parts: PreparedSetupModelPart[];
+	holdingLocations: PreparedSetupModelLocation[];
+	connectionPoints: PreparedSetupModelLocation[];
+	placementFrames: PreparedSetupModelPlacementFrame[];
+	collisionWitness: {
+		cylSphereCount: number;
+		sphereCount: number;
+	};
+	height: number | null;
+	radius: number | null;
+	stepUp: number | null;
+	stepDown: number | null;
+	sortingSphere: SphereDto | null;
+	selectionSphere: SphereDto | null;
+	lights: PreparedSetupModelLight[];
+	defaultAnimation: number | null;
+	defaultScript: number | null;
+	defaultMotionTable: number | null;
+	defaultSoundTable: number | null;
+	defaultScriptTable: number | null;
+}
+
 export interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
 	kind: "visual-asset-stub";
 	sourceAssetKind: string | null;
@@ -194,6 +252,7 @@ export type PreparedAssetPayload =
 	| PreparedEnvironmentPayload
 	| PreparedCellStructurePayload
 	| PreparedGfxObjPayload
+	| PreparedSetupModelPayload
 	| PreparedVisualAssetStubPayload
 	| PreparedDependencyManifestPayload
 	| PreparedUnknownAssetPayload;
@@ -241,6 +300,12 @@ export function getPreparedAssetDependencies(
 ): PreparedAssetDependency[] {
 	if (asset.payload.kind === "dependency-manifest") {
 		return asset.payload.dependencyAssetIds.map((assetId) => ({ assetId }));
+	}
+
+	if (asset.payload.kind === "setup-model") {
+		return [...new Set(asset.payload.parts.map((part) => part.gfxObjAssetId))]
+			.sort()
+			.map((assetId) => ({ assetId }));
 	}
 
 	return [];

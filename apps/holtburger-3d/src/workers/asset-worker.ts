@@ -8,6 +8,7 @@ import type {
 	EnvironmentPayloadDto,
 	GfxObjPayloadDto,
 	IndoorEnvCellPayloadDto,
+	SetupModelPayloadDto,
 	TerrainLandblockPayloadDto,
 } from "../lib/host/contracts";
 import {
@@ -19,6 +20,7 @@ import {
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
+	setupModelPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
 } from "../lib/host/contracts";
 import type {
@@ -89,6 +91,13 @@ export function prepareAssetPayload(
 	const gfxObjPayload = gfxObjPayloadDtoSchema.safeParse(response.payload);
 	if (gfxObjPayload.success) {
 		return prepareGfxObj(request, response, gfxObjPayload.data);
+	}
+
+	const setupModelPayload = setupModelPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (setupModelPayload.success) {
+		return prepareSetupModel(request, response, setupModelPayload.data);
 	}
 
 	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(
@@ -250,6 +259,43 @@ function prepareGfxObj(
 			renderGeometry,
 			sortCenter: payload.sortCenter,
 			didDegrade: payload.didDegrade,
+		},
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareSetupModel(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: SetupModelPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "setup-model",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			setupModelId: payload.setupModelId,
+			flags: payload.flags,
+			parts: payload.parts,
+			holdingLocations: payload.holdingLocations,
+			connectionPoints: payload.connectionPoints,
+			placementFrames: payload.placementFrames,
+			collisionWitness: payload.collisionWitness,
+			height: payload.height,
+			radius: payload.radius,
+			stepUp: payload.stepUp,
+			stepDown: payload.stepDown,
+			sortingSphere: payload.sortingSphere,
+			selectionSphere: payload.selectionSphere,
+			lights: payload.lights,
+			defaultAnimation: payload.defaultAnimation,
+			defaultScript: payload.defaultScript,
+			defaultMotionTable: payload.defaultMotionTable,
+			defaultSoundTable: payload.defaultSoundTable,
+			defaultScriptTable: payload.defaultScriptTable,
 		},
 		preparedAt: new Date().toISOString(),
 	};

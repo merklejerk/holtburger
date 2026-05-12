@@ -1860,7 +1860,7 @@ Phase gate before 12.3:
 
 ##### Phase 12.3 — `setup-model/*` composite asset family
 
-Status: planned.
+Status: completed on 2026-05-12.
 
 Scope: Add setup models as dependency-bearing composites that reference `gfx-obj/*` leaves by id and use the Phase 12.0c main-thread orchestration path for dependency resolution.
 
@@ -1868,7 +1868,7 @@ Deliverables:
 
 - `setup-model/*` asset-family discriminants in the host adapter contract, frontend contract parser, and asset worker dispatch path
 - host-side dynamic-key lookup for `setup-model/0x02XXXXXX`
-- prepared `setup-model` payload carrying parts with `gfx_obj_id`, placement frame, scale, parent index, and `CylSphere` collision witnesses
+- prepared `setup-model` payload carrying parts with `gfx_obj_id`, placement frame, scale, parent index, and compact collision witness counts
 - `getPreparedAssetDependencies(...)` support for `setup-model` payloads by deriving referenced `gfx-obj/*` ids from parts
 - tests proving setup-model dependency derivation and real `prepareAssetGraph(...)` setup-to-gfx scheduling
 
@@ -1877,6 +1877,26 @@ Acceptance:
 - a `setup-model/*` request prepares the setup payload and schedules missing `gfx-obj/*` leaves through main-thread orchestration
 - AC part order remains preserved inside the setup payload even if dependency id lists are normalized for scheduling
 - no outdoor scenery placement or rendering is required yet
+
+Delivered:
+
+- Added `setup-model/*` host lookup through `ContentRepository::read_resource(...)` with high-byte DID validation for `0x02`. The Tauri adapter now decodes real `SetupModel` data from repo-local HBA and returns a first-class `setup-model` payload instead of a generic fallback.
+- Added TypeScript host contracts for setup-model composites: ordered parts, per-part `gfxObjAssetId`, parent index, scale, holding locations, connection points, placement frames, compact collision witness counts, lights, bounds/step metadata, defaults, and provenance.
+- Added a prepared `setup-model` payload variant. The worker preserves the ordered composite data and does not create GPU resources or fetch follow-up assets.
+- Extended `getPreparedAssetDependencies(...)` so setup-model dependencies are derived from part `gfxObjAssetId` values. Dependency ids are unique and sorted for deterministic scheduling, while the setup payload keeps AC part order intact.
+- Added tests for real host lookup of `setup-model/02000001`, setup-model contract parsing, setup-model worker preparation, dependency derivation, and `prepareAssetGraph(...)` setup-to-gfx scheduling.
+
+Course corrections:
+
+- Setup-model collision structures remain Rust-owned. The frontend receives only compact cyl-sphere/sphere counts to prove the split exists; it does not receive collision-proxy geometry for normal rendering.
+- The payload includes placement-frame frame lists and hook counts, not decoded animation hook behavior. Animation interpretation belongs to later animation/script phases, not this static composite asset phase.
+- `setup-model/*` remains residency-neutral. Outdoor or indoor relevance will come from later runtime facts (`LandblockInfo.Objects`, `Buildings`, env-cell/static-object consumers), not from the reusable composite asset itself.
+- Main-thread orchestration remains the right dependency model. The worker prepares one asset at a time; the main thread schedules missing `gfx-obj/*` leaves from prepared payload data and reuses cached leaves across setup models.
+
+Phase gate before 12.4:
+
+- Phase 12.4 still makes sense as the next step. The asset side can now resolve both setup composites and gfx leaves, so the next missing input is runtime-channel outdoor scenery facts that name which source DIDs exist in each landblock and where they are placed.
+- Keep 12.4 focused on publishing `LandblockInfo.Objects` and `Buildings` as runtime facts. Do not start Three.js scenery hydration until those facts are explicit and frontend-owned asset selection can request the setup/gfx chain naturally.
 
 ##### Phase 12.4 — Outdoor scenery runtime facts
 
@@ -1923,7 +1943,7 @@ Acceptance:
 Primary deliverables:
 
 - `gfx-obj/*` and `setup-model/*` asset family discriminants in the host adapter contracts and the frontend asset channel
-- prepared boundary payloads that explicitly name the AC-shaped split: `setup-model` carries `parts: [{ gfx_obj_id, placement_frame, scale, cyl_spheres, parent_index, ... }]`; `gfx-obj` carries decoded drawing data, drawing BSP, surface refs, render geometry, sort center, and compact physics witness metadata while full physics structures remain Rust-owned
+- prepared boundary payloads that explicitly name the AC-shaped split: `setup-model` carries render/composition data such as `parts: [{ gfx_obj_id, placement_frame, scale, parent_index, ... }]` plus compact collision witness counts; `gfx-obj` carries decoded drawing data, drawing BSP, surface refs, render geometry, sort center, and compact physics witness metadata while full physics structures remain Rust-owned
 - runtime DTO expansion publishing per-landblock `scenery_instances: [{ source_did, frame, instance_id, owning_landblock_id }]` derived from `LandblockInfo.Objects` (and a parallel `building_instances` derived from `Buildings`) for the focus + neighborhood landblocks already covered by Phase 7's outdoor ring
 - worker-side preparation that, for each individual asset request, turns resolved payloads into CPU-side intermediates (`gfx-obj` render geometry arrays, setup-model parts list, etc.); the cross-asset dependency walk (setup-model → per-part gfx-obj) is handled by main-thread orchestration, not by the worker fetching follow-ups itself
 - frontend scene-context model gains a `sceneryInstanceSet` alongside the existing terrain ring, with explicit cache eviction tied to landblock residency
@@ -2015,7 +2035,7 @@ Phase 13 design guardrails:
 
 Phase Gate Review Before Phase 14:
 
-- assess whether Rust-owned physics data already decoded for `gfx-obj`, `setup-model` cyl-spheres, and `cell-struct` geometry is rich enough that Phase 14 becomes a spatial wiring exercise rather than a decode exercise
+- assess whether Rust-owned physics data already decoded for `gfx-obj`, `setup-model` collision proxies, and `cell-struct` geometry is rich enough that Phase 14 becomes a spatial wiring exercise rather than a decode exercise
 - assess whether camera collision against indoor walls (not outdoor terrain) is the right first non-world body driver, given that browser mode keeps a free cam by design
 - decide whether materials should be promoted to a parallel phase before or after Phase 14
 
@@ -2420,6 +2440,8 @@ Mitigation:
 - Prepare `GfxObj` render geometry as a frontend-owned derived intermediate. The worker uses deterministic fan triangulation into flat `BufferGeometry`-ready arrays while preserving decoded drawing data and surface references separately.
 - Keep the first `GfxObj` render intermediate non-indexed. Duplicating triangle vertices is acceptable at this stage because it keeps cache reuse, surface-debug metadata, and later renderer upload straightforward before material grouping exists.
 - Keep ACE's one-part setup normalization as a render/composition view, not an asset-family behavior. Do not cache fake `setup-model/*` records for direct `gfx-obj/*` sources; normalize them only when building renderable part lists.
+- Treat real `setup-model/*` records as reusable composite assets, not renderer bundles. They preserve AC part order and composition metadata, while dependency scheduling is derived by the main thread from part `gfxObjAssetId` values.
+- Keep setup-model cyl-sphere/sphere geometry out of frontend payloads. Only compact counts should cross for normal rendering; authoritative collision interpretation remains Rust-owned and should not move into TypeScript as part of the scenery render path.
 
 #### Verification Log
 
@@ -2525,6 +2547,8 @@ Mitigation:
 - 2026-05-12: Phase 12.2 completed with worker-side `GfxObj` render geometry. Prepared `gfx-obj/*` payloads now carry flat positions, normals, UVs, triangle metadata, surface refs, and bounds while retaining decoded drawing data and compact physics witness metadata separately.
 - 2026-05-12: Phase 12.2 corrected stale plan wording around physics payloads. The frontend should not receive full `GfxObj` physics polygons/BSPs for normal rendering; Rust remains the owner of those structures unless a future explicit debug/export feature needs them.
 - 2026-05-12: Phase 12.2 did not add `setup-model/*`, outdoor scenery facts, or scene rendering. The next step should remain Phase 12.3: setup-model composites using the main-thread dependency orchestration path.
+- 2026-05-12: Phase 12.3 completed with real `setup-model/*` host lookup, TypeScript contract parsing, worker preparation, and setup-to-gfx dependency derivation through main-thread orchestration.
+- 2026-05-12: Phase 12.3 deliberately did not publish outdoor scenery instances or render them. The next work should remain Phase 12.4: runtime-channel outdoor scenery facts from `LandblockInfo.Objects` and `Buildings`.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2572,6 +2596,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 and 12.2 are complete. The next step should be Phase 12.3: `setup-model/*` composite asset family.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.3 are complete. The next step should be Phase 12.4: outdoor scenery runtime facts.
 
-The rest of Phase 12 still makes sense as a parent milestone. The refined sequence now is: add `setup-model/*` composites through main-thread dependency orchestration, publish outdoor scenery runtime facts, then render first non-terrain scenery.
+The rest of Phase 12 still makes sense as a parent milestone. The refined sequence now is: publish outdoor scenery runtime facts, then render first non-terrain scenery through the existing setup/gfx asset chain.

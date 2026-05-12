@@ -736,7 +736,146 @@ describe("asset channel controller", () => {
 		expect(result.preparedAssets).toEqual([]);
 		controller.dispose();
 	});
+
+	it("prepares setup-model payloads and derives gfx-obj leaf dependencies", () => {
+		const setupModel = prepareAssetPayload(
+			{
+				requestId: "setup-model-1",
+				assetId: "setup-model/02000001",
+				priority: "streaming",
+			},
+			{
+				requestId: "setup-model-1",
+				assetId: "setup-model/02000001",
+				payloadKind: "json",
+				payload: createSetupModelPayload([
+					{ partIndex: 0, gfxObjId: 0x01000002 },
+					{ partIndex: 1, gfxObjId: 0x01000001 },
+					{ partIndex: 2, gfxObjId: 0x01000001 },
+				]),
+			},
+		);
+
+		expect(setupModel.payload.kind).toBe("setup-model");
+		if (setupModel.payload.kind !== "setup-model") {
+			throw new Error("expected setup-model payload");
+		}
+		expect(setupModel.payload.parts.map((part) => part.gfxObjAssetId)).toEqual([
+			"gfx-obj/01000002",
+			"gfx-obj/01000001",
+			"gfx-obj/01000001",
+		]);
+		expect(
+			getPreparedAssetDependencies(setupModel).map(({ assetId }) => assetId),
+		).toEqual(["gfx-obj/01000001", "gfx-obj/01000002"]);
+	});
+
+	it("schedules setup-model gfx-obj dependencies through graph preparation", async () => {
+		const lookupAssetIds: string[] = [];
+		const controller = new AssetChannelController(
+			async (request) => {
+				lookupAssetIds.push(request.assetId);
+				if (request.assetId === "setup-model/02000001") {
+					return {
+						requestId: request.requestId,
+						assetId: request.assetId,
+						payloadKind: "json",
+						payload: createSetupModelPayload([
+							{ partIndex: 0, gfxObjId: 0x01000002 },
+							{ partIndex: 1, gfxObjId: 0x01000001 },
+						]),
+					};
+				}
+
+				return {
+					...createPreparedGfxObjAsset(request.assetId).response,
+					requestId: request.requestId,
+					assetId: request.assetId,
+				};
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const result = await controller.prepareAssetGraph({
+			requestId: "setup-graph",
+			assetId: "setup-model/02000001",
+			priority: "streaming",
+		});
+
+		expect(lookupAssetIds).toEqual([
+			"setup-model/02000001",
+			"gfx-obj/01000001",
+			"gfx-obj/01000002",
+		]);
+		expect(result.rootAsset.payload.kind).toBe("setup-model");
+		expect(result.dependencyStatus).toEqual({
+			status: "ready",
+			dependencyAssetIds: ["gfx-obj/01000001", "gfx-obj/01000002"],
+			readyAssetIds: ["gfx-obj/01000001", "gfx-obj/01000002"],
+			missingAssetIds: [],
+			pendingAssetIds: [],
+		});
+		expect(Object.keys(result.preparedByAssetId).sort()).toEqual([
+			"gfx-obj/01000001",
+			"gfx-obj/01000002",
+			"setup-model/02000001",
+		]);
+		controller.dispose();
+	});
 });
+
+function createSetupModelPayload(
+	parts: Array<{ partIndex: number; gfxObjId: number }>,
+): unknown {
+	return {
+		kind: "setup-model",
+		residencyKind: "unknown",
+		sourceAssetKind: "setup-model",
+		setupModelId: 0x02000001,
+		flags: 3,
+		parts: parts.map((part) => ({
+			partIndex: part.partIndex,
+			gfxObjId: part.gfxObjId,
+			gfxObjAssetId: `gfx-obj/${part.gfxObjId.toString(16).padStart(8, "0")}`,
+			parentIndex: part.partIndex === 0 ? null : 0,
+			scale: { x: 1, y: 1, z: 1 },
+		})),
+		holdingLocations: [],
+		connectionPoints: [],
+		placementFrames: [
+			{
+				key: 0,
+				frames: parts.map(() => ({
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				})),
+				hookCount: 0,
+			},
+		],
+		collisionWitness: {
+			cylSphereCount: 1,
+			sphereCount: 1,
+		},
+		height: 2,
+		radius: 1,
+		stepUp: 0.5,
+		stepDown: 0.25,
+		sortingSphere: { center: { x: 0, y: 0, z: 0 }, radius: 1 },
+		selectionSphere: { center: { x: 0, y: 0, z: 0 }, radius: 1 },
+		lights: [],
+		defaultAnimation: null,
+		defaultScript: null,
+		defaultMotionTable: null,
+		defaultSoundTable: null,
+		defaultScriptTable: null,
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "setup-model",
+			errorCode: null,
+			detail: "dats/assets.hba",
+		},
+	};
+}
 
 function createSyntheticPreparedAsset(
 	assetId: string,

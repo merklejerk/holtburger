@@ -17,6 +17,7 @@ import {
 	gfxObjPayloadDtoSchema,
 	hostBoundaryOverviewDtoSchema,
 	runtimeNotificationEnvelopeDtoSchema,
+	setupModelPayloadDtoSchema,
 } from "./contracts";
 
 describe("host contracts", () => {
@@ -278,5 +279,74 @@ describe("host contracts", () => {
 			polygonCount: 4,
 			hasBsp: true,
 		});
+	});
+
+	it("parses setup-model payloads with ordered part references", () => {
+		const payload = setupModelPayloadDtoSchema.parse({
+			kind: "setup-model",
+			residencyKind: "unknown",
+			sourceAssetKind: "setup-model",
+			setupModelId: 0x02000001,
+			flags: 3,
+			parts: [
+				{
+					partIndex: 0,
+					gfxObjId: 0x01000001,
+					gfxObjAssetId: "gfx-obj/01000001",
+					parentIndex: null,
+					scale: { x: 1, y: 1, z: 1 },
+				},
+				{
+					partIndex: 1,
+					gfxObjId: 0x01000002,
+					gfxObjAssetId: "gfx-obj/01000002",
+					parentIndex: 0,
+					scale: null,
+				},
+			],
+			holdingLocations: [],
+			connectionPoints: [],
+			placementFrames: [
+				{
+					key: 0,
+					frames: [
+						{
+							origin: { x: 0, y: 0, z: 0 },
+							orientation: { w: 1, x: 0, y: 0, z: 0 },
+						},
+					],
+					hookCount: 0,
+				},
+			],
+			collisionWitness: {
+				cylSphereCount: 1,
+				sphereCount: 1,
+			},
+			height: 2,
+			radius: 1,
+			stepUp: 0.5,
+			stepDown: 0.25,
+			sortingSphere: { center: { x: 0, y: 0, z: 0 }, radius: 1 },
+			selectionSphere: { center: { x: 0, y: 0, z: 0 }, radius: 1 },
+			lights: [],
+			defaultAnimation: null,
+			defaultScript: null,
+			defaultMotionTable: null,
+			defaultSoundTable: null,
+			defaultScriptTable: null,
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "setup-model",
+				errorCode: null,
+				detail: "dats/assets.hba",
+			},
+		});
+
+		expect(payload.kind).toBe("setup-model");
+		expect(payload.parts.map((part) => part.gfxObjAssetId)).toEqual([
+			"gfx-obj/01000001",
+			"gfx-obj/01000002",
+		]);
+		expect(payload.placementFrames[0]?.frames).toHaveLength(1);
 	});
 });

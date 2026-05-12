@@ -4,6 +4,7 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	CellStructurePayloadDto,
+	DependencyManifestPayloadDto,
 	EnvironmentPayloadDto,
 	IndoorEnvCellPayloadDto,
 	TerrainLandblockPayloadDto,
@@ -12,6 +13,7 @@ import {
 	appearanceManifestPayloadDtoSchema,
 	assetProvenanceDtoSchema,
 	cellStructurePayloadDtoSchema,
+	dependencyManifestPayloadDtoSchema,
 	environmentPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
@@ -86,6 +88,16 @@ export function prepareAssetPayload(
 	);
 	if (appearancePayload.success) {
 		return prepareAppearanceManifest(request, response, appearancePayload.data);
+	}
+
+	const dependencyManifestPayload =
+		dependencyManifestPayloadDtoSchema.safeParse(response.payload);
+	if (dependencyManifestPayload.success) {
+		return prepareDependencyManifest(
+			request,
+			response,
+			dependencyManifestPayload.data,
+		);
 	}
 
 	const payload = genericAssetPayloadDtoSchema.parse(response.payload);
@@ -225,6 +237,25 @@ function prepareAppearanceManifest(
 	};
 }
 
+function prepareDependencyManifest(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: DependencyManifestPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "dependency-manifest",
+			sourceAssetKind: "dependency-manifest",
+			residencyKind: parseResidencyKind(payload.residencyKind),
+			provenance: parseProvenance(payload.provenance),
+			dependencyAssetIds: parseDependencies(payload.dependencyAssetIds),
+		},
+		preparedAt: new Date().toISOString(),
+	};
+}
+
 function prepareTerrainLandblock(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
@@ -322,6 +353,21 @@ function parseProvenance(value: unknown): PreparedAssetProvenance {
 		errorCode: parseErrorCode(provenance.data.errorCode),
 		detail: provenance.data.detail,
 	};
+}
+
+function parseDependencies(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return [
+		...new Set(
+			value.filter(
+				(assetId): assetId is string =>
+					typeof assetId === "string" && assetId.length > 0,
+			),
+		),
+	].sort();
 }
 
 function buildTerrainMesh(

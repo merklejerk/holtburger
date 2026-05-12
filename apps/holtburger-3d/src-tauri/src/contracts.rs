@@ -104,35 +104,10 @@ pub struct RuntimeResidencyDto {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RuntimeOutdoorSceneryInstanceDto {
-    pub instance_id: String,
-    pub owning_landblock_id: u32,
-    pub source_did: u32,
-    pub source_asset_id: String,
-    pub source_index: usize,
-    pub frame: FrameDto,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RuntimeOutdoorBuildingInstanceDto {
-    pub instance_id: String,
-    pub owning_landblock_id: u32,
-    pub source_did: u32,
-    pub source_asset_id: String,
-    pub source_index: usize,
-    pub frame: FrameDto,
-    pub num_leaves: u32,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RuntimeBatchDto {
     pub tick: u64,
     pub entities: Vec<RuntimeEntitySnapshotDto>,
     pub residency: RuntimeResidencyDto,
-    pub outdoor_scenery_instances: Vec<RuntimeOutdoorSceneryInstanceDto>,
-    pub outdoor_building_instances: Vec<RuntimeOutdoorBuildingInstanceDto>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

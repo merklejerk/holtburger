@@ -2002,7 +2002,7 @@ Phase gate before 13:
 
 ##### Phase 12.6 — Move outdoor static facts out of runtime batches
 
-Status: planned.
+Status: completed on 2026-05-12.
 
 Problem: Phase 12.4 published outdoor static scenery/building facts through `RuntimeBatchDto`, while terrain coverage is frontend-requested from the active scene focus. That split lets browser/manual navigation render terrain for one landblock ring while receiving static facts only for the runtime residency ring. More importantly, `LandblockInfo.Objects` and `Buildings` are static DAT/content facts used by the renderer; the Rust runtime should not prescribe their delivery in every runtime batch.
 
@@ -2031,6 +2031,35 @@ Acceptance:
 Course-correction note:
 
 - This phase supersedes the Phase 12.4 decision that outdoor static scenery should be runtime facts. Runtime can name authoritative focus/residency; static landblock content should be requested through the content/asset channel by the frontend scene-coverage policy.
+
+Delivered on 2026-05-12:
+
+- added a first-class `landblock-statics/{xxyyffff}` asset family in the Tauri host adapter, backed by repo-local `LandblockInfo`
+- added a `landblock-statics` payload shape carrying one landblock's static object and building facts: stable instance id, owning landblock id, source DID, source asset id, source index, frame, and building leaf count
+- removed `outdoorSceneryInstances` and `outdoorBuildingInstances` from `RuntimeBatchDto` and deleted frontend consumption of those fields
+- taught the TypeScript contract layer and asset worker to parse and prepare `landblock-statics` payloads
+- made prepared `landblock-statics` payloads derive source asset dependencies, so the existing main-thread graph orchestration loads setup/gfx assets without worker request-back
+- changed outdoor scene coverage to request `landblock-statics/*` for the same active landblock ring as `terrain/*`, including browser/manual destination coverage
+- changed static renderable composition and `WorldDisplay` scene-context counts to read prepared `landblock-statics` assets instead of runtime batches
+- kept the Phase 12.5 renderer path intact: setup/gfx normalization, one-part direct gfx views, main-thread geometry upload, and `InstancedMesh` reuse still sit in the frontend renderer layer
+- updated tests to prove browser destination coverage requests static facts, prepared static facts derive render asset requests/dependencies, runtime batches no longer push outdoor static content facts, and fixture landblocks still derive object/building facts from `LandblockInfo`
+
+Decisions:
+
+- Chose the asset id family name `landblock-statics/{xxyyffff}` because the source data is specifically AC `LandblockInfo`, not a generic renderer scene bucket.
+- Kept `landblock-statics` as an asset-channel payload rather than a new Tauri command. This preserves the existing request/worker/cache/orchestration path and keeps browser/manual coverage isomorphic with live-runtime coverage.
+- Kept source asset dependency derivation on the prepared payload. `PreparedAssetRecord` remains an envelope, while `landblock-statics` owns the references to setup/gfx visual assets.
+
+Course corrections:
+
+- The initial Phase 12.4 runtime-fact shape was useful for proving source extraction, but it mixed static DAT content with runtime authority. Phase 12.6 removes that exception rather than layering a browser-only workaround on top.
+- `createStaticRenderableAssetRequests(...)` remains as a catch-up path for already prepared static-fact payloads, but normal `landblock-statics/*` preparation now pulls setup/gfx through `prepareAssetGraph(...)`.
+- This phase still did not add a live visual smoke harness. The next implementation step should start with a short Tauri run that verifies `landblock-statics/*` requests appear for the selected browser landblock and that rendered statics are visible with plausible transforms.
+
+Phase gate before 13:
+
+- Phase 13 makes sense again after a 12.6 visual smoke pass. The remaining architectural blocker from Phase 12 is gone: outdoor terrain and outdoor statics now share the same frontend-requested coverage model.
+- If visual smoke testing shows static transforms are wrong, fix AC-to-Three frame/quaternion conversion before reusing the renderer path for indoor `CellStruct`.
 
 Phase 12 design guardrails:
 
@@ -2589,6 +2618,7 @@ Mitigation:
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after adding Phase 12.2 `GfxObj` render-geometry preparation.
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and `npm run build` in `apps/holtburger-3d` passed after adding Phase 12.5 static-renderable normalization, Three.js geometry upload, instanced rendering, and render-model coverage.
 - 2026-05-12: Targeted Prettier formatting passed for `static-renderables.ts` and `static-renderables.test.ts`. Direct Prettier formatting of `WorldDisplay.svelte` still cannot infer a Svelte parser in this repo, so Svelte formatting was validated through `npm run check` and `npm run lint:ts`.
+- 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, `npm run build`, `cargo test -p holtburger-3d`, and `cargo clippy -p holtburger-3d -- -D warnings` passed after moving outdoor static facts from `RuntimeBatchDto` to requestable `landblock-statics/*` assets.
 
 #### Phase Review Log
 
@@ -2634,6 +2664,8 @@ Mitigation:
 - 2026-05-12: Phase 12.5 completed with frontend-owned static-renderable composition, AC-to-Three geometry upload, one `InstancedMesh` per active `gfx-obj/*` geometry, debug coloring, and cache eviction tied to active landblock coverage.
 - 2026-05-12: Phase 12.5 did not add materials, textures, animation, collision, spatial solving, new runtime facts, or indoor static membership.
 - 2026-05-12: Phase 12.5 visual inspection exposed a scene-focus mismatch: browser/manual terrain coverage can target a different landblock ring than the runtime residency, while outdoor static facts are still delivered only through `RuntimeBatchDto`. The next work should be Phase 12.6 to move outdoor static facts onto the requestable content/asset path before Phase 13.
+- 2026-05-12: Phase 12.6 completed with requestable `landblock-statics/*` assets, static-fact dependency derivation, runtime-batch cleanup, and frontend static renderable composition fed from prepared content assets instead of runtime-pushed scenery arrays.
+- 2026-05-12: Phase 12.6 deliberately did not add materials, textures, animation, collision, indoor static membership, or a visual smoke harness. The next work should be a short Tauri visual smoke pass, then Phase 13 if outdoor static transforms look plausible.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2681,6 +2713,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.5 are complete. The next step should be Phase 12.6: move outdoor static facts out of runtime batches and onto the requestable content/asset path.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.6 are complete. The next step should be a short live Tauri visual smoke pass for outdoor static rendering, then Phase 13: `Environment` / `CellStruct` decoder and first indoor interior render.
 
-Phase 13 still makes sense after 12.6, but it should reuse the Phase 12.5 static-renderable composition and GPU upload path where possible. Do a short live Tauri visual smoke pass after 12.6 so any AC-to-Three transform mistake in outdoor scenery is corrected before indoor geometry depends on the same conversion.
+Phase 13 still makes sense, but it should reuse the Phase 12.5/12.6 static-renderable composition and GPU upload path where possible. If the smoke pass shows an AC-to-Three transform mistake in outdoor scenery, correct that before indoor geometry depends on the same conversion.

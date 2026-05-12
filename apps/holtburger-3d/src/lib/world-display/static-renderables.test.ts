@@ -27,10 +27,14 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000002",
 				0x01000002,
 			),
+			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+				0x0102ffff,
+				["setup-model/02000001"],
+			),
 		};
 
 		const model = deriveStaticRenderableSceneModel(
-			createRuntimeBatch("setup-model/02000001"),
+			createRuntimeBatch(),
 			assetState,
 		);
 
@@ -57,10 +61,14 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
+			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+				0x0102ffff,
+				["gfx-obj/01000001"],
+			),
 		};
 
 		const model = deriveStaticRenderableSceneModel(
-			createRuntimeBatch("gfx-obj/01000001"),
+			createRuntimeBatch(),
 			assetState,
 		);
 
@@ -81,17 +89,13 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
+			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+				0x0102ffff,
+				["gfx-obj/01000001"],
+				["gfx-obj/01000001"],
+			),
 		};
-		const runtimeBatch = createRuntimeBatch("gfx-obj/01000001");
-		runtimeBatch.outdoorBuildingInstances.push({
-			instanceId: "duplicate-building",
-			owningLandblockId: 0x0102ffff,
-			sourceDid: 0x01000001,
-			sourceAssetId: "gfx-obj/01000001",
-			sourceIndex: 1,
-			frame: createFrame({ x: 25, y: 48, z: 6 }),
-			numLeaves: 1,
-		});
+		const runtimeBatch = createRuntimeBatch();
 
 		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
 
@@ -108,30 +112,25 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
+			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+				0x0102ffff,
+				["setup-model/02000001", "setup-model/02000002"],
+			),
+			"landblock-statics/0909ffff": createPreparedLandblockStaticsAsset(
+				0x0909ffff,
+				["gfx-obj/01000001"],
+			),
 		};
-		const runtimeBatch = createRuntimeBatch("setup-model/02000001");
-		runtimeBatch.outdoorSceneryInstances.push({
-			instanceId: "missing-source",
-			owningLandblockId: 0x0102ffff,
-			sourceDid: 0x02000002,
-			sourceAssetId: "setup-model/02000002",
-			sourceIndex: 1,
-			frame: IDENTITY_FRAME,
-		});
-		runtimeBatch.outdoorSceneryInstances.push({
-			instanceId: "outside-ring",
-			owningLandblockId: 0x0909ffff,
-			sourceDid: 0x01000001,
-			sourceAssetId: "gfx-obj/01000001",
-			sourceIndex: 2,
-			frame: IDENTITY_FRAME,
-		});
+		const runtimeBatch = createRuntimeBatch();
 
 		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
 
 		expect(
 			model.sourceInstances.map((instance) => instance.instanceId),
-		).toEqual(["missing-source", "setup-model/02000001-instance"]);
+		).toEqual([
+			"landblock-statics/0102ffff/object/0",
+			"landblock-statics/0102ffff/object/1",
+		]);
 		expect(model.parts.map((part) => part.gfxObjAssetId)).toEqual([
 			"gfx-obj/01000001",
 		]);
@@ -140,7 +139,7 @@ describe("static renderable scene model", () => {
 	});
 });
 
-function createRuntimeBatch(sourceAssetId: string): RuntimeBatchDto {
+function createRuntimeBatch(): RuntimeBatchDto {
 	return {
 		tick: 11,
 		entities: [],
@@ -157,18 +156,44 @@ function createRuntimeBatch(sourceAssetId: string): RuntimeBatchDto {
 			indoors: false,
 			trackedBodyCount: 1,
 		},
-		outdoorSceneryInstances: [
-			{
-				instanceId: `${sourceAssetId}-instance`,
-				owningLandblockId: 0x0102ffff,
-				sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-				sourceAssetId,
-				sourceIndex: 0,
-				frame: createFrame({ x: 24, y: 48, z: 6 }),
-			},
-		],
-		outdoorBuildingInstances: [],
 	};
+}
+
+function createPreparedLandblockStaticsAsset(
+	landblockId: number,
+	scenerySourceAssetIds: string[],
+	buildingSourceAssetIds: string[] = [],
+): PreparedAssetRecord {
+	const assetId = `landblock-statics/${landblockId.toString(16).padStart(8, "0")}`;
+	return createPreparedAsset(assetId, {
+		kind: "landblock-statics",
+		sourceAssetKind: "landblock-info",
+		residencyKind: "outdoor-landblock",
+		landblockId,
+		sceneryInstances: scenerySourceAssetIds.map((sourceAssetId, index) => ({
+			instanceId: `${assetId}/object/${index}`,
+			owningLandblockId: landblockId,
+			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+			sourceAssetId,
+			sourceIndex: index,
+			frame: createFrame({ x: 24 + index, y: 48, z: 6 }),
+		})),
+		buildingInstances: buildingSourceAssetIds.map((sourceAssetId, index) => ({
+			instanceId: `${assetId}/building/${index}`,
+			owningLandblockId: landblockId,
+			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+			sourceAssetId,
+			sourceIndex: index,
+			frame: createFrame({ x: 25 + index, y: 48, z: 6 }),
+			numLeaves: 1,
+		})),
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "landblock-info",
+			errorCode: null,
+			detail: "test",
+		},
+	});
 }
 
 function createPreparedSetupModelAsset(): PreparedAssetRecord {

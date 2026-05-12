@@ -3,6 +3,7 @@ import type { AppModeId } from "../../app/modes";
 import { browserLocationToLandblockId } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
+	PreparedLandblockStaticsPayload,
 	PreparedAssetRecord,
 	PreparedTerrainMesh,
 } from "../assets/types";
@@ -246,6 +247,22 @@ function deriveSceneContext(
 				? "ACViewer loads the center outdoor landblock as the anchor for the local world view."
 				: "ACViewer's outdoor load path expands a radius-1 landblock ring around the outdoor focus block.",
 	}));
+	const activeLandblockIds = new Set(chunks.map((chunk) => chunk.landblockId));
+	const preparedStaticPayloads = Object.values(assetState.preparedByAssetId)
+		.map((asset) => asset.payload)
+		.filter(
+			(payload): payload is PreparedLandblockStaticsPayload =>
+				payload.kind === "landblock-statics" &&
+				activeLandblockIds.has(payload.landblockId),
+		);
+	const staticInstanceCount = preparedStaticPayloads.reduce(
+		(total, payload) => total + payload.sceneryInstances.length,
+		0,
+	);
+	const staticBuildingCount = preparedStaticPayloads.reduce(
+		(total, payload) => total + payload.buildingInstances.length,
+		0,
+	);
 
 	return {
 		kind: "outdoor-landblock-ring",
@@ -253,19 +270,19 @@ function deriveSceneContext(
 			"Phase 7 gives WorldDisplay an honest outdoor scene context: one focus landblock plus its immediate neighbor ring, matching the first outdoor browsing assumption used by ACViewer.",
 		focusAnchorLabel: focusLandblockLabel,
 		destinationText,
-		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks, ${runtimeBatch.outdoorSceneryInstances.length} static object${runtimeBatch.outdoorSceneryInstances.length === 1 ? "" : "s"}, and ${runtimeBatch.outdoorBuildingInstances.length} building${runtimeBatch.outdoorBuildingInstances.length === 1 ? "" : "s"} in a radius-1 ring around ${focusLandblockLabel}.`,
+		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks, ${staticInstanceCount} static object${staticInstanceCount === 1 ? "" : "s"}, and ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} from prepared landblock static facts in a radius-1 ring around ${focusLandblockLabel}.`,
 		gapText:
 			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
-		staticRenderableInstanceCount: runtimeBatch.outdoorSceneryInstances.length,
-		staticRenderableBuildingCount: runtimeBatch.outdoorBuildingInstances.length,
+		staticRenderableInstanceCount: staticInstanceCount,
+		staticRenderableBuildingCount: staticBuildingCount,
 		staticRenderableSourceAssetIds: [
 			...new Set([
-				...runtimeBatch.outdoorSceneryInstances.map(
-					(instance) => instance.sourceAssetId,
+				...preparedStaticPayloads.flatMap((payload) =>
+					payload.sceneryInstances.map((instance) => instance.sourceAssetId),
 				),
-				...runtimeBatch.outdoorBuildingInstances.map(
-					(instance) => instance.sourceAssetId,
+				...preparedStaticPayloads.flatMap((payload) =>
+					payload.buildingInstances.map((instance) => instance.sourceAssetId),
 				),
 			]),
 		].sort(),

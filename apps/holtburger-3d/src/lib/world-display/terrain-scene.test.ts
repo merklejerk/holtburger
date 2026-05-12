@@ -21,8 +21,6 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			indoors: false,
 			trackedBodyCount: 1,
 		},
-		outdoorSceneryInstances: [],
-		outdoorBuildingInstances: [],
 	};
 }
 

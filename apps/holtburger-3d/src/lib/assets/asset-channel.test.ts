@@ -54,8 +54,6 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			indoors: false,
 			trackedBodyCount: 1,
 		},
-		outdoorSceneryInstances: [],
-		outdoorBuildingInstances: [],
 	};
 }
 
@@ -263,52 +261,44 @@ describe("asset channel controller", () => {
 		).toBe(true);
 	});
 
-	it("derives demand-driven static renderable requests from outdoor scenery runtime facts", () => {
+	it("requests landblock static facts for the same destination coverage as terrain", () => {
 		const runtimeBatch = createRuntimeBatch();
-		runtimeBatch.outdoorSceneryInstances = [
+		const requests = createSceneCoverageRequests(
+			runtimeBatch,
 			{
-				instanceId: "outdoor-scenery/0102ffff/object/0000/02000002",
-				owningLandblockId: 0x0102ffff,
-				sourceDid: 0x02000002,
-				sourceAssetId: "setup-model/02000002",
-				sourceIndex: 0,
-				frame: {
-					origin: { x: 0, y: 0, z: 0 },
-					orientation: { w: 1, x: 0, y: 0, z: 0 },
-				},
+				label: "29.90S, 65.90W, 0.0Z",
+				northSouth: 29.9,
+				northSouthHemisphere: "S",
+				eastWest: 65.9,
+				eastWestHemisphere: "W",
+				elevation: 0,
+				source: "manual",
 			},
-			{
-				instanceId: "outdoor-scenery/0102ffff/object/0001/01000001",
-				owningLandblockId: 0x0102ffff,
-				sourceDid: 0x01000001,
-				sourceAssetId: "gfx-obj/01000001",
-				sourceIndex: 1,
-				frame: {
-					origin: { x: 1, y: 0, z: 0 },
-					orientation: { w: 1, x: 0, y: 0, z: 0 },
-				},
-			},
-		];
-		runtimeBatch.outdoorBuildingInstances = [
-			{
-				instanceId: "outdoor-scenery/0102ffff/building/0000/02000002",
-				owningLandblockId: 0x0102ffff,
-				sourceDid: 0x02000002,
-				sourceAssetId: "setup-model/02000002",
-				sourceIndex: 0,
-				frame: {
-					origin: { x: 2, y: 0, z: 0 },
-					orientation: { w: 1, x: 0, y: 0, z: 0 },
-				},
-				numLeaves: 3,
-			},
-		];
+			"bootstrap",
+			{},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId).sort()).toEqual([
+			"landblock-statics/2d5affff",
+			"terrain/2d5affff",
+		]);
+	});
+
+	it("derives demand-driven static renderable requests from prepared landblock static facts", () => {
+		const runtimeBatch = createRuntimeBatch();
 
 		const requests = createStaticRenderableAssetRequests(
 			runtimeBatch,
+			null,
 			"streaming",
 			{
 				"gfx-obj/01000001": createPreparedGfxObjAsset("gfx-obj/01000001"),
+				"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+					"landblock-statics/0102ffff",
+					0x0102ffff,
+					["setup-model/02000002", "gfx-obj/01000001"],
+				),
 			},
 			[],
 		);
@@ -1032,6 +1022,49 @@ function createPreparedGfxObjAsset(assetId: string): PreparedAssetRecord {
 				provenance: {
 					source: "repo-local-hba",
 					sourceAssetKind: "gfx-obj",
+					errorCode: null,
+					detail: "test-cache",
+				},
+			},
+		},
+	);
+}
+
+function createPreparedLandblockStaticsAsset(
+	assetId: string,
+	landblockId: number,
+	sourceAssetIds: string[],
+): PreparedAssetRecord {
+	return prepareAssetPayload(
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "landblock-statics",
+				residencyKind: "outdoor-landblock",
+				sourceAssetKind: "landblock-info",
+				landblockId,
+				sceneryInstances: sourceAssetIds.map((sourceAssetId, index) => ({
+					instanceId: `${assetId}/object/${index}`,
+					owningLandblockId: landblockId,
+					sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+					sourceAssetId,
+					sourceIndex: index,
+					frame: {
+						origin: { x: index, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+				})),
+				buildingInstances: [],
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "landblock-info",
 					errorCode: null,
 					detail: "test-cache",
 				},

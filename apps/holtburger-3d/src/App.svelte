@@ -47,9 +47,14 @@
           frontendState.markAssetPending(request);
 
           try {
-            const preparedAsset = await assetChannel.prepareAsset(request);
+            const preparedGraph = await assetChannel.prepareAssetGraph(
+              request,
+              { ...get(frontendState).asset.preparedByAssetId },
+            );
             if (!disposed) {
-              frontendState.applyPreparedAsset(preparedAsset);
+              for (const preparedAsset of preparedGraph.preparedAssets) {
+                frontendState.applyPreparedAsset(preparedAsset);
+              }
             }
           } catch (error) {
             if (!disposed) {

@@ -128,10 +128,32 @@ export const runtimeResidencyDtoSchema = z.object({
 });
 export type RuntimeResidencyDto = z.infer<typeof runtimeResidencyDtoSchema>;
 
+export const runtimeOutdoorSceneryInstanceDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	owningLandblockId: z.number().int().nonnegative(),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	frame: frameDtoSchema,
+});
+export type RuntimeOutdoorSceneryInstanceDto = z.infer<
+	typeof runtimeOutdoorSceneryInstanceDtoSchema
+>;
+
+export const runtimeOutdoorBuildingInstanceDtoSchema =
+	runtimeOutdoorSceneryInstanceDtoSchema.extend({
+		numLeaves: z.number().int().nonnegative(),
+	});
+export type RuntimeOutdoorBuildingInstanceDto = z.infer<
+	typeof runtimeOutdoorBuildingInstanceDtoSchema
+>;
+
 export const runtimeBatchDtoSchema = z.object({
 	tick: z.number().int().nonnegative(),
 	entities: z.array(runtimeEntitySnapshotDtoSchema),
 	residency: runtimeResidencyDtoSchema,
+	outdoorSceneryInstances: z.array(runtimeOutdoorSceneryInstanceDtoSchema),
+	outdoorBuildingInstances: z.array(runtimeOutdoorBuildingInstanceDtoSchema),
 });
 export type RuntimeBatchDto = z.infer<typeof runtimeBatchDtoSchema>;
 

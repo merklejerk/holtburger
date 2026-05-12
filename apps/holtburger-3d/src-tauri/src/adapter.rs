@@ -8,7 +8,7 @@ use holtburger_content::{ContentRepository, SoulEmoteCatalog};
 use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
-use holtburger_dat::landblock::CellLandblock;
+use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::physics::BspNode;
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::entity::Entity;
@@ -16,11 +16,12 @@ use holtburger_world::{WorldBootstrap, WorldState};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
-    CameraHintAckDto, CameraHintDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
+    CameraHintAckDto, CameraHintDto, FrameDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
     IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto, InteractionModeDto,
-    LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, RayPickHitDto, RayPickRequestDto,
-    RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto,
-    RuntimeResidencyDto, SessionStateDto, Vec3Dto,
+    LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, QuaternionDto, RayPickHitDto,
+    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
+    RuntimeNotificationEnvelopeDto, RuntimeOutdoorBuildingInstanceDto,
+    RuntimeOutdoorSceneryInstanceDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -160,10 +161,21 @@ impl HostBoundaryAdapter {
     }
 
     fn runtime_batch(&self, state: &HostRuntimeState) -> RuntimeBatchDto {
+        let focus_position = state.world.player_position().unwrap_or_default();
+        let focus_landblock_id = u32::from(focus_position.landblock_id);
+        let (outdoor_scenery_instances, outdoor_building_instances) = if focus_position.is_indoors()
+        {
+            (Vec::new(), Vec::new())
+        } else {
+            self.runtime_outdoor_static_instances(focus_landblock_id)
+        };
+
         RuntimeBatchDto {
             tick: state.tick,
             entities: Self::runtime_entities(state),
             residency: self.runtime_residency(state),
+            outdoor_scenery_instances,
+            outdoor_building_instances,
         }
     }
 
@@ -426,6 +438,62 @@ impl HostBoundaryAdapter {
             indoors: focus_position.is_indoors(),
             tracked_body_count: 3,
         }
+    }
+
+    fn runtime_outdoor_static_instances(
+        &self,
+        raw_focus_landblock_id: u32,
+    ) -> (
+        Vec<RuntimeOutdoorSceneryInstanceDto>,
+        Vec<RuntimeOutdoorBuildingInstanceDto>,
+    ) {
+        let mut scenery_instances = Vec::new();
+        let mut building_instances = Vec::new();
+
+        for landblock_id in outdoor_landblock_ring(normalize_landblock_id(raw_focus_landblock_id)) {
+            let Ok(landblock_info) = self.load_landblock_info(landblock_id) else {
+                continue;
+            };
+
+            scenery_instances.extend(landblock_info.objects.iter().enumerate().filter_map(
+                |(index, object)| {
+                    format_renderable_asset_id(object.id).map(|source_asset_id| {
+                        RuntimeOutdoorSceneryInstanceDto {
+                            instance_id: format!(
+                                "outdoor-scenery/{landblock_id:08x}/object/{index:04x}/{:08x}",
+                                object.id
+                            ),
+                            owning_landblock_id: landblock_id,
+                            source_did: object.id,
+                            source_asset_id,
+                            source_index: index,
+                            frame: serialize_landblock_frame_dto(&object.frame),
+                        }
+                    })
+                },
+            ));
+
+            building_instances.extend(landblock_info.buildings.iter().enumerate().filter_map(
+                |(index, building)| {
+                    format_renderable_asset_id(building.model_id).map(|source_asset_id| {
+                        RuntimeOutdoorBuildingInstanceDto {
+                            instance_id: format!(
+                                "outdoor-scenery/{landblock_id:08x}/building/{index:04x}/{:08x}",
+                                building.model_id
+                            ),
+                            owning_landblock_id: landblock_id,
+                            source_did: building.model_id,
+                            source_asset_id,
+                            source_index: index,
+                            frame: serialize_landblock_frame_dto(&building.frame),
+                            num_leaves: building.num_leaves,
+                        }
+                    })
+                },
+            ));
+        }
+
+        (scenery_instances, building_instances)
     }
 
     fn runtime_entities(state: &HostRuntimeState) -> Vec<RuntimeEntitySnapshotDto> {
@@ -748,6 +816,32 @@ impl HostBoundaryAdapter {
         })
     }
 
+    fn load_landblock_info(
+        &self,
+        landblock_id: u32,
+    ) -> Result<LandblockInfo, (String, &'static str)> {
+        let landblock_info_id = normalize_landblock_id(landblock_id) & 0xffff_fffe;
+        let resource = self
+            .content
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not read {}:0x{landblock_info_id:08X} from content repository: {error}",
+                        EOR_CELL_NAMESPACE
+                    ),
+                    "asset-read-failed",
+                )
+            })?;
+
+        LandblockInfo::unpack(&resource.bytes).map_err(|error| {
+            (
+                format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}: {error}"),
+                "asset-decode-failed",
+            )
+        })
+    }
+
     fn load_cell_landblock_payload(
         &self,
         landblock_id: u32,
@@ -1027,12 +1121,69 @@ fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
         .filter(|id| (id >> 24) == 0x02)
 }
 
+fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
+    (raw_landblock_id & 0xffff_0000) | 0xffff
+}
+
+fn outdoor_landblock_ring(focus_landblock_id: u32) -> Vec<u32> {
+    let center_x = ((focus_landblock_id >> 24) & 0xff) as i32;
+    let center_y = ((focus_landblock_id >> 16) & 0xff) as i32;
+    let mut landblock_ids = Vec::new();
+
+    for offset_y in -1..=1 {
+        for offset_x in -1..=1 {
+            let next_x = center_x + offset_x;
+            let next_y = center_y + offset_y;
+
+            if !(0..=0xfe).contains(&next_x) || !(0..=0xfe).contains(&next_y) {
+                continue;
+            }
+
+            landblock_ids.push(((next_x as u32) << 24) | ((next_y as u32) << 16) | 0xffff);
+        }
+    }
+
+    landblock_ids
+}
+
+fn format_renderable_asset_id(did: u32) -> Option<String> {
+    match did >> 24 {
+        0x01 => Some(format!("gfx-obj/{did:08x}")),
+        0x02 => Some(format!("setup-model/{did:08x}")),
+        _ => None,
+    }
+}
+
 fn serialize_vector3(vector: &Vector3) -> serde_json::Value {
     serde_json::json!({
         "x": vector.x,
         "y": vector.y,
         "z": vector.z,
     })
+}
+
+fn serialize_vec3_dto(vector: &Vector3) -> Vec3Dto {
+    Vec3Dto {
+        x: vector.x,
+        y: vector.y,
+        z: vector.z,
+    }
+}
+
+fn serialize_quaternion_dto(quaternion: &Quaternion) -> QuaternionDto {
+    QuaternionDto {
+        w: quaternion.w,
+        x: quaternion.x,
+        y: quaternion.y,
+        z: quaternion.z,
+    }
+}
+
+fn serialize_landblock_frame_dto(frame: &holtburger_dat::landblock::Frame) -> FrameDto {
+    FrameDto {
+        origin: serialize_vec3_dto(&frame.origin),
+        orientation: serialize_quaternion_dto(&frame.orientation),
+    }
 }
 
 fn serialize_quaternion(quaternion: &Quaternion) -> serde_json::Value {
@@ -1347,6 +1498,92 @@ mod tests {
         assert_eq!(indoor_entity.landblock_id, 0x016C_0155);
         assert_eq!(indoor_entity.cell_id, None);
         assert!(indoor_entity.location_label.starts_with("Indoors"));
+    }
+
+    #[test]
+    fn runtime_batch_exposes_outdoor_static_scenery_facts() {
+        let runtime = HostRuntimeService::new();
+
+        let batch = runtime.runtime_batch();
+
+        assert!(
+            batch
+                .outdoor_scenery_instances
+                .iter()
+                .all(|instance| instance.instance_id.starts_with("outdoor-scenery/"))
+        );
+        assert!(batch.outdoor_scenery_instances.iter().all(|instance| {
+            instance.source_asset_id.starts_with("setup-model/")
+                || instance.source_asset_id.starts_with("gfx-obj/")
+        }));
+        assert!(
+            batch
+                .outdoor_building_instances
+                .iter()
+                .all(|instance| instance.instance_id.contains("/building/"))
+        );
+    }
+
+    #[test]
+    fn outdoor_static_instance_derivation_covers_objects_and_buildings() {
+        let adapter = HostBoundaryAdapter::new();
+        let object_landblock_id = find_landblock_with_renderable_object(&adapter)
+            .expect("fixture should contain at least one renderable static object");
+        let building_landblock_id = find_landblock_with_renderable_building(&adapter)
+            .expect("fixture should contain at least one renderable building");
+
+        let (object_instances, _) = adapter.runtime_outdoor_static_instances(object_landblock_id);
+        assert!(object_instances.iter().any(|instance| {
+            instance.owning_landblock_id == object_landblock_id
+                && instance.instance_id.contains("/object/")
+                && format_renderable_asset_id(instance.source_did).as_deref()
+                    == Some(instance.source_asset_id.as_str())
+        }));
+
+        let (_, building_instances) =
+            adapter.runtime_outdoor_static_instances(building_landblock_id);
+        assert!(building_instances.iter().any(|instance| {
+            instance.owning_landblock_id == building_landblock_id
+                && instance.instance_id.contains("/building/")
+                && instance.num_leaves > 0
+                && format_renderable_asset_id(instance.source_did).as_deref()
+                    == Some(instance.source_asset_id.as_str())
+        }));
+    }
+
+    fn find_landblock_with_renderable_object(adapter: &HostBoundaryAdapter) -> Option<u32> {
+        find_landblock_matching(adapter, |info| {
+            info.objects
+                .iter()
+                .any(|object| format_renderable_asset_id(object.id).is_some())
+        })
+    }
+
+    fn find_landblock_with_renderable_building(adapter: &HostBoundaryAdapter) -> Option<u32> {
+        find_landblock_matching(adapter, |info| {
+            info.buildings.iter().any(|building| {
+                building.num_leaves > 0 && format_renderable_asset_id(building.model_id).is_some()
+            })
+        })
+    }
+
+    fn find_landblock_matching(
+        adapter: &HostBoundaryAdapter,
+        predicate: impl Fn(&LandblockInfo) -> bool,
+    ) -> Option<u32> {
+        for x in 0..=0xfe {
+            for y in 0..=0xfe {
+                let landblock_id = ((x as u32) << 24) | ((y as u32) << 16) | 0xffff;
+                let Ok(info) = adapter.load_landblock_info(landblock_id) else {
+                    continue;
+                };
+                if predicate(&info) {
+                    return Some(landblock_id);
+                }
+            }
+        }
+
+        None
     }
 
     #[test]

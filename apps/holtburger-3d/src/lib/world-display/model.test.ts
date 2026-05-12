@@ -28,6 +28,8 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			indoors: false,
 			trackedBodyCount: 0,
 		},
+		outdoorSceneryInstances: [],
+		outdoorBuildingInstances: [],
 	};
 }
 
@@ -130,6 +132,56 @@ describe("world display model helpers", () => {
 		expect(model.terrainContract.decodeOwner).toBe("rust-host-adapter");
 		expect(model.renderCacheText).toMatch(/authoritative residency/);
 		expect(model.assetText).toMatch(/Prepared terrain\/0102ffff/);
+	});
+
+	it("tracks outdoor scenery membership separately from terrain chunks", () => {
+		const runtimeBatch = createRuntimeBatch();
+		runtimeBatch.outdoorSceneryInstances = [
+			{
+				instanceId: "outdoor-scenery/0102ffff/object/0000/02000001",
+				owningLandblockId: 0x0102ffff,
+				sourceDid: 0x02000001,
+				sourceAssetId: "setup-model/02000001",
+				sourceIndex: 0,
+				frame: {
+					origin: { x: 1, y: 2, z: 3 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+			},
+		];
+		runtimeBatch.outdoorBuildingInstances = [
+			{
+				instanceId: "outdoor-scenery/0102ffff/building/0000/02000002",
+				owningLandblockId: 0x0102ffff,
+				sourceDid: 0x02000002,
+				sourceAssetId: "setup-model/02000002",
+				sourceIndex: 0,
+				frame: {
+					origin: { x: 4, y: 5, z: 6 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				numLeaves: 2,
+			},
+		];
+
+		const model = deriveWorldDisplayModel({
+			activeModeLabel: "World Viewer",
+			hostStatus: "ready",
+			runtimeBatch,
+			viewModelFeed: null,
+			assetState: createInitialAssetChannelState(),
+			browserDestination: null,
+			cameraAck: null,
+			rayPickResponse: null,
+			pendingCameraHint: false,
+		});
+
+		expect(model.sceneContext.staticRenderableInstanceCount).toBe(1);
+		expect(model.sceneContext.staticRenderableBuildingCount).toBe(1);
+		expect(model.sceneContext.staticRenderableSourceAssetIds).toEqual([
+			"setup-model/02000001",
+			"setup-model/02000002",
+		]);
 	});
 
 	it("projects a prepared terrain mesh into viewport polygons", () => {

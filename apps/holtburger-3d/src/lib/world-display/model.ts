@@ -51,6 +51,9 @@ export interface WorldDisplaySceneContext {
 	coverageText: string;
 	gapText: string | null;
 	chunks: WorldDisplaySceneChunk[];
+	staticRenderableInstanceCount: number;
+	staticRenderableBuildingCount: number;
+	staticRenderableSourceAssetIds: string[];
 }
 
 export interface WorldDisplayTerrainContract {
@@ -182,6 +185,9 @@ function createPendingSceneContext(
 		gapText:
 			"The app still needs an authoritative coordinate-to-landblock query before manual destinations can choose terrain chunks directly.",
 		chunks: [],
+		staticRenderableInstanceCount: 0,
+		staticRenderableBuildingCount: 0,
+		staticRenderableSourceAssetIds: [],
 	};
 }
 
@@ -227,6 +233,9 @@ function deriveSceneContext(
 			coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
 			gapText: null,
 			chunks: [],
+			staticRenderableInstanceCount: 0,
+			staticRenderableBuildingCount: 0,
+			staticRenderableSourceAssetIds: [],
 		};
 	}
 
@@ -244,10 +253,22 @@ function deriveSceneContext(
 			"Phase 7 gives WorldDisplay an honest outdoor scene context: one focus landblock plus its immediate neighbor ring, matching the first outdoor browsing assumption used by ACViewer.",
 		focusAnchorLabel: focusLandblockLabel,
 		destinationText,
-		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks in a radius-1 ring around ${focusLandblockLabel}.`,
+		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks, ${runtimeBatch.outdoorSceneryInstances.length} static object${runtimeBatch.outdoorSceneryInstances.length === 1 ? "" : "s"}, and ${runtimeBatch.outdoorBuildingInstances.length} building${runtimeBatch.outdoorBuildingInstances.length === 1 ? "" : "s"} in a radius-1 ring around ${focusLandblockLabel}.`,
 		gapText:
 			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
+		staticRenderableInstanceCount: runtimeBatch.outdoorSceneryInstances.length,
+		staticRenderableBuildingCount: runtimeBatch.outdoorBuildingInstances.length,
+		staticRenderableSourceAssetIds: [
+			...new Set([
+				...runtimeBatch.outdoorSceneryInstances.map(
+					(instance) => instance.sourceAssetId,
+				),
+				...runtimeBatch.outdoorBuildingInstances.map(
+					(instance) => instance.sourceAssetId,
+				),
+			]),
+		].sort(),
 	};
 }
 

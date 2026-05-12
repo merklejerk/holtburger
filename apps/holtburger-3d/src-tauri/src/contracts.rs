@@ -8,6 +8,22 @@ pub struct Vec3Dto {
     pub z: f32,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuaternionDto {
+    pub w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrameDto {
+    pub origin: Vec3Dto,
+    pub orientation: QuaternionDto,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LifecyclePhaseDto {
@@ -88,10 +104,35 @@ pub struct RuntimeResidencyDto {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuntimeOutdoorSceneryInstanceDto {
+    pub instance_id: String,
+    pub owning_landblock_id: u32,
+    pub source_did: u32,
+    pub source_asset_id: String,
+    pub source_index: usize,
+    pub frame: FrameDto,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeOutdoorBuildingInstanceDto {
+    pub instance_id: String,
+    pub owning_landblock_id: u32,
+    pub source_did: u32,
+    pub source_asset_id: String,
+    pub source_index: usize,
+    pub frame: FrameDto,
+    pub num_leaves: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeBatchDto {
     pub tick: u64,
     pub entities: Vec<RuntimeEntitySnapshotDto>,
     pub residency: RuntimeResidencyDto,
+    pub outdoor_scenery_instances: Vec<RuntimeOutdoorSceneryInstanceDto>,
+    pub outdoor_building_instances: Vec<RuntimeOutdoorBuildingInstanceDto>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

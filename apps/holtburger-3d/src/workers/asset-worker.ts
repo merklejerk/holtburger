@@ -26,6 +26,7 @@ import type {
 	PreparedAssetRecord,
 	PreparedAssetProvenance,
 	PreparedAssetPayload,
+	PreparedGfxObjRenderGeometry,
 	PreparedTerrainMesh,
 	PreparedTerrainTriangle,
 } from "../lib/assets/types";
@@ -229,6 +230,8 @@ function prepareGfxObj(
 	response: AssetLookupResponseDto,
 	payload: GfxObjPayloadDto,
 ): PreparedAssetRecord {
+	const renderGeometry = buildGfxObjRenderGeometry(payload);
+
 	return {
 		request,
 		response,
@@ -244,6 +247,7 @@ function prepareGfxObj(
 			drawingPolygons: payload.drawingPolygons,
 			drawingBsp: payload.drawingBsp,
 			physicsWitness: payload.physicsWitness,
+			renderGeometry,
 			sortCenter: payload.sortCenter,
 			didDegrade: payload.didDegrade,
 		},
@@ -472,6 +476,104 @@ function buildTerrainMesh(
 		minHeight: Math.min(...normalizedHeights),
 		maxHeight: Math.max(...normalizedHeights),
 	};
+}
+
+function buildGfxObjRenderGeometry(
+	payload: GfxObjPayloadDto,
+): PreparedGfxObjRenderGeometry {
+	const verticesById = new Map(
+		payload.vertexArray.vertices.map((vertex) => [vertex.id, vertex]),
+	);
+	const positions: number[] = [];
+	const normals: number[] = [];
+	const uvs: number[] = [];
+	const triangles: PreparedGfxObjRenderGeometry["triangles"] = [];
+	const surfaceIdSet = new Set<number>();
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let minZ = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	let maxZ = Number.NEGATIVE_INFINITY;
+
+	for (const polygon of payload.drawingPolygons) {
+		if (polygon.numPts !== polygon.vertexIds.length) {
+			throw new Error(
+				`GfxObj ${formatHexId(payload.gfxObjId)} polygon ${polygon.id} declares ${polygon.numPts} points but provides ${polygon.vertexIds.length} vertices.`,
+			);
+		}
+		if (polygon.vertexIds.length < 3) {
+			continue;
+		}
+
+		const surfaceId = normalizeSurfaceId(polygon.posSurface);
+		if (surfaceId !== null) {
+			surfaceIdSet.add(surfaceId);
+		}
+
+		for (
+			let vertexIndex = 1;
+			vertexIndex < polygon.vertexIds.length - 1;
+			vertexIndex += 1
+		) {
+			const triangleVertexOffsets = [0, vertexIndex, vertexIndex + 1];
+			triangles.push({
+				polygonId: polygon.id,
+				surfaceId,
+				firstVertex: positions.length / 3,
+			});
+
+			for (const polygonVertexOffset of triangleVertexOffsets) {
+				const vertexId = polygon.vertexIds[polygonVertexOffset];
+				const vertex = verticesById.get(vertexId);
+				if (!vertex) {
+					throw new Error(
+						`GfxObj ${formatHexId(payload.gfxObjId)} polygon ${polygon.id} references missing vertex ${vertexId}.`,
+					);
+				}
+
+				positions.push(vertex.origin.x, vertex.origin.y, vertex.origin.z);
+				normals.push(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+				const uvIndex = polygon.posUvIndices[polygonVertexOffset] ?? 0;
+				const uv = vertex.uvs[uvIndex] ?? { u: 0, v: 0 };
+				uvs.push(uv.u, uv.v);
+
+				minX = Math.min(minX, vertex.origin.x);
+				minY = Math.min(minY, vertex.origin.y);
+				minZ = Math.min(minZ, vertex.origin.z);
+				maxX = Math.max(maxX, vertex.origin.x);
+				maxY = Math.max(maxY, vertex.origin.y);
+				maxZ = Math.max(maxZ, vertex.origin.z);
+			}
+		}
+	}
+
+	const vertexCount = positions.length / 3;
+	return {
+		gfxObjId: payload.gfxObjId,
+		vertexCount,
+		triangleCount: triangles.length,
+		positions,
+		normals,
+		uvs,
+		triangles,
+		surfaceIds: [...surfaceIdSet].sort((left, right) => left - right),
+		bounds:
+			vertexCount === 0
+				? null
+				: {
+						min: { x: minX, y: minY, z: minZ },
+						max: { x: maxX, y: maxY, z: maxZ },
+					},
+	};
+}
+
+function normalizeSurfaceId(surfaceId: number): number | null {
+	return surfaceId > 0 ? surfaceId : null;
+}
+
+function formatHexId(id: number): string {
+	return `0x${id.toString(16).padStart(8, "0")}`;
 }
 
 function parseResidencyKind(value: unknown): AssetResidencyKind {

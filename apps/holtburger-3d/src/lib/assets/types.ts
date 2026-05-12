@@ -131,6 +131,29 @@ export interface PreparedGfxObjPhysicsWitness {
 	hasBsp: boolean;
 }
 
+export interface PreparedGfxObjRenderTriangle {
+	polygonId: number;
+	surfaceId: number | null;
+	firstVertex: number;
+}
+
+export interface PreparedGfxObjRenderBounds {
+	min: Vec3Dto;
+	max: Vec3Dto;
+}
+
+export interface PreparedGfxObjRenderGeometry {
+	gfxObjId: number;
+	vertexCount: number;
+	triangleCount: number;
+	positions: number[];
+	normals: number[];
+	uvs: number[];
+	triangles: PreparedGfxObjRenderTriangle[];
+	surfaceIds: number[];
+	bounds: PreparedGfxObjRenderBounds | null;
+}
+
 export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	kind: "gfx-obj";
 	sourceAssetKind: "gfx-obj";
@@ -141,6 +164,7 @@ export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	drawingPolygons: PreparedGfxObjPolygon[];
 	drawingBsp: PreparedGfxObjBspNode | null;
 	physicsWitness: PreparedGfxObjPhysicsWitness;
+	renderGeometry: PreparedGfxObjRenderGeometry;
 	sortCenter: Vec3Dto | null;
 	didDegrade: number | null;
 }

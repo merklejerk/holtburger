@@ -3,17 +3,13 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
+	PreparedLandblockStaticBuilding,
+	PreparedLandblockStaticInstance,
 	PreparedSetupModelPart,
 	PreparedSetupModelPayload,
 } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
-import type {
-	FrameDto,
-	RuntimeBatchDto,
-	RuntimeOutdoorBuildingInstanceDto,
-	RuntimeOutdoorSceneryInstanceDto,
-	Vec3Dto,
-} from "../host/contracts";
+import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
 
 export type StaticRenderableInstanceKind = "scenery" | "building";
 
@@ -76,7 +72,10 @@ export function deriveStaticRenderableSceneModel(
 	);
 	const activeLandblockIds = deriveOutdoorRingLandblockIds(focusLandblockId);
 	const activeLandblockSet = new Set(activeLandblockIds);
-	const sourceInstances = collectStaticRenderableSourceInstances(runtimeBatch)
+	const sourceInstances = collectStaticRenderableSourceInstances(
+		assetState,
+		activeLandblockSet,
+	)
 		.filter((instance) => activeLandblockSet.has(instance.owningLandblockId))
 		.sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
@@ -162,23 +161,31 @@ function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 }
 
 function collectStaticRenderableSourceInstances(
-	runtimeBatch: RuntimeBatchDto,
+	assetState: AssetChannelState,
+	activeLandblockSet: Set<number>,
 ): StaticRenderableSourceInstance[] {
-	return [
-		...runtimeBatch.outdoorSceneryInstances.map((instance) =>
-			normalizeSourceInstance("scenery", instance, null),
-		),
-		...runtimeBatch.outdoorBuildingInstances.map((instance) =>
-			normalizeSourceInstance("building", instance, instance.numLeaves),
-		),
-	];
+	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
+		if (
+			asset.payload.kind !== "landblock-statics" ||
+			!activeLandblockSet.has(asset.payload.landblockId)
+		) {
+			return [];
+		}
+
+		return [
+			...asset.payload.sceneryInstances.map((instance) =>
+				normalizeSourceInstance("scenery", instance, null),
+			),
+			...asset.payload.buildingInstances.map((instance) =>
+				normalizeSourceInstance("building", instance, instance.numLeaves),
+			),
+		];
+	});
 }
 
 function normalizeSourceInstance(
 	kind: StaticRenderableInstanceKind,
-	instance:
-		| RuntimeOutdoorSceneryInstanceDto
-		| RuntimeOutdoorBuildingInstanceDto,
+	instance: PreparedLandblockStaticInstance | PreparedLandblockStaticBuilding,
 	numLeaves: number | null,
 ): StaticRenderableSourceInstance {
 	return {

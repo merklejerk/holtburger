@@ -20,8 +20,7 @@ use crate::contracts::{
     IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto, InteractionModeDto,
     LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, QuaternionDto, RayPickHitDto,
     RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
-    RuntimeNotificationEnvelopeDto, RuntimeOutdoorBuildingInstanceDto,
-    RuntimeOutdoorSceneryInstanceDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
+    RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -161,21 +160,10 @@ impl HostBoundaryAdapter {
     }
 
     fn runtime_batch(&self, state: &HostRuntimeState) -> RuntimeBatchDto {
-        let focus_position = state.world.player_position().unwrap_or_default();
-        let focus_landblock_id = u32::from(focus_position.landblock_id);
-        let (outdoor_scenery_instances, outdoor_building_instances) = if focus_position.is_indoors()
-        {
-            (Vec::new(), Vec::new())
-        } else {
-            self.runtime_outdoor_static_instances(focus_landblock_id)
-        };
-
         RuntimeBatchDto {
             tick: state.tick,
             entities: Self::runtime_entities(state),
             residency: self.runtime_residency(state),
-            outdoor_scenery_instances,
-            outdoor_building_instances,
         }
     }
 
@@ -214,6 +202,10 @@ impl HostBoundaryAdapter {
     pub fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
         if let Some(landblock_id) = parse_terrain_asset_id(&request.asset_id) {
             return self.build_terrain_lookup_response(request, landblock_id);
+        }
+
+        if let Some(landblock_id) = parse_landblock_statics_asset_id(&request.asset_id) {
+            return self.build_landblock_statics_lookup_response(request, landblock_id);
         }
 
         if let Some(env_cell_id) = parse_indoor_env_cell_asset_id(&request.asset_id) {
@@ -440,60 +432,60 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn runtime_outdoor_static_instances(
+    fn load_landblock_statics_payload(
         &self,
-        raw_focus_landblock_id: u32,
-    ) -> (
-        Vec<RuntimeOutdoorSceneryInstanceDto>,
-        Vec<RuntimeOutdoorBuildingInstanceDto>,
-    ) {
-        let mut scenery_instances = Vec::new();
-        let mut building_instances = Vec::new();
+        raw_landblock_id: u32,
+    ) -> Result<serde_json::Value, (String, &'static str)> {
+        let landblock_id = normalize_landblock_id(raw_landblock_id);
+        let landblock_info = self.load_landblock_info(landblock_id)?;
 
-        for landblock_id in outdoor_landblock_ring(normalize_landblock_id(raw_focus_landblock_id)) {
-            let Ok(landblock_info) = self.load_landblock_info(landblock_id) else {
-                continue;
-            };
-
-            scenery_instances.extend(landblock_info.objects.iter().enumerate().filter_map(
+        Ok(serde_json::json!({
+            "kind": "landblock-statics",
+            "residencyKind": "outdoor-landblock",
+            "sourceAssetKind": "landblock-info",
+            "landblockId": landblock_id,
+            "sceneryInstances": landblock_info.objects.iter().enumerate().filter_map(
                 |(index, object)| {
                     format_renderable_asset_id(object.id).map(|source_asset_id| {
-                        RuntimeOutdoorSceneryInstanceDto {
-                            instance_id: format!(
-                                "outdoor-scenery/{landblock_id:08x}/object/{index:04x}/{:08x}",
+                        serde_json::json!({
+                            "instanceId": format!(
+                                "landblock-statics/{landblock_id:08x}/object/{index:04x}/{:08x}",
                                 object.id
                             ),
-                            owning_landblock_id: landblock_id,
-                            source_did: object.id,
-                            source_asset_id,
-                            source_index: index,
-                            frame: serialize_landblock_frame_dto(&object.frame),
-                        }
+                            "owningLandblockId": landblock_id,
+                            "sourceDid": object.id,
+                            "sourceAssetId": source_asset_id,
+                            "sourceIndex": index,
+                            "frame": serialize_landblock_frame_dto(&object.frame),
+                        })
                     })
                 },
-            ));
-
-            building_instances.extend(landblock_info.buildings.iter().enumerate().filter_map(
+            ).collect::<Vec<_>>(),
+            "buildingInstances": landblock_info.buildings.iter().enumerate().filter_map(
                 |(index, building)| {
                     format_renderable_asset_id(building.model_id).map(|source_asset_id| {
-                        RuntimeOutdoorBuildingInstanceDto {
-                            instance_id: format!(
-                                "outdoor-scenery/{landblock_id:08x}/building/{index:04x}/{:08x}",
+                        serde_json::json!({
+                            "instanceId": format!(
+                                "landblock-statics/{landblock_id:08x}/building/{index:04x}/{:08x}",
                                 building.model_id
                             ),
-                            owning_landblock_id: landblock_id,
-                            source_did: building.model_id,
-                            source_asset_id,
-                            source_index: index,
-                            frame: serialize_landblock_frame_dto(&building.frame),
-                            num_leaves: building.num_leaves,
-                        }
+                            "owningLandblockId": landblock_id,
+                            "sourceDid": building.model_id,
+                            "sourceAssetId": source_asset_id,
+                            "sourceIndex": index,
+                            "frame": serialize_landblock_frame_dto(&building.frame),
+                            "numLeaves": building.num_leaves,
+                        })
                     })
                 },
-            ));
-        }
-
-        (scenery_instances, building_instances)
+            ).collect::<Vec<_>>(),
+            "provenance": {
+                "source": "repo-local-hba",
+                "sourceAssetKind": "landblock-info",
+                "errorCode": null,
+                "detail": format!("{}:0x{:08X}", EOR_CELL_NAMESPACE, landblock_id & 0xffff_fffe)
+            }
+        }))
     }
 
     fn runtime_entities(state: &HostRuntimeState) -> Vec<RuntimeEntitySnapshotDto> {
@@ -561,6 +553,38 @@ impl HostBoundaryAdapter {
         let payload = self
             .load_cell_landblock_payload(landblock_id)
             .unwrap_or_else(|error| generated_fallback_terrain_payload(landblock_id, error));
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_landblock_statics_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+    ) -> AssetLookupResponseDto {
+        let payload = self
+            .load_landblock_statics_payload(landblock_id)
+            .unwrap_or_else(|(detail, error_code)| {
+                serde_json::json!({
+                    "kind": "landblock-statics",
+                    "residencyKind": "outdoor-landblock",
+                    "sourceAssetKind": "landblock-info",
+                    "landblockId": normalize_landblock_id(landblock_id),
+                    "sceneryInstances": [],
+                    "buildingInstances": [],
+                    "provenance": {
+                        "source": "app-local-stub",
+                        "sourceAssetKind": "landblock-info",
+                        "errorCode": error_code,
+                        "detail": detail
+                    }
+                })
+            });
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -1072,6 +1096,14 @@ fn parse_terrain_asset_id(asset_id: &str) -> Option<u32> {
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
 }
 
+fn parse_landblock_statics_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("landblock-statics/")
+        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        .map(normalize_landblock_id)
+}
+
 fn parse_indoor_env_cell_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("indoor-env-cell/")
@@ -1123,27 +1155,6 @@ fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
 
 fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
     (raw_landblock_id & 0xffff_0000) | 0xffff
-}
-
-fn outdoor_landblock_ring(focus_landblock_id: u32) -> Vec<u32> {
-    let center_x = ((focus_landblock_id >> 24) & 0xff) as i32;
-    let center_y = ((focus_landblock_id >> 16) & 0xff) as i32;
-    let mut landblock_ids = Vec::new();
-
-    for offset_y in -1..=1 {
-        for offset_x in -1..=1 {
-            let next_x = center_x + offset_x;
-            let next_y = center_y + offset_y;
-
-            if !(0..=0xfe).contains(&next_x) || !(0..=0xfe).contains(&next_y) {
-                continue;
-            }
-
-            landblock_ids.push(((next_x as u32) << 24) | ((next_y as u32) << 16) | 0xffff);
-        }
-    }
-
-    landblock_ids
 }
 
 fn format_renderable_asset_id(did: u32) -> Option<String> {
@@ -1501,54 +1512,63 @@ mod tests {
     }
 
     #[test]
-    fn runtime_batch_exposes_outdoor_static_scenery_facts() {
+    fn runtime_batch_does_not_push_outdoor_static_content_facts() {
         let runtime = HostRuntimeService::new();
 
         let batch = runtime.runtime_batch();
 
-        assert!(
-            batch
-                .outdoor_scenery_instances
-                .iter()
-                .all(|instance| instance.instance_id.starts_with("outdoor-scenery/"))
-        );
-        assert!(batch.outdoor_scenery_instances.iter().all(|instance| {
-            instance.source_asset_id.starts_with("setup-model/")
-                || instance.source_asset_id.starts_with("gfx-obj/")
-        }));
-        assert!(
-            batch
-                .outdoor_building_instances
-                .iter()
-                .all(|instance| instance.instance_id.contains("/building/"))
-        );
+        assert_eq!(batch.residency.focus_landblock_id, 0x0102_000C);
     }
 
     #[test]
-    fn outdoor_static_instance_derivation_covers_objects_and_buildings() {
+    fn landblock_static_asset_derivation_covers_objects_and_buildings() {
         let adapter = HostBoundaryAdapter::new();
         let object_landblock_id = find_landblock_with_renderable_object(&adapter)
             .expect("fixture should contain at least one renderable static object");
         let building_landblock_id = find_landblock_with_renderable_building(&adapter)
             .expect("fixture should contain at least one renderable building");
 
-        let (object_instances, _) = adapter.runtime_outdoor_static_instances(object_landblock_id);
-        assert!(object_instances.iter().any(|instance| {
-            instance.owning_landblock_id == object_landblock_id
-                && instance.instance_id.contains("/object/")
-                && format_renderable_asset_id(instance.source_did).as_deref()
-                    == Some(instance.source_asset_id.as_str())
-        }));
+        let object_payload = adapter
+            .load_landblock_statics_payload(object_landblock_id)
+            .expect("object landblock static facts should decode");
+        assert_eq!(object_payload["kind"], "landblock-statics");
+        assert!(
+            object_payload["sceneryInstances"]
+                .as_array()
+                .expect("scenery instances should be an array")
+                .iter()
+                .any(|instance| {
+                    instance["owningLandblockId"] == object_landblock_id
+                        && instance["instanceId"]
+                            .as_str()
+                            .is_some_and(|id| id.contains("/object/"))
+                        && instance["sourceAssetId"].as_str().is_some_and(|id| {
+                            id.starts_with("setup-model/") || id.starts_with("gfx-obj/")
+                        })
+                })
+        );
 
-        let (_, building_instances) =
-            adapter.runtime_outdoor_static_instances(building_landblock_id);
-        assert!(building_instances.iter().any(|instance| {
-            instance.owning_landblock_id == building_landblock_id
-                && instance.instance_id.contains("/building/")
-                && instance.num_leaves > 0
-                && format_renderable_asset_id(instance.source_did).as_deref()
-                    == Some(instance.source_asset_id.as_str())
-        }));
+        let building_payload = adapter
+            .load_landblock_statics_payload(building_landblock_id)
+            .expect("building landblock static facts should decode");
+        assert!(
+            building_payload["buildingInstances"]
+                .as_array()
+                .expect("building instances should be an array")
+                .iter()
+                .any(|instance| {
+                    instance["owningLandblockId"] == building_landblock_id
+                        && instance["instanceId"]
+                            .as_str()
+                            .is_some_and(|id| id.contains("/building/"))
+                        && instance["numLeaves"]
+                            .as_u64()
+                            .is_some_and(|count| count > 0)
+                        && instance["sourceAssetId"].as_str().is_some_and(|id| {
+                            id.starts_with("setup-model/") || id.starts_with("gfx-obj/")
+                        })
+                })
+        );
     }
 
     fn find_landblock_with_renderable_object(adapter: &HostBoundaryAdapter) -> Option<u32> {

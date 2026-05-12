@@ -250,8 +250,16 @@ export function createSceneCoverageRequests(
 			preparedByAssetId,
 			pendingAssetIds,
 		),
+		...createLandblockStaticsCoverageRequests(
+			runtimeBatch,
+			browserDestination,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+		),
 		...createStaticRenderableAssetRequests(
 			runtimeBatch,
+			browserDestination,
 			priority,
 			preparedByAssetId,
 			pendingAssetIds,
@@ -311,8 +319,9 @@ export function createTerrainCoverageRequests(
 		}));
 }
 
-export function createStaticRenderableAssetRequests(
+export function createLandblockStaticsCoverageRequests(
 	runtimeBatch: RuntimeBatchDto | null,
+	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[] = [],
@@ -321,15 +330,64 @@ export function createStaticRenderableAssetRequests(
 		return [];
 	}
 
+	const focusLandblockId = deriveTerrainFocusLandblockId(
+		runtimeBatch,
+		browserDestination,
+	);
+	const requestScope = browserDestination ? "destination" : "runtime";
+	const coverageAssetIds = buildOutdoorCoverageLandblockIds(
+		focusLandblockId,
+		priority,
+	).map(formatLandblockStaticsAssetId);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
-	const sourceAssetIds = [
-		...runtimeBatch.outdoorSceneryInstances.map(
-			(instance) => instance.sourceAssetId,
+
+	return coverageAssetIds
+		.filter(
+			(assetId) =>
+				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+		)
+		.map((assetId) => ({
+			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
+			assetId,
+			priority,
+		}));
+}
+
+export function createStaticRenderableAssetRequests(
+	runtimeBatch: RuntimeBatchDto | null,
+	browserDestination: BrowserLocationSelection | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[] = [],
+): AssetLookupRequestDto[] {
+	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+		return [];
+	}
+
+	const activeLandblockIds = new Set(
+		buildOutdoorCoverageLandblockIds(
+			deriveTerrainFocusLandblockId(runtimeBatch, browserDestination),
+			"streaming",
 		),
-		...runtimeBatch.outdoorBuildingInstances.map(
-			(instance) => instance.sourceAssetId,
-		),
-	];
+	);
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+	const sourceAssetIds = Object.values(preparedByAssetId).flatMap((asset) => {
+		if (
+			asset.payload.kind !== "landblock-statics" ||
+			!activeLandblockIds.has(asset.payload.landblockId)
+		) {
+			return [];
+		}
+
+		return [
+			...asset.payload.sceneryInstances.map(
+				(instance) => instance.sourceAssetId,
+			),
+			...asset.payload.buildingInstances.map(
+				(instance) => instance.sourceAssetId,
+			),
+		];
+	});
 
 	return [...new Set(sourceAssetIds)]
 		.sort()
@@ -363,14 +421,23 @@ function buildOutdoorCoverageAssetIds(
 	focusLandblockId: number,
 	priority: AssetPriority,
 ): string[] {
+	return buildOutdoorCoverageLandblockIds(focusLandblockId, priority).map(
+		formatTerrainAssetId,
+	);
+}
+
+function buildOutdoorCoverageLandblockIds(
+	focusLandblockId: number,
+	priority: AssetPriority,
+): number[] {
 	if (priority === "bootstrap") {
-		return [formatTerrainAssetId(focusLandblockId)];
+		return [focusLandblockId];
 	}
 
 	const centerX = (focusLandblockId >>> 24) & 0xff;
 	const centerY = (focusLandblockId >>> 16) & 0xff;
 	const candidates: Array<{
-		assetId: string;
+		landblockId: number;
 		distance: number;
 		offsetX: number;
 		offsetY: number;
@@ -388,7 +455,7 @@ function buildOutdoorCoverageAssetIds(
 			const landblockId =
 				((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
 			candidates.push({
-				assetId: formatTerrainAssetId(landblockId),
+				landblockId,
 				distance: Math.abs(offsetX) + Math.abs(offsetY),
 				offsetX,
 				offsetY,
@@ -406,11 +473,15 @@ function buildOutdoorCoverageAssetIds(
 			}
 			return left.offsetX - right.offsetX;
 		})
-		.map((candidate) => candidate.assetId);
+		.map((candidate) => candidate.landblockId);
 }
 
 function formatTerrainAssetId(landblockId: number): string {
 	return `terrain/${landblockId.toString(16).padStart(8, "0")}`;
+}
+
+function formatLandblockStaticsAssetId(landblockId: number): string {
+	return `landblock-statics/${landblockId.toString(16).padStart(8, "0")}`;
 }
 
 function isStaticRenderableAssetId(assetId: string): boolean {

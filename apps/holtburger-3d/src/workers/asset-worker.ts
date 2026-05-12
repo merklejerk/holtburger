@@ -8,6 +8,7 @@ import type {
 	EnvironmentPayloadDto,
 	GfxObjPayloadDto,
 	IndoorEnvCellPayloadDto,
+	LandblockStaticsPayloadDto,
 	SetupModelPayloadDto,
 	TerrainLandblockPayloadDto,
 } from "../lib/host/contracts";
@@ -20,6 +21,7 @@ import {
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
+	landblockStaticsPayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
 } from "../lib/host/contracts";
@@ -65,6 +67,17 @@ export function prepareAssetPayload(
 	);
 	if (terrainPayload.success) {
 		return prepareTerrainLandblock(request, response, terrainPayload.data);
+	}
+
+	const landblockStaticsPayload = landblockStaticsPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockStaticsPayload.success) {
+		return prepareLandblockStatics(
+			request,
+			response,
+			landblockStaticsPayload.data,
+		);
 	}
 
 	const indoorEnvCellPayload = indoorEnvCellPayloadDtoSchema.safeParse(
@@ -147,6 +160,27 @@ export function prepareAssetPayload(
 						paletteKey,
 						provenance,
 					}),
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareLandblockStatics(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: LandblockStaticsPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "landblock-statics",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			landblockId: payload.landblockId,
+			sceneryInstances: payload.sceneryInstances,
+			buildingInstances: payload.buildingInstances,
+		},
 		preparedAt: new Date().toISOString(),
 	};
 }

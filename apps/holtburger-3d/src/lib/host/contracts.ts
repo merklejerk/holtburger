@@ -128,7 +128,7 @@ export const runtimeResidencyDtoSchema = z.object({
 });
 export type RuntimeResidencyDto = z.infer<typeof runtimeResidencyDtoSchema>;
 
-export const runtimeOutdoorSceneryInstanceDtoSchema = z.object({
+export const landblockStaticInstanceDtoSchema = z.object({
 	instanceId: z.string().min(1),
 	owningLandblockId: z.number().int().nonnegative(),
 	sourceDid: z.number().int().nonnegative(),
@@ -136,24 +136,22 @@ export const runtimeOutdoorSceneryInstanceDtoSchema = z.object({
 	sourceIndex: z.number().int().nonnegative(),
 	frame: frameDtoSchema,
 });
-export type RuntimeOutdoorSceneryInstanceDto = z.infer<
-	typeof runtimeOutdoorSceneryInstanceDtoSchema
+export type LandblockStaticInstanceDto = z.infer<
+	typeof landblockStaticInstanceDtoSchema
 >;
 
-export const runtimeOutdoorBuildingInstanceDtoSchema =
-	runtimeOutdoorSceneryInstanceDtoSchema.extend({
+export const landblockStaticBuildingDtoSchema =
+	landblockStaticInstanceDtoSchema.extend({
 		numLeaves: z.number().int().nonnegative(),
 	});
-export type RuntimeOutdoorBuildingInstanceDto = z.infer<
-	typeof runtimeOutdoorBuildingInstanceDtoSchema
+export type LandblockStaticBuildingDto = z.infer<
+	typeof landblockStaticBuildingDtoSchema
 >;
 
 export const runtimeBatchDtoSchema = z.object({
 	tick: z.number().int().nonnegative(),
 	entities: z.array(runtimeEntitySnapshotDtoSchema),
 	residency: runtimeResidencyDtoSchema,
-	outdoorSceneryInstances: z.array(runtimeOutdoorSceneryInstanceDtoSchema),
-	outdoorBuildingInstances: z.array(runtimeOutdoorBuildingInstanceDtoSchema),
 });
 export type RuntimeBatchDto = z.infer<typeof runtimeBatchDtoSchema>;
 
@@ -202,6 +200,19 @@ export const terrainLandblockPayloadDtoSchema = z.object({
 });
 export type TerrainLandblockPayloadDto = z.infer<
 	typeof terrainLandblockPayloadDtoSchema
+>;
+
+export const landblockStaticsPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-statics"),
+	residencyKind: z.literal("outdoor-landblock"),
+	sourceAssetKind: z.literal("landblock-info"),
+	landblockId: z.number().int().nonnegative(),
+	sceneryInstances: z.array(landblockStaticInstanceDtoSchema),
+	buildingInstances: z.array(landblockStaticBuildingDtoSchema),
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockStaticsPayloadDto = z.infer<
+	typeof landblockStaticsPayloadDtoSchema
 >;
 
 export const indoorEnvCellPayloadDtoSchema = z.object({

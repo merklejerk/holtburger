@@ -28,8 +28,6 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			indoors: false,
 			trackedBodyCount: 0,
 		},
-		outdoorSceneryInstances: [],
-		outdoorBuildingInstances: [],
 	};
 }
 
@@ -136,40 +134,69 @@ describe("world display model helpers", () => {
 
 	it("tracks outdoor scenery membership separately from terrain chunks", () => {
 		const runtimeBatch = createRuntimeBatch();
-		runtimeBatch.outdoorSceneryInstances = [
-			{
-				instanceId: "outdoor-scenery/0102ffff/object/0000/02000001",
-				owningLandblockId: 0x0102ffff,
-				sourceDid: 0x02000001,
-				sourceAssetId: "setup-model/02000001",
-				sourceIndex: 0,
-				frame: {
-					origin: { x: 1, y: 2, z: 3 },
-					orientation: { w: 1, x: 0, y: 0, z: 0 },
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"landblock-statics/0102ffff": {
+				request: {
+					requestId: "statics",
+					assetId: "landblock-statics/0102ffff",
+					priority: "streaming",
 				},
-			},
-		];
-		runtimeBatch.outdoorBuildingInstances = [
-			{
-				instanceId: "outdoor-scenery/0102ffff/building/0000/02000002",
-				owningLandblockId: 0x0102ffff,
-				sourceDid: 0x02000002,
-				sourceAssetId: "setup-model/02000002",
-				sourceIndex: 0,
-				frame: {
-					origin: { x: 4, y: 5, z: 6 },
-					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				response: {
+					requestId: "statics",
+					assetId: "landblock-statics/0102ffff",
+					payloadKind: "json",
+					payload: {},
 				},
-				numLeaves: 2,
+				payload: {
+					kind: "landblock-statics",
+					sourceAssetKind: "landblock-info",
+					residencyKind: "outdoor-landblock",
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "landblock-info",
+						errorCode: null,
+						detail: "test",
+					},
+					landblockId: 0x0102ffff,
+					sceneryInstances: [
+						{
+							instanceId: "landblock-statics/0102ffff/object/0000/02000001",
+							owningLandblockId: 0x0102ffff,
+							sourceDid: 0x02000001,
+							sourceAssetId: "setup-model/02000001",
+							sourceIndex: 0,
+							frame: {
+								origin: { x: 1, y: 2, z: 3 },
+								orientation: { w: 1, x: 0, y: 0, z: 0 },
+							},
+						},
+					],
+					buildingInstances: [
+						{
+							instanceId: "landblock-statics/0102ffff/building/0000/02000002",
+							owningLandblockId: 0x0102ffff,
+							sourceDid: 0x02000002,
+							sourceAssetId: "setup-model/02000002",
+							sourceIndex: 0,
+							frame: {
+								origin: { x: 4, y: 5, z: 6 },
+								orientation: { w: 1, x: 0, y: 0, z: 0 },
+							},
+							numLeaves: 2,
+						},
+					],
+				},
+				preparedAt: "2026-05-12T00:00:00.000Z",
 			},
-		];
+		};
 
 		const model = deriveWorldDisplayModel({
 			activeModeLabel: "World Viewer",
 			hostStatus: "ready",
 			runtimeBatch,
 			viewModelFeed: null,
-			assetState: createInitialAssetChannelState(),
+			assetState,
 			browserDestination: null,
 			cameraAck: null,
 			rayPickResponse: null,

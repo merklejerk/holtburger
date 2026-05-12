@@ -28,8 +28,6 @@ function createRuntimeBatch(
 			indoors: false,
 			trackedBodyCount: 0,
 		},
-		outdoorSceneryInstances: [],
-		outdoorBuildingInstances: [],
 		...overrides,
 	};
 }

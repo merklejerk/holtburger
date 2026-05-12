@@ -58,6 +58,27 @@ export interface PreparedTerrainLandblockPayload extends PreparedAssetPayloadBas
 	terrainMesh: PreparedTerrainMesh;
 }
 
+export interface PreparedLandblockStaticInstance {
+	instanceId: string;
+	owningLandblockId: number;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	frame: FrameDto;
+}
+
+export interface PreparedLandblockStaticBuilding extends PreparedLandblockStaticInstance {
+	numLeaves: number;
+}
+
+export interface PreparedLandblockStaticsPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-statics";
+	sourceAssetKind: "landblock-info";
+	landblockId: number;
+	sceneryInstances: PreparedLandblockStaticInstance[];
+	buildingInstances: PreparedLandblockStaticBuilding[];
+}
+
 export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	kind: "indoor-env-cell";
 	sourceAssetKind: "env-cell";
@@ -248,6 +269,7 @@ export interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 
 export type PreparedAssetPayload =
 	| PreparedTerrainLandblockPayload
+	| PreparedLandblockStaticsPayload
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
 	| PreparedCellStructurePayload
@@ -304,6 +326,21 @@ export function getPreparedAssetDependencies(
 
 	if (asset.payload.kind === "setup-model") {
 		return [...new Set(asset.payload.parts.map((part) => part.gfxObjAssetId))]
+			.sort()
+			.map((assetId) => ({ assetId }));
+	}
+
+	if (asset.payload.kind === "landblock-statics") {
+		return [
+			...new Set([
+				...asset.payload.sceneryInstances.map(
+					(instance) => instance.sourceAssetId,
+				),
+				...asset.payload.buildingInstances.map(
+					(instance) => instance.sourceAssetId,
+				),
+			]),
+		]
 			.sort()
 			.map((assetId) => ({ assetId }));
 	}

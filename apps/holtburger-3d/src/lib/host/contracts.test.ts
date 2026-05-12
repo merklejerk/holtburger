@@ -56,6 +56,20 @@ describe("host contracts", () => {
 				},
 			],
 			residency,
+			outdoorSceneryInstances: [
+				{
+					instanceId: "outdoor-scenery/0102ffff/object/0000/02000001",
+					owningLandblockId: 0x0102ffff,
+					sourceDid: 0x02000001,
+					sourceAssetId: "setup-model/02000001",
+					sourceIndex: 0,
+					frame: {
+						origin: { x: 1, y: 2, z: 3 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+				},
+			],
+			outdoorBuildingInstances: [],
 		};
 		const viewModelFeed: FrontendStateFeedDto = {
 			selectedEntityId: 0x01020304,
@@ -75,6 +89,12 @@ describe("host contracts", () => {
 			"100.40S, 101.55W, 1.0Z",
 		);
 		expect(notification.viewModelFeed?.interactionMode).toBe("inspect");
+		expect(notification.runtimeBatch?.outdoorSceneryInstances[0]).toMatchObject(
+			{
+				sourceDid: 0x02000001,
+				sourceAssetId: "setup-model/02000001",
+			},
+		);
 	});
 
 	it("keeps the asset channel contract distinct from runtime snapshot typing", () => {
@@ -177,6 +197,8 @@ describe("host contracts", () => {
 					indoors: false,
 					trackedBodyCount: 0,
 				},
+				outdoorSceneryInstances: [],
+				outdoorBuildingInstances: [],
 			},
 			viewModelFeed: {
 				selectedEntityId: null,

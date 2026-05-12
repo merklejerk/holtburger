@@ -1900,7 +1900,7 @@ Phase gate before 12.4:
 
 ##### Phase 12.4 — Outdoor scenery runtime facts
 
-Status: planned.
+Status: completed on 2026-05-12.
 
 Scope: Surface static outdoor object/building placements from `LandblockInfo` as runtime-channel facts, separate from asset payloads and renderer policy.
 
@@ -1917,6 +1917,28 @@ Acceptance:
 - runtime facts say what outdoor static instances exist and where they are, without bundling renderer assets
 - frontend asset selection remains demand-driven from scenery/building source DIDs
 - no shared `holtburger-world` scenery-body abstraction is introduced
+
+Delivered:
+
+- `RuntimeBatchDto` now carries `outdoorSceneryInstances` from `LandblockInfo.Objects` and `outdoorBuildingInstances` from `LandblockInfo.Buildings`.
+- Runtime static instance facts include stable `instanceId`, `owningLandblockId`, `sourceDid`, `sourceAssetId`, `sourceIndex`, and placement `frame`. Building facts additionally carry `numLeaves`.
+- The host derives facts from the same outdoor radius-1 landblock ring used by terrain coverage and keeps unsupported DID families out of first-pass scenery selection. `0x01` maps to `gfx-obj/*`; `0x02` maps to `setup-model/*`.
+- Frontend contracts now parse the new runtime facts, and `WorldDisplay` scene context tracks outdoor static-object and building membership alongside terrain chunk membership.
+- Asset selection remains demand-driven: `createSceneCoverageRequests(...)` derives missing `gfx-obj/*` / `setup-model/*` requests from runtime scenery facts, and the app uses `prepareAssetGraph(...)` so setup-model dependencies still resolve through main-thread orchestration.
+- Tests cover runtime DTO parsing, frontend scenery asset-request derivation, scene-context membership counts, default empty-focus behavior, and fixture-backed Object/Building derivation against repo-local `LandblockInfo` data.
+- Follow-up refinement: frontend request and scene-context helpers now name the renderer-facing layer as static renderables rather than outdoor scenery. The runtime DTO remains outdoor-specific because it reports `LandblockInfo` source facts, but Phase 12.5 should consume generic static renderable assets/instances.
+
+Course corrections:
+
+- The current default browser focus landblock ring can legitimately contain no static objects or buildings. That is valid runtime data, not a fallback. Tests that prove Object/Building derivation now discover populated fixture landblocks instead of assuming the demo focus block is populated.
+- The runtime facts do not aggregate renderer bundles and do not inline setup/gfx payloads. They only name source DIDs plus placement frames; the frontend decides which assets to request.
+- Other DID families remain out of scope for Phase 12.4. ACE can coerce some non-`0x01`/`0x02` DIDs through animation/setup paths, but first-pass static scenery selection only requests the explicit `gfx-obj/*` and `setup-model/*` families already implemented.
+- Indoor and outdoor scenes should not stay different all the way down. They differ at source-fact and scene-membership layers, but asset lookup, dependency orchestration, renderable part normalization, GPU cache, and instance rendering should converge.
+
+Phase gate before 12.5:
+
+- Phase 12.5 still makes sense as the next step. Runtime facts now identify outdoor scenery instances, and the asset channel can resolve setup/gfx payloads and their dependencies.
+- The main refinement for 12.5 is to keep rendering as hydration/composition work: build a normalized renderable part list from direct `gfx-obj/*` leaves or real `setup-model/*` composites, upload GPU resources on the main thread, and leave collision/material/animation interpretation out of scope.
 
 ##### Phase 12.5 — First non-terrain scenery render
 
@@ -2442,6 +2464,9 @@ Mitigation:
 - Keep ACE's one-part setup normalization as a render/composition view, not an asset-family behavior. Do not cache fake `setup-model/*` records for direct `gfx-obj/*` sources; normalize them only when building renderable part lists.
 - Treat real `setup-model/*` records as reusable composite assets, not renderer bundles. They preserve AC part order and composition metadata, while dependency scheduling is derived by the main thread from part `gfxObjAssetId` values.
 - Keep setup-model cyl-sphere/sphere geometry out of frontend payloads. Only compact counts should cross for normal rendering; authoritative collision interpretation remains Rust-owned and should not move into TypeScript as part of the scenery render path.
+- Treat outdoor static scenery as runtime facts, not asset bundles. Runtime batches may name source DIDs and placement frames from `LandblockInfo`, but setup/gfx asset lookup stays frontend-demand-driven.
+- Do not assume a focus landblock is populated. Empty static-object/building arrays are valid data; fixture tests that need populated scenery should target populated `LandblockInfo` records explicitly.
+- Keep source-fact DTOs AC-shaped and renderer helpers generic. Outdoor facts may be landblock-shaped, but frontend rendering should talk in static renderables so indoor env-cell statics can join the same path later.
 
 #### Verification Log
 
@@ -2549,6 +2574,8 @@ Mitigation:
 - 2026-05-12: Phase 12.2 did not add `setup-model/*`, outdoor scenery facts, or scene rendering. The next step should remain Phase 12.3: setup-model composites using the main-thread dependency orchestration path.
 - 2026-05-12: Phase 12.3 completed with real `setup-model/*` host lookup, TypeScript contract parsing, worker preparation, and setup-to-gfx dependency derivation through main-thread orchestration.
 - 2026-05-12: Phase 12.3 deliberately did not publish outdoor scenery instances or render them. The next work should remain Phase 12.4: runtime-channel outdoor scenery facts from `LandblockInfo.Objects` and `Buildings`.
+- 2026-05-12: Phase 12.4 completed with runtime-channel outdoor static scenery and building facts derived from `LandblockInfo`, plus demand-driven frontend setup/gfx asset request selection from those facts.
+- 2026-05-12: Phase 12.4 did not render scenery. The next work should remain Phase 12.5: hydrate prepared setup/gfx payloads into normalized renderable parts and render first non-terrain scenery.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2596,6 +2623,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.3 are complete. The next step should be Phase 12.4: outdoor scenery runtime facts.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.4 are complete. The next step should be Phase 12.5: first non-terrain scenery render.
 
-The rest of Phase 12 still makes sense as a parent milestone. The refined sequence now is: publish outdoor scenery runtime facts, then render first non-terrain scenery through the existing setup/gfx asset chain.
+The rest of Phase 12 still makes sense as a parent milestone. The remaining work is first non-terrain scenery rendering through the existing runtime-fact and setup/gfx asset chain.

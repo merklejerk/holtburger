@@ -242,13 +242,21 @@ export function createSceneCoverageRequests(
 		);
 	}
 
-	return createTerrainCoverageRequests(
-		runtimeBatch,
-		browserDestination,
-		priority,
-		preparedByAssetId,
-		pendingAssetIds,
-	);
+	return [
+		...createTerrainCoverageRequests(
+			runtimeBatch,
+			browserDestination,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+		),
+		...createStaticRenderableAssetRequests(
+			runtimeBatch,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+		),
+	];
 }
 
 export function createTerrainCoverageRequest(
@@ -298,6 +306,41 @@ export function createTerrainCoverageRequests(
 		)
 		.map((assetId) => ({
 			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
+			assetId,
+			priority,
+		}));
+}
+
+export function createStaticRenderableAssetRequests(
+	runtimeBatch: RuntimeBatchDto | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[] = [],
+): AssetLookupRequestDto[] {
+	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+		return [];
+	}
+
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+	const sourceAssetIds = [
+		...runtimeBatch.outdoorSceneryInstances.map(
+			(instance) => instance.sourceAssetId,
+		),
+		...runtimeBatch.outdoorBuildingInstances.map(
+			(instance) => instance.sourceAssetId,
+		),
+	];
+
+	return [...new Set(sourceAssetIds)]
+		.sort()
+		.filter(
+			(assetId) =>
+				isStaticRenderableAssetId(assetId) &&
+				!preparedByAssetId[assetId] &&
+				!pendingAssetIdSet.has(assetId),
+		)
+		.map((assetId) => ({
+			requestId: `${priority}-${runtimeBatch.tick}-static-renderable-${assetId}`,
 			assetId,
 			priority,
 		}));
@@ -368,6 +411,13 @@ function buildOutdoorCoverageAssetIds(
 
 function formatTerrainAssetId(landblockId: number): string {
 	return `terrain/${landblockId.toString(16).padStart(8, "0")}`;
+}
+
+function isStaticRenderableAssetId(assetId: string): boolean {
+	return (
+		/^gfx-obj\/[0-9a-fA-F]{8}$/.test(assetId) ||
+		/^setup-model\/[0-9a-fA-F]{8}$/.test(assetId)
+	);
 }
 
 function createIndoorCoverageRequests(

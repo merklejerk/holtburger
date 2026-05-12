@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	AssetChannelController,
 	createSceneCoverageRequests,
+	createStaticRenderableAssetRequests,
 	deriveTerrainFocusLandblockId,
 	createTerrainCoverageRequest,
 	createTerrainCoverageRequests,
@@ -53,6 +54,8 @@ function createRuntimeBatch(): RuntimeBatchDto {
 			indoors: false,
 			trackedBodyCount: 1,
 		},
+		outdoorSceneryInstances: [],
+		outdoorBuildingInstances: [],
 	};
 }
 
@@ -258,6 +261,61 @@ describe("asset channel controller", () => {
 		expect(
 			requests.every((request) => request.assetId !== "terrain/0102ffff"),
 		).toBe(true);
+	});
+
+	it("derives demand-driven static renderable requests from outdoor scenery runtime facts", () => {
+		const runtimeBatch = createRuntimeBatch();
+		runtimeBatch.outdoorSceneryInstances = [
+			{
+				instanceId: "outdoor-scenery/0102ffff/object/0000/02000002",
+				owningLandblockId: 0x0102ffff,
+				sourceDid: 0x02000002,
+				sourceAssetId: "setup-model/02000002",
+				sourceIndex: 0,
+				frame: {
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+			},
+			{
+				instanceId: "outdoor-scenery/0102ffff/object/0001/01000001",
+				owningLandblockId: 0x0102ffff,
+				sourceDid: 0x01000001,
+				sourceAssetId: "gfx-obj/01000001",
+				sourceIndex: 1,
+				frame: {
+					origin: { x: 1, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+			},
+		];
+		runtimeBatch.outdoorBuildingInstances = [
+			{
+				instanceId: "outdoor-scenery/0102ffff/building/0000/02000002",
+				owningLandblockId: 0x0102ffff,
+				sourceDid: 0x02000002,
+				sourceAssetId: "setup-model/02000002",
+				sourceIndex: 0,
+				frame: {
+					origin: { x: 2, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				numLeaves: 3,
+			},
+		];
+
+		const requests = createStaticRenderableAssetRequests(
+			runtimeBatch,
+			"streaming",
+			{
+				"gfx-obj/01000001": createPreparedGfxObjAsset("gfx-obj/01000001"),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"setup-model/02000002",
+		]);
 	});
 
 	it("excludes already in-flight terrain assets from the immediate coverage enqueue set", () => {

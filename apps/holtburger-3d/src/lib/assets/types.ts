@@ -91,6 +91,60 @@ export interface PreparedCellStructurePayload extends PreparedAssetPayloadBase {
 	hasDrawingBsp: boolean;
 }
 
+export interface PreparedGfxObjUv {
+	u: number;
+	v: number;
+}
+
+export interface PreparedGfxObjVertex {
+	id: number;
+	origin: Vec3Dto;
+	normal: Vec3Dto;
+	uvs: PreparedGfxObjUv[];
+}
+
+export interface PreparedGfxObjVertexArray {
+	vertexType: number | null;
+	vertexCount: number;
+	vertices: PreparedGfxObjVertex[];
+}
+
+export interface PreparedGfxObjPolygon {
+	id: number;
+	numPts: number;
+	stippling: number;
+	sidesType: number;
+	posSurface: number;
+	negSurface: number;
+	vertexIds: number[];
+	posUvIndices: number[];
+	negUvIndices: number[];
+}
+
+export interface PreparedGfxObjBspNode {
+	kind: string;
+	[key: string]: unknown;
+}
+
+export interface PreparedGfxObjPhysicsWitness {
+	polygonCount: number;
+	hasBsp: boolean;
+}
+
+export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
+	kind: "gfx-obj";
+	sourceAssetKind: "gfx-obj";
+	gfxObjId: number;
+	flags: number | null;
+	surfaceIds: number[];
+	vertexArray: PreparedGfxObjVertexArray;
+	drawingPolygons: PreparedGfxObjPolygon[];
+	drawingBsp: PreparedGfxObjBspNode | null;
+	physicsWitness: PreparedGfxObjPhysicsWitness;
+	sortCenter: Vec3Dto | null;
+	didDegrade: number | null;
+}
+
 export interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
 	kind: "visual-asset-stub";
 	sourceAssetKind: string | null;
@@ -115,6 +169,7 @@ export type PreparedAssetPayload =
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
 	| PreparedCellStructurePayload
+	| PreparedGfxObjPayload
 	| PreparedVisualAssetStubPayload
 	| PreparedDependencyManifestPayload
 	| PreparedUnknownAssetPayload;

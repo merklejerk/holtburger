@@ -14,6 +14,7 @@ import type {
 	RuntimeResidencyDto,
 } from "./contracts";
 import {
+	gfxObjPayloadDtoSchema,
 	hostBoundaryOverviewDtoSchema,
 	runtimeNotificationEnvelopeDtoSchema,
 } from "./contracts";
@@ -106,11 +107,7 @@ describe("host contracts", () => {
 					"environment-id",
 					"cell-structure-id",
 				],
-				assetFamilyIds: [
-					"indoor-env-cell",
-					"environment",
-					"cell-structure",
-				],
+				assetFamilyIds: ["indoor-env-cell", "environment", "cell-structure"],
 			},
 		};
 
@@ -200,7 +197,9 @@ describe("host contracts", () => {
 		});
 
 		expect(notification.runtimeBatch?.tick).toBe(1);
-		expect(overview.indoorContractBacklog.assetFamilyIds).toContain("cell-structure");
+		expect(overview.indoorContractBacklog.assetFamilyIds).toContain(
+			"cell-structure",
+		);
 	});
 
 	it("rejects malformed runtime notifications instead of trusting invoke generics", () => {
@@ -217,5 +216,67 @@ describe("host contracts", () => {
 				viewModelFeed: null,
 			}),
 		).toThrow();
+	});
+
+	it("parses gfx-obj payloads with drawing data and opaque physics witnesses", () => {
+		const payload = gfxObjPayloadDtoSchema.parse({
+			kind: "gfx-obj",
+			residencyKind: "unknown",
+			sourceAssetKind: "gfx-obj",
+			gfxObjId: 0x01000001,
+			flags: 3,
+			surfaceIds: [0x08000001],
+			vertexArray: {
+				vertexType: 1,
+				vertexCount: 1,
+				vertices: [
+					{
+						id: 0,
+						origin: { x: 1, y: 2, z: 3 },
+						normal: { x: 0, y: 0, z: 1 },
+						uvs: [{ u: 0.25, v: 0.75 }],
+					},
+				],
+			},
+			drawingPolygons: [
+				{
+					id: 1,
+					numPts: 3,
+					stippling: 0,
+					sidesType: 1,
+					posSurface: 0,
+					negSurface: 0,
+					vertexIds: [0, 1, 2],
+					posUvIndices: [0, 0, 0],
+					negUvIndices: [0, 0, 0],
+				},
+			],
+			drawingBsp: {
+				kind: "leaf",
+				index: 0,
+				solid: 0,
+				sphere: null,
+				polyIds: [1],
+			},
+			physicsWitness: {
+				polygonCount: 4,
+				hasBsp: true,
+			},
+			sortCenter: { x: 4, y: 5, z: 6 },
+			didDegrade: null,
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "gfx-obj",
+				errorCode: null,
+				detail: "dats/assets.hba",
+			},
+		});
+
+		expect(payload.kind).toBe("gfx-obj");
+		expect(payload.drawingPolygons).toHaveLength(1);
+		expect(payload.physicsWitness).toEqual({
+			polygonCount: 4,
+			hasBsp: true,
+		});
 	});
 });

@@ -300,5 +300,5 @@
 - [x] Track "dead" creatures to avoid targeting them?
 - [x] Strange login issues when indoors.
 - [x] Iffy trade behavior against trade bots.
+- [x] What's the static resource key used for? seems fishy
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
-- [ ] What's the static resource key used for? seems fishy

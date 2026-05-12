@@ -92,7 +92,9 @@ impl ContentRepository {
     where
         T: StaticResourceKey + for<'a> BinRead<Args<'a> = ()>,
     {
-        let resource = self.read_resource(T::RESOURCE_KEY, asset_name)?;
+        let resource = self
+            .read_resource(T::RESOURCE_KEY)
+            .with_context(|| format!("failed to load {asset_name}"))?;
         T::read_options(&mut Cursor::new(resource.bytes), Endian::Little, ())
             .with_context(|| format!("failed to parse {asset_name}"))
     }
@@ -101,11 +103,7 @@ impl ContentRepository {
     ///
     /// Use this for app-local asset lookups whose keys are discovered at runtime,
     /// such as terrain, setup-model, gfx-obj, or env-cell requests.
-    pub fn read_resource(
-        &self,
-        key: ResourceKey<'_>,
-        asset_name: &'static str,
-    ) -> Result<RepositoryResource> {
+    pub fn read_resource(&self, key: ResourceKey<'_>) -> Result<RepositoryResource> {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
         let metadata = resources.get_metadata_by_key(key);
 
@@ -137,11 +135,7 @@ impl ContentRepository {
             });
         }
 
-        Err(missing_asset_error(
-            key,
-            asset_name,
-            self.source_description.as_deref(),
-        ))
+        Err(missing_asset_error(key, self.source_description.as_deref()))
     }
 
     pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
@@ -152,24 +146,18 @@ impl ContentRepository {
     }
 }
 
-fn missing_asset_error(
-    key: ResourceKey<'_>,
-    asset_name: &'static str,
-    source_description: Option<&str>,
-) -> anyhow::Error {
+fn missing_asset_error(key: ResourceKey<'_>, source_description: Option<&str>) -> anyhow::Error {
     match source_description {
         Some(source) => anyhow!(
-            "Missing asset {}:0x{:08X} ({}) while reading client data from {}.",
+            "Missing asset {}:0x{:08X} while reading client data from {}.",
             key.namespace,
             key.file_id,
-            asset_name,
             source
         ),
         None => anyhow!(
-            "Missing asset {}:0x{:08X} ({}) in the mounted resource namespaces.",
+            "Missing asset {}:0x{:08X} in the mounted resource namespaces.",
             key.namespace,
             key.file_id,
-            asset_name,
         ),
     }
 }
@@ -500,10 +488,7 @@ mod tests {
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
         let resource = repository
-            .read_resource(
-                ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001),
-                "test cell resource",
-            )
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001))
             .expect("dynamic resource should resolve from content repository");
 
         assert_eq!(resource.namespace, EOR_CELL_NAMESPACE);
@@ -550,14 +535,11 @@ mod tests {
         let repository =
             ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
         let error = repository
-            .read_resource(
-                ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001),
-                "missing test cell resource",
-            )
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, 0x0000_0001))
             .expect_err("missing dynamic resource should fail");
 
-        assert!(error.to_string().contains("missing test cell resource"));
         assert!(error.to_string().contains(EOR_CELL_NAMESPACE));
+        assert!(error.to_string().contains("0x00000001"));
     }
 
     #[test]

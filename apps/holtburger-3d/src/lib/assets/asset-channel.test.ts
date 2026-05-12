@@ -597,6 +597,72 @@ describe("asset channel controller", () => {
 			"environment-reference",
 		);
 	});
+
+	it("prepares gfx-obj payloads as first-class geometry leaves", () => {
+		const gfxObj = prepareAssetPayload(
+			{
+				requestId: "gfx-obj-1",
+				assetId: "gfx-obj/01000001",
+				priority: "streaming",
+			},
+			{
+				requestId: "gfx-obj-1",
+				assetId: "gfx-obj/01000001",
+				payloadKind: "json",
+				payload: {
+					kind: "gfx-obj",
+					residencyKind: "unknown",
+					sourceAssetKind: "gfx-obj",
+					gfxObjId: 0x01000001,
+					flags: 3,
+					surfaceIds: [0x08000001],
+					vertexArray: {
+						vertexType: 1,
+						vertexCount: 3,
+						vertices: [],
+					},
+					drawingPolygons: [
+						{
+							id: 1,
+							numPts: 3,
+							stippling: 0,
+							sidesType: 1,
+							posSurface: 0,
+							negSurface: 0,
+							vertexIds: [0, 1, 2],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [0, 0, 0],
+						},
+					],
+					drawingBsp: null,
+					physicsWitness: {
+						polygonCount: 2,
+						hasBsp: true,
+					},
+					sortCenter: { x: 1, y: 2, z: 3 },
+					didDegrade: null,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "gfx-obj",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		expect(gfxObj.payload.kind).toBe("gfx-obj");
+		if (gfxObj.payload.kind !== "gfx-obj") {
+			throw new Error("expected gfx-obj payload");
+		}
+		expect(gfxObj.payload.gfxObjId).toBe(0x01000001);
+		expect(gfxObj.payload.vertexArray.vertexCount).toBe(3);
+		expect(gfxObj.payload.drawingPolygons).toHaveLength(1);
+		expect(gfxObj.payload.physicsWitness).toEqual({
+			polygonCount: 2,
+			hasBsp: true,
+		});
+	});
 });
 
 function createSyntheticPreparedAsset(

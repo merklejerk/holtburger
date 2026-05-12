@@ -6,7 +6,11 @@ export type LifecyclePhase = z.infer<typeof lifecyclePhaseValueSchema>;
 const modeHintValueSchema = z.enum(["client"]);
 export type ModeHint = z.infer<typeof modeHintValueSchema>;
 
-const sessionStateValueSchema = z.enum(["unavailable", "disconnected", "connected"]);
+const sessionStateValueSchema = z.enum([
+	"unavailable",
+	"disconnected",
+	"connected",
+]);
 export type SessionState = z.infer<typeof sessionStateValueSchema>;
 
 const interactionModeValueSchema = z.enum(["none", "inspect"]);
@@ -27,7 +31,9 @@ const assetProvenanceSourceValueSchema = z.enum([
 	"app-local-stub",
 	"unknown",
 ]);
-export type AssetProvenanceSource = z.infer<typeof assetProvenanceSourceValueSchema>;
+export type AssetProvenanceSource = z.infer<
+	typeof assetProvenanceSourceValueSchema
+>;
 
 const assetErrorCodeValueSchema = z.enum([
 	"asset-id-unknown",
@@ -45,14 +51,18 @@ const indoorRuntimeFieldIdValueSchema = z.enum([
 	"environment-id",
 	"cell-structure-id",
 ]);
-export type IndoorRuntimeFieldId = z.infer<typeof indoorRuntimeFieldIdValueSchema>;
+export type IndoorRuntimeFieldId = z.infer<
+	typeof indoorRuntimeFieldIdValueSchema
+>;
 
 const indoorAssetFamilyIdValueSchema = z.enum([
 	"indoor-env-cell",
 	"environment",
 	"cell-structure",
 ]);
-export type IndoorAssetFamilyId = z.infer<typeof indoorAssetFamilyIdValueSchema>;
+export type IndoorAssetFamilyId = z.infer<
+	typeof indoorAssetFamilyIdValueSchema
+>;
 
 export const vec3DtoSchema = z.object({
 	x: z.number().finite(),
@@ -79,7 +89,9 @@ export const runtimeEntitySnapshotDtoSchema = z.object({
 	locationLabel: z.string(),
 	isLocalPlayer: z.boolean(),
 });
-export type RuntimeEntitySnapshotDto = z.infer<typeof runtimeEntitySnapshotDtoSchema>;
+export type RuntimeEntitySnapshotDto = z.infer<
+	typeof runtimeEntitySnapshotDtoSchema
+>;
 
 export const runtimeResidencyDtoSchema = z.object({
 	focusEntityId: z.number().int().nonnegative().nullable(),
@@ -123,7 +135,9 @@ export const assetLookupResponseDtoSchema = z.object({
 	payloadKind: assetPayloadKindValueSchema,
 	payload: z.unknown(),
 });
-export type AssetLookupResponseDto = z.infer<typeof assetLookupResponseDtoSchema>;
+export type AssetLookupResponseDto = z.infer<
+	typeof assetLookupResponseDtoSchema
+>;
 
 export const assetProvenanceDtoSchema = z.object({
 	source: assetProvenanceSourceValueSchema,
@@ -144,7 +158,9 @@ export const terrainLandblockPayloadDtoSchema = z.object({
 	terrainTypes: z.array(z.number().finite()),
 	provenance: assetProvenanceDtoSchema,
 });
-export type TerrainLandblockPayloadDto = z.infer<typeof terrainLandblockPayloadDtoSchema>;
+export type TerrainLandblockPayloadDto = z.infer<
+	typeof terrainLandblockPayloadDtoSchema
+>;
 
 export const indoorEnvCellPayloadDtoSchema = z.object({
 	kind: z.literal("indoor-env-cell"),
@@ -160,7 +176,9 @@ export const indoorEnvCellPayloadDtoSchema = z.object({
 	staticObjectCount: z.number().int().nonnegative(),
 	provenance: assetProvenanceDtoSchema,
 });
-export type IndoorEnvCellPayloadDto = z.infer<typeof indoorEnvCellPayloadDtoSchema>;
+export type IndoorEnvCellPayloadDto = z.infer<
+	typeof indoorEnvCellPayloadDtoSchema
+>;
 
 export const environmentPayloadDtoSchema = z.object({
 	kind: z.literal("environment"),
@@ -185,7 +203,107 @@ export const cellStructurePayloadDtoSchema = z.object({
 	hasDrawingBsp: z.boolean(),
 	provenance: assetProvenanceDtoSchema,
 });
-export type CellStructurePayloadDto = z.infer<typeof cellStructurePayloadDtoSchema>;
+export type CellStructurePayloadDto = z.infer<
+	typeof cellStructurePayloadDtoSchema
+>;
+
+const gfxObjVertexDtoSchema = z.object({
+	id: z.number().int().nonnegative(),
+	origin: vec3DtoSchema,
+	normal: vec3DtoSchema,
+	uvs: z.array(z.object({ u: z.number().finite(), v: z.number().finite() })),
+});
+export type GfxObjVertexDto = z.infer<typeof gfxObjVertexDtoSchema>;
+
+const gfxObjVertexArrayDtoSchema = z.object({
+	vertexType: z.number().int().nullable(),
+	vertexCount: z.number().int().nonnegative(),
+	vertices: z.array(gfxObjVertexDtoSchema),
+});
+export type GfxObjVertexArrayDto = z.infer<typeof gfxObjVertexArrayDtoSchema>;
+
+const gfxObjPolygonDtoSchema = z.object({
+	id: z.number().int().nonnegative(),
+	numPts: z.number().int().nonnegative(),
+	stippling: z.number().int().nonnegative(),
+	sidesType: z.number().int(),
+	posSurface: z.number().int(),
+	negSurface: z.number().int(),
+	vertexIds: z.array(z.number().int()),
+	posUvIndices: z.array(z.number().int().nonnegative()),
+	negUvIndices: z.array(z.number().int().nonnegative()),
+});
+export type GfxObjPolygonDto = z.infer<typeof gfxObjPolygonDtoSchema>;
+
+const gfxObjBspNodeDtoSchema: z.ZodType<{
+	kind: string;
+	[key: string]: unknown;
+}> = z.lazy(() =>
+	z.discriminatedUnion("kind", [
+		z.object({
+			kind: z.literal("port"),
+			plane: z.object({ normal: vec3DtoSchema, d: z.number().finite() }),
+			pos: gfxObjBspNodeDtoSchema,
+			neg: gfxObjBspNodeDtoSchema,
+			sphere: z
+				.object({ center: vec3DtoSchema, radius: z.number().finite() })
+				.nullable(),
+			polyIds: z.array(z.number().int().nonnegative()),
+			portalPolys: z.array(
+				z.object({
+					portalIndex: z.number().int(),
+					polyId: z.number().int(),
+				}),
+			),
+		}),
+		z.object({
+			kind: z.literal("leaf"),
+			index: z.number().int(),
+			solid: z.number().int(),
+			sphere: z
+				.object({ center: vec3DtoSchema, radius: z.number().finite() })
+				.nullable(),
+			polyIds: z.array(z.number().int().nonnegative()),
+		}),
+		z.object({
+			kind: z.literal("internal"),
+			tag: z.string(),
+			plane: z.object({ normal: vec3DtoSchema, d: z.number().finite() }),
+			pos: gfxObjBspNodeDtoSchema.nullable(),
+			neg: gfxObjBspNodeDtoSchema.nullable(),
+			sphere: z
+				.object({ center: vec3DtoSchema, radius: z.number().finite() })
+				.nullable(),
+			polyIds: z.array(z.number().int().nonnegative()),
+		}),
+	]),
+);
+export type GfxObjBspNodeDto = z.infer<typeof gfxObjBspNodeDtoSchema>;
+
+const gfxObjPhysicsWitnessDtoSchema = z.object({
+	polygonCount: z.number().int().nonnegative(),
+	hasBsp: z.boolean(),
+});
+export type GfxObjPhysicsWitnessDto = z.infer<
+	typeof gfxObjPhysicsWitnessDtoSchema
+>;
+
+export const gfxObjPayloadDtoSchema = z.object({
+	kind: z.literal("gfx-obj"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("gfx-obj"),
+	gfxObjId: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative().nullable(),
+	surfaceIds: z.array(z.number().int().nonnegative()),
+	vertexArray: gfxObjVertexArrayDtoSchema,
+	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
+	drawingBsp: gfxObjBspNodeDtoSchema.nullable(),
+	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
+	sortCenter: vec3DtoSchema.nullable(),
+	didDegrade: z.number().int().nonnegative().nullable(),
+	provenance: assetProvenanceDtoSchema,
+});
+export type GfxObjPayloadDto = z.infer<typeof gfxObjPayloadDtoSchema>;
 
 export const appearanceManifestPayloadDtoSchema = z.object({
 	kind: z.literal("appearance-manifest"),
@@ -196,7 +314,9 @@ export const appearanceManifestPayloadDtoSchema = z.object({
 	paletteKey: z.string().min(1),
 	provenance: assetProvenanceDtoSchema,
 });
-export type AppearanceManifestPayloadDto = z.infer<typeof appearanceManifestPayloadDtoSchema>;
+export type AppearanceManifestPayloadDto = z.infer<
+	typeof appearanceManifestPayloadDtoSchema
+>;
 
 export const dependencyManifestPayloadDtoSchema = z.object({
 	kind: z.literal("dependency-manifest"),
@@ -204,16 +324,22 @@ export const dependencyManifestPayloadDtoSchema = z.object({
 	dependencyAssetIds: z.array(z.string().min(1)),
 	provenance: assetProvenanceDtoSchema.optional(),
 });
-export type DependencyManifestPayloadDto = z.infer<typeof dependencyManifestPayloadDtoSchema>;
+export type DependencyManifestPayloadDto = z.infer<
+	typeof dependencyManifestPayloadDtoSchema
+>;
 
-export const genericAssetPayloadDtoSchema = z.object({
-	kind: z.string().min(1),
-	residencyKind: z.string().optional(),
-	debugPrimitive: z.string().optional(),
-	paletteKey: z.string().optional(),
-	provenance: assetProvenanceDtoSchema.optional(),
-}).passthrough();
-export type GenericAssetPayloadDto = z.infer<typeof genericAssetPayloadDtoSchema>;
+export const genericAssetPayloadDtoSchema = z
+	.object({
+		kind: z.string().min(1),
+		residencyKind: z.string().optional(),
+		debugPrimitive: z.string().optional(),
+		paletteKey: z.string().optional(),
+		provenance: assetProvenanceDtoSchema.optional(),
+	})
+	.passthrough();
+export type GenericAssetPayloadDto = z.infer<
+	typeof genericAssetPayloadDtoSchema
+>;
 
 export const runtimeNotificationEnvelopeDtoSchema = z.object({
 	channel: z.string().min(1),
@@ -222,13 +348,17 @@ export const runtimeNotificationEnvelopeDtoSchema = z.object({
 	runtimeBatch: runtimeBatchDtoSchema.nullable(),
 	viewModelFeed: frontendStateFeedDtoSchema.nullable(),
 });
-export type RuntimeNotificationEnvelopeDto = z.infer<typeof runtimeNotificationEnvelopeDtoSchema>;
+export type RuntimeNotificationEnvelopeDto = z.infer<
+	typeof runtimeNotificationEnvelopeDtoSchema
+>;
 
 export const indoorContractBacklogDtoSchema = z.object({
 	runtimeFieldIds: z.array(indoorRuntimeFieldIdValueSchema),
 	assetFamilyIds: z.array(indoorAssetFamilyIdValueSchema),
 });
-export type IndoorContractBacklogDto = z.infer<typeof indoorContractBacklogDtoSchema>;
+export type IndoorContractBacklogDto = z.infer<
+	typeof indoorContractBacklogDtoSchema
+>;
 
 export const hostBoundaryOverviewDtoSchema = z.object({
 	assetChannel: z.string().min(1),
@@ -239,7 +369,9 @@ export const hostBoundaryOverviewDtoSchema = z.object({
 	assetLookupCommand: z.string().min(1),
 	indoorContractBacklog: indoorContractBacklogDtoSchema,
 });
-export type HostBoundaryOverviewDto = z.infer<typeof hostBoundaryOverviewDtoSchema>;
+export type HostBoundaryOverviewDto = z.infer<
+	typeof hostBoundaryOverviewDtoSchema
+>;
 
 export const cameraHintDtoSchema = z.object({
 	mode: modeHintValueSchema,

@@ -6,6 +6,7 @@ import type {
 	CellStructurePayloadDto,
 	DependencyManifestPayloadDto,
 	EnvironmentPayloadDto,
+	GfxObjPayloadDto,
 	IndoorEnvCellPayloadDto,
 	TerrainLandblockPayloadDto,
 } from "../lib/host/contracts";
@@ -16,6 +17,7 @@ import {
 	dependencyManifestPayloadDtoSchema,
 	environmentPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
+	gfxObjPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
 } from "../lib/host/contracts";
@@ -81,6 +83,11 @@ export function prepareAssetPayload(
 	);
 	if (cellStructurePayload.success) {
 		return prepareCellStructure(request, response, cellStructurePayload.data);
+	}
+
+	const gfxObjPayload = gfxObjPayloadDtoSchema.safeParse(response.payload);
+	if (gfxObjPayload.success) {
+		return prepareGfxObj(request, response, gfxObjPayload.data);
 	}
 
 	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(
@@ -212,6 +219,33 @@ function prepareCellStructure(
 			hasCellBsp: payload.hasCellBsp,
 			hasPhysicsBsp: payload.hasPhysicsBsp,
 			hasDrawingBsp: payload.hasDrawingBsp,
+		},
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareGfxObj(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: GfxObjPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "gfx-obj",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			gfxObjId: payload.gfxObjId,
+			flags: payload.flags,
+			surfaceIds: payload.surfaceIds,
+			vertexArray: payload.vertexArray,
+			drawingPolygons: payload.drawingPolygons,
+			drawingBsp: payload.drawingBsp,
+			physicsWitness: payload.physicsWitness,
+			sortCenter: payload.sortCenter,
+			didDegrade: payload.didDegrade,
 		},
 		preparedAt: new Date().toISOString(),
 	};

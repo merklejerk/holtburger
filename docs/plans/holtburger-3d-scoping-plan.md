@@ -1605,11 +1605,12 @@ Verified ID resolution chain (matches ACE 1:1):
 
 - `LandblockInfo.Objects[i] = Stab { id, frame }` and `LandblockInfo.Buildings[i].BuildInfo { model_id, frame, ... }` carry polymorphic DIDs
 - the high byte of the DID dispatches the load:
-  - `0x01XXXXXX` → `GfxObj` DID; ACE wraps it in a synthetic single-part setup via `Setup.MakeSimpleSetup`
+  - `0x01XXXXXX` → `GfxObj` DID; ACE can normalize it into a synthetic single-part setup via `Setup.MakeSimpleSetup` at the physics/render composition layer
   - `0x02XXXXXX` → `SetupModel` DID; resolved via `Setup.Get`, exposing N parts where each part references a `GfxObj`
   - other prefixes → animation-coerced setup (`did | 0x02000000`); not required for first-pass static scenery
 - a `SetupModel` carries per-part placement frames, scales, parent links, and `CylSphere` collision proxies
 - a `GfxObj` carries the actual `CVertexArray`, drawing polygons + drawing BSP, physics polygons + physics BSP, surface ids, and a sort center
+- Holtburger should keep that normalization out of the asset cache: `gfx-obj/*` remains a real leaf asset, `setup-model/*` remains a real composite asset, and direct `gfx-obj/*` inputs may become one-part setup-like renderables only as ephemeral composition/view-model data.
 
 Phase 12.0 prerequisite — asset-shape cleanup (do this before any new resolution code lands):
 
@@ -1907,6 +1908,7 @@ Deliverables:
 
 - frontend scenery cache with eviction tied to outdoor landblock residency
 - setup-model part placement applied to prepared `gfx-obj/*` geometry
+- a normalized renderable-model view that lets real `setup-model/*` composites and direct `gfx-obj/*` leaves share the same part-iteration render path without inventing fake `setup-model/*` cache entries
 - `InstancedMesh` rendering per unique `gfx-obj/*` geometry where duplicates make that worthwhile
 - deterministic per-instance debug coloring derived from `(setup_id, gfx_obj_id, part_index)` or the direct `gfx-obj` id
 - component/integration coverage proving duplicate source geometry is reused instead of uploaded once per instance
@@ -1915,14 +1917,15 @@ Acceptance:
 
 - a real Tauri run renders at least one outdoor landblock with terrain plus at least one decoded scenery instance from repo-local `LandblockInfo` data
 - duplicate scenery instances of the same source geometry share uploaded geometry and render through the cache/instancing path
+- direct `gfx-obj/*` scenery sources, if encountered, render through an ephemeral one-part renderable view with identity placement and unit scale rather than through a synthetic cached setup asset
 - camera behavior remains free fly-cam; ray pick remains on the current entity DTO path; no spatial solver or material decode is introduced
 
 Primary deliverables:
 
 - `gfx-obj/*` and `setup-model/*` asset family discriminants in the host adapter contracts and the frontend asset channel
-- prepared boundary payloads that explicitly name the AC-shaped split: `setup-model` carries `parts: [{ gfx_obj_id, placement_frame, scale, cyl_spheres, parent_index, ... }]`; `gfx-obj` carries `{ vertex_array, drawing_polygons, drawing_bsp, physics_polygons, physics_bsp, surface_refs, sort_center }`
+- prepared boundary payloads that explicitly name the AC-shaped split: `setup-model` carries `parts: [{ gfx_obj_id, placement_frame, scale, cyl_spheres, parent_index, ... }]`; `gfx-obj` carries decoded drawing data, drawing BSP, surface refs, render geometry, sort center, and compact physics witness metadata while full physics structures remain Rust-owned
 - runtime DTO expansion publishing per-landblock `scenery_instances: [{ source_did, frame, instance_id, owning_landblock_id }]` derived from `LandblockInfo.Objects` (and a parallel `building_instances` derived from `Buildings`) for the focus + neighborhood landblocks already covered by Phase 7's outdoor ring
-- worker-side decode that, for each individual asset request, parses the resolved bytes into the appropriate decoded payload (gfx-obj geometry intermediates, setup-model parts list, etc.) and emits Three.js-ready `BufferGeometry` data; the cross-asset dependency walk (setup-model → per-part gfx-obj) is handled per the orchestration option chosen in Phase 12.0 deliverable (4), not by the worker fetching follow-ups itself
+- worker-side preparation that, for each individual asset request, turns resolved payloads into CPU-side intermediates (`gfx-obj` render geometry arrays, setup-model parts list, etc.); the cross-asset dependency walk (setup-model → per-part gfx-obj) is handled by main-thread orchestration, not by the worker fetching follow-ups itself
 - frontend scene-context model gains a `sceneryInstanceSet` alongside the existing terrain ring, with explicit cache eviction tied to landblock residency
 - `WorldDisplay` renders scenery via `InstancedMesh` per unique `gfx-obj` so duplicates of the same model do not multiply draw calls
 - a deterministic per-instance debug color derived from a stable hash of `(setup_id, gfx_obj_id, part_index)` so the first-pass scene reads as recognizable distinct objects without requiring `Surface`/`Texture` decode
@@ -1931,7 +1934,8 @@ Acceptance criteria:
 
 - a real Tauri run renders at least one outdoor landblock with both terrain and at least one decoded scenery instance from repo-local `LandblockInfo` data
 - duplicate scenery instances of the same source DID share a single uploaded `BufferGeometry` and render through `InstancedMesh`
-- the boundary payload for both `setup-model/*` and `gfx-obj/*` carries the AC-shaped drawing-versus-physics split intact, including `physics_polygons`, `physics_bsp`, and `cyl_spheres`, even though no consumer reads them
+- the boundary payload for `setup-model/*` and `gfx-obj/*` preserves the AC-shaped drawing-versus-physics distinction: render-facing drawing data crosses to the frontend, compact physics witnesses cross only where useful, and full physics structures stay Rust-owned
+- render composition normalizes direct `gfx-obj/*` leaves and real `setup-model/*` composites into a common renderable part list without creating fake setup-model assets or muddying provenance
 - the scenery cache evicts in step with landblock residency rather than growing unboundedly
 - camera behavior is unchanged: free fly-cam everywhere, no collision, no solver participation
 - ray pick continues to work on entity DTOs as today; this phase does not migrate it onto the spatial substrate
@@ -1944,20 +1948,22 @@ Phase 12 design guardrails:
 - do not introduce a `gfx-obj` instance abstraction in shared crates; instances live in app-local frontend scene state
 - do not invent a "scenery body" concept in `holtburger-world`; scenery instances are runtime-channel facts plus asset-channel payloads, nothing more
 - do not let the per-object debug coloring leak into shared types; it is a frontend rendering policy
+- do not create synthetic `setup-model/*` assets for bare `gfx-obj/*` inputs. The one-part setup idea is a render/composition normalization view only.
 
 Phase Gate Review Before Phase 13:
 
 - assess whether the `gfx-obj/*` and `setup-model/*` payload shapes are honest enough to also carry indoor `CellStruct`-derived geometry without renaming, since Phase 13 will reuse the same intermediate-to-`BufferGeometry` worker path
 - assess whether the runtime channel's scenery-instance shape generalizes cleanly to indoor static-object stabs published via `EnvCell.static_objects`
 - assess whether per-instance debug coloring is good enough to defer materials further or whether a minimum `Surface` decode should be folded into Phase 13
-- decide whether the physics-witness fields (`physics_bsp`, `cyl_spheres`) need any shared documentation pass before Phase 14 starts attaching real consumers
+- decide whether compact frontend physics witnesses plus Rust-owned decoded physics structures need a shared documentation pass before Phase 14 starts attaching real consumers
 
 Phase 12 testing expectations:
 
 - Rust adapter tests covering scenery-instance derivation from `LandblockInfo`, including the Objects + Buildings split
 - Rust adapter tests covering `setup-model/*` and `gfx-obj/*` request resolution against a fixture HBA
-- worker tests covering DID high-byte dispatch (gfx-obj vs setup-model branches) for the per-asset decode path, plus the synthetic single-part wrapper case for bare `gfx-obj` inputs
+- worker tests covering DID high-byte dispatch (gfx-obj vs setup-model branches) for the per-asset preparation path
 - worker tests covering `GfxObj` polygon-set → `BufferGeometry` triangulation for at least one non-trivial fixture
+- render/composition tests covering the ephemeral one-part renderable view for direct `gfx-obj/*` inputs without adding a synthetic setup-model cache record
 - frontend store tests covering the scenery-instance cache and landblock-residency-driven eviction
 - one component or integration test that confirms `InstancedMesh` deduplication occurs for duplicate source DIDs
 
@@ -2413,6 +2419,7 @@ Mitigation:
 - Keep dynamic `ContentRepository::read_resource(...)` keyed only by `ResourceKey`. Human-readable asset labels belong on higher-level typed loaders or call-site error context, not in the raw resource lookup API.
 - Prepare `GfxObj` render geometry as a frontend-owned derived intermediate. The worker uses deterministic fan triangulation into flat `BufferGeometry`-ready arrays while preserving decoded drawing data and surface references separately.
 - Keep the first `GfxObj` render intermediate non-indexed. Duplicating triangle vertices is acceptable at this stage because it keeps cache reuse, surface-debug metadata, and later renderer upload straightforward before material grouping exists.
+- Keep ACE's one-part setup normalization as a render/composition view, not an asset-family behavior. Do not cache fake `setup-model/*` records for direct `gfx-obj/*` sources; normalize them only when building renderable part lists.
 
 #### Verification Log
 

@@ -5,9 +5,11 @@ use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_content::{ContentRepository, SoulEmoteCatalog};
-use holtburger_dat::file_type::EnvCell;
+use holtburger_dat::file_type::{EnvCell, GfxObj};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
+use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::landblock::CellLandblock;
+use holtburger_dat::physics::BspNode;
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::entity::Entity;
 use holtburger_world::{WorldBootstrap, WorldState};
@@ -212,6 +214,10 @@ impl HostBoundaryAdapter {
 
         if let Some(cell_structure_id) = parse_cell_structure_asset_id(&request.asset_id) {
             return build_cell_structure_lookup_response(request, cell_structure_id);
+        }
+
+        if let Some(gfx_obj_id) = parse_gfx_obj_asset_id(&request.asset_id) {
+            return self.build_gfx_obj_lookup_response(request, gfx_obj_id);
         }
 
         let (residency_kind, debug_primitive, palette_key, provenance) = match request
@@ -528,6 +534,51 @@ impl HostBoundaryAdapter {
             payload,
         }
     }
+
+    fn build_gfx_obj_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        gfx_obj_id: u32,
+    ) -> AssetLookupResponseDto {
+        let payload =
+            self.load_gfx_obj_payload(gfx_obj_id)
+                .unwrap_or_else(|(detail, error_code)| {
+                    serde_json::json!({
+                        "kind": "gfx-obj",
+                        "residencyKind": "unknown",
+                        "sourceAssetKind": "gfx-obj",
+                        "gfxObjId": gfx_obj_id,
+                        "flags": null,
+                        "surfaceIds": [],
+                        "vertexArray": {
+                            "vertexType": null,
+                            "vertexCount": 0,
+                            "vertices": []
+                        },
+                        "drawingPolygons": [],
+                        "drawingBsp": null,
+                        "physicsWitness": {
+                            "polygonCount": 0,
+                            "hasBsp": false
+                        },
+                        "sortCenter": null,
+                        "didDegrade": null,
+                        "provenance": {
+                            "source": "app-local-stub",
+                            "sourceAssetKind": "gfx-obj",
+                            "errorCode": error_code,
+                            "detail": detail
+                        }
+                    })
+                });
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
 }
 
 fn build_cell_structure_lookup_response(
@@ -573,10 +624,10 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         environment_id: u32,
     ) -> AssetLookupResponseDto {
-        let provenance = match self.content.read_resource(
-            ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id),
-            "environment reference asset",
-        ) {
+        let provenance = match self
+            .content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
+        {
             Ok(resource) => serde_json::json!({
                 "source": "repo-local-hba",
                 "sourceAssetKind": "environment",
@@ -612,10 +663,7 @@ impl HostBoundaryAdapter {
     ) -> Result<IndoorEnvCellMetadata, (String, &'static str)> {
         let resource = self
             .content
-            .read_resource(
-                ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id),
-                "indoor env cell metadata",
-            )
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
             .map_err(|error| {
                 (
                     format!(
@@ -651,10 +699,7 @@ impl HostBoundaryAdapter {
     ) -> Result<serde_json::Value, (String, &'static str)> {
         let resource = self
             .content
-            .read_resource(
-                ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id),
-                "cell landblock terrain",
-            )
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
             .map_err(|error| {
                 (
                     format!(
@@ -684,6 +729,56 @@ impl HostBoundaryAdapter {
             "provenance": {
                 "source": "repo-local-hba",
                 "sourceAssetKind": "cell-landblock",
+                "errorCode": null,
+                "detail": source_detail
+            }
+        }))
+    }
+
+    fn load_gfx_obj_payload(
+        &self,
+        gfx_obj_id: u32,
+    ) -> Result<serde_json::Value, (String, &'static str)> {
+        let resource = self
+            .content
+            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not read {}:0x{gfx_obj_id:08X} from content repository: {error}",
+                        EOR_PORTAL_NAMESPACE
+                    ),
+                    "asset-read-failed",
+                )
+            })?;
+        let source_detail = resource.source_description.clone();
+        let gfx_obj =
+            GfxObj::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
+                (
+                    format!("Could not decode GfxObj 0x{gfx_obj_id:08X}: {error}"),
+                    "asset-decode-failed",
+                )
+            })?;
+
+        Ok(serde_json::json!({
+            "kind": "gfx-obj",
+            "residencyKind": "unknown",
+            "sourceAssetKind": "gfx-obj",
+            "gfxObjId": gfx_obj.id,
+            "flags": gfx_obj.flags.bits(),
+            "surfaceIds": gfx_obj.surfaces,
+            "vertexArray": serialize_vertex_array(&gfx_obj.vertex_array),
+            "drawingPolygons": serialize_polygons(&gfx_obj.polygons),
+            "drawingBsp": gfx_obj.drawing_bsp.as_ref().map(serialize_bsp_node),
+            "physicsWitness": {
+                "polygonCount": gfx_obj.physics_polygons.len(),
+                "hasBsp": gfx_obj.physics_bsp.is_some()
+            },
+            "sortCenter": serialize_vector3(&gfx_obj.sort_center),
+            "didDegrade": gfx_obj.did_degrade,
+            "provenance": {
+                "source": "repo-local-hba",
+                "sourceAssetKind": "gfx-obj",
                 "errorCode": null,
                 "detail": source_detail
             }
@@ -720,10 +815,7 @@ impl HostBoundaryAdapter {
     ) -> Result<serde_json::Value, (String, &'static str)> {
         let resource = self
             .content
-            .read_resource(
-                ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id),
-                "indoor env cell asset",
-            )
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
             .map_err(|error| {
                 (
                     format!(
@@ -792,6 +884,133 @@ fn parse_cell_structure_asset_id(asset_id: &str) -> Option<u32> {
             !hex.is_empty() && hex.len() <= 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit())
         })
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+}
+
+fn parse_gfx_obj_asset_id(asset_id: &str) -> Option<u32> {
+    let raw_hex = asset_id.strip_prefix("gfx-obj/")?;
+    let hex = raw_hex
+        .strip_prefix("0x")
+        .or_else(|| raw_hex.strip_prefix("0X"))
+        .unwrap_or(raw_hex);
+
+    (hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
+        .filter(|id| (id >> 24) == 0x01)
+}
+
+fn serialize_vector3(vector: &Vector3) -> serde_json::Value {
+    serde_json::json!({
+        "x": vector.x,
+        "y": vector.y,
+        "z": vector.z,
+    })
+}
+
+fn serialize_vertex_array(vertex_array: &CVertexArray) -> serde_json::Value {
+    let mut vertices = vertex_array.vertices.iter().collect::<Vec<_>>();
+    vertices.sort_by_key(|(id, _)| **id);
+
+    serde_json::json!({
+        "vertexType": vertex_array.vertex_type,
+        "vertexCount": vertex_array.vertices.len(),
+        "vertices": vertices
+            .into_iter()
+            .map(|(id, vertex)| {
+                serde_json::json!({
+                    "id": id,
+                    "origin": serialize_vector3(&vertex.origin),
+                    "normal": serialize_vector3(&vertex.normal),
+                    "uvs": vertex.uvs.iter().map(|uv| {
+                        serde_json::json!({
+                            "u": uv.u,
+                            "v": uv.v,
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_polygons(
+    polygons: &std::collections::HashMap<u16, Polygon>,
+) -> Vec<serde_json::Value> {
+    let mut entries = polygons.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|(id, _)| **id);
+
+    entries
+        .into_iter()
+        .map(|(id, polygon)| {
+            serde_json::json!({
+                "id": id,
+                "numPts": polygon.num_pts,
+                "stippling": polygon.stippling,
+                "sidesType": polygon.sides_type,
+                "posSurface": polygon.pos_surface,
+                "negSurface": polygon.neg_surface,
+                "vertexIds": polygon.vertex_ids,
+                "posUvIndices": polygon.pos_uv_indices,
+                "negUvIndices": polygon.neg_uv_indices,
+            })
+        })
+        .collect()
+}
+
+fn serialize_bsp_node(node: &BspNode) -> serde_json::Value {
+    match node {
+        BspNode::Port(portal) => serde_json::json!({
+            "kind": "port",
+            "plane": {
+                "normal": serialize_vector3(&portal.plane.normal),
+                "d": portal.plane.d,
+            },
+            "pos": serialize_bsp_node(&portal.pos),
+            "neg": serialize_bsp_node(&portal.neg),
+            "sphere": portal.sphere.as_ref().map(|sphere| {
+                serde_json::json!({
+                    "center": serialize_vector3(&sphere.center),
+                    "radius": sphere.radius,
+                })
+            }),
+            "polyIds": portal.poly_ids,
+            "portalPolys": portal.portal_polys.iter().map(|portal_poly| {
+                serde_json::json!({
+                    "portalIndex": portal_poly.portal_index,
+                    "polyId": portal_poly.poly_id,
+                })
+            }).collect::<Vec<_>>(),
+        }),
+        BspNode::Leaf(leaf) => serde_json::json!({
+            "kind": "leaf",
+            "index": leaf.index,
+            "solid": leaf.solid,
+            "sphere": leaf.sphere.as_ref().map(|sphere| {
+                serde_json::json!({
+                    "center": serialize_vector3(&sphere.center),
+                    "radius": sphere.radius,
+                })
+            }),
+            "polyIds": leaf.poly_ids,
+        }),
+        BspNode::Internal(internal) => serde_json::json!({
+            "kind": "internal",
+            "tag": std::str::from_utf8(&internal.tag).unwrap_or("????"),
+            "plane": {
+                "normal": serialize_vector3(&internal.plane.normal),
+                "d": internal.plane.d,
+            },
+            "pos": internal.pos.as_ref().map(|pos| serialize_bsp_node(pos)),
+            "neg": internal.neg.as_ref().map(|neg| serialize_bsp_node(neg)),
+            "sphere": internal.sphere.as_ref().map(|sphere| {
+                serde_json::json!({
+                    "center": serialize_vector3(&sphere.center),
+                    "radius": sphere.radius,
+                })
+            }),
+            "polyIds": internal.poly_ids,
+        }),
+    }
 }
 
 fn repo_assets_hba_path() -> PathBuf {
@@ -997,6 +1216,37 @@ mod tests {
         assert_eq!(asset.payload["kind"], "terrain-landblock");
         assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
         assert_eq!(asset.payload["landblockId"], 0x0102ffff);
+    }
+
+    #[test]
+    fn gfx_obj_lookup_returns_first_class_payload() {
+        let runtime = HostRuntimeService::new();
+        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-gfx-obj".to_string(),
+            asset_id: "gfx-obj/01000001".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.request_id, "test-gfx-obj");
+        assert_eq!(asset.asset_id, "gfx-obj/01000001");
+        assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
+        assert_eq!(asset.payload["kind"], "gfx-obj");
+        assert_eq!(asset.payload["sourceAssetKind"], "gfx-obj");
+        assert_eq!(asset.payload["gfxObjId"], 0x01000001);
+        assert_eq!(asset.payload["residencyKind"], "unknown");
+        assert_eq!(asset.payload["provenance"]["source"], "repo-local-hba");
+        assert!(
+            asset.payload["vertexArray"]["vertexCount"]
+                .as_u64()
+                .is_some()
+        );
+        assert!(asset.payload["drawingPolygons"].is_array());
+        assert!(
+            asset.payload["physicsWitness"]["polygonCount"]
+                .as_u64()
+                .is_some()
+        );
+        assert!(asset.payload["physicsWitness"]["hasBsp"].is_boolean());
     }
 
     #[test]

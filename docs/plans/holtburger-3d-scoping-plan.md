@@ -1780,7 +1780,7 @@ Phase 12 is a parent milestone, not a single implementation bite. The original d
 
 ##### Phase 12.1 — `gfx-obj/*` leaf asset family
 
-Status: planned.
+Status: completed on 2026-05-12.
 
 Scope: Add the first real non-terrain asset family as an individually requestable leaf. This phase proves host lookup, DTO typing, worker dispatch, and prepared-payload shape for `GfxObj` without requiring scene placement or `setup-model/*` composition yet.
 
@@ -1797,6 +1797,27 @@ Acceptance:
 - a direct `gfx-obj/*` request can resolve from repo-local HBA data through the dedicated asset channel
 - no `setup-model/*`, scenery instance DTO, or Three.js scene placement is introduced yet
 - physics-facing fields are preserved as data/witnesses only; TypeScript does not implement authoritative collision traversal
+
+Delivered in this phase:
+
+- The host adapter now recognizes `gfx-obj/01000000`-style asset ids, validates the DID family high byte as `0x01`, resolves the raw resource through `ContentRepository::read_resource(...)`, and decodes it with `holtburger-dat::file_type::GfxObj`.
+- The `gfx-obj` boundary payload carries frontend-relevant decoded drawing data: `vertexArray`, `drawingPolygons`, `drawingBsp`, `surfaceIds`, `sortCenter`, `didDegrade`, flags, and provenance. Physics data stays Rust-owned; the frontend only receives an opaque `physicsWitness` summary with polygon count and BSP presence.
+- TypeScript host contracts now parse `gfx-obj` payloads explicitly, including recursive BSP witness nodes.
+- The asset worker now prepares `gfx-obj` as a first-class `PreparedAssetPayload` variant instead of falling through to `unknown`.
+- Tests cover a repo-local `gfx-obj/01000001` lookup through the host adapter, contract parsing for separate drawing/physics witnesses, and worker preparation of a first-class `gfx-obj` payload.
+
+Course corrections and notes:
+
+- `gfx-obj` prepared payloads use `residencyKind: "unknown"` for now. That is intentional: a reusable geometry leaf does not know whether it is outdoor, indoor, or shared until a later setup/scenery consumer places it.
+- The prepared payload keeps decoded witness data, but does not triangulate polygons or create renderer geometry. That remains Phase 12.2 so the leaf-family contract can be reviewed before geometry-preparation policy lands.
+- Full physics polygons and physics BSPs were deliberately removed from the frontend-facing payload after review. The drawing-vs-physics split is preserved in Rust, while TypeScript only gets enough physics witness metadata to prove the split exists and avoid pretending drawing meshes are collision truth.
+- The host accepts both `gfx-obj/01000001` and `gfx-obj/0x01000001` spellings, but the codebase should prefer the no-`0x` spelling used by existing asset ids.
+- `gfx-obj` lookup still returns a structured fallback payload on read/decode failure, matching the current terrain/env-cell lookup style. The Phase 12.1 acceptance test asserts the known fixture comes from `repo-local-hba` so fallback does not mask the happy path.
+
+Phase gate before 12.2:
+
+- Phase 12.2 still makes sense as the next step. The asset family and decoded witness payload are now first-class, and the remaining work is specifically worker-side render-geometry preparation from `GfxObj` drawing polygons.
+- Keep 12.2 scoped to `GfxObj` geometry preparation and cache reuse. Do not add `setup-model/*`, outdoor scenery facts, or visible scene instances until the leaf geometry intermediate is proven.
 
 ##### Phase 12.2 — `GfxObj` render-geometry preparation
 
@@ -2368,6 +2389,9 @@ Mitigation:
 - Derive dependency ids from prepared payload data rather than from `PreparedAssetRecord` envelope fields. The envelope owns request/response/timestamp context; payload variants own asset-specific references.
 - Keep dependency behavior out of `PreparedUnknownAssetPayload` and `genericAssetPayloadDtoSchema`. Unknown payloads should remain diagnostic fallback payloads, not a shortcut for real asset-family behavior.
 - Treat Phase 12 as a parent milestone rather than one implementation phase. The reviewable path is now 12.1 `gfx-obj/*` leaf assets, 12.2 `GfxObj` render-geometry preparation, 12.3 `setup-model/*` composites, 12.4 outdoor scenery runtime facts, and 12.5 first non-terrain scenery rendering.
+- Keep `gfx-obj/*` leaves residency-neutral. They are reusable decoded geometry assets, so placement-specific outdoor/indoor residency should come from later setup/scenery or env-cell consumers rather than the leaf asset itself.
+- Keep full physics `GfxObj` payload data Rust-owned. Frontend-facing `gfx-obj/*` payloads may carry drawing data and compact physics witness metadata, but they should not expose physics polygons/BSPs unless a dedicated debug/export feature explicitly needs that data.
+- Keep dynamic `ContentRepository::read_resource(...)` keyed only by `ResourceKey`. Human-readable asset labels belong on higher-level typed loaders or call-site error context, not in the raw resource lookup API.
 
 #### Verification Log
 
@@ -2432,6 +2456,8 @@ Mitigation:
 - 2026-05-12: `npm run check`, `npm run test:ts`, and `npm run lint:ts` passed after adding Phase 12.0c main-thread dependency orchestration and synthetic dependency-walk tests. Targeted Prettier verification passed for the formatted asset-channel, asset-type, and worker files; `contracts.ts` was intentionally kept narrowly edited to avoid broad pre-existing formatting churn.
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving dependency ids out of `PreparedAssetRecord` and deriving them from prepared payload variants.
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after moving synthetic dependency orchestration from generic/unknown payloads to an explicit `dependency-manifest` payload.
+- 2026-05-12: `cargo check -p holtburger-3d`, `cargo test -p holtburger-3d`, `cargo clippy -p holtburger-3d --all-targets -- -D warnings`, `npm run check`, `npm run test:ts`, and `npm run lint:ts` passed after adding Phase 12.1 `gfx-obj/*` host lookup, TypeScript contract parsing, and worker preparation.
+- 2026-05-12: `cargo test -p holtburger-content --lib`, `cargo check -p holtburger-3d`, `cargo test -p holtburger-3d`, `cargo clippy -p holtburger-content --all-targets -- -D warnings`, and `cargo clippy -p holtburger-3d --all-targets -- -D warnings` passed after removing the human-readable label parameter from dynamic `ContentRepository::read_resource(...)`.
 
 #### Phase Review Log
 
@@ -2463,6 +2489,10 @@ Mitigation:
 - 2026-05-12: Phase 12.0c follow-up cleanup removed dependency declarations from `PreparedAssetRecord`. The frontend now derives dependency ids from payload data, which keeps the record envelope from becoming a second source of truth.
 - 2026-05-12: Phase 12.0c follow-up cleanup also removed dependency behavior from the generic/unknown fallback. The synthetic dependency test path now uses an explicit `dependency-manifest`, preserving `unknown` as a diagnostic fallback.
 - 2026-05-12: Phase 12.0c intentionally used synthetic dependency payloads and did not add real `gfx-obj/*` or `setup-model/*` families. The next work should add real leaf geometry first, then setup-model references, then outdoor scenery instances.
+- 2026-05-12: Phase 12.1 completed with first-class `gfx-obj/*` leaf lookup and preparation. The host resolves repo-local `GfxObj` data through `ContentRepository`, the boundary preserves drawing and physics witnesses separately, and the worker now prepares `gfx-obj` payloads without using the unknown fallback.
+- 2026-05-12: Phase 12.1 follow-up cleanup removed full physics polygons and physics BSPs from the frontend-facing `gfx-obj` payload. The boundary now exposes drawing data plus compact physics witness metadata, keeping authoritative physics structures Rust-owned.
+- 2026-05-12: Phase 12.1 follow-up cleanup simplified dynamic content lookup. `ContentRepository::read_resource(...)` now takes only a `ResourceKey`; friendly labels remain on typed loaders like `read_asset(...)` and on call-site context where they add real diagnostic value.
+- 2026-05-12: Phase 12.1 deliberately did not triangulate `GfxObj` polygons, add `setup-model/*`, publish scenery runtime facts, or render scene instances. The next work should remain Phase 12.2: render-geometry preparation for the decoded `GfxObj` drawing polygons.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2510,6 +2540,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c are complete. The next step should be Phase 12.1: the real `gfx-obj/*` leaf asset family.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phase 12.1 are complete. The next step should be Phase 12.2: `GfxObj` render-geometry preparation.
 
-The rest of Phase 12 still makes sense as a parent milestone, but it is now intentionally split into reviewable slices: `gfx-obj/*` leaf assets, `GfxObj` render-geometry preparation, `setup-model/*` composites through main-thread dependency orchestration, outdoor scenery runtime facts, and first non-terrain scenery rendering.
+The rest of Phase 12 still makes sense as a parent milestone. The refined sequence remains: prepare reusable `GfxObj` render geometry, add `setup-model/*` composites through main-thread dependency orchestration, publish outdoor scenery runtime facts, then render first non-terrain scenery.

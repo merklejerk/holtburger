@@ -1942,46 +1942,95 @@ Phase gate before 12.5:
 
 ##### Phase 12.5 — First non-terrain scenery render
 
-Status: planned.
+Status: completed on 2026-05-12.
 
-Scope: Hydrate prepared `gfx-obj/*` and `setup-model/*` data into Three.js scene instances and render outdoor static scenery in browser mode.
+Scope: Hydrate already-prepared `gfx-obj/*` and `setup-model/*` visual payloads into Three.js scene instances and render the first outdoor static scenery in browser mode. This phase is frontend render/composition work only; the asset families, worker preparation, dependency orchestration, and runtime outdoor source facts landed in Phases 12.1 through 12.4.
+
+Out of scope:
+
+- new host DTO asset families or runtime source-fact shapes
+- worker-side dependency fetching or aggregate scene payloads
+- material, texture, animation, physics, collision, or spatial-solver interpretation
+- ray-pick migration away from the existing entity DTO path
+- indoor `EnvCell.static_objects` membership
 
 Deliverables:
 
-- frontend scenery cache with eviction tied to outdoor landblock residency
-- setup-model part placement applied to prepared `gfx-obj/*` geometry
-- a normalized renderable-model view that lets real `setup-model/*` composites and direct `gfx-obj/*` leaves share the same part-iteration render path without inventing fake `setup-model/*` cache entries
-- `InstancedMesh` rendering per unique `gfx-obj/*` geometry where duplicates make that worthwhile
-- deterministic per-instance debug coloring derived from `(setup_id, gfx_obj_id, part_index)` or the direct `gfx-obj` id
-- component/integration coverage proving duplicate source geometry is reused instead of uploaded once per instance
+- a normalized static-renderable composition model that turns real `setup-model/*` composites and direct `gfx-obj/*` leaves into a common ordered part list
+- direct `gfx-obj/*` sources represented as ephemeral one-part renderables with identity placement and unit scale, never as synthetic cached `setup-model/*` assets
+- setup-model part placement and scale applied on top of the outdoor instance frame before rendering prepared `gfx-obj/*` geometry
+- a main-thread Three.js geometry cache keyed by `gfx-obj/*` asset id, with unused geometries disposed when no active static renderable references them
+- static-renderable scene membership tied to the current outdoor landblock coverage ring, so instances from non-resident landblocks are removed
+- duplicate geometry reuse, preferably through `InstancedMesh` per unique `gfx-obj/*` geometry when duplicate instances or parts make it worthwhile
+- deterministic frontend-only debug coloring derived from the static renderable source id, `gfx-obj` id, and part index
+- focused render/composition tests covering normalization, direct `gfx-obj/*` one-part views, and geometry reuse/eviction behavior
 
 Acceptance:
 
-- a real Tauri run renders at least one outdoor landblock with terrain plus at least one decoded scenery instance from repo-local `LandblockInfo` data
-- duplicate scenery instances of the same source geometry share uploaded geometry and render through the cache/instancing path
-- direct `gfx-obj/*` scenery sources, if encountered, render through an ephemeral one-part renderable view with identity placement and unit scale rather than through a synthetic cached setup asset
-- camera behavior remains free fly-cam; ray pick remains on the current entity DTO path; no spatial solver or material decode is introduced
-
-Primary deliverables:
-
-- `gfx-obj/*` and `setup-model/*` asset family discriminants in the host adapter contracts and the frontend asset channel
-- prepared boundary payloads that explicitly name the AC-shaped split: `setup-model` carries render/composition data such as `parts: [{ gfx_obj_id, placement_frame, scale, parent_index, ... }]` plus compact collision witness counts; `gfx-obj` carries decoded drawing data, drawing BSP, surface refs, render geometry, sort center, and compact physics witness metadata while full physics structures remain Rust-owned
-- runtime DTO expansion publishing per-landblock `scenery_instances: [{ source_did, frame, instance_id, owning_landblock_id }]` derived from `LandblockInfo.Objects` (and a parallel `building_instances` derived from `Buildings`) for the focus + neighborhood landblocks already covered by Phase 7's outdoor ring
-- worker-side preparation that, for each individual asset request, turns resolved payloads into CPU-side intermediates (`gfx-obj` render geometry arrays, setup-model parts list, etc.); the cross-asset dependency walk (setup-model → per-part gfx-obj) is handled by main-thread orchestration, not by the worker fetching follow-ups itself
-- frontend scene-context model gains a `sceneryInstanceSet` alongside the existing terrain ring, with explicit cache eviction tied to landblock residency
-- `WorldDisplay` renders scenery via `InstancedMesh` per unique `gfx-obj` so duplicates of the same model do not multiply draw calls
-- a deterministic per-instance debug color derived from a stable hash of `(setup_id, gfx_obj_id, part_index)` so the first-pass scene reads as recognizable distinct objects without requiring `Surface`/`Texture` decode
-
-Acceptance criteria:
-
-- a real Tauri run renders at least one outdoor landblock with both terrain and at least one decoded scenery instance from repo-local `LandblockInfo` data
-- duplicate scenery instances of the same source DID share a single uploaded `BufferGeometry` and render through `InstancedMesh`
-- the boundary payload for `setup-model/*` and `gfx-obj/*` preserves the AC-shaped drawing-versus-physics distinction: render-facing drawing data crosses to the frontend, compact physics witnesses cross only where useful, and full physics structures stay Rust-owned
-- render composition normalizes direct `gfx-obj/*` leaves and real `setup-model/*` composites into a common renderable part list without creating fake setup-model assets or muddying provenance
+- a real Tauri run renders at least one outdoor landblock with terrain plus at least one decoded static renderable from repo-local `LandblockInfo` data
+- duplicate static renderable parts that use the same `gfx-obj/*` asset share a single uploaded `BufferGeometry`
+- direct `gfx-obj/*` scenery sources, if encountered, render through the ephemeral one-part renderable path
+- render composition normalizes direct `gfx-obj/*` leaves and real `setup-model/*` composites without creating fake setup-model assets or muddying provenance
 - the scenery cache evicts in step with landblock residency rather than growing unboundedly
 - camera behavior is unchanged: free fly-cam everywhere, no collision, no solver participation
 - ray pick continues to work on entity DTOs as today; this phase does not migrate it onto the spatial substrate
 - frontend rendering uses per-instance debug coloring; no `Surface`/`Texture` decode is introduced
+
+Delivered on 2026-05-12:
+
+- added a frontend static-renderable composition model that normalizes outdoor runtime source facts plus prepared `gfx-obj/*` / `setup-model/*` payloads into renderer-facing parts
+- kept direct `gfx-obj/*` sources as ephemeral one-part renderables with identity placement and unit scale; no synthetic setup-model cache entries are created
+- resolved setup-model part placement from the default placement-frame table, including parent-index transform chains, then applies part scale at render time
+- added static-renderable membership filtering against the same radius-1 outdoor landblock coverage used by the terrain scene
+- added main-thread Three.js `BufferGeometry` upload from prepared `gfx-obj/*` render arrays with AC-to-Three coordinate conversion
+- added one `InstancedMesh` per active `gfx-obj/*` asset id so duplicate renderable parts share a single uploaded geometry
+- added geometry and mesh disposal when active static renderables or landblock coverage no longer reference a `gfx-obj/*`
+- added deterministic frontend-only debug coloring from source asset id, gfx id, and part index
+- added render-model tests covering setup-model normalization, direct `gfx-obj/*` one-part rendering, missing dependency reporting, coverage filtering, and duplicate-geometry grouping
+
+Course corrections:
+
+- setup-model parts do not directly own placement frames. The renderer composition layer derives per-part frame chains from `placementFrames[key=0]` and `parentIndex` instead of expecting a frame on each part record.
+- the geometry-reuse proof is implemented as one `InstancedMesh` per `gfx-obj/*` asset id, not as ad hoc mesh sharing. This is stronger than the optional wording in the refined phase.
+- this pass did not introduce a browser/Tauri visual smoke harness. Typecheck, tests, lint, and production build passed, but a human or automated Tauri run should still verify that at least one populated landblock visibly renders statics with the expected orientation and scale.
+
+Phase gate before 13:
+
+- Phase 13 still makes sense as the next indoor implementation step, but it should wait behind Phase 12.6 so outdoor static content facts use the same frontend-requested asset/content path as terrain.
+- Before adding richer indoor rendering, do a visual Tauri smoke pass on Phase 12.5 scenery transforms. If placement axes or quaternions are visibly wrong, correct the AC-to-Three transform conversion before reusing the path for `CellStruct`.
+- Keep materials and textures deferred unless debug coloring makes indoor geometry unreadable. The next structural gap is still `Environment` / `CellStruct` decode and indoor static membership, not surface decode.
+
+##### Phase 12.6 — Move outdoor static facts out of runtime batches
+
+Status: planned.
+
+Problem: Phase 12.4 published outdoor static scenery/building facts through `RuntimeBatchDto`, while terrain coverage is frontend-requested from the active scene focus. That split lets browser/manual navigation render terrain for one landblock ring while receiving static facts only for the runtime residency ring. More importantly, `LandblockInfo.Objects` and `Buildings` are static DAT/content facts used by the renderer; the Rust runtime should not prescribe their delivery in every runtime batch.
+
+Scope: Add a requestable outdoor static-facts content/asset family and feed Phase 12.5 rendering from prepared static-fact assets instead of runtime-batch scenery arrays.
+
+Deliverables:
+
+- a requestable asset family such as `landblock-statics/{xxyyffff}` or `outdoor-statics/{xxyyffff}` that reads repo-local `LandblockInfo`
+- a typed host payload carrying static object/building source facts for one landblock: stable instance id, owning landblock id, source DID, source asset id, source index, frame, and building leaf count where applicable
+- TypeScript contract parsing and worker preparation for the static-facts payload
+- scene coverage requests that load static-fact assets for the same active outdoor landblock ring used by terrain, whether the focus comes from live runtime residency or browser/manual destination
+- static renderable asset requests derived from prepared static-fact payloads, not from `RuntimeBatchDto`
+- `WorldDisplay` static-renderable composition fed by prepared static-fact payloads plus prepared setup/gfx assets
+- removal of `outdoorSceneryInstances` and `outdoorBuildingInstances` from `RuntimeBatchDto`, or an explicit deprecation step followed immediately by no frontend consumption
+- tests proving browser destination coverage requests static facts for the destination ring and no longer depends on runtime residency scenery facts
+
+Acceptance:
+
+- browser/manual navigation can render terrain and static objects for the same selected landblock coverage ring
+- live client mode remains isomorphic: runtime publishes the current focus/residency; frontend derives the outdoor coverage ring and requests terrain plus static-fact assets from that focus
+- `RuntimeBatchDto` no longer carries DAT-derived outdoor static render facts as normal runtime data
+- setup/gfx dependency orchestration remains main-thread-owned, with workers still preparing one requested payload at a time
+- the Phase 12.5 renderer keeps the normalized static-renderable part path and `InstancedMesh` geometry reuse
+- no material, texture, animation, collision, or indoor static membership work is introduced
+
+Course-correction note:
+
+- This phase supersedes the Phase 12.4 decision that outdoor static scenery should be runtime facts. Runtime can name authoritative focus/residency; static landblock content should be requested through the content/asset channel by the frontend scene-coverage policy.
 
 Phase 12 design guardrails:
 
@@ -2006,8 +2055,8 @@ Phase 12 testing expectations:
 - worker tests covering DID high-byte dispatch (gfx-obj vs setup-model branches) for the per-asset preparation path
 - worker tests covering `GfxObj` polygon-set → `BufferGeometry` triangulation for at least one non-trivial fixture
 - render/composition tests covering the ephemeral one-part renderable view for direct `gfx-obj/*` inputs without adding a synthetic setup-model cache record
-- frontend store tests covering the scenery-instance cache and landblock-residency-driven eviction
-- one component or integration test that confirms `InstancedMesh` deduplication occurs for duplicate source DIDs
+- frontend render-model tests covering static-renderable membership and landblock-residency-driven eviction
+- one component or integration test that confirms geometry reuse, and `InstancedMesh` deduplication if used, for duplicate static renderable parts that share a `gfx-obj/*` asset
 
 #### Phase 13: `Environment` / `CellStruct` Decoder And First Indoor Interior Render
 
@@ -2455,7 +2504,7 @@ Mitigation:
 - Use main-thread orchestration for future multi-asset setup-model to gfx-obj walks. Workers stay one-shot, the host does not aggregate renderer bundles, and the frontend asset cache owns dependency readiness.
 - Derive dependency ids from prepared payload data rather than from `PreparedAssetRecord` envelope fields. The envelope owns request/response/timestamp context; payload variants own asset-specific references.
 - Keep dependency behavior out of `PreparedUnknownAssetPayload` and `genericAssetPayloadDtoSchema`. Unknown payloads should remain diagnostic fallback payloads, not a shortcut for real asset-family behavior.
-- Treat Phase 12 as a parent milestone rather than one implementation phase. The reviewable path is now 12.1 `gfx-obj/*` leaf assets, 12.2 `GfxObj` render-geometry preparation, 12.3 `setup-model/*` composites, 12.4 outdoor scenery runtime facts, and 12.5 first non-terrain scenery rendering.
+- Treat Phase 12 as a parent milestone rather than one implementation phase. The reviewable path is now 12.1 `gfx-obj/*` leaf assets, 12.2 `GfxObj` render-geometry preparation, 12.3 `setup-model/*` composites, 12.4 initial outdoor scenery facts, 12.5 first non-terrain scenery rendering, and 12.6 moving static facts onto the requestable content/asset path.
 - Keep `gfx-obj/*` leaves residency-neutral. They are reusable decoded geometry assets, so placement-specific outdoor/indoor residency should come from later setup/scenery or env-cell consumers rather than the leaf asset itself.
 - Keep full physics `GfxObj` payload data Rust-owned. Frontend-facing `gfx-obj/*` payloads may carry drawing data and compact physics witness metadata, but they should not expose physics polygons/BSPs unless a dedicated debug/export feature explicitly needs that data.
 - Keep dynamic `ContentRepository::read_resource(...)` keyed only by `ResourceKey`. Human-readable asset labels belong on higher-level typed loaders or call-site error context, not in the raw resource lookup API.
@@ -2464,9 +2513,13 @@ Mitigation:
 - Keep ACE's one-part setup normalization as a render/composition view, not an asset-family behavior. Do not cache fake `setup-model/*` records for direct `gfx-obj/*` sources; normalize them only when building renderable part lists.
 - Treat real `setup-model/*` records as reusable composite assets, not renderer bundles. They preserve AC part order and composition metadata, while dependency scheduling is derived by the main thread from part `gfxObjAssetId` values.
 - Keep setup-model cyl-sphere/sphere geometry out of frontend payloads. Only compact counts should cross for normal rendering; authoritative collision interpretation remains Rust-owned and should not move into TypeScript as part of the scenery render path.
-- Treat outdoor static scenery as runtime facts, not asset bundles. Runtime batches may name source DIDs and placement frames from `LandblockInfo`, but setup/gfx asset lookup stays frontend-demand-driven.
+- Treat outdoor static scenery facts as static content, not runtime authority. Phase 12.4 initially put them in `RuntimeBatchDto`, but Phase 12.6 should move `LandblockInfo.Objects` / `Buildings` facts behind a frontend-requested asset/content family so browser and live-client coverage use the same path.
 - Do not assume a focus landblock is populated. Empty static-object/building arrays are valid data; fixture tests that need populated scenery should target populated `LandblockInfo` records explicitly.
 - Keep source-fact DTOs AC-shaped and renderer helpers generic. Outdoor facts may be landblock-shaped, but frontend rendering should talk in static renderables so indoor env-cell statics can join the same path later.
+- Keep static renderable composition frontend-owned. Runtime facts identify source assets and placement frames, prepared assets provide reusable visual data, and `WorldDisplay` owns the normalized part list, GPU upload, instancing, debug coloring, and cache eviction.
+- Derive setup-model render placement from the default placement-frame entry plus parent chains. `SetupModel.parts` remains an ordered AC composite description, not the sole transform source for rendering.
+- Use one main-thread `InstancedMesh` per active `gfx-obj/*` asset id for first-pass static scenery. This proves geometry reuse without adding material grouping, texture decode, or a broader renderer asset registry yet.
+- Keep runtime batches focused on authoritative/session state. DAT-derived render facts such as outdoor landblock static placements should cross the asset/content channel unless a later live-session feature proves the server can dynamically override them.
 
 #### Verification Log
 
@@ -2534,6 +2587,8 @@ Mitigation:
 - 2026-05-12: `cargo check -p holtburger-3d`, `cargo test -p holtburger-3d`, `cargo clippy -p holtburger-3d --all-targets -- -D warnings`, `npm run check`, `npm run test:ts`, and `npm run lint:ts` passed after adding Phase 12.1 `gfx-obj/*` host lookup, TypeScript contract parsing, and worker preparation.
 - 2026-05-12: `cargo test -p holtburger-content --lib`, `cargo check -p holtburger-3d`, `cargo test -p holtburger-3d`, `cargo clippy -p holtburger-content --all-targets -- -D warnings`, and `cargo clippy -p holtburger-3d --all-targets -- -D warnings` passed after removing the human-readable label parameter from dynamic `ContentRepository::read_resource(...)`.
 - 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and targeted Prettier verification passed after adding Phase 12.2 `GfxObj` render-geometry preparation.
+- 2026-05-12: `npm run check`, `npm run test:ts`, `npm run lint:ts`, and `npm run build` in `apps/holtburger-3d` passed after adding Phase 12.5 static-renderable normalization, Three.js geometry upload, instanced rendering, and render-model coverage.
+- 2026-05-12: Targeted Prettier formatting passed for `static-renderables.ts` and `static-renderables.test.ts`. Direct Prettier formatting of `WorldDisplay.svelte` still cannot infer a Svelte parser in this repo, so Svelte formatting was validated through `npm run check` and `npm run lint:ts`.
 
 #### Phase Review Log
 
@@ -2576,6 +2631,9 @@ Mitigation:
 - 2026-05-12: Phase 12.3 deliberately did not publish outdoor scenery instances or render them. The next work should remain Phase 12.4: runtime-channel outdoor scenery facts from `LandblockInfo.Objects` and `Buildings`.
 - 2026-05-12: Phase 12.4 completed with runtime-channel outdoor static scenery and building facts derived from `LandblockInfo`, plus demand-driven frontend setup/gfx asset request selection from those facts.
 - 2026-05-12: Phase 12.4 did not render scenery. The next work should remain Phase 12.5: hydrate prepared setup/gfx payloads into normalized renderable parts and render first non-terrain scenery.
+- 2026-05-12: Phase 12.5 completed with frontend-owned static-renderable composition, AC-to-Three geometry upload, one `InstancedMesh` per active `gfx-obj/*` geometry, debug coloring, and cache eviction tied to active landblock coverage.
+- 2026-05-12: Phase 12.5 did not add materials, textures, animation, collision, spatial solving, new runtime facts, or indoor static membership.
+- 2026-05-12: Phase 12.5 visual inspection exposed a scene-focus mismatch: browser/manual terrain coverage can target a different landblock ring than the runtime residency, while outdoor static facts are still delivered only through `RuntimeBatchDto`. The next work should be Phase 12.6 to move outdoor static facts onto the requestable content/asset path before Phase 13.
 - 2026-04-26: Phase 3 completed with an app-local frontend store for host-boundary-derived state, frontend-owned lifecycle-to-mode routing, a browser-mode coordinate input plus residency-promotion flow, and the first TypeScript test suite for bridge, store, contract, and location-policy behavior.
 - 2026-04-26: Phase 3 did not require Rust or shared-crate changes. The missing seams were genuinely frontend-owned, so keeping the work in `apps/holtburger-3d/src` was the cleaner design.
 - 2026-04-26: Gate review resolved in favor of moving to a narrowed Phase 4 focused on making `WorldDisplay` consume the new store and selected browser destination, while leaving richer navigation UX and worker-heavy work to later phases.
@@ -2623,6 +2681,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.4 are complete. The next step should be Phase 12.5: first non-terrain scenery render.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.5 are complete. The next step should be Phase 12.6: move outdoor static facts out of runtime batches and onto the requestable content/asset path.
 
-The rest of Phase 12 still makes sense as a parent milestone. The remaining work is first non-terrain scenery rendering through the existing runtime-fact and setup/gfx asset chain.
+Phase 13 still makes sense after 12.6, but it should reuse the Phase 12.5 static-renderable composition and GPU upload path where possible. Do a short live Tauri visual smoke pass after 12.6 so any AC-to-Three transform mistake in outdoor scenery is corrected before indoor geometry depends on the same conversion.

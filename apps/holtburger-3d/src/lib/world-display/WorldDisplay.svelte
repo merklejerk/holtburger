@@ -8,9 +8,12 @@
     Color,
     DirectionalLight,
     Group,
+    InstancedMesh,
+    Matrix4,
     Mesh,
     MeshStandardMaterial,
     PerspectiveCamera,
+    Quaternion as ThreeQuaternion,
     Scene,
     Vector3,
     WebGLRenderer,
@@ -18,9 +21,14 @@
 
   import type { BrowserLocationSelection } from '../../app/browser-mode';
   import type { AppModeId } from '../../app/modes';
-  import type { AssetChannelState, PreparedTerrainMesh } from '../assets/types';
+  import type { AssetChannelState, PreparedGfxObjRenderGeometry, PreparedTerrainMesh } from '../assets/types';
   import type { CameraHintAckDto, FrontendStateFeedDto, RayPickResponseDto, RuntimeBatchDto } from '../host/contracts';
   import { resolveRayPick, submitCameraHint } from '../host/tauri';
+  import {
+    deriveStaticRenderableSceneModel,
+    type StaticRenderablePart,
+    isPreparedGfxObjAsset,
+  } from './static-renderables';
   import {
     buildCameraHint,
     buildRayPickRequest,
@@ -64,13 +72,20 @@
   let scene: Scene | null = null;
   let camera: PerspectiveCamera | null = null;
   let terrainRoot: Group | null = null;
+  let staticRenderableRoot: Group | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let sceneGeometryText = $state('No terrain geometry is cached yet.');
+  let staticRenderableText = $state('No static renderables are cached yet.');
   let sceneBoundsText = $state('Scene bounds are unavailable until terrain is framed.');
   let cameraFrameText = $state('Camera frame is waiting for terrain.');
   const terrainMeshes = new Map<string, Mesh>();
+  const staticGeometryCache = new Map<string, BufferGeometry>();
+  const staticRenderableMeshes = new Map<string, InstancedMesh>();
 
   const terrainScene = $derived(deriveTerrainSceneModel(runtimeBatch, assetState, browserDestination));
+  const staticRenderableScene = $derived(
+    deriveStaticRenderableSceneModel(runtimeBatch, assetState, browserDestination),
+  );
 
   const terrainVertexCount = $derived(
     terrainScene.tiles.reduce((total, tile) => total + tile.mesh.vertices.length, 0),
@@ -152,12 +167,15 @@
     nextScene.add(ambientLight, sunLight);
 
     const nextTerrainRoot = new Group();
+    const nextStaticRenderableRoot = new Group();
     nextScene.add(nextTerrainRoot);
+    nextScene.add(nextStaticRenderableRoot);
 
     renderer = nextRenderer;
     scene = nextScene;
     camera = nextCamera;
     terrainRoot = nextTerrainRoot;
+    staticRenderableRoot = nextStaticRenderableRoot;
 
     const nextResizeObserver = new ResizeObserver(() => {
       syncRendererSize();
@@ -187,7 +205,16 @@
         disposeMesh(mesh);
       }
       terrainMeshes.clear();
+      for (const mesh of staticRenderableMeshes.values()) {
+        disposeMeshMaterial(mesh);
+      }
+      staticRenderableMeshes.clear();
+      for (const geometry of staticGeometryCache.values()) {
+        geometry.dispose();
+      }
+      staticGeometryCache.clear();
       nextTerrainRoot.clear();
+      nextStaticRenderableRoot.clear();
       nextRenderer.dispose();
       nextRenderer.domElement.remove();
       if (renderer === nextRenderer) {
@@ -202,11 +229,18 @@
       if (terrainRoot === nextTerrainRoot) {
         terrainRoot = null;
       }
+      if (staticRenderableRoot === nextStaticRenderableRoot) {
+        staticRenderableRoot = null;
+      }
     };
   });
 
   $effect(() => {
     syncTerrainMeshes();
+  });
+
+  $effect(() => {
+    syncStaticRenderableMeshes();
   });
 
   onDestroy(() => {
@@ -341,11 +375,11 @@
   }
 
   function updateCameraFrame(): void {
-    if (!camera || !terrainRoot) {
+    if (!camera || !terrainRoot || !staticRenderableRoot) {
       return;
     }
 
-    if (terrainScene.tiles.length === 0) {
+    if (terrainScene.tiles.length === 0 && staticRenderableScene.parts.length === 0) {
       camera.position.set(180, 220, 180);
       camera.lookAt(0, 0, 0);
       sceneBoundsText = 'Scene bounds are unavailable until terrain is framed.';
@@ -353,7 +387,9 @@
       return;
     }
 
-    const bounds = new Box3().setFromObject(terrainRoot);
+    const bounds = new Box3();
+    bounds.expandByObject(terrainRoot);
+    bounds.expandByObject(staticRenderableRoot);
     const center = bounds.getCenter(new Vector3());
     const size = bounds.getSize(new Vector3());
     const span = Math.max(size.x, size.z, 180);
@@ -367,6 +403,188 @@
     camera.lookAt(center.x, center.y, center.z);
     sceneBoundsText = `Center (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}) span (${size.x.toFixed(1)}, ${size.y.toFixed(1)}, ${size.z.toFixed(1)}).`;
     cameraFrameText = `Camera (${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}) looking at (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}).`;
+  }
+
+  function syncStaticRenderableMeshes(): void {
+    if (!staticRenderableRoot) {
+      return;
+    }
+
+    const partsByGfxAssetId = staticRenderableScene.partsByGfxAssetId;
+    const activeGfxAssetIds = new Set(partsByGfxAssetId.keys());
+
+    for (const [gfxAssetId, mesh] of staticRenderableMeshes.entries()) {
+      const activeParts = partsByGfxAssetId.get(gfxAssetId);
+      if (activeParts && mesh.count === activeParts.length) {
+        continue;
+      }
+
+      staticRenderableRoot.remove(mesh);
+      disposeMeshMaterial(mesh);
+      staticRenderableMeshes.delete(gfxAssetId);
+    }
+
+    for (const [gfxAssetId, parts] of partsByGfxAssetId.entries()) {
+      const geometry = getStaticRenderableGeometry(gfxAssetId);
+      if (!geometry) {
+        continue;
+      }
+
+      let mesh = staticRenderableMeshes.get(gfxAssetId);
+      if (!mesh) {
+        mesh = createStaticRenderableInstancedMesh(gfxAssetId, geometry, parts.length);
+        staticRenderableRoot.add(mesh);
+        staticRenderableMeshes.set(gfxAssetId, mesh);
+      }
+
+      updateStaticRenderableInstancedMesh(mesh, parts);
+    }
+
+    for (const [gfxAssetId, geometry] of staticGeometryCache.entries()) {
+      if (activeGfxAssetIds.has(gfxAssetId)) {
+        continue;
+      }
+
+      geometry.dispose();
+      staticGeometryCache.delete(gfxAssetId);
+    }
+
+    staticRenderableText =
+      staticRenderableScene.parts.length === 0
+        ? describeStaticRenderableIdleState()
+        : `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? '' : 's'} across ${partsByGfxAssetId.size} shared gfx geometr${partsByGfxAssetId.size === 1 ? 'y' : 'ies'}.`;
+
+    updateCameraFrame();
+  }
+
+  function describeStaticRenderableIdleState(): string {
+    if (staticRenderableScene.sourceInstances.length === 0) {
+      return 'No static renderable source facts are active for the current outdoor coverage.';
+    }
+
+    if (staticRenderableScene.missingSourceAssetIds.length > 0) {
+      return `Waiting for ${staticRenderableScene.missingSourceAssetIds.length} static renderable source asset${staticRenderableScene.missingSourceAssetIds.length === 1 ? '' : 's'}.`;
+    }
+
+    if (staticRenderableScene.missingGfxAssetIds.length > 0) {
+      return `Waiting for ${staticRenderableScene.missingGfxAssetIds.length} gfx geometry dependenc${staticRenderableScene.missingGfxAssetIds.length === 1 ? 'y' : 'ies'}.`;
+    }
+
+    return 'Static renderable source facts are active, but no drawable gfx geometry is ready.';
+  }
+
+  function getStaticRenderableGeometry(gfxAssetId: string): BufferGeometry | null {
+    const cachedGeometry = staticGeometryCache.get(gfxAssetId);
+    if (cachedGeometry) {
+      return cachedGeometry;
+    }
+
+    const asset = assetState.preparedByAssetId[gfxAssetId];
+    if (!isPreparedGfxObjAsset(asset) || asset.payload.renderGeometry.vertexCount === 0) {
+      return null;
+    }
+
+    const geometry = buildGfxObjGeometry(asset.payload.renderGeometry);
+    staticGeometryCache.set(gfxAssetId, geometry);
+    return geometry;
+  }
+
+  function createStaticRenderableInstancedMesh(
+    gfxAssetId: string,
+    geometry: BufferGeometry,
+    count: number,
+  ): InstancedMesh {
+    const material = new MeshStandardMaterial({
+      color: '#ffffff',
+      flatShading: true,
+      metalness: 0.02,
+      roughness: 0.88,
+    });
+    const mesh = new InstancedMesh(geometry, material, count);
+    mesh.name = `static-renderable/${gfxAssetId}`;
+    return mesh;
+  }
+
+  function updateStaticRenderableInstancedMesh(
+    mesh: InstancedMesh,
+    parts: StaticRenderablePart[],
+  ): void {
+    parts.forEach((part, index) => {
+      mesh.setMatrixAt(index, buildStaticRenderablePartMatrix(part));
+      mesh.setColorAt(index, buildStaticRenderableColor(part.debugColorKey));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) {
+      mesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  function buildStaticRenderablePartMatrix(part: StaticRenderablePart): Matrix4 {
+    const matrix = frameToMatrix(part.instanceFrame, { x: 1, y: 1, z: 1 });
+    for (const placementFrame of part.placementFrames) {
+      matrix.multiply(frameToMatrix(placementFrame, { x: 1, y: 1, z: 1 }));
+    }
+    matrix.multiply(new Matrix4().makeScale(part.scale.x, part.scale.z, part.scale.y));
+    return matrix;
+  }
+
+  function frameToMatrix(frame: StaticRenderablePart['instanceFrame'], scale: { x: number; y: number; z: number }): Matrix4 {
+    return new Matrix4().compose(
+      new Vector3(frame.origin.x, frame.origin.z, -frame.origin.y),
+      convertAcQuaternion(frame.orientation),
+      new Vector3(scale.x, scale.y, scale.z),
+    );
+  }
+
+  function convertAcQuaternion(quaternion: StaticRenderablePart['instanceFrame']['orientation']): ThreeQuaternion {
+    const acRotation = new Matrix4().makeRotationFromQuaternion(
+      new ThreeQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w),
+    );
+    const acToThree = new Matrix4().set(
+      1, 0, 0, 0,
+      0, 0, 1, 0,
+      0, -1, 0, 0,
+      0, 0, 0, 1,
+    );
+    const threeToAc = acToThree.clone().invert();
+    const threeRotation = acToThree.multiply(acRotation).multiply(threeToAc);
+    return new ThreeQuaternion().setFromRotationMatrix(threeRotation);
+  }
+
+  function buildGfxObjGeometry(renderGeometry: PreparedGfxObjRenderGeometry): BufferGeometry {
+    const geometry = new BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new BufferAttribute(convertAcVectorTriplets(renderGeometry.positions), 3),
+    );
+    if (renderGeometry.normals.length === renderGeometry.positions.length) {
+      geometry.setAttribute('normal', new BufferAttribute(convertAcVectorTriplets(renderGeometry.normals), 3));
+    } else {
+      geometry.computeVertexNormals();
+    }
+    if (renderGeometry.uvs.length > 0) {
+      geometry.setAttribute('uv', new BufferAttribute(new Float32Array(renderGeometry.uvs), 2));
+    }
+    return geometry;
+  }
+
+  function convertAcVectorTriplets(values: number[]): Float32Array {
+    const converted = new Float32Array(values.length);
+    for (let index = 0; index < values.length; index += 3) {
+      converted[index] = values[index] ?? 0;
+      converted[index + 1] = values[index + 2] ?? 0;
+      converted[index + 2] = -(values[index + 1] ?? 0);
+    }
+    return converted;
+  }
+
+  function buildStaticRenderableColor(debugColorKey: string): Color {
+    let hash = 0;
+    for (let index = 0; index < debugColorKey.length; index += 1) {
+      hash = (hash * 31 + debugColorKey.charCodeAt(index)) >>> 0;
+    }
+
+    return new Color().setHSL((hash % 360) / 360, 0.54, 0.48);
   }
 
   function createTerrainTileMesh(tile: TerrainSceneTile): Mesh {
@@ -434,6 +652,10 @@
 
   function disposeMesh(mesh: Mesh): void {
     mesh.geometry.dispose();
+    disposeMeshMaterial(mesh);
+  }
+
+  function disposeMeshMaterial(mesh: Mesh): void {
     const material = mesh.material;
     if (Array.isArray(material)) {
       for (const entry of material) {
@@ -474,6 +696,10 @@
           <div>
             <dt>Geometry</dt>
             <dd>{sceneGeometryText}</dd>
+          </div>
+          <div>
+            <dt>Statics</dt>
+            <dd>{staticRenderableText}</dd>
           </div>
           <div>
             <dt>Heights</dt>

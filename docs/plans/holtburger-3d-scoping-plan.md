@@ -1746,7 +1746,7 @@ Acceptance:
 
 Delivered in this phase:
 
-- Generic JSON payload preparation accepts synthetic `dependencyAssetIds` on the prepared payload. Existing terrain, indoor env-cell, environment, and cell-structure paths continue to derive no dependencies.
+- Explicit `dependency-manifest` payload preparation accepts synthetic `dependencyAssetIds` on the prepared payload. Existing terrain, indoor env-cell, environment, cell-structure, generic, and unknown paths continue to derive no dependencies.
 - `derivePreparedAssetDependencyStatus(...)` models dependency readiness as `ready`, `awaiting-dependency`, or `partial-ready`, with ready, missing, and pending dependency id lists.
 - `AssetChannelController.prepareAssetGraph(...)` performs main-thread dependency scheduling by preparing the root asset, deriving dependency ids from the prepared payload, requesting missing dependencies through the existing `lookupAsset` + one-shot worker path, and returning the prepared graph plus dependency status.
 - The existing one-shot terrain path remains valid: callers can still use `prepareAsset(...)` exactly as before, and terrain records have no dependencies.
@@ -1762,7 +1762,7 @@ Course corrections and notes:
 Phase gate before the rest of Phase 12:
 
 - The next Phase 12 steps still make sense: add real `gfx-obj/*` and `setup-model/*` families, then use the main-thread dependency orchestration path for setup-to-gfx walks.
-- The main adjustment is sequencing discipline: add the real leaf `gfx-obj/*` payload first, then `setup-model/*` references to those ids, then outdoor scenery instances. Jumping straight to aggregate scene rendering would bypass the cache and dependency seams that 12.0c just established.
+- The main adjustment is sequencing discipline: Phase 12 should be treated as a parent milestone with sub-phases 12.1 through 12.5. Add the real leaf `gfx-obj/*` payload first, then `GfxObj` render-geometry preparation, then `setup-model/*` references to those ids, then outdoor scenery instances, then rendering. Jumping straight to aggregate scene rendering would bypass the cache and dependency seams that 12.0c just established.
 
 Once 12.0a, 12.0b, and 12.0c have all landed, the remainder of Phase 12 (the actual `gfx-obj/*` / `setup-model/*` work and outdoor scenery rendering) may begin.
 
@@ -1773,6 +1773,109 @@ Purpose:
 - prove the full landblock → setup → gfx leaf chain end-to-end by rendering at least one real non-terrain instance in browser mode
 - keep materials and textures explicitly out of scope; use per-object debug coloring derived from a stable hash of the `setup-model/gfx-obj` id so neighboring instances are visually distinguishable
 - preserve the free fly-cam; do not introduce camera collision or any spatial-solver consumer in this phase
+
+Refined implementation shape:
+
+Phase 12 is a parent milestone, not a single implementation bite. The original deliverables remain valid, but they should land through smaller reviewable sub-phases so each boundary can be checked before the next layer depends on it.
+
+##### Phase 12.1 — `gfx-obj/*` leaf asset family
+
+Status: planned.
+
+Scope: Add the first real non-terrain asset family as an individually requestable leaf. This phase proves host lookup, DTO typing, worker dispatch, and prepared-payload shape for `GfxObj` without requiring scene placement or `setup-model/*` composition yet.
+
+Deliverables:
+
+- `gfx-obj/*` asset-family discriminants in the host adapter contract, frontend contract parser, and asset worker dispatch path
+- host-side dynamic-key lookup for `gfx-obj/0x01XXXXXX` through `ContentRepository::read_resource(...)`
+- a first `GfxObj` boundary payload that preserves drawing geometry, physics geometry, surface refs, sort center, and provenance without collapsing physics witnesses into renderer mesh data
+- a prepared `gfx-obj` payload variant in TypeScript with no fake debug fields except an intentional debug presentation surface if needed
+- worker tests proving DID-family dispatch and prepared-payload creation for a fixture `GfxObj`
+
+Acceptance:
+
+- a direct `gfx-obj/*` request can resolve from repo-local HBA data through the dedicated asset channel
+- no `setup-model/*`, scenery instance DTO, or Three.js scene placement is introduced yet
+- physics-facing fields are preserved as data/witnesses only; TypeScript does not implement authoritative collision traversal
+
+##### Phase 12.2 — `GfxObj` render-geometry preparation
+
+Status: planned.
+
+Scope: Turn the decoded `GfxObj` drawing polygon data into a reusable renderer-facing geometry intermediate while keeping the physics polygon/BSP data separate and intact.
+
+Deliverables:
+
+- worker-side polygon-set to `BufferGeometry`-ready intermediate for `GfxObj` drawing polygons
+- deterministic triangulation behavior covered by fixture tests, including at least one non-trivial polygon set
+- prepared payload shape that keeps drawing geometry, drawing BSP, physics polygons, physics BSP, and surface refs distinct
+- debug color or material placeholder derived on the frontend side only, without introducing `Surface` / `Texture` decode
+
+Acceptance:
+
+- `gfx-obj/*` assets can be prepared into reusable geometry intermediates keyed by asset id
+- duplicate requests for the same `gfx-obj/*` can reuse the same prepared geometry cache entry
+- no setup-model composition, scenery runtime facts, or visible scene instances are required yet
+
+##### Phase 12.3 — `setup-model/*` composite asset family
+
+Status: planned.
+
+Scope: Add setup models as dependency-bearing composites that reference `gfx-obj/*` leaves by id and use the Phase 12.0c main-thread orchestration path for dependency resolution.
+
+Deliverables:
+
+- `setup-model/*` asset-family discriminants in the host adapter contract, frontend contract parser, and asset worker dispatch path
+- host-side dynamic-key lookup for `setup-model/0x02XXXXXX`
+- prepared `setup-model` payload carrying parts with `gfx_obj_id`, placement frame, scale, parent index, and `CylSphere` collision witnesses
+- `getPreparedAssetDependencies(...)` support for `setup-model` payloads by deriving referenced `gfx-obj/*` ids from parts
+- tests proving setup-model dependency derivation and real `prepareAssetGraph(...)` setup-to-gfx scheduling
+
+Acceptance:
+
+- a `setup-model/*` request prepares the setup payload and schedules missing `gfx-obj/*` leaves through main-thread orchestration
+- AC part order remains preserved inside the setup payload even if dependency id lists are normalized for scheduling
+- no outdoor scenery placement or rendering is required yet
+
+##### Phase 12.4 — Outdoor scenery runtime facts
+
+Status: planned.
+
+Scope: Surface static outdoor object/building placements from `LandblockInfo` as runtime-channel facts, separate from asset payloads and renderer policy.
+
+Deliverables:
+
+- runtime DTO expansion publishing per-landblock `scenery_instances` from `LandblockInfo.Objects`
+- parallel `building_instances` derived from `LandblockInfo.Buildings`
+- stable frontend instance ids derived from owning landblock plus source DID plus source index
+- scene-context state that tracks scenery membership alongside terrain landblock residency
+- tests covering Objects vs Buildings derivation and residency-driven scenery membership updates
+
+Acceptance:
+
+- runtime facts say what outdoor static instances exist and where they are, without bundling renderer assets
+- frontend asset selection remains demand-driven from scenery/building source DIDs
+- no shared `holtburger-world` scenery-body abstraction is introduced
+
+##### Phase 12.5 — First non-terrain scenery render
+
+Status: planned.
+
+Scope: Hydrate prepared `gfx-obj/*` and `setup-model/*` data into Three.js scene instances and render outdoor static scenery in browser mode.
+
+Deliverables:
+
+- frontend scenery cache with eviction tied to outdoor landblock residency
+- setup-model part placement applied to prepared `gfx-obj/*` geometry
+- `InstancedMesh` rendering per unique `gfx-obj/*` geometry where duplicates make that worthwhile
+- deterministic per-instance debug coloring derived from `(setup_id, gfx_obj_id, part_index)` or the direct `gfx-obj` id
+- component/integration coverage proving duplicate source geometry is reused instead of uploaded once per instance
+
+Acceptance:
+
+- a real Tauri run renders at least one outdoor landblock with terrain plus at least one decoded scenery instance from repo-local `LandblockInfo` data
+- duplicate scenery instances of the same source geometry share uploaded geometry and render through the cache/instancing path
+- camera behavior remains free fly-cam; ray pick remains on the current entity DTO path; no spatial solver or material decode is introduced
 
 Primary deliverables:
 
@@ -2264,6 +2367,7 @@ Mitigation:
 - Use main-thread orchestration for future multi-asset setup-model to gfx-obj walks. Workers stay one-shot, the host does not aggregate renderer bundles, and the frontend asset cache owns dependency readiness.
 - Derive dependency ids from prepared payload data rather than from `PreparedAssetRecord` envelope fields. The envelope owns request/response/timestamp context; payload variants own asset-specific references.
 - Keep dependency behavior out of `PreparedUnknownAssetPayload` and `genericAssetPayloadDtoSchema`. Unknown payloads should remain diagnostic fallback payloads, not a shortcut for real asset-family behavior.
+- Treat Phase 12 as a parent milestone rather than one implementation phase. The reviewable path is now 12.1 `gfx-obj/*` leaf assets, 12.2 `GfxObj` render-geometry preparation, 12.3 `setup-model/*` composites, 12.4 outdoor scenery runtime facts, and 12.5 first non-terrain scenery rendering.
 
 #### Verification Log
 
@@ -2406,6 +2510,6 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c are complete. The next step should be the real Phase 12 asset-family expansion, starting with `gfx-obj/*` leaf geometry payloads before `setup-model/*` composites.
+Phases 0 through 11 and Phases 12.0a through 12.0c are complete. The next step should be Phase 12.1: the real `gfx-obj/*` leaf asset family.
 
-The rest of Phase 12 still makes sense: `gfx-obj/*`, `setup-model/*`, outdoor scenery instances, and first non-terrain rendering. The course correction is sequencing: prove reusable `gfx-obj/*` leaves first, then `setup-model/*` dependencies through the main-thread orchestration path, then scenery placement/rendering.
+The rest of Phase 12 still makes sense as a parent milestone, but it is now intentionally split into reviewable slices: `gfx-obj/*` leaf assets, `GfxObj` render-geometry preparation, `setup-model/*` composites through main-thread dependency orchestration, outdoor scenery runtime facts, and first non-terrain scenery rendering.

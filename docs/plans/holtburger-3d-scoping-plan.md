@@ -71,6 +71,7 @@ The plan should use AC-shaped terms instead of broad visual labels whenever poss
 - **Subterranean opening**: an outdoor-world entrance into env-cell-backed space below the terrain surface. ACE position resolution can classify an outdoor-looking position as an env cell when the point is below terrain and inside an env-cell volume.
 - **Explicit landblock statics**: `LandblockInfo.Objects` and `LandblockInfo.Buildings`, now exposed through requestable `landblock-statics/*` assets. These are static content facts, not runtime-authoritative renderer bundles.
 - **Generated outdoor scenery**: pseudo-random outdoor scenery selected from terrain type / scenery bits, region scene tables, and `0x12 Scene` records. This is a distinct outdoor layer from explicit landblock statics and is expected to account for many trees, bushes, rocks, and natural clutter.
+- **Scene object template**: one generated-scenery template entry inside a `0x12 Scene` record. ACE names this `ObjectDesc`, but the plan should avoid that name because it conflicts with runtime/network object-description semantics. A scene object template carries a candidate model id plus base frame, frequency, displacement, scale, rotation, slope, alignment, and orientation rules.
 - **Live entities / weenies**: server/runtime objects such as creatures, players, portals, doors, and interactables. Browser mode should not fake these as static scenery unless a dedicated diagnostic source is explicitly added.
 
 ### AC Scene Data Relationship Diagrams
@@ -99,8 +100,8 @@ flowchart TD
     GeneratedAsset --> TerrainSceneBits
     TerrainSceneBits --> RegionTables["Region TerrainInfo + SceneInfo"]
     RegionTables --> SceneRecords["0x12 Scene records"]
-    SceneRecords --> ObjectDesc["ObjectDesc candidates<br/>frequency, displacement, scale, rotation"]
-    ObjectDesc --> GeneratedFacts["generated scenery facts<br/>stable per landblock"]
+    SceneRecords --> SceneObjectTemplates["scene object templates<br/>frequency, displacement, scale, rotation"]
+    SceneObjectTemplates --> GeneratedFacts["generated scenery facts<br/>stable per landblock"]
 
     Objects --> StaticFacts["explicit static facts"]
     Buildings --> StaticFacts
@@ -2312,9 +2313,23 @@ Ground-truth anchors:
 
 - [ACE/Source/ACE.Server/Entity/Scenery.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Entity/Scenery.cs) — deterministic scenery selection, placement, road avoidance, scale, rotation, and collision filtering
 - [ACE/Source/ACE.DatLoader/FileTypes/CellLandblock.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/CellLandblock.cs) — terrain bits include road, terrain type, and scenery type
-- [ACE/Source/ACE.DatLoader/FileTypes/Scene.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Scene.cs) — `0x12 Scene` records hold `ObjectDesc` entries
-- [ACE/Source/ACE.DatLoader/Entity/ObjectDesc.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/ObjectDesc.cs) — generated object id, base frame, frequency, displacement, scale, rotation, slope, and orientation fields
+- [ACE/Source/ACE.DatLoader/FileTypes/Scene.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Scene.cs) — `0x12 Scene` records hold generated-scenery template entries
+- [ACE/Source/ACE.DatLoader/Entity/ObjectDesc.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/ObjectDesc.cs) — ACE's `ObjectDesc`; in this plan/codebase use `SceneObjectTemplate` for this concept to avoid conflict with runtime/network object descriptions
 - [ACViewer/ACViewer/Render/Buffer.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/Buffer.cs) — viewer render path treats generated scenery as a distinct outdoor draw bucket
+
+Implementation-reference priority:
+
+- Use [ACViewer/ACViewer/Physics/Common/Landblock.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Physics/Common/Landblock.cs) and [ACViewer/ACViewer/Physics/Common/ObjectDesc.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Physics/Common/ObjectDesc.cs) as the practical implementation reference for generated-scenery distribution. Their scene selection, per-template frequency noise, displacement, rotation, scale, slope, road, building, and `obj_within_block` flow closely match the retail `CLandBlock::get_land_scenes` and `ObjectDesc::*` decompile.
+- Use [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c) retail symbols `CLandBlock::get_land_scenes`, `ObjectDesc::Place`, `ObjectDesc::ScaleObj`, `ObjectDesc::GetObjFrame`, `ObjectDesc::ObjAlign`, and `ObjectDesc::CheckSlope` as parity checks for constants and survival filters.
+- Treat ACE server [ACE/Source/ACE.Server/Entity/Scenery.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Entity/Scenery.cs) as conceptual context and a readable fallback, not the closest behavior match. It omits or simplifies parts of the retail/ACViewer survival path.
+
+Placement model:
+
+- Generated outdoor scenery is deterministic procedural placement, not explicit per-object storage like `LandblockInfo.Objects` or `Buildings`.
+- Artist/content control is indirect: `CellLandblock.Terrain[i]` terrain type and scenery type select region scene tables, region scene tables select `0x12 Scene` records, and scene object templates inside those records provide candidate models plus frequency, displacement, scale, rotation, slope, alignment, and orientation rules.
+- The same generation path covers trees, bushes, rocks, grass/clutter, and other non-interactive outdoor props. Do not special-case the phase as "tree rendering" even though trees are the most visible missing layer.
+- Match ACE's first-pass behavior for `SceneObjectTemplate.WeenieObj != 0`: do not convert those templates into static renderables until a live/static weenie source is understood.
+- The generated randomness must be stable across runs and derived from landblock/global cell coordinates plus template index, matching ACE's deterministic placement constants where practical.
 
 Primary deliverables:
 

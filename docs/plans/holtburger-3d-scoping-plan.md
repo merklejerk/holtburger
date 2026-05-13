@@ -62,6 +62,9 @@ The plan should use AC-shaped terms instead of broad visual labels whenever poss
 - **Env cell**: a structured cell inside a landblock, with cell ids `0x100..0xFFFD`. Env cells are used for building interiors, caves, dungeon rooms, and other structured spaces. They can exist inside an otherwise outdoor landblock.
 - **Dungeon landblock**: a narrower ACE server classification for a landblock with no traversable overworld, all terrain heights zero, at least one env cell, and no buildings. This is not the only case that uses env cells.
 - **Structured interior**: any env-cell-backed space. This term includes building interiors, caves, dungeon rooms, and outdoor-world interiors that are represented as env cells. Prefer this over the ambiguous word "indoor" when discussing rendering work.
+- **Environment**: a portal-DAT `0x0D......` prefab container referenced by `EnvCell.environment_id`. An environment owns environment-scoped `CellStruct` records; it is the normal requestable static-content unit for structured-interior geometry.
+- **CellStruct**: an environment-scoped geometry and collision subrecord selected by `EnvCell.cell_structure`. It contains drawing polygons, portal polygon ids, `CellBSP`, physics polygons, `PhysicsBSP`, and optional `DrawingBSP`. Do not model it as a standalone durable asset id unless future source evidence proves global addressability.
+- **DrawingBSP**: the optional drawing-space BSP stored on a `CellStruct` or `GfxObj`. For first structured-interior rendering, use drawing polygons for mesh extraction and retain `DrawingBSP` as a portal/render witness for later clipping or visibility work.
 - **SeenOutside**: an env-cell flag indicating that an env cell participates in outdoor visibility. Buildings and some large cave-like openings can be visible from outside while still being env-cell-backed.
 - **VisibleCells**: env-cell visibility data used for structured-interior scene relevance. Do not replace it with symmetric adjacency or portal-derived guesses without stronger evidence.
 - **Cell portal**: an `EnvCell.CellPortals` / `CellPortal` topology record that names a portal polygon, an adjacent env cell, and the reciprocal portal id. This is structured-interior connectivity and clipping data, not a gameplay teleport portal.
@@ -196,6 +199,13 @@ Portal interpretation:
 - Gameplay portals remain live entities. Their rendering and interaction should come from runtime world objects, not from `CellPortal` / `CBldPortal` records.
 - Portal clipping is renderer capability, not a prerequisite for carrying honest portal data. The first structured-interior render should preserve portal witnesses and visible-cell membership without trying to reproduce retail recursive portal views in the same phase.
 
+Structured-interior asset interpretation:
+
+- `indoor-env-cell/*` carries env-cell placement, visible-cell, portal, surface-binding, and selected `EnvironmentId` / `CellStructure` metadata.
+- `environment/*` is the durable decoded geometry payload. It carries environment-scoped `CellStruct` records keyed by cell-structure id.
+- `cell-structure/*` was an earlier placeholder name. Phase 13 should remove or supersede it rather than turning it into a real standalone asset family.
+- First structured-interior rendering should extract triangles from `CellStruct.Polygons`. `DrawingBSP`, `CellBSP`, `PhysicsBSP`, and portal polygon data should cross as witnesses only where needed for diagnostics or future renderer/spatial phases.
+
 #### Structured-Interior / Env-Cell Composition
 
 ```mermaid
@@ -207,19 +217,18 @@ flowchart TD
     EnvCellAsset --> VisibleCells["VisibleCells<br/>structured-interior relevance"]
     EnvCellAsset --> SeenOutside["SeenOutside<br/>participates in outdoor visibility"]
     EnvCellAsset --> EnvironmentRef["EnvironmentId"]
-    EnvCellAsset --> CellStructRef["CellStructure"]
+    EnvCellAsset --> CellStructRef["CellStructure<br/>key inside Environment"]
     EnvCellAsset --> CellPortals["CellPortals<br/>portal polygon + adjacent cell topology"]
     EnvCellAsset --> EnvStaticObjects["EnvCell.static_objects<br/>structured-interior static stabs"]
     EnvCellAsset --> SurfaceBindings["surface bindings"]
 
     VisibleCells --> SceneSelection["browser/client scene orchestration<br/>selects env cells to render"]
     CellPortals --> PortalWitnesses["portal topology witnesses<br/>not a replacement for VisibleCells"]
-    EnvironmentRef --> EnvironmentAsset["environment/*<br/>planned real decoded payload"]
-    CellStructRef --> CellStructAsset["cell-structure/*<br/>planned real decoded payload"]
+    EnvironmentRef --> EnvironmentAsset["environment/*<br/>requestable decoded payload"]
+    CellStructRef --> EnvironmentAsset
 
-    EnvironmentAsset --> CellStructs["CellStruct records"]
-    CellStructAsset --> CellStructs
-    CellStructs --> DrawingGeometry["drawing polygons / drawing BSP"]
+    EnvironmentAsset --> CellStructs["environment-scoped<br/>CellStruct records"]
+    CellStructs --> DrawingGeometry["drawing polygons<br/>DrawingBSP witness"]
     CellStructs --> PortalPolygons["portal polygon indices"]
     CellStructs --> PhysicsWitness["cell BSP + physics polygons/BSP<br/>Rust-owned collision interpretation"]
     DrawingGeometry --> InteriorGeometry["worker render geometry<br/>BufferGeometry-ready"]
@@ -1583,7 +1592,7 @@ Fit audit of current and planned models:
 
 - The current outdoor landblock-centered scene-context model is a natural first fit for AC outdoor browsing. Keeping the local outdoor scene contract in landblock terms is better than talking about generic terrain chunks.
 - The current plan was still too generic about structured-interior rendering. Structured-interior work should be described in terms of env cells, visible cells, `SeenOutside`, environment references, cell structures, and BSP-bearing level structures, not generic scene chunks or a flat shared residency label.
-- The world model should stay broadly isomorphic across outdoor and indoor scenes, but that does not mean both sides collapse into one generic asset shape. The natural shared abstraction is a scene composed from authoritative residency plus referenced level assets, where outdoors resolves through landblock terrain plus scene-table-driven scenery and indoors resolves through env-cell metadata plus environment or cell-structure geometry.
+- The world model should stay broadly isomorphic across outdoor and indoor scenes, but that does not mean both sides collapse into one generic asset shape. The natural shared abstraction is a scene composed from authoritative residency plus referenced level assets, where outdoors resolves through landblock terrain plus scene-table-driven scenery and indoors resolves through env-cell metadata plus environment-scoped `CellStruct` geometry.
 - The asset split is still directionally correct, but the asset taxonomy should become more AC-shaped. Outdoor requests should distinguish landblock terrain, explicit landblock statics, and scene-table-generated scenery. Structured-interior requests should be env-cell-scoped requests that resolve `EnvironmentId`, `CellStructure`, surfaces, and any later BSP-derived helpers rather than one vague appearance bundle.
 - The runtime channel should not push renderer-shaped bundles. It should publish authoritative residency, current cell context, indoor-versus-outdoor facts, `SeenOutside`-style relevance hints when available, and stable asset references that let the frontend choose concrete terrain, environment, model, texture, and animation asset requests.
 - The current Phase 11 indoor plan should not assume frontend-only derivation of indoor visibility from topology. The safest next design target is a staged hybrid: keep render-scene ownership in the frontend, but allow the host to publish authoritative indoor visible-cell relevance once the app moves beyond preview data.
@@ -1601,7 +1610,7 @@ Resolved Phase 8 decisions:
 Remaining unknowns after Phase 8:
 
 - How much of retail indoor relevance is represented directly by `VisibleCells` versus additional runtime behavior not surfaced clearly in ACE or ACViewer.
-- Which parts of indoor level format need to cross the host boundary explicitly for the first indoor-capable world model: environment references only, cell-structure identifiers, decoded polygon buffers, BSP-derived helpers, or some staged subset.
+- Which parts of indoor level format need to cross the host boundary explicitly for the first indoor-capable world model: environment references only, environment-scoped cell-structure keys, decoded polygon buffers, BSP-derived helpers, or some staged subset.
 - How much of outdoor pseudo-random scenery selection should become an explicit asset or content-query concern before the world model is considered structurally honest for outdoor scenes.
 - Whether the first terrain payload should expose raw height and terrain grids, a lightly decoded structural intermediate, or a host-produced mesh-oriented intermediate.
 - How much host assistance Phase 11 should provide for indoor visible-cell relevance once the app uses live runtime state rather than the current preview path.
@@ -2658,8 +2667,8 @@ Ground-truth anchors for this phase:
 
 Purpose:
 
-- add `Environment` and `CellStruct` decoders to `holtburger-dat` so `environment/*` and `cell-structure/*` asset families can stop being reference-only metadata
-- promote the boundary payloads for `environment/*` and `cell-structure/*` to honest decoded shapes that mirror Phase 12's drawing-versus-physics discipline
+- add `Environment` and nested `CellStruct` decoders to `holtburger-dat` so `environment/*` can stop being reference-only metadata
+- promote the boundary payload for `environment/*` to an honest decoded shape that mirrors Phase 12's drawing-versus-physics discipline and carries environment-scoped cell-structure records
 - render the first real structured interior in browser mode, replacing the current Phase 11 visible-cell-set placeholder behavior with actual geometry
 - keep structured-interior scene membership and camera/input policy mode-owned: browser-mode wrappers derive the render scene from env-cell / visible-cell facts and prepared assets, while `WorldDisplay` hydrates and renders the supplied scene inputs
 - continue the physics-witness discipline: cell `PhysicsBSP` and `CellBSP` plus portal stabs remain Rust-owned decoded content, while frontend payloads expose only compact witnesses unless a dedicated debug/export feature needs more
@@ -2669,7 +2678,7 @@ Purpose:
 
 ##### Phase 13.0a — Source Audit And Contract Dry Run
 
-Status: planned.
+Status: implemented on 2026-05-13; docs-only audit and contract correction.
 
 Scope: prove the exact data relationships before adding new payloads or decoders. This phase should read the code and references, update this plan if the assumptions shift, and only then proceed to implementation.
 
@@ -2679,7 +2688,7 @@ Primary deliverables:
 - confirm whether `CellStruct` is naturally requestable by id, only reachable through `Environment`, or needs a host-side lookup helper
 - confirm whether ACViewer's `DrawingBSP`-preferred render path is the right first renderer behavior for our worker
 - confirm which portal witnesses should cross the normal frontend boundary and which should stay Rust-owned until a debug/export feature needs them
-- dry-run the `environment/*` and `cell-structure/*` payload contracts against the existing asset worker and `WorldDisplay` decomposition
+- dry-run the corrected `environment/*` payload contract and the legacy `cell-structure/*` placeholder against the existing asset worker and `WorldDisplay` decomposition
 - decide whether `EnvCell.static_objects` should become a separate requestable static-content fact in Phase 13 or remain deferred until visible structured geometry is rendered
 
 Acceptance:
@@ -2688,36 +2697,68 @@ Acceptance:
 - no decoder or frontend payload is added before the source relationships are documented
 - any terminology corrections are made here before new public contract names ship
 
+Audit results:
+
+- `EnvCell` is the runtime/world placement record for structured cells. It lives in `client_cell.dat`, carries the full env-cell id, surface list, `environment_id`, `cell_structure`, placement frame, `CellPortal` records, `VisibleCells`, optional static-object stabs, and optional restriction object. ACE normalizes `environment_id` to the `0x0D000000` portal-DAT family and stores `cell_structure` as a short key into the environment.
+- `Environment` is the portal-DAT asset. ACE models it as `Environment = { Id, Cells: Dictionary<uint, CellStruct> }`; ACViewer loads it by `envCell.EnvironmentID` and draws the single `CellStruct` selected by `envCell.CellStructureID`.
+- `CellStruct` is not naturally a standalone DAT asset. Retail unpacking stores a `cellstruct_id` inside each struct, while ACE's dictionary unpack also keys the map externally. Either way, the bytes are reached through the owning `Environment`. A bare public `cell-structure/<id>` asset id is therefore ambiguous across environments and should not become the durable contract.
+- `CellStruct` geometry layout is close enough to reuse the Phase 12 mesh path: counts, `CVertexArray`, drawing `Polygon`s, portal polygon ids, `CellBSP`, physics polygons, `PhysicsBSP`, optional `DrawingBSP`, and final DWORD alignment. The parser should share the existing `CVertexArray`, `Polygon`, and `BspNode` machinery instead of forking an indoor-only decoder.
+- ACViewer's first render path does not require walking the drawing BSP. `R_CellStruct` builds triangles from `CellStruct.Polygons` and draws all of them, while retail has richer built-mesh and drawing-BSP/portal behavior. For our first structured-interior renderer, use drawing polygons for mesh generation and keep `DrawingBSP`/portal witnesses for diagnostics and later portal clipping.
+- Portal data has two layers that should stay distinct. `EnvCell.CellPortals` says which env cells connect through which portal polygon. `CellStruct.Portals` identifies the drawing polygons that are portal polygons. Drawing-BSP `PortalPoly` records are renderer/portal-view witnesses. These are render-relevant, but they do not replace `VisibleCells`.
+- `EnvCell.static_objects` are local stabs placed in an env-cell frame. ACViewer renders them as `R_PhysicsObj`s after drawing the environment cell. They should follow the same requestable static-renderable dependency pattern as outdoor static scenes, but they can be a separate follow-up inside Phase 13 after base cell geometry renders. Do not block the first `Environment`/`CellStruct` render on indoor stabs.
+
+Decisions:
+
+- Replace the durable `cell-structure/*` contract with environment-scoped cell-structure selection. Preferred frontend asset shape: `environment/<0dxxxxxx>` carries decoded cell-structure records keyed by `cellStructureId`, and `indoor-env-cell/*` tells browser mode which environment and cell-structure key to select.
+- Keep `cell-structure/*` as a Phase 11 placeholder only until Phase 13.2 removes or supersedes it. Do not add a real standalone `cell-structure/<id>` lookup unless a future source proves cell structures are globally addressable.
+- Phase 13.1 should implement `Environment` plus nested `CellStruct` decoding in `holtburger-dat`; a separate Rust `CellStruct` type is still useful, but it is decoded through `Environment`.
+- Phase 13.2 should promote `environment/*` to the real decoded payload and slim `indoor-env-cell/*` to placement/selection metadata plus portal/visible-cell witnesses. It should not introduce normal frontend physics BSP DTOs.
+- Phase 13.3 should prep selected or visible environment cell structures from the decoded `environment/*` payload using the shared polygon mesh code path.
+- Defer indoor static stabs to a narrow Phase 13.4a or Phase 13 follow-up unless visual smoke shows interiors are misleading without them.
+
+Course corrections:
+
+- Rename future wording from "cell-structure asset family" to "environment-scoped cell-structure records" wherever the contract is public. The previous `cell-structure/*` language was too standalone and would create an ambiguous key shape.
+- Treat `DrawingBSP` as a witness and future portal-rendering input, not the source of first mesh extraction.
+- Keep `VisibleCells` authoritative for scene membership. Portal topology can augment diagnostics and future clipping, but frontend code should not infer visible-cell sets from portal adjacency.
+
+Next-step assessment:
+
+- Phase 13.1 through 13.5 still make sense with the contract correction above.
+- Phase 13.1 should start with the `Environment` decoder and nested `CellStruct` parser. The first test should prove at least one real `0x0D......` environment decodes, that its map contains the `EnvCell.cell_structure` key for a real env cell, and that polygon/portal/BSP counts are nonzero and aligned.
+- Phase 13.2 should remove or supersede the bare `cell-structure/*` request path before it becomes a real contract.
+
 ##### Phase 13.1 — `Environment` And `CellStruct` DAT Decoders
 
 Status: planned.
 
 Primary deliverables:
 
-- add `Environment` decoder in `holtburger-dat` producing an AC-shaped environment container with cell-structure records or references, as proven by Phase 13.0a
-- add `CellStruct` decoder producing vertex array, drawing polygons, portals, cell BSP, physics polygons, physics BSP, and optional drawing BSP
-- add fixture or round-trip tests for real repo-local environment/cell-structure data
+- add `Environment` decoder in `holtburger-dat` producing an AC-shaped portal-DAT container with nested cell-structure records keyed by cell-structure id
+- add nested `CellStruct` decoder producing cell-structure id, vertex array, drawing polygons, portal polygon ids, cell BSP, physics polygons, physics BSP, and optional drawing BSP
+- add fixture or round-trip tests for real repo-local environment data with nested cell-structure records
 - keep full physics BSP structures Rust-owned; do not design frontend physics DTOs in this phase
 
 Acceptance:
 
-- fixture-backed tests prove decoded counts and key relationships for at least one real environment
+- fixture-backed tests prove decoded counts and key relationships for at least one real env cell and its owning environment
 - decoder names and fields match the source-audit terminology
 
-##### Phase 13.2 — `environment/*` And `cell-structure/*` Asset Payloads
+##### Phase 13.2 — Decoded `environment/*` Asset Payloads
 
 Status: planned.
 
 Primary deliverables:
 
-- promote `environment/*` and `cell-structure/*` from stubs/reference-only payloads to decoded static-content payloads
+- promote `environment/*` from a reference-only payload to a decoded static-content payload carrying environment-scoped cell-structure records
+- remove or supersede the placeholder bare `cell-structure/*` request path; do not make standalone cell-structure ids a durable frontend contract
 - expose drawing geometry, surface refs, portal witnesses, and compact cell/physics BSP witnesses without shipping full physics structures for normal rendering
 - keep static content requestable through the asset path, mirroring `outdoor-static-scene/*`
-- add adapter and contract tests for both asset families
+- add adapter and contract tests proving `indoor-env-cell/*` selects an `environment/*` record and a cell-structure key that exists inside that environment
 
 Acceptance:
 
-- frontend can request environment/cell-structure assets without runtime-pushed DAT-derived renderer facts
+- frontend can request environment assets without runtime-pushed DAT-derived renderer facts
 - payloads preserve enough AC-shaped witnesses for future portal rendering and spatial work without forcing those features now
 
 ##### Phase 13.3 — Worker Geometry Prep Reusing Phase 12 Mesh Path
@@ -2726,13 +2767,13 @@ Status: planned.
 
 Primary deliverables:
 
-- reuse the Phase 12 polygon-set to `BufferGeometry` preparation path for `CellStruct` drawing geometry
-- choose `DrawingBSP` polygons when present and fall back to regular drawing polygons only if the source audit confirms that behavior
+- reuse the Phase 12 polygon-set to `BufferGeometry` preparation path for environment-scoped `CellStruct` drawing geometry
+- use regular `CellStruct.Polygons` for first mesh extraction; preserve `DrawingBSP` as witness metadata and future portal-rendering input
 - add worker tests proving structured-interior geometry uses the shared mesh preparation path rather than a parallel indoor-only intermediate
 
 Acceptance:
 
-- prepared cell-structure geometry can be hydrated by the existing render pipeline
+- prepared environment-scoped cell-structure geometry can be hydrated by the existing render pipeline
 - no duplicate polygon triangulation path is introduced for interiors
 
 ##### Phase 13.4 — Browser Structured-Interior Scene Integration
@@ -2741,9 +2782,10 @@ Status: planned.
 
 Primary deliverables:
 
-- derive a browser-mode structured-interior render scene from `EnvCell.visible_cells` plus prepared `environment/*` / `cell-structure/*` assets
+- derive a browser-mode structured-interior render scene from `EnvCell.visible_cells` plus prepared `indoor-env-cell/*` metadata and decoded `environment/*` assets
 - pass the selected structured-interior render scene into `WorldDisplay`; do not make `WorldDisplay` own visible-cell, destination, or browser-camera policy
 - preserve the free browser camera and existing outdoor render path while switching focus between outdoor landblocks and indoor env-cells
+- defer env-cell static stabs unless the Phase 13.0a decision is revisited; if implemented here, keep them on the same requestable static-renderable dependency path as outdoor static scenes
 
 Acceptance:
 
@@ -2769,7 +2811,7 @@ Acceptance:
 Acceptance criteria:
 
 - a real Tauri run loads an env cell from repo-local data, decodes its `CellStruct`-backed geometry, and renders the visible-cell set with debug coloring
-- `environment/*` and `cell-structure/*` boundary payloads carry drawing geometry, surface refs, portal witnesses, and compact physics/cell-BSP witnesses without shipping full physics structures to the frontend for normal rendering
+- `environment/*` boundary payloads carry environment-scoped drawing geometry, surface refs, portal witnesses, and compact physics/cell-BSP witnesses without shipping full physics structures to the frontend for normal rendering
 - the browser-owned structured-interior render-scene path no longer carries an interior-gap or visible-cell-set placeholder
 - `WorldDisplay` remains a shared render surface: it does not import host/Tauri commands, own browser camera controls, derive browser/client scene coverage, or render browser debug HUD policy
 - outdoor terrain and Phase 12 scenery rendering remain coherent when the browser focus moves between outdoor landblocks and indoor env-cells
@@ -2780,8 +2822,8 @@ Phase 13 design guardrails:
 
 - do not enforce portal-driven visibility culling in this phase; expose portals on the boundary as data, leave culling and portal-view rendering for a later renderer/spatial follow-up
 - do not derive structured-interior visible-cell relevance from frontend-local topology guesses; continue to rely on authoritative `EnvCell.visible_cells`
-- do not let `cell-structure/*` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should expose drawing geometry for rendering, drawing BSP or portal witnesses where useful, surface refs, and compact physics witnesses while keeping full physics structures Rust-owned
-- do not introduce shared-crate types for cell-structure consumers; this stays an asset-channel + frontend-scene concern
+- do not let environment-scoped `CellStruct` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should expose drawing geometry for rendering, drawing BSP or portal witnesses where useful, surface refs, and compact physics witnesses while keeping full physics structures Rust-owned
+- do not introduce shared-crate types for frontend consumers of environment-scoped cell-structure records; this stays an asset-channel + frontend-scene concern
 - do not put browser-mode camera/input/coverage policy back into `WorldDisplay`; add browser/client orchestration above it or pure helper functions beside it
 - do not reintroduce runtime-pushed DAT-derived renderer facts for indoor statics unless a live-session source proves those facts are dynamic gameplay state rather than static content
 - do not treat portal polygons as evidence of terrain holes. Outdoor terrain topology remains `CellLandblock`-derived unless a future retail-source pass proves a dedicated terrain cutout path.
@@ -2795,7 +2837,7 @@ Phase Gate Review Before Phase 14:
 Phase 13 testing expectations:
 
 - `holtburger-dat` round-trip tests for `Environment` and `CellStruct` against fixture data
-- adapter tests covering `environment/*` and `cell-structure/*` request resolution
+- adapter tests covering `indoor-env-cell/*` to decoded `environment/*` request resolution
 - worker tests covering `CellStruct` polygon-set → `BufferGeometry` parity with the Phase 12 path
 - frontend tests covering indoor visible-cell-set rendering replacing the placeholder branch
 
@@ -2862,7 +2904,7 @@ Concrete rules:
 - runtime-channel DTOs must describe runtime/session facts without baking in renderer policy or static archive access. DAT-derived static placement facts should usually live on requestable content/asset payloads unless a live-session source proves they are dynamic state.
 - DTO shape must not assume the source has on-demand random access to disk; a `ClientRuntime`-fed adapter only knows what the server has told it about, so any "and here is its full neighborhood pre-resolved" semantics belong to a separate query path, not to the runtime DTO
 - DTO shape must not assume the source has authoritative ground truth either; a static browser adapter is reading repo-local archives and is just as valid a source as a server stream, so DTOs must not require server-only fields like authoritative ownership tokens or session-scoped guids
-- asset-channel DTOs (`gfx-obj/*`, `setup-model/*`, `cell-structure/*`, `environment/*`) are inherently dual-source already because both adapters resolve them through the same `ContentRepository`; no additional discipline is required there beyond preserving the AC-shaped drawing-versus-physics split
+- asset-channel DTOs (`gfx-obj/*`, `setup-model/*`, `environment/*` with nested `CellStruct` records) are inherently dual-source already because both adapters resolve them through the same `ContentRepository`; no additional discipline is required there beyond preserving the AC-shaped drawing-versus-physics split
 - frontend scene-context state must subscribe to typed channels rather than inspect the adapter directly, so that swapping the adapter implementation under it does not require frontend changes
 - Phase 14's non-world body design must in particular keep the new `SpatialBody` semantics describable in terms of either source: a browser-mode camera body and a future client-mode third-person camera body should both be expressible without one being a special case of the other
 
@@ -3175,7 +3217,7 @@ Mitigation:
 - Count renderer progress only when geometry is drawn through the actual Three.js scene runtime. Phase 10 satisfies that bar; the deleted SVG projection does not.
 - Keep outdoor terrain coverage frontend-owned. The frontend now decides which `terrain/*` landblock assets to request and cache for the radius-1 neighborhood, while Rust remains responsible only for authoritative residency plus terrain payload lookup.
 - Surface terrain provenance explicitly in the app shell. The browser must keep identifying repo-local `CellLandblock` loads so live-host parity stays observable under the supported Tauri path.
-- Keep Phase 11 indoor env-cell payloads real and repo-backed, but keep `environment/*` and `cell-structure/*` reference-first until shared DAT parsers exist for them.
+- Keep Phase 11 indoor env-cell payloads real and repo-backed, but keep `environment/*` reference-first and `cell-structure/*` placeholder-only until Phase 13 replaces that shape with decoded environment-scoped cell-structure records.
 - Fix parser parity bugs when new contract work exposes them. Phase 11 uncovered mismatched `EnvCell` flag masks in `holtburger-dat`, and the right response was to correct the shared parser rather than normalizing bad semantics in app-local code.
 - Use `ContentRepository::read_resource(...)` as the shared dynamic-key asset substrate for runtime-discovered content lookups. App-local adapters should not reopen HBA archives directly for each asset family.
 - Keep Phase 12.0a Rust-only. The repository migration did not justify TypeScript shape changes or boundary DTO churn; those remain the explicit job of Phase 12.0b.
@@ -3370,17 +3412,15 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. The Phase 12.9 smoke pass looks good, with no remaining extra-tree mismatch observed. The next step is Phase 13.0a, a source audit and contract dry run for structured-interior rendering.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. The next step is Phase 13.1, decoding `Environment` and its nested `CellStruct` records in `holtburger-dat`.
 
 Current near-term sequence:
 
-1. implement Phase 13.0a source audit and contract dry run before adding new structured-interior payloads
-2. correct this plan if the audit changes `Environment`, `CellStruct`, portal, visible-cell, or static-object assumptions
-3. implement Phase 13.1 DAT decoders for `Environment` and `CellStruct`
-4. implement Phase 13.2 decoded `environment/*` and `cell-structure/*` asset payloads
-5. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
-6. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
-7. run Phase 13.5 live interior smoke and gate review
-8. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
-9. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-10. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+1. implement Phase 13.1 DAT decoders for `Environment` and nested `CellStruct` records
+2. implement Phase 13.2 decoded `environment/*` payloads and remove or supersede the bare `cell-structure/*` placeholder path
+3. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
+4. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
+5. run Phase 13.5 live interior smoke and gate review
+6. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
+7. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+8. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

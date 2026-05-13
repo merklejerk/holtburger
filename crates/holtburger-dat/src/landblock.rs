@@ -25,7 +25,7 @@ pub struct BuildInfo {
     pub frame: Frame,
     pub num_leaves: u32,
     #[br(temp)]
-    pub num_portals: u16,
+    pub num_portals: u32,
     #[br(count = num_portals)]
     pub portals: Vec<PortalInternal>,
 }
@@ -113,4 +113,43 @@ pub struct RestrictionTable {
     #[br(count = count)]
     #[br(map = |v: Vec<(u32, u32)>| v.into_iter().collect())]
     pub tables: HashMap<u32, u32>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn landblock_info_building_portal_count_is_uint32() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x0102fffefu32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+
+        bytes.extend_from_slice(&0x0200_0001u32.to_le_bytes());
+        append_identity_frame(&mut bytes);
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0123u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0004u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0124u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+
+        let info = LandblockInfo::unpack(&bytes).expect("landblock info should decode");
+
+        assert_eq!(info.buildings.len(), 1);
+        assert_eq!(info.buildings[0].portals.len(), 1);
+        assert_eq!(info.buildings[0].portals[0].stab_list, vec![0x0124]);
+    }
+
+    fn append_identity_frame(bytes: &mut Vec<u8>) {
+        for value in [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
 }

@@ -617,8 +617,9 @@ impl HostBoundaryAdapter {
                 })
             });
         if self.verbose {
+            let provenance = payload.get("provenance");
             eprintln!(
-                "[holtburger-3d][asset.lookup] response asset_id={} kind={} scenery={} buildings={} provenance={}",
+                "[holtburger-3d][asset.lookup] response asset_id={} kind={} scenery={} buildings={} provenance={} error_code={} detail={}",
                 request.asset_id,
                 payload
                     .get("kind")
@@ -632,9 +633,16 @@ impl HostBoundaryAdapter {
                     .get("buildingInstances")
                     .and_then(serde_json::Value::as_array)
                     .map_or(0, Vec::len),
-                payload
-                    .get("provenance")
+                provenance
                     .and_then(|provenance| provenance.get("source"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                provenance
+                    .and_then(|provenance| provenance.get("errorCode"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("null"),
+                provenance
+                    .and_then(|provenance| provenance.get("detail"))
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("unknown")
             );
@@ -1665,6 +1673,32 @@ mod tests {
                             id.starts_with("setup-model/") || id.starts_with("gfx-obj/")
                         })
                 })
+        );
+    }
+
+    #[test]
+    fn populated_landblock_info_with_building_portals_does_not_fall_back_to_stub() {
+        let adapter = HostBoundaryAdapter::new(false);
+
+        let payload = adapter
+            .load_landblock_statics_payload(0xda55ffff)
+            .expect("portal-bearing landblock static facts should decode");
+
+        assert_eq!(payload["kind"], "landblock-statics");
+        assert_eq!(payload["provenance"]["source"], "repo-local-hba");
+        assert_eq!(
+            payload["sceneryInstances"]
+                .as_array()
+                .expect("scenery instances should be an array")
+                .len(),
+            115
+        );
+        assert_eq!(
+            payload["buildingInstances"]
+                .as_array()
+                .expect("building instances should be an array")
+                .len(),
+            42
         );
     }
 

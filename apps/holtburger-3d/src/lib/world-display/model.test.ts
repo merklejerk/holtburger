@@ -138,32 +138,32 @@ describe("world display model helpers", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"landblock-statics/0102ffff": {
+			"outdoor-static-scene/0102ffff": {
 				request: {
 					requestId: "statics",
-					assetId: "landblock-statics/0102ffff",
+					assetId: "outdoor-static-scene/0102ffff",
 					priority: "streaming",
 				},
 				response: {
 					requestId: "statics",
-					assetId: "landblock-statics/0102ffff",
+					assetId: "outdoor-static-scene/0102ffff",
 					payloadKind: "json",
 					payload: {},
 				},
 				payload: {
-					kind: "landblock-statics",
-					sourceAssetKind: "landblock-info",
+					kind: "outdoor-static-scene",
+					sourceAssetKind: "outdoor-static-scene",
 					residencyKind: "outdoor-landblock",
 					provenance: {
 						source: "repo-local-hba",
-						sourceAssetKind: "landblock-info",
+						sourceAssetKind: "outdoor-static-scene",
 						errorCode: null,
 						detail: "test",
 					},
 					landblockId: 0x0102ffff,
 					sceneryInstances: [
 						{
-							instanceId: "landblock-statics/0102ffff/object/0000/02000001",
+							instanceId: "outdoor-static-scene/0102ffff/object/0000/02000001",
 							owningLandblockId: 0x0102ffff,
 							sourceDid: 0x02000001,
 							sourceAssetId: "setup-model/02000001",
@@ -176,7 +176,8 @@ describe("world display model helpers", () => {
 					],
 					buildingInstances: [
 						{
-							instanceId: "landblock-statics/0102ffff/building/0000/02000002",
+							instanceId:
+								"outdoor-static-scene/0102ffff/building/0000/02000002",
 							owningLandblockId: 0x0102ffff,
 							sourceDid: 0x02000002,
 							sourceAssetId: "setup-model/02000002",
@@ -188,6 +189,8 @@ describe("world display model helpers", () => {
 							numLeaves: 2,
 						},
 					],
+					generatedSceneryInstances: [],
+					diagnostics: createOutdoorStaticSceneDiagnostics(),
 				},
 				preparedAt: "2026-05-12T00:00:00.000Z",
 			},
@@ -366,3 +369,30 @@ describe("world display model helpers", () => {
 		expect(shouldSendThrottledCameraHint(1000, 1250)).toBe(true);
 	});
 });
+
+function createOutdoorStaticSceneDiagnostics() {
+	const emptyLayer = {
+		attempted: 0,
+		accepted: 0,
+		rejectedUnsupportedSource: 0,
+	};
+
+	return {
+		landblockInfoAvailable: true,
+		landblockInfoError: null,
+		explicit: emptyLayer,
+		buildings: emptyLayer,
+		generated: {
+			...emptyLayer,
+			skippedWeenieObj: 0,
+			rejectedFrequency: 0,
+			rejectedBounds: 0,
+			rejectedBuildingOccupancy: 0,
+			rejectedObjectBounds: 0,
+			objectBoundsUnavailable: 0,
+			rejectedRoad: 0,
+			rejectedSlope: 0,
+			rejectedOverlap: 0,
+		},
+	};
+}

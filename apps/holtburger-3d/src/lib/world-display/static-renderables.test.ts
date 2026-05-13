@@ -5,7 +5,7 @@ import {
 	type PreparedAssetRecord,
 } from "../assets/types";
 import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
-import { formatLandblockStaticsAssetId } from "../landblocks";
+import { formatOutdoorStaticSceneAssetId } from "../landblocks";
 import { deriveStaticRenderableSceneModel } from "./static-renderables";
 
 const IDENTITY_FRAME: FrameDto = {
@@ -28,7 +28,7 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000002",
 				0x01000002,
 			),
-			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0102ffff,
 				["setup-model/02000001"],
 			),
@@ -62,7 +62,7 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0102ffff,
 				["gfx-obj/01000001"],
 			),
@@ -90,7 +90,7 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0102ffff,
 				["gfx-obj/01000001"],
 				["gfx-obj/01000001"],
@@ -112,11 +112,11 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0102ffff,
 				["gfx-obj/01000001"],
 			),
-			"landblock-statics/0203ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0203ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0203ffff,
 				["gfx-obj/01000001"],
 			),
@@ -154,11 +154,11 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0102ffff,
 				["setup-model/02000001", "setup-model/02000002"],
 			),
-			"landblock-statics/0909ffff": createPreparedLandblockStaticsAsset(
+			"outdoor-static-scene/0909ffff": createPreparedOutdoorStaticSceneAsset(
 				0x0909ffff,
 				["gfx-obj/01000001"],
 			),
@@ -170,8 +170,8 @@ describe("static renderable scene model", () => {
 		expect(
 			model.sourceInstances.map((instance) => instance.instanceId),
 		).toEqual([
-			"landblock-statics/0102ffff/object/0",
-			"landblock-statics/0102ffff/object/1",
+			"outdoor-static-scene/0102ffff/object/0",
+			"outdoor-static-scene/0102ffff/object/1",
 		]);
 		expect(model.parts.map((part) => part.gfxObjAssetId)).toEqual([
 			"gfx-obj/01000001",
@@ -201,15 +201,15 @@ function createRuntimeBatch(): RuntimeBatchDto {
 	};
 }
 
-function createPreparedLandblockStaticsAsset(
+function createPreparedOutdoorStaticSceneAsset(
 	landblockId: number,
 	scenerySourceAssetIds: string[],
 	buildingSourceAssetIds: string[] = [],
 ): PreparedAssetRecord {
-	const assetId = formatLandblockStaticsAssetId(landblockId);
+	const assetId = formatOutdoorStaticSceneAssetId(landblockId);
 	return createPreparedAsset(assetId, {
-		kind: "landblock-statics",
-		sourceAssetKind: "landblock-info",
+		kind: "outdoor-static-scene",
+		sourceAssetKind: "outdoor-static-scene",
 		residencyKind: "outdoor-landblock",
 		landblockId,
 		sceneryInstances: scenerySourceAssetIds.map((sourceAssetId, index) => ({
@@ -229,13 +229,42 @@ function createPreparedLandblockStaticsAsset(
 			frame: createFrame({ x: 25 + index, y: 48, z: 6 }),
 			numLeaves: 1,
 		})),
+		generatedSceneryInstances: [],
+		diagnostics: createOutdoorStaticSceneDiagnostics(),
 		provenance: {
 			source: "repo-local-hba",
-			sourceAssetKind: "landblock-info",
+			sourceAssetKind: "outdoor-static-scene",
 			errorCode: null,
 			detail: "test",
 		},
 	});
+}
+
+function createOutdoorStaticSceneDiagnostics() {
+	const emptyLayer = {
+		attempted: 0,
+		accepted: 0,
+		rejectedUnsupportedSource: 0,
+	};
+
+	return {
+		landblockInfoAvailable: true,
+		landblockInfoError: null,
+		explicit: emptyLayer,
+		buildings: emptyLayer,
+		generated: {
+			...emptyLayer,
+			skippedWeenieObj: 0,
+			rejectedFrequency: 0,
+			rejectedBounds: 0,
+			rejectedBuildingOccupancy: 0,
+			rejectedObjectBounds: 0,
+			objectBoundsUnavailable: 0,
+			rejectedRoad: 0,
+			rejectedSlope: 0,
+			rejectedOverlap: 0,
+		},
+	};
 }
 
 function createPreparedSetupModelAsset(): PreparedAssetRecord {

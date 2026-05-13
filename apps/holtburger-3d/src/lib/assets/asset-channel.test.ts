@@ -311,11 +311,11 @@ describe("asset channel controller", () => {
 			"terrain/da55ffff",
 		);
 		expect(requests.map((request) => request.assetId)).toContain(
-			"landblock-statics/db56ffff",
+			"outdoor-static-scene/db56ffff",
 		);
 	});
 
-	it("requests landblock static facts for the same destination coverage as terrain", () => {
+	it("requests outdoor static scene facts for the same destination coverage as terrain", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createSceneCoverageRequests(
 			runtimeBatch,
@@ -335,13 +335,12 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId).sort()).toEqual([
-			"landblock-generated-scenery/2d5affff",
-			"landblock-statics/2d5affff",
+			"outdoor-static-scene/2d5affff",
 			"terrain/2d5affff",
 		]);
 	});
 
-	it("derives demand-driven static renderable requests from prepared landblock static facts", () => {
+	it("derives demand-driven static renderable requests from prepared outdoor static scene facts", () => {
 		const runtimeBatch = createRuntimeBatch();
 
 		const requests = createStaticRenderableAssetRequests(
@@ -350,10 +349,11 @@ describe("asset channel controller", () => {
 			"streaming",
 			{
 				"gfx-obj/01000001": createPreparedGfxObjAsset("gfx-obj/01000001"),
-				"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
-					"landblock-statics/0102ffff",
+				"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
+					"outdoor-static-scene/0102ffff",
 					0x0102ffff,
 					["setup-model/02000002", "gfx-obj/01000001"],
+					[],
 				),
 			},
 			[],
@@ -364,7 +364,7 @@ describe("asset channel controller", () => {
 		]);
 	});
 
-	it("derives demand-driven static renderable requests from generated outdoor scenery", () => {
+	it("derives demand-driven static renderable requests from generated outdoor scenery in the aggregate scene", () => {
 		const runtimeBatch = createRuntimeBatch();
 
 		const requests = createStaticRenderableAssetRequests(
@@ -372,12 +372,12 @@ describe("asset channel controller", () => {
 			null,
 			"streaming",
 			{
-				"landblock-generated-scenery/0102ffff":
-					createPreparedLandblockGeneratedSceneryAsset(
-						"landblock-generated-scenery/0102ffff",
-						0x0102ffff,
-						["setup-model/02000003"],
-					),
+				"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
+					"outdoor-static-scene/0102ffff",
+					0x0102ffff,
+					[],
+					["setup-model/02000003"],
+				),
 			},
 			[],
 		);
@@ -1258,10 +1258,11 @@ function createPreparedGfxObjAsset(assetId: string): PreparedAssetRecord {
 	);
 }
 
-function createPreparedLandblockStaticsAsset(
+function createPreparedOutdoorStaticSceneAsset(
 	assetId: string,
 	landblockId: number,
-	sourceAssetIds: string[],
+	scenerySourceAssetIds: string[],
+	generatedSourceAssetIds: string[],
 ): PreparedAssetRecord {
 	return prepareAssetPayload(
 		{
@@ -1274,11 +1275,11 @@ function createPreparedLandblockStaticsAsset(
 			assetId,
 			payloadKind: "json",
 			payload: {
-				kind: "landblock-statics",
+				kind: "outdoor-static-scene",
 				residencyKind: "outdoor-landblock",
-				sourceAssetKind: "landblock-info",
+				sourceAssetKind: "outdoor-static-scene",
 				landblockId,
-				sceneryInstances: sourceAssetIds.map((sourceAssetId, index) => ({
+				sceneryInstances: scenerySourceAssetIds.map((sourceAssetId, index) => ({
 					instanceId: `${assetId}/object/${index}`,
 					owningLandblockId: landblockId,
 					sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
@@ -1290,9 +1291,27 @@ function createPreparedLandblockStaticsAsset(
 					},
 				})),
 				buildingInstances: [],
+				generatedSceneryInstances: generatedSourceAssetIds.map(
+					(sourceAssetId, index) => ({
+						instanceId: `${assetId}/generated/${index}`,
+						owningLandblockId: landblockId,
+						sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+						sourceAssetId,
+						sourceIndex: index,
+						terrainIndex: index,
+						sceneId: 0x12000001,
+						sceneTemplateIndex: index,
+						frame: {
+							origin: { x: index, y: 0, z: 0 },
+							orientation: { w: 1, x: 0, y: 0, z: 0 },
+						},
+						scale: 1.25,
+					}),
+				),
+				diagnostics: createOutdoorStaticSceneDiagnostics(),
 				provenance: {
 					source: "repo-local-hba",
-					sourceAssetKind: "landblock-info",
+					sourceAssetKind: "outdoor-static-scene",
 					errorCode: null,
 					detail: "test-cache",
 				},
@@ -1301,48 +1320,29 @@ function createPreparedLandblockStaticsAsset(
 	);
 }
 
-function createPreparedLandblockGeneratedSceneryAsset(
-	assetId: string,
-	landblockId: number,
-	sourceAssetIds: string[],
-): PreparedAssetRecord {
-	return prepareAssetPayload(
-		{
-			requestId: `cached-${assetId}`,
-			assetId,
-			priority: "streaming",
+function createOutdoorStaticSceneDiagnostics() {
+	const emptyLayer = {
+		attempted: 0,
+		accepted: 0,
+		rejectedUnsupportedSource: 0,
+	};
+
+	return {
+		landblockInfoAvailable: true,
+		landblockInfoError: null,
+		explicit: emptyLayer,
+		buildings: emptyLayer,
+		generated: {
+			...emptyLayer,
+			skippedWeenieObj: 0,
+			rejectedFrequency: 0,
+			rejectedBounds: 0,
+			rejectedBuildingOccupancy: 0,
+			rejectedObjectBounds: 0,
+			objectBoundsUnavailable: 0,
+			rejectedRoad: 0,
+			rejectedSlope: 0,
+			rejectedOverlap: 0,
 		},
-		{
-			requestId: `cached-${assetId}`,
-			assetId,
-			payloadKind: "json",
-			payload: {
-				kind: "landblock-generated-scenery",
-				residencyKind: "outdoor-landblock",
-				sourceAssetKind: "region-scene-table",
-				landblockId,
-				sceneryInstances: sourceAssetIds.map((sourceAssetId, index) => ({
-					instanceId: `${assetId}/generated/${index}`,
-					owningLandblockId: landblockId,
-					sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-					sourceAssetId,
-					sourceIndex: index,
-					terrainIndex: index,
-					sceneId: 0x12000001,
-					sceneTemplateIndex: index,
-					frame: {
-						origin: { x: index, y: 0, z: 0 },
-						orientation: { w: 1, x: 0, y: 0, z: 0 },
-					},
-					scale: 1.25,
-				})),
-				provenance: {
-					source: "repo-local-hba",
-					sourceAssetKind: "region-scene-table",
-					errorCode: null,
-					detail: "test-cache",
-				},
-			},
-		},
-	);
+	};
 }

@@ -11,8 +11,7 @@ import {
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatHex32,
-	formatLandblockGeneratedSceneryAssetId,
-	formatLandblockStaticsAssetId,
+	formatOutdoorStaticSceneAssetId,
 	formatTerrainAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
@@ -268,15 +267,7 @@ export function createSceneCoverageRequests(
 			pendingAssetIds,
 			options,
 		),
-		...createLandblockStaticsCoverageRequests(
-			runtimeBatch,
-			browserDestination,
-			priority,
-			preparedByAssetId,
-			pendingAssetIds,
-			options,
-		),
-		...createLandblockGeneratedSceneryCoverageRequests(
+		...createOutdoorStaticSceneCoverageRequests(
 			runtimeBatch,
 			browserDestination,
 			priority,
@@ -349,7 +340,7 @@ export function createTerrainCoverageRequests(
 		}));
 }
 
-function createLandblockStaticsCoverageRequests(
+function createOutdoorStaticSceneCoverageRequests(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
@@ -370,43 +361,7 @@ function createLandblockStaticsCoverageRequests(
 		focusLandblockId,
 		priority,
 		options.landblockRadius,
-	).map(formatLandblockStaticsAssetId);
-	const pendingAssetIdSet = new Set(pendingAssetIds);
-
-	return coverageAssetIds
-		.filter(
-			(assetId) =>
-				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
-		)
-		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
-			assetId,
-			priority,
-		}));
-}
-
-function createLandblockGeneratedSceneryCoverageRequests(
-	runtimeBatch: RuntimeBatchDto | null,
-	browserDestination: BrowserLocationSelection | null,
-	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[] = [],
-	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
-): AssetLookupRequestDto[] {
-	if (!runtimeBatch || runtimeBatch.residency.indoors) {
-		return [];
-	}
-
-	const focusLandblockId = deriveTerrainFocusLandblockId(
-		runtimeBatch,
-		browserDestination,
-	);
-	const requestScope = browserDestination ? "destination" : "runtime";
-	const coverageAssetIds = buildPrioritizedOutdoorCoverageLandblockIds(
-		focusLandblockId,
-		priority,
-		options.landblockRadius,
-	).map(formatLandblockGeneratedSceneryAssetId);
+	).map(formatOutdoorStaticSceneAssetId);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
 	return coverageAssetIds
@@ -442,19 +397,10 @@ export function createStaticRenderableAssetRequests(
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	const sourceAssetIds = Object.values(preparedByAssetId).flatMap((asset) => {
 		if (
-			!(
-				asset.payload.kind === "landblock-statics" ||
-				asset.payload.kind === "landblock-generated-scenery"
-			) ||
+			asset.payload.kind !== "outdoor-static-scene" ||
 			!activeLandblockIds.has(asset.payload.landblockId)
 		) {
 			return [];
-		}
-
-		if (asset.payload.kind === "landblock-generated-scenery") {
-			return asset.payload.sceneryInstances.map(
-				(instance) => instance.sourceAssetId,
-			);
 		}
 
 		return [
@@ -462,6 +408,9 @@ export function createStaticRenderableAssetRequests(
 				(instance) => instance.sourceAssetId,
 			),
 			...asset.payload.buildingInstances.map(
+				(instance) => instance.sourceAssetId,
+			),
+			...asset.payload.generatedSceneryInstances.map(
 				(instance) => instance.sourceAssetId,
 			),
 		];

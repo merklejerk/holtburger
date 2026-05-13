@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatLandblockLabel,
-	formatLandblockStaticsAssetId,
+	formatOutdoorStaticSceneAssetId,
 	formatTerrainAssetId,
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
@@ -18,8 +18,8 @@ describe("outdoor landblock helpers", () => {
 		expect(landblockId).toBeGreaterThan(0);
 		expect(formatLandblockLabel(landblockId)).toBe("0xda55ffff");
 		expect(formatTerrainAssetId(landblockId)).toBe("terrain/da55ffff");
-		expect(formatLandblockStaticsAssetId(landblockId)).toBe(
-			"landblock-statics/da55ffff",
+		expect(formatOutdoorStaticSceneAssetId(landblockId)).toBe(
+			"outdoor-static-scene/da55ffff",
 		);
 	});
 

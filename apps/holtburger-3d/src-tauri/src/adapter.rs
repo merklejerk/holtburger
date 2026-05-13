@@ -5,12 +5,15 @@ use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_content::{ContentRepository, SoulEmoteCatalog};
-use holtburger_dat::file_type::{
-    EnvCell, GfxObj, REGION_DESC_FILE_ID, RegionDesc, Scene, SceneObjectTemplate, SetupModel,
+use holtburger_core::static_outdoor_scene::{
+    GeneratedOutdoorSceneryDiagnostics, StaticOutdoorFrame, StaticOutdoorInstance,
+    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
+    StaticRenderableSourceFamily, normalize_landblock_id,
 };
+use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
-use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
+use holtburger_dat::landblock::CellLandblock;
 use holtburger_dat::physics::BspNode;
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::entity::Entity;
@@ -35,10 +38,6 @@ pub const RUNTIME_NOTIFICATION_EVENT: &str = "runtime:notification";
 const LOCAL_PLAYER_GUID: Guid = Guid(0x5000_0001);
 const REMOTE_SCOUT_GUID: Guid = Guid(0x5000_0002);
 const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
-const GENERATED_SCENERY_CELL_SIZE: f32 = 24.0;
-const GENERATED_SCENERY_BLOCK_SIZE: f32 = 192.0;
-const GENERATED_SCENERY_MIN_POINT_SPACING_SQUARED: f32 = 4.0;
-const GENERATED_SCENERY_RANDOM_UNIT: f64 = 2.328_306_4e-10;
 
 pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
@@ -226,12 +225,8 @@ impl HostBoundaryAdapter {
             return self.build_terrain_lookup_response(request, landblock_id);
         }
 
-        if let Some(landblock_id) = parse_landblock_statics_asset_id(&request.asset_id) {
-            return self.build_landblock_statics_lookup_response(request, landblock_id);
-        }
-
-        if let Some(landblock_id) = parse_landblock_generated_scenery_asset_id(&request.asset_id) {
-            return self.build_landblock_generated_scenery_lookup_response(request, landblock_id);
+        if let Some(landblock_id) = parse_outdoor_static_scene_asset_id(&request.asset_id) {
+            return self.build_outdoor_static_scene_lookup_response(request, landblock_id);
         }
 
         if let Some(env_cell_id) = parse_indoor_env_cell_asset_id(&request.asset_id) {
@@ -458,93 +453,54 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn load_landblock_statics_payload(
+    fn load_outdoor_static_scene_payload(
         &self,
         raw_landblock_id: u32,
     ) -> Result<serde_json::Value, (String, &'static str)> {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_info = self.load_landblock_info(landblock_id)?;
+        let scene = StaticOutdoorSceneAssembler::new()
+            .assemble_landblock(&self.content, landblock_id)
+            .map_err(|error| {
+                (
+                    format!(
+                        "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
+                    ),
+                    "asset-decode-failed",
+                )
+            })?;
 
         Ok(serde_json::json!({
-            "kind": "landblock-statics",
+            "kind": "outdoor-static-scene",
             "residencyKind": "outdoor-landblock",
-            "sourceAssetKind": "landblock-info",
+            "sourceAssetKind": "outdoor-static-scene",
             "landblockId": landblock_id,
-            "sceneryInstances": landblock_info.objects.iter().enumerate().filter_map(
-                |(index, object)| {
-                    format_renderable_asset_id(object.id).map(|source_asset_id| {
-                        serde_json::json!({
-                            "instanceId": format!(
-                                "landblock-statics/{landblock_id:08x}/object/{index:04x}/{:08x}",
-                                object.id
-                            ),
-                            "owningLandblockId": landblock_id,
-                            "sourceDid": object.id,
-                            "sourceAssetId": source_asset_id,
-                            "sourceIndex": index,
-                            "frame": serialize_landblock_frame_dto(&object.frame),
-                        })
-                    })
-                },
-            ).collect::<Vec<_>>(),
-            "buildingInstances": landblock_info.buildings.iter().enumerate().filter_map(
-                |(index, building)| {
-                    format_renderable_asset_id(building.model_id).map(|source_asset_id| {
-                        serde_json::json!({
-                            "instanceId": format!(
-                                "landblock-statics/{landblock_id:08x}/building/{index:04x}/{:08x}",
-                                building.model_id
-                            ),
-                            "owningLandblockId": landblock_id,
-                            "sourceDid": building.model_id,
-                            "sourceAssetId": source_asset_id,
-                            "sourceIndex": index,
-                            "frame": serialize_landblock_frame_dto(&building.frame),
-                            "numLeaves": building.num_leaves,
-                        })
-                    })
-                },
-            ).collect::<Vec<_>>(),
+            "sceneryInstances": scene.explicit_objects.iter().filter_map(serialize_static_outdoor_instance).collect::<Vec<_>>(),
+            "buildingInstances": scene.buildings.iter().filter_map(|building| {
+                serialize_static_outdoor_instance(&building.instance).map(|mut value| {
+                    value["numLeaves"] = serde_json::json!(building.num_leaves);
+                    value
+                })
+            }).collect::<Vec<_>>(),
+            "generatedSceneryInstances": scene.generated_scenery.iter().filter_map(|generated| {
+                serialize_static_outdoor_instance(&generated.instance).map(|mut value| {
+                    value["terrainIndex"] = serde_json::json!(generated.terrain_index);
+                    value["sceneId"] = serde_json::json!(generated.scene_id);
+                    value["sceneTemplateIndex"] = serde_json::json!(generated.scene_template_index);
+                    value["scale"] = serde_json::json!(generated.scale);
+                    value
+                })
+            }).collect::<Vec<_>>(),
+            "diagnostics": serialize_static_outdoor_scene_diagnostics(&scene),
             "provenance": {
                 "source": "repo-local-hba",
-                "sourceAssetKind": "landblock-info",
-                "errorCode": null,
-                "detail": format!("{}:0x{:08X}", EOR_CELL_NAMESPACE, landblock_id & 0xffff_fffe)
-            }
-        }))
-    }
-
-    fn load_landblock_generated_scenery_payload(
-        &self,
-        raw_landblock_id: u32,
-    ) -> Result<serde_json::Value, (String, &'static str)> {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock = self.load_cell_landblock(landblock_id)?;
-        let landblock_info = self.load_landblock_info(landblock_id).ok();
-        let region = self.load_region_desc()?;
-        let instances = self.derive_generated_scenery_instances(
-            landblock_id,
-            &landblock,
-            landblock_info.as_ref(),
-            &region,
-        )?;
-
-        Ok(serde_json::json!({
-            "kind": "landblock-generated-scenery",
-            "residencyKind": "outdoor-landblock",
-            "sourceAssetKind": "region-scene-table",
-            "landblockId": landblock_id,
-            "sceneryInstances": instances,
-            "provenance": {
-                "source": "repo-local-hba",
-                "sourceAssetKind": "region-scene-table",
+                "sourceAssetKind": "outdoor-static-scene",
                 "errorCode": null,
                 "detail": format!(
                     "{}:0x{:08X} + {}:0x{:08X}",
                     EOR_CELL_NAMESPACE,
                     landblock_id,
-                    EOR_PORTAL_NAMESPACE,
-                    REGION_DESC_FILE_ID
+                    EOR_CELL_NAMESPACE,
+                    landblock_id & 0xffff_fffe
                 )
             }
         }))
@@ -607,134 +563,6 @@ impl HostBoundaryAdapter {
 }
 
 impl HostBoundaryAdapter {
-    fn derive_generated_scenery_instances(
-        &self,
-        landblock_id: u32,
-        landblock: &CellLandblock,
-        landblock_info: Option<&LandblockInfo>,
-        region: &RegionDesc,
-    ) -> Result<Vec<serde_json::Value>, (String, &'static str)> {
-        let mut instances = Vec::new();
-        let mut occupied_points = landblock_info
-            .into_iter()
-            .flat_map(|info| {
-                info.objects
-                    .iter()
-                    .map(|object| object.frame.origin)
-                    .chain(info.buildings.iter().map(|building| building.frame.origin))
-            })
-            .map(|origin| (origin.x, origin.y))
-            .collect::<Vec<_>>();
-        let block_x = (landblock_id >> 24) * 8;
-        let block_y = ((landblock_id >> 16) & 0xff) * 8;
-
-        for (terrain_index, terrain) in landblock.terrain.iter().copied().enumerate() {
-            let terrain_type = usize::from((terrain >> 2) & 0x1f);
-            let scenery_type = usize::from(terrain >> 11);
-            let Some(scene_info_index) = region
-                .terrain_info
-                .terrain_types
-                .get(terrain_type)
-                .and_then(|terrain_type| terrain_type.scene_types.get(scenery_type))
-                .copied()
-            else {
-                continue;
-            };
-            let Some(scene_type) = region.scene_info.scene_types.get(scene_info_index as usize)
-            else {
-                continue;
-            };
-            if scene_type.scenes.is_empty() {
-                continue;
-            }
-
-            let cell_x = (terrain_index / 9) as u32;
-            let cell_y = (terrain_index % 9) as u32;
-            let global_cell_x = block_x + cell_x;
-            let global_cell_y = block_y + cell_y;
-            let scene_id =
-                select_generated_scene_id(&scene_type.scenes, global_cell_x, global_cell_y);
-            let scene = self.load_scene(scene_id)?;
-
-            for (template_index, template) in scene.object_templates.iter().enumerate() {
-                if template.weenie_object_id != 0
-                    || generated_template_noise(global_cell_x, global_cell_y, template_index as u32)
-                        >= template.frequency
-                {
-                    continue;
-                }
-
-                let local_position = displace_generated_template(
-                    template,
-                    global_cell_x,
-                    global_cell_y,
-                    template_index as u32,
-                );
-                let local_x = cell_x as f32 * GENERATED_SCENERY_CELL_SIZE + local_position.x;
-                let local_y = cell_y as f32 * GENERATED_SCENERY_CELL_SIZE + local_position.y;
-                if !(0.0..GENERATED_SCENERY_BLOCK_SIZE).contains(&local_x)
-                    || !(0.0..GENERATED_SCENERY_BLOCK_SIZE).contains(&local_y)
-                    || generated_scenery_on_road(landblock, local_x, local_y)
-                {
-                    continue;
-                }
-
-                let Some(source_asset_id) = format_renderable_asset_id(template.object_id) else {
-                    continue;
-                };
-
-                let terrain_sample = sample_landblock_terrain(landblock, local_x, local_y);
-                if !generated_template_matches_slope(template, terrain_sample.normal_z) {
-                    continue;
-                }
-                if occupied_points.iter().any(|(x, y)| {
-                    let dx = local_x - *x;
-                    let dy = local_y - *y;
-                    dx * dx + dy * dy < GENERATED_SCENERY_MIN_POINT_SPACING_SQUARED
-                }) {
-                    continue;
-                }
-
-                occupied_points.push((local_x, local_y));
-                let scale = scale_generated_template(
-                    template,
-                    global_cell_x,
-                    global_cell_y,
-                    template_index as u32,
-                );
-                let frame = build_generated_template_frame(
-                    template,
-                    global_cell_x,
-                    global_cell_y,
-                    template_index as u32,
-                    local_x,
-                    local_y,
-                    terrain_sample.height + local_position.z,
-                );
-                let source_index = instances.len();
-                instances.push(serde_json::json!({
-                    "instanceId": format!(
-                        "landblock-generated-scenery/{landblock_id:08x}/scene/{scene_id:08x}/cell/{terrain_index:02x}/template/{template_index:04x}/{:08x}",
-                        template.object_id
-                    ),
-                    "owningLandblockId": landblock_id,
-                    "sourceDid": template.object_id,
-                    "sourceAssetId": source_asset_id,
-                    "sourceIndex": source_index,
-                    "terrainIndex": terrain_index,
-                    "sceneId": scene_id,
-                    "sceneTemplateIndex": template_index,
-                    "frame": frame,
-                    "scale": scale,
-                }));
-            }
-        }
-
-        Ok(instances)
-    }
-}
-
-impl HostBoundaryAdapter {
     fn build_terrain_lookup_response(
         &self,
         request: AssetLookupRequestDto,
@@ -767,24 +595,32 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn build_landblock_statics_lookup_response(
+    fn build_outdoor_static_scene_lookup_response(
         &self,
         request: AssetLookupRequestDto,
         landblock_id: u32,
     ) -> AssetLookupResponseDto {
         let payload = self
-            .load_landblock_statics_payload(landblock_id)
+            .load_outdoor_static_scene_payload(landblock_id)
             .unwrap_or_else(|(detail, error_code)| {
                 serde_json::json!({
-                    "kind": "landblock-statics",
+                    "kind": "outdoor-static-scene",
                     "residencyKind": "outdoor-landblock",
-                    "sourceAssetKind": "landblock-info",
+                    "sourceAssetKind": "outdoor-static-scene",
                     "landblockId": normalize_landblock_id(landblock_id),
                     "sceneryInstances": [],
                     "buildingInstances": [],
+                    "generatedSceneryInstances": [],
+                    "diagnostics": {
+                        "landblockInfoAvailable": false,
+                        "landblockInfoError": null,
+                        "explicit": empty_static_outdoor_layer_diagnostics(),
+                        "buildings": empty_static_outdoor_layer_diagnostics(),
+                        "generated": empty_generated_outdoor_scenery_diagnostics()
+                    },
                     "provenance": {
                         "source": "app-local-stub",
-                        "sourceAssetKind": "landblock-info",
+                        "sourceAssetKind": "outdoor-static-scene",
                         "errorCode": error_code,
                         "detail": detail
                     }
@@ -793,7 +629,7 @@ impl HostBoundaryAdapter {
         if self.verbose {
             let provenance = payload.get("provenance");
             eprintln!(
-                "[holtburger-3d][asset.lookup] response asset_id={} kind={} scenery={} buildings={} provenance={} error_code={} detail={}",
+                "[holtburger-3d][asset.lookup] response asset_id={} kind={} scenery={} buildings={} generated={} provenance={} error_code={} detail={}",
                 request.asset_id,
                 payload
                     .get("kind")
@@ -807,62 +643,8 @@ impl HostBoundaryAdapter {
                     .get("buildingInstances")
                     .and_then(serde_json::Value::as_array)
                     .map_or(0, Vec::len),
-                provenance
-                    .and_then(|provenance| provenance.get("source"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown"),
-                provenance
-                    .and_then(|provenance| provenance.get("errorCode"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("null"),
-                provenance
-                    .and_then(|provenance| provenance.get("detail"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown")
-            );
-        }
-
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload,
-        }
-    }
-
-    fn build_landblock_generated_scenery_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-    ) -> AssetLookupResponseDto {
-        let payload = self
-            .load_landblock_generated_scenery_payload(landblock_id)
-            .unwrap_or_else(|(detail, error_code)| {
-                serde_json::json!({
-                    "kind": "landblock-generated-scenery",
-                    "residencyKind": "outdoor-landblock",
-                    "sourceAssetKind": "region-scene-table",
-                    "landblockId": normalize_landblock_id(landblock_id),
-                    "sceneryInstances": [],
-                    "provenance": {
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "region-scene-table",
-                        "errorCode": error_code,
-                        "detail": detail
-                    }
-                })
-            });
-        if self.verbose {
-            let provenance = payload.get("provenance");
-            eprintln!(
-                "[holtburger-3d][asset.lookup] response asset_id={} kind={} generated={} provenance={} error_code={} detail={}",
-                request.asset_id,
                 payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown"),
-                payload
-                    .get("sceneryInstances")
+                    .get("generatedSceneryInstances")
                     .and_then(serde_json::Value::as_array)
                     .map_or(0, Vec::len),
                 provenance
@@ -1177,10 +959,11 @@ impl HostBoundaryAdapter {
         })
     }
 
+    #[cfg(test)]
     fn load_landblock_info(
         &self,
         landblock_id: u32,
-    ) -> Result<LandblockInfo, (String, &'static str)> {
+    ) -> Result<holtburger_dat::landblock::LandblockInfo, (String, &'static str)> {
         let landblock_info_id = normalize_landblock_id(landblock_id) & 0xffff_fffe;
         let resource = self
             .content
@@ -1195,78 +978,9 @@ impl HostBoundaryAdapter {
                 )
             })?;
 
-        LandblockInfo::unpack(&resource.bytes).map_err(|error| {
+        holtburger_dat::landblock::LandblockInfo::unpack(&resource.bytes).map_err(|error| {
             (
                 format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}: {error}"),
-                "asset-decode-failed",
-            )
-        })
-    }
-
-    fn load_cell_landblock(
-        &self,
-        landblock_id: u32,
-    ) -> Result<CellLandblock, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{landblock_id:08X} from content repository: {error}",
-                        EOR_CELL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-
-        CellLandblock::unpack(&resource.bytes).map_err(|error| {
-            (
-                format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"),
-                "asset-decode-failed",
-            )
-        })
-    }
-
-    fn load_region_desc(&self) -> Result<RegionDesc, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{REGION_DESC_FILE_ID:08X} from content repository: {error}",
-                        EOR_PORTAL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-
-        RegionDesc::unpack(&resource.bytes).map_err(|error| {
-            (
-                format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}: {error}"),
-                "asset-decode-failed",
-            )
-        })
-    }
-
-    fn load_scene(&self, scene_id: u32) -> Result<Scene, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{scene_id:08X} from content repository: {error}",
-                        EOR_PORTAL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-
-        Scene::unpack(&resource.bytes).map_err(|error| {
-            (
-                format!("Could not decode Scene 0x{scene_id:08X}: {error}"),
                 "asset-decode-failed",
             )
         })
@@ -1502,17 +1216,9 @@ fn parse_terrain_asset_id(asset_id: &str) -> Option<u32> {
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
 }
 
-fn parse_landblock_statics_asset_id(asset_id: &str) -> Option<u32> {
+fn parse_outdoor_static_scene_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
-        .strip_prefix("landblock-statics/")
-        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
-        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-        .map(normalize_landblock_id)
-}
-
-fn parse_landblock_generated_scenery_asset_id(asset_id: &str) -> Option<u32> {
-    asset_id
-        .strip_prefix("landblock-generated-scenery/")
+        .strip_prefix("outdoor-static-scene/")
         .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
         .map(normalize_landblock_id)
@@ -1567,228 +1273,77 @@ fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
         .filter(|id| (id >> 24) == 0x02)
 }
 
-fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
-    (raw_landblock_id & 0xffff_0000) | 0xffff
+fn serialize_static_outdoor_instance(
+    instance: &StaticOutdoorInstance,
+) -> Option<serde_json::Value> {
+    let source_asset_id =
+        format_renderable_source_asset_id(instance.source.family, instance.source.did)?;
+    Some(serde_json::json!({
+        "instanceId": instance.identity.stable_id(),
+        "owningLandblockId": instance.owning_landblock_id,
+        "sourceDid": instance.source.did,
+        "sourceAssetId": source_asset_id,
+        "sourceIndex": instance.source_index,
+        "frame": serialize_static_outdoor_frame_dto(&instance.frame),
+    }))
 }
 
-fn format_renderable_asset_id(did: u32) -> Option<String> {
-    match did >> 24 {
-        0x01 => Some(format!("gfx-obj/{did:08x}")),
-        0x02 => Some(format!("setup-model/{did:08x}")),
-        _ => None,
+fn format_renderable_source_asset_id(
+    family: StaticRenderableSourceFamily,
+    did: u32,
+) -> Option<String> {
+    match family {
+        StaticRenderableSourceFamily::GfxObj => Some(format!("gfx-obj/{did:08x}")),
+        StaticRenderableSourceFamily::SetupModel => Some(format!("setup-model/{did:08x}")),
+        StaticRenderableSourceFamily::Unsupported => None,
     }
 }
 
-struct TerrainSample {
-    height: f32,
-    normal_z: f32,
-}
-
-fn select_generated_scene_id(scenes: &[u32], global_cell_x: u32, global_cell_y: u32) -> u32 {
-    let cell_mat = global_cell_y
-        .wrapping_mul(
-            712_977_289u32
-                .wrapping_mul(global_cell_x)
-                .wrapping_add(1_813_693_831),
-        )
-        .wrapping_sub(1_109_124_029u32.wrapping_mul(global_cell_x))
-        .wrapping_add(2_139_937_281);
-    let offset = f64::from(cell_mat) * GENERATED_SCENERY_RANDOM_UNIT;
-    let scene_index = (scenes.len() as f64 * offset) as usize;
-    scenes.get(scene_index).copied().unwrap_or(scenes[0])
-}
-
-fn generated_template_noise(global_cell_x: u32, global_cell_y: u32, template_index: u32) -> f32 {
-    let cell_x_mat = 0u32.wrapping_sub(1_109_124_029u32.wrapping_mul(global_cell_x));
-    let cell_y_mat = 1_813_693_831u32.wrapping_mul(global_cell_y);
-    let cell_mat = 1_360_117_743u32
-        .wrapping_mul(global_cell_x)
-        .wrapping_mul(global_cell_y)
-        .wrapping_add(1_888_038_839);
-    f64::from(
-        cell_x_mat
-            .wrapping_add(cell_y_mat)
-            .wrapping_sub(cell_mat.wrapping_mul(23_399u32.wrapping_add(template_index))),
-    )
-    .mul_add(GENERATED_SCENERY_RANDOM_UNIT, 0.0) as f32
-}
-
-fn displace_generated_template(
-    template: &SceneObjectTemplate,
-    global_cell_x: u32,
-    global_cell_y: u32,
-    template_index: u32,
-) -> Vector3 {
-    let base = template.base_frame.origin;
-    let x = if template.displace_x <= 0.0 {
-        base.x
-    } else {
-        (generated_template_random(global_cell_x, global_cell_y, template_index, 45_773)
-            * f64::from(template.displace_x)) as f32
-            + base.x
-    };
-    let y = if template.displace_y <= 0.0 {
-        base.y
-    } else {
-        (generated_template_random(global_cell_x, global_cell_y, template_index, 72_719)
-            * f64::from(template.displace_y)) as f32
-            + base.y
-    };
-    let quadrant = f64::from(
-        1_813_693_831u32
-            .wrapping_mul(global_cell_y)
-            .wrapping_sub(
-                global_cell_x.wrapping_mul(
-                    1_870_387_557u32
-                        .wrapping_mul(global_cell_y)
-                        .wrapping_add(1_109_124_029),
-                ),
-            )
-            .wrapping_sub(402_451_965),
-    ) * GENERATED_SCENERY_RANDOM_UNIT;
-
-    if quadrant >= 0.75 {
-        Vector3::new(y, -x, base.z)
-    } else if quadrant >= 0.5 {
-        Vector3::new(-x, -y, base.z)
-    } else if quadrant >= 0.25 {
-        Vector3::new(-y, x, base.z)
-    } else {
-        Vector3::new(x, y, base.z)
-    }
-}
-
-fn scale_generated_template(
-    template: &SceneObjectTemplate,
-    global_cell_x: u32,
-    global_cell_y: u32,
-    template_index: u32,
-) -> f32 {
-    if (template.min_scale - template.max_scale).abs() <= f32::EPSILON {
-        return template.max_scale;
-    }
-
-    (f64::from(template.max_scale / template.min_scale).powf(generated_template_random(
-        global_cell_x,
-        global_cell_y,
-        template_index,
-        32_593,
-    )) as f32)
-        * template.min_scale
-}
-
-fn build_generated_template_frame(
-    template: &SceneObjectTemplate,
-    global_cell_x: u32,
-    global_cell_y: u32,
-    template_index: u32,
-    local_x: f32,
-    local_y: f32,
-    local_z: f32,
-) -> serde_json::Value {
-    let orientation = if template.max_rotation_degrees > 0.0 {
-        let heading_degrees =
-            (generated_template_random(global_cell_x, global_cell_y, template_index, 63_127)
-                * f64::from(template.max_rotation_degrees)) as f32;
-        Quaternion::from_heading(heading_degrees.to_radians())
-    } else {
-        template.base_frame.orientation
-    };
-
+fn serialize_static_outdoor_scene_diagnostics(scene: &StaticOutdoorScene) -> serde_json::Value {
     serde_json::json!({
-        "origin": { "x": local_x, "y": local_y, "z": local_z },
-        "orientation": serialize_quaternion_dto(&orientation),
+        "landblockInfoAvailable": scene.diagnostics.landblock_info_available,
+        "landblockInfoError": scene.diagnostics.landblock_info_error,
+        "explicit": serialize_static_outdoor_layer_diagnostics(&scene.diagnostics.explicit),
+        "buildings": serialize_static_outdoor_layer_diagnostics(&scene.diagnostics.buildings),
+        "generated": serialize_generated_outdoor_scenery_diagnostics(&scene.diagnostics.generated),
     })
 }
 
-fn generated_template_random(
-    global_cell_x: u32,
-    global_cell_y: u32,
-    template_index: u32,
-    salt: u32,
-) -> f64 {
-    f64::from(
-        1_813_693_831u32
-            .wrapping_mul(global_cell_y)
-            .wrapping_sub(
-                template_index.wrapping_add(salt).wrapping_mul(
-                    1_360_117_743u32
-                        .wrapping_mul(global_cell_y)
-                        .wrapping_mul(global_cell_x)
-                        .wrapping_add(1_888_038_839),
-                ),
-            )
-            .wrapping_sub(1_109_124_029u32.wrapping_mul(global_cell_x)),
-    ) * GENERATED_SCENERY_RANDOM_UNIT
+fn empty_static_outdoor_layer_diagnostics() -> serde_json::Value {
+    serialize_static_outdoor_layer_diagnostics(&StaticOutdoorLayerDiagnostics::default())
 }
 
-fn generated_scenery_on_road(landblock: &CellLandblock, x: f32, y: f32) -> bool {
-    let cell_x = (x / GENERATED_SCENERY_CELL_SIZE).floor() as i32;
-    let cell_y = (y / GENERATED_SCENERY_CELL_SIZE).floor() as i32;
-    let road_width = 5.0;
-    let road_min = road_width;
-    let road_max = GENERATED_SCENERY_CELL_SIZE - road_width;
-    let roads = [
-        get_road(landblock, cell_x, cell_y),
-        get_road(landblock, cell_x, cell_y + 1),
-        get_road(landblock, cell_x + 1, cell_y),
-        get_road(landblock, cell_x + 1, cell_y + 1),
-    ];
-    if roads.iter().all(|road| *road == 0) {
-        return false;
-    }
-
-    let dx = x - cell_x as f32 * GENERATED_SCENERY_CELL_SIZE;
-    let dy = y - cell_y as f32 * GENERATED_SCENERY_CELL_SIZE;
-    match (roads[0] > 0, roads[1] > 0, roads[2] > 0, roads[3] > 0) {
-        (true, true, true, true) => true,
-        (true, true, true, false) => dx < road_min || dy < road_min,
-        (true, true, false, true) => dx < road_min || dy > road_max,
-        (true, true, false, false) => dx < road_min,
-        (true, false, true, true) => dx > road_max || dy < road_min,
-        (true, false, true, false) => dy < road_min,
-        (true, false, false, true) => (dx - dy).abs() < road_min,
-        (true, false, false, false) => dx + dy < road_min,
-        (false, true, true, true) => dx > road_max || dy > road_max,
-        (false, true, true, false) => (dx + dy - GENERATED_SCENERY_CELL_SIZE).abs() < road_min,
-        (false, true, false, true) => dy > road_max,
-        (false, true, false, false) => GENERATED_SCENERY_CELL_SIZE + dx - dy < road_min,
-        (false, false, true, true) => dx > road_max,
-        (false, false, true, false) => GENERATED_SCENERY_CELL_SIZE - dx + dy < road_min,
-        (false, false, false, true) => GENERATED_SCENERY_CELL_SIZE * 2.0 - dx - dy < road_min,
-        (false, false, false, false) => false,
-    }
+fn serialize_static_outdoor_layer_diagnostics(
+    diagnostics: &StaticOutdoorLayerDiagnostics,
+) -> serde_json::Value {
+    serde_json::json!({
+        "attempted": diagnostics.attempted,
+        "accepted": diagnostics.accepted,
+        "rejectedUnsupportedSource": diagnostics.rejected_unsupported_source,
+    })
 }
 
-fn get_road(landblock: &CellLandblock, x: i32, y: i32) -> u16 {
-    if !(0..9).contains(&x) || !(0..9).contains(&y) {
-        return 0;
-    }
-    landblock.terrain[x as usize * 9 + y as usize] & 0x03
+fn empty_generated_outdoor_scenery_diagnostics() -> serde_json::Value {
+    serialize_generated_outdoor_scenery_diagnostics(&GeneratedOutdoorSceneryDiagnostics::default())
 }
 
-fn sample_landblock_terrain(landblock: &CellLandblock, x: f32, y: f32) -> TerrainSample {
-    let cell_x = (x / GENERATED_SCENERY_CELL_SIZE).floor().clamp(0.0, 7.0) as usize;
-    let cell_y = (y / GENERATED_SCENERY_CELL_SIZE).floor().clamp(0.0, 7.0) as usize;
-    let local_x = (x - cell_x as f32 * GENERATED_SCENERY_CELL_SIZE) / GENERATED_SCENERY_CELL_SIZE;
-    let local_y = (y - cell_y as f32 * GENERATED_SCENERY_CELL_SIZE) / GENERATED_SCENERY_CELL_SIZE;
-    let h00 = landblock.get_height(cell_x, cell_y);
-    let h10 = landblock.get_height(cell_x + 1, cell_y);
-    let h01 = landblock.get_height(cell_x, cell_y + 1);
-    let h11 = landblock.get_height(cell_x + 1, cell_y + 1);
-    let west = h00 + (h01 - h00) * local_y;
-    let east = h10 + (h11 - h10) * local_y;
-    let height = west + (east - west) * local_x;
-    let dz_dx = (east - west) / GENERATED_SCENERY_CELL_SIZE;
-    let south = h00 + (h10 - h00) * local_x;
-    let north = h01 + (h11 - h01) * local_x;
-    let dz_dy = (north - south) / GENERATED_SCENERY_CELL_SIZE;
-    let normal_z = 1.0 / (1.0 + dz_dx * dz_dx + dz_dy * dz_dy).sqrt();
-    TerrainSample { height, normal_z }
-}
-
-fn generated_template_matches_slope(template: &SceneObjectTemplate, normal_z: f32) -> bool {
-    normal_z >= template.min_slope && normal_z <= template.max_slope
+fn serialize_generated_outdoor_scenery_diagnostics(
+    diagnostics: &GeneratedOutdoorSceneryDiagnostics,
+) -> serde_json::Value {
+    serde_json::json!({
+        "attempted": diagnostics.attempted,
+        "accepted": diagnostics.accepted,
+        "skippedWeenieObj": diagnostics.skipped_weenie_obj,
+        "rejectedFrequency": diagnostics.rejected_frequency,
+        "rejectedBounds": diagnostics.rejected_bounds,
+        "rejectedBuildingOccupancy": diagnostics.rejected_building_occupancy,
+        "rejectedObjectBounds": diagnostics.rejected_object_bounds,
+        "objectBoundsUnavailable": diagnostics.object_bounds_unavailable,
+        "rejectedRoad": diagnostics.rejected_road,
+        "rejectedSlope": diagnostics.rejected_slope,
+        "rejectedOverlap": diagnostics.rejected_overlap,
+        "rejectedUnsupportedSource": diagnostics.rejected_unsupported_source,
+    })
 }
 
 fn serialize_vector3(vector: &Vector3) -> serde_json::Value {
@@ -1816,7 +1371,7 @@ fn serialize_quaternion_dto(quaternion: &Quaternion) -> QuaternionDto {
     }
 }
 
-fn serialize_landblock_frame_dto(frame: &holtburger_dat::landblock::Frame) -> FrameDto {
+fn serialize_static_outdoor_frame_dto(frame: &StaticOutdoorFrame) -> FrameDto {
     FrameDto {
         origin: serialize_vec3_dto(&frame.origin),
         orientation: serialize_quaternion_dto(&frame.orientation),
@@ -2147,7 +1702,7 @@ mod tests {
     }
 
     #[test]
-    fn landblock_static_asset_derivation_covers_objects_and_buildings() {
+    fn outdoor_static_scene_asset_derivation_covers_objects_and_buildings() {
         let adapter = HostBoundaryAdapter::new(false);
         let object_landblock_id = find_landblock_with_renderable_object(&adapter)
             .expect("fixture should contain at least one renderable static object");
@@ -2155,9 +1710,9 @@ mod tests {
             .expect("fixture should contain at least one renderable building");
 
         let object_payload = adapter
-            .load_landblock_statics_payload(object_landblock_id)
+            .load_outdoor_static_scene_payload(object_landblock_id)
             .expect("object landblock static facts should decode");
-        assert_eq!(object_payload["kind"], "landblock-statics");
+        assert_eq!(object_payload["kind"], "outdoor-static-scene");
         assert!(
             object_payload["sceneryInstances"]
                 .as_array()
@@ -2175,7 +1730,7 @@ mod tests {
         );
 
         let building_payload = adapter
-            .load_landblock_statics_payload(building_landblock_id)
+            .load_outdoor_static_scene_payload(building_landblock_id)
             .expect("building landblock static facts should decode");
         assert!(
             building_payload["buildingInstances"]
@@ -2202,10 +1757,10 @@ mod tests {
         let adapter = HostBoundaryAdapter::new(false);
 
         let payload = adapter
-            .load_landblock_statics_payload(0xda55ffff)
+            .load_outdoor_static_scene_payload(0xda55ffff)
             .expect("portal-bearing landblock static facts should decode");
 
-        assert_eq!(payload["kind"], "landblock-statics");
+        assert_eq!(payload["kind"], "outdoor-static-scene");
         assert_eq!(payload["provenance"]["source"], "repo-local-hba");
         assert_eq!(
             payload["sceneryInstances"]
@@ -2228,12 +1783,12 @@ mod tests {
         let adapter = HostBoundaryAdapter::new(false);
 
         let payload = adapter
-            .load_landblock_generated_scenery_payload(0xda55ffff)
+            .load_outdoor_static_scene_payload(0xda55ffff)
             .expect("generated outdoor scenery facts should decode");
 
-        assert_eq!(payload["kind"], "landblock-generated-scenery");
+        assert_eq!(payload["kind"], "outdoor-static-scene");
         assert_eq!(payload["provenance"]["source"], "repo-local-hba");
-        let instances = payload["sceneryInstances"]
+        let instances = payload["generatedSceneryInstances"]
             .as_array()
             .expect("generated scenery instances should be an array");
         assert!(
@@ -2257,21 +1812,25 @@ mod tests {
         find_landblock_matching(adapter, |info| {
             info.objects
                 .iter()
-                .any(|object| format_renderable_asset_id(object.id).is_some())
+                .any(|object| is_renderable_source_did(object.id))
         })
     }
 
     fn find_landblock_with_renderable_building(adapter: &HostBoundaryAdapter) -> Option<u32> {
         find_landblock_matching(adapter, |info| {
             info.buildings.iter().any(|building| {
-                building.num_leaves > 0 && format_renderable_asset_id(building.model_id).is_some()
+                building.num_leaves > 0 && is_renderable_source_did(building.model_id)
             })
         })
     }
 
+    fn is_renderable_source_did(did: u32) -> bool {
+        matches!(did >> 24, 0x01 | 0x02)
+    }
+
     fn find_landblock_matching(
         adapter: &HostBoundaryAdapter,
-        predicate: impl Fn(&LandblockInfo) -> bool,
+        predicate: impl Fn(&holtburger_dat::landblock::LandblockInfo) -> bool,
     ) -> Option<u32> {
         for x in 0..=0xfe {
             for y in 0..=0xfe {

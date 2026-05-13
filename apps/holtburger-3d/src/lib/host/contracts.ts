@@ -125,6 +125,14 @@ const landblockStaticBuildingDtoSchema =
 		numLeaves: z.number().int().nonnegative(),
 	});
 
+const landblockGeneratedSceneryInstanceDtoSchema =
+	landblockStaticInstanceDtoSchema.extend({
+		terrainIndex: z.number().int().nonnegative(),
+		sceneId: z.number().int().nonnegative(),
+		sceneTemplateIndex: z.number().int().nonnegative(),
+		scale: z.number().finite().positive(),
+	});
+
 export const runtimeBatchDtoSchema = z.object({
 	tick: z.number().int().nonnegative(),
 	entities: z.array(runtimeEntitySnapshotDtoSchema),
@@ -188,6 +196,18 @@ export const landblockStaticsPayloadDtoSchema = z.object({
 });
 export type LandblockStaticsPayloadDto = z.infer<
 	typeof landblockStaticsPayloadDtoSchema
+>;
+
+export const landblockGeneratedSceneryPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-generated-scenery"),
+	residencyKind: z.literal("outdoor-landblock"),
+	sourceAssetKind: z.literal("region-scene-table"),
+	landblockId: z.number().int().nonnegative(),
+	sceneryInstances: z.array(landblockGeneratedSceneryInstanceDtoSchema),
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockGeneratedSceneryPayloadDto = z.infer<
+	typeof landblockGeneratedSceneryPayloadDtoSchema
 >;
 
 export const indoorEnvCellPayloadDtoSchema = z.object({

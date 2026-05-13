@@ -81,6 +81,12 @@ export function formatLandblockStaticsAssetId(landblockId: number): string {
 	return `landblock-statics/${formatHex32(landblockId)}`;
 }
 
+export function formatLandblockGeneratedSceneryAssetId(
+	landblockId: number,
+): string {
+	return `landblock-generated-scenery/${formatHex32(landblockId)}`;
+}
+
 export function formatHex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
 }

@@ -3,6 +3,7 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
+	PreparedLandblockGeneratedSceneryInstance,
 	PreparedLandblockStaticBuilding,
 	PreparedLandblockStaticInstance,
 	PreparedSetupModelPart,
@@ -18,7 +19,10 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 
-type StaticRenderableInstanceKind = "scenery" | "building";
+type StaticRenderableInstanceKind =
+	| "scenery"
+	| "building"
+	| "generated-scenery";
 
 interface StaticRenderableSourceInstance {
 	kind: StaticRenderableInstanceKind;
@@ -29,6 +33,7 @@ interface StaticRenderableSourceInstance {
 	sourceIndex: number;
 	frame: FrameDto;
 	landblockWorldOffset: Vec3Dto;
+	sourceScale: Vec3Dto;
 	numLeaves: number | null;
 }
 
@@ -181,10 +186,19 @@ function collectStaticRenderableSourceInstances(
 ): StaticRenderableSourceInstance[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (
-			asset.payload.kind !== "landblock-statics" ||
+			!(
+				asset.payload.kind === "landblock-statics" ||
+				asset.payload.kind === "landblock-generated-scenery"
+			) ||
 			!activeLandblockSet.has(asset.payload.landblockId)
 		) {
 			return [];
+		}
+
+		if (asset.payload.kind === "landblock-generated-scenery") {
+			return asset.payload.sceneryInstances.map((instance) =>
+				normalizeGeneratedScenerySourceInstance(instance, focusLandblockId),
+			);
 		}
 
 		return [
@@ -224,7 +238,36 @@ function normalizeSourceInstance(
 			owningLandblockId,
 			focusLandblockId,
 		),
+		sourceScale: UNIT_SCALE,
 		numLeaves,
+	};
+}
+
+function normalizeGeneratedScenerySourceInstance(
+	instance: PreparedLandblockGeneratedSceneryInstance,
+	focusLandblockId: number,
+): StaticRenderableSourceInstance {
+	const owningLandblockId = normalizeOutdoorLandblockId(
+		instance.owningLandblockId,
+	);
+	return {
+		kind: "generated-scenery",
+		instanceId: instance.instanceId,
+		owningLandblockId,
+		sourceDid: instance.sourceDid,
+		sourceAssetId: instance.sourceAssetId,
+		sourceIndex: instance.sourceIndex,
+		frame: instance.frame,
+		landblockWorldOffset: deriveLandblockWorldOffset(
+			owningLandblockId,
+			focusLandblockId,
+		),
+		sourceScale: {
+			x: instance.scale,
+			y: instance.scale,
+			z: instance.scale,
+		},
+		numLeaves: null,
 	};
 }
 
@@ -299,8 +342,16 @@ function createStaticRenderablePart(
 		instanceFrame: instance.frame,
 		placementFrames: part.placementFrames,
 		landblockWorldOffset: instance.landblockWorldOffset,
-		scale: part.scale,
+		scale: multiplyScale(instance.sourceScale, part.scale),
 		debugColorKey,
+	};
+}
+
+function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
+	return {
+		x: left.x * right.x,
+		y: left.y * right.y,
+		z: left.z * right.z,
 	};
 }
 

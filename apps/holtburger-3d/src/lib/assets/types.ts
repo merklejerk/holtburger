@@ -71,12 +71,26 @@ export interface PreparedLandblockStaticBuilding extends PreparedLandblockStatic
 	numLeaves: number;
 }
 
+export interface PreparedLandblockGeneratedSceneryInstance extends PreparedLandblockStaticInstance {
+	terrainIndex: number;
+	sceneId: number;
+	sceneTemplateIndex: number;
+	scale: number;
+}
+
 export interface PreparedLandblockStaticsPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-statics";
 	sourceAssetKind: "landblock-info";
 	landblockId: number;
 	sceneryInstances: PreparedLandblockStaticInstance[];
 	buildingInstances: PreparedLandblockStaticBuilding[];
+}
+
+export interface PreparedLandblockGeneratedSceneryPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-generated-scenery";
+	sourceAssetKind: "region-scene-table";
+	landblockId: number;
+	sceneryInstances: PreparedLandblockGeneratedSceneryInstance[];
 }
 
 interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
@@ -165,7 +179,7 @@ interface PreparedGfxObjRenderBounds {
 	max: Vec3Dto;
 }
 
-export interface PreparedGfxObjInvalidPolygon {
+interface PreparedGfxObjInvalidPolygon {
 	polygonId: number;
 	vertexIds: number[];
 	missingVertexIds: number[];
@@ -278,6 +292,7 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 export type PreparedAssetPayload =
 	| PreparedTerrainLandblockPayload
 	| PreparedLandblockStaticsPayload
+	| PreparedLandblockGeneratedSceneryPayload
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
 	| PreparedCellStructurePayload
@@ -348,6 +363,18 @@ export function getPreparedAssetDependencies(
 					(instance) => instance.sourceAssetId,
 				),
 			]),
+		]
+			.sort()
+			.map((assetId) => ({ assetId }));
+	}
+
+	if (asset.payload.kind === "landblock-generated-scenery") {
+		return [
+			...new Set(
+				asset.payload.sceneryInstances.map(
+					(instance) => instance.sourceAssetId,
+				),
+			),
 		]
 			.sort()
 			.map((assetId) => ({ assetId }));

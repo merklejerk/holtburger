@@ -335,6 +335,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId).sort()).toEqual([
+			"landblock-generated-scenery/2d5affff",
 			"landblock-statics/2d5affff",
 			"terrain/2d5affff",
 		]);
@@ -360,6 +361,29 @@ describe("asset channel controller", () => {
 
 		expect(requests.map((request) => request.assetId)).toEqual([
 			"setup-model/02000002",
+		]);
+	});
+
+	it("derives demand-driven static renderable requests from generated outdoor scenery", () => {
+		const runtimeBatch = createRuntimeBatch();
+
+		const requests = createStaticRenderableAssetRequests(
+			runtimeBatch,
+			null,
+			"streaming",
+			{
+				"landblock-generated-scenery/0102ffff":
+					createPreparedLandblockGeneratedSceneryAsset(
+						"landblock-generated-scenery/0102ffff",
+						0x0102ffff,
+						["setup-model/02000003"],
+					),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"setup-model/02000003",
 		]);
 	});
 
@@ -1269,6 +1293,52 @@ function createPreparedLandblockStaticsAsset(
 				provenance: {
 					source: "repo-local-hba",
 					sourceAssetKind: "landblock-info",
+					errorCode: null,
+					detail: "test-cache",
+				},
+			},
+		},
+	);
+}
+
+function createPreparedLandblockGeneratedSceneryAsset(
+	assetId: string,
+	landblockId: number,
+	sourceAssetIds: string[],
+): PreparedAssetRecord {
+	return prepareAssetPayload(
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "landblock-generated-scenery",
+				residencyKind: "outdoor-landblock",
+				sourceAssetKind: "region-scene-table",
+				landblockId,
+				sceneryInstances: sourceAssetIds.map((sourceAssetId, index) => ({
+					instanceId: `${assetId}/generated/${index}`,
+					owningLandblockId: landblockId,
+					sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+					sourceAssetId,
+					sourceIndex: index,
+					terrainIndex: index,
+					sceneId: 0x12000001,
+					sceneTemplateIndex: index,
+					frame: {
+						origin: { x: index, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					scale: 1.25,
+				})),
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "region-scene-table",
 					errorCode: null,
 					detail: "test-cache",
 				},

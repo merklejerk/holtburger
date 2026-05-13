@@ -69,8 +69,9 @@ The plan should use AC-shaped terms instead of broad visual labels whenever poss
 - **Portal polygon**: the render/visibility polygon associated with a cell or building portal. Retail uses these polygons for clipped views and portal-mask/depth behavior; do not model them as terrain holes without stronger evidence.
 - **Gameplay portal**: a live entity / weenie that teleports or transports players. This is authoritative runtime object state and should not be confused with static cell/building portal topology.
 - **Subterranean opening**: an outdoor-world entrance into env-cell-backed space below the terrain surface. ACE position resolution can classify an outdoor-looking position as an env cell when the point is below terrain and inside an env-cell volume.
-- **Explicit landblock statics**: `LandblockInfo.Objects` and `LandblockInfo.Buildings`, now exposed through requestable `landblock-statics/*` assets. These are static content facts, not runtime-authoritative renderer bundles.
-- **Generated outdoor scenery**: pseudo-random outdoor scenery selected from terrain type / scenery bits, region scene tables, and `0x12 Scene` records. This is a distinct outdoor layer from explicit landblock statics and is expected to account for many trees, bushes, rocks, and natural clutter.
+- **Explicit landblock statics**: `LandblockInfo.Objects` and `LandblockInfo.Buildings`. These are authored static content facts, not runtime-authoritative renderer bundles. Phases 12.6/12.7 exposed them through `landblock-statics/*`; Phase 12.8 should fold them into the aggregate `outdoor-static-scene/*` payload.
+- **Generated outdoor scenery**: pseudo-random outdoor scenery selected from terrain type / scenery bits, region scene tables, and `0x12 Scene` records. This is a distinct outdoor layer from explicit landblock statics and is expected to account for many trees, bushes, rocks, and natural clutter. Phases 12.6/12.7 exposed it through `landblock-generated-scenery/*`; Phase 12.8 should fold it into the aggregate `outdoor-static-scene/*` payload.
+- **Outdoor static scene**: one landblock-scoped aggregate static-content fact containing explicit static objects, building records, generated outdoor scenery, and diagnostics. This should be the normal browser/client delivery unit after Phase 12.8.
 - **Scene object template**: one generated-scenery template entry inside a `0x12 Scene` record. ACE names this `ObjectDesc`, but the plan should avoid that name because it conflicts with runtime/network object-description semantics. A scene object template carries a candidate model id plus base frame, frequency, displacement, scale, rotation, slope, alignment, and orientation rules.
 - **Live entities / weenies**: server/runtime objects such as creatures, players, portals, doors, and interactables. Browser mode should not fake these as static scenery unless a dedicated diagnostic source is explicitly added.
 
@@ -82,22 +83,20 @@ The plan should use AC-shaped terms instead of broad visual labels whenever poss
 flowchart TD
     Coverage["Browser/client scene coverage<br/>selected landblock ring"]
     TerrainAsset["terrain/xxyyffff<br/>CellLandblock"]
-    StaticAsset["landblock-statics/xxyyffff<br/>LandblockInfo"]
-    GeneratedAsset["landblock-generated-scenery/xxyyffff<br/>planned Phase 12.7"]
+    StaticSceneAsset["outdoor-static-scene/xxyyffff<br/>Phase 12.8 aggregate"]
 
     Coverage --> TerrainAsset
-    Coverage --> StaticAsset
-    Coverage --> GeneratedAsset
+    Coverage --> StaticSceneAsset
 
     TerrainAsset --> TerrainGrid["Terrain bits + height grid<br/>81 terrain entries, 81 heights"]
     TerrainGrid --> TerrainMesh["Terrain render mesh"]
     TerrainGrid --> TerrainSceneBits["Terrain type + road + scenery bits"]
 
-    StaticAsset --> Objects["LandblockInfo.Objects<br/>explicit static stabs"]
-    StaticAsset --> Buildings["LandblockInfo.Buildings<br/>explicit structures + env-cell links"]
-    StaticAsset --> EnvCellCount["NumCells / restriction data<br/>structured-interior metadata"]
+    StaticSceneAsset --> Objects["LandblockInfo.Objects<br/>explicit static stabs"]
+    StaticSceneAsset --> Buildings["LandblockInfo.Buildings<br/>explicit structures + env-cell links"]
+    StaticSceneAsset --> EnvCellCount["NumCells / restriction data<br/>structured-interior metadata"]
 
-    GeneratedAsset --> TerrainSceneBits
+    StaticSceneAsset --> TerrainSceneBits
     TerrainSceneBits --> RegionTables["Region TerrainInfo + SceneInfo"]
     RegionTables --> SceneRecords["0x12 Scene records"]
     SceneRecords --> SceneObjectTemplates["scene object templates<br/>frequency, displacement, scale, rotation"]
@@ -106,9 +105,9 @@ flowchart TD
     Objects --> StaticFacts["explicit static facts"]
     Buildings --> StaticFacts
 
-    StaticFacts --> SourceAssets["source asset ids<br/>gfx-obj/* or setup-model/*"]
+    StaticFacts --> SourceAssets["source renderable refs<br/>DID + gfx/setup family"]
     GeneratedFacts --> SourceAssets
-    SourceAssets --> AssetGraph["main-thread asset graph<br/>setup-model -> gfx-obj leaves"]
+    SourceAssets --> AssetGraph["main-thread asset graph<br/>setup-model/* -> gfx-obj/* leaves"]
     AssetGraph --> StaticRenderables["frontend static-renderable scene"]
     TerrainMesh --> RenderScene["browser/client render scene inputs"]
     StaticRenderables --> RenderScene
@@ -1795,7 +1794,7 @@ Phase 11 course correction:
 
 #### Phase 12: Outdoor Scenery And The `gfx-obj` / `setup-model` Asset Family Seam
 
-Status: planned.
+Status: in progress; sub-phases 12.0 through 12.7 are implemented, with Phase 12.7 awaiting manual Tauri visual smoke.
 
 Replaces the old "Phase 12 = SpatialBody expansion" stub. Phase 11's gate review and the post-Phase 11 readiness check both concluded that browser mode lacks any honest driver for shared non-world body semantics: the world is currently terrain-only, the camera is a free fly-cam by design, and ray pick is a stubbed entity-distance heuristic that never touches `SpatialScene`. Forcing a shared-crate constraint expansion now would design role / membership / mask vocabulary against imagined demand.
 
@@ -2305,7 +2304,7 @@ Phase 12 testing expectations:
 
 ##### Phase 12.7 — Generated Outdoor Scenery From Region Scene Tables
 
-Status: planned.
+Status: implemented on 2026-05-13; awaiting manual Tauri visual smoke.
 
 Purpose: fill the largest remaining outdoor visual gap before moving deeper into structured-interior rendering. Outdoor landblocks currently show terrain plus explicit `LandblockInfo.Objects` / `Buildings`, but ACE also generates natural scenery from terrain cell bits, region scene tables, and `0x12 Scene` records. This layer should account for many missing trees, bushes, rocks, and natural clutter.
 
@@ -2359,6 +2358,191 @@ Phase gate before Phase 13:
 - confirm terrain mesh parity stays retail-shaped, including the deterministic `SWtoNEcut` diagonal split, before judging any structure/scenery placement mismatch as a placement bug
 - decide whether terrain materials/roads are now the bigger outdoor fidelity gap or whether structured-interior geometry should proceed next
 - decide whether generated scenery should remain a derived static-fact payload or whether individual `scene/*` records should become first-class prepared assets for tooling and reuse
+
+Delivered on 2026-05-13:
+
+- added `Scene` and `RegionDesc` decoders in `holtburger-dat`, scoped to the data needed for outdoor scene-table generation: `0x12 Scene` object templates, region terrain scene-type tables, and region scene lists
+- added the requestable `landblock-generated-scenery/{xxyyffff}` asset family in the Tauri host adapter
+- derived generated outdoor scenery as deterministic static facts from `CellLandblock.Terrain[i]`, region scene tables, selected `0x12 Scene` records, and scene object templates
+- matched the ACViewer/retail constants for scene selection, per-template frequency noise, displacement, scale, rotation, road avoidance, and slope checks
+- skipped `SceneObjectTemplate.WeenieObj != 0` entries, keeping live/interactable sources out of this static-renderable pass
+- grounded generated scenery to sampled landblock terrain height and emitted stable instance ids that include owning landblock, selected scene id, terrain index, template index, and source DID
+- fed generated-scenery payload dependencies through the existing setup/gfx graph orchestration and reused the existing static-renderable composition/GPU hydration path with per-instance uniform scale
+- updated browser scene coverage requests so browser-selected landblock rings request terrain, explicit `landblock-statics/*`, and generated `landblock-generated-scenery/*` facts together
+- updated diagnostics to count explicit static objects, buildings, and generated outdoor scenery separately
+- added Rust fixture coverage proving `landblock-generated-scenery/da55ffff` decodes repo-local region/scene data into renderable instances, and TS coverage proving generated-scenery facts derive setup/gfx asset requests
+
+Decisions:
+
+- Chose a derived `landblock-generated-scenery/*` static-fact payload instead of first-class `scene/*` prepared assets for the first pass. This keeps browser coverage cacheable at the same granularity as terrain/static facts and avoids exposing scene records as standalone frontend assets before tooling needs them.
+- Kept generated scenery app-local to the 3D asset/content path. It is static DAT-derived render content, not runtime-authoritative world state, so it remains frontend-requested rather than pushed through runtime batches.
+- Reused the existing static-renderable source shape and added generated-scenery-specific scale metadata, rather than creating a parallel renderer path.
+
+Course corrections:
+
+- The first pass implements basic survival filters only: bounds, road avoidance, terrain slope, and point-spacing rejection against explicit statics/buildings and earlier generated scenery. ACViewer/retail also run richer building/cell/object-within-block collision checks through physics objects; matching that exactly needs stronger decoded bounds/collision data and should be a follow-up, not a blocker for first visual coverage.
+- Generated template `align`/terrain-normal orientation is not fully honored yet. Non-aligned random heading is implemented; exact `ObjAlign` parity should be revisited after visual smoke if rocks/trees visibly float or lean incorrectly.
+- `RegionDesc` decoding currently skips many unrelated region sections after consuming enough to reach `SceneInfo` and `TerrainInfo`. That is intentional for Phase 12.7, but future terrain materials/roads work should replace the skips with typed region substructures as needed.
+- The implementation has automated fixture coverage but has not been manually smoke-tested in the Tauri renderer yet. Before Phase 13, run browser mode around known populated outdoor landblocks and inspect generated scenery density, scale, heading, and terrain grounding.
+
+Next-step assessment:
+
+- Phase 13 still makes sense after outdoor static-scene assembly is cleaned up, but Phase 12.7 left too much durable outdoor scene assembly in the Tauri adapter and split outdoor static facts across two frontend payload families. Insert Phase 12.8 before Phase 13 to extract a reusable Rust static outdoor scene assembly component and migrate delivery to a single aggregate payload.
+- If visual inspection shows outdoor readability is now mostly blocked by missing terrain materials, roads, water, or texture/surface fidelity, insert a narrow outdoor-materials/roads phase after Phase 12.8. Otherwise proceed to Phase 13 structured-interior geometry using the now-broader static-renderable confidence from Phase 12.
+
+##### Phase 12.8 — Reusable Static Outdoor Scene Assembly
+
+Status: planned.
+
+Purpose: turn the Phase 12.6/12.7 proof into an isomorphic Rust component that browser mode and the future client runtime can both use. Phase 12.7 intentionally proved generated outdoor scenery in the Tauri adapter, but that should not become the long-term owner of outdoor static scene assembly. The durable shape should avoid duplicating explicit statics, buildings, generated scenery, and future placement-suppression logic between browser and client modes.
+
+Architectural decision:
+
+- introduce a reusable Rust `StaticOutdoorSceneAssembler`-style component in `holtburger-core`
+- do not make `ContentRepository` own the assembler. Callers own or construct the assembler and pass `&ContentRepository` into assembly calls, unless later caching requirements justify an injected repository handle
+- keep `holtburger-content` focused on resource access / typed loading helpers; do not let it become the scene builder
+- keep `holtburger-world` focused on active authoritative spatial state. It may later import assembled static scene facts into runtime spatial state, but it should not read DAT assets or own static-content assembly
+- keep browser/frontend mode responsible for coverage policy, asset requests, Three.js hydration, HUD/debug display, browser camera controls, and picking policy
+- keep Tauri adapter responsibility to request/serialization glue; it should not contain the primary static scene assembly algorithm after this phase
+
+Target shape:
+
+```text
+caller: browser adapter or future client runtime
+  owns ContentRepository
+  owns/constructs StaticOutdoorSceneAssembler
+  calls assemble_landblock(&ContentRepository, landblock_id)
+
+StaticOutdoorSceneAssembler
+  loads CellLandblock, LandblockInfo, RegionDesc, Scene records, and later setup/gfx bounds as needed
+  emits StaticOutdoorScene
+    explicit object instances
+    building instances
+    generated scenery instances
+    typed source renderable refs: source DID plus gfx/setup/unsupported family
+    source-layer diagnostics
+    future rejection diagnostics / bounds / portal / material witnesses
+
+browser adapter
+  serializes StaticOutdoorScene into asset payloads and formats frontend asset ids such as gfx-obj/* and setup-model/*
+
+future client runtime
+  imports StaticOutdoorScene into authoritative static spatial structures
+```
+
+Non-goals:
+
+- do not wire browser mode through the live client runtime lifecycle just to reuse static scenery placement
+- do not move AC placement rules to TypeScript
+- do not make `WorldDisplay` aware of scene assembly or coverage policy
+- do not introduce a generic shared scene graph abstraction before Phase 13 proves the structured-interior shape
+- do not keep both split payload and aggregate payload paths alive after migration except during the transition sub-phase
+
+##### Phase 12.8a — Core Static Outdoor Scene Model
+
+Status: planned.
+
+Scope: define the Rust model and API shape before moving behavior. This is type/API work only.
+
+Primary deliverables:
+
+- add `StaticOutdoorSceneAssembler` API shape in `holtburger-core`, initially stateless and taking `&ContentRepository` plus landblock id
+- add `StaticOutdoorScene` output types that distinguish source layers: explicit object, building, generated scenery
+- include source DID, typed renderable source family, source index, owning landblock id, frame, optional uniform scale, and stable semantic instance identity in the common placed-instance shape
+- keep frontend asset string formatting (`gfx-obj/{did}`, `setup-model/{did}`) in the Tauri/frontend adapter boundary, not in the core assembly model
+- include a diagnostics shell with attempted/accepted/rejected counts by layer, even if some counts remain zero until 12.8e
+- keep `SceneObjectTemplate` naming in core-facing types; do not leak ACE's ambiguous `ObjectDesc` name
+
+Acceptance:
+
+- no Tauri/frontend behavior changes
+- the model can represent the existing `landblock-statics/*` and `landblock-generated-scenery/*` payloads without loss
+- the core model does not require frontend asset-id strings to represent source assets
+- tests cover stable ids and source-layer separation on small synthetic inputs or fixture-backed assembly if cheap
+
+##### Phase 12.8b — Move Existing Assembly Into Core
+
+Status: planned.
+
+Scope: move the existing Phase 12.6 explicit-static derivation and Phase 12.7 generated-scenery derivation out of the Tauri adapter into the core assembler without changing frontend delivery yet.
+
+Primary deliverables:
+
+- move landblock normalization, explicit object/building fact derivation, generated scene-table selection, placement, road/slope/basic overlap filtering, and stable id construction into `holtburger-core`
+- keep resource loading through `ContentRepository` passed by the caller
+- keep the Tauri adapter serving `landblock-statics/*` and `landblock-generated-scenery/*` temporarily by slicing the core `StaticOutdoorScene` and formatting source asset ids at the adapter boundary
+- add core tests that prove generated scenery for a repo-local fixture remains stable and layer-distinct
+- reduce the Tauri adapter back toward serialization and error/provenance glue
+
+Acceptance:
+
+- no frontend asset family change yet
+- sliced legacy payloads remain compatible from the frontend's point of view while the aggregate path is prepared
+- existing Rust adapter tests and TS tests continue to pass
+- generated scenery counts and stable ids for known fixtures remain unchanged unless a deliberate parity correction is documented
+
+##### Phase 12.8c — Aggregate Outdoor Static Scene Asset Family
+
+Status: planned.
+
+Scope: change delivery to avoid duplicate frontend/Rust work by replacing the two split renderer-fact payloads with one aggregate static scene payload per landblock.
+
+Primary deliverables:
+
+- add `outdoor-static-scene/{xxyyffff}` host asset family
+- define a TS/Rust payload carrying explicit objects, buildings, generated scenery, and diagnostics in one landblock-scoped static scene fact
+- teach the asset worker and prepared payload taxonomy to parse/prepare `outdoor-static-scene`
+- make scene coverage request `outdoor-static-scene/*` instead of both `landblock-statics/*` and `landblock-generated-scenery/*`
+- derive setup/gfx dependencies from the aggregate prepared payload
+- update static-renderable composition to consume the aggregate payload while preserving layer-distinct HUD/debug counts
+- update browser/model tests to prove a coverage ring requests exactly one static scene fact per landblock, plus the existing terrain facts
+
+Acceptance:
+
+- browser-selected landblock coverage requests terrain plus one static-scene payload per active landblock
+- frontend still controls coverage, graph orchestration, and GPU hydration
+- generated/explicit/building layers remain distinguishable in diagnostics and tests
+- no runtime batch carries DAT-derived static renderer facts
+
+##### Phase 12.8d — Remove Split Outdoor Static Payload Paths
+
+Status: planned.
+
+Scope: remove transition-only duplication after the aggregate payload is active.
+
+Primary deliverables:
+
+- delete or hard-deprecate `landblock-statics/*` and `landblock-generated-scenery/*` request paths if no callers remain
+- remove stale TS helpers, schemas, prepared payload variants, and tests for the split paths
+- remove Tauri adapter slicing endpoints if they are no longer used
+- update docs, diagrams, near-term checklist, and diagnostics to use `outdoor-static-scene/*`
+- run `knip`, clippy, format, and focused tests to catch dead code or hollow abstractions
+
+Acceptance:
+
+- there is one normal outdoor static scene fact delivery path
+- no compatibility shim or reexport preserves the old split path without an active caller
+- static analyzers do not report dead split-path code
+
+##### Phase 12.8e — Placement Suppression Diagnostics And Physics Hooks
+
+Status: planned.
+
+Scope: add the diagnostic and data hooks needed to pursue closer retail generated-scenery suppression parity without blocking the aggregate refactor on full physics parity.
+
+Primary deliverables:
+
+- add generated-scenery candidate diagnostics in core: attempted, skipped `WeenieObj`, rejected road, rejected slope, rejected bounds, rejected overlap/basic occupancy, accepted
+- expose bounded diagnostics through `outdoor-static-scene/*` so browser HUD/logging can identify why generated candidates survive or disappear without dumping every candidate by default
+- keep per-candidate records gated behind verbose/debug diagnostics and capped per landblock until a dedicated inspection view exists
+- identify the next decoded physics/bounds data needed for fuller retail parity: setup/gfx bounds, building occupancy, cell containment, and object-within-block checks
+- keep exact retail physics-object construction out of scope unless the data is already available cleanly
+
+Acceptance:
+
+- extra-tree mismatches can be investigated from deterministic candidate/rejection counts instead of visual guessing
+- the assembler has clear extension points for richer suppression using decoded physics/bounds data
+- Phase 13 can still proceed afterward without depending on browser-only static scene code
 
 #### Phase 13: `Environment` / `CellStruct` Decoder And First Structured-Interior Render
 
@@ -2497,7 +2681,7 @@ Concrete rules:
 
 Verification at each phase gate:
 
-- Phase 12 gate review: confirm that outdoor static placements are no longer runtime-pushed renderer facts and that `landblock-statics/*` remains usable by browser/manual coverage and future client-driven coverage alike
+- Phase 12 gate review: confirm that outdoor static placements are no longer runtime-pushed renderer facts and that `outdoor-static-scene/*` is the normal browser/manual and future client-driven static outdoor delivery path after Phase 12.8
 - Phase 13 gate review: confirm that structured-interior visible-cell-set flow remains source-neutral and that `EnvCell.static_objects` follows the static-content path unless a future `ClientRuntime` source proves those placements are dynamic runtime state
 - Phase 14 gate review: confirm that the expanded `SpatialBody` semantics describe the new non-world body kinds in source-neutral terms, so a future `ClientRuntime`-fed scene can register the same body kinds without inventing new variants
 
@@ -2999,16 +3183,18 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.6 are complete. The next step should be a short live Tauri visual smoke pass for outdoor static rendering, then Phase 12.7: generated outdoor scenery from region scene tables.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.7 are implemented. The next step should be a short live Tauri visual smoke pass for generated outdoor scenery and explicit statics together, then Phase 12.8 to move outdoor static scene assembly into a reusable Rust core component and migrate delivery to an aggregate static-scene asset.
 
 Current near-term sequence:
 
-1. run the outdoor static visual smoke pass and correct any AC-to-Three transform mistakes before generated scenery or structured-interior geometry depends on the same conversion path
-2. implement Phase 12.7 generated outdoor scenery: terrain/scenery bits, region scene tables, `0x12 Scene` records, deterministic placement, setup/gfx dependency loading, and static-renderable composition reuse
-3. verify terrain/placement parity after generated scenery lands, including transform plausibility and the retail-shaped terrain diagonal split, before diagnosing missing structures or openings as portal problems
-4. reassess whether terrain materials/roads or structured interiors are the bigger next gap after generated outdoor scenery lands
-5. proceed to Phase 13 `Environment` / `CellStruct` decoding and first structured-interior render if outdoor transforms and generated scenery are plausible
-6. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
-7. derive structured-interior scene coverage in browser-mode orchestration from `EnvCell.visible_cells` plus prepared assets, then pass the selected render scene into `WorldDisplay`
-8. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-9. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the `landblock-statics/*` correction, unless a later live-session source proves the fact is dynamic runtime state
+1. finish the outdoor visual smoke pass and inspect explicit statics plus generated scenery density, scale, heading, and terrain grounding
+2. correct any high-confidence AC-to-Three transform mistakes, generated `ObjAlign`/terrain-normal gaps, or terrain grounding problems before structured-interior geometry depends on the same conversion path
+3. verify terrain/placement parity, including the retail-shaped terrain diagonal split, before diagnosing missing structures or openings as portal problems
+4. implement Phase 12.8a through 12.8e: core static outdoor scene model, move existing assembly into core, add aggregate `outdoor-static-scene/*`, remove split payload paths, and add bounded placement suppression diagnostics/hooks
+5. keep frontend asset-id strings out of the new core scene model; core should emit typed renderable source refs and the adapter should format `gfx-obj/*` / `setup-model/*` payload ids
+6. reassess whether terrain materials/roads or structured interiors are the bigger next gap after generated outdoor scenery and aggregate static-scene delivery are visually plausible
+7. proceed to Phase 13 `Environment` / `CellStruct` decoding and first structured-interior render if outdoor transforms and generated scenery are plausible
+8. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
+9. derive structured-interior scene coverage in browser-mode orchestration from `EnvCell.visible_cells` plus prepared assets, then pass the selected render scene into `WorldDisplay`
+10. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+11. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

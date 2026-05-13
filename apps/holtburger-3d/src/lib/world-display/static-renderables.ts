@@ -16,9 +16,9 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 
-export type StaticRenderableInstanceKind = "scenery" | "building";
+type StaticRenderableInstanceKind = "scenery" | "building";
 
-export interface StaticRenderableSourceInstance {
+interface StaticRenderableSourceInstance {
 	kind: StaticRenderableInstanceKind;
 	instanceId: string;
 	owningLandblockId: number;
@@ -129,7 +129,7 @@ export function deriveStaticRenderableSceneModel(
 	};
 }
 
-export function groupStaticRenderablePartsByGfxAssetId(
+function groupStaticRenderablePartsByGfxAssetId(
 	parts: StaticRenderablePart[],
 ): Map<string, StaticRenderablePart[]> {
 	const partsByGfxAssetId = new Map<string, StaticRenderablePart[]>();
@@ -151,7 +151,7 @@ export function isPreparedGfxObjAsset(
 	return asset?.payload.kind === "gfx-obj";
 }
 
-export function isPreparedSetupModelAsset(
+function isPreparedSetupModelAsset(
 	asset: PreparedAssetRecord | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedSetupModelPayload } {
 	return asset?.payload.kind === "setup-model";

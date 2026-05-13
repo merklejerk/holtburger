@@ -150,7 +150,7 @@ describe("asset channel controller", () => {
 			eastWestHemisphere: "W",
 			elevation: 0,
 			source: "manual",
-				landblockId: null,
+			landblockId: null,
 		});
 
 		expect(landblockId).toBe(0x2d5affff);

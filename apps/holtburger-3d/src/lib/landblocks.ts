@@ -62,10 +62,9 @@ export function buildOutdoorCoverageLandblockIds(
 	focusLandblockId: number,
 	landblockRadius: number,
 ): number[] {
-	return buildOutdoorCoverageLandblocks(
-		focusLandblockId,
-		landblockRadius,
-	).map((landblock) => landblock.landblockId);
+	return buildOutdoorCoverageLandblocks(focusLandblockId, landblockRadius).map(
+		(landblock) => landblock.landblockId,
+	);
 }
 
 export function formatLandblockLabel(landblockId: number): string {

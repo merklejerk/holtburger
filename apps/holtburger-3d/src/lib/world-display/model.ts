@@ -32,7 +32,7 @@ export interface NormalizedViewportPoint {
 	normalizedY: number;
 }
 
-export interface WorldDisplayDebugEntity {
+interface WorldDisplayDebugEntity {
 	entityId: number;
 	label: string;
 	locationLabel: string;
@@ -42,7 +42,7 @@ export interface WorldDisplayDebugEntity {
 	screenYPercent: number;
 }
 
-export interface WorldDisplaySceneChunk {
+interface WorldDisplaySceneChunk {
 	landblockId: number;
 	label: string;
 	role: "focus" | "neighbor";
@@ -51,7 +51,7 @@ export interface WorldDisplaySceneChunk {
 	reason: string;
 }
 
-export interface WorldDisplaySceneContext {
+interface WorldDisplaySceneContext {
 	kind: "outdoor-landblock-ring" | "indoor-visible-cell-set";
 	statusText: string;
 	focusAnchorLabel: string;
@@ -64,7 +64,7 @@ export interface WorldDisplaySceneContext {
 	staticRenderableSourceAssetIds: string[];
 }
 
-export interface WorldDisplayTerrainContract {
+interface WorldDisplayTerrainContract {
 	requestKey: string | null;
 	sourceAssetKind: "cell-landblock";
 	decodeOwner: "rust-host-adapter";
@@ -75,7 +75,7 @@ export interface WorldDisplayTerrainContract {
 	statusText: string;
 }
 
-export interface WorldDisplayTerrainPolygon {
+interface WorldDisplayTerrainPolygon {
 	key: string;
 	points: string;
 	fill: string;
@@ -339,9 +339,7 @@ function buildOutdoorChunkRing(
 		landblockId: landblock.landblockId,
 		label: formatLandblockLabel(landblock.landblockId),
 		role:
-			landblock.offsetX === 0 && landblock.offsetY === 0
-				? "focus"
-				: "neighbor",
+			landblock.offsetX === 0 && landblock.offsetY === 0 ? "focus" : "neighbor",
 		offsetX: landblock.offsetX,
 		offsetY: landblock.offsetY,
 		reason: "",

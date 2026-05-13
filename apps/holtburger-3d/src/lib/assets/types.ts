@@ -8,7 +8,7 @@ import type {
 	Vec3Dto,
 } from "../host/contracts";
 
-export type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
+type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
 
 export type AssetResidencyKind =
 	| "outdoor-landblock"
@@ -46,7 +46,7 @@ interface PreparedAssetPayloadBase {
 	provenance: PreparedAssetProvenance;
 }
 
-export interface PreparedDebugPresentation {
+interface PreparedDebugPresentation {
 	primitive: string;
 	paletteKey: string;
 }
@@ -79,7 +79,7 @@ export interface PreparedLandblockStaticsPayload extends PreparedAssetPayloadBas
 	buildingInstances: PreparedLandblockStaticBuilding[];
 }
 
-export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
+interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	kind: "indoor-env-cell";
 	sourceAssetKind: "env-cell";
 	debugPresentation: PreparedDebugPresentation;
@@ -93,7 +93,7 @@ export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	staticObjectCount: number;
 }
 
-export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
+interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
 	kind: "environment";
 	sourceAssetKind: "environment";
 	debugPresentation: PreparedDebugPresentation;
@@ -101,7 +101,7 @@ export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
 	cellStructureIds: number[];
 }
 
-export interface PreparedCellStructurePayload extends PreparedAssetPayloadBase {
+interface PreparedCellStructurePayload extends PreparedAssetPayloadBase {
 	kind: "cell-structure";
 	sourceAssetKind: "cell-structure";
 	debugPresentation: PreparedDebugPresentation;
@@ -114,25 +114,25 @@ export interface PreparedCellStructurePayload extends PreparedAssetPayloadBase {
 	hasDrawingBsp: boolean;
 }
 
-export interface PreparedGfxObjUv {
+interface PreparedGfxObjUv {
 	u: number;
 	v: number;
 }
 
-export interface PreparedGfxObjVertex {
+interface PreparedGfxObjVertex {
 	id: number;
 	origin: Vec3Dto;
 	normal: Vec3Dto;
 	uvs: PreparedGfxObjUv[];
 }
 
-export interface PreparedGfxObjVertexArray {
+interface PreparedGfxObjVertexArray {
 	vertexType: number | null;
 	vertexCount: number;
 	vertices: PreparedGfxObjVertex[];
 }
 
-export interface PreparedGfxObjPolygon {
+interface PreparedGfxObjPolygon {
 	id: number;
 	numPts: number;
 	stippling: number;
@@ -144,23 +144,23 @@ export interface PreparedGfxObjPolygon {
 	negUvIndices: number[];
 }
 
-export interface PreparedGfxObjBspNode {
+interface PreparedGfxObjBspNode {
 	kind: string;
 	[key: string]: unknown;
 }
 
-export interface PreparedGfxObjPhysicsWitness {
+interface PreparedGfxObjPhysicsWitness {
 	polygonCount: number;
 	hasBsp: boolean;
 }
 
-export interface PreparedGfxObjRenderTriangle {
+interface PreparedGfxObjRenderTriangle {
 	polygonId: number;
 	surfaceId: number | null;
 	firstVertex: number;
 }
 
-export interface PreparedGfxObjRenderBounds {
+interface PreparedGfxObjRenderBounds {
 	min: Vec3Dto;
 	max: Vec3Dto;
 }
@@ -200,19 +200,19 @@ export interface PreparedSetupModelPart {
 	scale: Vec3Dto | null;
 }
 
-export interface PreparedSetupModelLocation {
+interface PreparedSetupModelLocation {
 	key: number;
 	partId: number;
 	frame: FrameDto;
 }
 
-export interface PreparedSetupModelPlacementFrame {
+interface PreparedSetupModelPlacementFrame {
 	key: number;
 	frames: FrameDto[];
 	hookCount: number;
 }
 
-export interface PreparedSetupModelLight {
+interface PreparedSetupModelLight {
 	key: number;
 	viewerSpaceLocation: FrameDto;
 	color: number;
@@ -248,19 +248,19 @@ export interface PreparedSetupModelPayload extends PreparedAssetPayloadBase {
 	defaultScriptTable: number | null;
 }
 
-export interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
+interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
 	kind: "visual-asset-stub";
 	sourceAssetKind: string | null;
 	debugPresentation: PreparedDebugPresentation;
 }
 
-export interface PreparedDependencyManifestPayload extends PreparedAssetPayloadBase {
+interface PreparedDependencyManifestPayload extends PreparedAssetPayloadBase {
 	kind: "dependency-manifest";
 	sourceAssetKind: "dependency-manifest";
 	dependencyAssetIds: string[];
 }
 
-export interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
+interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 	kind: "unknown";
 	sourceAssetKind: string | null;
 	rawKind: string;
@@ -290,7 +290,7 @@ export interface PreparedAssetDependency {
 	assetId: string;
 }
 
-export type PreparedAssetDependencyReadiness =
+type PreparedAssetDependencyReadiness =
 	| "ready"
 	| "awaiting-dependency"
 	| "partial-ready";
@@ -390,7 +390,7 @@ export function derivePreparedAssetDependencyStatus(
 	};
 }
 
-export type AssetActivityStatus = "requested" | "prepared" | "failed";
+type AssetActivityStatus = "requested" | "prepared" | "failed";
 
 export interface AssetActivityRecord {
 	requestId: string;

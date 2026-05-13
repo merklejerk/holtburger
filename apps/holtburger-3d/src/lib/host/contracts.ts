@@ -1,29 +1,23 @@
 import { z } from "zod";
 
 const lifecyclePhaseValueSchema = z.enum(["booting", "ready", "disconnected"]);
-export type LifecyclePhase = z.infer<typeof lifecyclePhaseValueSchema>;
 
 const modeHintValueSchema = z.enum(["client"]);
-export type ModeHint = z.infer<typeof modeHintValueSchema>;
 
 const sessionStateValueSchema = z.enum([
 	"unavailable",
 	"disconnected",
 	"connected",
 ]);
-export type SessionState = z.infer<typeof sessionStateValueSchema>;
 
 const interactionModeValueSchema = z.enum(["none", "inspect"]);
-export type InteractionMode = z.infer<typeof interactionModeValueSchema>;
 
 const busyStateValueSchema = z.enum(["idle", "loading"]);
-export type BusyState = z.infer<typeof busyStateValueSchema>;
 
 const assetPriorityValueSchema = z.enum(["bootstrap", "streaming", "prefetch"]);
 export type AssetPriority = z.infer<typeof assetPriorityValueSchema>;
 
 const assetPayloadKindValueSchema = z.enum(["bytes", "json"]);
-export type AssetPayloadKind = z.infer<typeof assetPayloadKindValueSchema>;
 
 const assetProvenanceSourceValueSchema = z.enum([
 	"repo-local-hba",
@@ -51,41 +45,34 @@ const indoorRuntimeFieldIdValueSchema = z.enum([
 	"environment-id",
 	"cell-structure-id",
 ]);
-export type IndoorRuntimeFieldId = z.infer<
-	typeof indoorRuntimeFieldIdValueSchema
->;
 
 const indoorAssetFamilyIdValueSchema = z.enum([
 	"indoor-env-cell",
 	"environment",
 	"cell-structure",
 ]);
-export type IndoorAssetFamilyId = z.infer<
-	typeof indoorAssetFamilyIdValueSchema
->;
 
-export const vec3DtoSchema = z.object({
+const vec3DtoSchema = z.object({
 	x: z.number().finite(),
 	y: z.number().finite(),
 	z: z.number().finite(),
 });
 export type Vec3Dto = z.infer<typeof vec3DtoSchema>;
 
-export const quaternionDtoSchema = z.object({
+const quaternionDtoSchema = z.object({
 	w: z.number().finite(),
 	x: z.number().finite(),
 	y: z.number().finite(),
 	z: z.number().finite(),
 });
-export type QuaternionDto = z.infer<typeof quaternionDtoSchema>;
 
-export const frameDtoSchema = z.object({
+const frameDtoSchema = z.object({
 	origin: vec3DtoSchema,
 	orientation: quaternionDtoSchema,
 });
 export type FrameDto = z.infer<typeof frameDtoSchema>;
 
-export const sphereDtoSchema = z.object({
+const sphereDtoSchema = z.object({
 	center: vec3DtoSchema,
 	radius: z.number().finite(),
 });
@@ -98,7 +85,7 @@ export const lifecycleStateDtoSchema = z.object({
 });
 export type LifecycleStateDto = z.infer<typeof lifecycleStateDtoSchema>;
 
-export const runtimeEntitySnapshotDtoSchema = z.object({
+const runtimeEntitySnapshotDtoSchema = z.object({
 	entityId: z.number().int().nonnegative(),
 	label: z.string(),
 	position: vec3DtoSchema,
@@ -109,11 +96,7 @@ export const runtimeEntitySnapshotDtoSchema = z.object({
 	locationLabel: z.string(),
 	isLocalPlayer: z.boolean(),
 });
-export type RuntimeEntitySnapshotDto = z.infer<
-	typeof runtimeEntitySnapshotDtoSchema
->;
-
-export const runtimeResidencyDtoSchema = z.object({
+const runtimeResidencyDtoSchema = z.object({
 	focusEntityId: z.number().int().nonnegative().nullable(),
 	focusLandblockId: z.number().int().nonnegative(),
 	focusCellId: z.number().int().nonnegative().nullable(),
@@ -128,7 +111,7 @@ export const runtimeResidencyDtoSchema = z.object({
 });
 export type RuntimeResidencyDto = z.infer<typeof runtimeResidencyDtoSchema>;
 
-export const landblockStaticInstanceDtoSchema = z.object({
+const landblockStaticInstanceDtoSchema = z.object({
 	instanceId: z.string().min(1),
 	owningLandblockId: z.number().int().nonnegative(),
 	sourceDid: z.number().int().nonnegative(),
@@ -136,17 +119,11 @@ export const landblockStaticInstanceDtoSchema = z.object({
 	sourceIndex: z.number().int().nonnegative(),
 	frame: frameDtoSchema,
 });
-export type LandblockStaticInstanceDto = z.infer<
-	typeof landblockStaticInstanceDtoSchema
->;
 
-export const landblockStaticBuildingDtoSchema =
+const landblockStaticBuildingDtoSchema =
 	landblockStaticInstanceDtoSchema.extend({
 		numLeaves: z.number().int().nonnegative(),
 	});
-export type LandblockStaticBuildingDto = z.infer<
-	typeof landblockStaticBuildingDtoSchema
->;
 
 export const runtimeBatchDtoSchema = z.object({
 	tick: z.number().int().nonnegative(),
@@ -162,12 +139,11 @@ export const frontendStateFeedDtoSchema = z.object({
 });
 export type FrontendStateFeedDto = z.infer<typeof frontendStateFeedDtoSchema>;
 
-export const assetLookupRequestDtoSchema = z.object({
-	requestId: z.string().min(1),
-	assetId: z.string().min(1),
-	priority: assetPriorityValueSchema,
-});
-export type AssetLookupRequestDto = z.infer<typeof assetLookupRequestDtoSchema>;
+export interface AssetLookupRequestDto {
+	requestId: string;
+	assetId: string;
+	priority: AssetPriority;
+}
 
 export const assetLookupResponseDtoSchema = z.object({
 	requestId: z.string().min(1),
@@ -185,7 +161,6 @@ export const assetProvenanceDtoSchema = z.object({
 	errorCode: assetErrorCodeValueSchema.nullable(),
 	detail: z.string().nullable(),
 });
-export type AssetProvenanceDto = z.infer<typeof assetProvenanceDtoSchema>;
 
 export const terrainLandblockPayloadDtoSchema = z.object({
 	kind: z.literal("terrain-landblock"),
@@ -266,14 +241,12 @@ const gfxObjVertexDtoSchema = z.object({
 	normal: vec3DtoSchema,
 	uvs: z.array(z.object({ u: z.number().finite(), v: z.number().finite() })),
 });
-export type GfxObjVertexDto = z.infer<typeof gfxObjVertexDtoSchema>;
 
 const gfxObjVertexArrayDtoSchema = z.object({
 	vertexType: z.number().int().nullable(),
 	vertexCount: z.number().int().nonnegative(),
 	vertices: z.array(gfxObjVertexDtoSchema),
 });
-export type GfxObjVertexArrayDto = z.infer<typeof gfxObjVertexArrayDtoSchema>;
 
 const gfxObjPolygonDtoSchema = z.object({
 	id: z.number().int().nonnegative(),
@@ -286,7 +259,6 @@ const gfxObjPolygonDtoSchema = z.object({
 	posUvIndices: z.array(z.number().int().nonnegative()),
 	negUvIndices: z.array(z.number().int().nonnegative()),
 });
-export type GfxObjPolygonDto = z.infer<typeof gfxObjPolygonDtoSchema>;
 
 const gfxObjBspNodeDtoSchema: z.ZodType<{
 	kind: string;
@@ -331,15 +303,11 @@ const gfxObjBspNodeDtoSchema: z.ZodType<{
 		}),
 	]),
 );
-export type GfxObjBspNodeDto = z.infer<typeof gfxObjBspNodeDtoSchema>;
 
 const gfxObjPhysicsWitnessDtoSchema = z.object({
 	polygonCount: z.number().int().nonnegative(),
 	hasBsp: z.boolean(),
 });
-export type GfxObjPhysicsWitnessDto = z.infer<
-	typeof gfxObjPhysicsWitnessDtoSchema
->;
 
 export const gfxObjPayloadDtoSchema = z.object({
 	kind: z.literal("gfx-obj"),
@@ -365,31 +333,23 @@ const setupModelPartDtoSchema = z.object({
 	parentIndex: z.number().int().nonnegative().nullable(),
 	scale: vec3DtoSchema.nullable(),
 });
-export type SetupModelPartDto = z.infer<typeof setupModelPartDtoSchema>;
 
 const setupModelLocationDtoSchema = z.object({
 	key: z.number().int(),
 	partId: z.number().int(),
 	frame: frameDtoSchema,
 });
-export type SetupModelLocationDto = z.infer<typeof setupModelLocationDtoSchema>;
 
 const setupModelPlacementFrameDtoSchema = z.object({
 	key: z.number().int(),
 	frames: z.array(frameDtoSchema),
 	hookCount: z.number().int().nonnegative(),
 });
-export type SetupModelPlacementFrameDto = z.infer<
-	typeof setupModelPlacementFrameDtoSchema
->;
 
 const setupModelCollisionWitnessDtoSchema = z.object({
 	cylSphereCount: z.number().int().nonnegative(),
 	sphereCount: z.number().int().nonnegative(),
 });
-export type SetupModelCollisionWitnessDto = z.infer<
-	typeof setupModelCollisionWitnessDtoSchema
->;
 
 const setupModelLightDtoSchema = z.object({
 	key: z.number().int(),
@@ -399,7 +359,6 @@ const setupModelLightDtoSchema = z.object({
 	falloff: z.number().finite(),
 	coneAngle: z.number().finite(),
 });
-export type SetupModelLightDto = z.infer<typeof setupModelLightDtoSchema>;
 
 export const setupModelPayloadDtoSchema = z.object({
 	kind: z.literal("setup-model"),
@@ -460,9 +419,6 @@ export const genericAssetPayloadDtoSchema = z
 		provenance: assetProvenanceDtoSchema.optional(),
 	})
 	.passthrough();
-export type GenericAssetPayloadDto = z.infer<
-	typeof genericAssetPayloadDtoSchema
->;
 
 export const runtimeNotificationEnvelopeDtoSchema = z.object({
 	channel: z.string().min(1),
@@ -475,13 +431,10 @@ export type RuntimeNotificationEnvelopeDto = z.infer<
 	typeof runtimeNotificationEnvelopeDtoSchema
 >;
 
-export const indoorContractBacklogDtoSchema = z.object({
+const indoorContractBacklogDtoSchema = z.object({
 	runtimeFieldIds: z.array(indoorRuntimeFieldIdValueSchema),
 	assetFamilyIds: z.array(indoorAssetFamilyIdValueSchema),
 });
-export type IndoorContractBacklogDto = z.infer<
-	typeof indoorContractBacklogDtoSchema
->;
 
 export const hostBoundaryOverviewDtoSchema = z.object({
 	assetChannel: z.string().min(1),
@@ -501,16 +454,15 @@ export const debugConfigDtoSchema = z.object({
 });
 export type DebugConfigDto = z.infer<typeof debugConfigDtoSchema>;
 
-export const cameraHintDtoSchema = z.object({
-	mode: modeHintValueSchema,
-	source: z.string().min(1),
-	position: vec3DtoSchema,
-	forward: vec3DtoSchema,
-	viewportNormalizedX: z.number().finite(),
-	viewportNormalizedY: z.number().finite(),
-	destinationLabel: z.string().nullable(),
-});
-export type CameraHintDto = z.infer<typeof cameraHintDtoSchema>;
+export interface CameraHintDto {
+	mode: "client";
+	source: string;
+	position: Vec3Dto;
+	forward: Vec3Dto;
+	viewportNormalizedX: number;
+	viewportNormalizedY: number;
+	destinationLabel: string | null;
+}
 
 export const cameraHintAckDtoSchema = z.object({
 	accepted: z.boolean(),
@@ -518,23 +470,21 @@ export const cameraHintAckDtoSchema = z.object({
 });
 export type CameraHintAckDto = z.infer<typeof cameraHintAckDtoSchema>;
 
-export const rayPickRequestDtoSchema = z.object({
-	requestId: z.string().min(1),
-	origin: vec3DtoSchema,
-	direction: vec3DtoSchema,
-	screenXNormalized: z.number().finite(),
-	screenYNormalized: z.number().finite(),
-	destinationLabel: z.string().nullable(),
-});
-export type RayPickRequestDto = z.infer<typeof rayPickRequestDtoSchema>;
+export interface RayPickRequestDto {
+	requestId: string;
+	origin: Vec3Dto;
+	direction: Vec3Dto;
+	screenXNormalized: number;
+	screenYNormalized: number;
+	destinationLabel: string | null;
+}
 
-export const rayPickHitDtoSchema = z.object({
+const rayPickHitDtoSchema = z.object({
 	entityId: z.number().int().nonnegative(),
 	label: z.string(),
 	locationLabel: z.string(),
 	distance: z.number().finite(),
 });
-export type RayPickHitDto = z.infer<typeof rayPickHitDtoSchema>;
 
 export const rayPickResponseDtoSchema = z.object({
 	requestId: z.string().min(1),

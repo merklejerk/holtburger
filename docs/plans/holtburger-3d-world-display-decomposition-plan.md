@@ -147,6 +147,8 @@ Decision:
 
 ### Phase 0: Define The Renderer Boundary Seam
 
+Status: implemented.
+
 Purpose: create the small shared contract needed by later phases before moving behavior across component boundaries.
 
 Dry-run finding:
@@ -173,7 +175,26 @@ Exit criteria:
 - `WorldDisplay` can apply a parent-provided camera frame.
 - No browser/client policy has to be hidden behind a broad imperative `WorldDisplay` API.
 
+Progress:
+
+- Added `renderer-contract.ts` with renderer-scene, renderer-metrics, camera-frame callback, and viewport-pick types.
+- Added optional `controlledCameraFrame`, `onCameraFrameChange`, and `onRenderMetricsChange` props to `WorldDisplay`.
+- Kept existing browser/debug behavior in place while allowing a parent to observe render metrics and camera frames.
+
+Decisions and course corrections:
+
+- Used typed callback props instead of Svelte event dispatch so the parent/controller boundary is explicit and easy to test.
+- Kept the existing imperative terrain landblock pick API temporarily because Phase 1 still needs the browser wrapper to own ctrl-click selection before the final cleanup pass removes migration leftovers.
+- Metrics currently report scene bounds, active camera frame, terrain geometry counts, and static renderable counts. Future phases should reuse this shape rather than re-reading renderer internals.
+
+Future-step refinement:
+
+- Phase 1 should move browser camera gesture state into `BrowserWorldDisplay` using the new metrics/camera-frame seam.
+- Phase 2 should move camera hint submission after Phase 1, because hints should be derived from the browser-controlled frame rather than the renderer-owned debug state.
+
 ### Phase 1: Make Input Ownership Explicit
+
+Status: implemented.
 
 Purpose: stop adding new browser/client input policy to `WorldDisplay`.
 
@@ -191,7 +212,27 @@ Exit criteria:
 - Browser mode still supports orbit/pan/zoom/refit.
 - Client mode can render `WorldDisplay` without inheriting browser controls.
 
+Progress:
+
+- Moved browser orbit, pan, zoom, refit, context-menu suppression, and drag-click suppression into `BrowserWorldDisplay`.
+- `BrowserWorldDisplay` now owns `DebugOrbitCameraState`, consumes renderer metrics, and passes a controlled `SceneCameraFrame` back into `WorldDisplay`.
+- Left ctrl-click landblock selection in the browser wrapper.
+- Removed pointer, wheel, and key gesture handlers from `WorldDisplay`.
+
+Decisions and course corrections:
+
+- Kept the existing renderer-originated click handler in `WorldDisplay` for one phase so Phase 1 only moved camera/input ownership. Phase 2 is now responsible for moving that host-side debug pick cleanly.
+- Used parent capture handlers around `WorldDisplay` instead of adding another imperative viewport API. This keeps browser policy outside the renderer while preserving the existing Svelte component shape.
+- Added a browser-camera comment in code to document that these controls are debug/browser navigation policy, not the future client camera.
+
+Future-step refinement:
+
+- Phase 2 should move camera-hint throttling into `BrowserWorldDisplay` and resume hint submission during browser camera movement now that the browser wrapper owns the frame.
+- Phase 4 should use the browser-owned camera state for camera-mode HUD text once the debug overlay moves.
+
 ### Phase 2: Remove Host/Tauri Calls From `WorldDisplay`
+
+Status: implemented.
 
 Purpose: make runtime side effects mode-controller-owned.
 
@@ -210,7 +251,27 @@ Exit criteria:
 - Browser mode still sends camera hints and can run authority-sensitive debug picks if desired.
 - The parent/controller decides whether a rendered click becomes a Rust query.
 
+Progress:
+
+- Removed `submitCameraHint`, `resolveRayPick`, camera-hint throttling, and authority debug-pick submission from `WorldDisplay`.
+- Moved browser camera hint state, throttling, acknowledgements, and debug ray-pick responses into `BrowserWorldDisplay`.
+- `WorldDisplay` now receives `cameraAck`, `rayPickResponse`, and `pendingCameraHint` as diagnostic props while the HUD is still inside the renderer pending Phase 4.
+- Browser mode now decides whether a click is a ctrl-click landblock selection or an authority-sensitive debug ray pick.
+
+Decisions and course corrections:
+
+- Kept pure helper functions such as `buildRayPickRequest` and `shouldSendThrottledCameraHint` in `world-display/model.ts` temporarily because the current diagnostic model still lives there. Phase 4 should split/rename those browser diagnostics.
+- Restored camera hint submission during browser camera movement from the browser wrapper, using the controlled frame from Phase 1.
+- `WorldDisplay` still exposes render-local terrain picking, but no longer decides what a browser click means.
+
+Future-step refinement:
+
+- Phase 3 can now move scene selection without needing to account for runtime side effects in the renderer.
+- Phase 4 should move the ack/pick telemetry markup and the diagnostic text helpers out with the rest of the browser HUD.
+
 ### Phase 3: Move Scene Selection Out Of `WorldDisplay`
+
+Status: implemented.
 
 Purpose: make the renderer consume render scene data rather than derive browser coverage.
 
@@ -234,7 +295,26 @@ Exit criteria:
 - Browser mode remains functional.
 - Future client mode can provide a different scene model without editing renderer internals.
 
+Progress:
+
+- Moved `deriveTerrainSceneModel` and `deriveStaticRenderableSceneModel` calls into `BrowserWorldDisplay`.
+- `WorldDisplay` now receives `terrainScene` and `staticRenderableScene` as props and only hydrates/syncs the provided render scene.
+- Browser destination/radius coverage selection is now explicitly browser-owned.
+
+Decisions and course corrections:
+
+- Kept scene model types in `lib/world-display` for now, matching the dry-run decision to avoid premature module churn.
+- `WorldDisplay` still imports runtime/browser types for the embedded debug HUD and diagnostic model. That is now Phase 4 cleanup, not scene selection coupling.
+- Did not introduce a generic render-scene controller yet; the Svelte browser wrapper is enough until a second mode needs a different scene-selection owner.
+
+Future-step refinement:
+
+- Phase 4 should remove `deriveWorldDisplayModel` and browser HUD facts from `WorldDisplay`, which will also remove the remaining runtime/browser diagnostic props from the shared renderer.
+- After Phase 4, revisit whether `WorldRenderSceneInput` should become the single grouped prop instead of separate terrain/static props.
+
 ### Phase 4: Extract Browser Debug Overlay
+
+Status: implemented.
 
 Purpose: separate renderer from browser diagnostics.
 
@@ -252,7 +332,27 @@ Exit criteria:
 - Browser mode still shows equivalent diagnostics.
 - Client mode can omit or replace the overlay entirely.
 
+Progress:
+
+- Moved scene HUD, viewport status copy, and hidden telemetry markup from `WorldDisplay` to `BrowserWorldDisplay`.
+- Moved `deriveWorldDisplayModel` usage and browser diagnostic text composition into `BrowserWorldDisplay`.
+- Removed runtime/browser diagnostic props from `WorldDisplay`; it now receives only render inputs, asset state needed for GPU hydration, camera frame control, and renderer callbacks.
+- Added `.browser-world-display` positioning so browser overlays can sit above the render surface without renderer-owned markup.
+
+Decisions and course corrections:
+
+- Rendered browser overlays as siblings above `WorldDisplay` instead of introducing Svelte snippets/slots during this refactor. That keeps the renderer simpler and avoids a broad overlay API.
+- Kept diagnostic helper names in `world-display/model.ts` temporarily because Phase 6 is planned to catch final naming and stale-export cleanup. The owner has moved, but the file name still lags the boundary.
+- Browser mode now computes camera/bounds/geometry/status text from browser-owned scene models and renderer metrics rather than renderer-local strings.
+
+Future-step refinement:
+
+- Phase 5 can focus on extracting pure renderer geometry/matrix helpers because the Svelte file now mostly contains Three.js lifecycle and mesh hydration.
+- Phase 6 should rename or relocate browser diagnostic model helpers so `world-display/model.ts` does not keep implying shared renderer ownership.
+
 ### Phase 5: Split Renderer Helpers
+
+Status: implemented.
 
 Purpose: reduce `WorldDisplay.svelte` size and keep pure logic testable.
 
@@ -269,7 +369,27 @@ Exit criteria:
 - Rendering helpers have clear names and ownership.
 - No behavior is changed except through intentional follow-up phases.
 
+Progress:
+
+- Added `terrain-geometry.ts` for terrain mesh geometry and terrain coloring.
+- Added `static-renderable-geometry.ts` for AC-to-Three static renderable geometry, placement matrix, quaternion conversion, and debug coloring.
+- Removed those pure helper implementations from `WorldDisplay.svelte`.
+- Kept material creation, mesh maps, resource disposal, and scene-root ownership inside `WorldDisplay`.
+
+Decisions and course corrections:
+
+- Did not move mesh creation or disposal into helpers because those are part of renderer resource ownership and lifecycle, not pure conversion.
+- Kept helper modules under `lib/world-display` until Phase 6 verifies whether a broader `lib/render-scene` split is worth it.
+- Did not add new tests in this phase because the extracted helpers preserve existing behavior and the meaningful immediate verification is Svelte/TS compilation. Phase 6 can identify whether these helpers warrant focused tests after dead-code and export review.
+
+Future-step refinement:
+
+- Phase 6 should check for dead imports/exports created by the extraction and decide whether browser diagnostic helpers should move out of `world-display/model.ts`.
+- Phase 6 should also review whether `WorldDisplay` has become narrow enough to rename to `WorldRenderSurface`, or whether that should wait until a client-mode wrapper exists.
+
 ### Phase 6: Final Cleanup And Static Analysis
+
+Status: implemented.
 
 Purpose: catch the common cleanup debt left by large decomposition work: dead codepaths, duplicated helpers, hollow abstractions, stale tests, and misleading names.
 
@@ -291,6 +411,35 @@ Exit criteria:
 - Renderer helper modules do not duplicate browser/controller scene selection logic.
 - Any analyzer false positives or deliberately retained seams are documented in the plan or adjacent code comments.
 
+Progress:
+
+- Ran Svelte/TypeScript checks, ESLint, Vitest, production build, Tauri `cargo check`, and strict Tauri `cargo clippy`.
+- Ran `knip` from the app workspace. The first sandboxed attempt failed because `knip` was not installed locally and npm registry access was blocked; after approval, `npm exec -- knip` ran successfully.
+- Follow-up correction: installed `knip` as a tracked app dev dependency, added `lint:dead`, and wired it into the app `lint` workflow.
+- Follow-up correction: removed the broad host/asset contract suppressions from `knip.json` and made unused nested schemas/types module-private instead.
+- Deleted unused starter/placeholder files:
+  - `src/app/state.ts`
+  - `src/lib/Counter.svelte`
+  - `src/pages/ClientModePage.svelte`
+- Removed unnecessary exports from internal-only helpers and types in browser mode, frontend state, asset-channel coverage, static renderable grouping, renderer-contract, and diagnostic model types.
+- Removed dead temporary renderer-contract types that had no concrete caller after the decomposition.
+
+Analyzer findings retained deliberately:
+
+- No `knip` suppressions are currently needed beyond the schema reference. Contract DTO files were audited so nested implementation schemas/types are private and externally consumed contract types/schemas remain exported.
+
+Decisions and course corrections:
+
+- Did not rename `WorldDisplay` to `WorldRenderSurface` in this pass. The component now behaves like a render surface, but waiting until a second wrapper/client consumer exists will make the rename less cosmetic and easier to validate.
+- Did not relocate `world-display/model.ts` yet. Ownership has moved to browser mode for the current caller, but the file still contains a mix of browser diagnostics and viewport/camera helper utilities. A targeted follow-up should split browser diagnostics from generic viewport/camera helpers rather than move everything at once.
+- Removed dead app placeholders now instead of preserving future-looking stubs. Future client mode should add real components/controllers when it needs them.
+
+Future-step refinement:
+
+- Keep `knip` in the normal lint workflow so future contract exports have to be either externally consumed or intentionally made private before merging.
+- Add a follow-up phase to rename or split `world-display/model.ts` into browser diagnostics and generic viewport/camera request helpers.
+- Reconsider renaming `WorldDisplay` to `WorldRenderSurface` once client mode starts consuming the shared renderer.
+
 ## Course Corrections Already Made
 
 - Browser ctrl-click landblock selection was first added directly to `WorldDisplay`, then corrected into `BrowserWorldDisplay`.
@@ -308,6 +457,9 @@ Exit criteria:
 
 ## Next Recommended Step
 
-Implement Phase 0 next.
+The decomposition plan is implemented.
 
-The highest-risk remaining coupling is browser/debug camera controls inside `WorldDisplay`, but moving those controls cleanly needs the renderer boundary seam first. Phase 0 should be small: add metrics/camera-frame plumbing while preserving behavior, then Phase 1 can move the browser controls without duplicating renderer internals.
+The next useful follow-up is a smaller renderer/browser naming pass:
+
+- split `world-display/model.ts` into browser diagnostics and generic viewport/camera request helpers,
+- reconsider a `WorldDisplay` to `WorldRenderSurface` rename once a client-mode wrapper starts consuming the shared renderer.

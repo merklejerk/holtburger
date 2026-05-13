@@ -24,7 +24,7 @@ import type {
 	RuntimeNotificationEnvelopeDto,
 } from "../lib/host/contracts";
 
-export interface HostConnectionState {
+interface HostConnectionState {
 	boundarySnapshot: HostBoundarySnapshot | null;
 	latestRuntimeNotification: RuntimeNotificationEnvelopeDto | null;
 	boundaryStatus: string;
@@ -47,14 +47,14 @@ export interface FrontendAppState {
 const DEFAULT_BOUNDARY_STATUS = "Loading host boundary...";
 const MAX_ASSET_ACTIVITY = 8;
 
-export function createInitialFrontendState(): FrontendAppState {
+function createInitialFrontendState(): FrontendAppState {
 	return reconcileModeState({
 		host: {
 			boundarySnapshot: null,
 			latestRuntimeNotification: null,
 			boundaryStatus: DEFAULT_BOUNDARY_STATUS,
 		},
-			asset: createInitialAssetChannelState(),
+		asset: createInitialAssetChannelState(),
 		browserMode: createBrowserModeState(),
 		mode: createModeState(
 			"client",
@@ -64,7 +64,7 @@ export function createInitialFrontendState(): FrontendAppState {
 	});
 }
 
-export function mergeHostBoundarySnapshot(
+function mergeHostBoundarySnapshot(
 	boundarySnapshot: HostBoundarySnapshot,
 	notification: RuntimeNotificationEnvelopeDto,
 ): HostBoundarySnapshot {
@@ -84,7 +84,8 @@ export function deriveModeState(
 	return createModeState(
 		"client",
 		browserMode.destination ? browserMode.page : "world-viewer",
-		lifecycleState?.phase === "ready" && lifecycleState.sessionState === "connected"
+		lifecycleState?.phase === "ready" &&
+			lifecycleState.sessionState === "connected"
 			? "The host lifecycle reports a ready connected client session, so the world viewer is live."
 			: "The app stays in one world-viewer mode; navigation overlays can change focus without becoming a separate app mode.",
 	);
@@ -195,7 +196,10 @@ export function createFrontendStateStore() {
 				},
 			}));
 		},
-		applyAssetError(request: AssetLookupRequestDto, errorMessage: string): void {
+		applyAssetError(
+			request: AssetLookupRequestDto,
+			errorMessage: string,
+		): void {
 			update((state) => ({
 				...state,
 				asset: {
@@ -248,7 +252,7 @@ function applyLoadedSnapshot(
 			boundaryStatus:
 				snapshot.source === "tauri"
 					? "Connected to the Tauri host boundary with a live authoritative runtime feed."
-						: "Tauri runtime is unavailable. Start the app with npm run tauri:dev.",
+					: "Tauri runtime is unavailable. Start the app with npm run tauri:dev.",
 		},
 		asset: {
 			...state.asset,

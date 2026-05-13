@@ -5,8 +5,10 @@ import {
 	createBrowserModeState,
 	parseBrowserLocationInput,
 	previewBrowserLocation,
+	selectBrowserLandblockDestination,
 	selectRuntimeResidencyDestination,
 	updateBrowserDraft,
+	updateLandblockCoverageRadius,
 } from "./browser-mode";
 import type { RuntimeResidencyDto } from "../lib/host/contracts";
 
@@ -28,8 +30,9 @@ describe("browser-mode location policy", () => {
 	it("starts with a known non-flat browser destination selected", () => {
 		const state = createBrowserModeState();
 
-		expect(state.draftInput).toBe("29.90S, 65.90W, 0.0Z");
-		expect(state.destination?.label).toBe("29.90S, 65.90W, 0.0Z");
+		expect(state.draftInput).toBe("33.50S, 72.80E, 0.0Z");
+		expect(state.destination?.label).toBe("33.50S, 72.80E, 0.0Z");
+		expect(state.landblockCoverageRadius).toBe(1);
 		expect(state.page).toBe("destination-preview");
 	});
 
@@ -42,6 +45,33 @@ describe("browser-mode location policy", () => {
 			eastWestHemisphere: "W",
 			elevation: 1,
 			source: "manual",
+			landblockId: null,
+		});
+	});
+
+	it("accepts compact coordinate input with omitted commas and elevation", () => {
+		expect(parseBrowserLocationInput("100.4s 101.55w")).toEqual({
+			label: "100.40S, 101.55W, 0.0Z",
+			northSouth: 100.4,
+			northSouthHemisphere: "S",
+			eastWest: 101.55,
+			eastWestHemisphere: "W",
+			elevation: 0,
+			source: "manual",
+			landblockId: null,
+		});
+	});
+
+	it("accepts coordinate input with numeric elevation and no Z suffix", () => {
+		expect(parseBrowserLocationInput("100.4s 101.55w -2.5")).toEqual({
+			label: "100.40S, 101.55W, -2.5Z",
+			northSouth: 100.4,
+			northSouthHemisphere: "S",
+			eastWest: 101.55,
+			eastWestHemisphere: "W",
+			elevation: -2.5,
+			source: "manual",
+			landblockId: null,
 		});
 	});
 
@@ -63,7 +93,32 @@ describe("browser-mode location policy", () => {
 
 		expect(state.destination?.source).toBe("runtime-residency");
 		expect(state.destination?.label).toBe(runtimeResidency.focusLocationLabel);
+		expect(state.destination?.landblockId).toBeNull();
 		expect(state.page).toBe("destination-preview");
+	});
+
+	it("can select a browser destination from an exact picked landblock id", () => {
+		const state = selectBrowserLandblockDestination(
+			createBrowserModeState(),
+			0xda550123,
+		);
+
+		expect(state.destination?.source).toBe("landblock-pick");
+		expect(state.destination?.landblockId).toBe(0xda55ffff);
+		expect(state.destination?.label).toContain("0xda55ffff");
+		expect(state.draftInput).toBe(state.destination?.label);
+		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
+	});
+
+	it("clamps browser coverage radius to the supported debug range", () => {
+		expect(
+			updateLandblockCoverageRadius(createBrowserModeState(), -2)
+				.landblockCoverageRadius,
+		).toBe(0);
+		expect(
+			updateLandblockCoverageRadius(createBrowserModeState(), 99)
+				.landblockCoverageRadius,
+		).toBe(8);
 	});
 
 	it("converts browser coordinates into a normalized outdoor landblock id", () => {
@@ -75,8 +130,25 @@ describe("browser-mode location policy", () => {
 			eastWestHemisphere: "W",
 			elevation: 0,
 			source: "manual",
+			landblockId: null,
 		});
 
 		expect(landblockId).toBe(0x2d5affff);
+	});
+
+	it("returns unsigned landblock ids for coordinates in high landblock ranges", () => {
+		const landblockId = browserLocationToLandblockId({
+			label: "33.60S, 72.70E, 0.0Z",
+			northSouth: 33.6,
+			northSouthHemisphere: "S",
+			eastWest: 72.7,
+			eastWestHemisphere: "E",
+			elevation: 0,
+			source: "manual",
+			landblockId: null,
+		});
+
+		expect(landblockId).toBe(0xda55ffff);
+		expect(landblockId).toBeGreaterThan(0);
 	});
 });

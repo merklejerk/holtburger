@@ -4,8 +4,10 @@ import { availableModes, type AppModeId } from "./modes";
 import {
 	createBrowserModeState,
 	previewBrowserLocation,
+	selectBrowserLandblockDestination,
 	seedBrowserDraftFromResidency,
 	selectRuntimeResidencyDestination,
+	updateLandblockCoverageRadius,
 	updateBrowserDraft,
 	type BrowserModeState,
 } from "./browser-mode";
@@ -120,6 +122,28 @@ export function createFrontendStateStore() {
 				reconcileModeState({
 					...state,
 					browserMode: previewBrowserLocation(state.browserMode),
+				}),
+			);
+		},
+		updateLandblockCoverageRadius(landblockCoverageRadius: number): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateLandblockCoverageRadius(
+						state.browserMode,
+						landblockCoverageRadius,
+					),
+				}),
+			);
+		},
+		selectBrowserLandblockDestination(landblockId: number): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: selectBrowserLandblockDestination(
+						state.browserMode,
+						landblockId,
+					),
 				}),
 			);
 		},

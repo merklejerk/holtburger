@@ -16,11 +16,12 @@ use holtburger_world::{WorldBootstrap, WorldState};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
-    CameraHintAckDto, CameraHintDto, FrameDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
-    IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto, InteractionModeDto,
-    LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, QuaternionDto, RayPickHitDto,
-    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto, RuntimeEntitySnapshotDto,
-    RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto, Vec3Dto,
+    CameraHintAckDto, CameraHintDto, DebugConfigDto, FrameDto, FrontendStateFeedDto,
+    HostBoundaryOverviewDto, IndoorAssetFamilyIdDto, IndoorContractBacklogDto,
+    IndoorRuntimeFieldIdDto, InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto,
+    ModeHintDto, QuaternionDto, RayPickHitDto, RayPickRequestDto, RayPickResponseDto,
+    RuntimeBatchDto, RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto, RuntimeResidencyDto,
+    SessionStateDto, Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -35,6 +36,7 @@ const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
 
 pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
+    verbose: bool,
 }
 
 #[derive(Clone)]
@@ -51,8 +53,8 @@ struct HostRuntimeState {
 }
 
 impl HostRuntimeService {
-    pub fn new() -> Self {
-        let adapter = Arc::new(HostBoundaryAdapter::new());
+    pub fn new(verbose: bool) -> Self {
+        let adapter = Arc::new(HostBoundaryAdapter::new(verbose));
         Self {
             state: Arc::new(Mutex::new(HostRuntimeState::new())),
             adapter,
@@ -105,6 +107,12 @@ impl HostRuntimeService {
     pub fn boundary_overview(&self) -> HostBoundaryOverviewDto {
         self.adapter.boundary_overview()
     }
+
+    pub fn debug_config(&self) -> DebugConfigDto {
+        DebugConfigDto {
+            verbose: self.adapter.verbose,
+        }
+    }
 }
 
 impl HostRuntimeState {
@@ -143,11 +151,12 @@ impl HostRuntimeState {
 }
 
 impl HostBoundaryAdapter {
-    pub fn new() -> Self {
+    pub fn new(verbose: bool) -> Self {
         let content = ContentRepository::from_hba_path(repo_assets_hba_path())
             .expect("failed to open repo-local 3D app content repository");
         Self {
             content: Arc::new(content),
+            verbose,
         }
     }
 
@@ -200,6 +209,13 @@ impl HostBoundaryAdapter {
     }
 
     pub fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] request_id={} asset_id={} priority={:?}",
+                request.request_id, request.asset_id, request.priority
+            );
+        }
+
         if let Some(landblock_id) = parse_terrain_asset_id(&request.asset_id) {
             return self.build_terrain_lookup_response(request, landblock_id);
         }
@@ -553,6 +569,21 @@ impl HostBoundaryAdapter {
         let payload = self
             .load_cell_landblock_payload(landblock_id)
             .unwrap_or_else(|error| generated_fallback_terrain_payload(landblock_id, error));
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] response asset_id={} kind={} provenance={}",
+                request.asset_id,
+                payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                payload
+                    .get("provenance")
+                    .and_then(|provenance| provenance.get("source"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown")
+            );
+        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -585,6 +616,29 @@ impl HostBoundaryAdapter {
                     }
                 })
             });
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] response asset_id={} kind={} scenery={} buildings={} provenance={}",
+                request.asset_id,
+                payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                payload
+                    .get("sceneryInstances")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len),
+                payload
+                    .get("buildingInstances")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len),
+                payload
+                    .get("provenance")
+                    .and_then(|provenance| provenance.get("source"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown")
+            );
+        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -667,6 +721,30 @@ impl HostBoundaryAdapter {
                         }
                     })
                 });
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] response asset_id={} kind={} vertices={} polygons={} render_source={}",
+                request.asset_id,
+                payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                payload
+                    .get("vertexArray")
+                    .and_then(|vertex_array| vertex_array.get("vertexCount"))
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                payload
+                    .get("drawingPolygons")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len),
+                payload
+                    .get("provenance")
+                    .and_then(|provenance| provenance.get("source"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown")
+            );
+        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -715,9 +793,28 @@ impl HostBoundaryAdapter {
                         "sourceAssetKind": "setup-model",
                         "errorCode": error_code,
                         "detail": detail
-                    }
-                })
+                        }
+                    })
             });
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] response asset_id={} kind={} parts={} provenance={}",
+                request.asset_id,
+                payload
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                payload
+                    .get("parts")
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len),
+                payload
+                    .get("provenance")
+                    .and_then(|provenance| provenance.get("source"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown")
+            );
+        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -1454,7 +1551,7 @@ mod tests {
 
     #[test]
     fn startup_notifications_include_lifecycle_and_runtime_batch_topics() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
 
         let notifications = runtime.startup_notifications();
 
@@ -1474,7 +1571,7 @@ mod tests {
 
     #[test]
     fn runtime_batch_exposes_authoritative_entities_and_residency_facts() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
 
         let batch = runtime.runtime_batch();
 
@@ -1513,7 +1610,7 @@ mod tests {
 
     #[test]
     fn runtime_batch_does_not_push_outdoor_static_content_facts() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
 
         let batch = runtime.runtime_batch();
 
@@ -1522,7 +1619,7 @@ mod tests {
 
     #[test]
     fn landblock_static_asset_derivation_covers_objects_and_buildings() {
-        let adapter = HostBoundaryAdapter::new();
+        let adapter = HostBoundaryAdapter::new(false);
         let object_landblock_id = find_landblock_with_renderable_object(&adapter)
             .expect("fixture should contain at least one renderable static object");
         let building_landblock_id = find_landblock_with_renderable_building(&adapter)
@@ -1608,7 +1705,7 @@ mod tests {
 
     #[test]
     fn advancing_runtime_notification_increments_tick_and_updates_view_model_selection() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
 
         let initial_batch = runtime.runtime_batch();
         let first = runtime.advance_runtime_notification();
@@ -1666,7 +1763,7 @@ mod tests {
 
     #[test]
     fn boundary_overview_and_asset_lookup_remain_runtime_asset_split() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
         let overview = runtime.boundary_overview();
         let asset = runtime.asset_lookup(AssetLookupRequestDto {
             request_id: "test-request".to_string(),
@@ -1705,7 +1802,7 @@ mod tests {
 
     #[test]
     fn gfx_obj_lookup_returns_first_class_payload() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup(AssetLookupRequestDto {
             request_id: "test-gfx-obj".to_string(),
             asset_id: "gfx-obj/01000001".to_string(),
@@ -1736,7 +1833,7 @@ mod tests {
 
     #[test]
     fn setup_model_lookup_returns_composite_payload() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup(AssetLookupRequestDto {
             request_id: "test-setup-model".to_string(),
             asset_id: "setup-model/02000001".to_string(),
@@ -1767,7 +1864,7 @@ mod tests {
 
     #[test]
     fn camera_hints_are_accepted_and_picks_resolve_against_authoritative_debug_entities() {
-        let runtime = HostRuntimeService::new();
+        let runtime = HostRuntimeService::new(false);
         let batch = runtime.runtime_batch();
         let local_player = batch
             .entities

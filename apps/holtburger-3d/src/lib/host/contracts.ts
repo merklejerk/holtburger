@@ -496,6 +496,11 @@ export type HostBoundaryOverviewDto = z.infer<
 	typeof hostBoundaryOverviewDtoSchema
 >;
 
+export const debugConfigDtoSchema = z.object({
+	verbose: z.boolean(),
+});
+export type DebugConfigDto = z.infer<typeof debugConfigDtoSchema>;
+
 export const cameraHintDtoSchema = z.object({
 	mode: modeHintValueSchema,
 	source: z.string().min(1),

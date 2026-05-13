@@ -195,6 +195,12 @@ pub struct HostBoundaryOverviewDto {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DebugConfigDto {
+    pub verbose: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CameraHintDto {
     pub mode: ModeHintDto,
     pub source: String,

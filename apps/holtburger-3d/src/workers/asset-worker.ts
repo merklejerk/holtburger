@@ -8,6 +8,7 @@ import type {
 	EnvironmentPayloadDto,
 	GfxObjPayloadDto,
 	IndoorEnvCellPayloadDto,
+	LandblockGeneratedSceneryPayloadDto,
 	LandblockStaticsPayloadDto,
 	SetupModelPayloadDto,
 	TerrainLandblockPayloadDto,
@@ -21,6 +22,7 @@ import {
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
+	landblockGeneratedSceneryPayloadDtoSchema,
 	landblockStaticsPayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
@@ -78,6 +80,16 @@ export function prepareAssetPayload(
 			request,
 			response,
 			landblockStaticsPayload.data,
+		);
+	}
+
+	const landblockGeneratedSceneryPayload =
+		landblockGeneratedSceneryPayloadDtoSchema.safeParse(response.payload);
+	if (landblockGeneratedSceneryPayload.success) {
+		return prepareLandblockGeneratedScenery(
+			request,
+			response,
+			landblockGeneratedSceneryPayload.data,
 		);
 	}
 
@@ -181,6 +193,26 @@ function prepareLandblockStatics(
 			landblockId: payload.landblockId,
 			sceneryInstances: payload.sceneryInstances,
 			buildingInstances: payload.buildingInstances,
+		},
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareLandblockGeneratedScenery(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: LandblockGeneratedSceneryPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "landblock-generated-scenery",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			landblockId: payload.landblockId,
+			sceneryInstances: payload.sceneryInstances,
 		},
 		preparedAt: new Date().toISOString(),
 	};

@@ -140,6 +140,18 @@
 			? describeStaticRenderableIdleState()
 			: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByGfxAssetId.size} shared gfx geometr${staticRenderableScene.partsByGfxAssetId.size === 1 ? "y" : "ies"}.`,
 	);
+	const staticRenderableLayerText = $derived.by(() => {
+		const explicitCount = staticRenderableScene.sourceInstances.filter(
+			(instance) => instance.kind === "scenery",
+		).length;
+		const buildingCount = staticRenderableScene.sourceInstances.filter(
+			(instance) => instance.kind === "building",
+		).length;
+		const generatedCount = staticRenderableScene.sourceInstances.filter(
+			(instance) => instance.kind === "generated-scenery",
+		).length;
+		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}.`;
+	});
 	const sceneBoundsText = $derived(
 		renderMetrics?.bounds
 			? `Center (${renderMetrics.bounds.center.x.toFixed(1)}, ${renderMetrics.bounds.center.y.toFixed(1)}, ${renderMetrics.bounds.center.z.toFixed(1)}) span (${renderMetrics.bounds.size.x.toFixed(1)}, ${renderMetrics.bounds.size.y.toFixed(1)}, ${renderMetrics.bounds.size.z.toFixed(1)}).`
@@ -568,6 +580,10 @@
 			<div>
 				<dt>Statics</dt>
 				<dd>{staticRenderableText}</dd>
+			</div>
+			<div>
+				<dt>Layers</dt>
+				<dd>{staticRenderableLayerText}</dd>
 			</div>
 			<div>
 				<dt>Heights</dt>

@@ -10,6 +10,7 @@ import {
 } from "../landblocks";
 import type {
 	AssetChannelState,
+	PreparedLandblockGeneratedSceneryPayload,
 	PreparedLandblockStaticsPayload,
 	PreparedAssetRecord,
 	PreparedTerrainMesh,
@@ -269,12 +270,23 @@ function deriveSceneContext(
 				payload.kind === "landblock-statics" &&
 				activeLandblockIds.has(payload.landblockId),
 		);
+	const preparedGeneratedPayloads = Object.values(assetState.preparedByAssetId)
+		.map((asset) => asset.payload)
+		.filter(
+			(payload): payload is PreparedLandblockGeneratedSceneryPayload =>
+				payload.kind === "landblock-generated-scenery" &&
+				activeLandblockIds.has(payload.landblockId),
+		);
 	const staticInstanceCount = preparedStaticPayloads.reduce(
 		(total, payload) => total + payload.sceneryInstances.length,
 		0,
 	);
 	const staticBuildingCount = preparedStaticPayloads.reduce(
 		(total, payload) => total + payload.buildingInstances.length,
+		0,
+	);
+	const generatedSceneryCount = preparedGeneratedPayloads.reduce(
+		(total, payload) => total + payload.sceneryInstances.length,
 		0,
 	);
 
@@ -284,7 +296,7 @@ function deriveSceneContext(
 			"Phase 7 gives WorldDisplay an honest outdoor scene context: one focus landblock plus its immediate neighbor ring, matching the first outdoor browsing assumption used by ACViewer.",
 		focusAnchorLabel: focusLandblockLabel,
 		destinationText,
-		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks, ${staticInstanceCount} static object${staticInstanceCount === 1 ? "" : "s"}, and ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} from prepared landblock static facts in a radius-${landblockCoverageRadius} ring around ${focusLandblockLabel}.`,
+		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks, ${staticInstanceCount} explicit static object${staticInstanceCount === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"}, and ${generatedSceneryCount} generated outdoor scenery object${generatedSceneryCount === 1 ? "" : "s"} in a radius-${landblockCoverageRadius} ring around ${focusLandblockLabel}.`,
 		gapText:
 			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
@@ -297,6 +309,9 @@ function deriveSceneContext(
 				),
 				...preparedStaticPayloads.flatMap((payload) =>
 					payload.buildingInstances.map((instance) => instance.sourceAssetId),
+				),
+				...preparedGeneratedPayloads.flatMap((payload) =>
+					payload.sceneryInstances.map((instance) => instance.sourceAssetId),
 				),
 			]),
 		].sort(),

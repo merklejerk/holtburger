@@ -6,7 +6,7 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../lib/landblocks";
 
-export type BrowserPageId = "location-entry" | "destination-preview";
+type BrowserPageId = "location-entry" | "destination-preview";
 
 export interface BrowserLocationSelection {
 	label: string;
@@ -33,7 +33,7 @@ const LOCATION_INPUT_PATTERN =
 const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 	"33.50S, 72.80E, 0.0Z",
 );
-export const DEFAULT_LANDBLOCK_COVERAGE_RADIUS = 1;
+const DEFAULT_LANDBLOCK_COVERAGE_RADIUS = 1;
 export const MIN_LANDBLOCK_COVERAGE_RADIUS = 0;
 export const MAX_LANDBLOCK_COVERAGE_RADIUS = 8;
 
@@ -43,11 +43,13 @@ export function createBrowserModeState(): BrowserModeState {
 		validationMessage: null,
 		destination: DEFAULT_BROWSER_DESTINATION,
 		landblockCoverageRadius: DEFAULT_LANDBLOCK_COVERAGE_RADIUS,
-		page: DEFAULT_BROWSER_DESTINATION ? "destination-preview" : "location-entry",
+		page: DEFAULT_BROWSER_DESTINATION
+			? "destination-preview"
+			: "location-entry",
 	};
 }
 
-export function formatResidencyDraft(residency: RuntimeResidencyDto): string {
+function formatResidencyDraft(residency: RuntimeResidencyDto): string {
 	return residency.focusLocationLabel.trim();
 }
 

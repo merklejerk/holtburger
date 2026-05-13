@@ -15,7 +15,9 @@ afterEach(() => {
 
 describe("readHostBoundarySnapshot", () => {
 	it("fails fast outside the Tauri runtime when reading the host snapshot", async () => {
-		await expect(readHostBoundarySnapshot()).rejects.toThrow(/requires the Tauri runtime/i);
+		await expect(readHostBoundarySnapshot()).rejects.toThrow(
+			/requires the Tauri runtime/i,
+		);
 	});
 
 	it("fails fast outside the Tauri runtime when submitting camera hints or picks", async () => {

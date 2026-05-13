@@ -145,6 +145,11 @@ ul {
 	cursor: grabbing;
 }
 
+.browser-world-display {
+	position: relative;
+	min-height: 100vh;
+}
+
 .world-display__viewport {
 	min-height: 100vh;
 	display: grid;
@@ -174,7 +179,11 @@ ul {
 	max-width: min(32rem, calc(100vw - 2rem));
 	padding: 0.85rem 1rem;
 	border-radius: 18px;
-	background: linear-gradient(180deg, rgba(6, 12, 20, 0.82), rgba(6, 12, 20, 0.56));
+	background: linear-gradient(
+		180deg,
+		rgba(6, 12, 20, 0.82),
+		rgba(6, 12, 20, 0.56)
+	);
 	border: 1px solid rgba(162, 183, 209, 0.14);
 	backdrop-filter: blur(18px);
 	z-index: 1;
@@ -295,7 +304,11 @@ ul {
 	width: 100%;
 	padding: 1rem;
 	border-radius: 20px;
-	background: linear-gradient(180deg, rgba(5, 11, 19, 0.84), rgba(5, 11, 19, 0.56));
+	background: linear-gradient(
+		180deg,
+		rgba(5, 11, 19, 0.84),
+		rgba(5, 11, 19, 0.56)
+	);
 	border: 1px solid rgba(162, 183, 209, 0.14);
 	backdrop-filter: blur(18px);
 	pointer-events: auto;

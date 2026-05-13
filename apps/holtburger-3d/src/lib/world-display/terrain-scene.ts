@@ -67,10 +67,7 @@ export function deriveTerrainSceneModel(
 		browserDestination,
 	);
 	const activeLandblockIds = new Set(
-		buildOutdoorCoverageLandblockIds(
-			focusLandblockId,
-			landblockCoverageRadius,
-		),
+		buildOutdoorCoverageLandblockIds(focusLandblockId, landblockCoverageRadius),
 	);
 	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
 	const tiles = Object.values(assetState.preparedByAssetId)

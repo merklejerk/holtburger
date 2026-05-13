@@ -167,7 +167,7 @@ describe("terrain scene model", () => {
 			eastWestHemisphere: "W",
 			elevation: 0,
 			source: "manual",
-				landblockId: null,
+			landblockId: null,
 		});
 
 		expect(model.focusLandblockId).toBe(0x2d5affff);

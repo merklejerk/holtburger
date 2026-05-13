@@ -340,7 +340,7 @@ export function createTerrainCoverageRequests(
 		}));
 }
 
-export function createLandblockStaticsCoverageRequests(
+function createLandblockStaticsCoverageRequests(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,

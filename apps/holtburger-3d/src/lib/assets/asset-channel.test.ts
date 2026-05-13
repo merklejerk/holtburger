@@ -608,6 +608,48 @@ describe("asset channel controller", () => {
 		expect(preparedAsset.payload.terrainMesh.triangles[2]?.terrainType).toBe(9);
 	});
 
+	it("splits terrain quads with the retail deterministic SW-to-NE cut formula", () => {
+		const preparedAsset = prepareAssetPayload(
+			{
+				requestId: "bootstrap-5-runtime-terrain/0102ffff",
+				assetId: "terrain/0102ffff",
+				priority: "bootstrap",
+			},
+			{
+				requestId: "bootstrap-5-runtime-terrain/0102ffff",
+				assetId: "terrain/0102ffff",
+				payloadKind: "json",
+				payload: {
+					kind: "terrain-landblock",
+					residencyKind: "outdoor-landblock",
+					sourceAssetKind: "cell-landblock",
+					landblockId: 0x0102ffff,
+					gridSize: 9,
+					tileSize: 24,
+					heights: Array.from({ length: 81 }, (_, index) => index),
+					terrainTypes: Array.from({ length: 81 }, (_, index) => index),
+					provenance: {
+						source: "unknown",
+						sourceAssetKind: "cell-landblock",
+						errorCode: null,
+						detail: null,
+					},
+				},
+			},
+		);
+
+		expect(preparedAsset.payload.kind).toBe("terrain-landblock");
+		if (preparedAsset.payload.kind !== "terrain-landblock") {
+			throw new Error("expected terrain-landblock payload");
+		}
+
+		const triangles = preparedAsset.payload.terrainMesh.triangles;
+		expect(triangles[0]).toMatchObject({ a: 0, b: 1, c: 10 });
+		expect(triangles[1]).toMatchObject({ a: 0, b: 10, c: 9 });
+		expect(triangles[2]).toMatchObject({ a: 1, b: 2, c: 10 });
+		expect(triangles[3]).toMatchObject({ a: 11, b: 10, c: 2 });
+	});
+
 	it("rejects malformed json payloads before cpu-side asset preparation continues", () => {
 		expect(() =>
 			prepareAssetPayload(
@@ -790,6 +832,7 @@ describe("asset channel controller", () => {
 			gfxObjId: 0x01000001,
 			vertexCount: 6,
 			triangleCount: 2,
+			skippedPolygonCount: 0,
 			surfaceIds: [0x08000001],
 			bounds: {
 				min: { x: 0, y: 0, z: 0 },
@@ -810,6 +853,112 @@ describe("asset channel controller", () => {
 			polygonCount: 2,
 			hasBsp: true,
 		});
+	});
+
+	it("skips gfx-obj drawing polygons that reference invalid vertices", async () => {
+		const controller = new AssetChannelController(
+			async (request) => ({
+				requestId: request.requestId,
+				assetId: request.assetId,
+				payloadKind: "json",
+				payload: {
+					kind: "gfx-obj",
+					residencyKind: "unknown",
+					sourceAssetKind: "gfx-obj",
+					gfxObjId: 0x01000001,
+					flags: 3,
+					surfaceIds: [0x08000001],
+					vertexArray: {
+						vertexType: 1,
+						vertexCount: 3,
+						vertices: [
+							{
+								id: 0,
+								origin: { x: 0, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 0 }],
+							},
+							{
+								id: 1,
+								origin: { x: 2, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 1, v: 0 }],
+							},
+							{
+								id: 2,
+								origin: { x: 0, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 1 }],
+							},
+						],
+					},
+					drawingPolygons: [
+						{
+							id: 1,
+							numPts: 3,
+							stippling: 0,
+							sidesType: 1,
+							posSurface: 0x08000001,
+							negSurface: 0,
+							vertexIds: [0, 1, 2],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [0, 0, 0],
+						},
+						{
+							id: 514,
+							numPts: 3,
+							stippling: 0,
+							sidesType: 1,
+							posSurface: 0x08000001,
+							negSurface: 0,
+							vertexIds: [0, -1, 2],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [0, 0, 0],
+						},
+					],
+					drawingBsp: null,
+					physicsWitness: {
+						polygonCount: 2,
+						hasBsp: true,
+					},
+					sortCenter: null,
+					didDegrade: null,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "gfx-obj",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			}),
+			() => new FakeAssetWorker(),
+		);
+		const gfxObj = await controller.prepareAsset({
+			requestId: "streaming-1-gfx-obj/01000001",
+			assetId: "gfx-obj/01000001",
+			priority: "streaming",
+		});
+
+		expect(gfxObj.payload.kind).toBe("gfx-obj");
+		if (gfxObj.payload.kind !== "gfx-obj") {
+			throw new Error("expected gfx-obj payload");
+		}
+		expect(gfxObj.payload.drawingPolygons).toHaveLength(2);
+		expect(gfxObj.payload.renderGeometry).toMatchObject({
+			vertexCount: 3,
+			triangleCount: 1,
+			skippedPolygonCount: 1,
+			invalidPolygons: [
+				{
+					polygonId: 514,
+					vertexIds: [0, -1, 2],
+					missingVertexIds: [-1],
+				},
+			],
+		});
+		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 0 },
+		]);
 	});
 
 	it("reuses cached gfx-obj preparation when a duplicate graph request arrives", async () => {

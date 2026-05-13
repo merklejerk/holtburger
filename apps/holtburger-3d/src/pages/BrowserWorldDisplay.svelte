@@ -36,7 +36,10 @@
 		type NormalizedViewportPoint,
 	} from "../lib/world-display/model";
 	import type { WorldRenderMetrics } from "../lib/world-display/renderer-contract";
-	import { deriveStaticRenderableSceneModel } from "../lib/world-display/static-renderables";
+	import {
+		deriveStaticRenderableSceneModel,
+		isPreparedGfxObjAsset,
+	} from "../lib/world-display/static-renderables";
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
 
 	let {
@@ -459,8 +462,39 @@
 		const recentText = recentActivity
 			? `${recentActivity.status} ${recentActivity.assetId}`
 			: "no asset activity yet";
+		const renderDiagnostic = describeGfxObjRenderDiagnostics();
+		if (renderDiagnostic) {
+			return `${assetState.status}; ${renderDiagnostic}; active ${activeAssetId}; prepared ${preparedCount}; latest ${recentText}.`;
+		}
 
 		return `${assetState.status}; active ${activeAssetId}; prepared ${preparedCount}; latest ${recentText}.`;
+	}
+
+	function describeGfxObjRenderDiagnostics(): string | null {
+		const affectedAssets = Object.values(assetState.preparedByAssetId)
+			.filter(isPreparedGfxObjAsset)
+			.map((asset) => ({
+				assetId: asset.request.assetId,
+				invalidPolygons: asset.payload.renderGeometry.invalidPolygons ?? [],
+			}))
+			.filter((asset) => asset.invalidPolygons.length > 0);
+
+		if (affectedAssets.length === 0) {
+			return null;
+		}
+
+		const firstAsset = affectedAssets[0];
+		const firstPolygon = firstAsset?.invalidPolygons[0];
+		const totalInvalidPolygons = affectedAssets.reduce(
+			(total, asset) => total + asset.invalidPolygons.length,
+			0,
+		);
+
+		if (!firstAsset || !firstPolygon) {
+			return null;
+		}
+
+		return `${totalInvalidPolygons} invalid gfx polygon${totalInvalidPolygons === 1 ? "" : "s"} while preparing ${affectedAssets.length} gfx asset${affectedAssets.length === 1 ? "" : "s"}; first ${firstAsset.assetId} polygon ${firstPolygon.polygonId} missing vertices ${firstPolygon.missingVertexIds.join(", ")}`;
 	}
 
 	function describeStaticRenderableIdleState(): string {

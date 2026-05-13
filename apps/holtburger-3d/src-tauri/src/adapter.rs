@@ -18,10 +18,10 @@ use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
     CameraHintAckDto, CameraHintDto, DebugConfigDto, FrameDto, FrontendStateFeedDto,
     HostBoundaryOverviewDto, IndoorAssetFamilyIdDto, IndoorContractBacklogDto,
-    IndoorRuntimeFieldIdDto, InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto,
-    ModeHintDto, QuaternionDto, RayPickHitDto, RayPickRequestDto, RayPickResponseDto,
-    RuntimeBatchDto, RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto, RuntimeResidencyDto,
-    SessionStateDto, Vec3Dto,
+    IndoorRuntimeFieldIdDto, InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto, ModeHintDto,
+    QuaternionDto, RayPickHitDto, RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto,
+    RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto,
+    Vec3Dto,
 };
 
 pub const RUNTIME_CHANNEL: &str = "runtime";
@@ -763,38 +763,38 @@ impl HostBoundaryAdapter {
             .load_setup_model_payload(setup_model_id)
             .unwrap_or_else(|(detail, error_code)| {
                 serde_json::json!({
-                    "kind": "setup-model",
-                    "residencyKind": "unknown",
+                "kind": "setup-model",
+                "residencyKind": "unknown",
+                "sourceAssetKind": "setup-model",
+                "setupModelId": setup_model_id,
+                "flags": null,
+                "parts": [],
+                "holdingLocations": [],
+                "connectionPoints": [],
+                "placementFrames": [],
+                "collisionWitness": {
+                    "cylSphereCount": 0,
+                    "sphereCount": 0
+                },
+                "height": null,
+                "radius": null,
+                "stepUp": null,
+                "stepDown": null,
+                "sortingSphere": null,
+                "selectionSphere": null,
+                "lights": [],
+                "defaultAnimation": null,
+                "defaultScript": null,
+                "defaultMotionTable": null,
+                "defaultSoundTable": null,
+                "defaultScriptTable": null,
+                "provenance": {
+                    "source": "app-local-stub",
                     "sourceAssetKind": "setup-model",
-                    "setupModelId": setup_model_id,
-                    "flags": null,
-                    "parts": [],
-                    "holdingLocations": [],
-                    "connectionPoints": [],
-                    "placementFrames": [],
-                    "collisionWitness": {
-                        "cylSphereCount": 0,
-                        "sphereCount": 0
-                    },
-                    "height": null,
-                    "radius": null,
-                    "stepUp": null,
-                    "stepDown": null,
-                    "sortingSphere": null,
-                    "selectionSphere": null,
-                    "lights": [],
-                    "defaultAnimation": null,
-                    "defaultScript": null,
-                    "defaultMotionTable": null,
-                    "defaultSoundTable": null,
-                    "defaultScriptTable": null,
-                    "provenance": {
-                        "source": "app-local-stub",
-                        "sourceAssetKind": "setup-model",
-                        "errorCode": error_code,
-                        "detail": detail
-                        }
-                    })
+                    "errorCode": error_code,
+                    "detail": detail
+                    }
+                })
             });
         if self.verbose {
             eprintln!(
@@ -1829,6 +1829,34 @@ mod tests {
                 .is_some()
         );
         assert!(asset.payload["physicsWitness"]["hasBsp"].is_boolean());
+    }
+
+    #[test]
+    fn gfx_obj_lookup_decodes_retail_polygon_stippling_without_vertex_sentinel() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-gfx-obj-stippling".to_string(),
+            asset_id: "gfx-obj/01000f69".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.request_id, "test-gfx-obj-stippling");
+        assert_eq!(asset.asset_id, "gfx-obj/01000f69");
+        assert_eq!(asset.payload["kind"], "gfx-obj");
+
+        let drawing_polygons = asset.payload["drawingPolygons"]
+            .as_array()
+            .expect("drawing polygons should be an array");
+        let has_vertex_sentinel = drawing_polygons.iter().any(|polygon| {
+            polygon["vertexIds"]
+                .as_array()
+                .is_some_and(|vertex_ids| vertex_ids.iter().any(|vertex_id| vertex_id == 0xffff))
+        });
+
+        assert!(
+            !has_vertex_sentinel,
+            "decoded gfx-obj/01000f69 should not contain 0xffff vertex ids"
+        );
     }
 
     #[test]

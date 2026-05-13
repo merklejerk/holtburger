@@ -165,6 +165,12 @@ interface PreparedGfxObjRenderBounds {
 	max: Vec3Dto;
 }
 
+export interface PreparedGfxObjInvalidPolygon {
+	polygonId: number;
+	vertexIds: number[];
+	missingVertexIds: number[];
+}
+
 export interface PreparedGfxObjRenderGeometry {
 	gfxObjId: number;
 	vertexCount: number;
@@ -174,6 +180,8 @@ export interface PreparedGfxObjRenderGeometry {
 	uvs: number[];
 	triangles: PreparedGfxObjRenderTriangle[];
 	surfaceIds: number[];
+	invalidPolygons?: PreparedGfxObjInvalidPolygon[];
+	skippedPolygonCount?: number;
 	bounds: PreparedGfxObjRenderBounds | null;
 }
 

@@ -10,6 +10,8 @@ export interface OutdoorCoverageLandblock {
 	distance: number;
 }
 
+export const OUTDOOR_LANDBLOCK_WORLD_SIZE = 192;
+
 export function makeOutdoorLandblockId(x: number, y: number): number {
 	return (((x & 0xff) << 24) | ((y & 0xff) << 16) | 0xffff) >>> 0;
 }

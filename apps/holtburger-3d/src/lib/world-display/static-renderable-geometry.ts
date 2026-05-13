@@ -13,9 +13,15 @@ import type { StaticRenderablePart } from "./static-renderables";
 export function buildStaticRenderablePartMatrix(
 	part: StaticRenderablePart,
 ): Matrix4 {
-	const matrix = frameToMatrix(part.instanceFrame, { x: 1, y: 1, z: 1 });
+	const matrix = frameToMatrix(part.instanceFrame, part.landblockWorldOffset, {
+		x: 1,
+		y: 1,
+		z: 1,
+	});
 	for (const placementFrame of part.placementFrames) {
-		matrix.multiply(frameToMatrix(placementFrame, { x: 1, y: 1, z: 1 }));
+		matrix.multiply(
+			frameToMatrix(placementFrame, { x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }),
+		);
 	}
 	matrix.multiply(
 		new Matrix4().makeScale(part.scale.x, part.scale.z, part.scale.y),
@@ -59,10 +65,15 @@ export function buildStaticRenderableColor(debugColorKey: string): Color {
 
 function frameToMatrix(
 	frame: StaticRenderablePart["instanceFrame"],
+	landblockWorldOffset: StaticRenderablePart["landblockWorldOffset"],
 	scale: { x: number; y: number; z: number },
 ): Matrix4 {
 	return new Matrix4().compose(
-		new Vector3(frame.origin.x, frame.origin.z, -frame.origin.y),
+		new Vector3(
+			frame.origin.x + landblockWorldOffset.x,
+			frame.origin.z + landblockWorldOffset.z,
+			-(frame.origin.y + landblockWorldOffset.y),
+		),
 		convertAcQuaternion(frame.orientation),
 		new Vector3(scale.x, scale.y, scale.z),
 	);

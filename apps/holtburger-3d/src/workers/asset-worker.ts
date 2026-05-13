@@ -519,32 +519,49 @@ function buildTerrainMesh(
 	const triangles: PreparedTerrainTriangle[] = [];
 	for (let row = 0; row < gridSize - 1; row += 1) {
 		for (let col = 0; col < gridSize - 1; col += 1) {
-			const topLeft = row * gridSize + col;
-			const topRight = topLeft + 1;
-			const bottomLeft = topLeft + gridSize;
-			const bottomRight = bottomLeft + 1;
-			const terrainType = normalizedTerrainTypes[topLeft] ?? 0;
+			const southwest = row * gridSize + col;
+			const southeast = southwest + 1;
+			const northwest = southwest + gridSize;
+			const northeast = northwest + 1;
+			const terrainType = normalizedTerrainTypes[southwest] ?? 0;
 			const averageHeight =
-				(normalizedHeights[topLeft] +
-					normalizedHeights[topRight] +
-					normalizedHeights[bottomLeft] +
-					normalizedHeights[bottomRight]) /
+				(normalizedHeights[southwest] +
+					normalizedHeights[southeast] +
+					normalizedHeights[northwest] +
+					normalizedHeights[northeast]) /
 				4;
 
-			triangles.push({
-				a: topLeft,
-				b: topRight,
-				c: bottomLeft,
-				terrainType,
-				averageHeight,
-			});
-			triangles.push({
-				a: topRight,
-				b: bottomRight,
-				c: bottomLeft,
-				terrainType,
-				averageHeight,
-			});
+			if (usesSouthwestToNortheastCut(landblockId, col, row)) {
+				triangles.push({
+					a: southwest,
+					b: southeast,
+					c: northeast,
+					terrainType,
+					averageHeight,
+				});
+				triangles.push({
+					a: southwest,
+					b: northeast,
+					c: northwest,
+					terrainType,
+					averageHeight,
+				});
+			} else {
+				triangles.push({
+					a: southwest,
+					b: southeast,
+					c: northwest,
+					terrainType,
+					averageHeight,
+				});
+				triangles.push({
+					a: northeast,
+					b: northwest,
+					c: southeast,
+					terrainType,
+					averageHeight,
+				});
+			}
 		}
 	}
 
@@ -559,6 +576,23 @@ function buildTerrainMesh(
 	};
 }
 
+function usesSouthwestToNortheastCut(
+	landblockId: number,
+	cellX: number,
+	cellY: number,
+): boolean {
+	const landblockX = (landblockId >>> 24) & 0xff;
+	const landblockY = (landblockId >>> 16) & 0xff;
+	const globalCellX = landblockX * 8 + cellX;
+	const globalCellY = landblockY * 8 + cellY;
+	const magicA = Math.imul(globalCellX, 214614067) + 1813693831;
+	const magicB = Math.imul(globalCellX, 1109124029);
+	const splitDirection =
+		(Math.imul(globalCellY, magicA) - magicB - 1369149221) >>> 0;
+
+	return splitDirection >= 0x80000000;
+}
+
 function buildGfxObjRenderGeometry(
 	payload: GfxObjPayloadDto,
 ): PreparedGfxObjRenderGeometry {
@@ -570,6 +604,9 @@ function buildGfxObjRenderGeometry(
 	const uvs: number[] = [];
 	const triangles: PreparedGfxObjRenderGeometry["triangles"] = [];
 	const surfaceIdSet = new Set<number>();
+	const invalidPolygons: NonNullable<
+		PreparedGfxObjRenderGeometry["invalidPolygons"]
+	> = [];
 	let minX = Number.POSITIVE_INFINITY;
 	let minY = Number.POSITIVE_INFINITY;
 	let minZ = Number.POSITIVE_INFINITY;
@@ -584,6 +621,21 @@ function buildGfxObjRenderGeometry(
 			);
 		}
 		if (polygon.vertexIds.length < 3) {
+			continue;
+		}
+
+		const polygonVertices = polygon.vertexIds.map((vertexId) =>
+			verticesById.get(vertexId),
+		);
+		const missingVertexIds = polygon.vertexIds.filter(
+			(vertexId) => !verticesById.has(vertexId),
+		);
+		if (missingVertexIds.length > 0) {
+			invalidPolygons.push({
+				polygonId: polygon.id,
+				vertexIds: polygon.vertexIds,
+				missingVertexIds,
+			});
 			continue;
 		}
 
@@ -605,11 +657,10 @@ function buildGfxObjRenderGeometry(
 			});
 
 			for (const polygonVertexOffset of triangleVertexOffsets) {
-				const vertexId = polygon.vertexIds[polygonVertexOffset];
-				const vertex = verticesById.get(vertexId);
+				const vertex = polygonVertices[polygonVertexOffset];
 				if (!vertex) {
 					throw new Error(
-						`GfxObj ${formatHexId(payload.gfxObjId)} polygon ${polygon.id} references missing vertex ${vertexId}.`,
+						`GfxObj ${formatHexId(payload.gfxObjId)} polygon ${polygon.id} failed internal vertex validation.`,
 					);
 				}
 
@@ -639,6 +690,8 @@ function buildGfxObjRenderGeometry(
 		uvs,
 		triangles,
 		surfaceIds: [...surfaceIdSet].sort((left, right) => left - right),
+		invalidPolygons,
+		skippedPolygonCount: invalidPolygons.length,
 		bounds:
 			vertexCount === 0
 				? null

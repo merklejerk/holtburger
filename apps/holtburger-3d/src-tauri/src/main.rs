@@ -3,9 +3,9 @@ mod contracts;
 
 use adapter::{HostRuntimeService, RUNTIME_NOTIFICATION_EVENT};
 use contracts::{
-    AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto, CameraHintDto,
-    DebugConfigDto, FrontendStateFeedDto, HostBoundaryOverviewDto, LifecycleStateDto,
-    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto,
+    AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto, CameraHintDto, DebugConfigDto,
+    FrontendStateFeedDto, HostBoundaryOverviewDto, LifecycleStateDto, RayPickRequestDto,
+    RayPickResponseDto, RuntimeBatchDto,
 };
 use tauri::Emitter;
 

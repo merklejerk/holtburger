@@ -105,6 +105,47 @@ describe("static renderable scene model", () => {
 		expect(model.partsByGfxAssetId.get("gfx-obj/01000001")).toHaveLength(2);
 	});
 
+	it("offsets landblock-local static frames into the focused terrain scene", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"gfx-obj/01000001": createPreparedGfxObjAsset(
+				"gfx-obj/01000001",
+				0x01000001,
+			),
+			"landblock-statics/0102ffff": createPreparedLandblockStaticsAsset(
+				0x0102ffff,
+				["gfx-obj/01000001"],
+			),
+			"landblock-statics/0203ffff": createPreparedLandblockStaticsAsset(
+				0x0203ffff,
+				["gfx-obj/01000001"],
+			),
+		};
+
+		const model = deriveStaticRenderableSceneModel(
+			createRuntimeBatch(),
+			assetState,
+			null,
+			1,
+		);
+
+		expect(
+			model.parts.map((part) => ({
+				landblockId: part.owningLandblockId,
+				offset: part.landblockWorldOffset,
+			})),
+		).toEqual([
+			{
+				landblockId: 0x0102ffff,
+				offset: { x: 0, y: 0, z: 0 },
+			},
+			{
+				landblockId: 0x0203ffff,
+				offset: { x: 192, y: 192, z: 0 },
+			},
+		]);
+	});
+
 	it("tracks missing prepared assets and filters instances outside active landblock coverage", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {

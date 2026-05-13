@@ -13,7 +13,9 @@ import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatHex32,
+	getOutdoorLandblockCoords,
 	normalizeOutdoorLandblockId,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 
 type StaticRenderableInstanceKind = "scenery" | "building";
@@ -26,6 +28,7 @@ interface StaticRenderableSourceInstance {
 	sourceAssetId: string;
 	sourceIndex: number;
 	frame: FrameDto;
+	landblockWorldOffset: Vec3Dto;
 	numLeaves: number | null;
 }
 
@@ -41,6 +44,7 @@ export interface StaticRenderablePart {
 	gfxObjAssetId: string;
 	instanceFrame: FrameDto;
 	placementFrames: FrameDto[];
+	landblockWorldOffset: Vec3Dto;
 	scale: Vec3Dto;
 	debugColorKey: string;
 }
@@ -84,6 +88,7 @@ export function deriveStaticRenderableSceneModel(
 	const sourceInstances = collectStaticRenderableSourceInstances(
 		assetState,
 		activeLandblockSet,
+		focusLandblockId,
 	)
 		.filter((instance) => activeLandblockSet.has(instance.owningLandblockId))
 		.sort(compareSourceInstances);
@@ -172,6 +177,7 @@ function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 function collectStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
 	activeLandblockSet: Set<number>,
+	focusLandblockId: number,
 ): StaticRenderableSourceInstance[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (
@@ -183,10 +189,15 @@ function collectStaticRenderableSourceInstances(
 
 		return [
 			...asset.payload.sceneryInstances.map((instance) =>
-				normalizeSourceInstance("scenery", instance, null),
+				normalizeSourceInstance("scenery", instance, null, focusLandblockId),
 			),
 			...asset.payload.buildingInstances.map((instance) =>
-				normalizeSourceInstance("building", instance, instance.numLeaves),
+				normalizeSourceInstance(
+					"building",
+					instance,
+					instance.numLeaves,
+					focusLandblockId,
+				),
 			),
 		];
 	});
@@ -196,15 +207,23 @@ function normalizeSourceInstance(
 	kind: StaticRenderableInstanceKind,
 	instance: PreparedLandblockStaticInstance | PreparedLandblockStaticBuilding,
 	numLeaves: number | null,
+	focusLandblockId: number,
 ): StaticRenderableSourceInstance {
+	const owningLandblockId = normalizeOutdoorLandblockId(
+		instance.owningLandblockId,
+	);
 	return {
 		kind,
 		instanceId: instance.instanceId,
-		owningLandblockId: normalizeOutdoorLandblockId(instance.owningLandblockId),
+		owningLandblockId,
 		sourceDid: instance.sourceDid,
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
 		frame: instance.frame,
+		landblockWorldOffset: deriveLandblockWorldOffset(
+			owningLandblockId,
+			focusLandblockId,
+		),
 		numLeaves,
 	};
 }
@@ -279,8 +298,23 @@ function createStaticRenderablePart(
 		gfxObjAssetId: part.gfxObjAssetId,
 		instanceFrame: instance.frame,
 		placementFrames: part.placementFrames,
+		landblockWorldOffset: instance.landblockWorldOffset,
 		scale: part.scale,
 		debugColorKey,
+	};
+}
+
+function deriveLandblockWorldOffset(
+	owningLandblockId: number,
+	focusLandblockId: number,
+): Vec3Dto {
+	const owningCoords = getOutdoorLandblockCoords(owningLandblockId);
+	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
+
+	return {
+		x: (owningCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		y: (owningCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		z: 0,
 	};
 }
 

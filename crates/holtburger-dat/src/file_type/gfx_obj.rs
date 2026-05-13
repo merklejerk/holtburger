@@ -155,9 +155,7 @@ impl GfxObj {
         let mut physics_vertex_ids = std::collections::HashSet::new();
         for poly in self.physics_polygons.values() {
             for &vid in &poly.vertex_ids {
-                if vid >= 0 {
-                    physics_vertex_ids.insert(vid as u16);
-                }
+                physics_vertex_ids.insert(vid);
             }
         }
 

@@ -27,27 +27,27 @@ jobs:
           # Fetch main and create a local tracking branch if it exists, otherwise create it
           git fetch origin main:main || git branch main
           git checkout main
-          
+
           # Merge dev into main but don't commit yet
           # We use -X theirs to favor new changes from dev
-          # We use || true because modify/delete conflicts (structural) will 
+          # We use || true because modify/delete conflicts (structural) will
           # cause a non-zero exit code even if content is resolved.
           git merge dev --no-commit --no-ff -X theirs || echo "Structural conflicts detected, resolving... 🛠️"
-          
+
           # THE PURGE 🧹
           echo "Purging the clutter... 🤫"
           # Use git rm to resolve conflict state and remove unwanted paths in one go
-          git rm -rf --ignore-unmatch ACE/ ACViewer/ docs/ ace-root/ release-test/ crates/holtburger-debug-harness/ .gitmodules TODO.md AGENTS.md
-          
+          git rm -rf --ignore-unmatch ACE/ ACViewer/ docs/ ace-root/ release-test/ crates/holtburger-debug-harness/ acclient-eor-source/ .gitmodules TODO.md AGENTS.md
+
           # Scrub Cargo.toml (remove the harness member)
           # We use a pattern that matches the specific line with its trailing comma if present
           sed -i '/"crates\/holtburger-debug-harness",/d' Cargo.toml
           # Also match it if it's the last item without a comma
           sed -i '/"crates\/holtburger-debug-harness"/d' Cargo.toml
-          
+
           # Final add to stage Cargo.toml changes and any updates from dev
           git add .
-          
+
           # Only commit and push if there are actual changes
           if git diff-index --quiet HEAD; then
             echo "No changes to sync, main is already vibing. 💅"

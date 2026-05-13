@@ -76,9 +76,14 @@
 						});
 						if (!disposed) {
 							for (const preparedAsset of preparedGraph.preparedAssets) {
+								const invalidPolygons =
+									preparedAsset.payload.kind === "gfx-obj"
+										? preparedAsset.payload.renderGeometry.invalidPolygons
+										: undefined;
 								debugLog("asset-apply", {
 									assetId: preparedAsset.request.assetId,
 									kind: preparedAsset.payload.kind,
+									invalidPolygons,
 								});
 								frontendState.applyPreparedAsset(preparedAsset);
 							}

@@ -117,6 +117,11 @@ Desired shape:
 - exports/outputs: render metrics, current camera frame, low-level render queries such as terrain hit tests
 - does not own: browser destination, client commands, Tauri calls, debug HUD, input gesture meanings
 
+Decision:
+
+- Keep the `WorldDisplay` name during decomposition to reduce churn.
+- Rename it to `WorldRenderSurface` only after the component actually matches the shared renderer boundary.
+
 ### Browser Wrapper
 
 `BrowserWorldDisplay`:
@@ -159,6 +164,7 @@ Tasks:
   - low-level viewport pick results.
 - Add a callback or bindable value that reports render bounds/metrics from `WorldDisplay` to its parent.
 - Make `WorldDisplay` accept an optional controlled `SceneCameraFrame` and apply it without owning the policy that produced it.
+- Prefer prop-driven camera frames with renderer metrics flowing upward over a renderer-owned camera adapter.
 - Keep the existing behavior while adding the seam; do not move all policy in this phase.
 
 Exit criteria:
@@ -196,6 +202,7 @@ Tasks:
 - Keep `WorldDisplay` low-level viewport picking limited to render-owned scene queries, such as terrain landblock hit tests.
 - Move camera-hint throttling and debug ray-pick submission into `BrowserWorldDisplay`.
 - Preserve existing browser diagnostics after moving the calls.
+- Treat authority-sensitive ray picks as browser/developer diagnostics, not renderer behavior or core browser navigation.
 
 Exit criteria:
 
@@ -218,6 +225,8 @@ Tasks:
 - Change `WorldDisplay` props to receive prepared terrain/static render scene models directly.
 - Keep GPU resource hydration and Three.js mesh sync inside the renderer.
 - Make naming clear: browser scene coverage is a browser/controller decision.
+- Keep renderer-consumed scene model shapes near `lib/world-display` during extraction, then move shared shapes to `lib/render-scene` once the boundary is stable.
+- Keep browser destination/radius coverage derivation in browser-mode code rather than shared renderer code.
 
 Exit criteria:
 
@@ -235,6 +244,7 @@ Tasks:
 - Define a small render metrics/facts shape for overlays.
 - Render browser debug HUD from `BrowserWorldDisplay`.
 - Keep `WorldDisplay` focused on canvas/render lifecycle.
+- Rename or split `WorldDisplayModel` debug presentation helpers into browser-specific diagnostics once the HUD moves, since the current name will be misleading after renderer cleanup.
 
 Exit criteria:
 
@@ -259,18 +269,42 @@ Exit criteria:
 - Rendering helpers have clear names and ownership.
 - No behavior is changed except through intentional follow-up phases.
 
+### Phase 6: Final Cleanup And Static Analysis
+
+Purpose: catch the common cleanup debt left by large decomposition work: dead codepaths, duplicated helpers, hollow abstractions, stale tests, and misleading names.
+
+Tasks:
+
+- Run TypeScript dead-code and dependency analysis, starting with `knip` if it fits the app workspace.
+- Run Rust-side unused/dead-code analysis with the best available project-appropriate toolchain, starting with strict `cargo clippy`/compiler warnings and evaluating a cargo dead-code tool if needed.
+- Search for duplicated browser/render-scene derivation paths after scene selection moves out of `WorldDisplay`.
+- Remove compatibility shims, reexports, and temporary imperative APIs that were only useful during migration.
+- Rename remaining browser-specific helpers that still carry shared-renderer names.
+- Delete stale tests or update them to target the new owner instead of preserving obsolete boundaries.
+- Review public exports from `lib/world-display`, `lib/render-scene`, and browser-mode modules so only intentional APIs remain.
+
+Exit criteria:
+
+- Static analyzers do not report unused exported code, unused files, or stale dependencies that are practical to remove.
+- Remaining abstractions have at least one concrete purpose and caller.
+- Browser-only code is not exposed as shared renderer API.
+- Renderer helper modules do not duplicate browser/controller scene selection logic.
+- Any analyzer false positives or deliberately retained seams are documented in the plan or adjacent code comments.
+
 ## Course Corrections Already Made
 
 - Browser ctrl-click landblock selection was first added directly to `WorldDisplay`, then corrected into `BrowserWorldDisplay`.
 - Landblock math and formatting were centralized in `src/lib/landblocks.ts` after repeated signed-ID bugs exposed duplicated bitwise logic.
 
-## Open Questions
+## Decisions From Dry Run
 
-- Should the shared renderer be renamed from `WorldDisplay` to `WorldRenderSurface` once the decomposition is complete?
-- Should camera control be modeled as a prop-driven camera frame only, with renderer metrics flowing upward, or should the renderer own a small camera adapter for resize/projection updates?
-- Should authority-sensitive debug ray picks remain in browser mode long term, or move into a separate developer overlay/tool?
-- Should render scene models live under `lib/world-display`, `lib/render-scene`, or mode-specific controller folders?
-- Should the existing `WorldDisplayModel` debug text helpers be renamed or split once they move to browser mode, since that name will become misleading after the renderer boundary is cleaned up?
+- Rename `WorldDisplay` to `WorldRenderSurface` only after Phases 0-4 make the boundary true. Do not do a cosmetic rename first.
+- Use prop-driven camera frames with renderer metrics flowing upward. Avoid a renderer-owned camera adapter unless a later concrete need appears.
+- Keep render-local hit tests in the renderer, such as terrain landblock picking. Move authority-sensitive Rust ray picks to browser/developer diagnostics.
+- Keep scene model shapes near the existing renderer code during extraction. Move shared renderer-consumed scene model types to `lib/render-scene` once browser derivation and renderer hydration are clearly separated.
+- Move browser destination/radius scene coverage derivation into browser-mode code.
+- Split or rename `WorldDisplayModel` debug text helpers during HUD extraction because those helpers represent browser diagnostics, not the shared renderer model.
+- Add a final cleanup/static-analysis phase after decomposition. Use tools such as `knip` for the TypeScript app and strict Rust analysis for crates to catch dead exports, stale dependencies, duplicated migration paths, and hollow abstractions.
 
 ## Next Recommended Step
 

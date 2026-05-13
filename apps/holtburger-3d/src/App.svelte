@@ -8,24 +8,28 @@
   } from './lib/assets/asset-channel';
   import {
     listenForRuntimeLifecycle,
+    readDebugConfig,
     readHostBoundarySnapshot,
   } from './lib/host/tauri';
   import type { AssetPriority, RuntimeBatchDto } from './lib/host/contracts';
-  import WorldDisplay from './lib/world-display/WorldDisplay.svelte';
+  import BrowserWorldDisplay from './pages/BrowserWorldDisplay.svelte';
   import BrowserModePage from './pages/BrowserModePage.svelte';
 
   const tauriLaunchCommand = 'npm run tauri:dev';
   let startupError = $state<string | null>(null);
+  let verboseDiagnostics = false;
 
   onMount(() => {
     let dispose = () => {};
     let disposed = false;
     const assetChannel = new AssetChannelController();
     const inFlightSceneAssetIds = new Set<string>();
+    let lastBrowserCoverageKey: string | null = null;
 
     async function syncSceneCoverage(
       runtimeBatch: RuntimeBatchDto | null,
       browserDestination: typeof $frontendState.browserMode.destination,
+      landblockCoverageRadius: number,
       priority: AssetPriority,
     ): Promise<void> {
       const assetState = get(frontendState).asset;
@@ -35,7 +39,18 @@
         priority,
         assetState.preparedByAssetId,
         [...inFlightSceneAssetIds],
+        { landblockRadius: landblockCoverageRadius },
       );
+
+      debugLog('scene-coverage', {
+        priority,
+        tick: runtimeBatch?.tick ?? null,
+        destination: browserDestination?.label ?? null,
+        landblockCoverageRadius,
+        preparedCount: Object.keys(assetState.preparedByAssetId).length,
+        inFlightSceneAssetIds: [...inFlightSceneAssetIds],
+        requestAssetIds: requests.map((request) => request.assetId),
+      });
 
       if (requests.length === 0) {
         return;
@@ -43,6 +58,7 @@
 
       await Promise.allSettled(
         requests.map(async (request) => {
+          debugLog('asset-request', request);
           inFlightSceneAssetIds.add(request.assetId);
           frontendState.markAssetPending(request);
 
@@ -51,12 +67,27 @@
               request,
               { ...get(frontendState).asset.preparedByAssetId },
             );
+            debugLog('asset-prepared-graph', {
+              rootAssetId: preparedGraph.rootAsset.request.assetId,
+              preparedAssetIds: preparedGraph.preparedAssets.map(
+                (asset) => asset.request.assetId,
+              ),
+              dependencyStatus: preparedGraph.dependencyStatus.status,
+            });
             if (!disposed) {
               for (const preparedAsset of preparedGraph.preparedAssets) {
+                debugLog('asset-apply', {
+                  assetId: preparedAsset.request.assetId,
+                  kind: preparedAsset.payload.kind,
+                });
                 frontendState.applyPreparedAsset(preparedAsset);
               }
             }
           } catch (error) {
+            debugLog('asset-error', {
+              request,
+              message: error instanceof Error ? error.message : String(error),
+            });
             if (!disposed) {
               frontendState.applyAssetError(
                 request,
@@ -70,35 +101,59 @@
       );
     }
 
+    const unsubscribeFrontendState = frontendState.subscribe((state) => {
+      const runtimeBatch = state.host.boundarySnapshot?.runtimeBatch ?? null;
+      const destination = state.browserMode.destination;
+      const landblockCoverageRadius = state.browserMode.landblockCoverageRadius;
+      const coverageKey = destination
+        ? `${destination.source}:${destination.label}:radius-${landblockCoverageRadius}`
+        : `runtime:radius-${landblockCoverageRadius}`;
+
+      if (!runtimeBatch || coverageKey === lastBrowserCoverageKey) {
+        return;
+      }
+
+      lastBrowserCoverageKey = coverageKey;
+      debugLog('coverage-key', {
+        coverageKey,
+        destination: destination?.label ?? null,
+        landblockCoverageRadius,
+        runtimeTick: runtimeBatch.tick,
+      });
+      void syncSceneCoverage(runtimeBatch, destination, landblockCoverageRadius, 'bootstrap');
+      void syncSceneCoverage(runtimeBatch, destination, landblockCoverageRadius, 'streaming');
+    });
+
     void (async () => {
       try {
+        const debugConfig = await readDebugConfig();
+        verboseDiagnostics = debugConfig.verbose;
+        debugLog('debug-config', debugConfig);
+
         dispose = await listenForRuntimeLifecycle((notification) => {
+          debugLog('runtime-notification', {
+            topic: notification.topic,
+            tick: notification.runtimeBatch?.tick ?? null,
+          });
           frontendState.applyRuntimeNotification(notification);
           if (notification.runtimeBatch) {
             void syncSceneCoverage(
               notification.runtimeBatch,
               $frontendState.browserMode.destination,
+              $frontendState.browserMode.landblockCoverageRadius,
               'streaming',
             );
           }
         });
 
         const snapshot = await readHostBoundarySnapshot();
+        debugLog('snapshot', {
+          tick: snapshot.runtimeBatch.tick,
+          runtimeFocus: snapshot.runtimeBatch.residency.focusLocationLabel,
+          draftDestination: $frontendState.browserMode.destination?.label ?? null,
+        });
         frontendState.loadSnapshot(snapshot);
         startupError = null;
-
-        await Promise.all([
-          syncSceneCoverage(
-            snapshot.runtimeBatch,
-            $frontendState.browserMode.destination,
-            'bootstrap',
-          ),
-          syncSceneCoverage(
-            snapshot.runtimeBatch,
-            $frontendState.browserMode.destination,
-            'streaming',
-          ),
-        ]);
       } catch (error) {
         startupError = error instanceof Error ? error.message : String(error);
       }
@@ -106,10 +161,20 @@
 
     return () => {
       disposed = true;
+      unsubscribeFrontendState();
       dispose();
       assetChannel.dispose();
     };
   });
+
+  function debugLog(label: string, detail: unknown): void {
+    if (!verboseDiagnostics) {
+      return;
+    }
+
+    console.debug(`[holtburger-3d][${label}]`, detail);
+  }
+
 </script>
 
 <svelte:head>
@@ -122,7 +187,7 @@
 
 <main class="viewer-shell">
   {#if $frontendState.host.boundarySnapshot}
-    <WorldDisplay
+    <BrowserWorldDisplay
       activeMode={$frontendState.mode.activeMode}
       activeModeLabel={$frontendState.mode.activeModeLabel}
       hostStatus={$frontendState.host.boundaryStatus}
@@ -130,6 +195,7 @@
       viewModelFeed={$frontendState.host.boundarySnapshot?.viewModelFeed ?? null}
       assetState={$frontendState.asset}
       browserDestination={$frontendState.browserMode.destination}
+      landblockCoverageRadius={$frontendState.browserMode.landblockCoverageRadius}
     />
 
     <div class="viewer-overlay viewer-overlay--right">

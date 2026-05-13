@@ -5,6 +5,7 @@ import {
 	type PreparedAssetRecord,
 } from "../assets/types";
 import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
+import { formatLandblockStaticsAssetId } from "../landblocks";
 import { deriveStaticRenderableSceneModel } from "./static-renderables";
 
 const IDENTITY_FRAME: FrameDto = {
@@ -164,7 +165,7 @@ function createPreparedLandblockStaticsAsset(
 	scenerySourceAssetIds: string[],
 	buildingSourceAssetIds: string[] = [],
 ): PreparedAssetRecord {
-	const assetId = `landblock-statics/${landblockId.toString(16).padStart(8, "0")}`;
+	const assetId = formatLandblockStaticsAssetId(landblockId);
 	return createPreparedAsset(assetId, {
 		kind: "landblock-statics",
 		sourceAssetKind: "landblock-info",

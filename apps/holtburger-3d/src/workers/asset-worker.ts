@@ -34,6 +34,7 @@ import type {
 	PreparedTerrainMesh,
 	PreparedTerrainTriangle,
 } from "../lib/assets/types";
+import { formatHex32 } from "../lib/landblocks";
 
 export interface AssetWorkerPrepareRequest {
 	type: "prepare-asset";
@@ -418,7 +419,7 @@ function prepareTerrainLandblock(
 			provenance,
 			debugPresentation: {
 				primitive: "terrain-landblock-mesh",
-				paletteKey: `terrain-${landblockId.toString(16).padStart(8, "0")}`,
+				paletteKey: `terrain-${formatHex32(landblockId)}`,
 			},
 			terrainMesh,
 		},
@@ -653,7 +654,7 @@ function normalizeSurfaceId(surfaceId: number): number | null {
 }
 
 function formatHexId(id: number): string {
-	return `0x${id.toString(16).padStart(8, "0")}`;
+	return `0x${formatHex32(id)}`;
 }
 
 function parseResidencyKind(value: unknown): AssetResidencyKind {

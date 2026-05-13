@@ -7,6 +7,11 @@ import type {
 import { isPreparedTerrainLandblock } from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
 import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
+import {
+	buildOutdoorCoverageLandblockIds,
+	formatLandblockLabel,
+	getOutdoorLandblockCoords,
+} from "../landblocks";
 
 export interface TerrainSceneTile {
 	assetId: string;
@@ -33,6 +38,7 @@ export function deriveTerrainSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
+	landblockCoverageRadius = 1,
 ): TerrainSceneModel {
 	if (!runtimeBatch) {
 		return {
@@ -60,8 +66,13 @@ export function deriveTerrainSceneModel(
 		runtimeBatch,
 		browserDestination,
 	);
-	const focusX = (focusLandblockId >>> 24) & 0xff;
-	const focusY = (focusLandblockId >>> 16) & 0xff;
+	const activeLandblockIds = new Set(
+		buildOutdoorCoverageLandblockIds(
+			focusLandblockId,
+			landblockCoverageRadius,
+		),
+	);
+	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
 	const tiles = Object.values(assetState.preparedByAssetId)
 		.filter(
 			(
@@ -72,10 +83,9 @@ export function deriveTerrainSceneModel(
 		)
 		.map((asset) => {
 			const landblockId = asset.payload.terrainMesh.landblockId;
-			const landblockX = (landblockId >>> 24) & 0xff;
-			const landblockY = (landblockId >>> 16) & 0xff;
-			const offsetX = landblockX - focusX;
-			const offsetY = landblockY - focusY;
+			const landblockCoords = getOutdoorLandblockCoords(landblockId);
+			const offsetX = landblockCoords.x - focusCoords.x;
+			const offsetY = landblockCoords.y - focusCoords.y;
 			const landblockSpan =
 				(asset.payload.terrainMesh.gridSize - 1) *
 				asset.payload.terrainMesh.tileSize;
@@ -93,9 +103,7 @@ export function deriveTerrainSceneModel(
 				dataSource: inferTerrainDataSource(asset),
 			};
 		})
-		.filter(
-			(tile) => Math.abs(tile.offsetX) <= 1 && Math.abs(tile.offsetY) <= 1,
-		)
+		.filter((tile) => activeLandblockIds.has(tile.landblockId))
 		.sort((left, right) => {
 			if (left.isFocus !== right.isFocus) {
 				return left.isFocus ? -1 : 1;
@@ -156,8 +164,4 @@ function inferTerrainDataSource(
 	}
 
 	return "unknown";
-}
-
-function formatLandblockLabel(landblockId: number): string {
-	return `0x${landblockId.toString(16).padStart(8, "0")}`;
 }

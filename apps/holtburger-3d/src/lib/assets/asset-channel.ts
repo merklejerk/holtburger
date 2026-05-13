@@ -8,6 +8,13 @@ import {
 	browserLocationToLandblockId,
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
+import {
+	buildOutdoorCoverageLandblockIds,
+	formatHex32,
+	formatLandblockStaticsAssetId,
+	formatTerrainAssetId,
+	normalizeOutdoorLandblockId,
+} from "../landblocks";
 import { lookupAsset } from "../host/tauri";
 import {
 	derivePreparedAssetDependencyStatus,
@@ -42,6 +49,14 @@ export interface AssetGraphPreparationResult {
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 	dependencyStatus: PreparedAssetDependencyStatus;
 }
+
+export interface OutdoorCoverageOptions {
+	landblockRadius: number;
+}
+
+const DEFAULT_OUTDOOR_COVERAGE_OPTIONS: OutdoorCoverageOptions = {
+	landblockRadius: 1,
+};
 
 export class AssetChannelController {
 	private readonly worker: AssetWorkerLike;
@@ -212,7 +227,7 @@ export function createFocusedAssetRequest(
 		runtimeBatch,
 		browserDestination,
 	);
-	const assetId = `terrain/${landblockId.toString(16).padStart(8, "0")}`;
+	const assetId = formatTerrainAssetId(landblockId);
 	const requestScope = browserDestination ? "destination" : "runtime";
 
 	return {
@@ -228,6 +243,7 @@ export function createSceneCoverageRequests(
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[] = [],
+	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
 	if (!runtimeBatch) {
 		return [];
@@ -249,6 +265,7 @@ export function createSceneCoverageRequests(
 			priority,
 			preparedByAssetId,
 			pendingAssetIds,
+			options,
 		),
 		...createLandblockStaticsCoverageRequests(
 			runtimeBatch,
@@ -256,6 +273,7 @@ export function createSceneCoverageRequests(
 			priority,
 			preparedByAssetId,
 			pendingAssetIds,
+			options,
 		),
 		...createStaticRenderableAssetRequests(
 			runtimeBatch,
@@ -263,6 +281,7 @@ export function createSceneCoverageRequests(
 			priority,
 			preparedByAssetId,
 			pendingAssetIds,
+			options,
 		),
 	];
 }
@@ -291,6 +310,7 @@ export function createTerrainCoverageRequests(
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[] = [],
+	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
 	if (!runtimeBatch || runtimeBatch.residency.indoors) {
 		return [];
@@ -304,6 +324,7 @@ export function createTerrainCoverageRequests(
 	const coverageAssetIds = buildOutdoorCoverageAssetIds(
 		focusLandblockId,
 		priority,
+		options.landblockRadius,
 	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
@@ -325,6 +346,7 @@ export function createLandblockStaticsCoverageRequests(
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[] = [],
+	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
 	if (!runtimeBatch || runtimeBatch.residency.indoors) {
 		return [];
@@ -335,9 +357,10 @@ export function createLandblockStaticsCoverageRequests(
 		browserDestination,
 	);
 	const requestScope = browserDestination ? "destination" : "runtime";
-	const coverageAssetIds = buildOutdoorCoverageLandblockIds(
+	const coverageAssetIds = buildPrioritizedOutdoorCoverageLandblockIds(
 		focusLandblockId,
 		priority,
+		options.landblockRadius,
 	).map(formatLandblockStaticsAssetId);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
@@ -359,6 +382,7 @@ export function createStaticRenderableAssetRequests(
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[] = [],
+	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
 	if (!runtimeBatch || runtimeBatch.residency.indoors) {
 		return [];
@@ -367,7 +391,7 @@ export function createStaticRenderableAssetRequests(
 	const activeLandblockIds = new Set(
 		buildOutdoorCoverageLandblockIds(
 			deriveTerrainFocusLandblockId(runtimeBatch, browserDestination),
-			"streaming",
+			options.landblockRadius,
 		),
 	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
@@ -410,78 +434,31 @@ export function deriveTerrainFocusLandblockId(
 ): number {
 	return browserDestination
 		? browserLocationToLandblockId(browserDestination)
-		: normalizeLandblockId(runtimeBatch.residency.focusLandblockId);
-}
-
-function normalizeLandblockId(rawLandblockId: number): number {
-	return (rawLandblockId & 0xffff0000) | 0xffff;
+		: normalizeOutdoorLandblockId(runtimeBatch.residency.focusLandblockId);
 }
 
 function buildOutdoorCoverageAssetIds(
 	focusLandblockId: number,
 	priority: AssetPriority,
+	landblockRadius: number,
 ): string[] {
-	return buildOutdoorCoverageLandblockIds(focusLandblockId, priority).map(
-		formatTerrainAssetId,
-	);
+	return buildPrioritizedOutdoorCoverageLandblockIds(
+		focusLandblockId,
+		priority,
+		landblockRadius,
+	).map(formatTerrainAssetId);
 }
 
-function buildOutdoorCoverageLandblockIds(
+function buildPrioritizedOutdoorCoverageLandblockIds(
 	focusLandblockId: number,
 	priority: AssetPriority,
+	landblockRadius: number,
 ): number[] {
 	if (priority === "bootstrap") {
 		return [focusLandblockId];
 	}
 
-	const centerX = (focusLandblockId >>> 24) & 0xff;
-	const centerY = (focusLandblockId >>> 16) & 0xff;
-	const candidates: Array<{
-		landblockId: number;
-		distance: number;
-		offsetX: number;
-		offsetY: number;
-	}> = [];
-
-	for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-		for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-			const nextX = centerX + offsetX;
-			const nextY = centerY + offsetY;
-
-			if (nextX < 0 || nextX > 0xfe || nextY < 0 || nextY > 0xfe) {
-				continue;
-			}
-
-			const landblockId =
-				((nextX & 0xff) << 24) | ((nextY & 0xff) << 16) | 0xffff;
-			candidates.push({
-				landblockId,
-				distance: Math.abs(offsetX) + Math.abs(offsetY),
-				offsetX,
-				offsetY,
-			});
-		}
-	}
-
-	return candidates
-		.sort((left, right) => {
-			if (left.distance !== right.distance) {
-				return left.distance - right.distance;
-			}
-			if (left.offsetY !== right.offsetY) {
-				return left.offsetY - right.offsetY;
-			}
-			return left.offsetX - right.offsetX;
-		})
-		.map((candidate) => candidate.landblockId);
-}
-
-function formatTerrainAssetId(landblockId: number): string {
-	return `terrain/${landblockId.toString(16).padStart(8, "0")}`;
-}
-
-function formatLandblockStaticsAssetId(landblockId: number): string {
-	return `landblock-statics/${landblockId.toString(16).padStart(8, "0")}`;
+	return buildOutdoorCoverageLandblockIds(focusLandblockId, landblockRadius);
 }
 
 function isStaticRenderableAssetId(assetId: string): boolean {
@@ -526,11 +503,11 @@ function createIndoorCoverageRequests(
 }
 
 function formatIndoorEnvCellAssetId(envCellId: number): string {
-	return `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
+	return `indoor-env-cell/${formatHex32(envCellId)}`;
 }
 
 function formatEnvironmentAssetId(environmentId: number): string {
-	return `environment/${environmentId.toString(16).padStart(8, "0")}`;
+	return `environment/${formatHex32(environmentId)}`;
 }
 
 function formatCellStructureAssetId(cellStructureId: number): string {

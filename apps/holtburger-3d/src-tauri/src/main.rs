@@ -4,8 +4,8 @@ mod contracts;
 use adapter::{HostRuntimeService, RUNTIME_NOTIFICATION_EVENT};
 use contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto, CameraHintDto,
-    FrontendStateFeedDto, HostBoundaryOverviewDto, LifecycleStateDto, RayPickRequestDto,
-    RayPickResponseDto, RuntimeBatchDto,
+    DebugConfigDto, FrontendStateFeedDto, HostBoundaryOverviewDto, LifecycleStateDto,
+    RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto,
 };
 use tauri::Emitter;
 
@@ -42,6 +42,11 @@ fn get_host_boundary_overview(
 }
 
 #[tauri::command]
+fn get_debug_config(runtime: tauri::State<'_, HostRuntimeService>) -> DebugConfigDto {
+    runtime.debug_config()
+}
+
+#[tauri::command]
 fn submit_camera_hint(
     runtime: tauri::State<'_, HostRuntimeService>,
     hint: CameraHintDto,
@@ -58,7 +63,11 @@ fn resolve_ray_pick(
 }
 
 fn main() {
-    let runtime = HostRuntimeService::new();
+    let verbose = verbose_logging_enabled();
+    if verbose {
+        eprintln!("[holtburger-3d][debug] verbose diagnostics enabled");
+    }
+    let runtime = HostRuntimeService::new(verbose);
 
     tauri::Builder::default()
         .manage(runtime.clone())
@@ -98,9 +107,17 @@ fn main() {
             get_view_model_feed,
             lookup_asset,
             get_host_boundary_overview,
+            get_debug_config,
             submit_camera_hint,
             resolve_ray_pick,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Holtburger 3D host");
+}
+
+fn verbose_logging_enabled() -> bool {
+    std::env::var("HOLTBURGER_3D_VERBOSE")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+        .unwrap_or(false)
+        || std::env::args().any(|arg| arg == "--verbose" || arg == "-v")
 }

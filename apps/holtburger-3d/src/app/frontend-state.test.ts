@@ -80,10 +80,11 @@ describe("frontend state store", () => {
 
 		store.loadSnapshot(createSnapshot());
 
-		expect(get(store).browserMode.draftInput).toBe("29.90S, 65.90W, 0.0Z");
+		expect(get(store).browserMode.draftInput).toBe("33.50S, 72.80E, 0.0Z");
 		expect(get(store).browserMode.destination?.label).toBe(
-			"29.90S, 65.90W, 0.0Z",
+			"33.50S, 72.80E, 0.0Z",
 		);
+		expect(get(store).browserMode.landblockCoverageRadius).toBe(1);
 		expect(get(store).mode.activeMode).toBe("client");
 		expect(get(store).mode.activePageId).toBe("destination-preview");
 		expect(get(store).asset.channel).toBe("asset");
@@ -210,6 +211,17 @@ describe("frontend state store", () => {
 		expect(get(browserModeStore).mode.activePageId).toBe("destination-preview");
 	});
 
+	it("can select browser focus from an exact landblock id", () => {
+		const store = createFrontendStateStore();
+
+		store.selectBrowserLandblockDestination(0xda550123);
+
+		expect(get(store).browserMode.destination?.source).toBe("landblock-pick");
+		expect(get(store).browserMode.destination?.landblockId).toBe(0xda55ffff);
+		expect(get(store).browserMode.destination?.label).toContain("0xda55ffff");
+		expect(get(store).mode.activePageId).toBe("destination-preview");
+	});
+
 	it("keeps the world-viewer page active when lifecycle facts are ready and connected", () => {
 		const mode = deriveModeState(
 			{
@@ -221,6 +233,7 @@ describe("frontend state store", () => {
 				draftInput: "",
 				validationMessage: null,
 				destination: null,
+				landblockCoverageRadius: 1,
 				page: "location-entry",
 			},
 		);

@@ -3,6 +3,7 @@ import type {
 	AssetLookupResponseDto,
 	CameraHintAckDto,
 	CameraHintDto,
+	DebugConfigDto,
 	HostBoundarySnapshot,
 	RayPickRequestDto,
 	RayPickResponseDto,
@@ -11,6 +12,7 @@ import type {
 import {
 	assetLookupResponseDtoSchema,
 	cameraHintAckDtoSchema,
+	debugConfigDtoSchema,
 	frontendStateFeedDtoSchema,
 	hostBoundaryOverviewDtoSchema,
 	lifecycleStateDtoSchema,
@@ -74,6 +76,12 @@ export async function readHostBoundarySnapshot(): Promise<HostBoundarySnapshot> 
 		viewModelFeed,
 		overview,
 	};
+}
+
+export async function readDebugConfig(): Promise<DebugConfigDto> {
+	requireTauriRuntime();
+
+	return invokeCommand("get_debug_config", debugConfigDtoSchema);
 }
 
 export async function lookupAsset(

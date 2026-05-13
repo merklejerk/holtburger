@@ -131,6 +131,7 @@ describe("asset channel controller", () => {
 				eastWestHemisphere: "W",
 				elevation: 0,
 				source: "manual",
+				landblockId: null,
 			},
 			"streaming",
 		);
@@ -149,6 +150,7 @@ describe("asset channel controller", () => {
 			eastWestHemisphere: "W",
 			elevation: 0,
 			source: "manual",
+				landblockId: null,
 		});
 
 		expect(landblockId).toBe(0x2d5affff);
@@ -261,6 +263,58 @@ describe("asset channel controller", () => {
 		).toBe(true);
 	});
 
+	it("expands streaming coverage from the requested browser landblock radius", () => {
+		const requests = createTerrainCoverageRequests(
+			{
+				...createRuntimeBatch(),
+				residency: {
+					...createRuntimeBatch().residency,
+					focusLandblockId: 0x40400003,
+				},
+			},
+			null,
+			"streaming",
+			{},
+			[],
+			{ landblockRadius: 2 },
+		);
+
+		expect(requests).toHaveLength(25);
+		expect(requests[0]?.assetId).toBe("terrain/4040ffff");
+		expect(requests.map((request) => request.assetId)).toContain(
+			"terrain/4242ffff",
+		);
+	});
+
+	it("formats high-range coverage landblocks as unsigned asset ids", () => {
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch(),
+			{
+				label: "33.50S, 72.80E, 0.0Z",
+				northSouth: 33.5,
+				northSouthHemisphere: "S",
+				eastWest: 72.8,
+				eastWestHemisphere: "E",
+				elevation: 0,
+				source: "manual",
+				landblockId: null,
+			},
+			"streaming",
+			{},
+			[],
+		);
+
+		expect(requests.every((request) => !request.assetId.includes("/-"))).toBe(
+			true,
+		);
+		expect(requests.map((request) => request.assetId)).toContain(
+			"terrain/da55ffff",
+		);
+		expect(requests.map((request) => request.assetId)).toContain(
+			"landblock-statics/db56ffff",
+		);
+	});
+
 	it("requests landblock static facts for the same destination coverage as terrain", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createSceneCoverageRequests(
@@ -273,6 +327,7 @@ describe("asset channel controller", () => {
 				eastWestHemisphere: "W",
 				elevation: 0,
 				source: "manual",
+				landblockId: null,
 			},
 			"bootstrap",
 			{},

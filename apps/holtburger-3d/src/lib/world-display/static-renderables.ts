@@ -10,6 +10,11 @@ import type {
 } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
 import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
+import {
+	buildOutdoorCoverageLandblockIds,
+	formatHex32,
+	normalizeOutdoorLandblockId,
+} from "../landblocks";
 
 export type StaticRenderableInstanceKind = "scenery" | "building";
 
@@ -61,6 +66,7 @@ export function deriveStaticRenderableSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
+	landblockCoverageRadius = 1,
 ): StaticRenderableSceneModel {
 	if (!runtimeBatch || runtimeBatch.residency.indoors) {
 		return emptyStaticRenderableSceneModel();
@@ -70,7 +76,10 @@ export function deriveStaticRenderableSceneModel(
 		runtimeBatch,
 		browserDestination,
 	);
-	const activeLandblockIds = deriveOutdoorRingLandblockIds(focusLandblockId);
+	const activeLandblockIds = buildOutdoorCoverageLandblockIds(
+		focusLandblockId,
+		landblockCoverageRadius,
+	).sort((left, right) => left - right);
 	const activeLandblockSet = new Set(activeLandblockIds);
 	const sourceInstances = collectStaticRenderableSourceInstances(
 		assetState,
@@ -191,7 +200,7 @@ function normalizeSourceInstance(
 	return {
 		kind,
 		instanceId: instance.instanceId,
-		owningLandblockId: normalizeLandblockId(instance.owningLandblockId),
+		owningLandblockId: normalizeOutdoorLandblockId(instance.owningLandblockId),
 		sourceDid: instance.sourceDid,
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
@@ -326,34 +335,6 @@ function selectDefaultPlacementFrames(
 	);
 }
 
-function deriveOutdoorRingLandblockIds(focusLandblockId: number): number[] {
-	const focusX = (focusLandblockId >>> 24) & 0xff;
-	const focusY = (focusLandblockId >>> 16) & 0xff;
-	const landblockIds: number[] = [];
-
-	for (
-		let y = Math.max(0, focusY - 1);
-		y <= Math.min(0xfe, focusY + 1);
-		y += 1
-	) {
-		for (
-			let x = Math.max(0, focusX - 1);
-			x <= Math.min(0xfe, focusX + 1);
-			x += 1
-		) {
-			landblockIds.push(
-				normalizeLandblockId(((x << 24) | (y << 16) | 0xffff) >>> 0),
-			);
-		}
-	}
-
-	return landblockIds.sort((left, right) => left - right);
-}
-
-function normalizeLandblockId(landblockId: number): number {
-	return (landblockId | 0xffff) >>> 0;
-}
-
 function formatHexId(value: number): string {
-	return `0x${value.toString(16).padStart(8, "0")}`;
+	return `0x${formatHex32(value)}`;
 }

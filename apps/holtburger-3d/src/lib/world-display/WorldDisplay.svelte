@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import {
     AmbientLight,
     Box3,
@@ -14,7 +14,9 @@
     MeshStandardMaterial,
     PerspectiveCamera,
     Quaternion as ThreeQuaternion,
+    Raycaster,
     Scene,
+    Vector2,
     Vector3,
     WebGLRenderer,
   } from 'three';
@@ -40,6 +42,18 @@
     type NormalizedViewportPoint,
   } from './model';
   import { deriveTerrainSceneModel, type TerrainSceneTile } from './terrain-scene';
+  import {
+    buildCameraHintFromSceneCameraFrame,
+    buildDebugOrbitCameraFrame,
+    createDebugOrbitCameraState,
+    describeSceneCameraFrame,
+    fitDebugOrbitCameraToBounds,
+    orbitDebugCamera,
+    panDebugCamera,
+    zoomDebugCamera,
+    type DebugOrbitCameraState,
+    type SceneCameraFrame,
+  } from './camera';
 
   let {
     activeMode,
@@ -49,6 +63,7 @@
     viewModelFeed,
     assetState,
     browserDestination,
+    landblockCoverageRadius,
   }: {
     activeMode: AppModeId;
     activeModeLabel: string;
@@ -57,6 +72,7 @@
     viewModelFeed: FrontendStateFeedDto | null;
     assetState: AssetChannelState;
     browserDestination: BrowserLocationSelection | null;
+    landblockCoverageRadius: number;
   } = $props();
 
   const CAMERA_HINT_INTERVAL_MS = 250;
@@ -78,13 +94,36 @@
   let staticRenderableText = $state('No static renderables are cached yet.');
   let sceneBoundsText = $state('Scene bounds are unavailable until terrain is framed.');
   let cameraFrameText = $state('Camera frame is waiting for terrain.');
+  let debugCameraState = $state<DebugOrbitCameraState>(createDebugOrbitCameraState());
+  let activeCameraFrame = $state<SceneCameraFrame | null>(null);
+  let activePointerDrag = $state<{
+    pointerId: number;
+    lastX: number;
+    lastY: number;
+    mode: 'orbit' | 'pan';
+    moved: boolean;
+  } | null>(null);
+  let suppressNextClick = false;
   const terrainMeshes = new Map<string, Mesh>();
   const staticGeometryCache = new Map<string, BufferGeometry>();
   const staticRenderableMeshes = new Map<string, InstancedMesh>();
+  const terrainRaycaster = new Raycaster();
 
-  const terrainScene = $derived(deriveTerrainSceneModel(runtimeBatch, assetState, browserDestination));
+  const terrainScene = $derived(
+    deriveTerrainSceneModel(
+      runtimeBatch,
+      assetState,
+      browserDestination,
+      landblockCoverageRadius,
+    ),
+  );
   const staticRenderableScene = $derived(
-    deriveStaticRenderableSceneModel(runtimeBatch, assetState, browserDestination),
+    deriveStaticRenderableSceneModel(
+      runtimeBatch,
+      assetState,
+      browserDestination,
+      landblockCoverageRadius,
+    ),
   );
 
   const terrainVertexCount = $derived(
@@ -108,6 +147,7 @@
       ? 'No terrain heights are cached yet.'
       : `Height range ${terrainMinHeight.toFixed(1)} to ${terrainMaxHeight.toFixed(1)} across cached tiles.`,
   );
+  const assetDebugText = $derived(describeAssetDebugState());
 
   const worldDisplay = $derived(
     deriveWorldDisplayModel({
@@ -117,13 +157,24 @@
       viewModelFeed,
       assetState,
       browserDestination,
+      landblockCoverageRadius,
       cameraAck,
       rayPickResponse,
       pendingCameraHint: trailingCameraHint !== null,
     }),
   );
 
-  const autoCameraHint = $derived(buildCameraHint(activeMode, runtimeBatch, browserDestination));
+  const autoCameraHint = $derived(
+    activeCameraFrame
+      ? buildCameraHintFromSceneCameraFrame(
+          activeMode,
+          runtimeBatch,
+          browserDestination,
+          activeCameraFrame,
+          { normalizedX: 0.5, normalizedY: 0.5 },
+        )
+      : buildCameraHint(activeMode, runtimeBatch, browserDestination),
+  );
   const autoHintKey = $derived(
     autoCameraHint
     ? [
@@ -138,7 +189,11 @@
   );
 
   $effect(() => {
-    if (autoCameraHint && autoHintKey !== lastAutoHintKey) {
+    if (
+      autoCameraHint &&
+      autoHintKey !== lastAutoHintKey &&
+      !debugCameraState.hasManualControl
+    ) {
       lastAutoHintKey = autoHintKey;
       scheduleCameraHint(autoCameraHint, true);
     }
@@ -249,20 +304,104 @@
     }
   });
 
-  function handleViewportMove(event: MouseEvent): void {
-    const viewportPoint = getViewportPoint(event);
-    const hint = buildCameraHint(activeMode, runtimeBatch, browserDestination, viewportPoint);
+  export function pickTerrainLandblockAtViewportPoint(
+    viewportPoint: NormalizedViewportPoint,
+  ): number | null {
+    return pickTerrainLandblock(viewportPoint);
+  }
 
-    if (!hint) {
+  function handleViewportPointerDown(event: PointerEvent): void {
+    if (event.button !== 0 && event.button !== 1 && event.button !== 2) {
       return;
     }
 
-    scheduleCameraHint(hint, false);
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture(event.pointerId);
+    activePointerDrag = {
+      pointerId: event.pointerId,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      mode: event.button === 0 ? 'orbit' : 'pan',
+      moved: false,
+    };
+    event.preventDefault();
+  }
+
+  function handleViewportPointerMove(event: PointerEvent): void {
+    const drag = activePointerDrag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      const viewportPoint = getViewportPoint(event);
+      scheduleRenderedCameraHint(viewportPoint, false);
+      return;
+    }
+
+    const delta = {
+      x: event.clientX - drag.lastX,
+      y: event.clientY - drag.lastY,
+    };
+    if (delta.x === 0 && delta.y === 0) {
+      return;
+    }
+
+    activePointerDrag = {
+      ...drag,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      moved: drag.moved || Math.hypot(delta.x, delta.y) > 2,
+    };
+    debugCameraState =
+      drag.mode === 'orbit'
+        ? orbitDebugCamera(debugCameraState, delta)
+        : panDebugCamera(debugCameraState, delta);
+    applyDebugCameraFrame();
+    scheduleRenderedCameraHint(getViewportPoint(event), false);
+    event.preventDefault();
+  }
+
+  function handleViewportPointerUp(event: PointerEvent): void {
+    const drag = activePointerDrag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId);
+    }
+    suppressNextClick = drag.moved;
+    activePointerDrag = null;
+    event.preventDefault();
+  }
+
+  function handleViewportWheel(event: WheelEvent): void {
+    debugCameraState = zoomDebugCamera(debugCameraState, event.deltaY);
+    applyDebugCameraFrame();
+    scheduleRenderedCameraHint(getViewportPoint(event), false);
+    event.preventDefault();
+  }
+
+  function handleViewportKeyDown(event: KeyboardEvent): void {
+    if (event.key.toLowerCase() !== 'f') {
+      return;
+    }
+
+    updateCameraFrame(true);
+    scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
+    event.preventDefault();
+  }
+
+  function handleViewportContextMenu(event: MouseEvent): void {
+    event.preventDefault();
   }
 
   async function handleViewportClick(event: MouseEvent): Promise<void> {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+
     const viewportPoint = getViewportPoint(event);
-    const hint = buildCameraHint(activeMode, runtimeBatch, browserDestination, viewportPoint);
+    const hint = buildRenderedCameraHint(viewportPoint);
 
     if (!hint) {
       return;
@@ -274,7 +413,31 @@
     );
   }
 
-  function getViewportPoint(event: MouseEvent): NormalizedViewportPoint {
+  function pickTerrainLandblock(
+    viewportPoint: NormalizedViewportPoint,
+  ): number | null {
+    if (!camera || terrainMeshes.size === 0) {
+      return null;
+    }
+
+    terrainRaycaster.setFromCamera(
+      new Vector2(
+        viewportPoint.normalizedX * 2 - 1,
+        -(viewportPoint.normalizedY * 2 - 1),
+      ),
+      camera,
+    );
+    const intersections = terrainRaycaster.intersectObjects(
+      [...terrainMeshes.values()],
+      false,
+    );
+    const pickedMesh = intersections[0]?.object;
+    const landblockId = pickedMesh?.userData.landblockId;
+
+    return typeof landblockId === 'number' ? landblockId : null;
+  }
+
+  function getViewportPoint(event: MouseEvent | PointerEvent | WheelEvent): NormalizedViewportPoint {
     const viewport = event.currentTarget as HTMLElement;
     const rect = viewport.getBoundingClientRect();
     return normalizeViewportPoint(
@@ -282,6 +445,35 @@
       event.clientY - rect.top,
       rect.width,
       rect.height,
+    );
+  }
+
+  function scheduleRenderedCameraHint(
+    viewportPoint: NormalizedViewportPoint,
+    immediate: boolean,
+  ): void {
+    const hint = buildRenderedCameraHint(viewportPoint);
+
+    if (!hint) {
+      return;
+    }
+
+    scheduleCameraHint(hint, immediate);
+  }
+
+  function buildRenderedCameraHint(
+    viewportPoint: NormalizedViewportPoint,
+  ): NonNullable<ReturnType<typeof buildCameraHint>> | null {
+    if (!activeCameraFrame) {
+      return buildCameraHint(activeMode, runtimeBatch, browserDestination, viewportPoint);
+    }
+
+    return buildCameraHintFromSceneCameraFrame(
+      activeMode,
+      runtimeBatch,
+      browserDestination,
+      activeCameraFrame,
+      viewportPoint,
     );
   }
 
@@ -363,6 +555,7 @@
 
       const mesh = createTerrainTileMesh(tile);
       mesh.position.set(tile.worldOffsetX, 0, -tile.worldOffsetY);
+      mesh.userData.landblockId = tile.landblockId;
       terrainRoot.add(mesh);
       terrainMeshes.set(tile.assetId, mesh);
     }
@@ -371,19 +564,27 @@
       ? 'No terrain geometry is cached yet.'
       : `${terrainScene.tiles.length} tile${terrainScene.tiles.length === 1 ? '' : 's'}, ${terrainVertexCount} vertices, ${terrainTriangleCount} triangles.`;
 
-    updateCameraFrame();
+    untrack(() => updateCameraFrame());
   }
 
-  function updateCameraFrame(): void {
+  function updateCameraFrame(forceFit = false): void {
     if (!camera || !terrainRoot || !staticRenderableRoot) {
       return;
     }
 
     if (terrainScene.tiles.length === 0 && staticRenderableScene.parts.length === 0) {
-      camera.position.set(180, 220, 180);
-      camera.lookAt(0, 0, 0);
+      activeCameraFrame = {
+        position: { x: 180, y: 220, z: 180 },
+        target: { x: 0, y: 0, z: 0 },
+        up: { x: 0, y: 1, z: 0 },
+        aspect: camera.aspect,
+        fovDegrees: 52,
+        near: 0.1,
+        far: 5000,
+      };
+      applySceneCameraFrame(activeCameraFrame);
       sceneBoundsText = 'Scene bounds are unavailable until terrain is framed.';
-      cameraFrameText = 'Camera parked at (180.0, 220.0, 180.0) looking at (0.0, 0.0, 0.0).';
+      cameraFrameText = `${describeSceneCameraFrame(activeCameraFrame)} ${describeCameraControlMode()}`;
       return;
     }
 
@@ -392,17 +593,74 @@
     bounds.expandByObject(staticRenderableRoot);
     const center = bounds.getCenter(new Vector3());
     const size = bounds.getSize(new Vector3());
-    const span = Math.max(size.x, size.z, 180);
-    const verticalSpan = Math.max(size.y, 24);
+    const fitKey = [
+      center.x.toFixed(2),
+      center.y.toFixed(2),
+      center.z.toFixed(2),
+      size.x.toFixed(2),
+      size.y.toFixed(2),
+      size.z.toFixed(2),
+      terrainScene.tiles.length,
+      staticRenderableScene.parts.length,
+    ].join(':');
 
-    camera.position.set(
-      center.x + span * 0.95,
-      center.y + verticalSpan + span * 0.72,
-      center.z + span * 0.9,
+    debugCameraState = fitDebugOrbitCameraToBounds(
+      debugCameraState,
+      {
+        center: { x: center.x, y: center.y, z: center.z },
+        size: { x: size.x, y: size.y, z: size.z },
+        minimumSpan: 180,
+      },
+      fitKey,
+      { force: forceFit },
     );
-    camera.lookAt(center.x, center.y, center.z);
+    applyDebugCameraFrame();
     sceneBoundsText = `Center (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}) span (${size.x.toFixed(1)}, ${size.y.toFixed(1)}, ${size.z.toFixed(1)}).`;
-    cameraFrameText = `Camera (${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)}) looking at (${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)}).`;
+  }
+
+  function applyDebugCameraFrame(): void {
+    activeCameraFrame = {
+      ...buildDebugOrbitCameraFrame(debugCameraState),
+      aspect: camera?.aspect ?? 1,
+    };
+    applySceneCameraFrame(activeCameraFrame);
+    cameraFrameText = `${describeSceneCameraFrame(activeCameraFrame)} ${describeCameraControlMode()}`;
+  }
+
+  function applySceneCameraFrame(frame: SceneCameraFrame): void {
+    if (!camera) {
+      return;
+    }
+
+    camera.fov = frame.fovDegrees;
+    camera.aspect = frame.aspect;
+    camera.near = frame.near;
+    camera.far = frame.far;
+    camera.position.set(frame.position.x, frame.position.y, frame.position.z);
+    camera.up.set(frame.up.x, frame.up.y, frame.up.z);
+    camera.lookAt(frame.target.x, frame.target.y, frame.target.z);
+    camera.updateProjectionMatrix();
+  }
+
+  function describeCameraControlMode(): string {
+    return debugCameraState.hasManualControl
+      ? 'Browser camera: manual orbit.'
+      : 'Browser camera: auto-fit.';
+  }
+
+  function describeAssetDebugState(): string {
+    if (assetState.errorMessage) {
+      return `Error while preparing ${assetState.activeRequest?.assetId ?? 'asset'}: ${assetState.errorMessage}`;
+    }
+
+    const preparedCount = Object.keys(assetState.preparedByAssetId).length;
+    const activeAssetId = assetState.activeRequest?.assetId ?? 'none';
+    const recentActivity = assetState.history.at(-1);
+    const recentText = recentActivity
+      ? `${recentActivity.status} ${recentActivity.assetId}`
+      : 'no asset activity yet';
+
+    return `${assetState.status}; active ${activeAssetId}; prepared ${preparedCount}; latest ${recentText}.`;
   }
 
   function syncStaticRenderableMeshes(): void {
@@ -454,7 +712,7 @@
         ? describeStaticRenderableIdleState()
         : `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? '' : 's'} across ${partsByGfxAssetId.size} shared gfx geometr${partsByGfxAssetId.size === 1 ? 'y' : 'ies'}.`;
 
-    updateCameraFrame();
+    untrack(() => updateCameraFrame());
   }
 
   function describeStaticRenderableIdleState(): string {
@@ -670,9 +928,16 @@
 
 <div class="world-display">
   <button
+    aria-label="World display viewport"
     class="world-display__viewport-button"
     type="button"
-    onmousemove={handleViewportMove}
+    onpointerdown={handleViewportPointerDown}
+    onpointermove={handleViewportPointerMove}
+    onpointerup={handleViewportPointerUp}
+    onpointercancel={handleViewportPointerUp}
+    onwheel={handleViewportWheel}
+    onkeydown={handleViewportKeyDown}
+    oncontextmenu={handleViewportContextMenu}
     onclick={handleViewportClick}
   >
     <div class="world-display__viewport">
@@ -698,6 +963,10 @@
             <dd>{sceneGeometryText}</dd>
           </div>
           <div>
+            <dt>Assets</dt>
+            <dd>{assetDebugText}</dd>
+          </div>
+          <div>
             <dt>Statics</dt>
             <dd>{staticRenderableText}</dd>
           </div>
@@ -715,8 +984,6 @@
           </div>
         </dl>
       </div>
-
-      <div class="world-display__reticle"></div>
 
       <div class="world-display__viewport-copy">
         <p>{terrainScene.statusText}</p>

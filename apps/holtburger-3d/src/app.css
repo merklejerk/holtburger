@@ -137,6 +137,12 @@ ul {
 	background: transparent;
 	width: 100%;
 	display: block;
+	cursor: grab;
+	touch-action: none;
+}
+
+.world-display__viewport-button:active {
+	cursor: grabbing;
 }
 
 .world-display__viewport {
@@ -215,38 +221,6 @@ ul {
 	height: 100%;
 	display: block;
 	filter: drop-shadow(0 22px 34px rgba(0, 0, 0, 0.24));
-}
-
-.world-display__reticle {
-	width: 72px;
-	aspect-ratio: 1;
-	border-radius: 50%;
-	border: 1px solid rgba(255, 255, 255, 0.24);
-	position: absolute;
-	z-index: 1;
-}
-
-.world-display__reticle::before,
-.world-display__reticle::after {
-	content: "";
-	position: absolute;
-	background: rgba(255, 255, 255, 0.22);
-}
-
-.world-display__reticle::before {
-	width: 1px;
-	height: 112px;
-	top: -20px;
-	left: 50%;
-	transform: translateX(-50%);
-}
-
-.world-display__reticle::after {
-	height: 1px;
-	width: 112px;
-	left: -20px;
-	top: 50%;
-	transform: translateY(-50%);
 }
 
 .world-display__viewport p {
@@ -357,9 +331,18 @@ ul {
 	gap: 0.45rem;
 }
 
+.browser-form__field--range {
+	padding: 0.75rem 0;
+}
+
 .browser-form__field span {
 	color: #90a8c7;
 	font-size: 0.88rem;
+}
+
+.browser-form__field strong {
+	color: #e8ecf3;
+	font-size: 0.95rem;
 }
 
 .browser-form__field input {
@@ -371,6 +354,11 @@ ul {
 	background: rgba(0, 0, 0, 0.18);
 	color: #e8ecf3;
 	font: inherit;
+}
+
+.browser-form__field input[type="range"] {
+	padding: 0;
+	accent-color: #a9d59f;
 }
 
 .browser-form__field input:focus {

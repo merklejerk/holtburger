@@ -1794,7 +1794,7 @@ Phase 11 course correction:
 
 #### Phase 12: Outdoor Scenery And The `gfx-obj` / `setup-model` Asset Family Seam
 
-Status: in progress; sub-phases 12.0 through 12.7 are implemented, with Phase 12.7 awaiting manual Tauri visual smoke.
+Status: in progress; sub-phases 12.0 through 12.8 are implemented, with aggregate outdoor static-scene delivery awaiting manual Tauri visual smoke.
 
 Replaces the old "Phase 12 = SpatialBody expansion" stub. Phase 11's gate review and the post-Phase 11 readiness check both concluded that browser mode lacks any honest driver for shared non-world body semantics: the world is currently terrain-only, the camera is a free fly-cam by design, and ray pick is a stubbed entity-distance heuristic that never touches `SpatialScene`. Forcing a shared-crate constraint expansion now would design role / membership / mask vocabulary against imagined demand.
 
@@ -2392,7 +2392,7 @@ Next-step assessment:
 
 ##### Phase 12.8 — Reusable Static Outdoor Scene Assembly
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Purpose: turn the Phase 12.6/12.7 proof into an isomorphic Rust component that browser mode and the future client runtime can both use. Phase 12.7 intentionally proved generated outdoor scenery in the Tauri adapter, but that should not become the long-term owner of outdoor static scene assembly. The durable shape should avoid duplicating explicit statics, buildings, generated scenery, and future placement-suppression logic between browser and client modes.
 
@@ -2440,7 +2440,7 @@ Non-goals:
 
 ##### Phase 12.8a — Core Static Outdoor Scene Model
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Scope: define the Rust model and API shape before moving behavior. This is type/API work only.
 
@@ -2462,7 +2462,7 @@ Acceptance:
 
 ##### Phase 12.8b — Move Existing Assembly Into Core
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Scope: move the existing Phase 12.6 explicit-static derivation and Phase 12.7 generated-scenery derivation out of the Tauri adapter into the core assembler without changing frontend delivery yet.
 
@@ -2483,7 +2483,7 @@ Acceptance:
 
 ##### Phase 12.8c — Aggregate Outdoor Static Scene Asset Family
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Scope: change delivery to avoid duplicate frontend/Rust work by replacing the two split renderer-fact payloads with one aggregate static scene payload per landblock.
 
@@ -2506,7 +2506,7 @@ Acceptance:
 
 ##### Phase 12.8d — Remove Split Outdoor Static Payload Paths
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Scope: remove transition-only duplication after the aggregate payload is active.
 
@@ -2526,7 +2526,7 @@ Acceptance:
 
 ##### Phase 12.8e — Placement Suppression Diagnostics And Physics Hooks
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Scope: add the diagnostic and data hooks needed to pursue closer retail generated-scenery suppression parity without blocking the aggregate refactor on full physics parity.
 
@@ -2544,9 +2544,108 @@ Acceptance:
 - the assembler has clear extension points for richer suppression using decoded physics/bounds data
 - Phase 13 can still proceed afterward without depending on browser-only static scene code
 
+Delivered on 2026-05-13:
+
+- added `holtburger_core::static_outdoor_scene`, including `StaticOutdoorSceneAssembler`, aggregate scene output types, typed renderable source refs, stable semantic instance identities, and layer/candidate diagnostics
+- moved explicit object derivation, building derivation, generated scene-table selection, road/slope/bounds/spacing suppression, and stable id construction out of the Tauri adapter into core
+- kept frontend asset-id strings out of the core model; the Tauri adapter now formats `gfx-obj/*` and `setup-model/*` ids while serializing the aggregate payload
+- replaced the split `landblock-statics/*` and `landblock-generated-scenery/*` asset families with `outdoor-static-scene/{xxyyffff}`
+- updated TypeScript contracts, worker preparation, dependency derivation, coverage requests, scene-context counts, and static-renderable composition to consume the aggregate payload
+- removed the old split-path schemas, helpers, request formatting functions, and tests from active source
+- added bounded aggregate diagnostics for explicit objects, buildings, and generated scenery candidate suppression counts
+
+Decisions:
+
+- Skipped the temporary compatibility slicing planned for 12.8b. Once the aggregate family existed, no active caller needed the old split payloads, so keeping both paths would have added dead compatibility code.
+- Treated missing `LandblockInfo` as non-fatal for core assembly. Generated scenery can still derive from `CellLandblock`, `RegionDesc`, and `Scene` data; the aggregate diagnostics preserve whether landblock-info data was available.
+- Kept aggregate static scene delivery on the asset channel. Browser/client coverage remains frontend-owned, while Rust owns deterministic AC static-scene assembly.
+- Kept detailed per-candidate diagnostics out of the normal payload. The payload carries deterministic counters now; per-candidate records should be added later behind a dedicated debug/inspection mode if needed.
+
+Course corrections:
+
+- The core assembler currently depends directly on `ContentRepository`, as planned. A narrower loader trait still does not appear necessary; introduce one only if future tests, caching, or client-runtime integration make direct repository passing awkward.
+- The aggregate payload changes stable instance id prefixes from the transitional split families to `outdoor-static-scene/*`. Existing tests were updated to assert the new semantic identity.
+- Phase 12.8 establishes extension points for richer physics/bounds suppression, but it does not construct retail-equivalent physics objects or solve exact generated-tree parity yet.
+
+Next-step assessment:
+
+- The previous conditional follow-up should be promoted to an explicit Phase 12.9 before Phase 13. Visual smoke has shown outdoor generated scenery is close to retail, but extra trees remain a real parity issue rather than a cosmetic maybe-later task.
+- The next correction should be a focused Rust-side physics/bounds suppression pass using the new assembler hooks, not a TypeScript placement patch.
+- Phase 13 can proceed afterward with the same requestable-content pattern for structured-interior static facts once generated-scenery filtering is no longer carrying known retail-parity debt.
+
+##### Phase 12.9 — Retail-Parity Generated Scenery Suppression
+
+Status: implemented on 2026-05-13.
+
+Purpose: close the observed generated-scenery filtering gap before structured-interior work depends on the same static-scene assembly and transform assumptions. Phase 12.7 intentionally used lighter filters to get first visual coverage, and Phase 12.8 moved that logic into reusable core assembly. Retail-source inspection now confirms that generated scenery is locally filtered through landblock terrain, road bits, building occupancy, terrain polygon/slope, terrain-normal alignment, and object physics bounds before it becomes a static object. The current extra-tree mismatches should be fixed in the Rust assembler path rather than papered over in TypeScript.
+
+Retail anchors:
+
+- [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c:338071) — `CLandBlock::get_land_scenes` selects scene templates from terrain/scenery bits, applies deterministic placement, rejects road/building/slope failures, creates a physics object, and only then adds accepted objects to the landblock
+- [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c:338216) — generated scenery is rejected by current-landblock road checks before terrain polygon and building occupancy checks
+- [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c:338228) — generated scenery is rejected when the target land cell has a building, lacks a terrain polygon, or fails template slope limits
+- [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c:338233) — retail sets terrain height, then uses `ObjAlign` or randomized heading to produce the final object frame
+- [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c:338242) — retail rejects generated scenery whose created physics object fails `obj_within_block`
+- [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c:306610) — `CPhysicsObj::obj_within_block` uses object part bounds rather than only the placement origin
+
+Primary deliverables:
+
+- audit `StaticOutdoorSceneAssembler` generated-scenery filtering against the retail sequence and document any deliberate deviations
+- replace remaining point-only or heuristic suppression with local landblock checks that match retail as closely as the decoded data allows
+- hydrate or derive enough setup/gfx bounds in Rust to approximate `CPhysicsObj::obj_within_block` for generated scenery without constructing frontend-facing physics DTOs
+- make building occupancy suppression use the same local landcell/building context that explicit building assembly already exposes
+- implement generated template `align` / terrain-normal frame handling where the current output still diverges from retail's `ObjAlign` path
+- keep the assembler stateless; pass richer per-landblock/per-candidate context into pure filtering helpers rather than adding hidden mutable cache state
+- keep generated-scenery ownership in `holtburger-core`; TypeScript should continue to consume accepted `outdoor-static-scene/*` facts and should not own random placement or suppression rules
+- extend bounded diagnostics with any newly implemented rejection categories, especially physics-bounds / object-within-block and building-occupancy rejects
+
+Acceptance criteria:
+
+- known landblocks that currently show extra trees are measurably closer to retail after Rust-side suppression changes
+- fixture or focused tests prove deterministic candidate counts and rejection reasons for at least one landblock with generated scenery and one landblock with nearby explicit buildings
+- extra generated trees are not fixed by hardcoded asset ids, coordinates, or frontend-only filters
+- normal `outdoor-static-scene/*` payloads still expose only accepted renderable facts plus bounded diagnostics; full physics structures stay Rust-owned
+- no new runtime-pushed DAT-derived renderer facts are introduced
+- Phase 13 structured-interior work can proceed without carrying known generated-scenery filtering debt
+
+Non-goals:
+
+- do not chase exact dynamic gameplay collision or server authority in this phase
+- do not introduce cross-landblock neighbor queries unless retail evidence proves generated scenery consults neighboring landblocks
+- do not decode materials, textures, or surface rendering fidelity
+- do not build a general shared spatial cache before Phase 14's first concrete spatial-body consumer
+
+Delivered on 2026-05-13:
+
+- added local building-cell occupancy suppression for generated scenery candidates before slope/object-bound checks
+- added terrain-normal-aware generated template alignment for templates with `align != 0`, matching the retail `ObjAlign` intent without moving placement rules to TypeScript
+- added Rust-side source bounds checks for generated scenery: setup models use decoded cyl/sphere/sorting-sphere witnesses, while direct `gfx-obj` sources use decoded physics vertices when present and drawing vertices as a fallback
+- added generated-scenery diagnostics for building-occupancy rejection, object-bounds rejection, and unavailable object-bounds data
+- updated Tauri serialization, frontend contracts, prepared asset types, and tests so the new diagnostics stay visible through `outdoor-static-scene/*`
+- added focused Rust tests for setup-model bounds rejection and terrain-normal alignment
+
+Decisions:
+
+- Kept `StaticOutdoorSceneAssembler` stateless. The new filters are pure helpers fed by the current landblock, landblock-info context, and decoded source assets.
+- Treated missing setup/gfx bounds as "bounds unavailable" rather than rejecting or failing the whole outdoor static-scene asset. This preserves rendering progress for assets that still rely on adapter fallback paths while making the gap diagnosable.
+- Used decoded setup collision witnesses as the closest available approximation of retail `CPhysicsObj::obj_within_block`; exact retail physics-object construction remains out of scope for this phase.
+- Kept generated-scenery filtering Rust-owned and left TypeScript as a consumer of accepted static-scene facts plus diagnostics.
+
+Course corrections:
+
+- The implementation does not yet prove exact visual parity against the retail client. It materially narrows the known gap by adding local building occupancy, terrain-normal alignment, and object-bounds suppression, but a manual side-by-side smoke pass is still required around the landblocks where extra trees were observed.
+- The bounds check intentionally approximates retail. Setup-model cyl/sphere witnesses are stronger than point-only filtering, but they are not a byte-for-byte reproduction of retail `CPhysicsObj` part-array transforms.
+- The previous point-spacing heuristic remains as an extra conservative overlap guard. If visual smoke shows missing rather than extra generated scenery, this heuristic should be the first suppression rule to audit against retail behavior.
+
+Next-step assessment:
+
+- Live smoke after Phase 12.9 showed the extra generated trees are gone and outdoor generated scenery is visually plausible enough to proceed.
+- Phase 13 still makes sense as the next implementation milestone, but it should be split into smaller sub-phases with a source-audit/contract dry run first.
+- Terrain materials/roads remain separate from generated-scenery suppression and should not block Phase 13 unless flat debug coloring prevents trustworthy smoke testing.
+
 #### Phase 13: `Environment` / `CellStruct` Decoder And First Structured-Interior Render
 
-Status: planned.
+Status: planned; split into source-audit and implementation sub-phases before coding.
 
 Closes the Phase 11 structured-interior debt by adding the missing decoder for env-cell-backed geometry and rendering the first real structured interior. Reuses the Phase 12 mesh pipeline because `CellStruct` is structurally analogous to `GfxObj` from a render-prep standpoint.
 
@@ -2568,16 +2667,104 @@ Purpose:
 - stop short of retail portal rendering. This phase should make portal polygons and adjacency visible to the data model and first renderer diagnostics, but recursive portal clipping, portal masks, depth-clear behavior, and portal-driven occlusion belong to a later renderer capability phase.
 - continue to defer materials; structured-interior surfaces use the same per-instance debug coloring Phase 12 introduced
 
+##### Phase 13.0a — Source Audit And Contract Dry Run
+
+Status: planned.
+
+Scope: prove the exact data relationships before adding new payloads or decoders. This phase should read the code and references, update this plan if the assumptions shift, and only then proceed to implementation.
+
 Primary deliverables:
 
-- `Environment` decoder in `holtburger-dat` producing `Environment { id, cells: HashMap<u32, CellStruct> }`
-- `CellStruct` decoder producing `CellStruct { vertex_array, polygons, portals, cell_bsp, physics_polygons, physics_bsp, drawing_bsp: Option<_> }`
-- adapter changes promoting `environment/*` and `cell-structure/*` from stubs to real payloads carrying that decoded structure
-- boundary payloads expose `EnvCell.CellPortals`, `BuildInfo.Portals`, portal polygon ids, reciprocal cell/portal links, and `SeenOutside` / `VisibleCells` without collapsing them into one generic adjacency list
-- worker reuses the Phase 12 polygon-set → `BufferGeometry` path for structured-interior cell geometry, choosing `DrawingBSP` polygons when present and falling back to `Polygons` otherwise (mirroring ACViewer)
-- browser-mode scene orchestration derives a structured-interior render scene from `EnvCell.visible_cells` and prepared `environment/*` / `cell-structure/*` payloads, then passes that scene into `WorldDisplay`
-- `WorldDisplay` hydrates and renders the supplied structured-interior visible-cell geometry without owning visible-cell policy, browser destination policy, or camera/control policy
-- define the first structured-interior static-object delivery shape for `EnvCell.static_objects`, preferably mirroring the Phase 12.6 requestable static-fact asset pattern instead of pushing renderer-shaped static facts through runtime batches
+- audit current `EnvCell`, `Environment`, `CellStruct`, portal, drawing BSP, physics BSP, visible-cell, and static-object shapes in `holtburger-dat`, ACE, ACViewer, and the retail decompile
+- confirm whether `CellStruct` is naturally requestable by id, only reachable through `Environment`, or needs a host-side lookup helper
+- confirm whether ACViewer's `DrawingBSP`-preferred render path is the right first renderer behavior for our worker
+- confirm which portal witnesses should cross the normal frontend boundary and which should stay Rust-owned until a debug/export feature needs them
+- dry-run the `environment/*` and `cell-structure/*` payload contracts against the existing asset worker and `WorldDisplay` decomposition
+- decide whether `EnvCell.static_objects` should become a separate requestable static-content fact in Phase 13 or remain deferred until visible structured geometry is rendered
+
+Acceptance:
+
+- Phase 13.1 through 13.5 remain coherent after source inspection, or this section is corrected before code changes begin
+- no decoder or frontend payload is added before the source relationships are documented
+- any terminology corrections are made here before new public contract names ship
+
+##### Phase 13.1 — `Environment` And `CellStruct` DAT Decoders
+
+Status: planned.
+
+Primary deliverables:
+
+- add `Environment` decoder in `holtburger-dat` producing an AC-shaped environment container with cell-structure records or references, as proven by Phase 13.0a
+- add `CellStruct` decoder producing vertex array, drawing polygons, portals, cell BSP, physics polygons, physics BSP, and optional drawing BSP
+- add fixture or round-trip tests for real repo-local environment/cell-structure data
+- keep full physics BSP structures Rust-owned; do not design frontend physics DTOs in this phase
+
+Acceptance:
+
+- fixture-backed tests prove decoded counts and key relationships for at least one real environment
+- decoder names and fields match the source-audit terminology
+
+##### Phase 13.2 — `environment/*` And `cell-structure/*` Asset Payloads
+
+Status: planned.
+
+Primary deliverables:
+
+- promote `environment/*` and `cell-structure/*` from stubs/reference-only payloads to decoded static-content payloads
+- expose drawing geometry, surface refs, portal witnesses, and compact cell/physics BSP witnesses without shipping full physics structures for normal rendering
+- keep static content requestable through the asset path, mirroring `outdoor-static-scene/*`
+- add adapter and contract tests for both asset families
+
+Acceptance:
+
+- frontend can request environment/cell-structure assets without runtime-pushed DAT-derived renderer facts
+- payloads preserve enough AC-shaped witnesses for future portal rendering and spatial work without forcing those features now
+
+##### Phase 13.3 — Worker Geometry Prep Reusing Phase 12 Mesh Path
+
+Status: planned.
+
+Primary deliverables:
+
+- reuse the Phase 12 polygon-set to `BufferGeometry` preparation path for `CellStruct` drawing geometry
+- choose `DrawingBSP` polygons when present and fall back to regular drawing polygons only if the source audit confirms that behavior
+- add worker tests proving structured-interior geometry uses the shared mesh preparation path rather than a parallel indoor-only intermediate
+
+Acceptance:
+
+- prepared cell-structure geometry can be hydrated by the existing render pipeline
+- no duplicate polygon triangulation path is introduced for interiors
+
+##### Phase 13.4 — Browser Structured-Interior Scene Integration
+
+Status: planned.
+
+Primary deliverables:
+
+- derive a browser-mode structured-interior render scene from `EnvCell.visible_cells` plus prepared `environment/*` / `cell-structure/*` assets
+- pass the selected structured-interior render scene into `WorldDisplay`; do not make `WorldDisplay` own visible-cell, destination, or browser-camera policy
+- preserve the free browser camera and existing outdoor render path while switching focus between outdoor landblocks and indoor env-cells
+
+Acceptance:
+
+- the browser-owned structured-interior render-scene path replaces the placeholder visible-cell branch
+- `WorldDisplay` remains a shared render surface with no host/Tauri command imports or browser-only policy
+
+##### Phase 13.5 — Live Interior Smoke And Gate Review
+
+Status: planned.
+
+Primary deliverables:
+
+- run a real Tauri browser-mode smoke against repo-local env-cell data
+- inspect whether visible cells, portal witnesses, first geometry, debug coloring, and free camera behavior are coherent
+- decide whether the next phase should be portal rendering, materials/surfaces, terrain roads/materials, or Phase 14 spatial-body wiring
+
+Acceptance:
+
+- at least one real structured interior renders through the normal asset/worker/render path
+- remaining gaps are classified as decoder bugs, transform/render bugs, portal-rendering deferrals, material/surface work, or later spatial work
+- the plan is updated with progress, decisions, course corrections, and whether Phase 14 still makes sense as written
 
 Acceptance criteria:
 
@@ -3183,18 +3370,17 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.7 are implemented. The next step should be a short live Tauri visual smoke pass for generated outdoor scenery and explicit statics together, then Phase 12.8 to move outdoor static scene assembly into a reusable Rust core component and migrate delivery to an aggregate static-scene asset.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. The Phase 12.9 smoke pass looks good, with no remaining extra-tree mismatch observed. The next step is Phase 13.0a, a source audit and contract dry run for structured-interior rendering.
 
 Current near-term sequence:
 
-1. finish the outdoor visual smoke pass and inspect explicit statics plus generated scenery density, scale, heading, and terrain grounding
-2. correct any high-confidence AC-to-Three transform mistakes, generated `ObjAlign`/terrain-normal gaps, or terrain grounding problems before structured-interior geometry depends on the same conversion path
-3. verify terrain/placement parity, including the retail-shaped terrain diagonal split, before diagnosing missing structures or openings as portal problems
-4. implement Phase 12.8a through 12.8e: core static outdoor scene model, move existing assembly into core, add aggregate `outdoor-static-scene/*`, remove split payload paths, and add bounded placement suppression diagnostics/hooks
-5. keep frontend asset-id strings out of the new core scene model; core should emit typed renderable source refs and the adapter should format `gfx-obj/*` / `setup-model/*` payload ids
-6. reassess whether terrain materials/roads or structured interiors are the bigger next gap after generated outdoor scenery and aggregate static-scene delivery are visually plausible
-7. proceed to Phase 13 `Environment` / `CellStruct` decoding and first structured-interior render if outdoor transforms and generated scenery are plausible
+1. implement Phase 13.0a source audit and contract dry run before adding new structured-interior payloads
+2. correct this plan if the audit changes `Environment`, `CellStruct`, portal, visible-cell, or static-object assumptions
+3. implement Phase 13.1 DAT decoders for `Environment` and `CellStruct`
+4. implement Phase 13.2 decoded `environment/*` and `cell-structure/*` asset payloads
+5. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
+6. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
+7. run Phase 13.5 live interior smoke and gate review
 8. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
-9. derive structured-interior scene coverage in browser-mode orchestration from `EnvCell.visible_cells` plus prepared assets, then pass the selected render scene into `WorldDisplay`
-10. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-11. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+9. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+10. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

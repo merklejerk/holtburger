@@ -58,7 +58,7 @@ export interface PreparedTerrainLandblockPayload extends PreparedAssetPayloadBas
 	terrainMesh: PreparedTerrainMesh;
 }
 
-export interface PreparedLandblockStaticInstance {
+export interface PreparedOutdoorStaticSceneInstance {
 	instanceId: string;
 	owningLandblockId: number;
 	sourceDid: number;
@@ -67,30 +67,51 @@ export interface PreparedLandblockStaticInstance {
 	frame: FrameDto;
 }
 
-export interface PreparedLandblockStaticBuilding extends PreparedLandblockStaticInstance {
+export interface PreparedOutdoorStaticSceneBuilding extends PreparedOutdoorStaticSceneInstance {
 	numLeaves: number;
 }
 
-export interface PreparedLandblockGeneratedSceneryInstance extends PreparedLandblockStaticInstance {
+export interface PreparedOutdoorStaticSceneGeneratedSceneryInstance extends PreparedOutdoorStaticSceneInstance {
 	terrainIndex: number;
 	sceneId: number;
 	sceneTemplateIndex: number;
 	scale: number;
 }
 
-export interface PreparedLandblockStaticsPayload extends PreparedAssetPayloadBase {
-	kind: "landblock-statics";
-	sourceAssetKind: "landblock-info";
-	landblockId: number;
-	sceneryInstances: PreparedLandblockStaticInstance[];
-	buildingInstances: PreparedLandblockStaticBuilding[];
+interface PreparedOutdoorStaticLayerDiagnostics {
+	attempted: number;
+	accepted: number;
+	rejectedUnsupportedSource: number;
 }
 
-export interface PreparedLandblockGeneratedSceneryPayload extends PreparedAssetPayloadBase {
-	kind: "landblock-generated-scenery";
-	sourceAssetKind: "region-scene-table";
+interface PreparedGeneratedOutdoorSceneryDiagnostics extends PreparedOutdoorStaticLayerDiagnostics {
+	skippedWeenieObj: number;
+	rejectedFrequency: number;
+	rejectedBounds: number;
+	rejectedBuildingOccupancy: number;
+	rejectedObjectBounds: number;
+	objectBoundsUnavailable: number;
+	rejectedRoad: number;
+	rejectedSlope: number;
+	rejectedOverlap: number;
+}
+
+interface PreparedOutdoorStaticSceneDiagnostics {
+	landblockInfoAvailable: boolean;
+	landblockInfoError: string | null;
+	explicit: PreparedOutdoorStaticLayerDiagnostics;
+	buildings: PreparedOutdoorStaticLayerDiagnostics;
+	generated: PreparedGeneratedOutdoorSceneryDiagnostics;
+}
+
+export interface PreparedOutdoorStaticScenePayload extends PreparedAssetPayloadBase {
+	kind: "outdoor-static-scene";
+	sourceAssetKind: "outdoor-static-scene";
 	landblockId: number;
-	sceneryInstances: PreparedLandblockGeneratedSceneryInstance[];
+	sceneryInstances: PreparedOutdoorStaticSceneInstance[];
+	buildingInstances: PreparedOutdoorStaticSceneBuilding[];
+	generatedSceneryInstances: PreparedOutdoorStaticSceneGeneratedSceneryInstance[];
+	diagnostics: PreparedOutdoorStaticSceneDiagnostics;
 }
 
 interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
@@ -291,8 +312,7 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 
 export type PreparedAssetPayload =
 	| PreparedTerrainLandblockPayload
-	| PreparedLandblockStaticsPayload
-	| PreparedLandblockGeneratedSceneryPayload
+	| PreparedOutdoorStaticScenePayload
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
 	| PreparedCellStructurePayload
@@ -353,7 +373,7 @@ export function getPreparedAssetDependencies(
 			.map((assetId) => ({ assetId }));
 	}
 
-	if (asset.payload.kind === "landblock-statics") {
+	if (asset.payload.kind === "outdoor-static-scene") {
 		return [
 			...new Set([
 				...asset.payload.sceneryInstances.map(
@@ -362,19 +382,10 @@ export function getPreparedAssetDependencies(
 				...asset.payload.buildingInstances.map(
 					(instance) => instance.sourceAssetId,
 				),
-			]),
-		]
-			.sort()
-			.map((assetId) => ({ assetId }));
-	}
-
-	if (asset.payload.kind === "landblock-generated-scenery") {
-		return [
-			...new Set(
-				asset.payload.sceneryInstances.map(
+				...asset.payload.generatedSceneryInstances.map(
 					(instance) => instance.sourceAssetId,
 				),
-			),
+			]),
 		]
 			.sort()
 			.map((assetId) => ({ assetId }));

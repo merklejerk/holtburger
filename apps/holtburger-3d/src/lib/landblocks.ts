@@ -77,14 +77,8 @@ export function formatTerrainAssetId(landblockId: number): string {
 	return `terrain/${formatHex32(landblockId)}`;
 }
 
-export function formatLandblockStaticsAssetId(landblockId: number): string {
-	return `landblock-statics/${formatHex32(landblockId)}`;
-}
-
-export function formatLandblockGeneratedSceneryAssetId(
-	landblockId: number,
-): string {
-	return `landblock-generated-scenery/${formatHex32(landblockId)}`;
+export function formatOutdoorStaticSceneAssetId(landblockId: number): string {
+	return `outdoor-static-scene/${formatHex32(landblockId)}`;
 }
 
 export function formatHex32(value: number): string {

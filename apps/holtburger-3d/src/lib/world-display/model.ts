@@ -10,8 +10,7 @@ import {
 } from "../landblocks";
 import type {
 	AssetChannelState,
-	PreparedLandblockGeneratedSceneryPayload,
-	PreparedLandblockStaticsPayload,
+	PreparedOutdoorStaticScenePayload,
 	PreparedAssetRecord,
 	PreparedTerrainMesh,
 } from "../assets/types";
@@ -263,30 +262,25 @@ function deriveSceneContext(
 				: "Browser mode expands a frontend-owned outdoor landblock ring around the focus block for render coverage.",
 	}));
 	const activeLandblockIds = new Set(chunks.map((chunk) => chunk.landblockId));
-	const preparedStaticPayloads = Object.values(assetState.preparedByAssetId)
+	const preparedStaticScenePayloads = Object.values(
+		assetState.preparedByAssetId,
+	)
 		.map((asset) => asset.payload)
 		.filter(
-			(payload): payload is PreparedLandblockStaticsPayload =>
-				payload.kind === "landblock-statics" &&
+			(payload): payload is PreparedOutdoorStaticScenePayload =>
+				payload.kind === "outdoor-static-scene" &&
 				activeLandblockIds.has(payload.landblockId),
 		);
-	const preparedGeneratedPayloads = Object.values(assetState.preparedByAssetId)
-		.map((asset) => asset.payload)
-		.filter(
-			(payload): payload is PreparedLandblockGeneratedSceneryPayload =>
-				payload.kind === "landblock-generated-scenery" &&
-				activeLandblockIds.has(payload.landblockId),
-		);
-	const staticInstanceCount = preparedStaticPayloads.reduce(
+	const staticInstanceCount = preparedStaticScenePayloads.reduce(
 		(total, payload) => total + payload.sceneryInstances.length,
 		0,
 	);
-	const staticBuildingCount = preparedStaticPayloads.reduce(
+	const staticBuildingCount = preparedStaticScenePayloads.reduce(
 		(total, payload) => total + payload.buildingInstances.length,
 		0,
 	);
-	const generatedSceneryCount = preparedGeneratedPayloads.reduce(
-		(total, payload) => total + payload.sceneryInstances.length,
+	const generatedSceneryCount = preparedStaticScenePayloads.reduce(
+		(total, payload) => total + payload.generatedSceneryInstances.length,
 		0,
 	);
 
@@ -304,14 +298,16 @@ function deriveSceneContext(
 		staticRenderableBuildingCount: staticBuildingCount,
 		staticRenderableSourceAssetIds: [
 			...new Set([
-				...preparedStaticPayloads.flatMap((payload) =>
+				...preparedStaticScenePayloads.flatMap((payload) =>
 					payload.sceneryInstances.map((instance) => instance.sourceAssetId),
 				),
-				...preparedStaticPayloads.flatMap((payload) =>
+				...preparedStaticScenePayloads.flatMap((payload) =>
 					payload.buildingInstances.map((instance) => instance.sourceAssetId),
 				),
-				...preparedGeneratedPayloads.flatMap((payload) =>
-					payload.sceneryInstances.map((instance) => instance.sourceAssetId),
+				...preparedStaticScenePayloads.flatMap((payload) =>
+					payload.generatedSceneryInstances.map(
+						(instance) => instance.sourceAssetId,
+					),
 				),
 			]),
 		].sort(),

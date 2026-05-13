@@ -16,7 +16,7 @@ import type {
 import {
 	gfxObjPayloadDtoSchema,
 	hostBoundaryOverviewDtoSchema,
-	landblockStaticsPayloadDtoSchema,
+	outdoorStaticScenePayloadDtoSchema,
 	runtimeNotificationEnvelopeDtoSchema,
 	setupModelPayloadDtoSchema,
 } from "./contracts";
@@ -78,15 +78,15 @@ describe("host contracts", () => {
 		expect(notification.viewModelFeed?.interactionMode).toBe("inspect");
 	});
 
-	it("parses requestable landblock static fact payloads", () => {
-		const payload = landblockStaticsPayloadDtoSchema.parse({
-			kind: "landblock-statics",
+	it("parses requestable outdoor static scene fact payloads", () => {
+		const payload = outdoorStaticScenePayloadDtoSchema.parse({
+			kind: "outdoor-static-scene",
 			residencyKind: "outdoor-landblock",
-			sourceAssetKind: "landblock-info",
+			sourceAssetKind: "outdoor-static-scene",
 			landblockId: 0x0102ffff,
 			sceneryInstances: [
 				{
-					instanceId: "landblock-statics/0102ffff/object/0000/02000001",
+					instanceId: "outdoor-static-scene/0102ffff/object/0000/02000001",
 					owningLandblockId: 0x0102ffff,
 					sourceDid: 0x02000001,
 					sourceAssetId: "setup-model/02000001",
@@ -98,9 +98,38 @@ describe("host contracts", () => {
 				},
 			],
 			buildingInstances: [],
+			generatedSceneryInstances: [],
+			diagnostics: {
+				landblockInfoAvailable: true,
+				landblockInfoError: null,
+				explicit: {
+					attempted: 1,
+					accepted: 1,
+					rejectedUnsupportedSource: 0,
+				},
+				buildings: {
+					attempted: 0,
+					accepted: 0,
+					rejectedUnsupportedSource: 0,
+				},
+				generated: {
+					attempted: 0,
+					accepted: 0,
+					rejectedUnsupportedSource: 0,
+					skippedWeenieObj: 0,
+					rejectedFrequency: 0,
+					rejectedBounds: 0,
+					rejectedBuildingOccupancy: 0,
+					rejectedObjectBounds: 0,
+					objectBoundsUnavailable: 0,
+					rejectedRoad: 0,
+					rejectedSlope: 0,
+					rejectedOverlap: 0,
+				},
+			},
 			provenance: {
 				source: "repo-local-hba",
-				sourceAssetKind: "landblock-info",
+				sourceAssetKind: "outdoor-static-scene",
 				errorCode: null,
 				detail: "test",
 			},

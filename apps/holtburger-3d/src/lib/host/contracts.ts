@@ -111,7 +111,7 @@ const runtimeResidencyDtoSchema = z.object({
 });
 export type RuntimeResidencyDto = z.infer<typeof runtimeResidencyDtoSchema>;
 
-const landblockStaticInstanceDtoSchema = z.object({
+const outdoorStaticSceneInstanceDtoSchema = z.object({
 	instanceId: z.string().min(1),
 	owningLandblockId: z.number().int().nonnegative(),
 	sourceDid: z.number().int().nonnegative(),
@@ -120,18 +120,45 @@ const landblockStaticInstanceDtoSchema = z.object({
 	frame: frameDtoSchema,
 });
 
-const landblockStaticBuildingDtoSchema =
-	landblockStaticInstanceDtoSchema.extend({
+const outdoorStaticSceneBuildingDtoSchema =
+	outdoorStaticSceneInstanceDtoSchema.extend({
 		numLeaves: z.number().int().nonnegative(),
 	});
 
-const landblockGeneratedSceneryInstanceDtoSchema =
-	landblockStaticInstanceDtoSchema.extend({
+const outdoorStaticSceneGeneratedSceneryInstanceDtoSchema =
+	outdoorStaticSceneInstanceDtoSchema.extend({
 		terrainIndex: z.number().int().nonnegative(),
 		sceneId: z.number().int().nonnegative(),
 		sceneTemplateIndex: z.number().int().nonnegative(),
 		scale: z.number().finite().positive(),
 	});
+
+const outdoorStaticLayerDiagnosticsDtoSchema = z.object({
+	attempted: z.number().int().nonnegative(),
+	accepted: z.number().int().nonnegative(),
+	rejectedUnsupportedSource: z.number().int().nonnegative(),
+});
+
+const generatedOutdoorSceneryDiagnosticsDtoSchema =
+	outdoorStaticLayerDiagnosticsDtoSchema.extend({
+		skippedWeenieObj: z.number().int().nonnegative(),
+		rejectedFrequency: z.number().int().nonnegative(),
+		rejectedBounds: z.number().int().nonnegative(),
+		rejectedBuildingOccupancy: z.number().int().nonnegative(),
+		rejectedObjectBounds: z.number().int().nonnegative(),
+		objectBoundsUnavailable: z.number().int().nonnegative(),
+		rejectedRoad: z.number().int().nonnegative(),
+		rejectedSlope: z.number().int().nonnegative(),
+		rejectedOverlap: z.number().int().nonnegative(),
+	});
+
+const outdoorStaticSceneDiagnosticsDtoSchema = z.object({
+	landblockInfoAvailable: z.boolean(),
+	landblockInfoError: z.string().nullable(),
+	explicit: outdoorStaticLayerDiagnosticsDtoSchema,
+	buildings: outdoorStaticLayerDiagnosticsDtoSchema,
+	generated: generatedOutdoorSceneryDiagnosticsDtoSchema,
+});
 
 export const runtimeBatchDtoSchema = z.object({
 	tick: z.number().int().nonnegative(),
@@ -185,29 +212,21 @@ export type TerrainLandblockPayloadDto = z.infer<
 	typeof terrainLandblockPayloadDtoSchema
 >;
 
-export const landblockStaticsPayloadDtoSchema = z.object({
-	kind: z.literal("landblock-statics"),
+export const outdoorStaticScenePayloadDtoSchema = z.object({
+	kind: z.literal("outdoor-static-scene"),
 	residencyKind: z.literal("outdoor-landblock"),
-	sourceAssetKind: z.literal("landblock-info"),
+	sourceAssetKind: z.literal("outdoor-static-scene"),
 	landblockId: z.number().int().nonnegative(),
-	sceneryInstances: z.array(landblockStaticInstanceDtoSchema),
-	buildingInstances: z.array(landblockStaticBuildingDtoSchema),
+	sceneryInstances: z.array(outdoorStaticSceneInstanceDtoSchema),
+	buildingInstances: z.array(outdoorStaticSceneBuildingDtoSchema),
+	generatedSceneryInstances: z.array(
+		outdoorStaticSceneGeneratedSceneryInstanceDtoSchema,
+	),
+	diagnostics: outdoorStaticSceneDiagnosticsDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
-export type LandblockStaticsPayloadDto = z.infer<
-	typeof landblockStaticsPayloadDtoSchema
->;
-
-export const landblockGeneratedSceneryPayloadDtoSchema = z.object({
-	kind: z.literal("landblock-generated-scenery"),
-	residencyKind: z.literal("outdoor-landblock"),
-	sourceAssetKind: z.literal("region-scene-table"),
-	landblockId: z.number().int().nonnegative(),
-	sceneryInstances: z.array(landblockGeneratedSceneryInstanceDtoSchema),
-	provenance: assetProvenanceDtoSchema,
-});
-export type LandblockGeneratedSceneryPayloadDto = z.infer<
-	typeof landblockGeneratedSceneryPayloadDtoSchema
+export type OutdoorStaticScenePayloadDto = z.infer<
+	typeof outdoorStaticScenePayloadDtoSchema
 >;
 
 export const indoorEnvCellPayloadDtoSchema = z.object({

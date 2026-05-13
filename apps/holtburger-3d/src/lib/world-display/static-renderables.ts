@@ -3,9 +3,9 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
-	PreparedLandblockGeneratedSceneryInstance,
-	PreparedLandblockStaticBuilding,
-	PreparedLandblockStaticInstance,
+	PreparedOutdoorStaticSceneBuilding,
+	PreparedOutdoorStaticSceneGeneratedSceneryInstance,
+	PreparedOutdoorStaticSceneInstance,
 	PreparedSetupModelPart,
 	PreparedSetupModelPayload,
 } from "../assets/types";
@@ -186,19 +186,10 @@ function collectStaticRenderableSourceInstances(
 ): StaticRenderableSourceInstance[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (
-			!(
-				asset.payload.kind === "landblock-statics" ||
-				asset.payload.kind === "landblock-generated-scenery"
-			) ||
+			asset.payload.kind !== "outdoor-static-scene" ||
 			!activeLandblockSet.has(asset.payload.landblockId)
 		) {
 			return [];
-		}
-
-		if (asset.payload.kind === "landblock-generated-scenery") {
-			return asset.payload.sceneryInstances.map((instance) =>
-				normalizeGeneratedScenerySourceInstance(instance, focusLandblockId),
-			);
 		}
 
 		return [
@@ -213,13 +204,18 @@ function collectStaticRenderableSourceInstances(
 					focusLandblockId,
 				),
 			),
+			...asset.payload.generatedSceneryInstances.map((instance) =>
+				normalizeGeneratedScenerySourceInstance(instance, focusLandblockId),
+			),
 		];
 	});
 }
 
 function normalizeSourceInstance(
 	kind: StaticRenderableInstanceKind,
-	instance: PreparedLandblockStaticInstance | PreparedLandblockStaticBuilding,
+	instance:
+		| PreparedOutdoorStaticSceneInstance
+		| PreparedOutdoorStaticSceneBuilding,
 	numLeaves: number | null,
 	focusLandblockId: number,
 ): StaticRenderableSourceInstance {
@@ -244,7 +240,7 @@ function normalizeSourceInstance(
 }
 
 function normalizeGeneratedScenerySourceInstance(
-	instance: PreparedLandblockGeneratedSceneryInstance,
+	instance: PreparedOutdoorStaticSceneGeneratedSceneryInstance,
 	focusLandblockId: number,
 ): StaticRenderableSourceInstance {
 	const owningLandblockId = normalizeOutdoorLandblockId(

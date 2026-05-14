@@ -47,12 +47,12 @@ describe("world display camera helpers", () => {
 		const frame = buildDebugOrbitCameraFrame(state);
 
 		expect(state.hasManualControl).toBe(false);
-		expect(state.target).toEqual({ x: 96, y: 18, z: -96 });
+		expect(frame.target).toEqual({ x: 96, y: 18, z: -96 });
 		expect(frame.position.x).not.toBeCloseTo(frame.target.x);
 		expect(frame.position.y).toBeGreaterThan(frame.target.y);
 	});
 
-	it("preserves manual orbit control across later automatic scene fits", () => {
+	it("preserves manual rotation control across later automatic scene fits", () => {
 		const fitted = fitDebugOrbitCameraToBounds(
 			createDebugOrbitCameraState(),
 			{
@@ -122,7 +122,11 @@ describe("world display camera helpers", () => {
 		);
 
 		expect(refit.hasManualControl).toBe(false);
-		expect(refit.target).toEqual({ x: 32, y: 12, z: -48 });
+		expect(buildDebugOrbitCameraFrame(refit).target).toEqual({
+			x: 32,
+			y: 12,
+			z: -48,
+		});
 	});
 
 	it("builds camera hints from the rendered Three.js camera frame in AC coordinates", () => {

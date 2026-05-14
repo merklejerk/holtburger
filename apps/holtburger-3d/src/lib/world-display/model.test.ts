@@ -188,6 +188,7 @@ describe("world display model helpers", () => {
 								orientation: { w: 1, x: 0, y: 0, z: 0 },
 							},
 							numLeaves: 2,
+							portals: [],
 						},
 					],
 					generatedSceneryInstances: [],

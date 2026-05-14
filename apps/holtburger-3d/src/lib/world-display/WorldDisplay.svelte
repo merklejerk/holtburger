@@ -317,6 +317,12 @@
 			return;
 		}
 
+		if (controlledCameraFrame) {
+			setActiveCameraFrame(controlledCameraFrame, { notifyParent: false });
+			reportRenderMetrics();
+			return;
+		}
+
 		if (
 			terrainScene.tiles.length === 0 &&
 			staticRenderableScene.parts.length === 0 &&
@@ -562,11 +568,11 @@
 		cell: StructuredInteriorCell,
 	): void {
 		mesh.matrix.copy(
-			buildAcPlacementMatrix(
-				cell.localPlacement,
-				{ x: 0, y: 0, z: 0 },
-				{ x: 1, y: 1, z: 1 },
-			),
+			buildAcPlacementMatrix(cell.localPlacement, cell.landblockWorldOffset, {
+				x: 1,
+				y: 1,
+				z: 1,
+			}),
 		);
 		mesh.matrixWorldNeedsUpdate = true;
 	}

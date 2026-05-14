@@ -108,6 +108,7 @@ export function zoomDebugCamera(
 	wheelDeltaY: number,
 ): DebugOrbitCameraState {
 	const multiplier = Math.exp(clamp(wheelDeltaY, -900, 900) * 0.0012);
+
 	return {
 		...state,
 		distance: clamp(

@@ -10,7 +10,7 @@ use holtburger_core::static_outdoor_scene::{
     StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
     StaticRenderableSourceFamily, normalize_landblock_id,
 };
-use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
+use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::landblock::CellLandblock;
@@ -237,10 +237,6 @@ impl HostBoundaryAdapter {
             return self.build_environment_lookup_response(request, environment_id);
         }
 
-        if let Some(cell_structure_id) = parse_cell_structure_asset_id(&request.asset_id) {
-            return build_cell_structure_lookup_response(request, cell_structure_id);
-        }
-
         if let Some(gfx_obj_id) = parse_gfx_obj_asset_id(&request.asset_id) {
             return self.build_gfx_obj_lookup_response(request, gfx_obj_id);
         }
@@ -334,7 +330,6 @@ impl HostBoundaryAdapter {
                 asset_family_ids: vec![
                     IndoorAssetFamilyIdDto::IndoorEnvCell,
                     IndoorAssetFamilyIdDto::Environment,
-                    IndoorAssetFamilyIdDto::CellStructure,
                 ],
             },
         }
@@ -847,35 +842,6 @@ impl HostBoundaryAdapter {
     }
 }
 
-fn build_cell_structure_lookup_response(
-    request: AssetLookupRequestDto,
-    cell_structure_id: u32,
-) -> AssetLookupResponseDto {
-    AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload: serde_json::json!({
-            "kind": "cell-structure",
-            "residencyKind": "indoor-env-cell",
-            "sourceAssetKind": "cell-structure",
-            "environmentId": null,
-            "cellStructureId": cell_structure_id,
-            "polygonCount": null,
-            "portalCount": null,
-            "hasCellBsp": false,
-            "hasPhysicsBsp": false,
-            "hasDrawingBsp": false,
-            "provenance": {
-                "source": "app-local-stub",
-                "sourceAssetKind": "cell-structure",
-                "errorCode": null,
-                "detail": "Cell-structure summaries stay reference-first in Phase 11 until a structural parser lands."
-            }
-        }),
-    }
-}
-
 #[derive(Clone)]
 struct IndoorEnvCellMetadata {
     environment_id: u32,
@@ -890,21 +856,56 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         environment_id: u32,
     ) -> AssetLookupResponseDto {
-        let provenance = match self
+        let payload = match self
             .content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
         {
-            Ok(resource) => serde_json::json!({
-                "source": "repo-local-hba",
-                "sourceAssetKind": "environment",
-                "errorCode": null,
-                "detail": resource.source_description
-            }),
+            Ok(resource) => {
+                let source_detail = resource.source_description.clone();
+                match Environment::unpack(&mut std::io::Cursor::new(resource.bytes)) {
+                    Ok(environment) => serde_json::json!({
+                        "kind": "environment",
+                        "residencyKind": "indoor-env-cell",
+                        "sourceAssetKind": "environment",
+                        "environmentId": environment.id,
+                        "cellStructureIds": environment.cells.keys().copied().collect::<Vec<_>>(),
+                        "cellStructures": environment.cells.values().map(serialize_cell_structure).collect::<Vec<_>>(),
+                        "provenance": {
+                            "source": "repo-local-hba",
+                            "sourceAssetKind": "environment",
+                            "errorCode": null,
+                            "detail": source_detail
+                        }
+                    }),
+                    Err(error) => serde_json::json!({
+                        "kind": "environment",
+                        "residencyKind": "indoor-env-cell",
+                        "sourceAssetKind": "environment",
+                        "environmentId": environment_id,
+                        "cellStructureIds": [],
+                        "cellStructures": [],
+                        "provenance": {
+                            "source": "app-local-stub",
+                            "sourceAssetKind": "environment",
+                            "errorCode": "asset-decode-failed",
+                            "detail": format!("Could not decode Environment 0x{environment_id:08X}: {error}")
+                        }
+                    }),
+                }
+            }
             Err(error) => serde_json::json!({
-                "source": "app-local-stub",
+                "kind": "environment",
+                "residencyKind": "indoor-env-cell",
                 "sourceAssetKind": "environment",
-                "errorCode": "asset-read-failed",
-                "detail": format!("Environment decoding is not implemented in holtburger-dat yet, and the raw reference could not be resolved: {error}")
+                "environmentId": environment_id,
+                "cellStructureIds": [],
+                "cellStructures": [],
+                "provenance": {
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "environment",
+                    "errorCode": "asset-read-failed",
+                    "detail": format!("Could not read Environment 0x{environment_id:08X}: {error}")
+                }
             }),
         };
 
@@ -912,14 +913,7 @@ impl HostBoundaryAdapter {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
-            payload: serde_json::json!({
-                "kind": "environment",
-                "residencyKind": "indoor-env-cell",
-                "sourceAssetKind": "environment",
-                "environmentId": environment_id,
-                "cellStructureIds": [],
-                "provenance": provenance
-            }),
+            payload,
         }
     }
 
@@ -1238,15 +1232,6 @@ fn parse_environment_asset_id(asset_id: &str) -> Option<u32> {
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
 }
 
-fn parse_cell_structure_asset_id(asset_id: &str) -> Option<u32> {
-    asset_id
-        .strip_prefix("cell-structure/")
-        .filter(|hex| {
-            !hex.is_empty() && hex.len() <= 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit())
-        })
-        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-}
-
 fn parse_gfx_obj_asset_id(asset_id: &str) -> Option<u32> {
     let raw_hex = asset_id.strip_prefix("gfx-obj/")?;
     let hex = raw_hex
@@ -1526,6 +1511,33 @@ fn serialize_polygons(
             })
         })
         .collect()
+}
+
+fn serialize_cell_structure(cell_structure: &CellStruct) -> serde_json::Value {
+    serde_json::json!({
+        "id": cell_structure.id,
+        "vertexArray": serialize_vertex_array(&cell_structure.vertex_array),
+        "drawingPolygons": serialize_polygons(&cell_structure.polygons),
+        "portalPolygonIds": cell_structure.portals,
+        "cellBspWitness": {
+            "hasBsp": true,
+            "rootKind": bsp_node_kind(&cell_structure.cell_bsp),
+        },
+        "physicsWitness": {
+            "polygonCount": cell_structure.physics_polygons.len(),
+            "hasBsp": true,
+            "rootKind": bsp_node_kind(&cell_structure.physics_bsp),
+        },
+        "drawingBsp": cell_structure.drawing_bsp.as_ref().map(serialize_bsp_node),
+    })
+}
+
+fn bsp_node_kind(node: &BspNode) -> &'static str {
+    match node {
+        BspNode::Port(_) => "port",
+        BspNode::Leaf(_) => "leaf",
+        BspNode::Internal(_) => "internal",
+    }
 }
 
 fn serialize_bsp_node(node: &BspNode) -> serde_json::Value {
@@ -1934,7 +1946,7 @@ mod tests {
             overview
                 .indoor_contract_backlog
                 .asset_family_ids
-                .contains(&IndoorAssetFamilyIdDto::CellStructure)
+                .contains(&IndoorAssetFamilyIdDto::Environment)
         );
         assert_eq!(asset.request_id, "test-request");
         assert_eq!(asset.asset_id, "terrain/0102ffff");
@@ -2000,6 +2012,61 @@ mod tests {
         assert!(
             !has_vertex_sentinel,
             "decoded gfx-obj/01000f69 should not contain 0xffff vertex ids"
+        );
+    }
+
+    #[test]
+    fn environment_lookup_returns_decoded_environment_scoped_cell_structures() {
+        let runtime = HostRuntimeService::new(false);
+        let env_cell_asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-indoor-env-cell".to_string(),
+            asset_id: "indoor-env-cell/016c0155".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+        let environment_id = env_cell_asset.payload["environmentId"]
+            .as_u64()
+            .expect("fixture EnvCell should expose an Environment id")
+            as u32;
+        let cell_structure_id = env_cell_asset.payload["cellStructureId"]
+            .as_u64()
+            .expect("fixture EnvCell should expose a selected CellStruct id");
+
+        let environment_asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-environment".to_string(),
+            asset_id: format!("environment/{environment_id:08x}"),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(environment_asset.payload["kind"], "environment");
+        assert_eq!(
+            environment_asset.payload["provenance"]["source"],
+            "repo-local-hba"
+        );
+        assert_eq!(
+            environment_asset.payload["environmentId"].as_u64(),
+            Some(u64::from(environment_id))
+        );
+
+        let cell_structure_ids = environment_asset.payload["cellStructureIds"]
+            .as_array()
+            .expect("environment payload should expose cell-structure keys");
+        assert!(cell_structure_ids.contains(&serde_json::json!(cell_structure_id)));
+
+        let cell_structures = environment_asset.payload["cellStructures"]
+            .as_array()
+            .expect("environment payload should expose decoded cell structures");
+        let selected_cell_structure = cell_structures
+            .iter()
+            .find(|cell_structure| cell_structure["id"].as_u64() == Some(cell_structure_id))
+            .expect("environment payload should contain the EnvCell-selected CellStruct");
+        assert!(
+            selected_cell_structure["drawingPolygons"]
+                .as_array()
+                .is_some_and(|polygons| !polygons.is_empty())
+        );
+        assert_eq!(
+            selected_cell_structure["physicsWitness"]["hasBsp"].as_bool(),
+            Some(true)
         );
     }
 

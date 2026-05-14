@@ -14,6 +14,7 @@ import type {
 	RuntimeResidencyDto,
 } from "./contracts";
 import {
+	environmentPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	hostBoundaryOverviewDtoSchema,
 	outdoorStaticScenePayloadDtoSchema,
@@ -171,7 +172,7 @@ describe("host contracts", () => {
 					"environment-id",
 					"cell-structure-id",
 				],
-				assetFamilyIds: ["indoor-env-cell", "environment", "cell-structure"],
+				assetFamilyIds: ["indoor-env-cell", "environment"],
 			},
 		};
 
@@ -180,7 +181,7 @@ describe("host contracts", () => {
 			"visible-cell-ids",
 		);
 		expect(overview.indoorContractBacklog.assetFamilyIds).toContain(
-			"cell-structure",
+			"environment",
 		);
 		expect(response.assetId).toBe(request.assetId);
 		expect(response.payload).toMatchObject({
@@ -256,13 +257,13 @@ describe("host contracts", () => {
 			assetLookupCommand: "lookup_asset",
 			indoorContractBacklog: {
 				runtimeFieldIds: ["visible-cell-ids"],
-				assetFamilyIds: ["cell-structure"],
+				assetFamilyIds: ["environment"],
 			},
 		});
 
 		expect(notification.runtimeBatch?.tick).toBe(1);
 		expect(overview.indoorContractBacklog.assetFamilyIds).toContain(
-			"cell-structure",
+			"environment",
 		);
 	});
 
@@ -342,6 +343,66 @@ describe("host contracts", () => {
 			polygonCount: 4,
 			hasBsp: true,
 		});
+	});
+
+	it("parses decoded environment payloads with environment-scoped cell structures", () => {
+		const payload = environmentPayloadDtoSchema.parse({
+			kind: "environment",
+			residencyKind: "indoor-env-cell",
+			sourceAssetKind: "environment",
+			environmentId: 0x0d000001,
+			cellStructureIds: [1],
+			cellStructures: [
+				{
+					id: 1,
+					vertexArray: {
+						vertexType: 1,
+						vertexCount: 1,
+						vertices: [
+							{
+								id: 0,
+								origin: { x: 1, y: 2, z: 3 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0.25, v: 0.75 }],
+							},
+						],
+					},
+					drawingPolygons: [
+						{
+							id: 1,
+							numPts: 3,
+							stippling: 0,
+							sidesType: 1,
+							posSurface: 0,
+							negSurface: 0,
+							vertexIds: [0, 1, 2],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [0, 0, 0],
+						},
+					],
+					portalPolygonIds: [1],
+					cellBspWitness: {
+						hasBsp: true,
+						rootKind: "leaf",
+					},
+					physicsWitness: {
+						polygonCount: 2,
+						hasBsp: true,
+						rootKind: "internal",
+					},
+					drawingBsp: null,
+				},
+			],
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "environment",
+				errorCode: null,
+				detail: "dats/assets.hba",
+			},
+		});
+
+		expect(payload.cellStructureIds).toEqual([1]);
+		expect(payload.cellStructures[0]?.drawingPolygons).toHaveLength(1);
 	});
 
 	it("parses setup-model payloads with ordered part references", () => {

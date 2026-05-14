@@ -226,8 +226,7 @@ function deriveSceneContext(
 		).filter(
 			(assetId) =>
 				assetId.startsWith("indoor-env-cell/") ||
-				assetId.startsWith("environment/") ||
-				assetId.startsWith("cell-structure/"),
+				assetId.startsWith("environment/"),
 		);
 		const seenOutsideText =
 			runtimeBatch.residency.seenOutside === null

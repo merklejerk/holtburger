@@ -134,19 +134,7 @@ interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
 	debugPresentation: PreparedDebugPresentation;
 	environmentId: number;
 	cellStructureIds: number[];
-}
-
-interface PreparedCellStructurePayload extends PreparedAssetPayloadBase {
-	kind: "cell-structure";
-	sourceAssetKind: "cell-structure";
-	debugPresentation: PreparedDebugPresentation;
-	environmentId: number | null;
-	cellStructureId: number;
-	polygonCount: number | null;
-	portalCount: number | null;
-	hasCellBsp: boolean;
-	hasPhysicsBsp: boolean;
-	hasDrawingBsp: boolean;
+	cellStructures: PreparedEnvironmentCellStruct[];
 }
 
 interface PreparedGfxObjUv {
@@ -187,6 +175,22 @@ interface PreparedGfxObjBspNode {
 interface PreparedGfxObjPhysicsWitness {
 	polygonCount: number;
 	hasBsp: boolean;
+	rootKind?: "port" | "leaf" | "internal" | null;
+}
+
+interface PreparedCellStructBspWitness {
+	hasBsp: boolean;
+	rootKind: "port" | "leaf" | "internal" | null;
+}
+
+interface PreparedEnvironmentCellStruct {
+	id: number;
+	vertexArray: PreparedGfxObjVertexArray;
+	drawingPolygons: PreparedGfxObjPolygon[];
+	portalPolygonIds: number[];
+	cellBspWitness: PreparedCellStructBspWitness;
+	physicsWitness: PreparedGfxObjPhysicsWitness;
+	drawingBsp: PreparedGfxObjBspNode | null;
 }
 
 interface PreparedGfxObjRenderTriangle {
@@ -315,7 +319,6 @@ export type PreparedAssetPayload =
 	| PreparedOutdoorStaticScenePayload
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
-	| PreparedCellStructurePayload
 	| PreparedGfxObjPayload
 	| PreparedSetupModelPayload
 	| PreparedVisualAssetStubPayload

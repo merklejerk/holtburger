@@ -2769,7 +2769,7 @@ Course corrections:
 
 ##### Phase 13.2 — Decoded `environment/*` Asset Payloads
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Primary deliverables:
 
@@ -2783,6 +2783,35 @@ Acceptance:
 
 - frontend can request environment assets without runtime-pushed DAT-derived renderer facts
 - payloads preserve enough AC-shaped witnesses for future portal rendering and spatial work without forcing those features now
+
+Progress:
+
+- Promoted `environment/*` from reference-only metadata to a decoded asset payload backed by `holtburger-dat::Environment`.
+- Added environment-scoped `cellStructures[]` records to the frontend contract. Each record carries drawing vertex data, drawing polygons, portal polygon ids, optional `DrawingBSP`, and compact cell/physics BSP witnesses.
+- Removed the active placeholder `cell-structure/*` request path from the Tauri adapter, asset-channel request planner, worker parser, prepared-asset union, host contract schemas, and world-display indoor asset summaries.
+- Kept `RuntimeResidency.cellStructureId` as a selection key. It is not a requestable asset id; it selects a cell-structure record inside the decoded `environment/*` payload.
+- Added tests proving `indoor-env-cell/016c0155` selects an environment whose decoded payload contains the selected nested `CellStruct`.
+- Validation passed:
+  - `cargo test -p holtburger-3d -p holtburger-dat`
+  - `cargo clippy -p holtburger-3d -p holtburger-dat --all-targets -- -D warnings`
+  - `npm run --prefix apps/holtburger-3d check`
+  - `npm run --prefix apps/holtburger-3d test:ts -- --run`
+  - `npm run --prefix apps/holtburger-3d lint`
+  - `npm run --prefix apps/holtburger-3d format:check`
+  - `cargo fmt --all --check`
+  - `git diff --check`
+
+Decisions:
+
+- `environment/*` is now the only requestable asset family for structured-interior geometry. The standalone `cell-structure/*` family is retired from active contracts.
+- The environment payload intentionally exposes full drawing data but only compact cell/physics BSP witnesses. Full physics interpretation remains Rust-owned until a later spatial phase needs it.
+- The worker currently passes decoded environment cell-structure drawing data through unchanged; Phase 13.3 owns mesh preparation.
+
+Course corrections:
+
+- Phase 13.3 should not add a new asset family or request path. It should prepare render geometry from `PreparedEnvironmentPayload.cellStructures[]`.
+- Phase 13.4 remains aligned: browser structured-interior scene assembly should join `indoor-env-cell/*` metadata with decoded `environment/*` assets, using `cellStructureId` only as an environment-local selector.
+- Later docs can still mention `cell-structure/*` historically, but active sections should use "environment-scoped cell-structure records" for the durable contract.
 
 ##### Phase 13.3 — Worker Geometry Prep Reusing Phase 12 Mesh Path
 
@@ -3435,14 +3464,13 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. The next step is Phase 13.2, promoting `environment/*` from reference-only metadata to decoded asset payloads and removing or superseding the placeholder `cell-structure/*` path.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. The next step is Phase 13.3, preparing environment-scoped cell-structure drawing geometry in the worker by reusing the Phase 12 polygon-set mesh path.
 
 Current near-term sequence:
 
-1. implement Phase 13.2 decoded `environment/*` payloads and remove or supersede the bare `cell-structure/*` placeholder path
-2. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
-3. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
-4. run Phase 13.5 live interior smoke and gate review
-5. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
-6. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-7. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+1. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
+2. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
+3. run Phase 13.5 live interior smoke and gate review
+4. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
+5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+6. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

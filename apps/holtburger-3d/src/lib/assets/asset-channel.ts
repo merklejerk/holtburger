@@ -477,7 +477,7 @@ function createIndoorCoverageRequests(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[],
 ): AssetLookupRequestDto[] {
-	const { focusEnvCellId, visibleCellIds, environmentId, cellStructureId } =
+	const { focusEnvCellId, visibleCellIds, environmentId } =
 		runtimeBatch.residency;
 	if (focusEnvCellId === null) {
 		return [];
@@ -487,9 +487,6 @@ function createIndoorCoverageRequests(
 		formatIndoorEnvCellAssetId(focusEnvCellId),
 		...visibleCellIds.map((cellId) => formatIndoorEnvCellAssetId(cellId)),
 		environmentId === null ? null : formatEnvironmentAssetId(environmentId),
-		cellStructureId === null
-			? null
-			: formatCellStructureAssetId(cellStructureId),
 	].filter((assetId): assetId is string => assetId !== null);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
@@ -511,10 +508,6 @@ function formatIndoorEnvCellAssetId(envCellId: number): string {
 
 function formatEnvironmentAssetId(environmentId: number): string {
 	return `environment/${formatHex32(environmentId)}`;
-}
-
-function formatCellStructureAssetId(cellStructureId: number): string {
-	return `cell-structure/${cellStructureId.toString(16).padStart(4, "0")}`;
 }
 
 function createAssetWorker(): AssetWorkerLike {

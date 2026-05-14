@@ -101,7 +101,7 @@
 			max={MAX_LANDBLOCK_COVERAGE_RADIUS}
 			step="1"
 			value={$frontendState.browserMode.landblockCoverageRadius}
-			on:input={handleCoverageRadiusInput}
+			on:change={handleCoverageRadiusInput}
 		/>
 	</label>
 

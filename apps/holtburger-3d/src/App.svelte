@@ -56,26 +56,30 @@
 				return;
 			}
 
+			for (const request of requests) {
+				inFlightSceneAssetIds.add(request.assetId);
+			}
+			frontendState.markAssetsPending(requests);
+
 			await Promise.allSettled(
 				requests.map(async (request) => {
 					debugLog("asset-request", request);
-					inFlightSceneAssetIds.add(request.assetId);
-					frontendState.markAssetPending(request);
-
 					try {
-						const preparedGraph = await assetChannel.prepareAssetGraph(
-							request,
-							{ ...get(frontendState).asset.preparedByAssetId },
-						);
-						debugLog("asset-prepared-graph", {
-							rootAssetId: preparedGraph.rootAsset.request.assetId,
-							preparedAssetIds: preparedGraph.preparedAssets.map(
+						const preparedAssets = isSceneCoverageAssetId(request.assetId)
+							? [await assetChannel.prepareAsset(request)]
+							: (
+									await assetChannel.prepareAssetGraph(request, {
+										...get(frontendState).asset.preparedByAssetId,
+									})
+								).preparedAssets;
+						debugLog("asset-prepared", {
+							rootAssetId: request.assetId,
+							preparedAssetIds: preparedAssets.map(
 								(asset) => asset.request.assetId,
 							),
-							dependencyStatus: preparedGraph.dependencyStatus.status,
 						});
 						if (!disposed) {
-							for (const preparedAsset of preparedGraph.preparedAssets) {
+							for (const preparedAsset of preparedAssets) {
 								const invalidPolygons =
 									preparedAsset.payload.kind === "gfx-obj"
 										? preparedAsset.payload.renderGeometry.invalidPolygons
@@ -85,8 +89,8 @@
 									kind: preparedAsset.payload.kind,
 									invalidPolygons,
 								});
-								frontendState.applyPreparedAsset(preparedAsset);
 							}
+							frontendState.applyPreparedAssets(preparedAssets);
 						}
 					} catch (error) {
 						debugLog("asset-error", {

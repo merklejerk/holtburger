@@ -149,52 +149,82 @@ export function createFrontendStateStore() {
 			);
 		},
 		markAssetPending(request: AssetLookupRequestDto): void {
-			update((state) => ({
-				...state,
-				asset: {
-					...state.asset,
-					status: "pending",
-					activeRequest: request,
-					errorMessage: null,
-					history: appendAssetActivity(state.asset.history, {
-						requestId: request.requestId,
-						assetId: request.assetId,
-						priority: request.priority,
-						status: "requested",
-						channel: state.asset.channel,
-						timestamp: new Date().toISOString(),
-					}),
-				},
-			}));
+			this.markAssetsPending([request]);
+		},
+		markAssetsPending(requests: AssetLookupRequestDto[]): void {
+			if (requests.length === 0) {
+				return;
+			}
+
+			update((state) => {
+				const timestamp = new Date().toISOString();
+				const historyEntries = requests.map((request) => ({
+					requestId: request.requestId,
+					assetId: request.assetId,
+					priority: request.priority,
+					status: "requested" as const,
+					channel: state.asset.channel,
+					timestamp,
+				}));
+
+				return {
+					...state,
+					asset: {
+						...state.asset,
+						status: "pending",
+						activeRequest: requests.at(-1) ?? null,
+						errorMessage: null,
+						history: appendAssetActivities(state.asset.history, historyEntries),
+					},
+				};
+			});
 		},
 		applyPreparedAsset(asset: PreparedAssetRecord): void {
-			update((state) => ({
-				...state,
-				asset: {
-					...state.asset,
-					status: "ready",
-					activeRequest: asset.request,
-					preparedAsset: asset,
-					preparedByPriority: {
-						...state.asset.preparedByPriority,
-						[asset.request.priority]: asset,
+			this.applyPreparedAssets([asset]);
+		},
+		applyPreparedAssets(assets: PreparedAssetRecord[]): void {
+			if (assets.length === 0) {
+				return;
+			}
+
+			update((state) => {
+				const preparedByPriority = { ...state.asset.preparedByPriority };
+				const preparedByAssetId = { ...state.asset.preparedByAssetId };
+				for (const asset of assets) {
+					preparedByPriority[asset.request.priority] = asset;
+					preparedByAssetId[asset.request.assetId] = asset;
+				}
+
+				const latestAsset = assets.at(-1);
+				if (!latestAsset) {
+					return state;
+				}
+
+				return {
+					...state,
+					asset: {
+						...state.asset,
+						status: "ready",
+						activeRequest: latestAsset.request,
+						preparedAsset: latestAsset,
+						preparedByPriority,
+						preparedByAssetId,
+						lastResponse: latestAsset.response,
+						errorMessage: null,
+						history: appendAssetActivities(
+							state.asset.history,
+							assets.map((asset) => ({
+								requestId: asset.request.requestId,
+								assetId: asset.request.assetId,
+								priority: asset.request.priority,
+								status: "prepared" as const,
+								channel: state.asset.channel,
+								timestamp: asset.preparedAt,
+							})),
+						),
 					},
-					preparedByAssetId: {
-						...state.asset.preparedByAssetId,
-						[asset.request.assetId]: asset,
-					},
-					lastResponse: asset.response,
-					errorMessage: null,
-					history: appendAssetActivity(state.asset.history, {
-						requestId: asset.request.requestId,
-						assetId: asset.request.assetId,
-						priority: asset.request.priority,
-						status: "prepared",
-						channel: state.asset.channel,
-						timestamp: asset.preparedAt,
-					}),
-				},
-			}));
+				};
+			});
 		},
 		applyAssetError(
 			request: AssetLookupRequestDto,
@@ -329,5 +359,12 @@ function appendAssetActivity(
 	history: AssetActivityRecord[],
 	entry: AssetActivityRecord,
 ): AssetActivityRecord[] {
-	return [...history, entry].slice(-MAX_ASSET_ACTIVITY);
+	return appendAssetActivities(history, [entry]);
+}
+
+function appendAssetActivities(
+	history: AssetActivityRecord[],
+	entries: AssetActivityRecord[],
+): AssetActivityRecord[] {
+	return [...history, ...entries].slice(-MAX_ASSET_ACTIVITY);
 }

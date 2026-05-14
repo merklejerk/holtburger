@@ -391,6 +391,86 @@ describe("asset channel controller", () => {
 		]);
 	});
 
+	it("requests outdoor-linked interior env cells from building portal links", () => {
+		const runtimeBatch = createRuntimeBatch();
+		const requests = createSceneCoverageRequests(
+			runtimeBatch,
+			null,
+			"streaming",
+			{
+				"outdoor-static-scene/0102ffff":
+					createPreparedOutdoorStaticSceneWithBuildingPortal(
+						"outdoor-static-scene/0102ffff",
+						0x0102ffff,
+						[0x01020155, 0x01020156],
+					),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"indoor-env-cell/01020155",
+		);
+		expect(requests.map((request) => request.assetId)).toContain(
+			"indoor-env-cell/01020156",
+		);
+	});
+
+	it("requests outdoor-linked interior environments once env-cell metadata is prepared", () => {
+		const runtimeBatch = createRuntimeBatch();
+		const requests = createSceneCoverageRequests(
+			runtimeBatch,
+			null,
+			"streaming",
+			{
+				"outdoor-static-scene/0102ffff":
+					createPreparedOutdoorStaticSceneWithBuildingPortal(
+						"outdoor-static-scene/0102ffff",
+						0x0102ffff,
+						[0x01020155],
+					),
+				"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+					0x01020155,
+					0x0d000123,
+					1,
+				),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"environment/0d000123",
+		);
+	});
+
+	it("requests static assets for outdoor-linked interior static objects", () => {
+		const runtimeBatch = createRuntimeBatch();
+		const requests = createStaticRenderableAssetRequests(
+			runtimeBatch,
+			null,
+			"streaming",
+			{
+				"outdoor-static-scene/0102ffff":
+					createPreparedOutdoorStaticSceneWithBuildingPortal(
+						"outdoor-static-scene/0102ffff",
+						0x0102ffff,
+						[0x01020155],
+					),
+				"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+					0x01020155,
+					0x0d000123,
+					1,
+					["setup-model/0200abcd"],
+				),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"setup-model/0200abcd",
+		);
+	});
+
 	it("excludes already in-flight terrain assets from the immediate coverage enqueue set", () => {
 		const requests = createTerrainCoverageRequests(
 			createRuntimeBatch(),
@@ -1567,6 +1647,120 @@ function createPreparedOutdoorStaticSceneAsset(
 				provenance: {
 					source: "repo-local-hba",
 					sourceAssetKind: "outdoor-static-scene",
+					errorCode: null,
+					detail: "test-cache",
+				},
+			},
+		},
+	);
+}
+
+function createPreparedOutdoorStaticSceneWithBuildingPortal(
+	assetId: string,
+	landblockId: number,
+	linkedEnvCellIds: number[],
+): PreparedAssetRecord {
+	return prepareAssetPayload(
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "outdoor-static-scene",
+				residencyKind: "outdoor-landblock",
+				sourceAssetKind: "outdoor-static-scene",
+				landblockId,
+				sceneryInstances: [],
+				buildingInstances: [
+					{
+						instanceId: `${assetId}/building/0`,
+						owningLandblockId: landblockId,
+						sourceDid: 0x02000001,
+						sourceAssetId: "setup-model/02000001",
+						sourceIndex: 0,
+						localPlacement: {
+							origin: { x: 0, y: 0, z: 0 },
+							orientation: { w: 1, x: 0, y: 0, z: 0 },
+						},
+						numLeaves: linkedEnvCellIds.length,
+						portals: [
+							{
+								portalId: `${assetId}/building/0/portal/0000`,
+								sourceIndex: 0,
+								flags: 0,
+								otherCellId: 0,
+								otherPortalId: 0,
+								stabList: linkedEnvCellIds.map((id) => id & 0xffff),
+								linkedEnvCellIds,
+							},
+						],
+					},
+				],
+				generatedSceneryInstances: [],
+				diagnostics: createOutdoorStaticSceneDiagnostics(),
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "outdoor-static-scene",
+					errorCode: null,
+					detail: "test-cache",
+				},
+			},
+		},
+	);
+}
+
+function createPreparedIndoorEnvCellAsset(
+	envCellId: number,
+	environmentId: number,
+	cellStructureId: number,
+	staticSourceAssetIds: string[] = [],
+): PreparedAssetRecord {
+	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
+	return prepareAssetPayload(
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		{
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "indoor-env-cell",
+				residencyKind: "indoor-env-cell",
+				sourceAssetKind: "env-cell",
+				envCellId,
+				environmentId,
+				cellStructureId,
+				localPlacement: {
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				visibleCellIds: [],
+				seenOutside: true,
+				surfaceIds: [],
+				portalCount: 0,
+				staticObjectCount: staticSourceAssetIds.length,
+				staticObjects: staticSourceAssetIds.map((sourceAssetId, index) => ({
+					instanceId: `${assetId}/static/${index}`,
+					owningEnvCellId: envCellId,
+					sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+					sourceAssetId,
+					sourceIndex: index,
+					localPlacement: {
+						origin: { x: index, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+				})),
+				provenance: {
+					source: "repo-local-hba",
+					sourceAssetKind: "env-cell",
 					errorCode: null,
 					detail: "test-cache",
 				},

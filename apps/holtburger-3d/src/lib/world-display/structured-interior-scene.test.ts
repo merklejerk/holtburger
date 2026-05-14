@@ -119,6 +119,43 @@ describe("structured interior scene model", () => {
 		expect(model.cells.map((cell) => cell.envCellId)).toEqual([0x016c0155]);
 		expect(model.missingEnvCellAssetIds).toEqual([]);
 	});
+
+	it("derives outdoor-linked interior cells without an indoor focus cell", () => {
+		const runtimeBatch = createIndoorRuntimeBatch();
+		runtimeBatch.residency.indoors = false;
+		runtimeBatch.residency.focusEnvCellId = null;
+		runtimeBatch.residency.visibleCellIds = [];
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+				0x01020155,
+				0x0d000001,
+				1,
+				IDENTITY_PLACEMENT,
+			),
+			"environment/0d000001": createPreparedEnvironmentAsset(0x0d000001),
+		};
+
+		const model = deriveStructuredInteriorSceneModel(
+			runtimeBatch,
+			assetState,
+			null,
+			{
+				envCellIds: [0x01020155],
+				focusLandblockId: 0x0102ffff,
+			},
+		);
+
+		expect(model.focusEnvCellId).toBeNull();
+		expect(model.activeEnvCellIds).toEqual([0x01020155]);
+		expect(model.cells).toContainEqual(
+			expect.objectContaining({
+				envCellId: 0x01020155,
+				isFocus: false,
+				landblockWorldOffset: { x: 0, y: 0, z: 0 },
+			}),
+		);
+	});
 });
 
 function createIndoorRuntimeBatch(): RuntimeBatchDto {

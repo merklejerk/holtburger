@@ -67,8 +67,19 @@ export interface PreparedOutdoorStaticSceneInstance {
 	localPlacement: PlacementTransformDto;
 }
 
+interface PreparedOutdoorStaticSceneBuildingPortal {
+	portalId: string;
+	sourceIndex: number;
+	flags: number;
+	otherCellId: number;
+	otherPortalId: number;
+	stabList: number[];
+	linkedEnvCellIds: number[];
+}
+
 export interface PreparedOutdoorStaticSceneBuilding extends PreparedOutdoorStaticSceneInstance {
 	numLeaves: number;
+	portals: PreparedOutdoorStaticSceneBuildingPortal[];
 }
 
 export interface PreparedOutdoorStaticSceneGeneratedSceneryInstance extends PreparedOutdoorStaticSceneInstance {

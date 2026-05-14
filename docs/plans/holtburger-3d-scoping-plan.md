@@ -3000,7 +3000,7 @@ Course corrections and next-step assessment:
 
 ##### Phase 13.6 — Outdoor-Linked Interior Scene Composition
 
-Status: planned.
+Status: implemented.
 
 Scope: let browser outdoor mode render indoor env cells linked from loaded outdoor landblocks/buildings, using static `LandblockInfo.Buildings[*].Portals[*].StabList` facts rather than portal visibility traversal. This phase should make building interiors inspectable from outdoor landblock context while continuing to render all linked cells openly in free-camera mode.
 
@@ -3039,6 +3039,33 @@ Guardrails:
 - do not leave temporary real-asset probes, debug logs, or exploratory fixture assertions in the final patch
 - do not hide or mask linked interiors in free-camera browser mode
 - do not move browser coverage policy into `WorldDisplay`; keep linked-interior selection above the shared renderer
+
+Progress:
+
+- Added `normalize_landblock_env_cell_id(...)` in `holtburger-core` so building portal `stabList` values are converted from landblock-local cell suffixes into full env-cell ids such as `0xda55012e`. The committed coverage is synthetic and does not depend on a specific real DAT/HBA landblock.
+- Preserved decoded `LandblockInfo.Buildings[*].Portals[*]` facts in `StaticOutdoorSceneAssembler`, including flags, `otherCellId`, `otherPortalId`, raw `stabList`, and normalized `linkedEnvCellIds`.
+- Extended the Tauri `outdoor-static-scene/*` payload contract so building instances carry stable portal ids plus normalized linked env-cell ids. The payload remains reference-only; linked `indoor-env-cell/*`, `environment/*`, `gfx-obj/*`, and `setup-model/*` payloads are still requested separately.
+- Added browser asset orchestration for outdoor-linked interiors. Active outdoor static scenes now derive linked env-cell requests from prepared building portal facts, then request dependent `environment/*` payloads once env-cell metadata is prepared.
+- Extended static-renderable dependency discovery so linked indoor env-cell static objects request their visual source assets while outdoor terrain/statics remain active.
+- Extended structured-interior scene assembly so an outdoor browser scene can include linked env-cell shells without pretending there is an indoor focus/resident env cell.
+- Offset linked interior shells and authored indoor static props by the owning landblock relative to the outdoor focus landblock, matching the existing outdoor terrain/statics coordinate convention.
+- Updated browser diagnostics to distinguish outdoor-linked env cells from resident/visible indoor cells and to surface waiting states for missing linked env-cell or environment payloads.
+- Added synthetic TypeScript tests for linked-interior asset request derivation, environment follow-up requests, linked indoor static-object dependency requests, outdoor-linked static renderables, and linked structured-interior scene composition.
+
+Decisions:
+
+- Browser outdoor mode now greedily inspects linked interiors for active outdoor coverage, but this remains browser orchestration policy above `WorldDisplay`. Future client mode can request resident/visible/prefetched cells with different policy over the same requestable asset families.
+- `outdoor-static-scene/*` exposes building portal links only as references and provenance-bearing composition facts. It does not bulk-embed indoor cell geometry or prop payloads.
+- Outdoor-linked structured interiors have no indoor focus cell in browser free-camera mode. The scene model marks them as non-focus cells and renders them openly; portal masking/culling remains deferred.
+- Linked env-cell shell placement and linked indoor static placement both use landblock-relative offsets when rendered in an outdoor scene. This keeps cross-landblock linked interiors aligned with the terrain/static origin convention instead of creating a second coordinate path.
+- No new permanent real-asset assertions were added. Existing real-asset adapter tests remain, but this phase's new behavior is defended with synthetic fixtures.
+
+Course corrections and next-step assessment:
+
+- The phase did not add detailed per-building-to-env-cell HUD relationship rows. The payload and scene/request seams now carry that relationship, but richer visualization belongs with Phase 13.7 portal diagnostics where overlays and target highlighting can present the data without cluttering the main scene panel.
+- Linked-interior composition is enough to proceed to Phase 13.7. Portal diagnostics still make sense next because users should now be able to inspect outdoor terrain/statics, linked cell shells, and authored interior props in one scene before we add portal overlays and target highlighting.
+- Portal masking/culling should remain out of Phase 13.7. The implementation reinforced the earlier decision: browser free-camera mode can inspect linked cells, but it still has no resident-camera basis for visibility masking.
+- If smoke testing shows linked interiors offset from their building shell, inspect `CBldPortal`/building placement semantics and env-cell placement basis before changing renderer transforms. Do not paper over it with frontend-only offsets.
 
 ##### Phase 13.7 — Portal Diagnostics and Topology Visualization
 
@@ -3687,12 +3714,12 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke confirming room population after the indoor static transform correction. The next step is Phase 13.6 outdoor-linked interior scene composition; portal diagnostics follow after linked interiors are visible from outdoor context, and portal masking/culling is deferred until a resident-camera basis exists.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke confirming room population after the indoor static transform correction. Phase 13.6 is implemented: outdoor static scene payloads now carry building portal `stabList` links, and browser outdoor scenes can request/render linked env-cell shells plus authored indoor props through the existing requestable asset path. The next step is Phase 13.7 portal diagnostics and topology visualization; portal masking/culling is deferred until a resident-camera basis exists.
 
 Current near-term sequence:
 
-1. run Phase 13.6 outdoor-linked interior scene composition, using building portal `stabList` facts to request/render linked env cells from outdoor landblock context
-2. run Phase 13.7 portal diagnostics and topology visualization once linked interiors are visible alongside outdoor terrain/statics
+1. smoke Phase 13.6 in Tauri on outdoor landblocks with known building interiors; verify linked cell shells and authored props line up with their outdoor building shells before adding portal overlays
+2. run Phase 13.7 portal diagnostics and topology visualization now that linked interiors can be visible alongside outdoor terrain/statics
 3. defer portal masking/culling to Phase 13.8 resident indoor preview or later client-mode work, where camera cell residency is coherent
 4. keep through-wall or overlap issues classified as future resident-camera portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, linked-interior ids, or indoor static object transform is demonstrably wrong
 5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it

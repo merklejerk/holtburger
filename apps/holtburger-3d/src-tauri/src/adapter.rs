@@ -473,6 +473,19 @@ impl HostBoundaryAdapter {
             "buildingInstances": scene.buildings.iter().filter_map(|building| {
                 serialize_static_outdoor_instance(&building.instance).map(|mut value| {
                     value["numLeaves"] = serde_json::json!(building.num_leaves);
+                    value["portals"] = serde_json::json!(
+                        building.portals.iter().map(|portal| {
+                            serde_json::json!({
+                                "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
+                                "sourceIndex": portal.source_index,
+                                "flags": portal.flags,
+                                "otherCellId": portal.other_cell_id,
+                                "otherPortalId": portal.other_portal_id,
+                                "stabList": portal.stab_list,
+                                "linkedEnvCellIds": portal.linked_env_cell_ids,
+                            })
+                        }).collect::<Vec<_>>()
+                    );
                     value
                 })
             }).collect::<Vec<_>>(),

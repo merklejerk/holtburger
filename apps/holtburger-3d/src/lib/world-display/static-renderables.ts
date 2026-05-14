@@ -15,7 +15,10 @@ import type {
 	PreparedSetupModelPart,
 	PreparedSetupModelPayload,
 } from "../assets/types";
-import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
+import {
+	deriveOutdoorLinkedInteriorEnvCellIds,
+	deriveTerrainFocusLandblockId,
+} from "../assets/asset-channel";
 import type {
 	PlacementTransformDto,
 	RuntimeBatchDto,
@@ -91,6 +94,7 @@ export function deriveStaticRenderableSceneModel(
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
 	landblockCoverageRadius = 1,
+	linkedOutdoorEnvCellIds: number[] = [],
 ): StaticRenderableSceneModel {
 	if (!runtimeBatch) {
 		return emptyStaticRenderableSceneModel();
@@ -121,6 +125,19 @@ export function deriveStaticRenderableSceneModel(
 		activeLandblockSet,
 		focusLandblockId,
 	)
+		.concat(
+			collectIndoorStaticRenderableSourceInstances(
+				assetState,
+				new Set([
+					...linkedOutdoorEnvCellIds,
+					...deriveOutdoorLinkedInteriorEnvCellIds(
+						assetState.preparedByAssetId,
+						activeLandblockSet,
+					),
+				]),
+				focusLandblockId,
+			),
+		)
 		.filter((instance) => activeLandblockSet.has(instance.owningLandblockId))
 		.sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
@@ -465,6 +482,7 @@ function deriveActiveIndoorEnvCellIds(
 function collectIndoorStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
 	activeEnvCellIds: Set<number>,
+	outdoorFocusLandblockId: number | null = null,
 ): StaticRenderableSourceInstance[] {
 	return [...activeEnvCellIds].flatMap((envCellId) => {
 		const envCell = getPreparedIndoorEnvCell(assetState, envCellId);
@@ -473,27 +491,38 @@ function collectIndoorStaticRenderableSourceInstances(
 		}
 
 		return envCell.staticObjects.map((staticObject) =>
-			normalizeIndoorStaticSourceInstance(staticObject),
+			normalizeIndoorStaticSourceInstance(
+				staticObject,
+				outdoorFocusLandblockId,
+			),
 		);
 	});
 }
 
 function normalizeIndoorStaticSourceInstance(
 	staticObject: PreparedIndoorStaticObject,
+	outdoorFocusLandblockId: number | null,
 ): StaticRenderableSourceInstance {
+	const owningLandblockId = normalizeOutdoorLandblockId(
+		staticObject.owningEnvCellId,
+	);
 	return {
 		kind: "indoor-static",
 		instanceId: staticObject.instanceId,
-		owningLandblockId: normalizeOutdoorLandblockId(
-			staticObject.owningEnvCellId,
-		),
+		owningLandblockId,
 		owningEnvCellId: staticObject.owningEnvCellId,
 		sourceDid: staticObject.sourceDid,
 		sourceAssetId: staticObject.sourceAssetId,
 		sourceIndex: staticObject.sourceIndex,
 		parentPlacements: [],
 		localPlacement: staticObject.localPlacement,
-		landblockWorldOffset: { x: 0, y: 0, z: 0 },
+		landblockWorldOffset:
+			outdoorFocusLandblockId === null
+				? { x: 0, y: 0, z: 0 }
+				: deriveLandblockWorldOffset(
+						owningLandblockId,
+						outdoorFocusLandblockId,
+					),
 		sourceScale: UNIT_SCALE,
 		numLeaves: null,
 	};

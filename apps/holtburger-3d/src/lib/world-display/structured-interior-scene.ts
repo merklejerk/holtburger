@@ -10,7 +10,17 @@ import type {
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
-import { formatHex32 } from "../landblocks";
+import {
+	formatHex32,
+	getOutdoorLandblockCoords,
+	normalizeOutdoorLandblockId,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+} from "../landblocks";
+
+export interface LinkedOutdoorInteriorSelection {
+	envCellIds: number[];
+	focusLandblockId: number;
+}
 
 export interface StructuredInteriorCell {
 	renderKey: string;
@@ -19,6 +29,7 @@ export interface StructuredInteriorCell {
 	cellStructureId: number;
 	isFocus: boolean;
 	localPlacement: PlacementTransformDto;
+	landblockWorldOffset: { x: number; y: number; z: number };
 	surfaceIds: number[];
 	portalCount: number;
 	staticObjectCount: number;
@@ -41,6 +52,7 @@ export function deriveStructuredInteriorSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
+	linkedOutdoorInteriors: LinkedOutdoorInteriorSelection | null = null,
 ): StructuredInteriorSceneModel {
 	const browserFocusEnvCellId =
 		browserDestinationToIndoorEnvCellId(browserDestination);
@@ -52,6 +64,20 @@ export function deriveStructuredInteriorSceneModel(
 	}
 
 	if (!runtimeBatch || !runtimeBatch.residency.indoors) {
+		if (
+			linkedOutdoorInteriors &&
+			linkedOutdoorInteriors.envCellIds.length > 0
+		) {
+			return deriveStructuredInteriorSceneForEnvCells(
+				null,
+				[...new Set(linkedOutdoorInteriors.envCellIds)].sort(
+					(left, right) => left - right,
+				),
+				assetState,
+				linkedOutdoorInteriors.focusLandblockId,
+			);
+		}
+
 		return emptyStructuredInteriorSceneModel(
 			null,
 			[],
@@ -103,9 +129,10 @@ function deriveBrowserFocusedStructuredInteriorSceneModel(
 }
 
 function deriveStructuredInteriorSceneForEnvCells(
-	focusEnvCellId: number,
+	focusEnvCellId: number | null,
 	activeEnvCellIds: number[],
 	assetState: AssetChannelState,
+	outdoorFocusLandblockId: number | null = null,
 ): StructuredInteriorSceneModel {
 	const missingEnvCellAssetIds = new Set<string>();
 	const missingEnvironmentAssetIds = new Set<string>();
@@ -152,8 +179,12 @@ function deriveStructuredInteriorSceneForEnvCells(
 			envCellId,
 			environmentId,
 			cellStructureId,
-			isFocus: envCellId === focusEnvCellId,
+			isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
 			localPlacement: envCellAsset.payload.localPlacement,
+			landblockWorldOffset:
+				outdoorFocusLandblockId === null
+					? { x: 0, y: 0, z: 0 }
+					: deriveLandblockWorldOffset(envCellId, outdoorFocusLandblockId),
 			surfaceIds: envCellAsset.payload.surfaceIds,
 			portalCount: envCellAsset.payload.portalCount,
 			staticObjectCount: envCellAsset.payload.staticObjectCount,
@@ -199,8 +230,16 @@ function compareStructuredInteriorCells(
 
 function describeStructuredInteriorStatus(
 	cells: StructuredInteriorCell[],
-	focusEnvCellId: number,
+	focusEnvCellId: number | null,
 ): string {
+	if (focusEnvCellId === null) {
+		if (cells.length === 0) {
+			return "Three.js is waiting for outdoor-linked structured-interior geometry.";
+		}
+
+		return `Three.js is rendering ${cells.length} outdoor-linked structured interior cell${cells.length === 1 ? "" : "s"}.`;
+	}
+
 	const focusLabel = formatEnvCellLabel(focusEnvCellId);
 	if (cells.length === 0) {
 		return `Three.js is waiting for structured-interior geometry around focus ${focusLabel}.`;
@@ -248,4 +287,22 @@ function formatEnvironmentAssetId(environmentId: number): string {
 
 function formatEnvCellLabel(envCellId: number): string {
 	return `0x${formatHex32(envCellId)}`;
+}
+
+function deriveLandblockWorldOffset(
+	envCellId: number,
+	focusLandblockId: number,
+): { x: number; y: number; z: number } {
+	const owningCoords = getOutdoorLandblockCoords(
+		normalizeOutdoorLandblockId(envCellId),
+	);
+	const focusCoords = getOutdoorLandblockCoords(
+		normalizeOutdoorLandblockId(focusLandblockId),
+	);
+
+	return {
+		x: (owningCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		y: (owningCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		z: 0,
+	};
 }

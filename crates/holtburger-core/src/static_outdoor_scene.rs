@@ -39,6 +39,17 @@ pub struct StaticOutdoorInstance {
 pub struct StaticOutdoorBuilding {
     pub instance: StaticOutdoorInstance,
     pub num_leaves: u32,
+    pub portals: Vec<StaticOutdoorBuildingPortal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaticOutdoorBuildingPortal {
+    pub source_index: usize,
+    pub flags: u16,
+    pub other_cell_id: u16,
+    pub other_portal_id: u16,
+    pub stab_list: Vec<u16>,
+    pub linked_env_cell_ids: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -304,6 +315,24 @@ fn derive_buildings(
             }
 
             diagnostics.accepted += 1;
+            let portals = building
+                .portals
+                .iter()
+                .enumerate()
+                .map(|(portal_index, portal)| StaticOutdoorBuildingPortal {
+                    source_index: portal_index,
+                    flags: portal.flags,
+                    other_cell_id: portal.other_cell_id,
+                    other_portal_id: portal.other_portal_id,
+                    stab_list: portal.stab_list.clone(),
+                    linked_env_cell_ids: portal
+                        .stab_list
+                        .iter()
+                        .copied()
+                        .map(|stab| normalize_landblock_env_cell_id(landblock_id, stab))
+                        .collect(),
+                })
+                .collect();
             Some(StaticOutdoorBuilding {
                 instance: StaticOutdoorInstance {
                     identity: StaticOutdoorInstanceIdentity::Building {
@@ -320,6 +349,7 @@ fn derive_buildings(
                     },
                 },
                 num_leaves: building.num_leaves,
+                portals,
             })
         })
         .collect()
@@ -488,6 +518,10 @@ fn derive_generated_scenery(
 
 pub fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
     (raw_landblock_id & 0xffff_0000) | 0xffff
+}
+
+pub fn normalize_landblock_env_cell_id(raw_landblock_id: u32, local_cell_id: u16) -> u32 {
+    (normalize_landblock_id(raw_landblock_id) & 0xffff_0000) | u32::from(local_cell_id)
 }
 
 fn load_landblock_info(content: &ContentRepository, landblock_id: u32) -> Result<LandblockInfo> {
@@ -964,6 +998,18 @@ mod tests {
         assert_eq!(
             StaticRenderableSourceRef::from_did(0x03000001).family,
             StaticRenderableSourceFamily::Unsupported
+        );
+    }
+
+    #[test]
+    fn normalizes_building_portal_stab_ids_to_landblock_env_cell_ids() {
+        assert_eq!(
+            normalize_landblock_env_cell_id(0xda55ffff, 0x012e),
+            0xda55012e
+        );
+        assert_eq!(
+            normalize_landblock_env_cell_id(0xda550123, 0x012e),
+            0xda55012e
         );
     }
 

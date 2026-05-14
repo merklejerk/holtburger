@@ -119,9 +119,20 @@ const outdoorStaticSceneInstanceDtoSchema = z.object({
 	localPlacement: placementTransformDtoSchema,
 });
 
+const outdoorStaticSceneBuildingPortalDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	stabList: z.array(z.number().int().nonnegative()),
+	linkedEnvCellIds: z.array(z.number().int().nonnegative()),
+});
+
 const outdoorStaticSceneBuildingDtoSchema =
 	outdoorStaticSceneInstanceDtoSchema.extend({
 		numLeaves: z.number().int().nonnegative(),
+		portals: z.array(outdoorStaticSceneBuildingPortalDtoSchema),
 	});
 
 const outdoorStaticSceneGeneratedSceneryInstanceDtoSchema =

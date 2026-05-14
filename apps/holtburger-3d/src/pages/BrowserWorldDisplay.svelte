@@ -26,6 +26,10 @@
 	} from "../lib/world-display/camera";
 	import WorldDisplay from "../lib/world-display/WorldDisplay.svelte";
 	import {
+		deriveOutdoorLinkedInteriorEnvCellIds,
+		deriveTerrainFocusLandblockId,
+	} from "../lib/assets/asset-channel";
+	import {
 		buildCameraHint,
 		buildRayPickRequest,
 		deriveWorldDisplayModel,
@@ -42,7 +46,10 @@
 	} from "../lib/world-display/static-renderables";
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
 	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
-	import { normalizeOutdoorLandblockId } from "../lib/landblocks";
+	import {
+		buildOutdoorCoverageLandblockIds,
+		normalizeOutdoorLandblockId,
+	} from "../lib/landblocks";
 
 	let {
 		activeMode,
@@ -85,6 +92,10 @@
 		moved: boolean;
 	} | null>(null);
 	let activeCameraSceneKey = $state<string | null>(null);
+	let renderMetricsEventCount = $state(0);
+	let cameraFrameApplyCount = $state(0);
+	let pointerInputEventCount = $state(0);
+	let keyboardInputEventCount = $state(0);
 	let suppressNextBrowserClick = false;
 	let cameraHintTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -101,12 +112,38 @@
 			landblockCoverageRadius,
 		),
 	);
+	const outdoorFocusLandblockId = $derived(
+		runtimeBatch &&
+			!runtimeBatch.residency.indoors &&
+			browserDestination?.kind !== "indoor-env-cell"
+			? deriveTerrainFocusLandblockId(runtimeBatch, browserDestination)
+			: null,
+	);
+	const linkedOutdoorEnvCellIds = $derived.by(() => {
+		if (outdoorFocusLandblockId === null) {
+			return [];
+		}
+
+		const activeLandblockIds = new Set(
+			buildOutdoorCoverageLandblockIds(
+				outdoorFocusLandblockId,
+				landblockCoverageRadius,
+			),
+		);
+		return [
+			...deriveOutdoorLinkedInteriorEnvCellIds(
+				assetState.preparedByAssetId,
+				activeLandblockIds,
+			),
+		].sort((left, right) => left - right);
+	});
 	const staticRenderableScene = $derived(
 		deriveStaticRenderableSceneModel(
 			runtimeBatch,
 			assetState,
 			browserDestination,
 			landblockCoverageRadius,
+			linkedOutdoorEnvCellIds,
 		),
 	);
 	const structuredInteriorScene = $derived(
@@ -114,6 +151,12 @@
 			runtimeBatch,
 			assetState,
 			browserDestination,
+			outdoorFocusLandblockId === null
+				? null
+				: {
+						envCellIds: linkedOutdoorEnvCellIds,
+						focusLandblockId: outdoorFocusLandblockId,
+					},
 		),
 	);
 	const terrainVertexCount = $derived(
@@ -176,7 +219,11 @@
 	);
 	const structuredInteriorText = $derived(
 		structuredInteriorScene.cells.length > 0
-			? `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}.`
+			? linkedOutdoorEnvCellIds.length > 0 &&
+				browserDestination?.kind !== "indoor-env-cell" &&
+				!runtimeBatch?.residency.indoors
+				? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked.`
+				: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}.`
 			: describeStructuredInteriorIdleState(),
 	);
 	const sceneBoundsText = $derived(
@@ -189,7 +236,9 @@
 			? `${describeSceneCameraFrame(browserCameraFrame)} ${describeBrowserCameraControlMode()}`
 			: "Camera frame is waiting for terrain.",
 	);
+	const cameraPipelineDebugText = $derived(describeCameraPipelineDebugState());
 	const assetDebugText = $derived(describeAssetDebugState());
+	const assetPipelineDebugText = $derived(describeAssetPipelineDebugState());
 	const pendingCameraHint = $derived(trailingCameraHint !== null);
 	const worldDisplay = $derived(
 		deriveWorldDisplayModel({
@@ -225,6 +274,7 @@
 
 	// Browser orbit controls are a debug/navigation policy, not the future client camera.
 	function handleRenderMetricsChange(metrics: WorldRenderMetrics): void {
+		renderMetricsEventCount += 1;
 		renderMetrics = metrics;
 
 		if (metrics.bounds) {
@@ -298,6 +348,7 @@
 		}
 
 		const target = event.currentTarget as HTMLElement;
+		target.focus();
 		target.setPointerCapture(event.pointerId);
 		activePointerDrag = {
 			pointerId: event.pointerId,
@@ -306,6 +357,7 @@
 			mode: event.button === 0 ? "orbit" : "pan",
 			moved: false,
 		};
+		pointerInputEventCount += 1;
 		event.preventDefault();
 	}
 
@@ -333,6 +385,7 @@
 			drag.mode === "orbit"
 				? orbitDebugCamera(browserCameraState, delta)
 				: panDebugCamera(browserCameraState, delta);
+		pointerInputEventCount += 1;
 		applyBrowserCameraFrame(getViewportPoint(event), false);
 		event.preventDefault();
 	}
@@ -354,6 +407,7 @@
 
 	function handleBrowserWheelCapture(event: WheelEvent): void {
 		browserCameraState = zoomDebugCamera(browserCameraState, event.deltaY);
+		pointerInputEventCount += 1;
 		applyBrowserCameraFrame(getViewportPoint(event), false);
 		event.preventDefault();
 	}
@@ -369,6 +423,7 @@
 			`forced:${Date.now()}`,
 			{ force: true },
 		);
+		keyboardInputEventCount += 1;
 		applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		event.preventDefault();
 	}
@@ -420,12 +475,51 @@
 		viewportPoint: NormalizedViewportPoint,
 		immediate: boolean,
 	): void {
-		browserCameraFrame = {
+		const nextFrame = {
 			...buildDebugOrbitCameraFrame(browserCameraState),
 			aspect:
 				renderMetrics?.cameraFrame?.aspect ?? browserCameraFrame?.aspect ?? 1,
 		};
+		if (
+			browserCameraFrame &&
+			areSceneCameraFramesEquivalent(browserCameraFrame, nextFrame)
+		) {
+			return;
+		}
+
+		browserCameraFrame = nextFrame;
+		cameraFrameApplyCount += 1;
 		scheduleRenderedCameraHint(viewportPoint, immediate);
+	}
+
+	function areSceneCameraFramesEquivalent(
+		left: SceneCameraFrame,
+		right: SceneCameraFrame,
+	): boolean {
+		return (
+			areNumbersClose(left.aspect, right.aspect) &&
+			areNumbersClose(left.fovDegrees, right.fovDegrees) &&
+			areNumbersClose(left.near, right.near) &&
+			areNumbersClose(left.far, right.far) &&
+			areVec3sClose(left.position, right.position) &&
+			areVec3sClose(left.target, right.target) &&
+			areVec3sClose(left.up, right.up)
+		);
+	}
+
+	function areVec3sClose(
+		left: SceneCameraFrame["position"],
+		right: SceneCameraFrame["position"],
+	): boolean {
+		return (
+			areNumbersClose(left.x, right.x) &&
+			areNumbersClose(left.y, right.y) &&
+			areNumbersClose(left.z, right.z)
+		);
+	}
+
+	function areNumbersClose(left: number, right: number): boolean {
+		return Math.abs(left - right) < 0.0001;
 	}
 
 	function getViewportPoint(
@@ -536,6 +630,10 @@
 			: "Browser camera: auto-fit.";
 	}
 
+	function describeCameraPipelineDebugState(): string {
+		return `metrics ${renderMetricsEventCount}; frames ${cameraFrameApplyCount}; pointer ${pointerInputEventCount}; keys ${keyboardInputEventCount}; focus ${document.activeElement?.tagName.toLowerCase() ?? "none"}.`;
+	}
+
 	function describeAssetDebugState(): string {
 		if (assetState.errorMessage) {
 			return `Error while preparing ${assetState.activeRequest?.assetId ?? "asset"}: ${assetState.errorMessage}`;
@@ -553,6 +651,16 @@
 		}
 
 		return `${assetState.status}; active ${activeAssetId}; prepared ${preparedCount}; latest ${recentText}.`;
+	}
+
+	function describeAssetPipelineDebugState(): string {
+		const preparedOutdoorSceneIds = Object.keys(assetState.preparedByAssetId)
+			.filter((assetId) => assetId.startsWith("outdoor-static-scene/"))
+			.sort();
+		const recentHistory = assetState.history
+			.map((entry) => `${entry.status}:${entry.assetId}`)
+			.join(" | ");
+		return `outdoor scenes ${preparedOutdoorSceneIds.length}: ${preparedOutdoorSceneIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
 	}
 
 	function describeGfxObjRenderDiagnostics(): string | null {
@@ -604,7 +712,8 @@
 	function describeStructuredInteriorIdleState(): string {
 		if (
 			!runtimeBatch?.residency.indoors &&
-			browserDestination?.kind !== "indoor-env-cell"
+			browserDestination?.kind !== "indoor-env-cell" &&
+			linkedOutdoorEnvCellIds.length === 0
 		) {
 			return "Structured interior rendering is dormant while outdoor residency is active.";
 		}
@@ -634,6 +743,7 @@
 <div
 	bind:this={rootElement}
 	class="browser-world-display"
+	tabindex="-1"
 	onpointerdowncapture={handleBrowserPointerDownCapture}
 	onpointermovecapture={handleBrowserPointerMoveCapture}
 	onpointerupcapture={handleBrowserPointerUpCapture}
@@ -678,6 +788,10 @@
 				<dd>{assetDebugText}</dd>
 			</div>
 			<div>
+				<dt>Pipeline</dt>
+				<dd>{assetPipelineDebugText}</dd>
+			</div>
+			<div>
 				<dt>Statics</dt>
 				<dd>{staticRenderableText}</dd>
 			</div>
@@ -700,6 +814,10 @@
 			<div>
 				<dt>Camera</dt>
 				<dd>{cameraFrameText}</dd>
+			</div>
+			<div>
+				<dt>Input</dt>
+				<dd>{cameraPipelineDebugText}</dd>
 			</div>
 		</dl>
 	</div>

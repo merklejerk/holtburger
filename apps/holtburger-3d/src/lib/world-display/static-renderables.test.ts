@@ -109,6 +109,43 @@ describe("static renderable scene model", () => {
 		expect(model.partsByGfxAssetId.get("gfx-obj/01000001")).toHaveLength(2);
 	});
 
+	it("includes outdoor-linked indoor static objects in outdoor scenes", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"gfx-obj/01000001": createPreparedGfxObjAsset(
+				"gfx-obj/01000001",
+				0x01000001,
+			),
+			"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+				0x01020155,
+				IDENTITY_PLACEMENT,
+				["gfx-obj/01000001"],
+			),
+			"outdoor-static-scene/0102ffff":
+				createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
+					0x0102ffff,
+					[0x01020155],
+				),
+		};
+
+		const model = deriveStaticRenderableSceneModel(
+			createRuntimeBatch(),
+			assetState,
+		);
+
+		expect(model.sourceInstances.map((instance) => instance.kind)).toContain(
+			"indoor-static",
+		);
+		expect(model.parts).toContainEqual(
+			expect.objectContaining({
+				kind: "indoor-static",
+				owningEnvCellId: 0x01020155,
+				gfxObjAssetId: "gfx-obj/01000001",
+				landblockWorldOffset: { x: 0, y: 0, z: 0 },
+			}),
+		);
+	});
+
 	it("offsets landblock-local static frames into the focused terrain scene", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
@@ -274,7 +311,52 @@ function createPreparedOutdoorStaticSceneAsset(
 			sourceIndex: index,
 			localPlacement: createPlacement({ x: 25 + index, y: 48, z: 6 }),
 			numLeaves: 1,
+			portals: [],
 		})),
+		generatedSceneryInstances: [],
+		diagnostics: createOutdoorStaticSceneDiagnostics(),
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "outdoor-static-scene",
+			errorCode: null,
+			detail: "test",
+		},
+	});
+}
+
+function createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
+	landblockId: number,
+	linkedEnvCellIds: number[],
+): PreparedAssetRecord {
+	const assetId = formatOutdoorStaticSceneAssetId(landblockId);
+	return createPreparedAsset(assetId, {
+		kind: "outdoor-static-scene",
+		sourceAssetKind: "outdoor-static-scene",
+		residencyKind: "outdoor-landblock",
+		landblockId,
+		sceneryInstances: [],
+		buildingInstances: [
+			{
+				instanceId: `${assetId}/building/0`,
+				owningLandblockId: landblockId,
+				sourceDid: 0x02000001,
+				sourceAssetId: "setup-model/02000001",
+				sourceIndex: 0,
+				localPlacement: createPlacement({ x: 24, y: 48, z: 6 }),
+				numLeaves: linkedEnvCellIds.length,
+				portals: [
+					{
+						portalId: `${assetId}/building/0/portal/0000`,
+						sourceIndex: 0,
+						flags: 0,
+						otherCellId: 0,
+						otherPortalId: 0,
+						stabList: linkedEnvCellIds.map((id) => id & 0xffff),
+						linkedEnvCellIds,
+					},
+				],
+			},
+		],
 		generatedSceneryInstances: [],
 		diagnostics: createOutdoorStaticSceneDiagnostics(),
 		provenance: {

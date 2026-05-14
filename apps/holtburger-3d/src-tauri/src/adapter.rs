@@ -21,10 +21,10 @@ use holtburger_world::{WorldBootstrap, WorldState};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
-    CameraHintAckDto, CameraHintDto, DebugConfigDto, FrameDto, FrontendStateFeedDto,
-    HostBoundaryOverviewDto, IndoorAssetFamilyIdDto, IndoorContractBacklogDto,
-    IndoorRuntimeFieldIdDto, InteractionModeDto, LifecyclePhaseDto, LifecycleStateDto, ModeHintDto,
-    QuaternionDto, RayPickHitDto, RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto,
+    CameraHintAckDto, CameraHintDto, DebugConfigDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
+    IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto, InteractionModeDto,
+    LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, PlacementTransformDto, QuaternionDto,
+    RayPickHitDto, RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto,
     RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto,
     Vec3Dto,
 };
@@ -680,6 +680,10 @@ impl HostBoundaryAdapter {
                     "envCellId": env_cell_id,
                     "environmentId": null,
                     "cellStructureId": null,
+                    "localPlacement": {
+                        "origin": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                        "orientation": { "w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0 }
+                    },
                     "visibleCellIds": [],
                     "seenOutside": null,
                     "surfaceIds": [],
@@ -788,7 +792,7 @@ impl HostBoundaryAdapter {
                 "parts": [],
                 "holdingLocations": [],
                 "connectionPoints": [],
-                "placementFrames": [],
+                "placementSets": [],
                 "collisionWitness": {
                     "cylSphereCount": 0,
                     "sphereCount": 0
@@ -1106,7 +1110,7 @@ impl HostBoundaryAdapter {
             "parts": serialize_setup_model_parts(&setup_model),
             "holdingLocations": serialize_location_map(&setup_model.holding_locations),
             "connectionPoints": serialize_location_map(&setup_model.connection_points),
-            "placementFrames": serialize_placement_frames(&setup_model),
+            "placementSets": serialize_placement_sets(&setup_model),
             "collisionWitness": {
                 "cylSphereCount": setup_model.cyl_spheres.len(),
                 "sphereCount": setup_model.spheres.len(),
@@ -1188,6 +1192,7 @@ impl HostBoundaryAdapter {
             "envCellId": env_cell_id,
             "environmentId": 0x0D00_0000 | u32::from(env_cell.environment_id),
             "cellStructureId": u32::from(env_cell.cell_structure),
+            "localPlacement": serialize_frame(&env_cell.position),
             "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
             "seenOutside": (env_cell.flags & 0x01) != 0,
             "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
@@ -1269,7 +1274,7 @@ fn serialize_static_outdoor_instance(
         "sourceDid": instance.source.did,
         "sourceAssetId": source_asset_id,
         "sourceIndex": instance.source_index,
-        "frame": serialize_static_outdoor_frame_dto(&instance.frame),
+        "localPlacement": serialize_static_outdoor_placement_dto(&instance.frame),
     }))
 }
 
@@ -1356,8 +1361,8 @@ fn serialize_quaternion_dto(quaternion: &Quaternion) -> QuaternionDto {
     }
 }
 
-fn serialize_static_outdoor_frame_dto(frame: &StaticOutdoorFrame) -> FrameDto {
-    FrameDto {
+fn serialize_static_outdoor_placement_dto(frame: &StaticOutdoorFrame) -> PlacementTransformDto {
+    PlacementTransformDto {
         origin: serialize_vec3_dto(&frame.origin),
         orientation: serialize_quaternion_dto(&frame.orientation),
     }
@@ -1417,13 +1422,13 @@ fn serialize_location_map(
             serde_json::json!({
                 "key": key,
                 "partId": location.part_id,
-                "frame": serialize_frame(&location.frame),
+                "localPlacement": serialize_frame(&location.frame),
             })
         })
         .collect()
 }
 
-fn serialize_placement_frames(setup_model: &SetupModel) -> Vec<serde_json::Value> {
+fn serialize_placement_sets(setup_model: &SetupModel) -> Vec<serde_json::Value> {
     let mut entries = setup_model.placement_frames.iter().collect::<Vec<_>>();
     entries.sort_by_key(|(key, _)| **key);
     entries
@@ -1431,7 +1436,7 @@ fn serialize_placement_frames(setup_model: &SetupModel) -> Vec<serde_json::Value
         .map(|(key, placement)| {
             serde_json::json!({
                 "key": key,
-                "frames": placement
+                "localPlacements": placement
                     .anim_frame
                     .frames
                     .iter()
@@ -2098,7 +2103,7 @@ mod tests {
                 .as_u64()
                 .is_some()
         );
-        assert!(asset.payload["placementFrames"].as_array().is_some());
+        assert!(asset.payload["placementSets"].as_array().is_some());
     }
 
     #[test]

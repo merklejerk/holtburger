@@ -3,7 +3,7 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	AssetProvenanceSource,
-	FrameDto,
+	PlacementTransformDto,
 	SphereDto,
 	Vec3Dto,
 } from "../host/contracts";
@@ -64,7 +64,7 @@ export interface PreparedOutdoorStaticSceneInstance {
 	sourceDid: number;
 	sourceAssetId: string;
 	sourceIndex: number;
-	frame: FrameDto;
+	localPlacement: PlacementTransformDto;
 }
 
 export interface PreparedOutdoorStaticSceneBuilding extends PreparedOutdoorStaticSceneInstance {
@@ -114,13 +114,14 @@ export interface PreparedOutdoorStaticScenePayload extends PreparedAssetPayloadB
 	diagnostics: PreparedOutdoorStaticSceneDiagnostics;
 }
 
-interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
+export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	kind: "indoor-env-cell";
 	sourceAssetKind: "env-cell";
 	debugPresentation: PreparedDebugPresentation;
 	envCellId: number;
 	environmentId: number | null;
 	cellStructureId: number | null;
+	localPlacement: PlacementTransformDto;
 	visibleCellIds: number[];
 	seenOutside: boolean | null;
 	surfaceIds: number[];
@@ -128,7 +129,7 @@ interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	staticObjectCount: number;
 }
 
-interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
+export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
 	kind: "environment";
 	sourceAssetKind: "environment";
 	debugPresentation: PreparedDebugPresentation;
@@ -251,18 +252,18 @@ export interface PreparedSetupModelPart {
 interface PreparedSetupModelLocation {
 	key: number;
 	partId: number;
-	frame: FrameDto;
+	localPlacement: PlacementTransformDto;
 }
 
-interface PreparedSetupModelPlacementFrame {
+interface PreparedSetupModelPlacementSet {
 	key: number;
-	frames: FrameDto[];
+	localPlacements: PlacementTransformDto[];
 	hookCount: number;
 }
 
 interface PreparedSetupModelLight {
 	key: number;
-	viewerSpaceLocation: FrameDto;
+	viewerSpaceLocation: PlacementTransformDto;
 	color: number;
 	intensity: number;
 	falloff: number;
@@ -277,7 +278,7 @@ export interface PreparedSetupModelPayload extends PreparedAssetPayloadBase {
 	parts: PreparedSetupModelPart[];
 	holdingLocations: PreparedSetupModelLocation[];
 	connectionPoints: PreparedSetupModelLocation[];
-	placementFrames: PreparedSetupModelPlacementFrame[];
+	placementSets: PreparedSetupModelPlacementSet[];
 	collisionWitness: {
 		cylSphereCount: number;
 		sphereCount: number;

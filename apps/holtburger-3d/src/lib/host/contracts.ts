@@ -65,11 +65,11 @@ const quaternionDtoSchema = z.object({
 	z: z.number().finite(),
 });
 
-const frameDtoSchema = z.object({
+const placementTransformDtoSchema = z.object({
 	origin: vec3DtoSchema,
 	orientation: quaternionDtoSchema,
 });
-export type FrameDto = z.infer<typeof frameDtoSchema>;
+export type PlacementTransformDto = z.infer<typeof placementTransformDtoSchema>;
 
 const sphereDtoSchema = z.object({
 	center: vec3DtoSchema,
@@ -116,7 +116,7 @@ const outdoorStaticSceneInstanceDtoSchema = z.object({
 	sourceDid: z.number().int().nonnegative(),
 	sourceAssetId: z.string().min(1),
 	sourceIndex: z.number().int().nonnegative(),
-	frame: frameDtoSchema,
+	localPlacement: placementTransformDtoSchema,
 });
 
 const outdoorStaticSceneBuildingDtoSchema =
@@ -235,6 +235,7 @@ export const indoorEnvCellPayloadDtoSchema = z.object({
 	envCellId: z.number().int().nonnegative(),
 	environmentId: z.number().int().nonnegative().nullable(),
 	cellStructureId: z.number().int().nonnegative().nullable(),
+	localPlacement: placementTransformDtoSchema,
 	visibleCellIds: z.array(z.number().int().nonnegative()),
 	seenOutside: z.boolean().nullable(),
 	surfaceIds: z.array(z.number().int().nonnegative()),
@@ -375,12 +376,12 @@ const setupModelPartDtoSchema = z.object({
 const setupModelLocationDtoSchema = z.object({
 	key: z.number().int(),
 	partId: z.number().int(),
-	frame: frameDtoSchema,
+	localPlacement: placementTransformDtoSchema,
 });
 
-const setupModelPlacementFrameDtoSchema = z.object({
+const setupModelPlacementSetDtoSchema = z.object({
 	key: z.number().int(),
-	frames: z.array(frameDtoSchema),
+	localPlacements: z.array(placementTransformDtoSchema),
 	hookCount: z.number().int().nonnegative(),
 });
 
@@ -391,7 +392,7 @@ const setupModelCollisionWitnessDtoSchema = z.object({
 
 const setupModelLightDtoSchema = z.object({
 	key: z.number().int(),
-	viewerSpaceLocation: frameDtoSchema,
+	viewerSpaceLocation: placementTransformDtoSchema,
 	color: z.number().int().nonnegative(),
 	intensity: z.number().finite(),
 	falloff: z.number().finite(),
@@ -407,7 +408,7 @@ export const setupModelPayloadDtoSchema = z.object({
 	parts: z.array(setupModelPartDtoSchema),
 	holdingLocations: z.array(setupModelLocationDtoSchema),
 	connectionPoints: z.array(setupModelLocationDtoSchema),
-	placementFrames: z.array(setupModelPlacementFrameDtoSchema),
+	placementSets: z.array(setupModelPlacementSetDtoSchema),
 	collisionWitness: setupModelCollisionWitnessDtoSchema,
 	height: z.number().finite().nullable(),
 	radius: z.number().finite().nullable(),

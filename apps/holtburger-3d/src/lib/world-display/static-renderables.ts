@@ -10,7 +10,11 @@ import type {
 	PreparedSetupModelPayload,
 } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
-import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
+import type {
+	PlacementTransformDto,
+	RuntimeBatchDto,
+	Vec3Dto,
+} from "../host/contracts";
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatHex32,
@@ -31,7 +35,7 @@ interface StaticRenderableSourceInstance {
 	sourceDid: number;
 	sourceAssetId: string;
 	sourceIndex: number;
-	frame: FrameDto;
+	localPlacement: PlacementTransformDto;
 	landblockWorldOffset: Vec3Dto;
 	sourceScale: Vec3Dto;
 	numLeaves: number | null;
@@ -47,8 +51,8 @@ export interface StaticRenderablePart {
 	partIndex: number;
 	gfxObjId: number;
 	gfxObjAssetId: string;
-	instanceFrame: FrameDto;
-	placementFrames: FrameDto[];
+	instancePlacement: PlacementTransformDto;
+	partPlacements: PlacementTransformDto[];
 	landblockWorldOffset: Vec3Dto;
 	scale: Vec3Dto;
 	debugColorKey: string;
@@ -64,7 +68,7 @@ export interface StaticRenderableSceneModel {
 	missingGfxAssetIds: string[];
 }
 
-const IDENTITY_FRAME: FrameDto = {
+const IDENTITY_PLACEMENT: PlacementTransformDto = {
 	origin: { x: 0, y: 0, z: 0 },
 	orientation: { w: 1, x: 0, y: 0, z: 0 },
 };
@@ -229,7 +233,7 @@ function normalizeSourceInstance(
 		sourceDid: instance.sourceDid,
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
-		frame: instance.frame,
+		localPlacement: instance.localPlacement,
 		landblockWorldOffset: deriveLandblockWorldOffset(
 			owningLandblockId,
 			focusLandblockId,
@@ -253,7 +257,7 @@ function normalizeGeneratedScenerySourceInstance(
 		sourceDid: instance.sourceDid,
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
-		frame: instance.frame,
+		localPlacement: instance.localPlacement,
 		landblockWorldOffset: deriveLandblockWorldOffset(
 			owningLandblockId,
 			focusLandblockId,
@@ -290,7 +294,7 @@ function normalizeStaticRenderableParts(
 				partIndex: 0,
 				gfxObjId: sourceAsset.payload.gfxObjId,
 				gfxObjAssetId: sourceAsset.request.assetId,
-				placementFrames: [],
+				partPlacements: [],
 				scale: UNIT_SCALE,
 			}),
 		];
@@ -305,10 +309,7 @@ function normalizeStaticRenderableParts(
 			partIndex: part.partIndex,
 			gfxObjId: part.gfxObjId,
 			gfxObjAssetId: part.gfxObjAssetId,
-			placementFrames: deriveSetupPartPlacementFrames(
-				part,
-				sourceAsset.payload,
-			),
+			partPlacements: deriveSetupPartLocalPlacements(part, sourceAsset.payload),
 			scale: part.scale ?? UNIT_SCALE,
 		}),
 	);
@@ -320,7 +321,7 @@ function createStaticRenderablePart(
 		partIndex: number;
 		gfxObjId: number;
 		gfxObjAssetId: string;
-		placementFrames: FrameDto[];
+		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
 	},
 ): StaticRenderablePart {
@@ -335,8 +336,8 @@ function createStaticRenderablePart(
 		partIndex: part.partIndex,
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
-		instanceFrame: instance.frame,
-		placementFrames: part.placementFrames,
+		instancePlacement: instance.localPlacement,
+		partPlacements: part.partPlacements,
 		landblockWorldOffset: instance.landblockWorldOffset,
 		scale: multiplyScale(instance.sourceScale, part.scale),
 		debugColorKey,
@@ -365,32 +366,32 @@ function deriveLandblockWorldOffset(
 	};
 }
 
-function deriveSetupPartPlacementFrames(
+function deriveSetupPartLocalPlacements(
 	part: PreparedSetupModelPart,
 	setupModel: PreparedSetupModelPayload,
-): FrameDto[] {
-	const defaultPlacement = selectDefaultPlacementFrames(setupModel);
+): PlacementTransformDto[] {
+	const defaultPlacement = selectDefaultPlacementSet(setupModel);
 	if (!defaultPlacement || defaultPlacement.length === 0) {
 		return [];
 	}
 
-	const framesByPartIndex = new Map(
+	const placementsByPartIndex = new Map(
 		setupModel.parts.map((entry) => [
 			entry.partIndex,
-			defaultPlacement[entry.partIndex] ?? IDENTITY_FRAME,
+			defaultPlacement[entry.partIndex] ?? IDENTITY_PLACEMENT,
 		]),
 	);
 	const partsByIndex = new Map(
 		setupModel.parts.map((entry) => [entry.partIndex, entry]),
 	);
-	const chain: FrameDto[] = [];
+	const chain: PlacementTransformDto[] = [];
 	const visitedPartIndexes = new Set<number>();
 	let currentPart: PreparedSetupModelPart | undefined = part;
 
 	while (currentPart && !visitedPartIndexes.has(currentPart.partIndex)) {
 		visitedPartIndexes.add(currentPart.partIndex);
 		chain.unshift(
-			framesByPartIndex.get(currentPart.partIndex) ?? IDENTITY_FRAME,
+			placementsByPartIndex.get(currentPart.partIndex) ?? IDENTITY_PLACEMENT,
 		);
 		currentPart =
 			currentPart.parentIndex === null
@@ -401,17 +402,16 @@ function deriveSetupPartPlacementFrames(
 	return chain;
 }
 
-function selectDefaultPlacementFrames(
+function selectDefaultPlacementSet(
 	setupModel: PreparedSetupModelPayload,
-): FrameDto[] | null {
-	const keyZeroPlacement = setupModel.placementFrames.find(
+): PlacementTransformDto[] | null {
+	const keyZeroPlacement = setupModel.placementSets.find(
 		(placement) => placement.key === 0,
 	);
 	return (
-		keyZeroPlacement?.frames ??
-		setupModel.placementFrames.toSorted(
-			(left, right) => left.key - right.key,
-		)[0]?.frames ??
+		keyZeroPlacement?.localPlacements ??
+		setupModel.placementSets.toSorted((left, right) => left.key - right.key)[0]
+			?.localPlacements ??
 		null
 	);
 }

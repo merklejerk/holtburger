@@ -4,11 +4,15 @@ import {
 	createInitialAssetChannelState,
 	type PreparedAssetRecord,
 } from "../assets/types";
-import type { FrameDto, RuntimeBatchDto, Vec3Dto } from "../host/contracts";
+import type {
+	PlacementTransformDto,
+	RuntimeBatchDto,
+	Vec3Dto,
+} from "../host/contracts";
 import { formatOutdoorStaticSceneAssetId } from "../landblocks";
 import { deriveStaticRenderableSceneModel } from "./static-renderables";
 
-const IDENTITY_FRAME: FrameDto = {
+const IDENTITY_PLACEMENT: PlacementTransformDto = {
 	origin: { x: 0, y: 0, z: 0 },
 	orientation: { w: 1, x: 0, y: 0, z: 0 },
 };
@@ -43,12 +47,12 @@ describe("static renderable scene model", () => {
 			"gfx-obj/01000001",
 			"gfx-obj/01000002",
 		]);
-		expect(model.parts[0]?.placementFrames).toEqual([
-			createFrame({ x: 1, y: 0, z: 0 }),
+		expect(model.parts[0]?.partPlacements).toEqual([
+			createPlacement({ x: 1, y: 0, z: 0 }),
 		]);
-		expect(model.parts[1]?.placementFrames).toEqual([
-			createFrame({ x: 1, y: 0, z: 0 }),
-			createFrame({ x: 0, y: 2, z: 0 }),
+		expect(model.parts[1]?.partPlacements).toEqual([
+			createPlacement({ x: 1, y: 0, z: 0 }),
+			createPlacement({ x: 0, y: 2, z: 0 }),
 		]);
 		expect(model.parts[1]?.scale).toEqual({ x: 2, y: 1, z: 1 });
 		expect(model.missingSourceAssetIds).toEqual([]);
@@ -79,7 +83,7 @@ describe("static renderable scene model", () => {
 			partIndex: 0,
 			gfxObjAssetId: "gfx-obj/01000001",
 			scale: UNIT_SCALE,
-			placementFrames: [],
+			partPlacements: [],
 		});
 	});
 
@@ -218,7 +222,7 @@ function createPreparedOutdoorStaticSceneAsset(
 			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
 			sourceAssetId,
 			sourceIndex: index,
-			frame: createFrame({ x: 24 + index, y: 48, z: 6 }),
+			localPlacement: createPlacement({ x: 24 + index, y: 48, z: 6 }),
 		})),
 		buildingInstances: buildingSourceAssetIds.map((sourceAssetId, index) => ({
 			instanceId: `${assetId}/building/${index}`,
@@ -226,7 +230,7 @@ function createPreparedOutdoorStaticSceneAsset(
 			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
 			sourceAssetId,
 			sourceIndex: index,
-			frame: createFrame({ x: 25 + index, y: 48, z: 6 }),
+			localPlacement: createPlacement({ x: 25 + index, y: 48, z: 6 }),
 			numLeaves: 1,
 		})),
 		generatedSceneryInstances: [],
@@ -292,12 +296,12 @@ function createPreparedSetupModelAsset(): PreparedAssetRecord {
 		],
 		holdingLocations: [],
 		connectionPoints: [],
-		placementFrames: [
+		placementSets: [
 			{
 				key: 0,
-				frames: [
-					createFrame({ x: 1, y: 0, z: 0 }),
-					createFrame({ x: 0, y: 2, z: 0 }),
+				localPlacements: [
+					createPlacement({ x: 1, y: 0, z: 0 }),
+					createPlacement({ x: 0, y: 2, z: 0 }),
 				],
 				hookCount: 0,
 			},
@@ -395,9 +399,9 @@ function createPreparedAsset(
 	};
 }
 
-function createFrame(origin: Vec3Dto): FrameDto {
+function createPlacement(origin: Vec3Dto): PlacementTransformDto {
 	return {
 		origin,
-		orientation: IDENTITY_FRAME.orientation,
+		orientation: IDENTITY_PLACEMENT.orientation,
 	};
 }

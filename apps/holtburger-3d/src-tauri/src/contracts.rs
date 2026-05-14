@@ -19,7 +19,7 @@ pub struct QuaternionDto {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FrameDto {
+pub struct PlacementTransformDto {
     pub origin: Vec3Dto,
     pub orientation: QuaternionDto,
 }

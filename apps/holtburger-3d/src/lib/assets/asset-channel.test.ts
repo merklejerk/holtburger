@@ -709,6 +709,10 @@ describe("asset channel controller", () => {
 					envCellId: 0x016c0155,
 					environmentId: 0x0d000001,
 					cellStructureId: 1,
+					localPlacement: {
+						origin: { x: 10, y: 20, z: 30 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
 					visibleCellIds: [0x016c0156],
 					seenOutside: false,
 					surfaceIds: [0x08000001],
@@ -813,6 +817,11 @@ describe("asset channel controller", () => {
 		if (indoorEnvCell.payload.kind !== "indoor-env-cell") {
 			throw new Error("expected indoor-env-cell payload");
 		}
+		expect(indoorEnvCell.payload.localPlacement.origin).toEqual({
+			x: 10,
+			y: 20,
+			z: 30,
+		});
 		expect(indoorEnvCell.payload.debugPresentation.primitive).toBe(
 			"indoor-env-cell-metadata",
 		);
@@ -1192,10 +1201,10 @@ function createSetupModelPayload(
 		})),
 		holdingLocations: [],
 		connectionPoints: [],
-		placementFrames: [
+		placementSets: [
 			{
 				key: 0,
-				frames: parts.map(() => ({
+				localPlacements: parts.map(() => ({
 					origin: { x: 0, y: 0, z: 0 },
 					orientation: { w: 1, x: 0, y: 0, z: 0 },
 				})),
@@ -1359,7 +1368,7 @@ function createPreparedOutdoorStaticSceneAsset(
 					sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
 					sourceAssetId,
 					sourceIndex: index,
-					frame: {
+					localPlacement: {
 						origin: { x: index, y: 0, z: 0 },
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
 					},
@@ -1375,7 +1384,7 @@ function createPreparedOutdoorStaticSceneAsset(
 						terrainIndex: index,
 						sceneId: 0x12000001,
 						sceneTemplateIndex: index,
-						frame: {
+						localPlacement: {
 							origin: { x: index, y: 0, z: 0 },
 							orientation: { w: 1, x: 0, y: 0, z: 0 },
 						},

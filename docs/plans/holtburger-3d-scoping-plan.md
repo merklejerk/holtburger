@@ -2995,43 +2995,111 @@ Decisions:
 Course corrections and next-step assessment:
 
 - Manual smoke after the first Phase 13.5a pass showed room props rendering in a separate cluster from the room shell. The correction is to mirror ACViewer: room shells use `EnvCell.Pos`, while indoor static objects use their own authored frame in the containing cell. Re-smoke `0xda55012e`; if props still separate from the shell, inspect whether setup-model part frames or coordinate-basis conversion are wrong before starting portal visibility work.
-- Portal visibility should remain after room population. Material/surface work is still useful, but populated debug-colored interiors are a better baseline for judging portal and overlap artifacts.
+- Outdoor-to-linked-interior composition should come before portal diagnostics. `LandblockInfo.Buildings[*].Portals[*].StabList` appears to carry the env-cell ids used by building interiors, so browser outdoor mode can likely load and render linked indoor cells without solving portal visibility first.
+- Portal diagnostics should remain after linked interiors are visible from outdoor context. Free-camera browser mode is an inspection tool rather than a resident client camera, so portal work should validate spatial understanding through overlays, highlights, and links rather than default portal masking/culling.
 
-##### Phase 13.6 — Portal Visibility Renderer Scoping
+##### Phase 13.6 — Outdoor-Linked Interior Scene Composition
 
 Status: planned.
 
-Scope: turn the portal witnesses carried through Phase 13 into a concrete renderer capability plan after indoor room population is visible. This phase should target retail visual semantics around openings and structured-interior visibility without cloning the retail client's implementation or treating ACViewer as authoritative runtime behavior.
+Scope: let browser outdoor mode render indoor env cells linked from loaded outdoor landblocks/buildings, using static `LandblockInfo.Buildings[*].Portals[*].StabList` facts rather than portal visibility traversal. This phase should make building interiors inspectable from outdoor landblock context while continuing to render all linked cells openly in free-camera mode.
+
+Implementation posture:
+
+- start with a temporary real-asset probe against a known portal-bearing landblock to confirm `StabList` values normalize to expected full env-cell ids; remove the probe before final validation
+- commit only synthetic/unit-style tests for normalization, payload shape, asset-request derivation, and scene-model behavior
+- do not add permanent tests that depend on specific real DAT/HBA asset contents such as `0xda55ffff` containing a particular building portal
 
 Primary deliverables:
 
-- audit the Phase 13.5 smoke result for visual cases where env cells bleed through walls, openings, cave mouths, or building portals
-- define the portal visibility renderer contract above `WorldDisplay`: inputs, scene ownership, portal topology, visible-cell membership, and prepared cell geometry
-- choose a modern implementation strategy or staged strategy, such as stencil buffers, scissor regions plus clip planes, depth prepasses, recursive screen-space portal regions, or a hybrid
-- document how `VisibleCells`, `CellPortal`, `CBldPortal`, portal polygon ids, and prepared `CellStruct` geometry participate without replacing authoritative visible-cell data with frontend-local topology guesses
-- separate culling decisions from drawing masks: portal graph or visible-cell relevance decides what may be drawn, while portal regions constrain where adjacent cells may draw
-- identify whether any additional Rust-side decoded witnesses are needed before implementation, especially drawing-BSP portal polys, portal sides, or opening/static-structure placement data
+- add a small normalization helper for converting landblock-local building portal stab ids into full `0xLLYYssss` env-cell ids, with synthetic coverage
+- preserve building portal facts in the Rust static outdoor scene path, including portal flags, `otherCellId`, `otherPortalId`, and `stabList`
+- expose building portal links through the `outdoor-static-scene` payload with stable building/portal ids and normalized linked env-cell ids
+- derive browser outdoor linked-interior requests from active outdoor static scenes, requesting `indoor-env-cell/*` and dependent `environment/*` payloads for linked cells
+- extend structured-interior scene assembly so outdoor browser context can include linked env cells in addition to explicit indoor focus scenes
+- add diagnostics/HUD text for linked-interior counts, missing env-cell payloads, and building-to-env-cell relationships
+- keep linked interior rendering opt-in or clearly diagnostic if the coverage radius would load too many interiors
+- keep linked interiors reference-driven: landblock payloads expose env-cell links, while `indoor-env-cell/*`, `environment/*`, and visual object assets remain individually requestable
 
 Acceptance:
 
-- the plan has an explicit portal-rendering/culling follow-up with visual parity goals, not just a vague deferral
-- retail, ACE, and ACViewer are documented as semantic/reference sources rather than implementation blueprints
-- the proposed implementation keeps `WorldDisplay` as a shared render surface and keeps browser/client scene policy above it
-- the first implementation slice is small enough to land without blocking material work, indoor static stabs, or later spatial-body work
+- selecting an outdoor landblock with building portal links can show the associated indoor env-cell shells and authored static props in the same Three.js scene as outdoor terrain/statics
+- linked env-cell ids are derived from decoded landblock building portal facts, not guessed from coordinate proximity or frontend portal topology
+- committed tests use synthetic fixtures and do not rely on mutable real asset corpus contents
+- missing/unsupported building portal links are surfaced as diagnostics rather than silently ignored
+- no portal masking, culling, recursive portal traversal, or resident camera semantics are introduced
+- cave mouths, world-object portal weenies, and terrain cutouts remain explicitly out of scope unless they are backed by the same landblock building portal facts
 
 Guardrails:
 
-- do not copy retail's CPU-side portal-view machinery unless it is the cleanest way to achieve the desired visual result; prefer modern GPU/browser-renderer techniques when they produce equivalent visuals with cleaner ownership
-- do not derive all structured-interior membership from portal adjacency alone while `EnvCell.visible_cells` remains the strongest relevance source
-- do not require exact retail renderer internals for parity sign-off; require plausible visual parity around openings, walls, and adjacent structured spaces
+- do not treat `CBldPortal.StabList` as a full portal visibility solution; it is a static link/source list for composition and diagnostics
+- do not bulk-embed linked indoor cell render payloads into `outdoor-static-scene`; expose refs and let orchestration request cells/assets explicitly
+- do not make `WorldDisplay` infer or fetch linked interiors; browser mode may over-request for inspection, while future client mode can request resident, visible, nearby, or prefetched cells by its own policy
+- do not derive all indoor cells for a landblock by brute-force id scanning; use decoded building portal links first
+- do not leave temporary real-asset probes, debug logs, or exploratory fixture assertions in the final patch
+- do not hide or mask linked interiors in free-camera browser mode
+- do not move browser coverage policy into `WorldDisplay`; keep linked-interior selection above the shared renderer
+
+##### Phase 13.7 — Portal Diagnostics and Topology Visualization
+
+Status: planned; depends on Phase 13.6.
+
+Scope: expose portal witnesses carried through Phase 13 as browser diagnostics that validate spatial understanding without pretending the detached browser free camera has client residency. This phase should help inspect openings, cell topology, and target-cell relationships while continuing to render all active structured-interior cells by default. It should not implement portal masking, portal culling, recursive portal traversal, or outdoor-to-indoor portal composition.
+
+Primary deliverables:
+
+- audit current decoded portal witnesses from `EnvCell`, `CellPortal`, `CBldPortal`, `VisibleCells`, portal polygon ids, and prepared `CellStruct` geometry, using ACE/ACViewer/retail only as semantic references
+- expose enough portal witness data through `indoor-env-cell/*` and/or `environment/*` payloads to let the frontend draw portal diagnostics without ad hoc topology guesses
+- add browser diagnostic toggles for portal overlays, per-cell color distinction, and portal/target-cell highlighting
+- render portal polygons/frames in world space so we can visually confirm they line up with openings and adjacent cell geometry
+- show portal target metadata where known, such as target env-cell id, target membership in `visibleCellIds`, and unsupported/missing witness diagnostics
+- keep `WorldDisplay` as the shared renderer surface; browser-mode toggle/state ownership remains above it
+- document what this diagnostic phase proves and what it deliberately does not prove about client-mode portal visibility
+
+Acceptance:
+
+- browser free-camera mode still renders all active structured-interior cells by default
+- a user can distinguish cells, see portal locations, and inspect portal target relationships in a loaded indoor scene
+- missing or unsupported portal witness data is surfaced as diagnostics rather than silently ignored
+- no portal masking/culling is introduced, and no browser camera residency is implied
+- the phase records payload/model gaps that would block later resident-camera portal visibility work
+
+Guardrails:
+
+- do not hide cells, mask cells, or cull cells in the default browser free-camera scene
+- do not derive structured-interior membership from portal adjacency while `EnvCell.visible_cells` remains the strongest relevance source
+- do not treat portal diagnostics as client-mode portal rendering; they are spatial/debug witnesses only
+- do not require exact retail renderer internals for diagnostic sign-off; require enough semantic clarity to validate openings, target ids, and cell transforms
+
+##### Phase 13.8 — Resident Indoor Preview and Portal Visibility
+
+Status: planned; depends on Phase 13.7.
+
+Scope: introduce a cell-constrained preview mode with a resident camera basis so portal visibility, masking, and culling have coherent semantics. This phase should bridge browser diagnostics toward future client-mode behavior without duplicating a full runtime spatial system.
+
+Primary deliverables:
+
+- define how browser/manual navigation chooses or simulates a resident env cell and how that relates to future client runtime residency
+- assess whether manual navigation should reuse a Rust-owned spatial component so browser and client modes do not grow duplicate containment/visibility logic
+- add a first-person or cell-constrained indoor preview mode that can identify the camera-containing env cell
+- scope portal visibility behavior from resident camera state: membership still comes from `EnvCell.visible_cells`, while portal regions constrain where adjacent cells may draw
+- decide whether the first resident preview should include collision, portal traversal, or only camera containment and visibility diagnostics
+
+Acceptance:
+
+- the mode has an explicit resident env-cell basis and does not reuse detached free-camera assumptions
+- any runtime/spatial logic is placed where browser and future client modes can share it
+- portal masking/culling remains optional until the resident-camera basis is proven
+- remaining gaps are classified as resident-camera containment, spatial-runtime reuse, mixed outdoor/indoor composition, material/surface work, or portal-region precision
 
 Phase 13 design guardrails:
 
-- do not enforce portal-driven visibility culling in Phases 13.1 through 13.5; expose portals on the boundary as data, then scope the portal visibility renderer in Phase 13.6
+- do not enforce portal-driven visibility culling in Phases 13.1 through 13.6; expose linked interiors and portal witnesses as data/diagnostics before scoping resident-camera portal visibility
 - do not derive structured-interior visible-cell relevance from frontend-local topology guesses; continue to rely on authoritative `EnvCell.visible_cells`
 - do not let environment-scoped `CellStruct` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should expose drawing geometry for rendering, drawing BSP or portal witnesses where useful, surface refs, and compact physics witnesses while keeping full physics structures Rust-owned
 - do not introduce shared-crate types for frontend consumers of environment-scoped cell-structure records; this stays an asset-channel + frontend-scene concern
 - do not put browser-mode camera/input/coverage policy back into `WorldDisplay`; add browser/client orchestration above it or pure helper functions beside it
+- do not enshrine browser-mode greedy inspection loading into renderer contracts; keep env cells, environments, and visual objects individually requestable so client mode can choose portal-visible, resident, nearby, or speculative prefetch policy later
 - do not reintroduce runtime-pushed DAT-derived renderer facts for indoor statics unless a live-session source proves those facts are dynamic gameplay state rather than static content
 - do not treat portal polygons as evidence of terrain holes. Outdoor terrain topology remains `CellLandblock`-derived unless a future retail-source pass proves a dedicated terrain cutout path.
 
@@ -3619,13 +3687,13 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke still needed to confirm room population in `0xda55012e`. The next step is to rerun that smoke before Phase 13.6 portal visibility scoping.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke confirming room population after the indoor static transform correction. The next step is Phase 13.6 outdoor-linked interior scene composition; portal diagnostics follow after linked interiors are visible from outdoor context, and portal masking/culling is deferred until a resident-camera basis exists.
 
 Current near-term sequence:
 
-1. rerun the `0xda55012e` live interior smoke and confirm room population appears before portal work
-2. if `0xda55012e` still appears empty, prove whether those retail props come from another source before adding portal rendering
-3. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
-4. keep through-wall or overlap issues classified as portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, or indoor static object transform is demonstrably wrong
+1. run Phase 13.6 outdoor-linked interior scene composition, using building portal `stabList` facts to request/render linked env cells from outdoor landblock context
+2. run Phase 13.7 portal diagnostics and topology visualization once linked interiors are visible alongside outdoor terrain/statics
+3. defer portal masking/culling to Phase 13.8 resident indoor preview or later client-mode work, where camera cell residency is coherent
+4. keep through-wall or overlap issues classified as future resident-camera portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, linked-interior ids, or indoor static object transform is demonstrably wrong
 5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-6. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+6. preserve requestable content/asset paths for static content facts unless a later live-session source proves the fact is dynamic runtime state

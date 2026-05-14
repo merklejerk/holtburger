@@ -1,9 +1,14 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
-import { isIndoorBrowserDestination } from "../../app/browser-mode";
+import {
+	browserDestinationToIndoorEnvCellId,
+	isIndoorBrowserDestination,
+} from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
+	PreparedIndoorEnvCellPayload,
+	PreparedIndoorStaticObject,
 	PreparedOutdoorStaticSceneBuilding,
 	PreparedOutdoorStaticSceneGeneratedSceneryInstance,
 	PreparedOutdoorStaticSceneInstance,
@@ -25,6 +30,7 @@ import {
 } from "../landblocks";
 
 type StaticRenderableInstanceKind =
+	| "indoor-static"
 	| "scenery"
 	| "building"
 	| "generated-scenery";
@@ -33,9 +39,11 @@ interface StaticRenderableSourceInstance {
 	kind: StaticRenderableInstanceKind;
 	instanceId: string;
 	owningLandblockId: number;
+	owningEnvCellId: number | null;
 	sourceDid: number;
 	sourceAssetId: string;
 	sourceIndex: number;
+	parentPlacements: PlacementTransformDto[];
 	localPlacement: PlacementTransformDto;
 	landblockWorldOffset: Vec3Dto;
 	sourceScale: Vec3Dto;
@@ -48,10 +56,12 @@ export interface StaticRenderablePart {
 	sourceAssetId: string;
 	sourceDid: number;
 	owningLandblockId: number;
+	owningEnvCellId: number | null;
 	kind: StaticRenderableInstanceKind;
 	partIndex: number;
 	gfxObjId: number;
 	gfxObjAssetId: string;
+	parentPlacements: PlacementTransformDto[];
 	instancePlacement: PlacementTransformDto;
 	partPlacements: PlacementTransformDto[];
 	landblockWorldOffset: Vec3Dto;
@@ -82,12 +92,19 @@ export function deriveStaticRenderableSceneModel(
 	browserDestination: BrowserLocationSelection | null = null,
 	landblockCoverageRadius = 1,
 ): StaticRenderableSceneModel {
+	if (!runtimeBatch) {
+		return emptyStaticRenderableSceneModel();
+	}
+
 	if (
-		!runtimeBatch ||
 		runtimeBatch.residency.indoors ||
 		isIndoorBrowserDestination(browserDestination)
 	) {
-		return emptyStaticRenderableSceneModel();
+		return deriveIndoorStaticRenderableSceneModel(
+			runtimeBatch,
+			assetState,
+			browserDestination,
+		);
 	}
 
 	const focusLandblockId = deriveTerrainFocusLandblockId(
@@ -140,6 +157,62 @@ export function deriveStaticRenderableSceneModel(
 	return {
 		focusLandblockId,
 		activeLandblockIds,
+		sourceInstances,
+		parts,
+		partsByGfxAssetId: groupStaticRenderablePartsByGfxAssetId(parts),
+		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
+		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
+	};
+}
+
+function deriveIndoorStaticRenderableSceneModel(
+	runtimeBatch: RuntimeBatchDto,
+	assetState: AssetChannelState,
+	browserDestination: BrowserLocationSelection | null,
+): StaticRenderableSceneModel {
+	const activeEnvCellIds = deriveActiveIndoorEnvCellIds(
+		runtimeBatch,
+		assetState,
+		browserDestination,
+	);
+	const sourceInstances = collectIndoorStaticRenderableSourceInstances(
+		assetState,
+		activeEnvCellIds,
+	).sort(compareSourceInstances);
+	const missingSourceAssetIds = new Set<string>();
+	const missingGfxAssetIds = new Set<string>();
+	const parts: StaticRenderablePart[] = [];
+
+	for (const instance of sourceInstances) {
+		const sourceAsset = assetState.preparedByAssetId[instance.sourceAssetId];
+		if (!sourceAsset) {
+			missingSourceAssetIds.add(instance.sourceAssetId);
+			continue;
+		}
+
+		const normalizedParts = normalizeStaticRenderableParts(
+			instance,
+			sourceAsset,
+		);
+		if (normalizedParts === null) {
+			missingSourceAssetIds.add(instance.sourceAssetId);
+			continue;
+		}
+
+		for (const part of normalizedParts) {
+			if (
+				!isPreparedGfxObjAsset(assetState.preparedByAssetId[part.gfxObjAssetId])
+			) {
+				missingGfxAssetIds.add(part.gfxObjAssetId);
+				continue;
+			}
+			parts.push(part);
+		}
+	}
+
+	return {
+		focusLandblockId: null,
+		activeLandblockIds: [],
 		sourceInstances,
 		parts,
 		partsByGfxAssetId: groupStaticRenderablePartsByGfxAssetId(parts),
@@ -235,9 +308,11 @@ function normalizeSourceInstance(
 		kind,
 		instanceId: instance.instanceId,
 		owningLandblockId,
+		owningEnvCellId: null,
 		sourceDid: instance.sourceDid,
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
+		parentPlacements: [],
 		localPlacement: instance.localPlacement,
 		landblockWorldOffset: deriveLandblockWorldOffset(
 			owningLandblockId,
@@ -259,9 +334,11 @@ function normalizeGeneratedScenerySourceInstance(
 		kind: "generated-scenery",
 		instanceId: instance.instanceId,
 		owningLandblockId,
+		owningEnvCellId: null,
 		sourceDid: instance.sourceDid,
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
+		parentPlacements: [],
 		localPlacement: instance.localPlacement,
 		landblockWorldOffset: deriveLandblockWorldOffset(
 			owningLandblockId,
@@ -337,10 +414,12 @@ function createStaticRenderablePart(
 		sourceAssetId: instance.sourceAssetId,
 		sourceDid: instance.sourceDid,
 		owningLandblockId: instance.owningLandblockId,
+		owningEnvCellId: instance.owningEnvCellId,
 		kind: instance.kind,
 		partIndex: part.partIndex,
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
+		parentPlacements: instance.parentPlacements,
 		instancePlacement: instance.localPlacement,
 		partPlacements: part.partPlacements,
 		landblockWorldOffset: instance.landblockWorldOffset,
@@ -355,6 +434,78 @@ function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
 		y: left.y * right.y,
 		z: left.z * right.z,
 	};
+}
+
+function deriveActiveIndoorEnvCellIds(
+	runtimeBatch: RuntimeBatchDto,
+	assetState: AssetChannelState,
+	browserDestination: BrowserLocationSelection | null,
+): Set<number> {
+	const browserFocusEnvCellId =
+		browserDestinationToIndoorEnvCellId(browserDestination);
+	if (browserFocusEnvCellId !== null) {
+		const focusEnvCell = getPreparedIndoorEnvCell(
+			assetState,
+			browserFocusEnvCellId,
+		);
+		return new Set([
+			browserFocusEnvCellId,
+			...(focusEnvCell?.visibleCellIds ?? []),
+		]);
+	}
+
+	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
+	if (focusEnvCellId === null) {
+		return new Set();
+	}
+
+	return new Set([focusEnvCellId, ...runtimeBatch.residency.visibleCellIds]);
+}
+
+function collectIndoorStaticRenderableSourceInstances(
+	assetState: AssetChannelState,
+	activeEnvCellIds: Set<number>,
+): StaticRenderableSourceInstance[] {
+	return [...activeEnvCellIds].flatMap((envCellId) => {
+		const envCell = getPreparedIndoorEnvCell(assetState, envCellId);
+		if (!envCell) {
+			return [];
+		}
+
+		return envCell.staticObjects.map((staticObject) =>
+			normalizeIndoorStaticSourceInstance(staticObject),
+		);
+	});
+}
+
+function normalizeIndoorStaticSourceInstance(
+	staticObject: PreparedIndoorStaticObject,
+): StaticRenderableSourceInstance {
+	return {
+		kind: "indoor-static",
+		instanceId: staticObject.instanceId,
+		owningLandblockId: normalizeOutdoorLandblockId(
+			staticObject.owningEnvCellId,
+		),
+		owningEnvCellId: staticObject.owningEnvCellId,
+		sourceDid: staticObject.sourceDid,
+		sourceAssetId: staticObject.sourceAssetId,
+		sourceIndex: staticObject.sourceIndex,
+		parentPlacements: [],
+		localPlacement: staticObject.localPlacement,
+		landblockWorldOffset: { x: 0, y: 0, z: 0 },
+		sourceScale: UNIT_SCALE,
+		numLeaves: null,
+	};
+}
+
+function getPreparedIndoorEnvCell(
+	assetState: AssetChannelState,
+	envCellId: number,
+): PreparedIndoorEnvCellPayload | null {
+	const asset =
+		assetState.preparedByAssetId[`indoor-env-cell/${formatHex32(envCellId)}`];
+	return asset?.payload.kind === "indoor-env-cell" ? asset.payload : null;
 }
 
 function deriveLandblockWorldOffset(

@@ -183,6 +183,48 @@ describe("static renderable scene model", () => {
 		expect(model.missingSourceAssetIds).toEqual(["setup-model/02000002"]);
 		expect(model.missingGfxAssetIds).toEqual(["gfx-obj/01000002"]);
 	});
+
+	it("normalizes indoor env-cell static objects without parent cell placement", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+				0x016c0155,
+				createPlacement({ x: 10, y: 20, z: 30 }),
+				["setup-model/02000001"],
+			),
+			"setup-model/02000001": createPreparedSetupModelAsset(),
+			"gfx-obj/01000001": createPreparedGfxObjAsset(
+				"gfx-obj/01000001",
+				0x01000001,
+			),
+			"gfx-obj/01000002": createPreparedGfxObjAsset(
+				"gfx-obj/01000002",
+				0x01000002,
+			),
+		};
+		const runtimeBatch = createRuntimeBatch();
+		runtimeBatch.residency.indoors = true;
+		runtimeBatch.residency.focusEnvCellId = 0x016c0155;
+
+		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
+
+		expect(
+			model.sourceInstances.map((instance) => instance.instanceId),
+		).toEqual(["indoor-env-cell/016c0155/static/0"]);
+		expect(model.parts).toHaveLength(2);
+		expect(model.parts[0]).toMatchObject({
+			kind: "indoor-static",
+			owningEnvCellId: 0x016c0155,
+			sourceAssetId: "setup-model/02000001",
+			landblockWorldOffset: { x: 0, y: 0, z: 0 },
+		});
+		expect(model.parts[0]?.parentPlacements).toEqual([]);
+		expect(model.parts[0]?.instancePlacement).toEqual(
+			createPlacement({ x: 2, y: 4, z: 6 }),
+		);
+		expect(model.missingSourceAssetIds).toEqual([]);
+		expect(model.missingGfxAssetIds).toEqual([]);
+	});
 });
 
 function createRuntimeBatch(): RuntimeBatchDto {
@@ -241,6 +283,46 @@ function createPreparedOutdoorStaticSceneAsset(
 			errorCode: null,
 			detail: "test",
 		},
+	});
+}
+
+function createPreparedIndoorEnvCellAsset(
+	envCellId: number,
+	localPlacement: PlacementTransformDto,
+	staticSourceAssetIds: string[],
+): PreparedAssetRecord {
+	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
+	return createPreparedAsset(assetId, {
+		kind: "indoor-env-cell",
+		sourceAssetKind: "env-cell",
+		residencyKind: "indoor-env-cell",
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "env-cell",
+			errorCode: null,
+			detail: "test",
+		},
+		debugPresentation: {
+			primitive: "indoor-env-cell-metadata",
+			paletteKey: assetId,
+		},
+		envCellId,
+		environmentId: 0x0d000001,
+		cellStructureId: 1,
+		localPlacement,
+		visibleCellIds: [],
+		seenOutside: false,
+		surfaceIds: [],
+		portalCount: 0,
+		staticObjectCount: staticSourceAssetIds.length,
+		staticObjects: staticSourceAssetIds.map((sourceAssetId, index) => ({
+			instanceId: `${assetId}/static/${index}`,
+			owningEnvCellId: envCellId,
+			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+			sourceAssetId,
+			sourceIndex: index,
+			localPlacement: createPlacement({ x: 2 + index, y: 4, z: 6 }),
+		})),
 	});
 }
 

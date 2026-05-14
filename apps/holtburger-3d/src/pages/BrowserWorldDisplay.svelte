@@ -42,6 +42,7 @@
 	} from "../lib/world-display/static-renderables";
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
 	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
+	import { normalizeOutdoorLandblockId } from "../lib/landblocks";
 
 	let {
 		activeMode,
@@ -83,10 +84,14 @@
 		mode: "orbit" | "pan";
 		moved: boolean;
 	} | null>(null);
+	let activeCameraSceneKey = $state<string | null>(null);
 	let suppressNextBrowserClick = false;
 	let cameraHintTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
+	const browserCameraSceneKey = $derived(
+		describeBrowserCameraSceneKey(browserDestination, runtimeBatch),
+	);
 
 	const terrainScene = $derived(
 		deriveTerrainSceneModel(
@@ -160,7 +165,10 @@
 		const generatedCount = staticRenderableScene.sourceInstances.filter(
 			(instance) => instance.kind === "generated-scenery",
 		).length;
-		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}.`;
+		const indoorCount = staticRenderableScene.sourceInstances.filter(
+			(instance) => instance.kind === "indoor-static",
+		).length;
+		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}, indoor ${indoorCount}.`;
 	});
 	const structuredInteriorEnvironmentCount = $derived(
 		new Set(structuredInteriorScene.cells.map((cell) => cell.environmentId))
@@ -197,6 +205,23 @@
 			pendingCameraHint,
 		}),
 	);
+
+	$effect(() => {
+		if (activeCameraSceneKey === null) {
+			activeCameraSceneKey = browserCameraSceneKey;
+			return;
+		}
+
+		if (activeCameraSceneKey === browserCameraSceneKey) {
+			return;
+		}
+
+		activeCameraSceneKey = browserCameraSceneKey;
+		browserCameraState = createDebugOrbitCameraState();
+		browserCameraFrame = null;
+		activePointerDrag = null;
+		suppressNextBrowserClick = false;
+	});
 
 	// Browser orbit controls are a debug/navigation policy, not the future client camera.
 	function handleRenderMetricsChange(metrics: WorldRenderMetrics): void {
@@ -236,6 +261,35 @@
 			browserCameraFrame = cameraFrame;
 			scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		}
+	}
+
+	function describeBrowserCameraSceneKey(
+		destination: BrowserLocationSelection | null,
+		runtime: RuntimeBatchDto | null,
+	): string {
+		if (destination?.kind === "indoor-env-cell") {
+			return `browser:indoor:${destination.envCellId.toString(16).padStart(8, "0")}`;
+		}
+
+		if (destination?.kind === "outdoor-location") {
+			const landblockKey =
+				destination.landblockId === null
+					? "unresolved"
+					: normalizeOutdoorLandblockId(destination.landblockId)
+							.toString(16)
+							.padStart(8, "0");
+			return `browser:outdoor:${destination.label}:${landblockKey}`;
+		}
+
+		if (runtime?.residency.indoors) {
+			return `runtime:indoor:${runtime.residency.focusEnvCellId?.toString(16).padStart(8, "0") ?? "none"}`;
+		}
+
+		if (runtime) {
+			return `runtime:outdoor:${normalizeOutdoorLandblockId(runtime.residency.focusLandblockId).toString(16).padStart(8, "0")}`;
+		}
+
+		return "pending";
 	}
 
 	function handleBrowserPointerDownCapture(event: PointerEvent): void {
@@ -530,7 +584,10 @@
 
 	function describeStaticRenderableIdleState(): string {
 		if (staticRenderableScene.sourceInstances.length === 0) {
-			return "No static renderable source facts are active for the current outdoor coverage.";
+			return browserDestination?.kind === "indoor-env-cell" ||
+				runtimeBatch?.residency.indoors
+				? "No indoor static object source facts are active for the current visible env cells."
+				: "No static renderable source facts are active for the current outdoor coverage.";
 		}
 
 		if (staticRenderableScene.missingSourceAssetIds.length > 0) {

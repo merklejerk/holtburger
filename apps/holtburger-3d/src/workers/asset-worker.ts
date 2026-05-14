@@ -204,6 +204,7 @@ function prepareIndoorEnvCell(
 			surfaceIds: payload.surfaceIds,
 			portalCount: payload.portalCount,
 			staticObjectCount: payload.staticObjectCount,
+			staticObjects: payload.staticObjects,
 		},
 		preparedAt: new Date().toISOString(),
 	};

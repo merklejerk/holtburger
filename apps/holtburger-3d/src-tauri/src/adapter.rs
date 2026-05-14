@@ -689,6 +689,7 @@ impl HostBoundaryAdapter {
                     "surfaceIds": [],
                     "portalCount": 0,
                     "staticObjectCount": 0,
+                    "staticObjects": [],
                     "provenance": {
                         "source": "app-local-stub",
                         "sourceAssetKind": "env-cell",
@@ -1198,6 +1199,9 @@ impl HostBoundaryAdapter {
             "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
             "portalCount": env_cell.portals.len(),
             "staticObjectCount": env_cell.static_objects.len(),
+            "staticObjects": env_cell.static_objects.iter().enumerate().map(|(source_index, static_object)| {
+                serialize_indoor_static_object(env_cell_id, source_index, static_object)
+            }).collect::<Vec<_>>(),
             "provenance": {
                 "source": "repo-local-hba",
                 "sourceAssetKind": "env-cell",
@@ -1205,6 +1209,29 @@ impl HostBoundaryAdapter {
                 "detail": source_detail
             }
         }))
+    }
+}
+
+fn serialize_indoor_static_object(
+    env_cell_id: u32,
+    source_index: usize,
+    static_object: &holtburger_dat::file_type::env_cell::Stab,
+) -> serde_json::Value {
+    serde_json::json!({
+        "instanceId": format!("env-cell-{env_cell_id:08x}-static-{source_index}-{:08x}", static_object.stab_id),
+        "owningEnvCellId": env_cell_id,
+        "sourceDid": static_object.stab_id,
+        "sourceAssetId": format_static_object_source_asset_id(static_object.stab_id),
+        "sourceIndex": source_index,
+        "localPlacement": serialize_frame(&static_object.position),
+    })
+}
+
+fn format_static_object_source_asset_id(did: u32) -> String {
+    match did >> 24 {
+        0x01 => format!("gfx-obj/{did:08x}"),
+        0x02 => format!("setup-model/{did:08x}"),
+        _ => format!("unsupported-static/{did:08x}"),
     }
 }
 
@@ -2072,6 +2099,40 @@ mod tests {
         assert_eq!(
             selected_cell_structure["physicsWitness"]["hasBsp"].as_bool(),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn indoor_env_cell_lookup_exposes_static_object_sources() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-indoor-env-cell-statics".to_string(),
+            asset_id: "indoor-env-cell/da55012e".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.payload["kind"], "indoor-env-cell");
+        assert_eq!(asset.payload["provenance"]["source"], "repo-local-hba");
+
+        let static_objects = asset.payload["staticObjects"]
+            .as_array()
+            .expect("fixture EnvCell should expose a staticObjects array");
+        assert!(
+            !static_objects.is_empty(),
+            "fixture EnvCell should contain authored indoor static objects"
+        );
+        assert_eq!(
+            asset.payload["staticObjectCount"].as_u64(),
+            Some(static_objects.len() as u64)
+        );
+        assert!(
+            static_objects
+                .iter()
+                .any(|static_object| static_object["sourceAssetId"]
+                    .as_str()
+                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
+                        || asset_id.starts_with("gfx-obj/"))),
+            "fixture EnvCell should expose at least one requestable visual static object"
         );
     }
 

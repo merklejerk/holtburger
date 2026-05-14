@@ -179,6 +179,7 @@ function createPreparedIndoorEnvCellAsset(
 			surfaceIds: [0x08000001],
 			portalCount: 1,
 			staticObjectCount: 0,
+			staticObjects: [],
 		},
 		preparedAt: "2026-05-13T00:00:00.000Z",
 	};

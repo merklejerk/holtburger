@@ -5,6 +5,7 @@ import type {
 	RuntimeBatchDto,
 } from "../host/contracts";
 import {
+	browserDestinationToIndoorEnvCellId,
 	browserLocationToLandblockId,
 	isIndoorBrowserDestination,
 	type BrowserLocationSelection,
@@ -255,22 +256,42 @@ export function createSceneCoverageRequests(
 	}
 
 	if (isIndoorBrowserDestination(browserDestination)) {
-		return createIndoorCoverageRequests(
-			runtimeBatch,
-			priority,
-			preparedByAssetId,
-			pendingAssetIds,
-			browserDestination.envCellId,
-		);
+		return [
+			...createIndoorCoverageRequests(
+				runtimeBatch,
+				priority,
+				preparedByAssetId,
+				pendingAssetIds,
+				browserDestination.envCellId,
+			),
+			...createStaticRenderableAssetRequests(
+				runtimeBatch,
+				browserDestination,
+				priority,
+				preparedByAssetId,
+				pendingAssetIds,
+				options,
+			),
+		];
 	}
 
 	if (runtimeBatch.residency.indoors) {
-		return createIndoorCoverageRequests(
-			runtimeBatch,
-			priority,
-			preparedByAssetId,
-			pendingAssetIds,
-		);
+		return [
+			...createIndoorCoverageRequests(
+				runtimeBatch,
+				priority,
+				preparedByAssetId,
+				pendingAssetIds,
+			),
+			...createStaticRenderableAssetRequests(
+				runtimeBatch,
+				browserDestination,
+				priority,
+				preparedByAssetId,
+				pendingAssetIds,
+				options,
+			),
+		];
 	}
 
 	return [
@@ -407,12 +428,21 @@ export function createStaticRenderableAssetRequests(
 	pendingAssetIds: string[] = [],
 	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
+	if (!runtimeBatch) {
+		return [];
+	}
+
 	if (
-		!runtimeBatch ||
 		runtimeBatch.residency.indoors ||
 		isIndoorBrowserDestination(browserDestination)
 	) {
-		return [];
+		return createIndoorStaticRenderableAssetRequests(
+			runtimeBatch,
+			browserDestination,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+		);
 	}
 
 	const activeLandblockIds = new Set(
@@ -456,6 +486,72 @@ export function createStaticRenderableAssetRequests(
 			assetId,
 			priority,
 		}));
+}
+
+function createIndoorStaticRenderableAssetRequests(
+	runtimeBatch: RuntimeBatchDto,
+	browserDestination: BrowserLocationSelection | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+): AssetLookupRequestDto[] {
+	const activeEnvCellIds = deriveActiveIndoorEnvCellIds(
+		runtimeBatch,
+		browserDestination,
+		preparedByAssetId,
+	);
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+	const sourceAssetIds = [...activeEnvCellIds].flatMap((envCellId) => {
+		const asset =
+			preparedByAssetId[`indoor-env-cell/${formatHex32(envCellId)}`];
+		return asset?.payload.kind === "indoor-env-cell"
+			? asset.payload.staticObjects.map(
+					(staticObject) => staticObject.sourceAssetId,
+				)
+			: [];
+	});
+
+	return [...new Set(sourceAssetIds)]
+		.sort()
+		.filter(
+			(assetId) =>
+				isStaticRenderableAssetId(assetId) &&
+				!preparedByAssetId[assetId] &&
+				!pendingAssetIdSet.has(assetId),
+		)
+		.map((assetId) => ({
+			requestId: `${priority}-${runtimeBatch.tick}-indoor-static-renderable-${assetId}`,
+			assetId,
+			priority,
+		}));
+}
+
+function deriveActiveIndoorEnvCellIds(
+	runtimeBatch: RuntimeBatchDto,
+	browserDestination: BrowserLocationSelection | null,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): Set<number> {
+	const browserFocusEnvCellId =
+		browserDestinationToIndoorEnvCellId(browserDestination);
+	if (browserFocusEnvCellId !== null) {
+		const focusAsset =
+			preparedByAssetId[
+				`indoor-env-cell/${formatHex32(browserFocusEnvCellId)}`
+			];
+		return new Set([
+			browserFocusEnvCellId,
+			...(focusAsset?.payload.kind === "indoor-env-cell"
+				? focusAsset.payload.visibleCellIds
+				: []),
+		]);
+	}
+
+	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
+	if (focusEnvCellId === null) {
+		return new Set();
+	}
+
+	return new Set([focusEnvCellId, ...runtimeBatch.residency.visibleCellIds]);
 }
 
 export function deriveTerrainFocusLandblockId(

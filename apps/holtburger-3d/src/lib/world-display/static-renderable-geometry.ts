@@ -8,19 +8,28 @@ import {
 } from "three";
 
 import type { PreparedPolygonSetRenderGeometry } from "../assets/types";
+import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { StaticRenderablePart } from "./static-renderables";
 
 export function buildStaticRenderablePartMatrix(
 	part: StaticRenderablePart,
 ): Matrix4 {
-	const matrix = frameToMatrix(part.instanceFrame, part.landblockWorldOffset, {
-		x: 1,
-		y: 1,
-		z: 1,
-	});
-	for (const placementFrame of part.placementFrames) {
+	const matrix = buildAcPlacementMatrix(
+		part.instancePlacement,
+		part.landblockWorldOffset,
+		{
+			x: 1,
+			y: 1,
+			z: 1,
+		},
+	);
+	for (const partPlacement of part.partPlacements) {
 		matrix.multiply(
-			frameToMatrix(placementFrame, { x: 0, y: 0, z: 0 }, { x: 1, y: 1, z: 1 }),
+			buildAcPlacementMatrix(
+				partPlacement,
+				{ x: 0, y: 0, z: 0 },
+				{ x: 1, y: 1, z: 1 },
+			),
 		);
 	}
 	matrix.multiply(
@@ -63,24 +72,24 @@ export function buildStaticRenderableColor(debugColorKey: string): Color {
 	return new Color().setHSL((hash % 360) / 360, 0.54, 0.48);
 }
 
-function frameToMatrix(
-	frame: StaticRenderablePart["instanceFrame"],
-	landblockWorldOffset: StaticRenderablePart["landblockWorldOffset"],
+export function buildAcPlacementMatrix(
+	placement: PlacementTransformDto,
+	worldOffset: Vec3Dto,
 	scale: { x: number; y: number; z: number },
 ): Matrix4 {
 	return new Matrix4().compose(
 		new Vector3(
-			frame.origin.x + landblockWorldOffset.x,
-			frame.origin.z + landblockWorldOffset.z,
-			-(frame.origin.y + landblockWorldOffset.y),
+			placement.origin.x + worldOffset.x,
+			placement.origin.z + worldOffset.z,
+			-(placement.origin.y + worldOffset.y),
 		),
-		convertAcQuaternion(frame.orientation),
+		convertAcQuaternion(placement.orientation),
 		new Vector3(scale.x, scale.y, scale.z),
 	);
 }
 
 function convertAcQuaternion(
-	quaternion: StaticRenderablePart["instanceFrame"]["orientation"],
+	quaternion: PlacementTransformDto["orientation"],
 ): ThreeQuaternion {
 	const acRotation = new Matrix4().makeRotationFromQuaternion(
 		new ThreeQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w),

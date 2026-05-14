@@ -168,7 +168,7 @@ describe("world display model helpers", () => {
 							sourceDid: 0x02000001,
 							sourceAssetId: "setup-model/02000001",
 							sourceIndex: 0,
-							frame: {
+							localPlacement: {
 								origin: { x: 1, y: 2, z: 3 },
 								orientation: { w: 1, x: 0, y: 0, z: 0 },
 							},
@@ -182,7 +182,7 @@ describe("world display model helpers", () => {
 							sourceDid: 0x02000002,
 							sourceAssetId: "setup-model/02000002",
 							sourceIndex: 0,
-							frame: {
+							localPlacement: {
 								origin: { x: 4, y: 5, z: 6 },
 								orientation: { w: 1, x: 0, y: 0, z: 0 },
 							},
@@ -318,6 +318,10 @@ describe("world display model helpers", () => {
 							envCellId: 0x016c0155,
 							environmentId: 0x0d000001,
 							cellStructureId: 1,
+							localPlacement: {
+								origin: { x: 0, y: 0, z: 0 },
+								orientation: { w: 1, x: 0, y: 0, z: 0 },
+							},
 							visibleCellIds: [0x016c0156, 0x016c0157],
 							seenOutside: false,
 							surfaceIds: [],

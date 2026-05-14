@@ -483,10 +483,21 @@ function createIndoorCoverageRequests(
 		return [];
 	}
 
-	const assetIds = [
+	const envCellAssetIds = [
 		formatIndoorEnvCellAssetId(focusEnvCellId),
 		...visibleCellIds.map((cellId) => formatIndoorEnvCellAssetId(cellId)),
+	];
+	const preparedEnvironmentAssetIds = envCellAssetIds.flatMap((assetId) => {
+		const asset = preparedByAssetId[assetId];
+		return asset?.payload.kind === "indoor-env-cell" &&
+			asset.payload.environmentId !== null
+			? [formatEnvironmentAssetId(asset.payload.environmentId)]
+			: [];
+	});
+	const assetIds = [
+		...envCellAssetIds,
 		environmentId === null ? null : formatEnvironmentAssetId(environmentId),
+		...preparedEnvironmentAssetIds,
 	].filter((assetId): assetId is string => assetId !== null);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 

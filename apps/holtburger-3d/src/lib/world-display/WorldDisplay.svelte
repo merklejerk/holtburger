@@ -32,9 +32,14 @@
 	import { buildTerrainGeometry } from "./terrain-geometry";
 	import {
 		buildGfxObjGeometry,
+		buildAcPlacementMatrix,
 		buildStaticRenderableColor,
 		buildStaticRenderablePartMatrix,
 	} from "./static-renderable-geometry";
+	import type {
+		StructuredInteriorCell,
+		StructuredInteriorSceneModel,
+	} from "./structured-interior-scene";
 	import {
 		buildDebugOrbitCameraFrame,
 		createDebugOrbitCameraState,
@@ -53,6 +58,7 @@
 		assetState,
 		terrainScene,
 		staticRenderableScene,
+		structuredInteriorScene,
 		controlledCameraFrame = null,
 		onCameraFrameChange,
 		onRenderMetricsChange,
@@ -60,6 +66,7 @@
 		assetState: AssetChannelState;
 		terrainScene: TerrainSceneModel;
 		staticRenderableScene: StaticRenderableSceneModel;
+		structuredInteriorScene: StructuredInteriorSceneModel;
 		controlledCameraFrame?: SceneCameraFrame | null;
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
@@ -70,6 +77,7 @@
 	let camera: PerspectiveCamera | null = null;
 	let terrainRoot: Group | null = null;
 	let staticRenderableRoot: Group | null = null;
+	let structuredInteriorRoot: Group | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let debugCameraState = $state<DebugOrbitCameraState>(
 		createDebugOrbitCameraState(),
@@ -78,6 +86,7 @@
 	const terrainMeshes = new Map<string, Mesh>();
 	const staticGeometryCache = new Map<string, BufferGeometry>();
 	const staticRenderableMeshes = new Map<string, InstancedMesh>();
+	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const terrainRaycaster = new Raycaster();
 	let lastReportedMetricsKey: string | null = null;
 
@@ -118,14 +127,17 @@
 
 		const nextTerrainRoot = new Group();
 		const nextStaticRenderableRoot = new Group();
+		const nextStructuredInteriorRoot = new Group();
 		nextScene.add(nextTerrainRoot);
 		nextScene.add(nextStaticRenderableRoot);
+		nextScene.add(nextStructuredInteriorRoot);
 
 		renderer = nextRenderer;
 		scene = nextScene;
 		camera = nextCamera;
 		terrainRoot = nextTerrainRoot;
 		staticRenderableRoot = nextStaticRenderableRoot;
+		structuredInteriorRoot = nextStructuredInteriorRoot;
 
 		const nextResizeObserver = new ResizeObserver(() => {
 			syncRendererSize();
@@ -167,8 +179,13 @@
 				geometry.dispose();
 			}
 			staticGeometryCache.clear();
+			for (const mesh of structuredInteriorMeshes.values()) {
+				disposeMesh(mesh);
+			}
+			structuredInteriorMeshes.clear();
 			nextTerrainRoot.clear();
 			nextStaticRenderableRoot.clear();
+			nextStructuredInteriorRoot.clear();
 			nextRenderer.dispose();
 			nextRenderer.domElement.remove();
 			if (renderer === nextRenderer) {
@@ -186,6 +203,9 @@
 			if (staticRenderableRoot === nextStaticRenderableRoot) {
 				staticRenderableRoot = null;
 			}
+			if (structuredInteriorRoot === nextStructuredInteriorRoot) {
+				structuredInteriorRoot = null;
+			}
 		};
 	});
 
@@ -195,6 +215,10 @@
 
 	$effect(() => {
 		syncStaticRenderableMeshes();
+	});
+
+	$effect(() => {
+		syncStructuredInteriorMeshes();
 	});
 
 	$effect(() => {
@@ -284,13 +308,19 @@
 	}
 
 	function updateCameraFrame(forceFit = false): void {
-		if (!camera || !terrainRoot || !staticRenderableRoot) {
+		if (
+			!camera ||
+			!terrainRoot ||
+			!staticRenderableRoot ||
+			!structuredInteriorRoot
+		) {
 			return;
 		}
 
 		if (
 			terrainScene.tiles.length === 0 &&
-			staticRenderableScene.parts.length === 0
+			staticRenderableScene.parts.length === 0 &&
+			structuredInteriorScene.cells.length === 0
 		) {
 			const fallbackFrame: SceneCameraFrame = {
 				position: { x: 180, y: 220, z: 180 },
@@ -320,6 +350,7 @@
 			size.z.toFixed(2),
 			terrainScene.tiles.length,
 			staticRenderableScene.parts.length,
+			structuredInteriorScene.cells.length,
 		].join(":");
 
 		debugCameraState = fitDebugOrbitCameraToBounds(
@@ -368,13 +399,14 @@
 	}
 
 	function calculateSceneBoundsFrame(): SceneBoundsFrame | null {
-		if (!terrainRoot || !staticRenderableRoot) {
+		if (!terrainRoot || !staticRenderableRoot || !structuredInteriorRoot) {
 			return null;
 		}
 
 		if (
 			terrainScene.tiles.length === 0 &&
-			staticRenderableScene.parts.length === 0
+			staticRenderableScene.parts.length === 0 &&
+			structuredInteriorScene.cells.length === 0
 		) {
 			return null;
 		}
@@ -382,6 +414,7 @@
 		const bounds = new Box3();
 		bounds.expandByObject(terrainRoot);
 		bounds.expandByObject(staticRenderableRoot);
+		bounds.expandByObject(structuredInteriorRoot);
 		const center = bounds.getCenter(new Vector3());
 		const size = bounds.getSize(new Vector3());
 
@@ -403,6 +436,15 @@
 				staticRenderablePartCount: staticRenderableScene.parts.length,
 				staticRenderableGeometryCount:
 					staticRenderableScene.partsByGfxAssetId.size,
+				structuredInteriorCellCount: structuredInteriorScene.cells.length,
+				structuredInteriorVertexCount: structuredInteriorScene.cells.reduce(
+					(total, cell) => total + cell.renderGeometry.vertexCount,
+					0,
+				),
+				structuredInteriorTriangleCount: structuredInteriorScene.cells.reduce(
+					(total, cell) => total + cell.renderGeometry.triangleCount,
+					0,
+				),
 			},
 		};
 		const metricsKey = JSON.stringify(metrics);
@@ -463,6 +505,70 @@
 		}
 
 		untrack(() => updateCameraFrame());
+	}
+
+	function syncStructuredInteriorMeshes(): void {
+		if (!structuredInteriorRoot) {
+			return;
+		}
+
+		const activeRenderKeys = new Set(
+			structuredInteriorScene.cells.map((cell) => cell.renderKey),
+		);
+		for (const [renderKey, mesh] of structuredInteriorMeshes.entries()) {
+			if (activeRenderKeys.has(renderKey)) {
+				continue;
+			}
+
+			structuredInteriorRoot.remove(mesh);
+			disposeMesh(mesh);
+			structuredInteriorMeshes.delete(renderKey);
+		}
+
+		for (const cell of structuredInteriorScene.cells) {
+			let mesh = structuredInteriorMeshes.get(cell.renderKey);
+			if (!mesh) {
+				mesh = createStructuredInteriorCellMesh(cell);
+				structuredInteriorRoot.add(mesh);
+				structuredInteriorMeshes.set(cell.renderKey, mesh);
+			}
+
+			updateStructuredInteriorCellMesh(mesh, cell);
+		}
+
+		untrack(() => updateCameraFrame());
+	}
+
+	function createStructuredInteriorCellMesh(
+		cell: StructuredInteriorCell,
+	): Mesh {
+		const geometry = buildGfxObjGeometry(cell.renderGeometry);
+		const material = new MeshStandardMaterial({
+			color: buildStaticRenderableColor(cell.debugColorKey),
+			flatShading: true,
+			metalness: 0.02,
+			roughness: 0.9,
+			transparent: !cell.isFocus,
+			opacity: cell.isFocus ? 1 : 0.74,
+		});
+		const mesh = new Mesh(geometry, material);
+		mesh.name = `structured-interior/${cell.renderKey}`;
+		mesh.matrixAutoUpdate = false;
+		return mesh;
+	}
+
+	function updateStructuredInteriorCellMesh(
+		mesh: Mesh,
+		cell: StructuredInteriorCell,
+	): void {
+		mesh.matrix.copy(
+			buildAcPlacementMatrix(
+				cell.localPlacement,
+				{ x: 0, y: 0, z: 0 },
+				{ x: 1, y: 1, z: 1 },
+			),
+		);
+		mesh.matrixWorldNeedsUpdate = true;
 	}
 
 	function getStaticRenderableGeometry(

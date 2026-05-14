@@ -41,6 +41,7 @@
 		isPreparedGfxObjAsset,
 	} from "../lib/world-display/static-renderables";
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
+	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
 
 	let {
 		activeMode,
@@ -103,6 +104,9 @@
 			landblockCoverageRadius,
 		),
 	);
+	const structuredInteriorScene = $derived(
+		deriveStructuredInteriorSceneModel(runtimeBatch, assetState),
+	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
 			(total, tile) => total + tile.mesh.vertices.length,
@@ -126,9 +130,11 @@
 			: Math.max(...terrainScene.tiles.map((tile) => tile.mesh.maxHeight)),
 	);
 	const sceneGeometryText = $derived(
-		terrainScene.tiles.length === 0
-			? "No terrain geometry is cached yet."
-			: `${terrainScene.tiles.length} tile${terrainScene.tiles.length === 1 ? "" : "s"}, ${terrainVertexCount} vertices, ${terrainTriangleCount} triangles.`,
+		structuredInteriorScene.cells.length > 0
+			? `${structuredInteriorScene.cells.length} env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}, ${renderMetrics?.geometry.structuredInteriorVertexCount ?? 0} vertices, ${renderMetrics?.geometry.structuredInteriorTriangleCount ?? 0} triangles.`
+			: terrainScene.tiles.length === 0
+				? "No terrain geometry is cached yet."
+				: `${terrainScene.tiles.length} tile${terrainScene.tiles.length === 1 ? "" : "s"}, ${terrainVertexCount} vertices, ${terrainTriangleCount} triangles.`,
 	);
 	const terrainHeightText = $derived(
 		terrainMinHeight === null || terrainMaxHeight === null
@@ -152,6 +158,15 @@
 		).length;
 		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}.`;
 	});
+	const structuredInteriorEnvironmentCount = $derived(
+		new Set(structuredInteriorScene.cells.map((cell) => cell.environmentId))
+			.size,
+	);
+	const structuredInteriorText = $derived(
+		structuredInteriorScene.cells.length > 0
+			? `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}.`
+			: describeStructuredInteriorIdleState(),
+	);
 	const sceneBoundsText = $derived(
 		renderMetrics?.bounds
 			? `Center (${renderMetrics.bounds.center.x.toFixed(1)}, ${renderMetrics.bounds.center.y.toFixed(1)}, ${renderMetrics.bounds.center.z.toFixed(1)}) span (${renderMetrics.bounds.size.x.toFixed(1)}, ${renderMetrics.bounds.size.y.toFixed(1)}, ${renderMetrics.bounds.size.z.toFixed(1)}).`
@@ -525,6 +540,26 @@
 		return "Static renderable source facts are active, but no drawable gfx geometry is ready.";
 	}
 
+	function describeStructuredInteriorIdleState(): string {
+		if (!runtimeBatch?.residency.indoors) {
+			return "Structured interior rendering is dormant while outdoor residency is active.";
+		}
+
+		if (structuredInteriorScene.missingEnvCellAssetIds.length > 0) {
+			return `Waiting for ${structuredInteriorScene.missingEnvCellAssetIds.length} visible env-cell metadata payload${structuredInteriorScene.missingEnvCellAssetIds.length === 1 ? "" : "s"}.`;
+		}
+
+		if (structuredInteriorScene.missingEnvironmentAssetIds.length > 0) {
+			return `Waiting for ${structuredInteriorScene.missingEnvironmentAssetIds.length} environment geometry payload${structuredInteriorScene.missingEnvironmentAssetIds.length === 1 ? "" : "s"}.`;
+		}
+
+		if (structuredInteriorScene.missingCellStructureKeys.length > 0) {
+			return `Waiting for ${structuredInteriorScene.missingCellStructureKeys.length} selected cell-structure match${structuredInteriorScene.missingCellStructureKeys.length === 1 ? "" : "es"}.`;
+		}
+
+		return "Structured interior source facts are active, but no drawable cell geometry is ready.";
+	}
+
 	onDestroy(() => {
 		if (cameraHintTimer) {
 			clearTimeout(cameraHintTimer);
@@ -549,6 +584,7 @@
 		{assetState}
 		{terrainScene}
 		{staticRenderableScene}
+		{structuredInteriorScene}
 		controlledCameraFrame={browserCameraFrame}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
@@ -582,6 +618,10 @@
 				<dd>{staticRenderableText}</dd>
 			</div>
 			<div>
+				<dt>Interiors</dt>
+				<dd>{structuredInteriorText}</dd>
+			</div>
+			<div>
 				<dt>Layers</dt>
 				<dd>{staticRenderableLayerText}</dd>
 			</div>
@@ -601,7 +641,11 @@
 	</div>
 
 	<div class="world-display__viewport-copy">
-		<p>{terrainScene.statusText}</p>
+		<p>
+			{structuredInteriorScene.cells.length > 0
+				? structuredInteriorScene.statusText
+				: terrainScene.statusText}
+		</p>
 		<p>{worldDisplay.inputText}</p>
 	</div>
 

@@ -92,7 +92,7 @@ describe("host contracts", () => {
 					sourceDid: 0x02000001,
 					sourceAssetId: "setup-model/02000001",
 					sourceIndex: 0,
-					frame: {
+					localPlacement: {
 						origin: { x: 1, y: 2, z: 3 },
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
 					},
@@ -430,10 +430,10 @@ describe("host contracts", () => {
 			],
 			holdingLocations: [],
 			connectionPoints: [],
-			placementFrames: [
+			placementSets: [
 				{
 					key: 0,
-					frames: [
+					localPlacements: [
 						{
 							origin: { x: 0, y: 0, z: 0 },
 							orientation: { w: 1, x: 0, y: 0, z: 0 },
@@ -471,6 +471,6 @@ describe("host contracts", () => {
 			"gfx-obj/01000001",
 			"gfx-obj/01000002",
 		]);
-		expect(payload.placementFrames[0]?.frames).toHaveLength(1);
+		expect(payload.placementSets[0]?.localPlacements).toHaveLength(1);
 	});
 });

@@ -9,6 +9,9 @@ export interface WorldRenderMetrics {
 		terrainTriangleCount: number;
 		staticRenderablePartCount: number;
 		staticRenderableGeometryCount: number;
+		structuredInteriorCellCount: number;
+		structuredInteriorVertexCount: number;
+		structuredInteriorTriangleCount: number;
 	};
 }
 

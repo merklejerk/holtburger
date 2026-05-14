@@ -1830,7 +1830,7 @@ Verified ID resolution chain (matches ACE 1:1):
   - `0x01XXXXXX` → `GfxObj` DID; ACE can normalize it into a synthetic single-part setup via `Setup.MakeSimpleSetup` at the physics/render composition layer
   - `0x02XXXXXX` → `SetupModel` DID; resolved via `Setup.Get`, exposing N parts where each part references a `GfxObj`
   - other prefixes → animation-coerced setup (`did | 0x02000000`); not required for first-pass static scenery
-- a `SetupModel` carries per-part placement frames, scales, parent links, and `CylSphere` collision proxies
+- a `SetupModel` carries per-part placement transforms, scales, parent links, and `CylSphere` collision proxies
 - a `GfxObj` carries the actual `CVertexArray`, drawing polygons + drawing BSP, physics polygons + physics BSP, surface ids, and a sort center
 - Holtburger should keep that normalization out of the asset cache: `gfx-obj/*` remains a real leaf asset, `setup-model/*` remains a real composite asset, and direct `gfx-obj/*` inputs may become one-part setup-like renderables only as ephemeral composition/view-model data.
 
@@ -2090,7 +2090,7 @@ Deliverables:
 
 - `setup-model/*` asset-family discriminants in the host adapter contract, frontend contract parser, and asset worker dispatch path
 - host-side dynamic-key lookup for `setup-model/0x02XXXXXX`
-- prepared `setup-model` payload carrying parts with `gfx_obj_id`, placement frame, scale, parent index, and compact collision witness counts
+- prepared `setup-model` payload carrying parts with `gfx_obj_id`, placement sets, scale, parent index, and compact collision witness counts
 - `getPreparedAssetDependencies(...)` support for `setup-model` payloads by deriving referenced `gfx-obj/*` ids from parts
 - tests proving setup-model dependency derivation and real `prepareAssetGraph(...)` setup-to-gfx scheduling
 
@@ -2103,7 +2103,7 @@ Acceptance:
 Delivered:
 
 - Added `setup-model/*` host lookup through `ContentRepository::read_resource(...)` with high-byte DID validation for `0x02`. The Tauri adapter now decodes real `SetupModel` data from repo-local HBA and returns a first-class `setup-model` payload instead of a generic fallback.
-- Added TypeScript host contracts for setup-model composites: ordered parts, per-part `gfxObjAssetId`, parent index, scale, holding locations, connection points, placement frames, compact collision witness counts, lights, bounds/step metadata, defaults, and provenance.
+- Added TypeScript host contracts for setup-model composites: ordered parts, per-part `gfxObjAssetId`, parent index, scale, holding locations, connection points, placement sets, compact collision witness counts, lights, bounds/step metadata, defaults, and provenance.
 - Added a prepared `setup-model` payload variant. The worker preserves the ordered composite data and does not create GPU resources or fetch follow-up assets.
 - Extended `getPreparedAssetDependencies(...)` so setup-model dependencies are derived from part `gfxObjAssetId` values. Dependency ids are unique and sorted for deterministic scheduling, while the setup payload keeps AC part order intact.
 - Added tests for real host lookup of `setup-model/02000001`, setup-model contract parsing, setup-model worker preparation, dependency derivation, and `prepareAssetGraph(...)` setup-to-gfx scheduling.
@@ -2111,7 +2111,7 @@ Delivered:
 Course corrections:
 
 - Setup-model collision structures remain Rust-owned. The frontend receives only compact cyl-sphere/sphere counts to prove the split exists; it does not receive collision-proxy geometry for normal rendering.
-- The payload includes placement-frame frame lists and hook counts, not decoded animation hook behavior. Animation interpretation belongs to later animation/script phases, not this static composite asset phase.
+- The payload includes placement-set transform lists and hook counts, not decoded animation hook behavior. Animation interpretation belongs to later animation/script phases, not this static composite asset phase.
 - `setup-model/*` remains residency-neutral. Outdoor or indoor relevance will come from later runtime facts (`LandblockInfo.Objects`, `Buildings`, env-cell/static-object consumers), not from the reusable composite asset itself.
 - Main-thread orchestration remains the right dependency model. The worker prepares one asset at a time; the main thread schedules missing `gfx-obj/*` leaves from prepared payload data and reuses cached leaves across setup models.
 
@@ -2153,7 +2153,7 @@ Delivered:
 Course corrections:
 
 - The current default browser focus landblock ring can legitimately contain no static objects or buildings. That is valid runtime data, not a fallback. Tests that prove Object/Building derivation now discover populated fixture landblocks instead of assuming the demo focus block is populated.
-- The runtime facts do not aggregate renderer bundles and do not inline setup/gfx payloads. They only name source DIDs plus placement frames; the frontend decides which assets to request.
+- The runtime facts do not aggregate renderer bundles and do not inline setup/gfx payloads. They only name source DIDs plus local placement transforms; the frontend decides which assets to request.
 - Other DID families remain out of scope for Phase 12.4. ACE can coerce some non-`0x01`/`0x02` DIDs through animation/setup paths, but first-pass static scenery selection only requests the explicit `gfx-obj/*` and `setup-model/*` families already implemented.
 - Indoor and outdoor scenes should not stay different all the way down. They differ at source-fact and scene-membership layers, but asset lookup, dependency orchestration, renderable part normalization, GPU cache, and instance rendering should converge.
 
@@ -2202,7 +2202,7 @@ Delivered on 2026-05-12:
 
 - added a frontend static-renderable composition model that normalizes outdoor runtime source facts plus prepared `gfx-obj/*` / `setup-model/*` payloads into renderer-facing parts
 - kept direct `gfx-obj/*` sources as ephemeral one-part renderables with identity placement and unit scale; no synthetic setup-model cache entries are created
-- resolved setup-model part placement from the default placement-frame table, including parent-index transform chains, then applies part scale at render time
+- resolved setup-model part placement from the default placement set, including parent-index transform chains, then applies part scale at render time
 - added static-renderable membership filtering against the same radius-1 outdoor landblock coverage used by the terrain scene
 - added main-thread Three.js `BufferGeometry` upload from prepared `gfx-obj/*` render arrays with AC-to-Three coordinate conversion
 - added one `InstancedMesh` per active `gfx-obj/*` asset id so duplicate renderable parts share a single uploaded geometry
@@ -2212,7 +2212,7 @@ Delivered on 2026-05-12:
 
 Course corrections:
 
-- setup-model parts do not directly own placement frames. The renderer composition layer derives per-part frame chains from `placementFrames[key=0]` and `parentIndex` instead of expecting a frame on each part record.
+- setup-model parts do not directly own placement transforms. The renderer composition layer derives per-part placement chains from `placementSets[key=0].localPlacements` and `parentIndex` instead of expecting a transform on each part record.
 - the geometry-reuse proof is implemented as one `InstancedMesh` per `gfx-obj/*` asset id, not as ad hoc mesh sharing. This is stronger than the optional wording in the refined phase.
 - this pass did not introduce a browser/Tauri visual smoke harness. Typecheck, tests, lint, and production build passed, but a human or automated Tauri run should still verify that at least one populated landblock visibly renders statics with the expected orientation and scale.
 
@@ -2701,7 +2701,7 @@ Acceptance:
 
 Audit results:
 
-- `EnvCell` is the runtime/world placement record for structured cells. It lives in `client_cell.dat`, carries the full env-cell id, surface list, `environment_id`, `cell_structure`, placement frame, `CellPortal` records, `VisibleCells`, optional static-object stabs, and optional restriction object. ACE normalizes `environment_id` to the `0x0D000000` portal-DAT family and stores `cell_structure` as a short key into the environment.
+- `EnvCell` is the runtime/world placement record for structured cells. It lives in `client_cell.dat`, carries the full env-cell id, surface list, `environment_id`, `cell_structure`, local placement transform, `CellPortal` records, `VisibleCells`, optional static-object stabs, and optional restriction object. ACE normalizes `environment_id` to the `0x0D000000` portal-DAT family and stores `cell_structure` as a short key into the environment.
 - `Environment` is the portal-DAT asset. ACE models it as `Environment = { Id, Cells: Dictionary<uint, CellStruct> }`; ACViewer loads it by `envCell.EnvironmentID` and draws the single `CellStruct` selected by `envCell.CellStructureID`.
 - `CellStruct` is not naturally a standalone DAT asset. Retail unpacking stores a `cellstruct_id` inside each struct, while ACE's dictionary unpack also keys the map externally. Either way, the bytes are reached through the owning `Environment`. A bare public `cell-structure/<id>` asset id is therefore ambiguous across environments and should not become the durable contract.
 - `CellStruct` geometry layout is close enough to reuse the Phase 12 mesh path: counts, `CVertexArray`, drawing `Polygon`s, portal polygon ids, `CellBSP`, physics polygons, `PhysicsBSP`, optional `DrawingBSP`, and final DWORD alignment. The parser should share the existing `CVertexArray`, `Polygon`, and `BspNode` machinery instead of forking an indoor-only decoder.
@@ -2858,7 +2858,7 @@ Course corrections:
 
 ##### Phase 13.4 — Browser Structured-Interior Scene Integration
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Primary deliverables:
 
@@ -2871,6 +2871,39 @@ Acceptance:
 
 - the browser-owned structured-interior render-scene path replaces the placeholder visible-cell branch
 - `WorldDisplay` remains a shared render surface with no host/Tauri command imports or browser-only policy
+
+Progress:
+
+- Added `EnvCell.position` to the `indoor-env-cell/*` asset payload as `localPlacement`, with app-local fallback payloads using an identity placement. This lets browser scene assembly place selected cell-structure geometry with the same EnvCell transform ACViewer applies through `R_EnvCell.WorldTransform`, while making clear the transform is relative to its containing scene context.
+- Added a browser-owned `StructuredInteriorSceneModel` that joins authoritative indoor residency and visible-cell ids to prepared `indoor-env-cell/*` metadata plus prepared `environment/*` cell structures. The model reports missing env-cell metadata, missing environment payloads, and missing selected cell-structure keys separately.
+- Wired `BrowserWorldDisplay` to derive and pass the structured-interior render scene into `WorldDisplay` while preserving the existing outdoor terrain/static scene path and browser camera controls.
+- Extended `WorldDisplay` with a separate structured-interior render root that hydrates prepared cell-structure `renderGeometry` into Three.js meshes and applies `localPlacement` through the shared AC-placement-to-Three matrix helper.
+- Extended render metrics and HUD copy to include structured-interior cell, vertex, and triangle counts.
+- Added coverage-request follow-through so prepared visible env-cell metadata can request its referenced `environment/*` payload if it differs from the runtime focus environment.
+- Added focused tests for structured-interior scene assembly, missing dependency reporting, `localPlacement` propagation, and the existing indoor model fixture.
+
+Decisions:
+
+- `WorldDisplay` now accepts a renderer-ready structured-interior scene prop, but it still does not derive visible-cell policy, request assets, call Tauri, or own browser camera/input behavior. Browser/client orchestration remains above the shared render surface.
+- Phase 13.4 renders environment cell structures from prepared drawing geometry only. Env-cell static stabs remain deferred, matching the earlier Phase 13.0a decision.
+- The first structured-interior renderer uses debug-colored, one-mesh-per-visible-cell geometry. It intentionally does not apply real surface/material bindings, portal-region clipping, drawing-BSP traversal, or indoor static-object rendering yet.
+- Env-cell placement is now based on the decoded `EnvCell.position`, exposed as `localPlacement`. No frontend-local topology guesses are used to place visible cells.
+
+Course corrections:
+
+- Phase 13.5 should smoke-test whether decoded env-cell `localPlacement` values and selected cell structures land coherently in live Tauri browser mode before adding material/surface work.
+- Phase 13.5 should classify any visible-cell overlap or through-wall drawing as either portal visibility renderer work for Phase 13.6 or a decoder/placement bug. Do not patch it with frontend-local portal guesses in Phase 13.5.
+- If visible env cells in real data reference different `environment/*` payloads, the request path is now set up to discover those from prepared env-cell metadata. This still depends on a subsequent scene-coverage tick after the env-cell payload arrives.
+
+Validation:
+
+- `npm run --prefix apps/holtburger-3d check`
+- `npm run --prefix apps/holtburger-3d test:ts -- --run`
+- `npm run --prefix apps/holtburger-3d lint`
+- `npm run --prefix apps/holtburger-3d format:check`
+- `cargo check -p holtburger-3d --no-default-features`
+- `cargo test -p holtburger-3d --no-default-features`
+- `cargo fmt --check`
 
 ##### Phase 13.5 — Live Interior Smoke And Gate Review
 
@@ -3349,8 +3382,8 @@ Mitigation:
 - Treat outdoor static scenery facts as static content, not runtime authority. Phase 12.4 initially put them in `RuntimeBatchDto`, but Phase 12.6 should move `LandblockInfo.Objects` / `Buildings` facts behind a frontend-requested asset/content family so browser and live-client coverage use the same path.
 - Do not assume a focus landblock is populated. Empty static-object/building arrays are valid data; fixture tests that need populated scenery should target populated `LandblockInfo` records explicitly.
 - Keep source-fact DTOs AC-shaped and renderer helpers generic. Outdoor facts may be landblock-shaped, but frontend rendering should talk in static renderables so indoor env-cell statics can join the same path later.
-- Keep static renderable composition frontend-owned. Source facts identify source assets and placement frames, prepared assets provide reusable visual data, browser/client scene orchestration owns normalized scene membership and cache policy, and `WorldDisplay` owns GPU upload, instancing, debug coloring application, and resource disposal for the supplied render scene.
-- Derive setup-model render placement from the default placement-frame entry plus parent chains. `SetupModel.parts` remains an ordered AC composite description, not the sole transform source for rendering.
+- Keep static renderable composition frontend-owned. Source facts identify source assets and local placement transforms, prepared assets provide reusable visual data, browser/client scene orchestration owns normalized scene membership and cache policy, and `WorldDisplay` owns GPU upload, instancing, debug coloring application, and resource disposal for the supplied render scene.
+- Derive setup-model render placement from the default placement set plus parent chains. `SetupModel.parts` remains an ordered AC composite description, not the sole transform source for rendering.
 - Use one main-thread `InstancedMesh` per active `gfx-obj/*` asset id for first-pass static scenery. This proves geometry reuse without adding material grouping, texture decode, or a broader renderer asset registry yet.
 - Keep runtime batches focused on authoritative/session state. DAT-derived render facts such as outdoor landblock static placements should cross the asset/content channel unless a later live-session feature proves the server can dynamically override them.
 - Keep the WorldDisplay decomposition as a standing guardrail for future phases. Phase 13 and later should add browser/client scene controllers or pure helpers when new policy appears, not widen `WorldDisplay` back into a mode-aware orchestration component.
@@ -3520,13 +3553,12 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. The next step is Phase 13.4, browser structured-interior scene integration above `WorldDisplay`.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The next step is Phase 13.5, live interior smoke and gate review.
 
 Current near-term sequence:
 
-1. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
-2. run Phase 13.5 live interior smoke and gate review
-3. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
-4. keep Phase 13.1 through 13.5 scoped to honest portal data plus first visible structured-interior geometry; do not sneak portal culling or opening masks into the first render path
-5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-6. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+1. run Phase 13.5 live interior smoke and gate review
+2. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
+3. keep Phase 13.5 scoped to validating the first visible structured-interior geometry path; classify through-wall or overlap issues as portal-renderer work unless the decoded env-cell `localPlacement` or selected CellStruct is demonstrably wrong
+4. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+5. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

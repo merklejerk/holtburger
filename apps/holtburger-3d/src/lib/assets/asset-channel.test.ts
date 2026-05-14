@@ -428,7 +428,6 @@ describe("asset channel controller", () => {
 			"indoor-env-cell/016c0156",
 			"indoor-env-cell/016c0157",
 			"environment/0d000001",
-			"cell-structure/0001",
 		]);
 	});
 
@@ -740,7 +739,8 @@ describe("asset channel controller", () => {
 					residencyKind: "indoor-env-cell",
 					sourceAssetKind: "environment",
 					environmentId: 0x0d000001,
-					cellStructureIds: [],
+					cellStructureIds: [1],
+					cellStructures: [],
 					provenance: {
 						source: "app-local-stub",
 						sourceAssetKind: "environment",
@@ -762,9 +762,7 @@ describe("asset channel controller", () => {
 		if (environment.payload.kind !== "environment") {
 			throw new Error("expected environment payload");
 		}
-		expect(environment.payload.debugPresentation.primitive).toBe(
-			"environment-reference",
-		);
+		expect(environment.payload.debugPresentation.primitive).toBe("environment");
 	});
 
 	it("prepares gfx-obj payloads as first-class geometry leaves", () => {

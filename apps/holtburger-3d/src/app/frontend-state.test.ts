@@ -68,7 +68,7 @@ function createSnapshot(): HostBoundarySnapshot {
 					"environment-id",
 					"cell-structure-id",
 				],
-				assetFamilyIds: ["indoor-env-cell", "environment", "cell-structure"],
+				assetFamilyIds: ["indoor-env-cell", "environment"],
 			},
 		},
 	};

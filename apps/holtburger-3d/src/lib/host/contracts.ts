@@ -49,7 +49,6 @@ const indoorRuntimeFieldIdValueSchema = z.enum([
 const indoorAssetFamilyIdValueSchema = z.enum([
 	"indoor-env-cell",
 	"environment",
-	"cell-structure",
 ]);
 
 const vec3DtoSchema = z.object({
@@ -247,33 +246,6 @@ export type IndoorEnvCellPayloadDto = z.infer<
 	typeof indoorEnvCellPayloadDtoSchema
 >;
 
-export const environmentPayloadDtoSchema = z.object({
-	kind: z.literal("environment"),
-	residencyKind: z.literal("indoor-env-cell"),
-	sourceAssetKind: z.literal("environment"),
-	environmentId: z.number().int().nonnegative(),
-	cellStructureIds: z.array(z.number().int().nonnegative()),
-	provenance: assetProvenanceDtoSchema,
-});
-export type EnvironmentPayloadDto = z.infer<typeof environmentPayloadDtoSchema>;
-
-export const cellStructurePayloadDtoSchema = z.object({
-	kind: z.literal("cell-structure"),
-	residencyKind: z.literal("indoor-env-cell"),
-	sourceAssetKind: z.literal("cell-structure"),
-	environmentId: z.number().int().nonnegative().nullable(),
-	cellStructureId: z.number().int().nonnegative(),
-	polygonCount: z.number().int().nonnegative().nullable(),
-	portalCount: z.number().int().nonnegative().nullable(),
-	hasCellBsp: z.boolean(),
-	hasPhysicsBsp: z.boolean(),
-	hasDrawingBsp: z.boolean(),
-	provenance: assetProvenanceDtoSchema,
-});
-export type CellStructurePayloadDto = z.infer<
-	typeof cellStructurePayloadDtoSchema
->;
-
 const gfxObjVertexDtoSchema = z.object({
 	id: z.number().int().nonnegative(),
 	origin: vec3DtoSchema,
@@ -346,7 +318,34 @@ const gfxObjBspNodeDtoSchema: z.ZodType<{
 const gfxObjPhysicsWitnessDtoSchema = z.object({
 	polygonCount: z.number().int().nonnegative(),
 	hasBsp: z.boolean(),
+	rootKind: z.enum(["port", "leaf", "internal"]).nullable().optional(),
 });
+
+const cellStructBspWitnessDtoSchema = z.object({
+	hasBsp: z.boolean(),
+	rootKind: z.enum(["port", "leaf", "internal"]).nullable(),
+});
+
+const environmentCellStructDtoSchema = z.object({
+	id: z.number().int().nonnegative(),
+	vertexArray: gfxObjVertexArrayDtoSchema,
+	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
+	portalPolygonIds: z.array(z.number().int().nonnegative()),
+	cellBspWitness: cellStructBspWitnessDtoSchema,
+	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
+	drawingBsp: gfxObjBspNodeDtoSchema.nullable(),
+});
+
+export const environmentPayloadDtoSchema = z.object({
+	kind: z.literal("environment"),
+	residencyKind: z.literal("indoor-env-cell"),
+	sourceAssetKind: z.literal("environment"),
+	environmentId: z.number().int().nonnegative(),
+	cellStructureIds: z.array(z.number().int().nonnegative()),
+	cellStructures: z.array(environmentCellStructDtoSchema),
+	provenance: assetProvenanceDtoSchema,
+});
+export type EnvironmentPayloadDto = z.infer<typeof environmentPayloadDtoSchema>;
 
 export const gfxObjPayloadDtoSchema = z.object({
 	kind: z.literal("gfx-obj"),

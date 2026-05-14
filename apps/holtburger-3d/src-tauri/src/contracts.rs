@@ -53,7 +53,6 @@ pub enum IndoorRuntimeFieldIdDto {
 pub enum IndoorAssetFamilyIdDto {
     IndoorEnvCell,
     Environment,
-    CellStructure,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

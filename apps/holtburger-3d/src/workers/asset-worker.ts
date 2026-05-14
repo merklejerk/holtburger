@@ -3,7 +3,6 @@ import type {
 	AssetErrorCode,
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
-	CellStructurePayloadDto,
 	DependencyManifestPayloadDto,
 	EnvironmentPayloadDto,
 	GfxObjPayloadDto,
@@ -15,7 +14,6 @@ import type {
 import {
 	appearanceManifestPayloadDtoSchema,
 	assetProvenanceDtoSchema,
-	cellStructurePayloadDtoSchema,
 	dependencyManifestPayloadDtoSchema,
 	environmentPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
@@ -92,13 +90,6 @@ export function prepareAssetPayload(
 	);
 	if (environmentPayload.success) {
 		return prepareEnvironment(request, response, environmentPayload.data);
-	}
-
-	const cellStructurePayload = cellStructurePayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (cellStructurePayload.success) {
-		return prepareCellStructure(request, response, cellStructurePayload.data);
 	}
 
 	const gfxObjPayload = gfxObjPayloadDtoSchema.safeParse(response.payload);
@@ -231,40 +222,12 @@ function prepareEnvironment(
 			residencyKind: payload.residencyKind,
 			provenance: parseProvenance(payload.provenance),
 			debugPresentation: {
-				primitive: "environment-reference",
+				primitive: "environment",
 				paletteKey: `environment-${payload.environmentId.toString(16).padStart(8, "0")}`,
 			},
 			environmentId: payload.environmentId,
 			cellStructureIds: payload.cellStructureIds,
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
-function prepareCellStructure(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: CellStructurePayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: {
-			kind: "cell-structure",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: payload.residencyKind,
-			provenance: parseProvenance(payload.provenance),
-			debugPresentation: {
-				primitive: "cell-structure-summary",
-				paletteKey: `cell-structure-${payload.cellStructureId.toString(16).padStart(4, "0")}`,
-			},
-			environmentId: payload.environmentId,
-			cellStructureId: payload.cellStructureId,
-			polygonCount: payload.polygonCount,
-			portalCount: payload.portalCount,
-			hasCellBsp: payload.hasCellBsp,
-			hasPhysicsBsp: payload.hasPhysicsBsp,
-			hasDrawingBsp: payload.hasDrawingBsp,
+			cellStructures: payload.cellStructures,
 		},
 		preparedAt: new Date().toISOString(),
 	};

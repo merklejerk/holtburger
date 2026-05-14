@@ -14,14 +14,22 @@ import type { StaticRenderablePart } from "./static-renderables";
 export function buildStaticRenderablePartMatrix(
 	part: StaticRenderablePart,
 ): Matrix4 {
-	const matrix = buildAcPlacementMatrix(
-		part.instancePlacement,
-		part.landblockWorldOffset,
-		{
+	const matrix = new Matrix4();
+	for (const parentPlacement of part.parentPlacements) {
+		matrix.multiply(
+			buildAcPlacementMatrix(
+				parentPlacement,
+				{ x: 0, y: 0, z: 0 },
+				{ x: 1, y: 1, z: 1 },
+			),
+		);
+	}
+	matrix.multiply(
+		buildAcPlacementMatrix(part.instancePlacement, part.landblockWorldOffset, {
 			x: 1,
 			y: 1,
 			z: 1,
-		},
+		}),
 	);
 	for (const partPlacement of part.partPlacements) {
 		matrix.multiply(

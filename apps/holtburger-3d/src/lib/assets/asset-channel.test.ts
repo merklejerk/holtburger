@@ -482,6 +482,7 @@ describe("asset channel controller", () => {
 					surfaceIds: [],
 					portalCount: 0,
 					staticObjectCount: 0,
+					staticObjects: [],
 					provenance: {
 						source: "repo-local-hba",
 						sourceAssetKind: "env-cell",
@@ -511,6 +512,77 @@ describe("asset channel controller", () => {
 		expect(requests.map((request) => request.assetId)).toEqual([
 			"indoor-env-cell/016c0156",
 			"environment/0d000001",
+		]);
+	});
+
+	it("requests indoor static visual assets from prepared env-cell metadata", () => {
+		const preparedFocusEnvCell = prepareAssetPayload(
+			{
+				requestId: "indoor-1",
+				assetId: "indoor-env-cell/016c0155",
+				priority: "bootstrap",
+			},
+			{
+				requestId: "indoor-1",
+				assetId: "indoor-env-cell/016c0155",
+				payloadKind: "json",
+				payload: {
+					kind: "indoor-env-cell",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "env-cell",
+					envCellId: 0x016c0155,
+					environmentId: null,
+					cellStructureId: null,
+					localPlacement: {
+						origin: { x: 0, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					visibleCellIds: [],
+					seenOutside: false,
+					surfaceIds: [],
+					portalCount: 0,
+					staticObjectCount: 1,
+					staticObjects: [
+						{
+							instanceId: "env-cell-016c0155-static-0-02000001",
+							owningEnvCellId: 0x016c0155,
+							sourceDid: 0x02000001,
+							sourceAssetId: "setup-model/02000001",
+							sourceIndex: 0,
+							localPlacement: {
+								origin: { x: 0, y: 0, z: 0 },
+								orientation: { w: 1, x: 0, y: 0, z: 0 },
+							},
+						},
+					],
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "env-cell",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch(),
+			{
+				kind: "indoor-env-cell",
+				label: "Env cell 0x016c0155",
+				source: "manual",
+				envCellId: 0x016c0155,
+				landblockId: 0x016cffff,
+			},
+			"streaming",
+			{
+				"indoor-env-cell/016c0155": preparedFocusEnvCell,
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"setup-model/02000001",
 		]);
 	});
 
@@ -801,6 +873,19 @@ describe("asset channel controller", () => {
 					surfaceIds: [0x08000001],
 					portalCount: 2,
 					staticObjectCount: 1,
+					staticObjects: [
+						{
+							instanceId: "env-cell-016c0155-static-0-02000001",
+							owningEnvCellId: 0x016c0155,
+							sourceDid: 0x02000001,
+							sourceAssetId: "setup-model/02000001",
+							sourceIndex: 0,
+							localPlacement: {
+								origin: { x: 1, y: 2, z: 3 },
+								orientation: { w: 1, x: 0, y: 0, z: 0 },
+							},
+						},
+					],
 					provenance: {
 						source: "repo-local-hba",
 						sourceAssetKind: "env-cell",
@@ -905,6 +990,10 @@ describe("asset channel controller", () => {
 			y: 20,
 			z: 30,
 		});
+		expect(indoorEnvCell.payload.staticObjects).toHaveLength(1);
+		expect(getPreparedAssetDependencies(indoorEnvCell)).toEqual([
+			{ assetId: "setup-model/02000001" },
+		]);
 		expect(indoorEnvCell.payload.debugPresentation.primitive).toBe(
 			"indoor-env-cell-metadata",
 		);

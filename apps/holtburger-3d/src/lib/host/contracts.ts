@@ -241,6 +241,16 @@ export const indoorEnvCellPayloadDtoSchema = z.object({
 	surfaceIds: z.array(z.number().int().nonnegative()),
 	portalCount: z.number().int().nonnegative(),
 	staticObjectCount: z.number().int().nonnegative(),
+	staticObjects: z.array(
+		z.object({
+			instanceId: z.string(),
+			owningEnvCellId: z.number().int().nonnegative(),
+			sourceDid: z.number().int().nonnegative(),
+			sourceAssetId: z.string(),
+			sourceIndex: z.number().int().nonnegative(),
+			localPlacement: placementTransformDtoSchema,
+		}),
+	),
 	provenance: assetProvenanceDtoSchema,
 });
 export type IndoorEnvCellPayloadDto = z.infer<

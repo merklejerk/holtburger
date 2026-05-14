@@ -2953,7 +2953,7 @@ Decisions and course corrections:
 
 ##### Phase 13.5a — Indoor Static Object Hydration
 
-Status: planned.
+Status: implemented on 2026-05-14; awaiting manual Tauri visual smoke.
 
 Scope: populate structured interiors with authored env-cell static objects using the same requestable visual-asset and Three.js hydration path as outdoor statics, without treating runtime entities as static room props.
 
@@ -2961,7 +2961,7 @@ Primary deliverables:
 
 - promote decoded `EnvCell.static_objects` / static stab facts from metadata-only witnesses into renderer-usable indoor static source instances
 - request and prepare each referenced `gfx-obj/*` or `setup-model/*` dependency through the existing asset graph, not a parallel indoor-only loader
-- join indoor static source instances to their owning env-cell `localPlacement` so furniture and fixtures land in the same scene space as the rendered `CellStruct`
+- place indoor static source instances from their authored static-object frame in the same cell/landblock-local scene space as the rendered `CellStruct`, without treating the env-cell placement as a parent transform
 - render indoor static parts in `WorldDisplay` through a shared static-renderable geometry path or a small generalized extension of the existing outdoor static-renderable model
 - keep runtime/mobile entities out of this phase; this is authored room population only
 
@@ -2975,7 +2975,27 @@ Acceptance:
 Course-correction notes:
 
 - If `EnvCell.static_objects` are not the source of the observed retail furniture, stop and prove the source from ACE/ACViewer/retail references before inventing another placement path.
-- If static object placement needs parent-cell transforms, keep that composition in the browser/renderer scene assembly layer for now; do not mutate authoritative runtime residency just for a browser smoke path.
+- ACE/ACViewer ground truth shows env-cell static object frames are installed as the static object's own position in the containing env cell. They are not children of the env-cell placement, so do not compose `EnvCell.localPlacement * staticObject.localPlacement`.
+
+Progress:
+
+- Confirmed against ACE/ACViewer that `EnvCell.StaticObjects` stores authored static object ids plus frames, and that the client-style path creates a static physics object for each id and adds it to the env cell at that frame.
+- Extended `indoor-env-cell/*` payloads with `staticObjects` records containing stable instance ids, owning env-cell ids, source DIDs, requestable `gfx-obj/*` or `setup-model/*` asset ids, source indexes, and local placements.
+- Added `indoor-env-cell/*` dependency discovery so authored indoor static objects can pull their visual source assets and setup-model gfx dependencies through the existing asset graph.
+- Extended static renderable scene assembly with an `indoor-static` instance kind. Indoor static transforms use the static object's authored local placement plus any setup-model part placements through the same `StaticRenderablePart` / instanced mesh path used by outdoor statics.
+- Updated browser scene coverage to request missing indoor static visual assets from prepared visible env-cell metadata, and updated HUD layer text to report indoor static source counts.
+- Added Rust, contract, worker, asset-channel, and render-model tests covering static object payload exposure, dependency discovery, and indoor static placement without env-cell parent composition.
+
+Decisions:
+
+- Indoor authored static objects are treated as requestable asset facts from `indoor-env-cell/*`, not runtime/mobile entities.
+- Unsupported static object source DID families are surfaced as `unsupported-static/<did>` dependency ids so they remain visible in debug/dependency paths instead of disappearing silently. Supported `0x01` and `0x02` DIDs map to `gfx-obj/*` and `setup-model/*`.
+- The existing static renderable path handles indoor statics without a parallel indoor renderer. Parent-placement support remains available for actual nested setup-model part composition, but env-cell static objects deliberately do not use the env-cell placement as a parent.
+
+Course corrections and next-step assessment:
+
+- Manual smoke after the first Phase 13.5a pass showed room props rendering in a separate cluster from the room shell. The correction is to mirror ACViewer: room shells use `EnvCell.Pos`, while indoor static objects use their own authored frame in the containing cell. Re-smoke `0xda55012e`; if props still separate from the shell, inspect whether setup-model part frames or coordinate-basis conversion are wrong before starting portal visibility work.
+- Portal visibility should remain after room population. Material/surface work is still useful, but populated debug-colored interiors are a better baseline for judging portal and overlap artifacts.
 
 ##### Phase 13.6 — Portal Visibility Renderer Scoping
 
@@ -3599,12 +3619,12 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. The next implementation step is Phase 13.5a, indoor static object hydration.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke still needed to confirm room population in `0xda55012e`. The next step is to rerun that smoke before Phase 13.6 portal visibility scoping.
 
 Current near-term sequence:
 
-1. implement Phase 13.5a indoor static object hydration, using env-cell static object facts to request and render authored furniture/fixtures through the existing static visual asset path
-2. rerun the `0xda55012e` live interior smoke and confirm room population appears before portal work
+1. rerun the `0xda55012e` live interior smoke and confirm room population appears before portal work
+2. if `0xda55012e` still appears empty, prove whether those retail props come from another source before adding portal rendering
 3. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
 4. keep through-wall or overlap issues classified as portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, or indoor static object transform is demonstrably wrong
 5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it

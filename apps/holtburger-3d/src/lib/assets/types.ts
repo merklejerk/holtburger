@@ -78,6 +78,15 @@ export interface PreparedOutdoorStaticSceneGeneratedSceneryInstance extends Prep
 	scale: number;
 }
 
+export interface PreparedIndoorStaticObject {
+	instanceId: string;
+	owningEnvCellId: number;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+}
+
 interface PreparedOutdoorStaticLayerDiagnostics {
 	attempted: number;
 	accepted: number;
@@ -127,6 +136,7 @@ export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	surfaceIds: number[];
 	portalCount: number;
 	staticObjectCount: number;
+	staticObjects: PreparedIndoorStaticObject[];
 }
 
 export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
@@ -391,6 +401,18 @@ export function getPreparedAssetDependencies(
 					(instance) => instance.sourceAssetId,
 				),
 			]),
+		]
+			.sort()
+			.map((assetId) => ({ assetId }));
+	}
+
+	if (asset.payload.kind === "indoor-env-cell") {
+		return [
+			...new Set(
+				asset.payload.staticObjects.map(
+					(staticObject) => staticObject.sourceAssetId,
+				),
+			),
 		]
 			.sort()
 			.map((assetId) => ({ assetId }));

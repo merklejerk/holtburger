@@ -328,6 +328,7 @@ describe("world display model helpers", () => {
 							surfaceIds: [],
 							portalCount: 0,
 							staticObjectCount: 0,
+							staticObjects: [],
 						},
 						preparedAt: "2026-04-28T00:00:00.000Z",
 					},

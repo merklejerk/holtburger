@@ -88,7 +88,7 @@ The goal is not "maximum concurrency." The goal is a stable pipeline where usefu
 ```text
 native lookup gets far enough ahead to reveal dependencies
 asset worker stays busy preparing non-duplicate responses
-main thread receives batched applies without reactive thrash
+frontendState batches store applies so Svelte does not react to every individual prepared asset
 ```
 
 Use this as the implementation heuristic:
@@ -96,10 +96,12 @@ Use this as the implementation heuristic:
 - If the worker is idle while graph dependencies remain undiscovered, traversal is too serial.
 - If native lookup requests explode during large coverage changes, lookup concurrency is too high.
 - If the worker is busy preparing duplicate asset ids, de-dupe is incomplete.
-- If prepared assets arrive quickly but the UI janks, store apply cadence or derived scene recomputation is the bottleneck.
+- If prepared assets arrive quickly but the UI janks, `frontendState` batching cadence or derived scene recomputation is the bottleneck.
 - If graph latency remains high with low lookup and worker utilization, dependency scheduling is still too conservative.
 
 This plan should optimize useful worker saturation first, then only consider a worker pool if profiling shows worker CPU is the sustained bottleneck after de-dupe and pipelined traversal are in place.
+
+`AssetGraphScheduler` should not own Svelte state stability. It may return grouped graph results, but committing those records into app state is a `frontendState` responsibility. The store boundary is the right place to coalesce prepared assets, preserve stable state transitions, and avoid reactive churn across all callers, not only graph hydration.
 
 ## Current Pipeline
 
@@ -132,6 +134,7 @@ The first draft was directionally right, but a code-level dry run exposed severa
 - `AssetChannelController` currently has one `inFlightByAssetId` map whose value is a prepared-asset promise. Adding a second independent response-level map would make request rebinding, disposal, and priority handling awkward.
 - A cleaner controller shape is one `AssetLoadEntry` per `assetId`, with separate optional `responsePromise` and `preparedPromise` fields.
 - `AssetChannelController` also currently owns graph traversal and scene coverage planning. The graph traversal rewrite should introduce `AssetGraphScheduler`; coverage planning can be split after the graph work or as a small cleanup if it blocks clarity.
+- `frontendState` already has `applyPreparedAssets`; future batching/stability work should stay there rather than leaking Svelte store policy into the graph scheduler.
 - `App.svelte` currently names its pending set `inFlightSceneAssetIds`, but it now tracks scene and renderable dependency requests. That name is misleading and should be fixed before deeper scheduling work.
 - `App.svelte` still owns the "scene coverage assets prepare directly; renderable dependencies use graph prep" policy inline. That policy should move into a small tested helper before graph traversal is rewritten.
 - `prepareAssetGraph` receives a snapshot copy of `preparedByAssetId`. Concurrent coverage syncs can apply assets after that snapshot is taken. The controller-level in-flight de-dupe helps, but graph scheduling should still treat caller-provided prepared state as an initial cache, not as the only source of truth.
@@ -504,7 +507,7 @@ with tests, so policy does not live as an ambiguous inline condition. If Phase 1
 - Scene facts should appear as soon as their own lookup + worker prep finishes.
 - Renderable dependencies should start sooner because graph traversal no longer waits for worker preparation just to discover dependencies.
 - Large coverage rings should feel less "spread out" because independent dependencies can load concurrently.
-- Main thread jank should continue to be managed by batched store updates and slider-on-change behavior.
+- Main thread jank should continue to be managed at the app-state boundary through `frontendState.applyPreparedAssets`, derived-state discipline, and slider-on-change behavior. The graph scheduler should not know about Svelte apply cadence.
 
 ## Risks
 

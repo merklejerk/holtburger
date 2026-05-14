@@ -1,4 +1,5 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
+import { isIndoorBrowserDestination } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
@@ -47,6 +48,17 @@ export function deriveTerrainSceneModel(
 				"Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
 			cacheText: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
 			dataSourceText: "No terrain provenance available yet.",
+			tiles: [],
+		};
+	}
+
+	if (isIndoorBrowserDestination(browserDestination)) {
+		return {
+			focusLandblockId: null,
+			statusText:
+				"Browser mode is focused on an indoor env cell, so outdoor terrain rendering is dormant.",
+			cacheText: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(assetState.preparedByAssetId)} landblocks while indoor browser focus is active.`,
+			dataSourceText: describeTerrainDataSources([]),
 			tiles: [],
 		};
 	}

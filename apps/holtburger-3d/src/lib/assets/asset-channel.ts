@@ -6,6 +6,7 @@ import type {
 } from "../host/contracts";
 import {
 	browserLocationToLandblockId,
+	isIndoorBrowserDestination,
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
 import {
@@ -219,7 +220,11 @@ export function createFocusedAssetRequest(
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 ): AssetLookupRequestDto | null {
-	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+	if (
+		!runtimeBatch ||
+		runtimeBatch.residency.indoors ||
+		isIndoorBrowserDestination(browserDestination)
+	) {
 		return null;
 	}
 
@@ -247,6 +252,16 @@ export function createSceneCoverageRequests(
 ): AssetLookupRequestDto[] {
 	if (!runtimeBatch) {
 		return [];
+	}
+
+	if (isIndoorBrowserDestination(browserDestination)) {
+		return createIndoorCoverageRequests(
+			runtimeBatch,
+			priority,
+			preparedByAssetId,
+			pendingAssetIds,
+			browserDestination.envCellId,
+		);
 	}
 
 	if (runtimeBatch.residency.indoors) {
@@ -312,7 +327,11 @@ export function createTerrainCoverageRequests(
 	pendingAssetIds: string[] = [],
 	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
-	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+	if (
+		!runtimeBatch ||
+		runtimeBatch.residency.indoors ||
+		isIndoorBrowserDestination(browserDestination)
+	) {
 		return [];
 	}
 
@@ -348,7 +367,11 @@ function createOutdoorStaticSceneCoverageRequests(
 	pendingAssetIds: string[] = [],
 	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
-	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+	if (
+		!runtimeBatch ||
+		runtimeBatch.residency.indoors ||
+		isIndoorBrowserDestination(browserDestination)
+	) {
 		return [];
 	}
 
@@ -384,7 +407,11 @@ export function createStaticRenderableAssetRequests(
 	pendingAssetIds: string[] = [],
 	options: OutdoorCoverageOptions = DEFAULT_OUTDOOR_COVERAGE_OPTIONS,
 ): AssetLookupRequestDto[] {
-	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+	if (
+		!runtimeBatch ||
+		runtimeBatch.residency.indoors ||
+		isIndoorBrowserDestination(browserDestination)
+	) {
 		return [];
 	}
 
@@ -476,15 +503,26 @@ function createIndoorCoverageRequests(
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[],
+	overrideFocusEnvCellId: number | null = null,
 ): AssetLookupRequestDto[] {
-	const { focusEnvCellId, visibleCellIds, environmentId } =
-		runtimeBatch.residency;
+	const runtimeResidency = runtimeBatch.residency;
+	const focusEnvCellId =
+		overrideFocusEnvCellId ?? runtimeResidency.focusEnvCellId;
 	if (focusEnvCellId === null) {
 		return [];
 	}
 
+	const focusEnvCellAssetId = formatIndoorEnvCellAssetId(focusEnvCellId);
+	const preparedFocusEnvCell = preparedByAssetId[focusEnvCellAssetId];
+	const visibleCellIds =
+		overrideFocusEnvCellId !== null &&
+		preparedFocusEnvCell?.payload.kind === "indoor-env-cell"
+			? preparedFocusEnvCell.payload.visibleCellIds
+			: runtimeResidency.visibleCellIds;
+	const environmentId =
+		overrideFocusEnvCellId !== null ? null : runtimeResidency.environmentId;
 	const envCellAssetIds = [
-		formatIndoorEnvCellAssetId(focusEnvCellId),
+		focusEnvCellAssetId,
 		...visibleCellIds.map((cellId) => formatIndoorEnvCellAssetId(cellId)),
 	];
 	const preparedEnvironmentAssetIds = envCellAssetIds.flatMap((assetId) => {
@@ -507,7 +545,7 @@ function createIndoorCoverageRequests(
 				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
 		)
 		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-runtime-${assetId}`,
+			requestId: `${priority}-${runtimeBatch.tick}-${overrideFocusEnvCellId === null ? "runtime" : "destination"}-${assetId}`,
 			assetId,
 			priority,
 		}));

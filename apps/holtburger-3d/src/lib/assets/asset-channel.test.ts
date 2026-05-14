@@ -124,6 +124,7 @@ describe("asset channel controller", () => {
 				],
 			},
 			{
+				kind: "outdoor-location",
 				label: "29.90S, 65.90W, 0.0Z",
 				northSouth: 29.9,
 				northSouthHemisphere: "S",
@@ -143,6 +144,7 @@ describe("asset channel controller", () => {
 
 	it("derives destination terrain focus from browser coordinates when present", () => {
 		const landblockId = deriveTerrainFocusLandblockId(createRuntimeBatch(), {
+			kind: "outdoor-location",
 			label: "29.90S, 65.90W, 0.0Z",
 			northSouth: 29.9,
 			northSouthHemisphere: "S",
@@ -290,6 +292,7 @@ describe("asset channel controller", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch(),
 			{
+				kind: "outdoor-location",
 				label: "33.50S, 72.80E, 0.0Z",
 				northSouth: 33.5,
 				northSouthHemisphere: "S",
@@ -320,6 +323,7 @@ describe("asset channel controller", () => {
 		const requests = createSceneCoverageRequests(
 			runtimeBatch,
 			{
+				kind: "outdoor-location",
 				label: "29.90S, 65.90W, 0.0Z",
 				northSouth: 29.9,
 				northSouthHemisphere: "S",
@@ -427,6 +431,85 @@ describe("asset channel controller", () => {
 			"indoor-env-cell/016c0155",
 			"indoor-env-cell/016c0156",
 			"indoor-env-cell/016c0157",
+			"environment/0d000001",
+		]);
+	});
+
+	it("requests browser-selected indoor env-cell metadata while runtime residency remains outdoors", () => {
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch(),
+			{
+				kind: "indoor-env-cell",
+				label: "Env cell 0x016c0155",
+				source: "manual",
+				envCellId: 0x016c0155,
+				landblockId: 0x016cffff,
+			},
+			"bootstrap",
+			{},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"indoor-env-cell/016c0155",
+		]);
+	});
+
+	it("expands browser-selected indoor coverage from prepared env-cell metadata", () => {
+		const preparedFocusEnvCell = prepareAssetPayload(
+			{
+				requestId: "indoor-1",
+				assetId: "indoor-env-cell/016c0155",
+				priority: "bootstrap",
+			},
+			{
+				requestId: "indoor-1",
+				assetId: "indoor-env-cell/016c0155",
+				payloadKind: "json",
+				payload: {
+					kind: "indoor-env-cell",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "env-cell",
+					envCellId: 0x016c0155,
+					environmentId: 0x0d000001,
+					cellStructureId: 1,
+					localPlacement: {
+						origin: { x: 0, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					visibleCellIds: [0x016c0156],
+					seenOutside: false,
+					surfaceIds: [],
+					portalCount: 0,
+					staticObjectCount: 0,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "env-cell",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch(),
+			{
+				kind: "indoor-env-cell",
+				label: "Env cell 0x016c0155",
+				source: "manual",
+				envCellId: 0x016c0155,
+				landblockId: 0x016cffff,
+			},
+			"streaming",
+			{
+				"indoor-env-cell/016c0155": preparedFocusEnvCell,
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"indoor-env-cell/016c0156",
 			"environment/0d000001",
 		]);
 	});

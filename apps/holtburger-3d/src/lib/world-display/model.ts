@@ -1,6 +1,9 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { AppModeId } from "../../app/modes";
-import { browserLocationToLandblockId } from "../../app/browser-mode";
+import {
+	browserDestinationToIndoorEnvCellId,
+	browserLocationToLandblockId,
+} from "../../app/browser-mode";
 import {
 	buildOutdoorCoverageLandblocks,
 	formatHex32,
@@ -208,6 +211,17 @@ function deriveSceneContext(
 	assetState: AssetChannelState,
 	landblockCoverageRadius: number,
 ): WorldDisplaySceneContext {
+	const browserFocusEnvCellId =
+		browserDestinationToIndoorEnvCellId(browserDestination);
+	if (browserFocusEnvCellId !== null) {
+		return deriveIndoorSceneContext(
+			browserFocusEnvCellId,
+			browserDestination?.label ?? null,
+			assetState,
+			null,
+		);
+	}
+
 	const focusLandblockId = browserDestination
 		? browserLocationToLandblockId(browserDestination)
 		: normalizeOutdoorLandblockId(runtimeBatch.residency.focusLandblockId);
@@ -217,37 +231,12 @@ function deriveSceneContext(
 		: `No manual destination override is active, so local terrain coverage follows authoritative runtime landblock ${focusLandblockLabel}.`;
 
 	if (runtimeBatch.residency.indoors) {
-		const focusEnvCellLabel = runtimeBatch.residency.focusEnvCellId
-			? formatEnvCellLabel(runtimeBatch.residency.focusEnvCellId)
-			: "Unknown env cell";
-		const visibleCount = runtimeBatch.residency.visibleCellIds.length;
-		const preparedIndoorAssets = Object.keys(
-			assetState.preparedByAssetId,
-		).filter(
-			(assetId) =>
-				assetId.startsWith("indoor-env-cell/") ||
-				assetId.startsWith("environment/"),
+		return deriveIndoorSceneContext(
+			runtimeBatch.residency.focusEnvCellId,
+			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
+			assetState,
+			runtimeBatch,
 		);
-		const seenOutsideText =
-			runtimeBatch.residency.seenOutside === null
-				? "SeenOutside is not available yet."
-				: runtimeBatch.residency.seenOutside
-					? "SeenOutside is set, so outdoor relevance may still matter."
-					: "SeenOutside is clear, so indoor visible-cell relevance stays local to env cells.";
-
-		return {
-			kind: "indoor-visible-cell-set",
-			statusText:
-				"Indoor scene context is now explicit: WorldDisplay tracks env-cell and visible-cell membership separately from outdoor landblock terrain.",
-			focusAnchorLabel: focusEnvCellLabel,
-			destinationText,
-			coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
-			gapText: null,
-			chunks: [],
-			staticRenderableInstanceCount: 0,
-			staticRenderableBuildingCount: 0,
-			staticRenderableSourceAssetIds: [],
-		};
 	}
 
 	const chunks = buildOutdoorChunkRing(
@@ -310,6 +299,46 @@ function deriveSceneContext(
 				),
 			]),
 		].sort(),
+	};
+}
+
+function deriveIndoorSceneContext(
+	focusEnvCellId: number | null,
+	destinationLabel: string | null,
+	assetState: AssetChannelState,
+	runtimeBatch: RuntimeBatchDto | null,
+): WorldDisplaySceneContext {
+	const focusEnvCellLabel = focusEnvCellId
+		? formatEnvCellLabel(focusEnvCellId)
+		: "Unknown env cell";
+	const visibleCount = runtimeBatch?.residency.visibleCellIds.length ?? 0;
+	const preparedIndoorAssets = Object.keys(assetState.preparedByAssetId).filter(
+		(assetId) =>
+			assetId.startsWith("indoor-env-cell/") ||
+			assetId.startsWith("environment/"),
+	);
+	const seenOutsideText =
+		runtimeBatch?.residency.seenOutside === null ||
+		runtimeBatch?.residency.seenOutside === undefined
+			? "SeenOutside is not available for this browser-selected env cell yet."
+			: runtimeBatch.residency.seenOutside
+				? "SeenOutside is set, so outdoor relevance may still matter."
+				: "SeenOutside is clear, so indoor visible-cell relevance stays local to env cells.";
+
+	return {
+		kind: "indoor-visible-cell-set",
+		statusText:
+			"Indoor scene context is explicit: WorldDisplay tracks env-cell and visible-cell membership separately from outdoor landblock terrain.",
+		focusAnchorLabel: focusEnvCellLabel,
+		destinationText: destinationLabel
+			? `Manual destination focus is ${destinationLabel}.`
+			: `Indoor focus is ${focusEnvCellLabel}.`,
+		coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
+		gapText: null,
+		chunks: [],
+		staticRenderableInstanceCount: 0,
+		staticRenderableBuildingCount: 0,
+		staticRenderableSourceAssetIds: [],
 	};
 }
 

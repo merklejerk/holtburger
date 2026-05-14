@@ -107,6 +107,7 @@ describe("world display model helpers", () => {
 				errorMessage: null,
 			},
 			browserDestination: {
+				kind: "outdoor-location",
 				label: "100.55S, 101.65W, 2.0Z",
 				northSouth: 100.55,
 				northSouthHemisphere: "S",

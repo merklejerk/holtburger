@@ -160,6 +160,7 @@ describe("terrain scene model", () => {
 		};
 
 		const model = deriveTerrainSceneModel(createRuntimeBatch(), assetState, {
+			kind: "outdoor-location",
 			label: "29.90S, 65.90W, 0.0Z",
 			northSouth: 29.9,
 			northSouthHemisphere: "S",

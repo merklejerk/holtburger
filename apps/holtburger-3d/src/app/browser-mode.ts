@@ -1,6 +1,7 @@
 import type { RuntimeResidencyDto } from "../lib/host/contracts";
 import {
 	formatLandblockLabel,
+	formatHex32,
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
@@ -8,16 +9,36 @@ import {
 
 type BrowserPageId = "location-entry" | "destination-preview";
 
-export interface BrowserLocationSelection {
+type BrowserDestinationSource =
+	| "manual"
+	| "runtime-residency"
+	| "landblock-pick";
+type NorthSouthHemisphere = "N" | "S";
+type EastWestHemisphere = "E" | "W";
+
+interface BrowserOutdoorLocationSelection {
+	kind: "outdoor-location";
 	label: string;
 	northSouth: number;
-	northSouthHemisphere: "N" | "S";
+	northSouthHemisphere: NorthSouthHemisphere;
 	eastWest: number;
-	eastWestHemisphere: "E" | "W";
+	eastWestHemisphere: EastWestHemisphere;
 	elevation: number;
-	source: "manual" | "runtime-residency" | "landblock-pick";
+	source: BrowserDestinationSource;
 	landblockId: number | null;
 }
+
+export interface BrowserIndoorEnvCellSelection {
+	kind: "indoor-env-cell";
+	label: string;
+	source: BrowserDestinationSource;
+	envCellId: number;
+	landblockId: number;
+}
+
+export type BrowserLocationSelection =
+	| BrowserOutdoorLocationSelection
+	| BrowserIndoorEnvCellSelection;
 
 export interface BrowserModeState {
 	draftInput: string;
@@ -29,6 +50,7 @@ export interface BrowserModeState {
 
 const LOCATION_INPUT_PATTERN =
 	/^\s*(\d+(?:\.\d+)?)\s*([NS])\s*,?\s*(\d+(?:\.\d+)?)\s*([EW])(?:\s*,?\s*(-?\d+(?:\.\d+)?)\s*Z?)?\s*$/i;
+const CELL_ID_INPUT_PATTERN = /^\s*(?:0x)?([0-9a-f]{8})\s*$/i;
 
 const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 	"33.50S, 72.80E, 0.0Z",
@@ -55,8 +77,13 @@ function formatResidencyDraft(residency: RuntimeResidencyDto): string {
 
 export function parseBrowserLocationInput(
 	value: string,
-	source: BrowserLocationSelection["source"] = "manual",
+	source: BrowserDestinationSource = "manual",
 ): BrowserLocationSelection | null {
+	const cellIdSelection = parseBrowserCellIdInput(value, source);
+	if (cellIdSelection) {
+		return cellIdSelection;
+	}
+
 	const match = value.match(LOCATION_INPUT_PATTERN);
 
 	if (!match) {
@@ -73,19 +100,19 @@ export function parseBrowserLocationInput(
 	] = match;
 
 	return {
+		kind: "outdoor-location",
 		label: formatBrowserLocationLabel(
 			Number(northSouth),
-			northSouthHemisphere.toUpperCase() as BrowserLocationSelection["northSouthHemisphere"],
+			northSouthHemisphere.toUpperCase() as NorthSouthHemisphere,
 			Number(eastWest),
-			eastWestHemisphere.toUpperCase() as BrowserLocationSelection["eastWestHemisphere"],
+			eastWestHemisphere.toUpperCase() as EastWestHemisphere,
 			Number(elevation),
 		),
 		northSouth: Number(northSouth),
 		northSouthHemisphere:
-			northSouthHemisphere.toUpperCase() as BrowserLocationSelection["northSouthHemisphere"],
+			northSouthHemisphere.toUpperCase() as NorthSouthHemisphere,
 		eastWest: Number(eastWest),
-		eastWestHemisphere:
-			eastWestHemisphere.toUpperCase() as BrowserLocationSelection["eastWestHemisphere"],
+		eastWestHemisphere: eastWestHemisphere.toUpperCase() as EastWestHemisphere,
 		elevation: Number(elevation),
 		source,
 		landblockId: null,
@@ -196,6 +223,7 @@ export function selectBrowserLandblockDestination(
 		validationMessage: null,
 		destination: {
 			...centerLocation,
+			kind: "outdoor-location",
 			source: "landblock-pick",
 			landblockId: normalizedLandblockId,
 		},
@@ -207,6 +235,10 @@ export function selectBrowserLandblockDestination(
 export function browserLocationToLandblockId(
 	location: BrowserLocationSelection,
 ): number {
+	if (location.kind === "indoor-env-cell") {
+		return normalizeOutdoorLandblockId(location.landblockId);
+	}
+
 	if (location.landblockId !== null) {
 		return normalizeOutdoorLandblockId(location.landblockId);
 	}
@@ -229,9 +261,53 @@ export function browserLocationToLandblockId(
 	return makeOutdoorLandblockId(landblockX, landblockY);
 }
 
+export function browserDestinationToIndoorEnvCellId(
+	location: BrowserLocationSelection | null,
+): number | null {
+	return location?.kind === "indoor-env-cell" ? location.envCellId : null;
+}
+
+export function isIndoorBrowserDestination(
+	location: BrowserLocationSelection | null,
+): location is BrowserIndoorEnvCellSelection {
+	return location?.kind === "indoor-env-cell";
+}
+
+function parseBrowserCellIdInput(
+	value: string,
+	source: BrowserDestinationSource,
+): BrowserLocationSelection | null {
+	const match = value.match(CELL_ID_INPUT_PATTERN);
+	if (!match) {
+		return null;
+	}
+
+	const cellId = Number.parseInt(match[1], 16) >>> 0;
+	const landblockId = normalizeOutdoorLandblockId(cellId);
+	if ((cellId & 0xffff) === 0xffff) {
+		const centerLocation =
+			outdoorLandblockIdToApproximateCenterLocation(landblockId);
+
+		return {
+			...centerLocation,
+			kind: "outdoor-location",
+			source,
+			landblockId,
+		};
+	}
+
+	return {
+		kind: "indoor-env-cell",
+		label: `Env cell 0x${formatHex32(cellId)} (${formatLandblockLabel(landblockId)})`,
+		source,
+		envCellId: cellId,
+		landblockId,
+	};
+}
+
 function outdoorLandblockIdToApproximateCenterLocation(
 	landblockId: number,
-): Omit<BrowserLocationSelection, "source" | "landblockId"> {
+): Omit<BrowserOutdoorLocationSelection, "kind" | "source" | "landblockId"> {
 	const coords = getOutdoorLandblockCoords(landblockId);
 	const signedLongitude = ((coords.x + 0.5) * 192) / 240 - 102;
 	const signedLatitude = ((coords.y + 0.5) * 192) / 240 - 102;
@@ -258,9 +334,9 @@ function outdoorLandblockIdToApproximateCenterLocation(
 
 function formatBrowserLocationLabel(
 	northSouth: number,
-	northSouthHemisphere: BrowserLocationSelection["northSouthHemisphere"],
+	northSouthHemisphere: NorthSouthHemisphere,
 	eastWest: number,
-	eastWestHemisphere: BrowserLocationSelection["eastWestHemisphere"],
+	eastWestHemisphere: EastWestHemisphere,
 	elevation: number,
 ): string {
 	return `${northSouth.toFixed(2)}${northSouthHemisphere}, ${eastWest.toFixed(2)}${eastWestHemisphere}, ${elevation.toFixed(1)}Z`;

@@ -1,3 +1,7 @@
+import {
+	browserDestinationToIndoorEnvCellId,
+	type BrowserLocationSelection,
+} from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
@@ -36,7 +40,17 @@ export interface StructuredInteriorSceneModel {
 export function deriveStructuredInteriorSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
+	browserDestination: BrowserLocationSelection | null = null,
 ): StructuredInteriorSceneModel {
+	const browserFocusEnvCellId =
+		browserDestinationToIndoorEnvCellId(browserDestination);
+	if (browserFocusEnvCellId !== null) {
+		return deriveBrowserFocusedStructuredInteriorSceneModel(
+			browserFocusEnvCellId,
+			assetState,
+		);
+	}
+
 	if (!runtimeBatch || !runtimeBatch.residency.indoors) {
 		return emptyStructuredInteriorSceneModel(
 			null,
@@ -59,6 +73,40 @@ export function deriveStructuredInteriorSceneModel(
 	const activeEnvCellIds = [
 		...new Set([focusEnvCellId, ...runtimeBatch.residency.visibleCellIds]),
 	].sort((left, right) => left - right);
+	return deriveStructuredInteriorSceneForEnvCells(
+		focusEnvCellId,
+		activeEnvCellIds,
+		assetState,
+	);
+}
+
+function deriveBrowserFocusedStructuredInteriorSceneModel(
+	focusEnvCellId: number,
+	assetState: AssetChannelState,
+): StructuredInteriorSceneModel {
+	const focusEnvCellAsset =
+		assetState.preparedByAssetId[formatIndoorEnvCellAssetId(focusEnvCellId)];
+	const activeEnvCellIds = isPreparedIndoorEnvCellAsset(focusEnvCellAsset)
+		? [
+				...new Set([
+					focusEnvCellId,
+					...focusEnvCellAsset.payload.visibleCellIds,
+				]),
+			].sort((left, right) => left - right)
+		: [focusEnvCellId];
+
+	return deriveStructuredInteriorSceneForEnvCells(
+		focusEnvCellId,
+		activeEnvCellIds,
+		assetState,
+	);
+}
+
+function deriveStructuredInteriorSceneForEnvCells(
+	focusEnvCellId: number,
+	activeEnvCellIds: number[],
+	assetState: AssetChannelState,
+): StructuredInteriorSceneModel {
 	const missingEnvCellAssetIds = new Set<string>();
 	const missingEnvironmentAssetIds = new Set<string>();
 	const missingCellStructureKeys = new Set<string>();

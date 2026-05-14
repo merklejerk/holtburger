@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	browserDestinationToIndoorEnvCellId,
 	browserLocationToLandblockId,
 	createBrowserModeState,
+	isIndoorBrowserDestination,
 	parseBrowserLocationInput,
 	previewBrowserLocation,
 	selectBrowserLandblockDestination,
@@ -38,6 +40,7 @@ describe("browser-mode location policy", () => {
 
 	it("parses AC-style coordinate input into a stable selection label", () => {
 		expect(parseBrowserLocationInput("100.4s, 101.55w, 1z")).toEqual({
+			kind: "outdoor-location",
 			label: "100.40S, 101.55W, 1.0Z",
 			northSouth: 100.4,
 			northSouthHemisphere: "S",
@@ -51,6 +54,7 @@ describe("browser-mode location policy", () => {
 
 	it("accepts compact coordinate input with omitted commas and elevation", () => {
 		expect(parseBrowserLocationInput("100.4s 101.55w")).toEqual({
+			kind: "outdoor-location",
 			label: "100.40S, 101.55W, 0.0Z",
 			northSouth: 100.4,
 			northSouthHemisphere: "S",
@@ -64,6 +68,7 @@ describe("browser-mode location policy", () => {
 
 	it("accepts coordinate input with numeric elevation and no Z suffix", () => {
 		expect(parseBrowserLocationInput("100.4s 101.55w -2.5")).toEqual({
+			kind: "outdoor-location",
 			label: "100.40S, 101.55W, -2.5Z",
 			northSouth: 100.4,
 			northSouthHemisphere: "S",
@@ -93,6 +98,7 @@ describe("browser-mode location policy", () => {
 
 		expect(state.destination?.source).toBe("runtime-residency");
 		expect(state.destination?.label).toBe(runtimeResidency.focusLocationLabel);
+		expect(state.destination?.kind).toBe("outdoor-location");
 		expect(state.destination?.landblockId).toBeNull();
 		expect(state.page).toBe("destination-preview");
 	});
@@ -104,10 +110,35 @@ describe("browser-mode location policy", () => {
 		);
 
 		expect(state.destination?.source).toBe("landblock-pick");
+		expect(state.destination?.kind).toBe("outdoor-location");
 		expect(state.destination?.landblockId).toBe(0xda55ffff);
 		expect(state.destination?.label).toContain("0xda55ffff");
 		expect(state.draftInput).toBe(state.destination?.label);
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
+	});
+
+	it("can select an outdoor landblock from an explicit 32-bit landblock id", () => {
+		const state = previewBrowserLocation(
+			updateBrowserDraft(createBrowserModeState(), "0xda55ffff"),
+		);
+
+		expect(state.destination?.kind).toBe("outdoor-location");
+		expect(state.destination?.source).toBe("manual");
+		expect(state.destination?.landblockId).toBe(0xda55ffff);
+		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
+	});
+
+	it("can select an indoor env cell from an explicit 32-bit cell id", () => {
+		const state = previewBrowserLocation(
+			updateBrowserDraft(createBrowserModeState(), "016c0155"),
+		);
+
+		expect(isIndoorBrowserDestination(state.destination)).toBe(true);
+		expect(state.destination?.label).toContain("0x016c0155");
+		expect(browserDestinationToIndoorEnvCellId(state.destination)).toBe(
+			0x016c0155,
+		);
+		expect(browserLocationToLandblockId(state.destination!)).toBe(0x016cffff);
 	});
 
 	it("clamps browser coverage radius to the supported debug range", () => {
@@ -123,6 +154,7 @@ describe("browser-mode location policy", () => {
 
 	it("converts browser coordinates into a normalized outdoor landblock id", () => {
 		const landblockId = browserLocationToLandblockId({
+			kind: "outdoor-location",
 			label: "29.90S, 65.90W, 0.0Z",
 			northSouth: 29.9,
 			northSouthHemisphere: "S",
@@ -138,6 +170,7 @@ describe("browser-mode location policy", () => {
 
 	it("returns unsigned landblock ids for coordinates in high landblock ranges", () => {
 		const landblockId = browserLocationToLandblockId({
+			kind: "outdoor-location",
 			label: "33.60S, 72.70E, 0.0Z",
 			northSouth: 33.6,
 			northSouthHemisphere: "S",

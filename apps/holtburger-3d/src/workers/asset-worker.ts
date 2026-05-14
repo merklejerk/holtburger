@@ -28,7 +28,7 @@ import type {
 	PreparedAssetRecord,
 	PreparedAssetProvenance,
 	PreparedAssetPayload,
-	PreparedGfxObjRenderGeometry,
+	PreparedPolygonSetRenderGeometry,
 	PreparedTerrainMesh,
 	PreparedTerrainTriangle,
 } from "../lib/assets/types";
@@ -213,6 +213,16 @@ function prepareEnvironment(
 	response: AssetLookupResponseDto,
 	payload: EnvironmentPayloadDto,
 ): PreparedAssetRecord {
+	const cellStructures = payload.cellStructures.map((cellStructure) => ({
+		...cellStructure,
+		renderGeometry: buildPolygonSetRenderGeometry({
+			sourceLabel: `Environment ${formatHexId(payload.environmentId)} cell structure ${cellStructure.id}`,
+			sourceId: cellStructure.id,
+			vertexArray: cellStructure.vertexArray,
+			drawingPolygons: cellStructure.drawingPolygons,
+		}),
+	}));
+
 	return {
 		request,
 		response,
@@ -227,7 +237,7 @@ function prepareEnvironment(
 			},
 			environmentId: payload.environmentId,
 			cellStructureIds: payload.cellStructureIds,
-			cellStructures: payload.cellStructures,
+			cellStructures,
 		},
 		preparedAt: new Date().toISOString(),
 	};
@@ -238,7 +248,12 @@ function prepareGfxObj(
 	response: AssetLookupResponseDto,
 	payload: GfxObjPayloadDto,
 ): PreparedAssetRecord {
-	const renderGeometry = buildGfxObjRenderGeometry(payload);
+	const renderGeometry = buildPolygonSetRenderGeometry({
+		sourceLabel: `GfxObj ${formatHexId(payload.gfxObjId)}`,
+		sourceId: payload.gfxObjId,
+		vertexArray: payload.vertexArray,
+		drawingPolygons: payload.drawingPolygons,
+	});
 
 	return {
 		request,
@@ -557,19 +572,26 @@ function usesSouthwestToNortheastCut(
 	return splitDirection >= 0x80000000;
 }
 
-function buildGfxObjRenderGeometry(
-	payload: GfxObjPayloadDto,
-): PreparedGfxObjRenderGeometry {
+interface PolygonSetGeometrySource {
+	sourceLabel: string;
+	sourceId: number;
+	vertexArray: GfxObjPayloadDto["vertexArray"];
+	drawingPolygons: GfxObjPayloadDto["drawingPolygons"];
+}
+
+function buildPolygonSetRenderGeometry(
+	source: PolygonSetGeometrySource,
+): PreparedPolygonSetRenderGeometry {
 	const verticesById = new Map(
-		payload.vertexArray.vertices.map((vertex) => [vertex.id, vertex]),
+		source.vertexArray.vertices.map((vertex) => [vertex.id, vertex]),
 	);
 	const positions: number[] = [];
 	const normals: number[] = [];
 	const uvs: number[] = [];
-	const triangles: PreparedGfxObjRenderGeometry["triangles"] = [];
+	const triangles: PreparedPolygonSetRenderGeometry["triangles"] = [];
 	const surfaceIdSet = new Set<number>();
 	const invalidPolygons: NonNullable<
-		PreparedGfxObjRenderGeometry["invalidPolygons"]
+		PreparedPolygonSetRenderGeometry["invalidPolygons"]
 	> = [];
 	let minX = Number.POSITIVE_INFINITY;
 	let minY = Number.POSITIVE_INFINITY;
@@ -578,10 +600,10 @@ function buildGfxObjRenderGeometry(
 	let maxY = Number.NEGATIVE_INFINITY;
 	let maxZ = Number.NEGATIVE_INFINITY;
 
-	for (const polygon of payload.drawingPolygons) {
+	for (const polygon of source.drawingPolygons) {
 		if (polygon.numPts !== polygon.vertexIds.length) {
 			throw new Error(
-				`GfxObj ${formatHexId(payload.gfxObjId)} polygon ${polygon.id} declares ${polygon.numPts} points but provides ${polygon.vertexIds.length} vertices.`,
+				`${source.sourceLabel} polygon ${polygon.id} declares ${polygon.numPts} points but provides ${polygon.vertexIds.length} vertices.`,
 			);
 		}
 		if (polygon.vertexIds.length < 3) {
@@ -624,7 +646,7 @@ function buildGfxObjRenderGeometry(
 				const vertex = polygonVertices[polygonVertexOffset];
 				if (!vertex) {
 					throw new Error(
-						`GfxObj ${formatHexId(payload.gfxObjId)} polygon ${polygon.id} failed internal vertex validation.`,
+						`${source.sourceLabel} polygon ${polygon.id} failed internal vertex validation.`,
 					);
 				}
 
@@ -646,7 +668,7 @@ function buildGfxObjRenderGeometry(
 
 	const vertexCount = positions.length / 3;
 	return {
-		gfxObjId: payload.gfxObjId,
+		sourceId: source.sourceId,
 		vertexCount,
 		triangleCount: triangles.length,
 		positions,

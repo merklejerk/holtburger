@@ -7,7 +7,7 @@ import {
 	Vector3,
 } from "three";
 
-import type { PreparedGfxObjRenderGeometry } from "../assets/types";
+import type { PreparedPolygonSetRenderGeometry } from "../assets/types";
 import type { StaticRenderablePart } from "./static-renderables";
 
 export function buildStaticRenderablePartMatrix(
@@ -30,7 +30,7 @@ export function buildStaticRenderablePartMatrix(
 }
 
 export function buildGfxObjGeometry(
-	renderGeometry: PreparedGfxObjRenderGeometry,
+	renderGeometry: PreparedPolygonSetRenderGeometry,
 ): BufferGeometry {
 	const geometry = new BufferGeometry();
 	geometry.setAttribute(

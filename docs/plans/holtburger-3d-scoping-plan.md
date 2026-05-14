@@ -2730,7 +2730,7 @@ Next-step assessment:
 
 ##### Phase 13.1 — `Environment` And `CellStruct` DAT Decoders
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Primary deliverables:
 
@@ -2743,6 +2743,29 @@ Acceptance:
 
 - fixture-backed tests prove decoded counts and key relationships for at least one real env cell and its owning environment
 - decoder names and fields match the source-audit terminology
+
+Progress:
+
+- Added `holtburger-dat` decoders for portal-DAT `Environment` records and their nested environment-scoped `CellStruct` records.
+- Reused the existing `CVertexArray`, `Polygon`, and `BspNode` machinery for cell drawing geometry, portal polygon ids, cell BSP, physics polygons, physics BSP, and optional drawing BSP.
+- Added a synthetic parser test for the minimal cell-structure byte shape and a repo-local fixture test that scans `assets.hba` for a real `EnvCell`, resolves its owning `Environment`, and proves the selected `cell_structure` key exists with drawing polygons.
+- Validation passed:
+  - `cargo test -p holtburger-dat file_type::environment -- --nocapture`
+  - `cargo test -p holtburger-dat`
+  - `cargo clippy -p holtburger-dat --all-targets -- -D warnings`
+  - `cargo fmt --all --check`
+
+Decisions:
+
+- `CellStruct.id` is populated from the owning `Environment.Cells` map key. ACE's `Environment` dictionary supplies the key, and ACE's `CellStruct.Unpack` body does not read a standalone id.
+- The decoded Rust `CellStruct` type is still first-class because downstream code needs a typed handle for selected geometry, but it remains environment-scoped rather than a globally requestable asset.
+- Full BSP structures stay in Rust. Phase 13.1 does not add frontend DTOs or host payloads.
+
+Course corrections:
+
+- Phase 13.2 can now decode `environment/*` through `holtburger-dat` directly instead of treating it as reference-only metadata.
+- The old `cell-structure/*` placeholder should be removed or replaced in Phase 13.2 before frontend code grows more dependency logic around it.
+- There is no evidence from this phase that Phase 13.3 through 13.5 need a different order. The next step still makes sense as decoded `environment/*` payload promotion, followed by worker mesh prep.
 
 ##### Phase 13.2 — Decoded `environment/*` Asset Payloads
 
@@ -3412,15 +3435,14 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. The next step is Phase 13.1, decoding `Environment` and its nested `CellStruct` records in `holtburger-dat`.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. The next step is Phase 13.2, promoting `environment/*` from reference-only metadata to decoded asset payloads and removing or superseding the placeholder `cell-structure/*` path.
 
 Current near-term sequence:
 
-1. implement Phase 13.1 DAT decoders for `Environment` and nested `CellStruct` records
-2. implement Phase 13.2 decoded `environment/*` payloads and remove or supersede the bare `cell-structure/*` placeholder path
-3. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
-4. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
-5. run Phase 13.5 live interior smoke and gate review
-6. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
-7. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-8. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+1. implement Phase 13.2 decoded `environment/*` payloads and remove or supersede the bare `cell-structure/*` placeholder path
+2. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
+3. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
+4. run Phase 13.5 live interior smoke and gate review
+5. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
+6. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+7. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

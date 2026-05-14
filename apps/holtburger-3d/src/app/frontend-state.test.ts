@@ -194,6 +194,43 @@ describe("frontend state store", () => {
 		]);
 	});
 
+	it("can batch asset pending and prepared updates into one state transition", () => {
+		const store = createFrontendStateStore();
+
+		store.loadSnapshot(createSnapshot());
+		store.markAssetsPending([
+			{
+				requestId: "bootstrap-terrain-a",
+				assetId: "terrain/0102ffff",
+				priority: "bootstrap",
+			},
+			{
+				requestId: "bootstrap-terrain-b",
+				assetId: "terrain/0103ffff",
+				priority: "bootstrap",
+			},
+		]);
+		store.applyPreparedAssets([
+			createPreparedTerrainAsset("bootstrap-terrain-a", "terrain/0102ffff"),
+			createPreparedTerrainAsset("bootstrap-terrain-b", "terrain/0103ffff"),
+		]);
+
+		expect(get(store).asset.status).toBe("ready");
+		expect(get(store).asset.activeRequest?.assetId).toBe("terrain/0103ffff");
+		expect(
+			get(store).asset.preparedByAssetId["terrain/0102ffff"],
+		).toBeDefined();
+		expect(
+			get(store).asset.preparedByAssetId["terrain/0103ffff"],
+		).toBeDefined();
+		expect(get(store).asset.history.map((entry) => entry.status)).toEqual([
+			"requested",
+			"requested",
+			"prepared",
+			"prepared",
+		]);
+	});
+
 	it("keeps the app in world-viewer mode even when a destination override is active", () => {
 		const browserModeStore = createFrontendStateStore();
 
@@ -242,3 +279,44 @@ describe("frontend state store", () => {
 		expect(mode.activePageId).toBe("world-viewer");
 	});
 });
+
+function createPreparedTerrainAsset(requestId: string, assetId: string) {
+	return {
+		request: {
+			requestId,
+			assetId,
+			priority: "bootstrap" as const,
+		},
+		response: {
+			requestId,
+			assetId,
+			payloadKind: "json" as const,
+			payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
+		},
+		payload: {
+			kind: "terrain-landblock" as const,
+			sourceAssetKind: "cell-landblock" as const,
+			residencyKind: "outdoor-landblock" as const,
+			provenance: {
+				source: "unknown" as const,
+				sourceAssetKind: "cell-landblock" as const,
+				errorCode: null,
+				detail: null,
+			},
+			debugPresentation: {
+				primitive: "terrain-landblock-mesh",
+				paletteKey: "terrain-0102ffff",
+			},
+			terrainMesh: {
+				landblockId: 0x0102ffff,
+				gridSize: 9,
+				tileSize: 24,
+				vertices: [],
+				triangles: [],
+				minHeight: 0,
+				maxHeight: 24,
+			},
+		},
+		preparedAt: "2026-04-26T00:00:00.000Z",
+	};
+}

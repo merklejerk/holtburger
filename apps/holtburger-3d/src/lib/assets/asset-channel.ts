@@ -45,6 +45,11 @@ type PendingAssetRequest = {
 	reject: (error: Error) => void;
 };
 
+interface InFlightAssetPreparation {
+	requestId: string;
+	promise: Promise<PreparedAssetRecord>;
+}
+
 export interface AssetGraphPreparationResult {
 	rootAsset: PreparedAssetRecord;
 	preparedAssets: PreparedAssetRecord[];
@@ -64,6 +69,11 @@ export class AssetChannelController {
 	private readonly worker: AssetWorkerLike;
 
 	private readonly pendingRequests = new Map<string, PendingAssetRequest>();
+
+	private readonly inFlightByAssetId = new Map<
+		string,
+		InFlightAssetPreparation
+	>();
 
 	constructor(
 		private readonly lookupAssetFn: AssetLookupFn = lookupAsset,
@@ -107,6 +117,30 @@ export class AssetChannelController {
 	}
 
 	async prepareAsset(
+		request: AssetLookupRequestDto,
+	): Promise<PreparedAssetRecord> {
+		const inFlight = this.inFlightByAssetId.get(request.assetId);
+		if (inFlight) {
+			return rebindPreparedAssetRequest(await inFlight.promise, request);
+		}
+
+		const promise = this.prepareAssetUncached(request);
+		this.inFlightByAssetId.set(request.assetId, {
+			requestId: request.requestId,
+			promise,
+		});
+
+		try {
+			return await promise;
+		} finally {
+			const active = this.inFlightByAssetId.get(request.assetId);
+			if (active?.requestId === request.requestId) {
+				this.inFlightByAssetId.delete(request.assetId);
+			}
+		}
+	}
+
+	private async prepareAssetUncached(
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
 		const response = await this.lookupAssetFn(request);
@@ -213,7 +247,23 @@ export class AssetChannelController {
 			pending.reject(error);
 		}
 		this.pendingRequests.clear();
+		this.inFlightByAssetId.clear();
 	}
+}
+
+function rebindPreparedAssetRequest(
+	asset: PreparedAssetRecord,
+	request: AssetLookupRequestDto,
+): PreparedAssetRecord {
+	return {
+		...asset,
+		request,
+		response: {
+			...asset.response,
+			requestId: request.requestId,
+			assetId: request.assetId,
+		},
+	};
 }
 
 export function createFocusedAssetRequest(

@@ -717,6 +717,57 @@ describe("asset channel controller", () => {
 		controller.dispose();
 	});
 
+	it("coalesces concurrent direct preparation requests by asset id", async () => {
+		let lookupCount = 0;
+		let releaseLookup = () => {};
+		const lookupGate = new Promise<void>((resolve) => {
+			releaseLookup = resolve;
+		});
+		const controller = new AssetChannelController(
+			async (request) => {
+				lookupCount += 1;
+				await lookupGate;
+				return {
+					requestId: request.requestId,
+					assetId: request.assetId,
+					payloadKind: "json",
+					payload: {
+						kind: "synthetic-leaf",
+						residencyKind: "unknown",
+						provenance: {
+							source: "unknown",
+							sourceAssetKind: "synthetic-leaf",
+							errorCode: null,
+							detail: "synthetic dependency leaf",
+						},
+					},
+				};
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const first = controller.prepareAsset({
+			requestId: "first-request",
+			assetId: "synthetic/shared",
+			priority: "streaming",
+		});
+		const second = controller.prepareAsset({
+			requestId: "second-request",
+			assetId: "synthetic/shared",
+			priority: "bootstrap",
+		});
+		releaseLookup();
+		const [firstAsset, secondAsset] = await Promise.all([first, second]);
+
+		expect(lookupCount).toBe(1);
+		expect(firstAsset.request.requestId).toBe("first-request");
+		expect(secondAsset.request.requestId).toBe("second-request");
+		expect(secondAsset.request.priority).toBe("bootstrap");
+		expect(secondAsset.response.requestId).toBe("second-request");
+		expect(secondAsset.response.assetId).toBe("synthetic/shared");
+		controller.dispose();
+	});
+
 	it("orchestrates a synthetic dependency walk on the main thread without worker request-back", async () => {
 		const responsesByAssetId: Record<
 			string,
@@ -800,6 +851,62 @@ describe("asset channel controller", () => {
 			pendingAssetIds: [],
 		});
 
+		controller.dispose();
+	});
+
+	it("coalesces overlapping graph dependency preparation by asset id", async () => {
+		const lookupAssetIds: string[] = [];
+		let releaseSharedLookup = () => {};
+		const sharedLookupGate = new Promise<void>((resolve) => {
+			releaseSharedLookup = resolve;
+		});
+		const controller = new AssetChannelController(
+			async (request) => {
+				lookupAssetIds.push(request.assetId);
+				if (request.assetId === "synthetic/root-a") {
+					return createSyntheticDependencyManifestResponse(request, [
+						"synthetic/shared",
+					]);
+				}
+				if (request.assetId === "synthetic/root-b") {
+					return createSyntheticDependencyManifestResponse(request, [
+						"synthetic/shared",
+					]);
+				}
+				if (request.assetId === "synthetic/shared") {
+					await sharedLookupGate;
+					return createSyntheticLeafResponse(request);
+				}
+
+				throw new Error(`unexpected lookup ${request.assetId}`);
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const first = controller.prepareAssetGraph({
+			requestId: "root-a",
+			assetId: "synthetic/root-a",
+			priority: "streaming",
+		});
+		const second = controller.prepareAssetGraph({
+			requestId: "root-b",
+			assetId: "synthetic/root-b",
+			priority: "streaming",
+		});
+		await waitForMicrotasks();
+		releaseSharedLookup();
+		const [firstGraph, secondGraph] = await Promise.all([first, second]);
+
+		expect(
+			lookupAssetIds.filter((assetId) => assetId === "synthetic/shared"),
+		).toHaveLength(1);
+		expect(firstGraph.preparedByAssetId["synthetic/shared"]).toBeDefined();
+		expect(secondGraph.preparedByAssetId["synthetic/shared"]).toBeDefined();
+		expect(
+			secondGraph.preparedAssets.find(
+				(asset) => asset.request.assetId === "synthetic/shared",
+			)?.request.requestId,
+		).toBe("root-b-dependency-synthetic/shared");
 		controller.dispose();
 	});
 
@@ -1767,6 +1874,54 @@ function createPreparedIndoorEnvCellAsset(
 			},
 		},
 	);
+}
+
+function createSyntheticDependencyManifestResponse(
+	request: AssetLookupRequestDto,
+	dependencyAssetIds: string[],
+): AssetLookupResponseDto {
+	return {
+		requestId: request.requestId,
+		assetId: request.assetId,
+		payloadKind: "json",
+		payload: {
+			kind: "dependency-manifest",
+			residencyKind: "unknown",
+			dependencyAssetIds,
+			provenance: {
+				source: "unknown",
+				sourceAssetKind: "dependency-manifest",
+				errorCode: null,
+				detail: "synthetic dependency root",
+			},
+		},
+	};
+}
+
+function createSyntheticLeafResponse(
+	request: AssetLookupRequestDto,
+): AssetLookupResponseDto {
+	return {
+		requestId: request.requestId,
+		assetId: request.assetId,
+		payloadKind: "json",
+		payload: {
+			kind: "synthetic-leaf",
+			residencyKind: "unknown",
+			provenance: {
+				source: "unknown",
+				sourceAssetKind: "synthetic-leaf",
+				errorCode: null,
+				detail: "synthetic dependency leaf",
+			},
+		},
+	};
+}
+
+async function waitForMicrotasks(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
 }
 
 function createOutdoorStaticSceneDiagnostics() {

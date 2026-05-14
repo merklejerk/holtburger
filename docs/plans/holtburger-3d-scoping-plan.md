@@ -69,7 +69,8 @@ The plan should use AC-shaped terms instead of broad visual labels whenever poss
 - **VisibleCells**: env-cell visibility data used for structured-interior scene relevance. Do not replace it with symmetric adjacency or portal-derived guesses without stronger evidence.
 - **Cell portal**: an `EnvCell.CellPortals` / `CellPortal` topology record that names a portal polygon, an adjacent env cell, and the reciprocal portal id. This is structured-interior connectivity and clipping data, not a gameplay teleport portal.
 - **Building portal**: a `LandblockInfo.Buildings[*].BuildInfo.Portals` / `CBldPortal` topology record for doors, windows, cave mouths, and other openings from outdoor/building geometry into env-cell-backed structured spaces.
-- **Portal polygon**: the render/visibility polygon associated with a cell or building portal. Retail uses these polygons for clipped views and portal-mask/depth behavior; do not model them as terrain holes without stronger evidence.
+- **Portal polygon**: the render/visibility polygon associated with a cell or building portal. Retail uses these polygons for clipped portal views; do not model them as terrain holes without stronger evidence.
+- **Portal visibility renderer**: a future renderer capability that uses portal topology and portal polygons to make structured spaces visually match retail behavior around openings. Retail, ACE, and ACViewer are semantic references for what should be visible, not implementation constraints. The final implementation can use modern techniques such as stencil buffers, scissor regions, clip planes, depth prepasses, portal-region recursion, or hybrids.
 - **Gameplay portal**: a live entity / weenie that teleports or transports players. This is authoritative runtime object state and should not be confused with static cell/building portal topology.
 - **Subterranean opening**: an outdoor-world entrance into env-cell-backed space below the terrain surface. ACE position resolution can classify an outdoor-looking position as an env cell when the point is below terrain and inside an env-cell volume.
 - **Explicit landblock statics**: `LandblockInfo.Objects` and `LandblockInfo.Buildings`. These are authored static content facts, not runtime-authoritative renderer bundles. Phases 12.6/12.7 exposed them through `landblock-statics/*`; Phase 12.8 should fold them into the aggregate `outdoor-static-scene/*` payload.
@@ -195,9 +196,10 @@ flowchart TD
 Portal interpretation:
 
 - Cell and building portals are static topology witnesses. They help the frontend render clipped views through openings and help Rust/world logic reason about spatial transitions.
-- Portal polygons are not gameplay portals and are not necessarily terrain cutouts. Retail evidence points toward portal-mask/depth behavior around building/cave geometry rather than mutation of the `CellLandblock` terrain triangle set.
+- Portal polygons are not gameplay portals and are not necessarily terrain cutouts. Retail evidence points toward clipped portal views around building/cave geometry rather than mutation of the `CellLandblock` terrain triangle set.
 - Gameplay portals remain live entities. Their rendering and interaction should come from runtime world objects, not from `CellPortal` / `CBldPortal` records.
 - Portal clipping is renderer capability, not a prerequisite for carrying honest portal data. The first structured-interior render should preserve portal witnesses and visible-cell membership without trying to reproduce retail recursive portal views in the same phase.
+- Future portal rendering should target visual parity with retail semantics, not an implementation clone of the retail client's CPU-side portal-view machinery or ACViewer's inspection renderer.
 
 Structured-interior asset interpretation:
 
@@ -1577,14 +1579,14 @@ Strong anchors:
 - The structured-interior level format has a real second layer below `EnvCell`, and that layer matters architecturally. `Environment` is a portal-DAT prefab container of `CellStruct`s, and each `CellStruct` contains render polygons, portal indices, cell BSP, physics polygons, physics BSP, and an optional drawing BSP. That means structured-interior level data is not just "an env cell with textures"; it is env-cell metadata plus a reusable geometry or collision structure with multiple spatial trees. Relevant anchors: [ACE/Source/ACE.DatLoader/FileTypes/Environment.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Environment.cs), [ACE/Source/ACE.DatLoader/Entity/CellStruct.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CellStruct.cs), [ACE/Source/ACE.DatLoader/Entity/CellPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/BSPPortal.cs), and [ACViewer/docs/index.html](/home/cluracan/code/holtburger/ACViewer/docs/index.html).
 - ACE server physics treats `VisibleCells` as a real structured-interior visibility or PVS-style input, not just debug metadata. `ObjectMaint` uses current cell plus `VisibleCells` for env-cell visibility and adds outdoor landblock objects when `SeenOutside` is set. `PhysicsObj.handle_visible_cells()` uses that visibility set to maintain create or destroy state. Relevant anchors: [ACE/Source/ACE.Server/Physics/Common/ObjectMaint.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/Common/ObjectMaint.cs), [ACE/Source/ACE.Server/Physics/Common/EnvCell.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/Common/EnvCell.cs), and [ACE/Source/ACE.Server/Physics/PhysicsObj.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Physics/PhysicsObj.cs).
 - Structured-interior visibility is not safely assumed to be symmetric. ACE's own player command comments call out a case where one room contains another in its `VisibleCells` list while the inverse is missing. That is strong evidence against replacing AC's visible-cell data with naive graph symmetry or portal-derived adjacency. Relevant anchor: [ACE/Source/ACE.Server/Command/Handlers/PlayerCommands.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server/Command/Handlers/PlayerCommands.cs).
-- Portal topology has multiple meanings that must remain separate. `EnvCell.CellPortals` / `CellPortal` and `LandblockInfo.Buildings[*].BuildInfo.Portals` / `CBldPortal` are static spatial topology records; gameplay portals are live runtime objects. Retail client evidence also shows portal polygons being used for clipped views and depth-mask-style rendering rather than as proof that `CellLandblock` terrain polygons are deleted around cave/building openings. Relevant anchors: [ACE/Source/ACE.DatLoader/Entity/CellPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CellPortal.cs), [ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs), [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c), and [acclient-eor-source/acclient.h](/home/cluracan/code/holtburger/acclient-eor-source/acclient.h).
+- Portal topology has multiple meanings that must remain separate. `EnvCell.CellPortals` / `CellPortal` and `LandblockInfo.Buildings[*].BuildInfo.Portals` / `CBldPortal` are static spatial topology records; gameplay portals are live runtime objects. Retail client evidence also shows portal polygons being used for clipped portal views rather than as proof that `CellLandblock` terrain polygons are deleted around cave/building openings. Relevant anchors: [ACE/Source/ACE.DatLoader/Entity/CellPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CellPortal.cs), [ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs), [acclient-eor-source/acclient.c](/home/cluracan/code/holtburger/acclient-eor-source/acclient.c), and [acclient-eor-source/acclient.h](/home/cluracan/code/holtburger/acclient-eor-source/acclient.h).
 - `Scene` records are part of outdoor level data, not a separate unrelated curiosity. ACViewer docs and ACE-side scenery generation show that pseudo-random outdoor scenery is selected by combining terrain-type scene tables from region data with `0x12` `Scene` records that hold object descriptions. That means outdoor world composition is also two-layered: terrain grids plus scene-table-driven scenery selection. Relevant anchors: [ACViewer/docs/index.html](/home/cluracan/code/holtburger/ACViewer/docs/index.html), [ACE/Source/ACE.DatLoader/FileTypes/Scene.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/Scene.cs), [ACE/Source/ACE.DatLoader/Entity/SceneType.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/SceneType.cs), and [ACViewer/ACE/Source/ACE.Server/Entity/Scenery.cs](/home/cluracan/code/holtburger/ACViewer/ACE/Source/ACE.Server/Entity/Scenery.cs).
 
 Weaker or inferential anchors:
 
 - ACViewer `WorldViewer.LoadLandblock()` loads a radius-1 outdoor neighborhood by default and eagerly builds every env cell in the selected landblock. That is a useful browser or inspection policy, but it is not strong evidence for retail runtime visibility, streaming behavior, or long-term render-load ownership. Relevant anchors: [ACViewer/ACViewer/WorldViewer.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/WorldViewer.cs) and [ACViewer/ACViewer/Render/Buffer.cs](/home/cluracan/code/holtburger/ACViewer/ACViewer/Render/Buffer.cs).
 - `CBldPortal` and `CellPortals` prove that AC stores portal or passage data, but the current evidence does not prove that indoor visible sets can or should be derived from portals alone. The portal data is real; the replacement of `VisibleCells` with a portal walk is not yet justified. Relevant anchors: [ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/Entity/CBldPortal.cs) and [ACE/Source/ACE.DatLoader/FileTypes/EnvCell.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.DatLoader/FileTypes/EnvCell.cs).
-- Retail portal rendering evidence is strong enough to preserve portal polygons as render-relevant witnesses, but not yet strong enough to require portal-driven occlusion as the first structured-interior renderer. Phase 13 should carry the data and render visible geometry first, then iterate toward retail portal clipping once the payloads are honest.
+- Retail portal rendering evidence is strong enough to preserve portal polygons as render-relevant witnesses, but not yet strong enough to require portal-driven occlusion as the first structured-interior renderer. Phase 13 should carry the data and render visible geometry first, then scope a modern portal visibility renderer that targets retail visual semantics once the payloads are honest.
 - The exact frontend-facing role of indoor BSP data is still unresolved. The sources prove `CellStruct` contains cell, physics, and optional drawing BSP trees, but they do not yet tell us which parts Phase 11 should expose directly, flatten into a host-built intermediate, or ignore for the first indoor render pass.
 - The current Rust-host-first terrain decode idea remains plausible but unproven. The sources prove the data families and render ingredients, but they do not by themselves force the first decode layer to be Rust rather than JavaScript.
 
@@ -2048,7 +2050,7 @@ Scope: Turn the decoded `GfxObj` drawing polygon data into a reusable renderer-f
 
 Deliverables:
 
-- worker-side polygon-set to `BufferGeometry`-ready intermediate for `GfxObj` drawing polygons: delivered via `PreparedGfxObjRenderGeometry`
+- worker-side polygon-set to `BufferGeometry`-ready intermediate for `GfxObj` drawing polygons: delivered initially via `PreparedGfxObjRenderGeometry`, later generalized in Phase 13.3 to `PreparedPolygonSetRenderGeometry`
 - deterministic triangulation behavior covered by fixture tests, including at least one non-trivial polygon set: delivered with quad fan-triangulation coverage
 - prepared payload shape that keeps render geometry, decoded drawing polygons, drawing BSP, compact physics witness metadata, and surface refs distinct
 - debug color or material placeholder derived on the frontend side only, without introducing `Surface` / `Texture` decode: preserved by carrying surface ids and triangle metadata without decoding material assets
@@ -2061,7 +2063,7 @@ Acceptance:
 
 Delivered:
 
-- Added `PreparedGfxObjRenderGeometry` to the prepared asset payload. The worker now emits flat `positions`, `normals`, and `uvs` arrays suitable for later `BufferGeometry` upload, plus per-triangle `polygonId`, `surfaceId`, `firstVertex`, unique surface ids, and bounds.
+- Added `PreparedGfxObjRenderGeometry` to the prepared asset payload. The worker now emits flat `positions`, `normals`, and `uvs` arrays suitable for later `BufferGeometry` upload, plus per-triangle `polygonId`, `surfaceId`, `firstVertex`, unique surface ids, and bounds. Phase 13.3 later generalized this payload shape to `PreparedPolygonSetRenderGeometry` for both `gfx-obj/*` and environment-scoped cell structures.
 - Kept the original decoded drawing payload (`vertexArray`, `drawingPolygons`, `drawingBsp`) on the `gfx-obj` payload. The render geometry is an added derived intermediate, not a lossy replacement.
 - Preserved the Phase 12.1 physics decision: the frontend still receives only `physicsWitness`, not full physics polygons or physics BSPs.
 - Added tests for non-trivial quad triangulation and duplicate `gfx-obj/*` graph requests reusing the prepared-by-asset-id cache.
@@ -2673,7 +2675,7 @@ Purpose:
 - keep structured-interior scene membership and camera/input policy mode-owned: browser-mode wrappers derive the render scene from env-cell / visible-cell facts and prepared assets, while `WorldDisplay` hydrates and renders the supplied scene inputs
 - continue the physics-witness discipline: cell `PhysicsBSP` and `CellBSP` plus portal stabs remain Rust-owned decoded content, while frontend payloads expose only compact witnesses unless a dedicated debug/export feature needs more
 - preserve portal topology as first-class boundary data: `CellPortal`, `CBldPortal`, portal polygon ids, and portal sides are render/world witnesses, but they do not replace `VisibleCells` and they are not gameplay portals
-- stop short of retail portal rendering. This phase should make portal polygons and adjacency visible to the data model and first renderer diagnostics, but recursive portal clipping, portal masks, depth-clear behavior, and portal-driven occlusion belong to a later renderer capability phase.
+- stop short of portal visibility rendering. This phase should make portal polygons and adjacency visible to the data model and first renderer diagnostics, but recursive portal-region rendering, portal-driven culling, and opening/depth masking belong to a later renderer capability phase.
 - continue to defer materials; structured-interior surfaces use the same per-instance debug coloring Phase 12 introduced
 
 ##### Phase 13.0a — Source Audit And Contract Dry Run
@@ -2815,7 +2817,7 @@ Course corrections:
 
 ##### Phase 13.3 — Worker Geometry Prep Reusing Phase 12 Mesh Path
 
-Status: planned.
+Status: implemented on 2026-05-13.
 
 Primary deliverables:
 
@@ -2827,6 +2829,32 @@ Acceptance:
 
 - prepared environment-scoped cell-structure geometry can be hydrated by the existing render pipeline
 - no duplicate polygon triangulation path is introduced for interiors
+
+Progress:
+
+- Generalized the worker-side GfxObj mesh-prep output into `PreparedPolygonSetRenderGeometry`.
+- Reused the same polygon-set triangulation path for decoded `environment/*` cell structures and `gfx-obj/*` payloads.
+- Added `renderGeometry` to each prepared environment-scoped cell-structure record.
+- Preserved raw `vertexArray`, `drawingPolygons`, portal polygon ids, `DrawingBSP`, and compact BSP witnesses alongside the prepared geometry.
+- Updated the existing render helper to accept the generalized prepared polygon-set geometry.
+- Added tests proving an environment-scoped cell-structure quad is triangulated into the same BufferGeometry-ready intermediate as GfxObj drawing polygons.
+- Validation passed:
+  - `npm run --prefix apps/holtburger-3d check`
+  - `npm run --prefix apps/holtburger-3d test:ts -- --run`
+  - `npm run --prefix apps/holtburger-3d lint`
+  - `npm run --prefix apps/holtburger-3d format:check`
+
+Decisions:
+
+- `renderGeometry.sourceId` replaces the GfxObj-specific `renderGeometry.gfxObjId`; source-specific ids remain on their owning prepared payloads, such as `PreparedGfxObjPayload.gfxObjId` and `PreparedEnvironmentCellStruct.id`.
+- Phase 13.3 intentionally does not interpret portal clipping, drawing BSP traversal, texture-set mapping, or visible-cell scene assembly. It only prepares lossless drawing polygons into the shared renderable intermediate.
+- Environment cell structures stay nested under `environment/*`; no standalone `cell-structure/*` request path was reintroduced.
+
+Course corrections:
+
+- Phase 13.4 can consume `PreparedEnvironmentPayload.cellStructures[].renderGeometry` directly. It should not add another indoor triangulation layer.
+- Phase 13.4 still needs to decide the coordinate placement and surface binding for environment-scoped cell structures when joining `indoor-env-cell/*` metadata to decoded `environment/*` assets.
+- Phase 13.5 remains the right gate for live visual parity issues such as portal-region rendering, drawing-BSP ordering, and texture/surface mismatches.
 
 ##### Phase 13.4 — Browser Structured-Interior Scene Integration
 
@@ -2870,9 +2898,37 @@ Acceptance criteria:
 - the Phase 12 mesh pipeline is genuinely reused; no parallel indoor-only geometry intermediate is introduced
 - the free fly-cam still works in indoor scenes; no portal-driven visibility culling, recursive portal view traversal, or depth-mask portal rendering is enforced yet
 
+##### Phase 13.6 — Portal Visibility Renderer Scoping
+
+Status: planned.
+
+Scope: turn the portal witnesses carried through Phase 13 into a concrete renderer capability plan. This phase should target retail visual semantics around openings and structured-interior visibility without cloning the retail client's implementation or treating ACViewer as authoritative runtime behavior.
+
+Primary deliverables:
+
+- audit the Phase 13.5 smoke result for visual cases where env cells bleed through walls, openings, cave mouths, or building portals
+- define the portal visibility renderer contract above `WorldDisplay`: inputs, scene ownership, portal topology, visible-cell membership, and prepared cell geometry
+- choose a modern implementation strategy or staged strategy, such as stencil buffers, scissor regions plus clip planes, depth prepasses, recursive screen-space portal regions, or a hybrid
+- document how `VisibleCells`, `CellPortal`, `CBldPortal`, portal polygon ids, and prepared `CellStruct` geometry participate without replacing authoritative visible-cell data with frontend-local topology guesses
+- separate culling decisions from drawing masks: portal graph or visible-cell relevance decides what may be drawn, while portal regions constrain where adjacent cells may draw
+- identify whether any additional Rust-side decoded witnesses are needed before implementation, especially drawing-BSP portal polys, portal sides, or opening/static-structure placement data
+
+Acceptance:
+
+- the plan has an explicit portal-rendering/culling follow-up with visual parity goals, not just a vague deferral
+- retail, ACE, and ACViewer are documented as semantic/reference sources rather than implementation blueprints
+- the proposed implementation keeps `WorldDisplay` as a shared render surface and keeps browser/client scene policy above it
+- the first implementation slice is small enough to land without blocking material work, indoor static stabs, or later spatial-body work
+
+Guardrails:
+
+- do not copy retail's CPU-side portal-view machinery unless it is the cleanest way to achieve the desired visual result; prefer modern GPU/browser-renderer techniques when they produce equivalent visuals with cleaner ownership
+- do not derive all structured-interior membership from portal adjacency alone while `EnvCell.visible_cells` remains the strongest relevance source
+- do not require exact retail renderer internals for parity sign-off; require plausible visual parity around openings, walls, and adjacent structured spaces
+
 Phase 13 design guardrails:
 
-- do not enforce portal-driven visibility culling in this phase; expose portals on the boundary as data, leave culling and portal-view rendering for a later renderer/spatial follow-up
+- do not enforce portal-driven visibility culling in Phases 13.1 through 13.5; expose portals on the boundary as data, then scope the portal visibility renderer in Phase 13.6
 - do not derive structured-interior visible-cell relevance from frontend-local topology guesses; continue to rely on authoritative `EnvCell.visible_cells`
 - do not let environment-scoped `CellStruct` payload shape diverge from `gfx-obj/*` more than the AC-shaped data demands; both should expose drawing geometry for rendering, drawing BSP or portal witnesses where useful, surface refs, and compact physics witnesses while keeping full physics structures Rust-owned
 - do not introduce shared-crate types for frontend consumers of environment-scoped cell-structure records; this stays an asset-channel + frontend-scene concern
@@ -3298,7 +3354,7 @@ Mitigation:
 - Use one main-thread `InstancedMesh` per active `gfx-obj/*` asset id for first-pass static scenery. This proves geometry reuse without adding material grouping, texture decode, or a broader renderer asset registry yet.
 - Keep runtime batches focused on authoritative/session state. DAT-derived render facts such as outdoor landblock static placements should cross the asset/content channel unless a later live-session feature proves the server can dynamically override them.
 - Keep the WorldDisplay decomposition as a standing guardrail for future phases. Phase 13 and later should add browser/client scene controllers or pure helpers when new policy appears, not widen `WorldDisplay` back into a mode-aware orchestration component.
-- Treat retail-source portal rendering as a staged renderer capability. Phase 13 should carry `CBldPortal`, `CellPortal`, portal polygon, and visible-cell data honestly, but recursive portal views, portal masks, and depth-clear behavior should not block the first structured-interior geometry render.
+- Treat portal visibility rendering as a staged renderer capability. Phase 13 should carry `CBldPortal`, `CellPortal`, portal polygon, and visible-cell data honestly, but recursive portal-region rendering, opening masks, and portal-driven culling should not block the first structured-interior geometry render.
 - Keep outdoor terrain topology retail-shaped and terrain-derived. The deterministic `SWtoNEcut` diagonal split is part of terrain parity; portal polygons or subterranean openings should not cause frontend terrain triangle deletion unless a later retail-source pass proves a dedicated terrain cutout path.
 
 #### Verification Log
@@ -3464,13 +3520,13 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. The next step is Phase 13.3, preparing environment-scoped cell-structure drawing geometry in the worker by reusing the Phase 12 polygon-set mesh path.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. The next step is Phase 13.4, browser structured-interior scene integration above `WorldDisplay`.
 
 Current near-term sequence:
 
-1. implement Phase 13.3 worker geometry prep by reusing the Phase 12 polygon-set mesh path
-2. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
-3. run Phase 13.5 live interior smoke and gate review
-4. keep Phase 13 scoped to honest portal data plus first visible structured-interior geometry; defer retail-style recursive portal clipping, portal masks, and portal-driven occlusion to a later renderer/spatial follow-up
+1. implement Phase 13.4 browser structured-interior scene integration above `WorldDisplay`
+2. run Phase 13.5 live interior smoke and gate review
+3. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
+4. keep Phase 13.1 through 13.5 scoped to honest portal data plus first visible structured-interior geometry; do not sneak portal culling or opening masks into the first render path
 5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
 6. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

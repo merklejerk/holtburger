@@ -1,6 +1,6 @@
 The ultimate goal of this project is to develop a third-party client for Asheron's Call.
 - We also need to reverse engineer and document the Asheron's Call protocol and file formats. Those docs should be detailed enough for others to implement their own clients or tools from scratch, but expect docs to lag code. The ultimate source of truth is the ACE Server code.
-- Included in this repository are submodules for the [ACE Server](ACE/) and the [AC DAT viewer](ACViewer/), which we should use as ground truth references. Do not guess. If you find yourself guessing, stop and prove the answer from those references. You may modify them for diagnostics and create tests to validate your understanding.
+- Included in this repository are submodules for the [ACE Server](ACE/) and the [AC DAT viewer](ACViewer/), which we should use as ground truth references. You may also refer to the [retail AC client decompile](acclient-eor-source/), though it is unofficial and incomplete. Do not guess. If you find yourself guessing, stop and prove the answer from these references. You may modify ACE and ACViewer for diagnostics and tests, but DO NOT modify the retail client decompile.
 - DO NOT RUN THE TUI CLIENT for diagnostics/testing. It is interactive so will just hang. That's for me to use. You can just write your own bespoke client in the [harness](crates/holtburger-debug-harness/) if you need live data.
 - Temporary planning docs can go into the [plan folder](docs/plans/). Old plans are retained for posterity and may no longer represent the code.
 
@@ -33,7 +33,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - Do not leave logic in the TUI just because the TUI is the only current consumer if that logic represents authoritative world semantics or reusable client behavior.
 - Prefer extensible, lossless shared representations. A frontend can ignore detail it does not need; adding missing shared detail later is harder.
 - If a change weakens crate separation, call that out explicitly and choose a cleaner design or explain the tradeoff.
-- Use the per-crate architecture docs for details, but treat the code and ACE/ACViewer references as the final source of truth when docs lag.
+- Use the per-crate architecture docs for details, but treat the code and ACE/ACViewer references as the final source of truth when docs lag. Use the retail client decompile as a secondary reference where appropriate.
 
 # Lint Rules
 - Treat clippy warnings as errors that must be addressed.

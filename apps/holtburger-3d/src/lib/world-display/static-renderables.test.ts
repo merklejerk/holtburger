@@ -350,7 +350,7 @@ function createPreparedGfxObjAsset(
 			hasBsp: false,
 		},
 		renderGeometry: {
-			gfxObjId,
+			sourceId: gfxObjId,
 			vertexCount: 3,
 			triangleCount: 1,
 			positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],

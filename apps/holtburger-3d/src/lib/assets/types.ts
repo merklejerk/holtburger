@@ -137,25 +137,25 @@ interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
 	cellStructures: PreparedEnvironmentCellStruct[];
 }
 
-interface PreparedGfxObjUv {
+interface PreparedPolygonSetUv {
 	u: number;
 	v: number;
 }
 
-interface PreparedGfxObjVertex {
+interface PreparedPolygonSetVertex {
 	id: number;
 	origin: Vec3Dto;
 	normal: Vec3Dto;
-	uvs: PreparedGfxObjUv[];
+	uvs: PreparedPolygonSetUv[];
 }
 
-interface PreparedGfxObjVertexArray {
+interface PreparedPolygonSetVertexArray {
 	vertexType: number | null;
 	vertexCount: number;
-	vertices: PreparedGfxObjVertex[];
+	vertices: PreparedPolygonSetVertex[];
 }
 
-interface PreparedGfxObjPolygon {
+interface PreparedPolygonSetPolygon {
 	id: number;
 	numPts: number;
 	stippling: number;
@@ -167,7 +167,7 @@ interface PreparedGfxObjPolygon {
 	negUvIndices: number[];
 }
 
-interface PreparedGfxObjBspNode {
+interface PreparedPolygonSetBspNode {
 	kind: string;
 	[key: string]: unknown;
 }
@@ -185,43 +185,44 @@ interface PreparedCellStructBspWitness {
 
 interface PreparedEnvironmentCellStruct {
 	id: number;
-	vertexArray: PreparedGfxObjVertexArray;
-	drawingPolygons: PreparedGfxObjPolygon[];
+	vertexArray: PreparedPolygonSetVertexArray;
+	drawingPolygons: PreparedPolygonSetPolygon[];
 	portalPolygonIds: number[];
 	cellBspWitness: PreparedCellStructBspWitness;
 	physicsWitness: PreparedGfxObjPhysicsWitness;
-	drawingBsp: PreparedGfxObjBspNode | null;
+	drawingBsp: PreparedPolygonSetBspNode | null;
+	renderGeometry: PreparedPolygonSetRenderGeometry;
 }
 
-interface PreparedGfxObjRenderTriangle {
+interface PreparedPolygonSetRenderTriangle {
 	polygonId: number;
 	surfaceId: number | null;
 	firstVertex: number;
 }
 
-interface PreparedGfxObjRenderBounds {
+interface PreparedPolygonSetRenderBounds {
 	min: Vec3Dto;
 	max: Vec3Dto;
 }
 
-interface PreparedGfxObjInvalidPolygon {
+interface PreparedPolygonSetInvalidPolygon {
 	polygonId: number;
 	vertexIds: number[];
 	missingVertexIds: number[];
 }
 
-export interface PreparedGfxObjRenderGeometry {
-	gfxObjId: number;
+export interface PreparedPolygonSetRenderGeometry {
+	sourceId: number;
 	vertexCount: number;
 	triangleCount: number;
 	positions: number[];
 	normals: number[];
 	uvs: number[];
-	triangles: PreparedGfxObjRenderTriangle[];
+	triangles: PreparedPolygonSetRenderTriangle[];
 	surfaceIds: number[];
-	invalidPolygons?: PreparedGfxObjInvalidPolygon[];
+	invalidPolygons?: PreparedPolygonSetInvalidPolygon[];
 	skippedPolygonCount?: number;
-	bounds: PreparedGfxObjRenderBounds | null;
+	bounds: PreparedPolygonSetRenderBounds | null;
 }
 
 export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
@@ -230,11 +231,11 @@ export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	gfxObjId: number;
 	flags: number | null;
 	surfaceIds: number[];
-	vertexArray: PreparedGfxObjVertexArray;
-	drawingPolygons: PreparedGfxObjPolygon[];
-	drawingBsp: PreparedGfxObjBspNode | null;
+	vertexArray: PreparedPolygonSetVertexArray;
+	drawingPolygons: PreparedPolygonSetPolygon[];
+	drawingBsp: PreparedPolygonSetBspNode | null;
 	physicsWitness: PreparedGfxObjPhysicsWitness;
-	renderGeometry: PreparedGfxObjRenderGeometry;
+	renderGeometry: PreparedPolygonSetRenderGeometry;
 	sortCenter: Vec3Dto | null;
 	didDegrade: number | null;
 }

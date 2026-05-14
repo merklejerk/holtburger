@@ -68,7 +68,7 @@
 				type="text"
 				value={$frontendState.browserMode.draftInput}
 				on:input={handleDraftInput}
-				placeholder="33.50S, 72.80E, 0.0Z"
+				placeholder="33.50S, 72.80E, 0.0Z or 0x016c0155"
 				spellcheck="false"
 			/>
 		</label>

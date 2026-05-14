@@ -110,9 +110,13 @@
 			const runtimeBatch = state.host.boundarySnapshot?.runtimeBatch ?? null;
 			const destination = state.browserMode.destination;
 			const landblockCoverageRadius = state.browserMode.landblockCoverageRadius;
+			const preparedSceneAssetKey = Object.keys(state.asset.preparedByAssetId)
+				.filter(isSceneCoverageAssetId)
+				.sort()
+				.join(",");
 			const coverageKey = destination
-				? `${destination.source}:${destination.label}:radius-${landblockCoverageRadius}`
-				: `runtime:radius-${landblockCoverageRadius}`;
+				? `${destination.source}:${destination.label}:radius-${landblockCoverageRadius}:prepared-${preparedSceneAssetKey}`
+				: `runtime:radius-${landblockCoverageRadius}:prepared-${preparedSceneAssetKey}`;
 
 			if (!runtimeBatch || coverageKey === lastBrowserCoverageKey) {
 				return;
@@ -189,6 +193,15 @@
 		}
 
 		console.debug(`[holtburger-3d][${label}]`, detail);
+	}
+
+	function isSceneCoverageAssetId(assetId: string): boolean {
+		return (
+			assetId.startsWith("terrain/") ||
+			assetId.startsWith("outdoor-static-scene/") ||
+			assetId.startsWith("indoor-env-cell/") ||
+			assetId.startsWith("environment/")
+		);
 	}
 </script>
 

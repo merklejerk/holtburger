@@ -105,7 +105,11 @@
 		),
 	);
 	const structuredInteriorScene = $derived(
-		deriveStructuredInteriorSceneModel(runtimeBatch, assetState),
+		deriveStructuredInteriorSceneModel(
+			runtimeBatch,
+			assetState,
+			browserDestination,
+		),
 	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
@@ -541,7 +545,10 @@
 	}
 
 	function describeStructuredInteriorIdleState(): string {
-		if (!runtimeBatch?.residency.indoors) {
+		if (
+			!runtimeBatch?.residency.indoors &&
+			browserDestination?.kind !== "indoor-env-cell"
+		) {
 			return "Structured interior rendering is dormant while outdoor residency is active.";
 		}
 

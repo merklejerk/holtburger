@@ -1,4 +1,5 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
+import { isIndoorBrowserDestination } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
@@ -81,7 +82,11 @@ export function deriveStaticRenderableSceneModel(
 	browserDestination: BrowserLocationSelection | null = null,
 	landblockCoverageRadius = 1,
 ): StaticRenderableSceneModel {
-	if (!runtimeBatch || runtimeBatch.residency.indoors) {
+	if (
+		!runtimeBatch ||
+		runtimeBatch.residency.indoors ||
+		isIndoorBrowserDestination(browserDestination)
+	) {
 		return emptyStaticRenderableSceneModel();
 	}
 

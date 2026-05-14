@@ -90,6 +90,35 @@ describe("structured interior scene model", () => {
 			"environment/0d000001:cell-structure/00000063",
 		]);
 	});
+
+	it("derives an indoor scene from browser-selected env-cell focus while runtime residency is outdoors", () => {
+		const runtimeBatch = createIndoorRuntimeBatch();
+		runtimeBatch.residency.indoors = false;
+		runtimeBatch.residency.focusEnvCellId = null;
+		runtimeBatch.residency.visibleCellIds = [];
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+				0x016c0155,
+				0x0d000001,
+				1,
+				IDENTITY_PLACEMENT,
+			),
+			"environment/0d000001": createPreparedEnvironmentAsset(0x0d000001),
+		};
+
+		const model = deriveStructuredInteriorSceneModel(runtimeBatch, assetState, {
+			kind: "indoor-env-cell",
+			label: "Env cell 0x016c0155",
+			source: "manual",
+			envCellId: 0x016c0155,
+			landblockId: 0x016cffff,
+		});
+
+		expect(model.focusEnvCellId).toBe(0x016c0155);
+		expect(model.cells.map((cell) => cell.envCellId)).toEqual([0x016c0155]);
+		expect(model.missingEnvCellAssetIds).toEqual([]);
+	});
 });
 
 function createIndoorRuntimeBatch(): RuntimeBatchDto {

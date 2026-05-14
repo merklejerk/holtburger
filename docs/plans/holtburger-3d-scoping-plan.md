@@ -2907,7 +2907,7 @@ Validation:
 
 ##### Phase 13.5 — Live Interior Smoke And Gate Review
 
-Status: planned.
+Status: planned; browser-mode explicit env-cell focus prerequisite implemented on 2026-05-14.
 
 Primary deliverables:
 
@@ -2915,9 +2915,16 @@ Primary deliverables:
 - inspect whether visible cells, portal witnesses, first geometry, debug coloring, and free camera behavior are coherent
 - decide whether the next phase should be portal rendering, materials/surfaces, terrain roads/materials, or Phase 14 spatial-body wiring
 
+Entry point:
+
+- Browser navigation now accepts either outdoor AC coordinates, an outdoor landblock id such as `0xda55ffff`, or an explicit indoor env-cell id such as `0x016c0155`.
+- `????ffff` ids stay outdoor-focused and drive terrain/static landblock coverage.
+- Non-`ffff` ids are treated as browser-only indoor env-cell focus for smoke testing. This does not claim client-mode residency or outdoor-to-indoor portal traversal; it only lets Phase 13.5 load `indoor-env-cell/*` and discovered `environment/*` assets through the normal demand-driven asset path.
+
 Acceptance:
 
 - at least one real structured interior renders through the normal asset/worker/render path
+- the smoke result explicitly records that Phase 13.5 renders cell-structure walls but does not yet hydrate env-cell static stabs such as furniture, fixtures, and other authored indoor props
 - remaining gaps are classified as decoder bugs, transform/render bugs, portal-rendering deferrals, material/surface work, or later spatial work
 - the plan is updated with progress, decisions, course corrections, and whether Phase 14 still makes sense as written
 
@@ -2931,11 +2938,50 @@ Acceptance criteria:
 - the Phase 12 mesh pipeline is genuinely reused; no parallel indoor-only geometry intermediate is introduced
 - the free fly-cam still works in indoor scenes; no portal-driven visibility culling, recursive portal view traversal, or depth-mask portal rendering is enforced yet
 
+Progress:
+
+- 2026-05-14: Added explicit browser env-cell focus by 32-bit hex id. The frontend selection model now distinguishes outdoor coordinate/landblock destinations from indoor env-cell destinations instead of fabricating coordinates for indoor cells.
+- 2026-05-14: Scene coverage can request `indoor-env-cell/{id}` while the live Rust runtime remains outdoors. Once the focus env-cell metadata is prepared, coverage expands to visible env cells and referenced `environment/*` payloads.
+- 2026-05-14: Structured interior scene derivation accepts browser-selected env-cell focus, so Phase 13.5 no longer depends on an unavailable UI path for placing residency inside a building.
+- 2026-05-14: Manual smoke on env-cell `0xda55012e` rendered 15 visible structured-interior cells from `environment/0d000355`. The room shells were coherent, but no indoor static objects such as tables, chairs, or fixtures rendered because env-cell static stabs are not yet hydrated into the asset/render path.
+
+Decisions and course corrections:
+
+- Browser env-cell focus is a smoke/debug affordance, not client-mode movement or authoritative residency. Proper outdoor portal entry and client spatial residency remain later work.
+- The asset coverage key now includes prepared scene asset ids so multi-stage indoor discovery can advance after the first env-cell payload reveals its visible cells and environment id.
+- Indoor static stabs should move ahead of portal visibility renderer implementation. Portal culling over empty interior shells is less useful than first proving the room-population path that retail interiors visibly depend on.
+
+##### Phase 13.5a — Indoor Static Object Hydration
+
+Status: planned.
+
+Scope: populate structured interiors with authored env-cell static objects using the same requestable visual-asset and Three.js hydration path as outdoor statics, without treating runtime entities as static room props.
+
+Primary deliverables:
+
+- promote decoded `EnvCell.static_objects` / static stab facts from metadata-only witnesses into renderer-usable indoor static source instances
+- request and prepare each referenced `gfx-obj/*` or `setup-model/*` dependency through the existing asset graph, not a parallel indoor-only loader
+- join indoor static source instances to their owning env-cell `localPlacement` so furniture and fixtures land in the same scene space as the rendered `CellStruct`
+- render indoor static parts in `WorldDisplay` through a shared static-renderable geometry path or a small generalized extension of the existing outdoor static-renderable model
+- keep runtime/mobile entities out of this phase; this is authored room population only
+
+Acceptance:
+
+- the `0xda55012e` smoke scene shows at least some authored indoor props when repo-local env-cell data references them
+- logs show follow-up static visual dependency requests such as `gfx-obj/*` or `setup-model/*` sourced from visible env-cell static objects
+- missing or undecodable static object references fail loudly through the asset/debug path rather than being silently ignored
+- outdoor static rendering remains unchanged, and indoor static rendering does not duplicate the setup-model/gfx-obj transform logic
+
+Course-correction notes:
+
+- If `EnvCell.static_objects` are not the source of the observed retail furniture, stop and prove the source from ACE/ACViewer/retail references before inventing another placement path.
+- If static object placement needs parent-cell transforms, keep that composition in the browser/renderer scene assembly layer for now; do not mutate authoritative runtime residency just for a browser smoke path.
+
 ##### Phase 13.6 — Portal Visibility Renderer Scoping
 
 Status: planned.
 
-Scope: turn the portal witnesses carried through Phase 13 into a concrete renderer capability plan. This phase should target retail visual semantics around openings and structured-interior visibility without cloning the retail client's implementation or treating ACViewer as authoritative runtime behavior.
+Scope: turn the portal witnesses carried through Phase 13 into a concrete renderer capability plan after indoor room population is visible. This phase should target retail visual semantics around openings and structured-interior visibility without cloning the retail client's implementation or treating ACViewer as authoritative runtime behavior.
 
 Primary deliverables:
 
@@ -3553,12 +3599,13 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The next step is Phase 13.5, live interior smoke and gate review.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. The next implementation step is Phase 13.5a, indoor static object hydration.
 
 Current near-term sequence:
 
-1. run Phase 13.5 live interior smoke and gate review
-2. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
-3. keep Phase 13.5 scoped to validating the first visible structured-interior geometry path; classify through-wall or overlap issues as portal-renderer work unless the decoded env-cell `localPlacement` or selected CellStruct is demonstrably wrong
-4. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
-5. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state
+1. implement Phase 13.5a indoor static object hydration, using env-cell static object facts to request and render authored furniture/fixtures through the existing static visual asset path
+2. rerun the `0xda55012e` live interior smoke and confirm room population appears before portal work
+3. run Phase 13.6 portal visibility renderer scoping, targeting retail visual semantics while avoiding implementation overfitting to retail, ACE, or ACViewer
+4. keep through-wall or overlap issues classified as portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, or indoor static object transform is demonstrably wrong
+5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+6. prefer a requestable content/asset path for `EnvCell.static_objects` facts, mirroring the aggregate outdoor static-scene correction, unless a later live-session source proves the fact is dynamic runtime state

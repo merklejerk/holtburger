@@ -2,7 +2,10 @@
 	import { onDestroy } from "svelte";
 
 	import { frontendState } from "../app/frontend-state";
-	import type { BrowserLocationSelection } from "../app/browser-mode";
+	import {
+		browserDestinationToIndoorEnvCellId,
+		type BrowserLocationSelection,
+	} from "../app/browser-mode";
 	import type { AppModeId } from "../app/modes";
 	import type { AssetChannelState } from "../lib/assets/types";
 	import type {
@@ -32,6 +35,7 @@
 		deriveOutdoorLinkedInteriorEnvCellIds,
 		deriveTerrainFocusLandblockId,
 	} from "../lib/assets/asset-channel";
+	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
 	import {
 		buildCameraHint,
 		buildRayPickRequest,
@@ -63,6 +67,8 @@
 		assetState,
 		browserDestination,
 		landblockCoverageRadius,
+		structuredInteriorMaxEnvCells,
+		structuredInteriorMaxVisibleCellDepth,
 	}: {
 		activeMode: AppModeId;
 		activeModeLabel: string;
@@ -72,6 +78,8 @@
 		assetState: AssetChannelState;
 		browserDestination: BrowserLocationSelection | null;
 		landblockCoverageRadius: number;
+		structuredInteriorMaxEnvCells: number;
+		structuredInteriorMaxVisibleCellDepth: number;
 	} = $props();
 
 	let rootElement = $state<HTMLDivElement | null>(null);
@@ -144,13 +152,45 @@
 			),
 		].sort((left, right) => left - right);
 	});
+	const structuredInteriorCoverageOptions = $derived({
+		maxEnvCells: structuredInteriorMaxEnvCells,
+		maxVisibleCellDepth: structuredInteriorMaxVisibleCellDepth,
+	});
+	const structuredInteriorCoverage = $derived.by(() => {
+		const browserFocusEnvCellId =
+			browserDestinationToIndoorEnvCellId(browserDestination);
+		if (browserFocusEnvCellId !== null) {
+			return deriveStructuredInteriorCoverage(
+				{
+					kind: "visible-cell-closure",
+					seedEnvCellIds: [browserFocusEnvCellId],
+				},
+				assetState.preparedByAssetId,
+				structuredInteriorCoverageOptions,
+			);
+		}
+
+		if (linkedOutdoorEnvCellIds.length > 0) {
+			return deriveStructuredInteriorCoverage(
+				{
+					kind: "visible-cell-closure",
+					seedEnvCellIds: linkedOutdoorEnvCellIds,
+				},
+				assetState.preparedByAssetId,
+				structuredInteriorCoverageOptions,
+			);
+		}
+
+		return null;
+	});
 	const staticRenderableScene = $derived(
 		deriveStaticRenderableSceneModel(
 			runtimeBatch,
 			assetState,
 			browserDestination,
 			landblockCoverageRadius,
-			linkedOutdoorEnvCellIds,
+			structuredInteriorCoverage,
+			structuredInteriorCoverageOptions,
 		),
 	);
 	const structuredInteriorScene = $derived(
@@ -164,6 +204,8 @@
 						envCellIds: linkedOutdoorEnvCellIds,
 						focusLandblockId: outdoorFocusLandblockId,
 					},
+			structuredInteriorCoverage,
+			structuredInteriorCoverageOptions,
 		),
 	);
 	const terrainVertexCount = $derived(
@@ -229,7 +271,7 @@
 			? linkedOutdoorEnvCellIds.length > 0 &&
 				browserDestination?.kind !== "indoor-env-cell" &&
 				!runtimeBatch?.residency.indoors
-				? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked.`
+				? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked, ${structuredInteriorCoverage?.envCellIds.length ?? linkedOutdoorEnvCellIds.length} covered${structuredInteriorCoverage?.truncated ? " (truncated)" : ""}.`
 				: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}.`
 			: describeStructuredInteriorIdleState(),
 	);

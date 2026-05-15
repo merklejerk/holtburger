@@ -9,6 +9,8 @@ import {
 	selectRuntimeResidencyDestination,
 	updateLandblockCoverageRadius,
 	updateBrowserDraft,
+	updateStructuredInteriorMaxEnvCells,
+	updateStructuredInteriorMaxVisibleCellDepth,
 	type BrowserModeState,
 } from "./browser-mode";
 import {
@@ -133,6 +135,30 @@ export function createFrontendStateStore() {
 					browserMode: updateLandblockCoverageRadius(
 						state.browserMode,
 						landblockCoverageRadius,
+					),
+				}),
+			);
+		},
+		updateStructuredInteriorMaxEnvCells(maxEnvCells: number): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateStructuredInteriorMaxEnvCells(
+						state.browserMode,
+						maxEnvCells,
+					),
+				}),
+			);
+		},
+		updateStructuredInteriorMaxVisibleCellDepth(
+			maxVisibleCellDepth: number,
+		): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateStructuredInteriorMaxVisibleCellDepth(
+						state.browserMode,
+						maxVisibleCellDepth,
 					),
 				}),
 			);

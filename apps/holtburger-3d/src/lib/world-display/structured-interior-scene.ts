@@ -6,9 +6,17 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedEnvironmentPayload,
-	PreparedIndoorEnvCellPayload,
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
+import {
+	createDefaultStructuredInteriorCoverageOptions,
+	deriveStructuredInteriorCoverage,
+	formatEnvironmentAssetId,
+	formatIndoorEnvCellAssetId,
+	isPreparedIndoorEnvCellAsset,
+	type StructuredInteriorCoverage,
+	type StructuredInteriorCoverageOptions,
+} from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
 import {
 	formatHex32,
@@ -53,6 +61,8 @@ export function deriveStructuredInteriorSceneModel(
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
 	linkedOutdoorInteriors: LinkedOutdoorInteriorSelection | null = null,
+	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
+	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions = createDefaultStructuredInteriorCoverageOptions(),
 ): StructuredInteriorSceneModel {
 	const browserFocusEnvCellId =
 		browserDestinationToIndoorEnvCellId(browserDestination);
@@ -60,6 +70,8 @@ export function deriveStructuredInteriorSceneModel(
 		return deriveBrowserFocusedStructuredInteriorSceneModel(
 			browserFocusEnvCellId,
 			assetState,
+			structuredInteriorCoverage,
+			structuredInteriorCoverageOptions,
 		);
 	}
 
@@ -70,9 +82,15 @@ export function deriveStructuredInteriorSceneModel(
 		) {
 			return deriveStructuredInteriorSceneForEnvCells(
 				null,
-				[...new Set(linkedOutdoorInteriors.envCellIds)].sort(
-					(left, right) => left - right,
-				),
+				structuredInteriorCoverage?.envCellIds ??
+					deriveStructuredInteriorCoverage(
+						{
+							kind: "visible-cell-closure",
+							seedEnvCellIds: linkedOutdoorInteriors.envCellIds,
+						},
+						assetState.preparedByAssetId,
+						structuredInteriorCoverageOptions,
+					).envCellIds,
 				assetState,
 				linkedOutdoorInteriors.focusLandblockId,
 			);
@@ -96,9 +114,14 @@ export function deriveStructuredInteriorSceneModel(
 		);
 	}
 
-	const activeEnvCellIds = [
-		...new Set([focusEnvCellId, ...runtimeBatch.residency.visibleCellIds]),
-	].sort((left, right) => left - right);
+	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+		{
+			kind: "direct",
+			envCellIds: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
+		},
+		assetState.preparedByAssetId,
+		structuredInteriorCoverageOptions,
+	).envCellIds;
 	return deriveStructuredInteriorSceneForEnvCells(
 		focusEnvCellId,
 		activeEnvCellIds,
@@ -109,17 +132,19 @@ export function deriveStructuredInteriorSceneModel(
 function deriveBrowserFocusedStructuredInteriorSceneModel(
 	focusEnvCellId: number,
 	assetState: AssetChannelState,
+	structuredInteriorCoverage: StructuredInteriorCoverage | null,
+	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions,
 ): StructuredInteriorSceneModel {
-	const focusEnvCellAsset =
-		assetState.preparedByAssetId[formatIndoorEnvCellAssetId(focusEnvCellId)];
-	const activeEnvCellIds = isPreparedIndoorEnvCellAsset(focusEnvCellAsset)
-		? [
-				...new Set([
-					focusEnvCellId,
-					...focusEnvCellAsset.payload.visibleCellIds,
-				]),
-			].sort((left, right) => left - right)
-		: [focusEnvCellId];
+	const activeEnvCellIds =
+		structuredInteriorCoverage?.envCellIds ??
+		deriveStructuredInteriorCoverage(
+			{
+				kind: "visible-cell-closure",
+				seedEnvCellIds: [focusEnvCellId],
+			},
+			assetState.preparedByAssetId,
+			structuredInteriorCoverageOptions,
+		).envCellIds;
 
 	return deriveStructuredInteriorSceneForEnvCells(
 		focusEnvCellId,
@@ -205,12 +230,6 @@ function deriveStructuredInteriorSceneForEnvCells(
 	};
 }
 
-function isPreparedIndoorEnvCellAsset(
-	asset: PreparedAssetRecord | undefined,
-): asset is PreparedAssetRecord & { payload: PreparedIndoorEnvCellPayload } {
-	return asset?.payload.kind === "indoor-env-cell";
-}
-
 function isPreparedEnvironmentAsset(
 	asset: PreparedAssetRecord | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedEnvironmentPayload } {
@@ -275,14 +294,6 @@ function emptyStructuredInteriorSceneModel(
 		statusText,
 		cacheText,
 	};
-}
-
-function formatIndoorEnvCellAssetId(envCellId: number): string {
-	return `indoor-env-cell/${formatHex32(envCellId)}`;
-}
-
-function formatEnvironmentAssetId(environmentId: number): string {
-	return `environment/${formatHex32(environmentId)}`;
 }
 
 function formatEnvCellLabel(envCellId: number): string {

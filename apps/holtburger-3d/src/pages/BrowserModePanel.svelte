@@ -2,6 +2,7 @@
 	import { frontendState } from "../app/frontend-state";
 	import {
 		browserLocationToLandblockId,
+		isLandblockPrefixInput,
 		MAX_BROWSER_LOD_RADIUS,
 		MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
@@ -69,6 +70,9 @@
 
 		return { landblockId, cellId };
 	});
+	const draftIsLandblockPrefix = $derived(
+		isLandblockPrefixInput($frontendState.browserMode.draftInput),
+	);
 
 	function selectTab(tabId: BrowserPanelTabId): void {
 		activeTab = tabId;
@@ -81,6 +85,18 @@
 	function handleDraftInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateBrowserDraft(input.value);
+	}
+
+	function toggleLandblockInputMode(): void {
+		if (!draftIsLandblockPrefix) {
+			return;
+		}
+
+		frontendState.updateLandblockInputMode(
+			$frontendState.browserMode.landblockInputMode === "dungeon"
+				? "outdoor"
+				: "dungeon",
+		);
 	}
 
 	function previewDestination(event?: SubmitEvent): void {
@@ -238,10 +254,37 @@
 						type="text"
 						value={$frontendState.browserMode.draftInput}
 						oninput={handleDraftInput}
-						placeholder="33.50S, 72.80E, 0.0Z or 0x016c0155"
+						placeholder="33.50S, 72.80E, 0xda55, or 0x016c0155"
 						spellcheck="false"
 					/>
 				</label>
+
+				<div
+					class:disabled={!draftIsLandblockPrefix}
+					class="browser-form__switch-row"
+				>
+					<span>Landblock focus</span>
+					<button
+						type="button"
+						class:active={$frontendState.browserMode.landblockInputMode ===
+							"dungeon"}
+						class="browser-form__mode-switch"
+						disabled={!draftIsLandblockPrefix}
+						aria-pressed={$frontendState.browserMode.landblockInputMode ===
+							"dungeon"}
+						aria-label={`Landblock focus: ${$frontendState.browserMode.landblockInputMode === "dungeon" ? "Dungeon" : "Outdoor"}`}
+						onclick={toggleLandblockInputMode}
+					>
+						<span class="browser-form__mode-switch-track">
+							<span class="browser-form__mode-switch-thumb"></span>
+						</span>
+						<span class="browser-form__mode-switch-label">
+							{$frontendState.browserMode.landblockInputMode === "dungeon"
+								? "Dungeon"
+								: "Outdoor"}
+						</span>
+					</button>
+				</div>
 
 				<div class="browser-form__actions">
 					<button type="submit">Set destination</button>
@@ -391,7 +434,7 @@
 				<label class="browser-form__field browser-form__field--checkbox">
 					<span>
 						<strong>Cell indicators</strong>
-						<small>Show env-cell markers, bounds, axes, and labels.</small>
+						<small>Show env-cell bounds.</small>
 					</span>
 					<input
 						type="checkbox"

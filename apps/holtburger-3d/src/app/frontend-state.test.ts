@@ -68,6 +68,39 @@ describe("frontend state store", () => {
 		);
 	});
 
+	it("does not refill an intentionally cleared browser draft from runtime residency", () => {
+		const store = createFrontendStateStore();
+		const notification: RuntimeNotificationEnvelopeDto = {
+			channel: "runtime",
+			topic: "runtime.batch",
+			lifecycleState: null,
+			runtimeBatch: createRuntimeBatch({
+				tick: 3,
+				residency: {
+					focusEntityId: null,
+					focusLandblockId: 0x0102001b,
+					focusCellId: 27,
+					focusEnvCellId: null,
+					visibleCellIds: [],
+					seenOutside: null,
+					environmentId: null,
+					cellStructureId: null,
+					focusLocationLabel: "100.05S, 101.02W, 2.0Z",
+					indoors: false,
+					trackedBodyCount: 0,
+				},
+			}),
+			viewModelFeed: createViewModelFeed(),
+		};
+
+		store.loadSnapshot(createHostSnapshot());
+		store.updateBrowserDraft("");
+		store.applyRuntimeNotification(notification);
+
+		expect(get(store).browserMode.draftInput).toBe("");
+		expect(get(store).browserMode.draftInputEditedByUser).toBe(true);
+	});
+
 	it("tracks asset preparation state separately from the host boundary snapshot", () => {
 		const store = createFrontendStateStore();
 

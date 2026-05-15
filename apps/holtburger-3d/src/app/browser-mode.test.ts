@@ -5,6 +5,7 @@ import {
 	browserLocationToLandblockId,
 	createBrowserModeState,
 	isIndoorBrowserDestination,
+	isLandblockPrefixInput,
 	parseBrowserLocationInput,
 	previewBrowserLocation,
 	selectBrowserLandblockDestination,
@@ -13,6 +14,7 @@ import {
 	updateBrowserDraft,
 	updateCellIndicatorVisibility,
 	updateDetailLodRadius,
+	updateLandblockInputMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
 	updateTerrainLodRadius,
@@ -38,13 +40,15 @@ describe("browser-mode location policy", () => {
 		const state = createBrowserModeState();
 
 		expect(state.draftInput).toBe("33.50S, 72.80E, 0.0Z");
+		expect(state.draftInputEditedByUser).toBe(false);
 		expect(state.destination?.label).toBe("33.50S, 72.80E, 0.0Z");
 		expect(state.terrainLodRadius).toBe(2);
 		expect(state.buildingLodRadius).toBe(1);
 		expect(state.detailLodRadius).toBe(1);
+		expect(state.landblockInputMode).toBe("dungeon");
 		expect(state.showPortalPolygons).toBe(false);
-		expect(state.showCellIndicators).toBe(true);
-		expect(state.highlightPortalTargets).toBe(true);
+		expect(state.showCellIndicators).toBe(false);
+		expect(state.highlightPortalTargets).toBe(false);
 		expect(state.page).toBe("destination-preview");
 	});
 
@@ -109,7 +113,9 @@ describe("browser-mode location policy", () => {
 			updateBrowserDraft(createBrowserModeState(), "holtburg plaza"),
 		);
 
-		expect(state.validationMessage).toMatch(/AC-style location format/);
+		expect(state.validationMessage).toBe(
+			"Use the AC-style location format: 100.40S, 101.55W.",
+		);
 		expect(state.destination).toBeNull();
 		expect(state.page).toBe("location-entry");
 	});
@@ -148,6 +154,51 @@ describe("browser-mode location policy", () => {
 
 		expect(state.destination?.kind).toBe("outdoor-location");
 		expect(state.destination?.source).toBe("manual");
+		expect(state.destination?.landblockId).toBe(0xda55ffff);
+		expect(state.draftInput).toBe("0xda55ffff");
+		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
+	});
+
+	it("keeps the submitted cell id editable after previewing it", () => {
+		const state = previewBrowserLocation(
+			updateBrowserDraft(createBrowserModeState(), "016c0155"),
+		);
+
+		expect(state.draftInput).toBe("016c0155");
+		expect(state.destination?.label).toContain("0x016c0155");
+	});
+
+	it("detects 16-bit landblock shorthand input", () => {
+		expect(isLandblockPrefixInput("da55")).toBe(true);
+		expect(isLandblockPrefixInput("0xda55")).toBe(true);
+		expect(isLandblockPrefixInput("0xda55ffff")).toBe(false);
+		expect(isLandblockPrefixInput("33.50S, 72.80E, 0.0Z")).toBe(false);
+	});
+
+	it("defaults 16-bit landblock shorthand to dungeon focus", () => {
+		const state = previewBrowserLocation(
+			updateBrowserDraft(createBrowserModeState(), "da55"),
+		);
+
+		expect(state.draftInput).toBe("da55");
+		expect(isIndoorBrowserDestination(state.destination)).toBe(true);
+		expect(browserDestinationToIndoorEnvCellId(state.destination)).toBe(
+			0xda550100,
+		);
+		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
+	});
+
+	it("can resolve 16-bit landblock shorthand to outdoor focus", () => {
+		const state = previewBrowserLocation(
+			updateLandblockInputMode(
+				updateBrowserDraft(createBrowserModeState(), "da55"),
+				"outdoor",
+			),
+		);
+
+		expect(state.draftInput).toBe("da55");
+		expect(state.landblockInputMode).toBe("outdoor");
+		expect(state.destination?.kind).toBe("outdoor-location");
 		expect(state.destination?.landblockId).toBe(0xda55ffff);
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
 	});

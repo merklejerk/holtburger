@@ -600,40 +600,21 @@ function deriveSetupPartLocalPlacements(
 		return [];
 	}
 
-	const placementsByPartIndex = new Map(
-		setupModel.parts.map((entry) => [
-			entry.partIndex,
-			defaultPlacement[entry.partIndex] ?? IDENTITY_PLACEMENT,
-		]),
-	);
-	const partsByIndex = new Map(
-		setupModel.parts.map((entry) => [entry.partIndex, entry]),
-	);
-	const chain: PlacementTransformDto[] = [];
-	const visitedPartIndexes = new Set<number>();
-	let currentPart: PreparedSetupModelPart | undefined = part;
-
-	while (currentPart && !visitedPartIndexes.has(currentPart.partIndex)) {
-		visitedPartIndexes.add(currentPart.partIndex);
-		chain.unshift(
-			placementsByPartIndex.get(currentPart.partIndex) ?? IDENTITY_PLACEMENT,
-		);
-		currentPart =
-			currentPart.parentIndex === null
-				? undefined
-				: partsByIndex.get(currentPart.parentIndex);
-	}
-
-	return chain;
+	return [defaultPlacement[part.partIndex] ?? IDENTITY_PLACEMENT];
 }
 
 function selectDefaultPlacementSet(
 	setupModel: PreparedSetupModelPayload,
 ): PlacementTransformDto[] | null {
+	const retailDefaultPlacement = setupModel.placementSets.find(
+		(placement) => placement.key === 0x65,
+	);
 	const keyZeroPlacement = setupModel.placementSets.find(
 		(placement) => placement.key === 0,
 	);
+
 	return (
+		retailDefaultPlacement?.localPlacements ??
 		keyZeroPlacement?.localPlacements ??
 		setupModel.placementSets.toSorted((left, right) => left.key - right.key)[0]
 			?.localPlacements ??

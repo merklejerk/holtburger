@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	createInitialAssetChannelState,
 	type PreparedAssetRecord,
+	type PreparedSetupModelPayload,
 } from "../assets/types";
 import type {
 	PlacementTransformDto,
@@ -51,12 +52,59 @@ describe("static renderable scene model", () => {
 			createPlacement({ x: 1, y: 0, z: 0 }),
 		]);
 		expect(model.parts[1]?.partPlacements).toEqual([
-			createPlacement({ x: 1, y: 0, z: 0 }),
 			createPlacement({ x: 0, y: 2, z: 0 }),
 		]);
 		expect(model.parts[1]?.scale).toEqual({ x: 2, y: 1, z: 1 });
 		expect(model.missingSourceAssetIds).toEqual([]);
 		expect(model.missingGfxAssetIds).toEqual([]);
+	});
+
+	it("prefers the retail default setup placement frame", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"setup-model/02000001": createPreparedSetupModelAsset([
+				{
+					key: 0,
+					localPlacements: [
+						createPlacement({ x: 1, y: 0, z: 0 }),
+						createPlacement({ x: 0, y: 2, z: 0 }),
+					],
+					hookCount: 0,
+				},
+				{
+					key: 0x65,
+					localPlacements: [
+						createPlacement({ x: 3, y: 0, z: 0 }),
+						createPlacement({ x: 0, y: 4, z: 0 }),
+					],
+					hookCount: 0,
+				},
+			]),
+			"gfx-obj/01000001": createPreparedGfxObjAsset(
+				"gfx-obj/01000001",
+				0x01000001,
+			),
+			"gfx-obj/01000002": createPreparedGfxObjAsset(
+				"gfx-obj/01000002",
+				0x01000002,
+			),
+			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
+				0x0102ffff,
+				["setup-model/02000001"],
+			),
+		};
+
+		const model = deriveStaticRenderableSceneModel(
+			createRuntimeBatch(),
+			assetState,
+		);
+
+		expect(model.parts[0]?.partPlacements).toEqual([
+			createPlacement({ x: 3, y: 0, z: 0 }),
+		]);
+		expect(model.parts[1]?.partPlacements).toEqual([
+			createPlacement({ x: 0, y: 4, z: 0 }),
+		]);
 	});
 
 	it("normalizes direct gfx-obj sources through an ephemeral one-part view", () => {
@@ -435,7 +483,18 @@ function createOutdoorStaticSceneDiagnostics() {
 	};
 }
 
-function createPreparedSetupModelAsset(): PreparedAssetRecord {
+function createPreparedSetupModelAsset(
+	placementSets: PreparedSetupModelPayload["placementSets"] = [
+		{
+			key: 0,
+			localPlacements: [
+				createPlacement({ x: 1, y: 0, z: 0 }),
+				createPlacement({ x: 0, y: 2, z: 0 }),
+			],
+			hookCount: 0,
+		},
+	],
+): PreparedAssetRecord {
 	return createPreparedAsset("setup-model/02000001", {
 		kind: "setup-model",
 		sourceAssetKind: "setup-model",
@@ -460,16 +519,7 @@ function createPreparedSetupModelAsset(): PreparedAssetRecord {
 		],
 		holdingLocations: [],
 		connectionPoints: [],
-		placementSets: [
-			{
-				key: 0,
-				localPlacements: [
-					createPlacement({ x: 1, y: 0, z: 0 }),
-					createPlacement({ x: 0, y: 2, z: 0 }),
-				],
-				hookCount: 0,
-			},
-		],
+		placementSets,
 		collisionWitness: {
 			cylSphereCount: 0,
 			sphereCount: 0,

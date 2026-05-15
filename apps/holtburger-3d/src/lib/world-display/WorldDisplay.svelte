@@ -6,22 +6,22 @@
 		BufferGeometry,
 		BufferAttribute,
 		Color,
+		CylinderGeometry,
 		DirectionalLight,
+		Frustum,
 		Group,
-		AxesHelper,
 		InstancedMesh,
 		LineBasicMaterial,
 		LineLoop,
 		LineSegments,
+		Matrix4,
 		type Material,
 		Mesh,
 		MeshBasicMaterial,
 		MeshStandardMaterial,
 		Object3D,
 		PerspectiveCamera,
-		Raycaster,
 		Scene,
-		SphereGeometry,
 		Vector2,
 		Vector3,
 		WebGLRenderer,
@@ -65,6 +65,18 @@
 		WorldRenderMetrics,
 		WorldRenderMetricsChangeHandler,
 	} from "./renderer-contract";
+	import type {
+		RenderFrustum,
+		RenderSpatialIndexQuery,
+		RenderSpatialItemKind,
+		RenderSpatialPick,
+	} from "./render-spatial-index";
+	import {
+		debugCellSpatialItemId,
+		portalSpatialItemId,
+		structuredCellSpatialItemId,
+		terrainSpatialItemId,
+	} from "./render-spatial-ids";
 
 	let {
 		assetState,
@@ -72,6 +84,7 @@
 		staticRenderableScene,
 		structuredInteriorScene,
 		debugOverlayScene,
+		renderSpatialQuery = null,
 		controlledCameraFrame = null,
 		onCameraFrameChange,
 		onRenderMetricsChange,
@@ -81,6 +94,7 @@
 		staticRenderableScene: StaticRenderableSceneModel;
 		structuredInteriorScene: StructuredInteriorSceneModel;
 		debugOverlayScene: WorldDebugOverlayModel;
+		renderSpatialQuery?: RenderSpatialIndexQuery | null;
 		controlledCameraFrame?: SceneCameraFrame | null;
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
@@ -99,13 +113,14 @@
 	const staticGeometryCache = new Map<string, BufferGeometry>();
 	const staticRenderableMeshes = new Map<string, InstancedMesh>();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
-	const terrainRaycaster = new Raycaster();
+	const debugOverlayObjects = new Map<string, Object3D>();
 	let lastReportedMetricsKey: string | null = null;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
 
 	const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 	const UNFOCUSED_MAX_RENDER_FPS = 15;
 	const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
+	const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
 
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
@@ -207,6 +222,7 @@
 				scene === nextScene &&
 				camera === nextCamera
 			) {
+				syncSpatialVisibility();
 				syncReducedFrameRateState();
 				if (
 					isReducedFrameRateActive &&
@@ -281,6 +297,7 @@
 				disposeMesh(mesh);
 			}
 			structuredInteriorMeshes.clear();
+			debugOverlayObjects.clear();
 			nextTerrainRoot.clear();
 			nextStaticRenderableRoot.clear();
 			nextStructuredInteriorRoot.clear();
@@ -340,31 +357,22 @@
 	export function pickTerrainLandblockAtViewportPoint(
 		viewportPoint: NormalizedViewportPoint,
 	): number | null {
-		return pickTerrainLandblock(viewportPoint);
+		const pick = pickAtViewportPoint(viewportPoint, new Set(["terrain"]));
+		return pick?.item.metadata.kind === "terrain"
+			? pick.item.metadata.landblockId
+			: null;
 	}
 
-	function pickTerrainLandblock(
+	export function pickAtViewportPoint(
 		viewportPoint: NormalizedViewportPoint,
-	): number | null {
-		if (!camera || terrainMeshes.size === 0) {
+		mask: ReadonlySet<RenderSpatialItemKind>,
+		ownerKeys?: ReadonlySet<string>,
+	): RenderSpatialPick | null {
+		if (!camera || !renderSpatialQuery) {
 			return null;
 		}
-
-		terrainRaycaster.setFromCamera(
-			new Vector2(
-				viewportPoint.normalizedX * 2 - 1,
-				-(viewportPoint.normalizedY * 2 - 1),
-			),
-			camera,
-		);
-		const intersections = terrainRaycaster.intersectObjects(
-			[...terrainMeshes.values()],
-			false,
-		);
-		const pickedMesh = intersections[0]?.object;
-		const landblockId = pickedMesh?.userData.landblockId;
-
-		return typeof landblockId === "number" ? landblockId : null;
+		const ray = buildViewportRay(viewportPoint);
+		return renderSpatialQuery.pickRay(ray, mask, ownerKeys);
 	}
 
 	function syncRendererSize(): void {
@@ -407,11 +415,120 @@
 			const mesh = createTerrainTileMesh(tile);
 			mesh.position.set(tile.worldOffsetX, 0, -tile.worldOffsetY);
 			mesh.userData.landblockId = tile.landblockId;
+			mesh.userData.spatialItemId = terrainSpatialItemId(tile.assetId);
 			terrainRoot.add(mesh);
 			terrainMeshes.set(tile.assetId, mesh);
 		}
-
 		untrack(() => updateCameraFrame());
+	}
+
+	function buildViewportRay(viewportPoint: NormalizedViewportPoint): {
+		origin: { x: number; y: number; z: number };
+		direction: { x: number; y: number; z: number };
+	} {
+		if (!camera) {
+			throw new Error("Cannot build a viewport ray without an active camera.");
+		}
+		const normalizedDevicePoint = new Vector2(
+			viewportPoint.normalizedX * 2 - 1,
+			-(viewportPoint.normalizedY * 2 - 1),
+		);
+		const origin = new Vector3();
+		camera.getWorldPosition(origin);
+		const direction = new Vector3(
+			normalizedDevicePoint.x,
+			normalizedDevicePoint.y,
+			0.5,
+		)
+			.unproject(camera)
+			.sub(origin)
+			.normalize();
+		return {
+			origin: { x: origin.x, y: origin.y, z: origin.z },
+			direction: { x: direction.x, y: direction.y, z: direction.z },
+		};
+	}
+
+	function syncSpatialVisibility(): void {
+		if (!camera || !renderSpatialQuery) {
+			setAllSpatiallyCullableObjectsVisible(true);
+			return;
+		}
+
+		const visibleItemIds = new Set(
+			renderSpatialQuery
+				.queryFrustum(
+					buildCameraRenderFrustum(),
+					new Set(["terrain", "structured-cell", "portal"]),
+				)
+				.map((item) => item.id),
+		);
+
+		for (const [assetId, mesh] of terrainMeshes.entries()) {
+			applySpatialVisibility(
+				mesh,
+				terrainSpatialItemId(assetId),
+				visibleItemIds,
+			);
+		}
+		for (const [renderKey, mesh] of structuredInteriorMeshes.entries()) {
+			applySpatialVisibility(
+				mesh,
+				structuredCellSpatialItemId(renderKey),
+				visibleItemIds,
+			);
+		}
+		for (const [spatialItemId, object] of debugOverlayObjects.entries()) {
+			applySpatialVisibility(object, spatialItemId, visibleItemIds);
+		}
+	}
+
+	function applySpatialVisibility(
+		object: Object3D,
+		spatialItemId: string,
+		visibleItemIds: ReadonlySet<string>,
+	): void {
+		object.visible =
+			!renderSpatialQuery?.hasItem(spatialItemId) ||
+			visibleItemIds.has(spatialItemId);
+	}
+
+	function setAllSpatiallyCullableObjectsVisible(visible: boolean): void {
+		for (const mesh of terrainMeshes.values()) {
+			mesh.visible = visible;
+		}
+		for (const mesh of structuredInteriorMeshes.values()) {
+			mesh.visible = visible;
+		}
+		for (const object of debugOverlayObjects.values()) {
+			object.visible = visible;
+		}
+	}
+
+	function buildCameraRenderFrustum(): RenderFrustum {
+		if (!camera) {
+			throw new Error(
+				"Cannot build a render frustum without an active camera.",
+			);
+		}
+		camera.updateMatrixWorld();
+		const projectionScreenMatrix = new Matrix4().multiplyMatrices(
+			camera.projectionMatrix,
+			camera.matrixWorldInverse,
+		);
+		const frustum = new Frustum().setFromProjectionMatrix(
+			projectionScreenMatrix,
+		);
+		return {
+			planes: frustum.planes.map((plane) => ({
+				normal: {
+					x: plane.normal.x,
+					y: plane.normal.y,
+					z: plane.normal.z,
+				},
+				constant: plane.constant,
+			})),
+		};
 	}
 
 	function updateCameraFrame(): void {
@@ -605,10 +722,16 @@
 
 		disposeObjectChildren(debugOverlayRoot);
 		debugOverlayRoot.clear();
+		debugOverlayObjects.clear();
 
 		if (debugOverlayScene.showCellIndicators) {
 			for (const cell of debugOverlayScene.cells) {
-				debugOverlayRoot.add(createCellDebugOverlayGroup(cell));
+				const overlay = createCellDebugOverlayGroup(cell);
+				debugOverlayRoot.add(overlay);
+				debugOverlayObjects.set(
+					debugCellSpatialItemId(cell.renderKey),
+					overlay,
+				);
 			}
 		}
 
@@ -617,6 +740,10 @@
 				const overlay = createPortalDebugOverlayLine(portal);
 				if (overlay) {
 					debugOverlayRoot.add(overlay);
+					debugOverlayObjects.set(
+						portalSpatialItemId(portal.portalId),
+						overlay,
+					);
 				}
 			}
 		}
@@ -671,6 +798,7 @@
 		const mesh = new Mesh(geometry, material);
 		mesh.name = `structured-interior/${cell.renderKey}`;
 		mesh.matrixAutoUpdate = false;
+		mesh.userData.spatialItemId = structuredCellSpatialItemId(cell.renderKey);
 		return mesh;
 	}
 
@@ -687,26 +815,24 @@
 		);
 
 		const color = buildStaticRenderableColor(cell.colorKey);
-		const marker = new Mesh(
-			new SphereGeometry(cell.isFocus ? 1.8 : 1.2, 12, 8),
-			new MeshBasicMaterial({
-				color,
-				depthTest: false,
-				depthWrite: false,
-			}),
-		);
-		marker.name = `debug-cell-marker/${cell.renderKey}`;
-		group.add(marker);
-
-		const axes = new AxesHelper(cell.isFocus ? 18 : 12);
-		axes.name = `debug-cell-axes/${cell.renderKey}`;
-		setObjectDepthTest(axes, false);
-		group.add(axes);
-
-		const bounds = cell.bounds ? createBoundsLineSegments(cell.bounds, color) : null;
+		const bounds = cell.bounds
+			? createBoundsLineSegments(
+					cell.bounds,
+					cell.isSelected ? new Color("#ffffff") : color,
+				)
+			: null;
 		if (bounds) {
 			bounds.name = `debug-cell-bounds/${cell.renderKey}`;
 			group.add(bounds);
+		}
+		if (cell.isSelected && cell.bounds) {
+			const selectedBounds = createThickBoundsLineGroup(
+				cell.bounds,
+				new Color("#ffffff"),
+				SELECTED_DEBUG_EDGE_RADIUS,
+			);
+			selectedBounds.name = `debug-cell-selected-bounds/${cell.renderKey}`;
+			group.add(selectedBounds);
 		}
 
 		return group;
@@ -714,7 +840,7 @@
 
 	function createPortalDebugOverlayLine(
 		portal: PortalDebugOverlay,
-	): LineLoop | null {
+	): Object3D | null {
 		if (portal.points.length < 3) {
 			return null;
 		}
@@ -739,15 +865,46 @@
 			}),
 		);
 		line.name = `debug-portal/${portal.portalId}`;
-		line.matrixAutoUpdate = false;
-		line.matrix.copy(
-			buildAcPlacementMatrix(portal.localPlacement, portal.landblockWorldOffset, {
-				x: 1,
-				y: 1,
-				z: 1,
-			}),
+		if (!portal.isSelected) {
+			line.matrixAutoUpdate = false;
+			line.matrix.copy(
+				buildAcPlacementMatrix(
+					portal.localPlacement,
+					portal.landblockWorldOffset,
+					{
+						x: 1,
+						y: 1,
+						z: 1,
+					},
+				),
+			);
+			return line;
+		}
+
+		const group = new Group();
+		group.name = `debug-portal-selected/${portal.portalId}`;
+		group.matrixAutoUpdate = false;
+		group.matrix.copy(
+			buildAcPlacementMatrix(
+				portal.localPlacement,
+				portal.landblockWorldOffset,
+				{
+					x: 1,
+					y: 1,
+					z: 1,
+				},
+			),
 		);
-		return line;
+		group.add(line);
+		group.add(
+			createThickPolylineGroup(
+				portal.points,
+				true,
+				new Color("#ffffff"),
+				SELECTED_DEBUG_EDGE_RADIUS,
+			),
+		);
+		return group;
 	}
 
 	function createBoundsLineSegments(
@@ -766,8 +923,7 @@
 			[min.x, max.y, max.z],
 		];
 		const edgeIndices = [
-			0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6,
-			3, 7,
+			0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7,
 		];
 		const positions = edgeIndices.flatMap((index) => corners[index] ?? []);
 		const geometry = new BufferGeometry();
@@ -787,13 +943,102 @@
 		);
 	}
 
+	function createThickBoundsLineGroup(
+		bounds: NonNullable<CellDebugOverlay["bounds"]>,
+		color: Color,
+		radius: number,
+	): Group {
+		const { min, max } = bounds;
+		const corners = [
+			new Vector3(min.x, min.y, min.z),
+			new Vector3(max.x, min.y, min.z),
+			new Vector3(max.x, max.y, min.z),
+			new Vector3(min.x, max.y, min.z),
+			new Vector3(min.x, min.y, max.z),
+			new Vector3(max.x, min.y, max.z),
+			new Vector3(max.x, max.y, max.z),
+			new Vector3(min.x, max.y, max.z),
+		];
+		const edgeIndices = [
+			0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7,
+		];
+		const group = new Group();
+		const material = createSelectedDebugEdgeMaterial(color);
+		for (let index = 0; index < edgeIndices.length; index += 2) {
+			const start = corners[edgeIndices[index] ?? 0];
+			const end = corners[edgeIndices[index + 1] ?? 0];
+			if (start && end) {
+				group.add(createCylinderSegment(start, end, radius, material));
+			}
+		}
+		return group;
+	}
+
+	function createThickPolylineGroup(
+		points: PortalDebugOverlay["points"],
+		closed: boolean,
+		color: Color,
+		radius: number,
+	): Group {
+		const group = new Group();
+		const material = createSelectedDebugEdgeMaterial(color);
+		const vectors = points.map((point) => new Vector3(point.x, point.y, point.z));
+		const segmentCount = closed ? vectors.length : vectors.length - 1;
+		for (let index = 0; index < segmentCount; index += 1) {
+			const start = vectors[index];
+			const end = vectors[(index + 1) % vectors.length];
+			if (start && end) {
+				group.add(createCylinderSegment(start, end, radius, material));
+			}
+		}
+		return group;
+	}
+
+	function createSelectedDebugEdgeMaterial(color: Color): MeshBasicMaterial {
+		return new MeshBasicMaterial({
+			color,
+			depthTest: false,
+			depthWrite: false,
+			transparent: true,
+			opacity: 0.95,
+		});
+	}
+
+	function createCylinderSegment(
+		start: Vector3,
+		end: Vector3,
+		radius: number,
+		material: MeshBasicMaterial,
+	): Mesh {
+		const direction = new Vector3().subVectors(end, start);
+		const length = direction.length();
+		const mesh = new Mesh(
+			new CylinderGeometry(radius, radius, length, 8),
+			material,
+		);
+		mesh.position.copy(start).add(end).multiplyScalar(0.5);
+		if (length > 0) {
+			mesh.quaternion.setFromUnitVectors(
+				new Vector3(0, 1, 0),
+				direction.normalize(),
+			);
+		}
+		return mesh;
+	}
+
 	function buildPortalOverlayColor(portal: PortalDebugOverlay): Color {
+		if (portal.isSelected) {
+			return new Color("#ffffff");
+		}
 		if (debugOverlayScene.highlightPortalTargets) {
 			if (portal.targetStatus === "loaded-visible") {
 				return new Color("#61d394");
 			}
 			if (portal.targetStatus === "known-unloaded") {
 				return new Color("#f4d35e");
+			}
+			if (portal.targetStatus === "outside") {
+				return new Color("#7cc7ff");
 			}
 			if (portal.targetStatus === "missing-polygon") {
 				return new Color("#ff6b6b");
@@ -913,24 +1158,6 @@
 
 	function disposeMaterial(material: Material): void {
 		material.dispose();
-	}
-
-	function setObjectDepthTest(object: Object3D, depthTest: boolean): void {
-		object.traverse((entry) => {
-			const maybeMaterial = (entry as { material?: unknown }).material;
-			if (Array.isArray(maybeMaterial)) {
-				for (const material of maybeMaterial) {
-					material.depthTest = depthTest;
-					material.depthWrite = false;
-				}
-				return;
-			}
-			if (maybeMaterial) {
-				const material = maybeMaterial as Material;
-				material.depthTest = depthTest;
-				material.depthWrite = false;
-			}
-		});
 	}
 
 	function disposeMeshMaterial(mesh: Mesh): void {

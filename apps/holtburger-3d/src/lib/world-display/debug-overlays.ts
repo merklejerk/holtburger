@@ -14,11 +14,14 @@ export interface WorldDebugOverlayOptions {
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
+	selectedPortalId?: string | null;
+	selectedEnvCellId?: number | null;
 }
 
 export type PortalOverlayTargetStatus =
 	| "loaded-visible"
 	| "known-unloaded"
+	| "outside"
 	| "unsupported"
 	| "missing-polygon";
 
@@ -28,6 +31,7 @@ export interface CellDebugOverlay {
 	label: string;
 	colorKey: string;
 	isFocus: boolean;
+	isSelected: boolean;
 	localPlacement: StructuredInteriorCell["localPlacement"];
 	landblockWorldOffset: StructuredInteriorCell["landblockWorldOffset"];
 	bounds: { min: Vec3Dto; max: Vec3Dto } | null;
@@ -41,6 +45,7 @@ export interface PortalDebugOverlay {
 	polygonId: number;
 	otherPortalId: number;
 	flags: number;
+	isSelected: boolean;
 	localPlacement: StructuredInteriorCell["localPlacement"];
 	landblockWorldOffset: StructuredInteriorCell["landblockWorldOffset"];
 	points: Vec3Dto[];
@@ -68,11 +73,17 @@ export function deriveWorldDebugOverlayModel(
 ): WorldDebugOverlayModel {
 	const activeEnvCellIds = new Set(structuredInteriorScene.activeEnvCellIds);
 	const cells = options.showCellIndicators
-		? structuredInteriorScene.cells.map(createCellOverlay)
+		? structuredInteriorScene.cells.map((cell) =>
+				createCellOverlay(cell, options.selectedEnvCellId ?? null),
+			)
 		: [];
 	const portals = options.showPortalPolygons
 		? structuredInteriorScene.cells.flatMap((cell) =>
-				createPortalOverlays(cell, activeEnvCellIds),
+				createPortalOverlays(
+					cell,
+					activeEnvCellIds,
+					options.selectedPortalId ?? null,
+				),
 			)
 		: [];
 	const knownTargetCount = portals.filter(
@@ -98,13 +109,22 @@ export function deriveWorldDebugOverlayModel(
 	};
 }
 
-function createCellOverlay(cell: StructuredInteriorCell): CellDebugOverlay {
+function createCellOverlay(
+	cell: StructuredInteriorCell,
+	selectedEnvCellId: number | null,
+): CellDebugOverlay {
+	const isSelected = cell.envCellId === selectedEnvCellId;
 	return {
 		envCellId: cell.envCellId,
 		renderKey: cell.renderKey,
 		label: formatEnvCellSuffix(cell.envCellId),
-		colorKey: cell.isFocus ? `${cell.debugColorKey}:focus` : cell.debugColorKey,
+		colorKey: isSelected
+			? `${cell.debugColorKey}:selected`
+			: cell.isFocus
+				? `${cell.debugColorKey}:focus`
+				: cell.debugColorKey,
 		isFocus: cell.isFocus,
+		isSelected,
 		localPlacement: cell.localPlacement,
 		landblockWorldOffset: cell.landblockWorldOffset,
 		bounds: cell.renderGeometry.bounds,
@@ -114,6 +134,7 @@ function createCellOverlay(cell: StructuredInteriorCell): CellDebugOverlay {
 function createPortalOverlays(
 	cell: StructuredInteriorCell,
 	activeEnvCellIds: ReadonlySet<number>,
+	selectedPortalId: string | null,
 ): PortalDebugOverlay[] {
 	const cellStructure = cell.cellStructure;
 	if (!cellStructure) {
@@ -144,6 +165,7 @@ function createPortalOverlays(
 			polygonId: portal.polygonId,
 			otherPortalId: portal.otherPortalId,
 			flags: portal.flags,
+			isSelected: portal.portalId === selectedPortalId,
 			localPlacement: cell.localPlacement,
 			landblockWorldOffset: cell.landblockWorldOffset,
 			points,
@@ -170,6 +192,9 @@ function normalizePortalTargetEnvCellId(
 	cell: StructuredInteriorCell,
 	portal: PreparedIndoorCellPortal,
 ): number | null {
+	if (isOutsidePortal(portal)) {
+		return (cell.envCellId & 0xffff_0000) | 0xffff;
+	}
 	if (portal.otherCellId === 0) {
 		return null;
 	}
@@ -185,6 +210,9 @@ function resolveTargetStatus(
 	if (points.length < 3) {
 		return "missing-polygon";
 	}
+	if (targetEnvCellId !== null && (targetEnvCellId & 0xffff) === 0xffff) {
+		return "outside";
+	}
 	if (targetEnvCellId === null) {
 		return "unsupported";
 	}
@@ -193,6 +221,12 @@ function resolveTargetStatus(
 	}
 
 	return "known-unloaded";
+}
+
+function isOutsidePortal(portal: PreparedIndoorCellPortal): boolean {
+	// Retail CCellPortal::UnPack maps flag 0x4 to other_cell_id = -1, then
+	// transit resolves the crossing through outside landcell membership.
+	return (portal.flags & 0x4) !== 0;
 }
 
 function toRenderSpace(point: Vec3Dto): Vec3Dto {

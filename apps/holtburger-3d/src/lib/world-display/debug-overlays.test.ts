@@ -76,6 +76,36 @@ describe("debug overlays", () => {
 		expect(model.portals[0]?.targetStatus).toBe("missing-polygon");
 		expect(model.diagnostics.missingPortalPolygonCount).toBe(1);
 	});
+
+	it("classifies flag 0x4 portals as outside transitions", () => {
+		const scene = createStructuredInteriorSceneModel([
+			{
+				...createStructuredInteriorCell(0x016c0155, 0),
+				portals: [
+					{
+						portalId: "outside",
+						sourceIndex: 0,
+						flags: 0x4,
+						polygonId: 7,
+						otherCellId: 0xffff,
+						otherPortalId: 0xffff,
+						targetEnvCellId: 0x016cffff,
+					},
+				],
+			},
+		]);
+
+		const model = deriveWorldDebugOverlayModel(scene, {
+			showPortalPolygons: true,
+			showCellIndicators: false,
+			highlightPortalTargets: true,
+		});
+
+		expect(model.portals[0]).toMatchObject({
+			targetEnvCellId: 0x016cffff,
+			targetStatus: "outside",
+		});
+	});
 });
 
 function createStructuredInteriorSceneModel(
@@ -115,7 +145,8 @@ function createStructuredInteriorCell(
 				polygonId: 7,
 				otherCellId: targetSuffix,
 				otherPortalId: 0,
-				targetEnvCellId: targetSuffix === 0 ? 0 : (envCellId & 0xffff0000) | targetSuffix,
+				targetEnvCellId:
+					targetSuffix === 0 ? 0 : (envCellId & 0xffff0000) | targetSuffix,
 			},
 		],
 		staticObjectCount: 0,

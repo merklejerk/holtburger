@@ -134,6 +134,7 @@ function createPreparedIndoorEnvCellAsset(
 			seenOutside: false,
 			surfaceIds: [],
 			portalCount: 0,
+			portals: [],
 			staticObjectCount: 0,
 			staticObjects: [],
 		},

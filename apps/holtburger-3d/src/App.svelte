@@ -117,6 +117,9 @@
 				.structuredInteriorMaxEnvCells}
 			structuredInteriorMaxVisibleCellDepth={$frontendState.browserMode
 				.structuredInteriorMaxVisibleCellDepth}
+			showPortalPolygons={$frontendState.browserMode.showPortalPolygons}
+			showCellIndicators={$frontendState.browserMode.showCellIndicators}
+			highlightPortalTargets={$frontendState.browserMode.highlightPortalTargets}
 		/>
 	{:else}
 		<section class="viewer-unavailable">

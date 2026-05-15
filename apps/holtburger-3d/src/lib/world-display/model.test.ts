@@ -332,6 +332,7 @@ describe("world display model helpers", () => {
 							seenOutside: false,
 							surfaceIds: [],
 							portalCount: 0,
+							portals: [],
 							staticObjectCount: 0,
 							staticObjects: [],
 						},

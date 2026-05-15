@@ -444,6 +444,7 @@ function createPreparedIndoorEnvCellAsset(
 		seenOutside: false,
 		surfaceIds: [],
 		portalCount: 0,
+		portals: [],
 		staticObjectCount: staticSourceAssetIds.length,
 		staticObjects: staticSourceAssetIds.map((sourceAssetId, index) => ({
 			instanceId: `${assetId}/static/${index}`,

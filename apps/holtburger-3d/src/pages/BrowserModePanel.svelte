@@ -121,6 +121,21 @@
 		);
 	}
 
+	function handlePortalPolygonsToggle(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updatePortalPolygonVisibility(input.checked);
+	}
+
+	function handleCellIndicatorsToggle(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateCellIndicatorVisibility(input.checked);
+	}
+
+	function handlePortalTargetHighlightToggle(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updatePortalTargetHighlighting(input.checked);
+	}
+
 	function normalizeLandblockCellId(
 		landblockId: number,
 		focusCellId: number,
@@ -157,7 +172,7 @@
 					aria-selected={activeTab === "lod"}
 					onclick={() => selectTab("lod")}
 				>
-					LoD
+					Settings
 				</button>
 				<button
 					type="button"
@@ -358,6 +373,43 @@
 						/>
 					</label>
 				</div>
+			</fieldset>
+
+			<fieldset class="browser-form__fieldset">
+				<legend>Diagnostics</legend>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span>
+						<strong>Portal polygons</strong>
+						<small>Show decoded portal opening outlines.</small>
+					</span>
+					<input
+						type="checkbox"
+						checked={$frontendState.browserMode.showPortalPolygons}
+						onchange={handlePortalPolygonsToggle}
+					/>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span>
+						<strong>Cell indicators</strong>
+						<small>Show env-cell markers, bounds, axes, and labels.</small>
+					</span>
+					<input
+						type="checkbox"
+						checked={$frontendState.browserMode.showCellIndicators}
+						onchange={handleCellIndicatorsToggle}
+					/>
+				</label>
+				<label class="browser-form__field browser-form__field--checkbox">
+					<span>
+						<strong>Portal targets</strong>
+						<small>Color portal outlines by target/load status.</small>
+					</span>
+					<input
+						type="checkbox"
+						checked={$frontendState.browserMode.highlightPortalTargets}
+						onchange={handlePortalTargetHighlightToggle}
+					/>
+				</label>
 			</fieldset>
 		</div>
 	{:else if !isCollapsed && activeTab === "scene"}

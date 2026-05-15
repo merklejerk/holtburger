@@ -69,6 +69,7 @@ describe("asset response dependencies", () => {
 			seenOutside: true,
 			surfaceIds: [],
 			portalCount: 0,
+			portals: [],
 			staticObjectCount: 2,
 			staticObjects: [
 				createIndoorStaticObject("static-0", "setup-model/02000004"),

@@ -57,6 +57,9 @@ export interface BrowserModeState {
 	detailLodRadius: number;
 	structuredInteriorMaxEnvCells: number;
 	structuredInteriorMaxVisibleCellDepth: number;
+	showPortalPolygons: boolean;
+	showCellIndicators: boolean;
+	highlightPortalTargets: boolean;
 	page: BrowserPageId;
 }
 
@@ -87,6 +90,9 @@ export function createBrowserModeState(): BrowserModeState {
 		structuredInteriorMaxEnvCells: DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		structuredInteriorMaxVisibleCellDepth:
 			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		showPortalPolygons: false,
+		showCellIndicators: true,
+		highlightPortalTargets: true,
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
 			: "location-entry",
@@ -249,6 +255,36 @@ export function updateStructuredInteriorMaxVisibleCellDepth(
 	};
 }
 
+export function updatePortalPolygonVisibility(
+	browserMode: BrowserModeState,
+	showPortalPolygons: boolean,
+): BrowserModeState {
+	return {
+		...browserMode,
+		showPortalPolygons,
+	};
+}
+
+export function updateCellIndicatorVisibility(
+	browserMode: BrowserModeState,
+	showCellIndicators: boolean,
+): BrowserModeState {
+	return {
+		...browserMode,
+		showCellIndicators,
+	};
+}
+
+export function updatePortalTargetHighlighting(
+	browserMode: BrowserModeState,
+	highlightPortalTargets: boolean,
+): BrowserModeState {
+	return {
+		...browserMode,
+		highlightPortalTargets,
+	};
+}
+
 export function previewBrowserLocation(
 	browserMode: BrowserModeState,
 ): BrowserModeState {
@@ -274,6 +310,9 @@ export function previewBrowserLocation(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		showPortalPolygons: browserMode.showPortalPolygons,
+		showCellIndicators: browserMode.showCellIndicators,
+		highlightPortalTargets: browserMode.highlightPortalTargets,
 		page: "destination-preview",
 	};
 }
@@ -308,6 +347,9 @@ export function selectRuntimeResidencyDestination(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		showPortalPolygons: browserMode.showPortalPolygons,
+		showCellIndicators: browserMode.showCellIndicators,
+		highlightPortalTargets: browserMode.highlightPortalTargets,
 		page: "destination-preview",
 	};
 }
@@ -336,6 +378,9 @@ export function selectBrowserLandblockDestination(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		showPortalPolygons: browserMode.showPortalPolygons,
+		showCellIndicators: browserMode.showCellIndicators,
+		highlightPortalTargets: browserMode.highlightPortalTargets,
 		page: "destination-preview",
 	};
 }

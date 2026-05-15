@@ -251,6 +251,17 @@ export const indoorEnvCellPayloadDtoSchema = z.object({
 	seenOutside: z.boolean().nullable(),
 	surfaceIds: z.array(z.number().int().nonnegative()),
 	portalCount: z.number().int().nonnegative(),
+	portals: z.array(
+		z.object({
+			portalId: z.string().min(1),
+			sourceIndex: z.number().int().nonnegative(),
+			flags: z.number().int().nonnegative(),
+			polygonId: z.number().int().nonnegative(),
+			otherCellId: z.number().int().nonnegative(),
+			otherPortalId: z.number().int().nonnegative(),
+			targetEnvCellId: z.number().int().nonnegative(),
+		}),
+	),
 	staticObjectCount: z.number().int().nonnegative(),
 	staticObjects: z.array(
 		z.object({

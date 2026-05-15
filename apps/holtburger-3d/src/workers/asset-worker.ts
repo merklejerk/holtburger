@@ -203,6 +203,7 @@ function prepareIndoorEnvCell(
 			seenOutside: payload.seenOutside,
 			surfaceIds: payload.surfaceIds,
 			portalCount: payload.portalCount,
+			portals: payload.portals,
 			staticObjectCount: payload.staticObjectCount,
 			staticObjects: payload.staticObjects,
 		},

@@ -215,6 +215,17 @@ function createPreparedIndoorEnvCellAsset(
 			seenOutside: false,
 			surfaceIds: [0x08000001],
 			portalCount: 1,
+			portals: [
+				{
+					portalId: `${assetId}/portal/00`,
+					sourceIndex: 0,
+					flags: 0,
+					polygonId: 1,
+					otherCellId: 0x0156,
+					otherPortalId: 0,
+					targetEnvCellId: 0x016c0156,
+				},
+			],
 			staticObjectCount: 0,
 			staticObjects: [],
 		},

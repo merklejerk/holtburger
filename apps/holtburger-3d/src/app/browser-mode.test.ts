@@ -11,7 +11,10 @@ import {
 	selectRuntimeResidencyDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
+	updateCellIndicatorVisibility,
 	updateDetailLodRadius,
+	updatePortalPolygonVisibility,
+	updatePortalTargetHighlighting,
 	updateTerrainLodRadius,
 } from "./browser-mode";
 import type { RuntimeResidencyDto } from "../lib/host/contracts";
@@ -39,7 +42,24 @@ describe("browser-mode location policy", () => {
 		expect(state.terrainLodRadius).toBe(2);
 		expect(state.buildingLodRadius).toBe(1);
 		expect(state.detailLodRadius).toBe(1);
+		expect(state.showPortalPolygons).toBe(false);
+		expect(state.showCellIndicators).toBe(true);
+		expect(state.highlightPortalTargets).toBe(true);
 		expect(state.page).toBe("destination-preview");
+	});
+
+	it("keeps portal diagnostic toggles in browser-owned mode state", () => {
+		const state = updatePortalTargetHighlighting(
+			updateCellIndicatorVisibility(
+				updatePortalPolygonVisibility(createBrowserModeState(), true),
+				false,
+			),
+			false,
+		);
+
+		expect(state.showPortalPolygons).toBe(true);
+		expect(state.showCellIndicators).toBe(false);
+		expect(state.highlightPortalTargets).toBe(false);
 	});
 
 	it("parses AC-style coordinate input into a stable selection label", () => {

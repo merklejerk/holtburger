@@ -4,15 +4,24 @@
 		AmbientLight,
 		Box3,
 		BufferGeometry,
+		BufferAttribute,
 		Color,
 		DirectionalLight,
 		Group,
+		AxesHelper,
 		InstancedMesh,
+		LineBasicMaterial,
+		LineLoop,
+		LineSegments,
+		type Material,
 		Mesh,
+		MeshBasicMaterial,
 		MeshStandardMaterial,
+		Object3D,
 		PerspectiveCamera,
 		Raycaster,
 		Scene,
+		SphereGeometry,
 		Vector2,
 		Vector3,
 		WebGLRenderer,
@@ -29,6 +38,11 @@
 		type TerrainSceneModel,
 		type TerrainSceneTile,
 	} from "./terrain-scene";
+	import type {
+		CellDebugOverlay,
+		PortalDebugOverlay,
+		WorldDebugOverlayModel,
+	} from "./debug-overlays";
 	import { buildTerrainGeometry } from "./terrain-geometry";
 	import {
 		buildGfxObjGeometry,
@@ -57,6 +71,7 @@
 		terrainScene,
 		staticRenderableScene,
 		structuredInteriorScene,
+		debugOverlayScene,
 		controlledCameraFrame = null,
 		onCameraFrameChange,
 		onRenderMetricsChange,
@@ -65,6 +80,7 @@
 		terrainScene: TerrainSceneModel;
 		staticRenderableScene: StaticRenderableSceneModel;
 		structuredInteriorScene: StructuredInteriorSceneModel;
+		debugOverlayScene: WorldDebugOverlayModel;
 		controlledCameraFrame?: SceneCameraFrame | null;
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
@@ -76,6 +92,7 @@
 	let terrainRoot: Group | null = null;
 	let staticRenderableRoot: Group | null = null;
 	let structuredInteriorRoot: Group | null = null;
+	let debugOverlayRoot: Group | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let activeCameraFrame = $state<SceneCameraFrame | null>(null);
 	const terrainMeshes = new Map<string, Mesh>();
@@ -128,9 +145,11 @@
 		const nextTerrainRoot = new Group();
 		const nextStaticRenderableRoot = new Group();
 		const nextStructuredInteriorRoot = new Group();
+		const nextDebugOverlayRoot = new Group();
 		nextScene.add(nextTerrainRoot);
 		nextScene.add(nextStaticRenderableRoot);
 		nextScene.add(nextStructuredInteriorRoot);
+		nextScene.add(nextDebugOverlayRoot);
 
 		renderer = nextRenderer;
 		scene = nextScene;
@@ -138,6 +157,7 @@
 		terrainRoot = nextTerrainRoot;
 		staticRenderableRoot = nextStaticRenderableRoot;
 		structuredInteriorRoot = nextStructuredInteriorRoot;
+		debugOverlayRoot = nextDebugOverlayRoot;
 
 		const nextResizeObserver = new ResizeObserver(() => {
 			syncRendererSize();
@@ -264,6 +284,8 @@
 			nextTerrainRoot.clear();
 			nextStaticRenderableRoot.clear();
 			nextStructuredInteriorRoot.clear();
+			disposeObjectChildren(nextDebugOverlayRoot);
+			nextDebugOverlayRoot.clear();
 			nextRenderer.dispose();
 			nextRenderer.domElement.remove();
 			if (renderer === nextRenderer) {
@@ -284,6 +306,9 @@
 			if (structuredInteriorRoot === nextStructuredInteriorRoot) {
 				structuredInteriorRoot = null;
 			}
+			if (debugOverlayRoot === nextDebugOverlayRoot) {
+				debugOverlayRoot = null;
+			}
 		};
 	});
 
@@ -297,6 +322,10 @@
 
 	$effect(() => {
 		syncStructuredInteriorMeshes();
+	});
+
+	$effect(() => {
+		syncDebugOverlayMeshes();
 	});
 
 	$effect(() => {
@@ -569,6 +598,32 @@
 		untrack(() => updateCameraFrame());
 	}
 
+	function syncDebugOverlayMeshes(): void {
+		if (!debugOverlayRoot) {
+			return;
+		}
+
+		disposeObjectChildren(debugOverlayRoot);
+		debugOverlayRoot.clear();
+
+		if (debugOverlayScene.showCellIndicators) {
+			for (const cell of debugOverlayScene.cells) {
+				debugOverlayRoot.add(createCellDebugOverlayGroup(cell));
+			}
+		}
+
+		if (debugOverlayScene.showPortalPolygons) {
+			for (const portal of debugOverlayScene.portals) {
+				const overlay = createPortalDebugOverlayLine(portal);
+				if (overlay) {
+					debugOverlayRoot.add(overlay);
+				}
+			}
+		}
+
+		untrack(() => updateCameraFrame());
+	}
+
 	function syncStructuredInteriorMeshes(): void {
 		if (!structuredInteriorRoot) {
 			return;
@@ -617,6 +672,136 @@
 		mesh.name = `structured-interior/${cell.renderKey}`;
 		mesh.matrixAutoUpdate = false;
 		return mesh;
+	}
+
+	function createCellDebugOverlayGroup(cell: CellDebugOverlay): Group {
+		const group = new Group();
+		group.name = `debug-cell/${cell.renderKey}`;
+		group.matrixAutoUpdate = false;
+		group.matrix.copy(
+			buildAcPlacementMatrix(cell.localPlacement, cell.landblockWorldOffset, {
+				x: 1,
+				y: 1,
+				z: 1,
+			}),
+		);
+
+		const color = buildStaticRenderableColor(cell.colorKey);
+		const marker = new Mesh(
+			new SphereGeometry(cell.isFocus ? 1.8 : 1.2, 12, 8),
+			new MeshBasicMaterial({
+				color,
+				depthTest: false,
+				depthWrite: false,
+			}),
+		);
+		marker.name = `debug-cell-marker/${cell.renderKey}`;
+		group.add(marker);
+
+		const axes = new AxesHelper(cell.isFocus ? 18 : 12);
+		axes.name = `debug-cell-axes/${cell.renderKey}`;
+		setObjectDepthTest(axes, false);
+		group.add(axes);
+
+		const bounds = cell.bounds ? createBoundsLineSegments(cell.bounds, color) : null;
+		if (bounds) {
+			bounds.name = `debug-cell-bounds/${cell.renderKey}`;
+			group.add(bounds);
+		}
+
+		return group;
+	}
+
+	function createPortalDebugOverlayLine(
+		portal: PortalDebugOverlay,
+	): LineLoop | null {
+		if (portal.points.length < 3) {
+			return null;
+		}
+
+		const geometry = new BufferGeometry();
+		geometry.setAttribute(
+			"position",
+			new BufferAttribute(
+				new Float32Array(
+					portal.points.flatMap((point) => [point.x, point.y, point.z]),
+				),
+				3,
+			),
+		);
+		const line = new LineLoop(
+			geometry,
+			new LineBasicMaterial({
+				color: buildPortalOverlayColor(portal),
+				depthWrite: false,
+				transparent: true,
+				opacity: 0.95,
+			}),
+		);
+		line.name = `debug-portal/${portal.portalId}`;
+		line.matrixAutoUpdate = false;
+		line.matrix.copy(
+			buildAcPlacementMatrix(portal.localPlacement, portal.landblockWorldOffset, {
+				x: 1,
+				y: 1,
+				z: 1,
+			}),
+		);
+		return line;
+	}
+
+	function createBoundsLineSegments(
+		bounds: NonNullable<CellDebugOverlay["bounds"]>,
+		color: Color,
+	): LineSegments {
+		const { min, max } = bounds;
+		const corners = [
+			[min.x, min.y, min.z],
+			[max.x, min.y, min.z],
+			[max.x, max.y, min.z],
+			[min.x, max.y, min.z],
+			[min.x, min.y, max.z],
+			[max.x, min.y, max.z],
+			[max.x, max.y, max.z],
+			[min.x, max.y, max.z],
+		];
+		const edgeIndices = [
+			0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6,
+			3, 7,
+		];
+		const positions = edgeIndices.flatMap((index) => corners[index] ?? []);
+		const geometry = new BufferGeometry();
+		geometry.setAttribute(
+			"position",
+			new BufferAttribute(new Float32Array(positions), 3),
+		);
+		return new LineSegments(
+			geometry,
+			new LineBasicMaterial({
+				color,
+				depthTest: false,
+				depthWrite: false,
+				transparent: true,
+				opacity: 0.32,
+			}),
+		);
+	}
+
+	function buildPortalOverlayColor(portal: PortalDebugOverlay): Color {
+		if (debugOverlayScene.highlightPortalTargets) {
+			if (portal.targetStatus === "loaded-visible") {
+				return new Color("#61d394");
+			}
+			if (portal.targetStatus === "known-unloaded") {
+				return new Color("#f4d35e");
+			}
+			if (portal.targetStatus === "missing-polygon") {
+				return new Color("#ff6b6b");
+			}
+			return new Color("#9aa9b2");
+		}
+
+		return buildStaticRenderableColor(portal.colorKey);
 	}
 
 	function updateStructuredInteriorCellMesh(
@@ -700,6 +885,52 @@
 	function disposeMesh(mesh: Mesh): void {
 		mesh.geometry.dispose();
 		disposeMeshMaterial(mesh);
+	}
+
+	function disposeObjectChildren(root: Object3D): void {
+		root.traverse((object) => {
+			if (object === root) {
+				return;
+			}
+
+			const maybeGeometry = (object as { geometry?: unknown }).geometry;
+			if (maybeGeometry instanceof BufferGeometry) {
+				maybeGeometry.dispose();
+			}
+
+			const maybeMaterial = (object as { material?: unknown }).material;
+			if (Array.isArray(maybeMaterial)) {
+				for (const material of maybeMaterial) {
+					disposeMaterial(material);
+				}
+				return;
+			}
+			if (maybeMaterial) {
+				disposeMaterial(maybeMaterial as Material);
+			}
+		});
+	}
+
+	function disposeMaterial(material: Material): void {
+		material.dispose();
+	}
+
+	function setObjectDepthTest(object: Object3D, depthTest: boolean): void {
+		object.traverse((entry) => {
+			const maybeMaterial = (entry as { material?: unknown }).material;
+			if (Array.isArray(maybeMaterial)) {
+				for (const material of maybeMaterial) {
+					material.depthTest = depthTest;
+					material.depthWrite = false;
+				}
+				return;
+			}
+			if (maybeMaterial) {
+				const material = maybeMaterial as Material;
+				material.depthTest = depthTest;
+				material.depthWrite = false;
+			}
+		});
 	}
 
 	function disposeMeshMaterial(mesh: Mesh): void {

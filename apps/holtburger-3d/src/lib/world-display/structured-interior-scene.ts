@@ -4,8 +4,10 @@ import {
 } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
+	PreparedEnvironmentCellStruct,
 	PreparedAssetRecord,
 	PreparedEnvironmentPayload,
+	PreparedIndoorCellPortal,
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import {
@@ -40,7 +42,9 @@ export interface StructuredInteriorCell {
 	landblockWorldOffset: { x: number; y: number; z: number };
 	surfaceIds: number[];
 	portalCount: number;
+	portals: PreparedIndoorCellPortal[];
 	staticObjectCount: number;
+	cellStructure: PreparedEnvironmentCellStruct | null;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	debugColorKey: string;
 }
@@ -212,7 +216,9 @@ function deriveStructuredInteriorSceneForEnvCells(
 					: deriveLandblockWorldOffset(envCellId, outdoorFocusLandblockId),
 			surfaceIds: envCellAsset.payload.surfaceIds,
 			portalCount: envCellAsset.payload.portalCount,
+			portals: envCellAsset.payload.portals,
 			staticObjectCount: envCellAsset.payload.staticObjectCount,
+			cellStructure,
 			renderGeometry: cellStructure.renderGeometry,
 			debugColorKey: `${envCellAssetId}:${environmentAssetId}:${formatHex32(cellStructureId)}`,
 		});

@@ -1,47 +1,63 @@
-# Svelte + TS + Vite
+# holtburger-3d
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+`holtburger-3d` is the browser/Tauri 3D client app for Holtburger. It is the proving ground for the future graphical client and currently focuses on browser mode: loading world content, inspecting landblocks and interiors, exercising the asset pipeline, and validating renderer-facing contracts.
 
-## Recommended IDE Setup
+The app is frontend-owned. Browser-mode UX, panels, tabs, viewport HUDs, camera gestures, selection affordances, debug overlays, and other presentation policy should stay in this app rather than moving into shared Rust crates.
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
+## Boundaries
 
-## Need an official Svelte framework?
+- `src/`: Svelte and TypeScript app code.
+- `src/app/`: frontend mode state, browser-mode policy, and app-level view models.
+- `src/pages/`: browser-mode pages and app-specific composition around shared renderer pieces.
+- `src/lib/world-display/`: Three.js-backed renderer foundation and render-scene helpers. Keep renderer infrastructure reusable inside this app, but do not make it own browser workflow policy.
+- `src/lib/assets/`: frontend asset request planning, worker coordination, dependency scheduling, and hydration policy.
+- `src/lib/host/`: typed frontend contracts for the Tauri host boundary.
+- `src/workers/`: browser workers for expensive frontend-side preparation.
+- `src-tauri/`: app-local Rust host adapter and Tauri command boundary.
 
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
+Shared crates still own authoritative game state, protocol, content decoding, transport, and reusable client behavior. This app consumes those surfaces and decides how to present and interact with them in the browser.
 
-## Technical considerations
+## Development
 
-**Why use this over SvelteKit?**
+Install dependencies from this directory:
 
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + TypeScript + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why `global.d.ts` instead of `compilerOptions.types` inside `jsconfig.json` or `tsconfig.json`?**
-
-Setting `compilerOptions.types` shuts out all other types not explicitly listed in the configuration. Using triple-slash references keeps the default TypeScript setting of accepting type information from the entire workspace, while also adding `svelte` and `vite/client` type information.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `allowJs` in the TS template?**
-
-While `allowJs: false` would indeed prevent the use of `.js` files in the project, it does not prevent the use of JavaScript syntax in `.svelte` files. In addition, it would force `checkJs: false`, bringing the worst of both worlds: not being able to guarantee the entire codebase is TypeScript, and also having worse typechecking for the existing JavaScript. In addition, there are valid use cases in which a mixed codebase may be relevant.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/rixo/svelte-hmr#svelte-hmr).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```ts
-// store.ts
-// An extremely simple external store
-import { writable } from "svelte/store";
-export default writable(0);
+```sh
+npm install
 ```
+
+Run the browser frontend:
+
+```sh
+npm run dev
+```
+
+Run the Tauri app:
+
+```sh
+npm run tauri:dev
+```
+
+Build outputs:
+
+```sh
+npm run build
+npm run tauri:build
+```
+
+## Quality Gates
+
+Run the TypeScript, Svelte, Rust, lint, dead-code, formatting, and test checks before handing off app changes:
+
+```sh
+npm run check
+npm run check:rust
+npm run test:ts
+npm run lint
+npm run format:check
+```
+
+`npm run lint` includes TypeScript ESLint, Knip dead-code checks, and Rust clippy with warnings treated as errors.
+
+## UX Direction
+
+Browser mode should keep the 3D viewport primary. Panels, inspectors, and debug controls should support world inspection without scattering unrelated floating UI across the view. Prefer compact, workflow-oriented controls and app-local state over pushing browser presentation decisions into shared crates.

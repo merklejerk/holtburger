@@ -24,10 +24,18 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - `holtburger-cli`: TUI-only rendering, input mapping, local view state, layout, and UX/control policy.
 - `holtburger-tools` and `holtburger-debug-harness`: diagnostics, reverse-engineering, and focused experiments.
 
+## App Boundaries
+
+- `apps/holtburger-3d`: browser/Tauri 3D client app shell, Svelte UI, Three.js renderer integration, browser-mode controls, frontend view state, debug overlays, panels, tabs, layout, and browser-specific UX policy.
+- Keep browser-mode presentation and interaction decisions inside `apps/holtburger-3d`. Floating panels, tabbed inspectors, viewport HUDs, camera gestures, browser navigation controls, selection affordances, and debug UI are app-local concerns.
+- `apps/holtburger-3d/src-tauri`: app-local host adapter and Tauri command boundary. Keep it narrow and typed; do not promote adapter shapes into shared crates unless they represent reusable client behavior proven outside the browser app.
+- `WorldDisplay`-style renderer foundations may be shared inside `apps/holtburger-3d` between browser mode and future client mode, but they should not own browser-mode workflow policy.
+
 ## Decision Rules
 
 - Before adding code to a shared crate, ask whether it is likely to be shared by both the TUI and a future 3D client.
 - Distinguish authoritative game understanding from frontend presentation. Shared semantics belong in `world` or `core`; presentation and UX belong in the frontend.
+- Do not move browser-mode UX or frontend control policy out of `apps/holtburger-3d` just because it consumes shared world, content, or core data.
 - Keep runtime content discovery and static reference-data queries in `holtburger-content`; `core` should consume parsed bootstrap data rather than disk paths or archive policy.
 - Do not move code into a lower-level crate just because there is only one caller today.
 - Do not leave logic in the TUI just because the TUI is the only current consumer if that logic represents authoritative world semantics or reusable client behavior.

@@ -3069,7 +3069,7 @@ Course corrections and next-step assessment:
 
 ##### Phase 13.7 — Portal Diagnostics and Topology Visualization
 
-Status: planned; depends on Phase 13.6.
+Status: implemented.
 
 Scope: expose portal witnesses carried through Phase 13 as browser diagnostics that validate spatial understanding without pretending the detached browser free camera has client residency. This phase should help inspect openings, cell topology, and target-cell relationships while continuing to render all active structured-interior cells by default. It should not implement portal masking, portal culling, recursive portal traversal, or outdoor-to-indoor portal composition.
 
@@ -3118,6 +3118,32 @@ Guardrails:
 - do not derive structured-interior membership from portal adjacency while `EnvCell.visible_cells` remains the strongest relevance source
 - do not treat portal diagnostics as client-mode portal rendering; they are spatial/debug witnesses only
 - do not require exact retail renderer internals for diagnostic sign-off; require enough semantic clarity to validate openings, target ids, and cell transforms
+
+Progress:
+
+- Audited the current Phase 13.6 witnesses and kept the split intact: `environment/*` already carried portal polygon ids plus BSP portal witnesses, while `indoor-env-cell/*` needed compact `CellPortal` details to relate portal polygons to target env cells.
+- Extended the Tauri `indoor-env-cell/*` payload with stable portal ids, source indices, flags, polygon ids, `otherCellId`, `otherPortalId`, and normalized target env-cell ids.
+- Extended the TypeScript contract, worker preparation, and prepared asset types so portal witnesses remain part of the real decoded env-cell payload rather than debug-only data.
+- Added browser-owned diagnostic toggles for portal polygon overlays, cell indicators, and portal-target highlighting. These live in browser mode state and are passed down as renderer inputs rather than being inferred by `WorldDisplay`.
+- Added a frontend-derived `WorldDebugOverlayModel` that builds cell marker/bounds/axis overlays and portal polygon overlays from already prepared structured-interior scene data.
+- Rendered debug geometry under a separate Three.js debug overlay root inside `WorldDisplay`. Overlay lines, markers, labels, bounds, and axes are ephemeral renderer primitives and do not enter the asset channel or `PreparedAssetRecord`.
+- Added browser diagnostics for cell indicator counts, portal overlay counts, loaded known targets, and missing portal polygon witnesses.
+- Added synthetic TypeScript coverage for browser toggle state and debug-overlay derivation, including loaded portal targets and missing portal polygon diagnostics.
+
+Decisions:
+
+- `CellPortal` witness data belongs in `indoor-env-cell/*` because it is decoded env-cell content, not renderer-only debug state.
+- Debug overlay geometry remains renderer-local and ephemeral. The source facts are real content payloads; the overlay meshes, lines, labels, bounds, and axes are not content assets and do not use content asset ids.
+- Cell indicators are enabled by default because they are lightweight and help validate placement immediately. Portal polygon overlays default off because they can add visual clutter in dense interiors.
+- Portal target highlighting is a browser diagnostic style choice, not a visibility rule. Loaded targets, known-unloaded targets, unsupported targets, and missing polygon witnesses are color/style categories only.
+- `WorldDisplay` may own overlay mesh lifecycle because that is renderer mechanics, but browser mode owns whether overlays are shown and how diagnostic mode is configured.
+
+Course corrections and next-step assessment:
+
+- Phase 13.7 did not add portal/cell click or hover selection. The implemented overlay model and diagnostics provide the needed spatial witness layer, but interactive picking should wait until there is a clearer resident-camera or inspection workflow so it does not harden the free-camera browser semantics prematurely.
+- Overlay geometry is intentionally excluded from scene bounds and camera framing. Diagnostics should not move the camera or change core render metrics.
+- The new `indoor-env-cell/*` portal target ids are normalized using the source env-cell landblock prefix plus `otherCellId`. If visual inspection later shows cross-landblock or special portal cases, the next correction should be source-backed target normalization, not frontend-only offset or target guessing.
+- Phase 13.8 still makes sense next, but it should begin with a focused source audit of resident-camera containment and portal target normalization before adding portal masking/culling. The browser free-camera overlay work is now enough to inspect portal witnesses, but it still does not prove client-mode portal visibility behavior.
 
 ##### Phase 13.8 — Resident Indoor Preview and Portal Visibility
 
@@ -3735,13 +3761,13 @@ Mitigation:
 
 ## Recommended Near-Term Follow-Up
 
-Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke confirming room population after the indoor static transform correction. Phase 13.6 is implemented: outdoor static scene payloads now carry building portal `stabList` links, and browser outdoor scenes can request/render linked env-cell shells plus authored indoor props through the existing requestable asset path. The next step is Phase 13.7 portal diagnostics and topology visualization; portal masking/culling is deferred until a resident-camera basis exists.
+Phases 0 through 11 and Phases 12.0a through 12.0c plus Phases 12.1 through 12.9 are implemented. Phase 13.0a is implemented as a docs-only source audit. Phase 13.1 is implemented in `holtburger-dat`, with real `Environment` decoding and nested environment-scoped `CellStruct` records. Phase 13.2 is implemented, promoting `environment/*` to decoded payloads and retiring the active placeholder `cell-structure/*` request path. Phase 13.3 is implemented, preparing environment-scoped cell-structure drawing geometry with the shared polygon-set mesh path. Phase 13.4 is implemented, deriving browser-owned structured-interior render scenes from visible env-cell metadata plus decoded environment geometry and passing them into `WorldDisplay`. The Phase 13.5 browser-focus prerequisite is implemented: the navigation input can now select explicit 32-bit env-cell ids for live interior smoke without pretending outdoor coordinates can place residency inside a building. Phase 13.5 smoke on `0xda55012e` proved structured-interior shells render but also exposed missing authored indoor static objects. Phase 13.5a is implemented in the asset and render pipeline, with manual Tauri smoke confirming room population after the indoor static transform correction. Phase 13.6 is implemented: outdoor static scene payloads now carry building portal `stabList` links, and browser outdoor scenes can request/render linked env-cell shells plus authored indoor props through the existing requestable asset path. Phase 13.7 is implemented: `indoor-env-cell/*` carries compact portal witnesses, browser mode owns portal/cell diagnostic toggles, and `WorldDisplay` renders separate ephemeral debug overlays for portal polygons, cell markers, bounds, axes, labels, and portal target states. The next step is Phase 13.8 resident indoor preview and portal visibility; portal masking/culling remains deferred until a resident-camera basis exists.
 
 Current near-term sequence:
 
-1. smoke Phase 13.6 in Tauri on outdoor landblocks with known building interiors; verify linked cell shells and authored props line up with their outdoor building shells before adding portal overlays
-2. run Phase 13.7 portal diagnostics and topology visualization now that linked interiors can be visible alongside outdoor terrain/statics
-3. defer portal masking/culling to Phase 13.8 resident indoor preview or later client-mode work, where camera cell residency is coherent
-4. keep through-wall or overlap issues classified as future resident-camera portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, linked-interior ids, or indoor static object transform is demonstrably wrong
-5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlays, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
+1. smoke Phase 13.7 in Tauri on indoor-focused env cells and outdoor landblocks with linked interiors; verify portal polygon overlays line up with openings and cell indicators line up with env-cell placement/bounds
+2. start Phase 13.8 with a focused source audit of resident-camera containment, portal target normalization, and whether browser/manual preview can reuse shared spatial logic instead of inventing frontend-only containment
+3. defer portal masking/culling until Phase 13.8 has a coherent resident env-cell basis; Phase 13.7 overlays remain diagnostic and must not drive scene membership
+4. keep through-wall or overlap issues classified as future resident-camera portal-renderer work unless the decoded env-cell `localPlacement`, selected CellStruct, linked-interior ids, portal target ids, or indoor static object transform is demonstrably wrong
+5. keep `WorldDisplay` as the shared render surface; do not move browser controls, debug overlay policy, camera-hint submission, ray-pick semantics, or scene-coverage policy back into it
 6. preserve requestable content/asset paths for static content facts unless a later live-session source proves the fact is dynamic runtime state

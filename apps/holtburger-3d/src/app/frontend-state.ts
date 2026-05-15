@@ -9,6 +9,9 @@ import {
 	updateBuildingLodRadius,
 	updateBrowserDraft,
 	updateDetailLodRadius,
+	updateCellIndicatorVisibility,
+	updatePortalPolygonVisibility,
+	updatePortalTargetHighlighting,
 	updateStructuredInteriorMaxEnvCells,
 	updateStructuredInteriorMaxVisibleCellDepth,
 	updateTerrainLodRadius,
@@ -149,6 +152,33 @@ export function createFrontendStateStore() {
 					),
 				}),
 			);
+		},
+		updatePortalPolygonVisibility(showPortalPolygons: boolean): void {
+			update((state) => ({
+				...state,
+				browserMode: updatePortalPolygonVisibility(
+					state.browserMode,
+					showPortalPolygons,
+				),
+			}));
+		},
+		updateCellIndicatorVisibility(showCellIndicators: boolean): void {
+			update((state) => ({
+				...state,
+				browserMode: updateCellIndicatorVisibility(
+					state.browserMode,
+					showCellIndicators,
+				),
+			}));
+		},
+		updatePortalTargetHighlighting(highlightPortalTargets: boolean): void {
+			update((state) => ({
+				...state,
+				browserMode: updatePortalTargetHighlighting(
+					state.browserMode,
+					highlightPortalTargets,
+				),
+			}));
 		},
 		selectBrowserLandblockDestination(landblockId: number): void {
 			update((state) =>

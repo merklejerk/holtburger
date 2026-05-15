@@ -52,6 +52,7 @@
 		isPreparedGfxObjAsset,
 	} from "../lib/world-display/static-renderables";
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
+	import { deriveWorldDebugOverlayModel } from "../lib/world-display/debug-overlays";
 	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
 	import { normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
@@ -75,6 +76,9 @@
 		detailLodRadius,
 		structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth,
+		showPortalPolygons,
+		showCellIndicators,
+		highlightPortalTargets,
 	}: {
 		activeMode: AppModeId;
 		activeModeLabel: string;
@@ -88,6 +92,9 @@
 		detailLodRadius: number;
 		structuredInteriorMaxEnvCells: number;
 		structuredInteriorMaxVisibleCellDepth: number;
+		showPortalPolygons: boolean;
+		showCellIndicators: boolean;
+		highlightPortalTargets: boolean;
 	} = $props();
 
 	let rootElement = $state<HTMLDivElement | null>(null);
@@ -227,6 +234,13 @@
 			structuredInteriorCoverageOptions,
 		),
 	);
+	const debugOverlayScene = $derived(
+		deriveWorldDebugOverlayModel(structuredInteriorScene, {
+			showPortalPolygons,
+			showCellIndicators,
+			highlightPortalTargets,
+		}),
+	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
 			(total, tile) => total + tile.mesh.vertices.length,
@@ -294,6 +308,16 @@
 				: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}.`
 			: describeStructuredInteriorIdleState(),
 	);
+	const cellIndicatorText = $derived(
+		debugOverlayScene.showCellIndicators
+			? `${debugOverlayScene.diagnostics.cellCount} cell indicator${debugOverlayScene.diagnostics.cellCount === 1 ? "" : "s"} visible.`
+			: "Cell indicators are hidden.",
+	);
+	const portalDiagnosticsText = $derived(
+		debugOverlayScene.showPortalPolygons
+			? `${debugOverlayScene.diagnostics.portalCount} portal overlay${debugOverlayScene.diagnostics.portalCount === 1 ? "" : "s"}; ${debugOverlayScene.diagnostics.loadedTargetCount}/${debugOverlayScene.diagnostics.knownTargetCount} known target${debugOverlayScene.diagnostics.knownTargetCount === 1 ? "" : "s"} loaded${debugOverlayScene.diagnostics.missingPortalPolygonCount > 0 ? `; ${debugOverlayScene.diagnostics.missingPortalPolygonCount} missing polygon witness${debugOverlayScene.diagnostics.missingPortalPolygonCount === 1 ? "" : "es"}` : ""}.`
+			: "Portal polygon overlays are hidden.",
+	);
 	const sceneBoundsText = $derived(
 		renderMetrics?.bounds
 			? `Center (${renderMetrics.bounds.center.x.toFixed(1)}, ${renderMetrics.bounds.center.y.toFixed(1)}, ${renderMetrics.bounds.center.z.toFixed(1)}) span (${renderMetrics.bounds.size.x.toFixed(1)}, ${renderMetrics.bounds.size.y.toFixed(1)}, ${renderMetrics.bounds.size.z.toFixed(1)}).`
@@ -341,6 +365,8 @@
 		{ label: "Geometry", value: sceneGeometryText },
 		{ label: "Statics", value: staticRenderableText },
 		{ label: "Interiors", value: structuredInteriorText },
+		{ label: "Cells", value: cellIndicatorText },
+		{ label: "Portals", value: portalDiagnosticsText },
 		{ label: "Heights", value: terrainHeightText },
 		{ label: "Bounds", value: sceneBoundsText },
 	]);
@@ -1055,6 +1081,7 @@
 		{terrainScene}
 		{staticRenderableScene}
 		{structuredInteriorScene}
+		{debugOverlayScene}
 		controlledCameraFrame={browserCameraFrame}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}

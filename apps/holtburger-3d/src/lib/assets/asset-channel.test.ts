@@ -610,6 +610,7 @@ describe("asset channel controller", () => {
 					seenOutside: false,
 					surfaceIds: [],
 					portalCount: 0,
+					portals: [],
 					staticObjectCount: 0,
 					staticObjects: [],
 					provenance: {
@@ -742,6 +743,7 @@ describe("asset channel controller", () => {
 					seenOutside: false,
 					surfaceIds: [],
 					portalCount: 0,
+					portals: [],
 					staticObjectCount: 1,
 					staticObjects: [
 						{
@@ -1276,6 +1278,26 @@ describe("asset channel controller", () => {
 					seenOutside: false,
 					surfaceIds: [0x08000001],
 					portalCount: 2,
+					portals: [
+						{
+							portalId: "env-cell/016c0155/portal/00",
+							sourceIndex: 0,
+							flags: 0,
+							polygonId: 1,
+							otherCellId: 0x0156,
+							otherPortalId: 0,
+							targetEnvCellId: 0x016c0156,
+						},
+						{
+							portalId: "env-cell/016c0155/portal/01",
+							sourceIndex: 1,
+							flags: 0,
+							polygonId: 2,
+							otherCellId: 0x0157,
+							otherPortalId: 1,
+							targetEnvCellId: 0x016c0157,
+						},
+					],
 					staticObjectCount: 1,
 					staticObjects: [
 						{
@@ -2074,6 +2096,7 @@ function createPreparedIndoorEnvCellAsset(
 				seenOutside: true,
 				surfaceIds: [],
 				portalCount: 0,
+				portals: [],
 				staticObjectCount: staticSourceAssetIds.length,
 				staticObjects: staticSourceAssetIds.map((sourceAssetId, index) => ({
 					instanceId: `${assetId}/static/${index}`,

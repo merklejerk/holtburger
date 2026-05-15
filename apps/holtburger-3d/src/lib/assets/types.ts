@@ -98,6 +98,16 @@ export interface PreparedIndoorStaticObject {
 	localPlacement: PlacementTransformDto;
 }
 
+export interface PreparedIndoorCellPortal {
+	portalId: string;
+	sourceIndex: number;
+	flags: number;
+	polygonId: number;
+	otherCellId: number;
+	otherPortalId: number;
+	targetEnvCellId: number;
+}
+
 interface PreparedOutdoorStaticLayerDiagnostics {
 	attempted: number;
 	accepted: number;
@@ -146,6 +156,7 @@ export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	seenOutside: boolean | null;
 	surfaceIds: number[];
 	portalCount: number;
+	portals: PreparedIndoorCellPortal[];
 	staticObjectCount: number;
 	staticObjects: PreparedIndoorStaticObject[];
 }
@@ -159,25 +170,25 @@ export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
 	cellStructures: PreparedEnvironmentCellStruct[];
 }
 
-interface PreparedPolygonSetUv {
+export interface PreparedPolygonSetUv {
 	u: number;
 	v: number;
 }
 
-interface PreparedPolygonSetVertex {
+export interface PreparedPolygonSetVertex {
 	id: number;
 	origin: Vec3Dto;
 	normal: Vec3Dto;
 	uvs: PreparedPolygonSetUv[];
 }
 
-interface PreparedPolygonSetVertexArray {
+export interface PreparedPolygonSetVertexArray {
 	vertexType: number | null;
 	vertexCount: number;
 	vertices: PreparedPolygonSetVertex[];
 }
 
-interface PreparedPolygonSetPolygon {
+export interface PreparedPolygonSetPolygon {
 	id: number;
 	numPts: number;
 	stippling: number;
@@ -205,7 +216,7 @@ interface PreparedCellStructBspWitness {
 	rootKind: "port" | "leaf" | "internal" | null;
 }
 
-interface PreparedEnvironmentCellStruct {
+export interface PreparedEnvironmentCellStruct {
 	id: number;
 	vertexArray: PreparedPolygonSetVertexArray;
 	drawingPolygons: PreparedPolygonSetPolygon[];

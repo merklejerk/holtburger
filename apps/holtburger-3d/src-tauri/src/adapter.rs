@@ -1211,6 +1211,17 @@ impl HostBoundaryAdapter {
             "seenOutside": (env_cell.flags & 0x01) != 0,
             "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
             "portalCount": env_cell.portals.len(),
+            "portals": env_cell.portals.iter().enumerate().map(|(source_index, portal)| {
+                serde_json::json!({
+                    "portalId": format!("env-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
+                    "sourceIndex": source_index,
+                    "flags": portal.flags,
+                    "polygonId": portal.polygon_id,
+                    "otherCellId": portal.other_cell_id,
+                    "otherPortalId": portal.other_portal_id,
+                    "targetEnvCellId": (env_cell_id & 0xFFFF_0000) | u32::from(portal.other_cell_id),
+                })
+            }).collect::<Vec<_>>(),
             "staticObjectCount": env_cell.static_objects.len(),
             "staticObjects": env_cell.static_objects.iter().enumerate().map(|(source_index, static_object)| {
                 serialize_indoor_static_object(env_cell_id, source_index, static_object)

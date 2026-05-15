@@ -237,7 +237,9 @@ export interface PreparedPolygonSetRenderGeometry {
 	sourceId: number;
 	vertexCount: number;
 	triangleCount: number;
+	/** Render-space coordinates: x is unchanged, y is AC z, z is negative AC y. */
 	positions: number[];
+	/** Render-space normals using the same basis as positions. */
 	normals: number[];
 	uvs: number[];
 	triangles: PreparedPolygonSetRenderTriangle[];

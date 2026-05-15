@@ -1292,8 +1292,8 @@ describe("asset channel controller", () => {
 				triangleCount: 2,
 				surfaceIds: [0x08000002],
 				bounds: {
-					min: { x: 0, y: 0, z: 0 },
-					max: { x: 2, y: 2, z: 0 },
+					min: { x: 0, y: 0, z: -2 },
+					max: { x: 2, y: 0, z: 0 },
 				},
 			},
 		);
@@ -1397,12 +1397,15 @@ describe("asset channel controller", () => {
 			skippedPolygonCount: 0,
 			surfaceIds: [0x08000001],
 			bounds: {
-				min: { x: 0, y: 0, z: 0 },
-				max: { x: 2, y: 2, z: 0 },
+				min: { x: 0, y: 0, z: -2 },
+				max: { x: 2, y: 0, z: 0 },
 			},
 		});
 		expect(gfxObj.payload.renderGeometry.positions).toEqual([
-			0, 0, 0, 2, 0, 0, 2, 2, 0, 0, 0, 0, 2, 2, 0, 0, 2, 0,
+			0, 0, 0, 2, 0, 0, 2, 0, -2, 0, 0, 0, 2, 0, -2, 0, 0, -2,
+		]);
+		expect(gfxObj.payload.renderGeometry.normals).toEqual([
+			0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
 		]);
 		expect(gfxObj.payload.renderGeometry.uvs).toEqual([
 			0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1,

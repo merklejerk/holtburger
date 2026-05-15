@@ -52,12 +52,12 @@ export function buildGfxObjGeometry(
 	const geometry = new BufferGeometry();
 	geometry.setAttribute(
 		"position",
-		new BufferAttribute(convertAcVectorTriplets(renderGeometry.positions), 3),
+		new BufferAttribute(new Float32Array(renderGeometry.positions), 3),
 	);
 	if (renderGeometry.normals.length === renderGeometry.positions.length) {
 		geometry.setAttribute(
 			"normal",
-			new BufferAttribute(convertAcVectorTriplets(renderGeometry.normals), 3),
+			new BufferAttribute(new Float32Array(renderGeometry.normals), 3),
 		);
 	} else {
 		geometry.computeVertexNormals();
@@ -123,14 +123,4 @@ function convertAcQuaternion(
 	const threeToAc = acToThree.clone().invert();
 	const threeRotation = acToThree.multiply(acRotation).multiply(threeToAc);
 	return new ThreeQuaternion().setFromRotationMatrix(threeRotation);
-}
-
-function convertAcVectorTriplets(values: number[]): Float32Array {
-	const converted = new Float32Array(values.length);
-	for (let index = 0; index < values.length; index += 3) {
-		converted[index] = values[index] ?? 0;
-		converted[index + 1] = values[index + 2] ?? 0;
-		converted[index + 2] = -(values[index + 1] ?? 0);
-	}
-	return converted;
 }

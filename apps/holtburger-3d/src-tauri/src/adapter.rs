@@ -1212,6 +1212,11 @@ impl HostBoundaryAdapter {
             "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
             "portalCount": env_cell.portals.len(),
             "portals": env_cell.portals.iter().enumerate().map(|(source_index, portal)| {
+                // Retail CCellPortal::UnPack treats portal flag 0x4 as an outside transition:
+                // it sets other_cell_id to -1 instead of using the serialized otherCellId suffix,
+                // and later transit asks the landcell to add outside cells. Preserve the raw
+                // fields here for diagnostics, but future authoritative runtime transition logic
+                // should interpret flag 0x4 instead of blindly trusting targetEnvCellId.
                 serde_json::json!({
                     "portalId": format!("env-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
                     "sourceIndex": source_index,

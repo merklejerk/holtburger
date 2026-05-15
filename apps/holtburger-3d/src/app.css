@@ -163,6 +163,91 @@ ul {
 	pointer-events: none;
 }
 
+.browser-world-display__inspector {
+	position: absolute;
+	z-index: 5;
+	left: 1rem;
+	top: 1rem;
+	width: min(24rem, calc(100vw - 2rem));
+	box-sizing: border-box;
+	padding: 0.85rem;
+	border-radius: 8px;
+	border: 1px solid rgba(162, 183, 209, 0.16);
+	background: rgba(8, 16, 26, 0.82);
+	color: #d9e4f0;
+	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+	backdrop-filter: blur(10px);
+}
+
+.browser-world-display__inspector-header {
+	display: flex;
+	align-items: start;
+	justify-content: space-between;
+	gap: 0.8rem;
+	margin-bottom: 0.75rem;
+}
+
+.browser-world-display__inspector-header p {
+	margin: 0 0 0.15rem;
+	color: #90a8c7;
+	font-size: 0.72rem;
+	line-height: 1.2;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.browser-world-display__inspector-header h2 {
+	margin: 0;
+	font-size: 1rem;
+	line-height: 1.2;
+	overflow-wrap: anywhere;
+}
+
+.browser-world-display__inspector-close {
+	flex: 0 0 auto;
+	padding: 0.25rem 0.45rem;
+	border: 1px solid rgba(162, 183, 209, 0.18);
+	border-radius: 6px;
+	background: rgba(220, 232, 249, 0.08);
+	color: #d9e4f0;
+	font: inherit;
+	font-size: 0.76rem;
+	cursor: pointer;
+}
+
+.browser-world-display__inspector-close:hover {
+	background: rgba(220, 232, 249, 0.14);
+}
+
+.browser-world-display__inspector-rows {
+	display: grid;
+	gap: 0.38rem;
+	margin: 0;
+}
+
+.browser-world-display__inspector-rows div {
+	display: grid;
+	grid-template-columns: minmax(6.5rem, 0.42fr) minmax(0, 1fr);
+	gap: 0.75rem;
+	align-items: start;
+}
+
+.browser-world-display__inspector-rows dt {
+	color: #90a8c7;
+	font-size: 0.78rem;
+}
+
+.browser-world-display__inspector-rows dd {
+	margin: 0;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	color: #edf4fc;
+	font:
+		0.78rem/1.35 "Iosevka",
+		"Iosevka Aile",
+		monospace;
+}
+
 .world-display__viewport {
 	min-height: 100vh;
 	display: grid;

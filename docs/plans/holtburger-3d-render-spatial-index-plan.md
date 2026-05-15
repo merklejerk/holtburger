@@ -1,6 +1,29 @@
 # Holtburger 3D Render Spatial Index Plan
 
-Status: draft.
+Status: implemented through the non-instanced renderer-culling slice. The spatial-index substrate, terrain pick migration, portal/cell diagnostic picking, frustum query support, and spatial-index-driven culling for terrain, structured interior meshes, and debug overlays are in place. Static `InstancedMesh` culling remains profiling-gated follow-up work.
+
+Progress log:
+
+- 2026-05-15: Added shared spatial item id helpers for terrain, structured cells, and portals.
+- 2026-05-15: Added a narrow TypeScript render spatial index interface and a simple owner-scoped linear implementation with ray picking, frustum queries, kind masks, owner replacement, and missing-item fallback checks.
+- 2026-05-15: Added pure spatial scene derivation for terrain plus Phase 13.7 debug cell/portal targets. Static renderables remain intentionally excluded because current rendering batches them into `InstancedMesh` objects by `gfxObjAssetId`.
+- 2026-05-15: `BrowserWorldDisplay` now owns concrete index construction and owner-scoped item population from already-derived scene models.
+- 2026-05-15: `WorldDisplay` now receives a narrow query interface by dependency injection and routes the existing Ctrl-click terrain landblock pick through the spatial index.
+- 2026-05-15: Added browser-owned diagnostic selection for portal and structured-cell spatial picks. Normal clicks against debug targets open a closable, context-sensitive inspector panel and feed selected portal/cell ids back into the debug overlay model for highlighting.
+- 2026-05-15: Added conservative frustum query support to the linear spatial index.
+- 2026-05-15: Split structured-cell spatial item derivation out of debug overlays so structured mesh culling and picking do not depend on the cell-indicator toggle.
+- 2026-05-15: Added spatial-index-driven visibility updates for non-instanced terrain meshes, structured interior meshes, cell debug overlays, and portal debug overlays. Missing index entries fall back to visible.
+- 2026-05-15: Debug raycast targets are now gated by browser visibility toggles and owner-filtered to the debug-overlay bucket. Structured-cell mesh culling remains indexed separately from visible cell-indicator pick targets.
+- 2026-05-15: Validation passed with `npm run test:ts`, `npm run check`, `npm run lint:ts`, and `npm run build` in `apps/holtburger-3d`.
+
+Course corrections:
+
+- Portal/cell spatial item derivation moved into the first code pass even though inspector UX remains a second-slice deliverable. This keeps geometry/identity derivation centralized from the start and avoids creating a terrain-only helper that would immediately be generalized.
+- Terrain ray picking now uses conservative tile bounds rather than exact triangle intersection. This matches the first-slice plan and is sufficient for preserving Ctrl-click landblock destination selection, but it is less precise near tile edges or vertical camera angles than the previous Three.js mesh raycast.
+- Structured-cell picking uses transformed cell bounds when available and falls back to the marker sphere when bounds are absent. This makes the visible bounds indicator inspectable without requiring debug overlay Three.js objects to be raycast targets.
+- The optional render-object binding sink was removed rather than made real. `WorldDisplay` already owns the non-instanced Three.js object maps, so it can apply culling by mapping those objects to shared spatial item ids without storing renderer handles inside the index.
+- Frustum broadphase is now connected to non-instanced visibility toggles. Static `InstancedMesh` culling remains deferred because splitting or partially hiding those batches needs profiling and a separate batch-vs-instance design.
+- Debug pick targets use distinct IDs from structured mesh culling targets so hidden debug affordances are not accidentally pickable through always-present render geometry.
 
 ## Purpose
 
@@ -14,28 +37,27 @@ This plan defines a TypeScript-side render spatial index that can serve renderer
 
 `BrowserWorldDisplay` may construct the concrete spatial index because it is the current app composition root for the browser world surface.
 
-`WorldDisplay` should not depend on browser-specific behavior. It should receive narrow renderer-facing interfaces by dependency injection. Those interfaces should let it bind renderer objects and ask neutral renderer-local queries without learning browser actions.
+`WorldDisplay` should not depend on browser-specific behavior. It should receive narrow renderer-facing interfaces by dependency injection. Those interfaces should let it ask neutral renderer-local queries without learning browser actions.
 
 Browser/client wrappers interpret pick results. `WorldDisplay` and the index return neutral renderer identities and metadata only.
 
 Ownership split:
 
 - `BrowserWorldDisplay` or a browser scene controller: browser controls, input gestures, selected inspector item, diagnostic toggles, click meaning, destination changes, and semantic spatial item population from already-derived scene models
-- `WorldDisplay`: Three.js scene lifecycle, GPU object lifecycle, optional renderer-object binding for already registered spatial items, neutral renderer-local pick queries
+- `WorldDisplay`: Three.js scene lifecycle, GPU object lifecycle, non-instanced visibility toggles, and neutral renderer-local pick/frustum queries
 - `RenderSpatialIndex`: spatial item storage, broadphase partitioning, query adapters, optional narrowphase pick tests, query masks
 - Rust/Tauri runtime: authoritative/session picks only, such as server-known entities or future physics-backed gameplay queries
 
 Population split:
 
-- Scene/controller code populates semantic spatial items from `terrainScene`, `staticRenderableScene`, `structuredInteriorScene`, and `debugOverlayScene`. These items should exist independently of whether a specific Three.js object has been created yet.
-- `WorldDisplay` may bind renderer object keys or handles to existing item ids after it creates meshes, groups, instanced batches, or debug overlays. These bindings are optional renderer mechanics, not the source of semantic spatial truth.
+- Scene/controller code populates semantic spatial items from `terrainScene`, `structuredInteriorScene`, and `debugOverlayScene`. Static renderables remain excluded until the batch-vs-instance design is explicit.
+- `WorldDisplay` maps its own non-instanced Three.js objects to shared spatial item ids when applying visibility. Those object maps are renderer mechanics, not the source of semantic spatial truth.
 - Browser/client wrappers interpret query results and own any UI action or inspector state.
 
 Critical invariant:
 
 - Rendering must not depend on index registration. Scene models render directly through `WorldDisplay`; the spatial index is an auxiliary query and optimization structure.
-- If an item is missing from the index, it should still render. The item simply cannot be picked through the index and cannot participate in index-driven culling or visibility optimization.
-- If `WorldDisplay` attempts to bind a renderer object to a missing item id, the binding layer should no-op or surface a diagnostic. It must not block rendering.
+- If an item is missing from the index, it should still render. The item simply cannot be picked through the index and cannot participate in index-driven visibility optimization.
 - Index-driven frustum culling must be conservative. The fallback for missing or suspect index data is to render normally.
 
 ## Non-Goals
@@ -50,45 +72,41 @@ Critical invariant:
 
 Keep the injected dependency narrow. `WorldDisplay` should code against an interface, not a browser-owned concrete type.
 
-Draft interfaces:
+Implemented interface shape:
 
 ```ts
-export type RenderSpatialItemKind =
-	| "terrain"
-	| "static-renderable"
-	| "structured-cell"
-	| "portal"
-	| "debug-overlay";
+export type RenderSpatialItemKind = "terrain" | "structured-cell" | "portal";
 
 export interface RenderSpatialItem {
-	id: string;
-	kind: RenderSpatialItemKind;
-	ownerKey: string;
-	broadphaseBounds: RenderBounds;
-	pickShape?: RenderPickShape;
-	metadata: RenderSpatialMetadata;
+  id: string;
+  kind: RenderSpatialItemKind;
+  ownerKey: string;
+  broadphaseBounds: RenderBounds;
+  pickShape?: RenderPickShape;
+  metadata: RenderSpatialMetadata;
 }
 
 export interface RenderSpatialIndexSink {
-	clearOwner(ownerKey: string): void;
-	replaceOwnerItems(ownerKey: string, items: RenderSpatialItem[]): void;
-	upsertItem(item: RenderSpatialItem): void;
-	removeItem(itemId: string): void;
-}
-
-export interface RenderSpatialIndexRenderBindingSink {
-	bindRenderObject(itemId: string, binding: RenderObjectBinding): void;
-	clearRenderBindings(ownerKey: string): void;
+  clearOwner(ownerKey: string): void;
+  replaceOwnerItems(ownerKey: string, items: RenderSpatialItem[]): void;
+  upsertItem(item: RenderSpatialItem): void;
+  removeItem(itemId: string): void;
 }
 
 export interface RenderSpatialIndexQuery {
-	pickRay(ray: RenderRay, mask: RenderPickMask): RenderSpatialPick | null;
-	queryFrustum(frustum: RenderFrustum, mask: RenderVisibilityMask): RenderSpatialItem[];
+  hasItem(itemId: RenderSpatialItemId): boolean;
+  pickRay(
+    ray: RenderRay,
+    mask: ReadonlySet<RenderSpatialItemKind>,
+  ): RenderSpatialPick | null;
+  queryFrustum(
+    frustum: RenderFrustum,
+    mask: ReadonlySet<RenderSpatialItemKind>,
+  ): RenderSpatialItem[];
 }
 
 export interface RenderSpatialIndex
-	extends RenderSpatialIndexSink,
-		RenderSpatialIndexQuery {}
+  extends RenderSpatialIndexSink, RenderSpatialIndexQuery {}
 ```
 
 `metadata` should be strongly typed enough to identify renderer facts, but not browser actions. For example, a portal item can expose source env-cell id, target env-cell id, portal id, polygon id, and target status. It should not expose "open inspector" or "select destination" commands.
@@ -103,15 +121,17 @@ Examples:
 
 ```ts
 export function terrainSpatialItemId(assetId: string): RenderSpatialItemId {
-	return `terrain:${assetId}`;
+  return `terrain:${assetId}`;
 }
 
-export function structuredCellSpatialItemId(renderKey: string): RenderSpatialItemId {
-	return `structured-cell:${renderKey}`;
+export function structuredCellSpatialItemId(
+  renderKey: string,
+): RenderSpatialItemId {
+  return `structured-cell:${renderKey}`;
 }
 
 export function portalSpatialItemId(portalId: string): RenderSpatialItemId {
-	return `portal:${portalId}`;
+  return `portal:${portalId}`;
 }
 ```
 
@@ -189,6 +209,8 @@ Frustum culling remains renderer optimization. It must not become authoritative 
 
 ## First Implementation Slice
 
+Status: implemented.
+
 Purpose: add the spatial-index substrate and replace the ad hoc terrain-only raycast path without changing browser-visible behavior.
 
 Deliverables:
@@ -197,7 +219,7 @@ Deliverables:
 - add shared spatial item id helpers and use them from both semantic item derivation and renderer binding code
 - add a pure spatial scene derivation helper that accepts `terrainScene` first and returns owner-scoped spatial items
 - have `BrowserWorldDisplay` or a small controller create the spatial scene items from `terrainScene`
-- have `BrowserWorldDisplay` construct the concrete index, replace owner-scoped terrain items when the terrain scene changes, and inject the query/binding interfaces into `WorldDisplay`
+- have `BrowserWorldDisplay` construct the concrete index, replace owner-scoped terrain items when the terrain scene changes, and inject the query interface into `WorldDisplay`
 - have `WorldDisplay` optionally bind terrain render object keys/handles to the registered terrain items during terrain mesh sync
 - replace `pickTerrainLandblockAtViewportPoint(...)` internals so it queries the spatial index for terrain items rather than raycasting an ad hoc terrain mesh list directly. The first terrain narrowphase may use landblock/tile bounds rather than exact terrain triangles.
 - keep the public behavior identical: Ctrl-click terrain still selects the browser landblock destination
@@ -211,10 +233,12 @@ Acceptance:
 - terrain picking still works through the same browser control path
 - rendering still succeeds if the index is empty or missing a terrain item; only spatial-index picking is unavailable in that case
 - the index can answer a masked terrain pick without testing static renderables, structured cells, or portal overlays
-- no portal/cell inspection UI is added yet
+- no portal/cell inspection UI is added yet for this slice; it was added in the second slice
 - static renderables are explicitly left out of this slice
 
 ## Second Implementation Slice
+
+Status: implemented with a context-sensitive browser inspector panel.
 
 Purpose: register Phase 13.7 diagnostic items and expose neutral portal/cell pick results.
 
@@ -232,29 +256,31 @@ Acceptance:
 - clicking a portal or cell can show decoded diagnostic facts without changing scene membership, streaming, or camera residency
 - portal picks do not ray-test terrain/static objects unless the query mask asks for them
 - cell/portal picking is optional and browser-owned; future client mode can interpret the same neutral pick result differently
-- the inspector can report missing/unsupported target or polygon witnesses without treating that as a pick failure
+- the inspector can report unsupported portal targets without treating that as a pick failure. Missing-polygon witnesses are reported by the existing diagnostics row and are intentionally not pickable until a fallback pick shape is added.
 
 Recommended inspector payload:
 
-- cell pick: env-cell id, environment id, cell-structure id, focus flag, visible-cell membership, `SeenOutside`, static object count, portal count
-- portal pick: portal id, source env-cell id, polygon id, flags, `otherCellId`, `otherPortalId`, normalized target env-cell id, target status, whether target is loaded/visible
+- cell pick: env-cell id and focus/visible state are implemented. Environment id, cell-structure id, `SeenOutside`, static object count, and portal count should be added to spatial metadata if the diagnostics panel needs richer inspection.
+- portal pick: portal id, source env-cell id, polygon id, flags, `otherPortalId`, normalized target env-cell id, and target status are implemented. `otherCellId` is not currently carried by the debug overlay model and should be added there before exposing it in the pick metadata.
 - terrain pick: landblock id and asset id, preserving the current destination-selection path
 
 ## Third Implementation Slice
+
+Status: implemented for non-instanced renderer objects. Static `InstancedMesh` culling remains deferred.
 
 Purpose: use the same index for renderer broadphase visibility work.
 
 Deliverables:
 
 - add frustum query support using item bounds
-- group spatial items by landblock/env-cell owner keys where practical
-- evaluate whether `WorldDisplay` can skip updating or hide coarse terrain, structured-interior, and debug-overlay groups outside the frustum
+- group spatial items by landblock/env-cell owner keys where practical; current owner buckets are scene-level (`terrain-scene`, `structured-interior-scene`, `debug-overlay-scene`), which is sufficient for replacement and visibility but still coarse for detailed culling diagnostics
+- have `WorldDisplay` hide non-instanced terrain, structured-interior, and debug-overlay objects outside the frustum
 - treat static-renderable instanced mesh culling as profiling-gated follow-up work, not an assumed deliverable
 - keep Three.js object-level frustum culling enabled as a second layer
 
 Acceptance:
 
-- frustum broadphase improves renderer workload or observability without changing scene membership
+- frustum broadphase now drives conservative visibility for terrain meshes, structured interior meshes, and debug overlay objects without changing scene membership
 - `InstancedMesh` limitations are documented, but static renderable batches are not split solely for theoretical culling gains
 - any future split of static renderable instancing by landblock, env cell, or grid bucket is justified by measured render or CPU cost
 - portal visibility/culling remains out of scope

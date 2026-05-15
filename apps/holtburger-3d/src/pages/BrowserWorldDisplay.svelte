@@ -14,7 +14,7 @@
 		RayPickResponseDto,
 		RuntimeBatchDto,
 	} from "../lib/host/contracts";
-	import { resolveRayPick, submitCameraHint } from "../lib/host/tauri";
+	import { submitCameraHint } from "../lib/host/tauri";
 	import {
 		buildCameraHintFromSceneCameraFrame,
 		buildBrowserFreeCameraFrame,
@@ -38,7 +38,6 @@
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
 	import {
 		buildCameraHint,
-		buildRayPickRequest,
 		deriveWorldDisplayModel,
 		describeCameraHintAck,
 		describeRayPickResponse,
@@ -54,13 +53,31 @@
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
 	import { deriveWorldDebugOverlayModel } from "../lib/world-display/debug-overlays";
 	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
-	import { normalizeOutdoorLandblockId } from "../lib/landblocks";
+	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
+	import {
+		createLinearRenderSpatialIndex,
+		type RenderSpatialPick,
+	} from "../lib/world-display/render-spatial-index";
+	import {
+		DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+		TERRAIN_SPATIAL_OWNER_KEY,
+		deriveDebugOverlaySpatialItems,
+		deriveStructuredInteriorSpatialItems,
+		deriveTerrainSpatialItems,
+	} from "../lib/world-display/render-spatial-scene";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
 	interface BrowserPanelRow {
 		label: string;
 		value: string;
+	}
+
+	interface BrowserInspectorModel {
+		title: string;
+		kicker: string;
+		rows: BrowserPanelRow[];
 	}
 
 	let {
@@ -99,6 +116,7 @@
 
 	let rootElement = $state<HTMLDivElement | null>(null);
 	let worldDisplaySurface = $state<WorldDisplay | null>(null);
+	const renderSpatialIndex = createLinearRenderSpatialIndex();
 	let renderMetrics = $state<WorldRenderMetrics | null>(null);
 	let browserCameraState = $state<BrowserFreeCameraState>(
 		createBrowserFreeCameraState(),
@@ -106,6 +124,7 @@
 	let browserCameraFrame = $state<SceneCameraFrame | null>(null);
 	let cameraAck = $state<CameraHintAckDto | null>(null);
 	let rayPickResponse = $state<RayPickResponseDto | null>(null);
+	let diagnosticSelection = $state<RenderSpatialPick | null>(null);
 	let lastCameraHintAt = $state<number | null>(null);
 	let trailingCameraHint = $state<ReturnType<typeof buildCameraHint> | null>(
 		null,
@@ -234,12 +253,33 @@
 			structuredInteriorCoverageOptions,
 		),
 	);
+	const selectedDiagnosticPortalId = $derived(
+		diagnosticSelection?.item.metadata.kind === "portal"
+			? diagnosticSelection.item.metadata.portalId
+			: null,
+	);
+	const selectedDiagnosticEnvCellId = $derived(
+		diagnosticSelection?.item.metadata.kind === "structured-cell"
+			? diagnosticSelection.item.metadata.envCellId
+			: diagnosticSelection?.item.metadata.kind === "portal"
+				? diagnosticSelection.item.metadata.sourceEnvCellId
+				: null,
+	);
 	const debugOverlayScene = $derived(
 		deriveWorldDebugOverlayModel(structuredInteriorScene, {
 			showPortalPolygons,
 			showCellIndicators,
 			highlightPortalTargets,
+			selectedPortalId: selectedDiagnosticPortalId,
+			selectedEnvCellId: selectedDiagnosticEnvCellId,
 		}),
+	);
+	const terrainSpatialItems = $derived(deriveTerrainSpatialItems(terrainScene));
+	const structuredInteriorSpatialItems = $derived(
+		deriveStructuredInteriorSpatialItems(structuredInteriorScene),
+	);
+	const debugOverlaySpatialItems = $derived(
+		deriveDebugOverlaySpatialItems(debugOverlayScene),
 	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
@@ -336,6 +376,9 @@
 	const cameraPipelineDebugText = $derived(describeCameraPipelineDebugState());
 	const assetDebugText = $derived(describeAssetDebugState());
 	const assetPipelineDebugText = $derived(describeAssetPipelineDebugState());
+	const diagnosticInspector = $derived(
+		deriveDiagnosticInspector(diagnosticSelection),
+	);
 	const pendingCameraHint = $derived(trailingCameraHint !== null);
 	const worldDisplay = $derived(
 		deriveWorldDisplayModel({
@@ -353,6 +396,24 @@
 			pendingCameraHint,
 		}),
 	);
+	$effect(() => {
+		renderSpatialIndex.replaceOwnerItems(
+			TERRAIN_SPATIAL_OWNER_KEY,
+			terrainSpatialItems,
+		);
+	});
+	$effect(() => {
+		renderSpatialIndex.replaceOwnerItems(
+			STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+			structuredInteriorSpatialItems,
+		);
+	});
+	$effect(() => {
+		renderSpatialIndex.replaceOwnerItems(
+			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+			debugOverlaySpatialItems,
+		);
+	});
 	const sceneStatusText = $derived(
 		structuredInteriorScene.cells.length > 0
 			? structuredInteriorScene.statusText
@@ -633,7 +694,7 @@
 		stopCameraMovement();
 	}
 
-	async function handleBrowserClickCapture(event: MouseEvent): Promise<void> {
+	function handleBrowserClickCapture(event: MouseEvent): void {
 		if (isBrowserPanelEvent(event)) {
 			return;
 		}
@@ -645,22 +706,26 @@
 			return;
 		}
 
-		if (!event.ctrlKey || !rootElement || !worldDisplaySurface) {
+		if (!rootElement || !worldDisplaySurface) {
 			return;
 		}
 
 		const viewportPoint = getViewportPoint(event);
 
 		if (!event.ctrlKey) {
-			const hint = buildRenderedCameraHint(viewportPoint);
-			if (!hint) {
+			const diagnosticPick = worldDisplaySurface.pickAtViewportPoint(
+				viewportPoint,
+				new Set(["portal", "structured-cell"]),
+				new Set([DEBUG_OVERLAY_SPATIAL_OWNER_KEY]),
+			);
+			if (!diagnosticPick) {
+				diagnosticSelection = null;
 				return;
 			}
 
-			await flushCameraHint(hint);
-			rayPickResponse = await resolveRayPick(
-				buildRayPickRequest(hint, `browser-world-display-pick-${Date.now()}`),
-			);
+			diagnosticSelection = diagnosticPick;
+			event.preventDefault();
+			event.stopPropagation();
 			return;
 		}
 
@@ -674,6 +739,140 @@
 		event.preventDefault();
 		event.stopPropagation();
 		frontendState.selectBrowserLandblockDestination(landblockId);
+	}
+
+	function closeDiagnosticInspector(): void {
+		diagnosticSelection = null;
+	}
+
+	function deriveDiagnosticInspector(
+		selection: RenderSpatialPick | null,
+	): BrowserInspectorModel | null {
+		if (!selection) {
+			return null;
+		}
+		const { metadata } = selection.item;
+		const pickPoint = selection.point;
+		const commonRows = [
+			{ label: "Distance", value: selection.distance.toFixed(2) },
+			{
+				label: "Point",
+				value: `${pickPoint.x.toFixed(2)}, ${pickPoint.y.toFixed(2)}, ${pickPoint.z.toFixed(2)}`,
+			},
+		];
+		if (metadata.kind === "structured-cell") {
+			return {
+				title: formatHex32(metadata.envCellId),
+				kicker: "Structured cell",
+				rows: [
+					{ label: "Env cell", value: formatHex32(metadata.envCellId) },
+					{ label: "Render key", value: metadata.renderKey },
+					{ label: "Role", value: metadata.isFocus ? "Focus" : "Visible" },
+					...commonRows,
+				],
+			};
+		}
+		if (metadata.kind === "portal") {
+			return {
+				title: metadata.portalId,
+				kicker: "Portal",
+				rows: [
+					{
+						label: "Source",
+						value: formatCellIdForInspector(metadata.sourceEnvCellId),
+					},
+					{
+						label: "Target",
+						value: formatPortalTargetForInspector(metadata.targetEnvCellId),
+					},
+					{
+						label: "Target status",
+						value: formatPortalTargetStatus(metadata.targetStatus),
+					},
+					{ label: "Polygon", value: metadata.polygonId.toString() },
+					{
+						label: "Other portal",
+						value: formatOtherPortalId(metadata.otherPortalId),
+					},
+					{ label: "Flags", value: formatPortalFlags(metadata.flags) },
+					...commonRows,
+				],
+			};
+		}
+		return {
+			title: formatHex32(metadata.landblockId),
+			kicker: "Terrain",
+			rows: [
+				{ label: "Landblock", value: formatHex32(metadata.landblockId) },
+				{ label: "Asset", value: metadata.assetId },
+				...commonRows,
+			],
+		};
+	}
+
+	function formatCellIdForInspector(cellId: number): string {
+		return `0x${formatHex32(cellId)}`;
+	}
+
+	function formatPortalTargetForInspector(
+		targetEnvCellId: number | null,
+	): string {
+		if (targetEnvCellId === null) {
+			return "Unsupported";
+		}
+		if ((targetEnvCellId & 0xffff) === 0xffff) {
+			return `Outdoor landblock ${formatCellIdForInspector(targetEnvCellId)}`;
+		}
+		return `Env cell ${formatCellIdForInspector(targetEnvCellId)}`;
+	}
+
+	function formatPortalTargetStatus(status: string): string {
+		if (status === "loaded-visible") {
+			return "Loaded and visible";
+		}
+		if (status === "known-unloaded") {
+			return "Known, not loaded";
+		}
+		if (status === "outside") {
+			return "Outside transition";
+		}
+		if (status === "missing-polygon") {
+			return "Missing portal polygon";
+		}
+		if (status === "unsupported") {
+			return "Unsupported";
+		}
+		return status;
+	}
+
+	function formatOtherPortalId(otherPortalId: number): string {
+		if (otherPortalId === 0xffff) {
+			return "None (0xffff)";
+		}
+		return `0x${otherPortalId.toString(16).padStart(4, "0")}`;
+	}
+
+	function formatPortalFlags(flags: number): string {
+		const knownFlags = [
+			{ mask: 0x1, label: "ExactMatch" },
+			{ mask: 0x2, label: "PortalSide bit" },
+			{ mask: 0x4, label: "Outside transition" },
+		];
+		const labels = knownFlags
+			.filter((flag) => (flags & flag.mask) !== 0)
+			.map((flag) => flag.label);
+		const unknownBits =
+			flags & ~knownFlags.reduce((mask, flag) => mask | flag.mask, 0);
+		if (unknownBits !== 0) {
+			labels.push(`Unknown ${formatHex16(unknownBits)}`);
+		}
+		return labels.length === 0
+			? `${formatHex16(flags)} (none)`
+			: `${formatHex16(flags)} (${labels.join(", ")})`;
+	}
+
+	function formatHex16(value: number): string {
+		return `0x${(value & 0xffff).toString(16).padStart(4, "0")}`;
 	}
 
 	function isBrowserPanelEvent(event: Event): boolean {
@@ -1082,6 +1281,7 @@
 		{staticRenderableScene}
 		{structuredInteriorScene}
 		{debugOverlayScene}
+		renderSpatialQuery={renderSpatialIndex}
 		controlledCameraFrame={browserCameraFrame}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
@@ -1096,4 +1296,31 @@
 			debugRows={browserPanelDebugRows}
 		/>
 	</div>
+
+	{#if diagnosticInspector}
+		<aside class="browser-world-display__inspector" data-browser-panel>
+			<div class="browser-world-display__inspector-header">
+				<div>
+					<p>{diagnosticInspector.kicker}</p>
+					<h2>{diagnosticInspector.title}</h2>
+				</div>
+				<button
+					type="button"
+					class="browser-world-display__inspector-close"
+					aria-label="Close inspector"
+					onclick={closeDiagnosticInspector}
+				>
+					Close
+				</button>
+			</div>
+			<dl class="browser-world-display__inspector-rows">
+				{#each diagnosticInspector.rows as row}
+					<div>
+						<dt>{row.label}</dt>
+						<dd>{row.value}</dd>
+					</div>
+				{/each}
+			</dl>
+		</aside>
+	{/if}
 </div>

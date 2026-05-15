@@ -10,11 +10,13 @@ import {
 	updateBrowserDraft,
 	updateDetailLodRadius,
 	updateCellIndicatorVisibility,
+	updateLandblockInputMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
 	updateStructuredInteriorMaxEnvCells,
 	updateStructuredInteriorMaxVisibleCellDepth,
 	updateTerrainLodRadius,
+	type BrowserLandblockInputMode,
 	type BrowserModeState,
 } from "./browser-mode";
 import {
@@ -149,6 +151,19 @@ export function createFrontendStateStore() {
 					browserMode: updateStructuredInteriorMaxVisibleCellDepth(
 						state.browserMode,
 						maxVisibleCellDepth,
+					),
+				}),
+			);
+		},
+		updateLandblockInputMode(
+			landblockInputMode: BrowserLandblockInputMode,
+		): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateLandblockInputMode(
+						state.browserMode,
+						landblockInputMode,
 					),
 				}),
 			);

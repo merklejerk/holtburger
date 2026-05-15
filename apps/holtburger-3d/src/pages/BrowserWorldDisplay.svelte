@@ -526,7 +526,7 @@
 					: normalizeOutdoorLandblockId(destination.landblockId)
 							.toString(16)
 							.padStart(8, "0");
-			return `browser:outdoor:${destination.label}:${landblockKey}`;
+			return `browser:outdoor:${landblockKey}`;
 		}
 
 		if (runtime?.residency.indoors) {

@@ -21,6 +21,7 @@ type BrowserDestinationSource =
 	| "manual"
 	| "runtime-residency"
 	| "landblock-pick";
+export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
 type EastWestHemisphere = "E" | "W";
 
@@ -50,6 +51,7 @@ export type BrowserLocationSelection =
 
 export interface BrowserModeState {
 	draftInput: string;
+	draftInputEditedByUser: boolean;
 	validationMessage: string | null;
 	destination: BrowserLocationSelection | null;
 	terrainLodRadius: number;
@@ -57,6 +59,7 @@ export interface BrowserModeState {
 	detailLodRadius: number;
 	structuredInteriorMaxEnvCells: number;
 	structuredInteriorMaxVisibleCellDepth: number;
+	landblockInputMode: BrowserLandblockInputMode;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
@@ -66,6 +69,7 @@ export interface BrowserModeState {
 const LOCATION_INPUT_PATTERN =
 	/^\s*(\d+(?:\.\d+)?)\s*([NS])\s*,?\s*(\d+(?:\.\d+)?)\s*([EW])(?:\s*,?\s*(-?\d+(?:\.\d+)?)\s*Z?)?\s*$/i;
 const CELL_ID_INPUT_PATTERN = /^\s*(?:0x)?([0-9a-f]{8})\s*$/i;
+const LANDBLOCK_PREFIX_INPUT_PATTERN = /^\s*(?:0x)?([0-9a-f]{4})\s*$/i;
 
 const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 	"33.50S, 72.80E, 0.0Z",
@@ -82,6 +86,7 @@ export const MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 128;
 export function createBrowserModeState(): BrowserModeState {
 	return {
 		draftInput: DEFAULT_BROWSER_DESTINATION?.label ?? "",
+		draftInputEditedByUser: false,
 		validationMessage: null,
 		destination: DEFAULT_BROWSER_DESTINATION,
 		terrainLodRadius: DEFAULT_TERRAIN_LOD_RADIUS,
@@ -90,9 +95,10 @@ export function createBrowserModeState(): BrowserModeState {
 		structuredInteriorMaxEnvCells: DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		structuredInteriorMaxVisibleCellDepth:
 			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		landblockInputMode: "dungeon",
 		showPortalPolygons: false,
-		showCellIndicators: true,
-		highlightPortalTargets: true,
+		showCellIndicators: false,
+		highlightPortalTargets: false,
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
 			: "location-entry",
@@ -106,8 +112,13 @@ function formatResidencyDraft(residency: RuntimeResidencyDto): string {
 export function parseBrowserLocationInput(
 	value: string,
 	source: BrowserDestinationSource = "manual",
+	landblockInputMode: BrowserLandblockInputMode = "dungeon",
 ): BrowserLocationSelection | null {
-	const cellIdSelection = parseBrowserCellIdInput(value, source);
+	const cellIdSelection = parseBrowserCellIdInput(
+		value,
+		source,
+		landblockInputMode,
+	);
 	if (cellIdSelection) {
 		return cellIdSelection;
 	}
@@ -151,13 +162,17 @@ export function seedBrowserDraftFromResidency(
 	browserMode: BrowserModeState,
 	residency: RuntimeResidencyDto,
 ): BrowserModeState {
-	if (browserMode.draftInput.trim().length > 0) {
+	if (
+		browserMode.draftInputEditedByUser ||
+		browserMode.draftInput.trim().length > 0
+	) {
 		return browserMode;
 	}
 
 	return {
 		...browserMode,
 		draftInput: formatResidencyDraft(residency),
+		draftInputEditedByUser: false,
 	};
 }
 
@@ -168,6 +183,7 @@ export function updateBrowserDraft(
 	return {
 		...browserMode,
 		draftInput,
+		draftInputEditedByUser: true,
 		validationMessage: null,
 	};
 }
@@ -255,6 +271,17 @@ export function updateStructuredInteriorMaxVisibleCellDepth(
 	};
 }
 
+export function updateLandblockInputMode(
+	browserMode: BrowserModeState,
+	landblockInputMode: BrowserLandblockInputMode,
+): BrowserModeState {
+	return {
+		...browserMode,
+		landblockInputMode,
+		validationMessage: null,
+	};
+}
+
 export function updatePortalPolygonVisibility(
 	browserMode: BrowserModeState,
 	showPortalPolygons: boolean,
@@ -288,20 +315,25 @@ export function updatePortalTargetHighlighting(
 export function previewBrowserLocation(
 	browserMode: BrowserModeState,
 ): BrowserModeState {
-	const parsedLocation = parseBrowserLocationInput(browserMode.draftInput);
+	const parsedLocation = parseBrowserLocationInput(
+		browserMode.draftInput,
+		"manual",
+		browserMode.landblockInputMode,
+	);
 
 	if (!parsedLocation) {
 		return {
 			...browserMode,
 			validationMessage:
-				"Use the AC-style location format: 100.40S, 101.55W, 1.0Z.",
+				"Use the AC-style location format: 100.40S, 101.55W.",
 			destination: null,
 			page: "location-entry",
 		};
 	}
 
 	return {
-		draftInput: parsedLocation.label,
+		draftInput: browserMode.draftInput,
+		draftInputEditedByUser: browserMode.draftInputEditedByUser,
 		validationMessage: null,
 		destination: parsedLocation,
 		terrainLodRadius: browserMode.terrainLodRadius,
@@ -310,6 +342,7 @@ export function previewBrowserLocation(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
@@ -330,6 +363,7 @@ export function selectRuntimeResidencyDestination(
 		return {
 			...browserMode,
 			draftInput: formatResidencyDraft(residency),
+			draftInputEditedByUser: false,
 			validationMessage:
 				"The current runtime residency location could not be parsed into the browser-mode destination format.",
 			destination: null,
@@ -339,6 +373,7 @@ export function selectRuntimeResidencyDestination(
 
 	return {
 		draftInput: parsedLocation.label,
+		draftInputEditedByUser: false,
 		validationMessage: null,
 		destination: parsedLocation,
 		terrainLodRadius: browserMode.terrainLodRadius,
@@ -347,6 +382,7 @@ export function selectRuntimeResidencyDestination(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
@@ -365,6 +401,7 @@ export function selectBrowserLandblockDestination(
 
 	return {
 		draftInput: centerLocation.label,
+		draftInputEditedByUser: false,
 		validationMessage: null,
 		destination: {
 			...centerLocation,
@@ -378,6 +415,7 @@ export function selectBrowserLandblockDestination(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
@@ -429,7 +467,35 @@ export function isIndoorBrowserDestination(
 function parseBrowserCellIdInput(
 	value: string,
 	source: BrowserDestinationSource,
+	landblockInputMode: BrowserLandblockInputMode,
 ): BrowserLocationSelection | null {
+	const landblockPrefixMatch = value.match(LANDBLOCK_PREFIX_INPUT_PATTERN);
+	if (landblockPrefixMatch) {
+		const landblockPrefix = Number.parseInt(landblockPrefixMatch[1], 16) >>> 0;
+		const landblockId = ((landblockPrefix << 16) | 0xffff) >>> 0;
+		if (landblockInputMode === "dungeon") {
+			const envCellId = ((landblockPrefix << 16) | 0x0100) >>> 0;
+
+			return {
+				kind: "indoor-env-cell",
+				label: `Env cell 0x${formatHex32(envCellId)} (${formatLandblockLabel(landblockId)})`,
+				source,
+				envCellId,
+				landblockId,
+			};
+		}
+
+		const centerLocation =
+			outdoorLandblockIdToApproximateCenterLocation(landblockId);
+
+		return {
+			...centerLocation,
+			kind: "outdoor-location",
+			source,
+			landblockId,
+		};
+	}
+
 	const match = value.match(CELL_ID_INPUT_PATTERN);
 	if (!match) {
 		return null;
@@ -456,6 +522,10 @@ function parseBrowserCellIdInput(
 		envCellId: cellId,
 		landblockId,
 	};
+}
+
+export function isLandblockPrefixInput(value: string): boolean {
+	return LANDBLOCK_PREFIX_INPUT_PATTERN.test(value);
 }
 
 function outdoorLandblockIdToApproximateCenterLocation(

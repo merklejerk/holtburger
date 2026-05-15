@@ -350,7 +350,9 @@
 			return;
 		}
 
-		setActiveCameraFrame(controlledCameraFrame, { notifyParent: false });
+		setActiveCameraFrame(resolveControlledCameraFrame(controlledCameraFrame), {
+			notifyParent: false,
+		});
 		reportRenderMetrics();
 	});
 
@@ -382,9 +384,20 @@
 
 		const width = Math.max(viewportHost.clientWidth, 1);
 		const height = Math.max(viewportHost.clientHeight, 1);
+		renderer.setPixelRatio(window.devicePixelRatio);
 		renderer.setSize(width, height, false);
 		camera.aspect = width / height;
 		camera.updateProjectionMatrix();
+	}
+
+	function resolveControlledCameraFrame(
+		frame: SceneCameraFrame,
+	): SceneCameraFrame {
+		const aspect = camera?.aspect ?? frame.aspect;
+		if (frame.aspect === aspect) {
+			return frame;
+		}
+		return { ...frame, aspect };
 	}
 
 	function syncTerrainMeshes(): void {
@@ -542,7 +555,9 @@
 		}
 
 		if (controlledCameraFrame) {
-			setActiveCameraFrame(controlledCameraFrame, { notifyParent: false });
+			setActiveCameraFrame(resolveControlledCameraFrame(controlledCameraFrame), {
+				notifyParent: false,
+			});
 			reportRenderMetrics();
 			return;
 		}

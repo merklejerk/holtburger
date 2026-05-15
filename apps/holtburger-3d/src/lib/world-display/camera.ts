@@ -23,114 +23,257 @@ export interface SceneBoundsFrame {
 	minimumSpan: number;
 }
 
-export interface DebugOrbitCameraState {
-	target: Vec3Dto;
+export interface BrowserFreeCameraState {
+	position: Vec3Dto;
 	yawRadians: number;
 	pitchRadians: number;
-	distance: number;
-	minDistance: number;
-	maxDistance: number;
+	focusDistance: number;
+	minFocusDistance: number;
+	maxFocusDistance: number;
+	moveSpeed: number;
 	hasManualControl: boolean;
 	lastFitKey: string | null;
 }
 
-const DEFAULT_UP: Vec3Dto = { x: 0, y: 1, z: 0 };
-const DEFAULT_FOV_DEGREES = 52;
-const DEFAULT_NEAR = 0.1;
-const DEFAULT_FAR = 5000;
-const MIN_PITCH_RADIANS = -1.38;
-const MAX_PITCH_RADIANS = 1.38;
+export interface BrowserFreeCameraConfig {
+	defaultPosition: Vec3Dto;
+	defaultYawRadians: number;
+	defaultPitchRadians: number;
+	defaultFocusDistance: number;
+	defaultMinFocusDistance: number;
+	defaultMaxFocusDistance: number;
+	defaultMoveSpeed: number;
+	fovDegrees: number;
+	near: number;
+	far: number;
+	minPitchRadians: number;
+	maxPitchRadians: number;
+	pointerYawRadiansPerPixel: number;
+	pointerPitchRadiansPerPixel: number;
+	keyboardYawRadiansPerSecond: number;
+	shiftSlowMultiplier: number;
+	wheelDeltaClamp: number;
+	wheelLocalUpUnitsPerDelta: number;
+	panScalePerPixelAtFocusDistance: number;
+	fitHorizontalDistanceScale: number;
+	fitVerticalDistanceScale: number;
+	fitFrameMinDistanceScale: number;
+	fitFrameMaxDistanceScale: number;
+	fitMinDistanceScale: number;
+	fitMaxDistanceScale: number;
+	fitMinimumVerticalSpan: number;
+	fitAbsoluteMinFocusDistance: number;
+	fitAbsoluteMaxFocusDistance: number;
+	fitAbsoluteMinMoveSpeed: number;
+	fitMoveSpeedScale: number;
+}
 
-export function createDebugOrbitCameraState(): DebugOrbitCameraState {
+const DEFAULT_UP: Vec3Dto = { x: 0, y: 1, z: 0 };
+const DEFAULT_CAMERA_YAW_RADIANS = Math.PI * 0.74;
+const DEFAULT_CAMERA_PITCH_RADIANS = -0.72;
+
+export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
+	defaultPosition: { x: 180, y: 220, z: 180 },
+	defaultYawRadians: DEFAULT_CAMERA_YAW_RADIANS,
+	defaultPitchRadians: DEFAULT_CAMERA_PITCH_RADIANS,
+	defaultFocusDistance: 360,
+	defaultMinFocusDistance: 18,
+	defaultMaxFocusDistance: 4000,
+	defaultMoveSpeed: 180,
+	fovDegrees: 52,
+	near: 0.1,
+	far: 5000,
+	minPitchRadians: -1.38,
+	maxPitchRadians: 1.38,
+	pointerYawRadiansPerPixel: 0.006,
+	pointerPitchRadiansPerPixel: 0.005,
+	keyboardYawRadiansPerSecond: 1.8,
+	shiftSlowMultiplier: 0.05,
+	wheelDeltaClamp: 900,
+	wheelLocalUpUnitsPerDelta: -0.35,
+	panScalePerPixelAtFocusDistance: 0.0018,
+	fitHorizontalDistanceScale: 1.65,
+	fitVerticalDistanceScale: 3.4,
+	fitFrameMinDistanceScale: 0.12,
+	fitFrameMaxDistanceScale: 8,
+	fitMinDistanceScale: 0.04,
+	fitMaxDistanceScale: 10,
+	fitMinimumVerticalSpan: 24,
+	fitAbsoluteMinFocusDistance: 6,
+	fitAbsoluteMaxFocusDistance: 1200,
+	fitAbsoluteMinMoveSpeed: 24,
+	fitMoveSpeedScale: 0.75,
+};
+
+export function createBrowserFreeCameraState(
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): BrowserFreeCameraState {
 	return {
-		target: { x: 0, y: 0, z: 0 },
-		yawRadians: Math.PI * 0.74,
-		pitchRadians: -0.72,
-		distance: 360,
-		minDistance: 18,
-		maxDistance: 4000,
+		position: { ...config.defaultPosition },
+		yawRadians: config.defaultYawRadians,
+		pitchRadians: config.defaultPitchRadians,
+		focusDistance: config.defaultFocusDistance,
+		minFocusDistance: config.defaultMinFocusDistance,
+		maxFocusDistance: config.defaultMaxFocusDistance,
+		moveSpeed: config.defaultMoveSpeed,
 		hasManualControl: false,
 		lastFitKey: null,
 	};
 }
 
-export function fitDebugOrbitCameraToBounds(
-	state: DebugOrbitCameraState,
+export function fitSceneCameraFrameToBounds(
+	bounds: SceneBoundsFrame,
+	aspect: number,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): SceneCameraFrame {
+	const focusDistance = calculateSceneFocusDistance(bounds, config);
+	const axes = getCameraAxes({
+		yawRadians: config.defaultYawRadians,
+		pitchRadians: config.defaultPitchRadians,
+	});
+	const position = subtractVec3(
+		bounds.center,
+		scaleVec3(axes.forward, focusDistance),
+	);
+
+	return buildSceneCameraFrameFromPose({
+		position,
+		forward: axes.forward,
+		up: axes.up,
+		focusDistance,
+		aspect,
+		config,
+	});
+}
+
+export function createFallbackSceneCameraFrame(
+	aspect: number,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): SceneCameraFrame {
+	const fallbackCamera = createBrowserFreeCameraState(config);
+	const axes = getCameraAxes(fallbackCamera);
+
+	return buildSceneCameraFrameFromPose({
+		position: fallbackCamera.position,
+		forward: axes.forward,
+		up: axes.up,
+		focusDistance: fallbackCamera.focusDistance,
+		aspect,
+		config,
+	});
+}
+
+export function fitBrowserFreeCameraToBounds(
+	state: BrowserFreeCameraState,
 	bounds: SceneBoundsFrame,
 	fitKey: string,
 	options: { force: boolean },
-): DebugOrbitCameraState {
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): BrowserFreeCameraState {
 	if (!options.force && state.hasManualControl) {
 		return state;
 	}
 
-	const horizontalSpan = Math.max(
-		bounds.size.x,
-		bounds.size.z,
-		bounds.minimumSpan,
-	);
-	const verticalSpan = Math.max(bounds.size.y, 24);
-	const distance = clamp(
-		Math.max(horizontalSpan * 1.65, verticalSpan * 3.4),
-		Math.max(18, horizontalSpan * 0.12),
-		Math.max(1200, horizontalSpan * 8),
-	);
-
-	return {
+	const horizontalSpan = calculateSceneHorizontalSpan(bounds);
+	const focusDistance = calculateSceneFocusDistance(bounds, config);
+	const nextState = {
 		...state,
-		target: { ...bounds.center },
-		distance,
-		minDistance: Math.max(6, horizontalSpan * 0.04),
-		maxDistance: Math.max(1200, horizontalSpan * 10),
+		focusDistance,
+		minFocusDistance: Math.max(
+			config.fitAbsoluteMinFocusDistance,
+			horizontalSpan * config.fitMinDistanceScale,
+		),
+		maxFocusDistance: Math.max(
+			config.fitAbsoluteMaxFocusDistance,
+			horizontalSpan * config.fitMaxDistanceScale,
+		),
+		moveSpeed: Math.max(
+			config.fitAbsoluteMinMoveSpeed,
+			horizontalSpan * config.fitMoveSpeedScale,
+		),
 		hasManualControl: options.force ? false : state.hasManualControl,
 		lastFitKey: fitKey,
 	};
+	const forward = getCameraAxes(nextState).forward;
+
+	return {
+		...nextState,
+		position: subtractVec3(bounds.center, scaleVec3(forward, focusDistance)),
+	};
 }
 
-export function orbitDebugCamera(
-	state: DebugOrbitCameraState,
+export function rotateBrowserFreeCamera(
+	state: BrowserFreeCameraState,
 	deltaPixels: { x: number; y: number },
-): DebugOrbitCameraState {
+	speedMultiplier = 1,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): BrowserFreeCameraState {
 	return {
 		...state,
-		yawRadians: state.yawRadians - deltaPixels.x * 0.006,
+		yawRadians:
+			state.yawRadians -
+			deltaPixels.x * config.pointerYawRadiansPerPixel * speedMultiplier,
 		pitchRadians: clamp(
-			state.pitchRadians - deltaPixels.y * 0.005,
-			MIN_PITCH_RADIANS,
-			MAX_PITCH_RADIANS,
+			state.pitchRadians +
+				deltaPixels.y * config.pointerPitchRadiansPerPixel * speedMultiplier,
+			config.minPitchRadians,
+			config.maxPitchRadians,
 		),
 		hasManualControl: true,
 	};
 }
 
-export function zoomDebugCamera(
-	state: DebugOrbitCameraState,
+export function rotateBrowserFreeCameraAroundLocalUp(
+	state: BrowserFreeCameraState,
+	direction: -1 | 1,
+	deltaSeconds: number,
+	speedMultiplier = 1,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): BrowserFreeCameraState {
+	return {
+		...state,
+		yawRadians:
+			state.yawRadians +
+			direction *
+				config.keyboardYawRadiansPerSecond *
+				deltaSeconds *
+				speedMultiplier,
+		hasManualControl: true,
+	};
+}
+
+export function moveBrowserFreeCameraLocalUpByWheel(
+	state: BrowserFreeCameraState,
 	wheelDeltaY: number,
-): DebugOrbitCameraState {
-	const multiplier = Math.exp(clamp(wheelDeltaY, -900, 900) * 0.0012);
+	speedMultiplier = 1,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): BrowserFreeCameraState {
+	const { up } = getCameraAxes(state);
+	const localUpDistance =
+		-clamp(wheelDeltaY, -config.wheelDeltaClamp, config.wheelDeltaClamp) *
+		config.wheelLocalUpUnitsPerDelta *
+		speedMultiplier;
 
 	return {
 		...state,
-		distance: clamp(
-			state.distance * multiplier,
-			state.minDistance,
-			state.maxDistance,
-		),
+		position: addVec3(state.position, scaleVec3(up, localUpDistance)),
 		hasManualControl: true,
 	};
 }
 
-export function panDebugCamera(
-	state: DebugOrbitCameraState,
+export function panBrowserFreeCamera(
+	state: BrowserFreeCameraState,
 	deltaPixels: { x: number; y: number },
-): DebugOrbitCameraState {
-	const frame = buildDebugOrbitCameraFrame(state);
-	const forward = normalizeVec3(subtractVec3(frame.target, frame.position));
-	const right = normalizeVec3(crossVec3(forward, frame.up));
-	const up = normalizeVec3(crossVec3(right, forward));
-	const panScale = state.distance * 0.0018;
-	const target = addVec3(
-		state.target,
+	speedMultiplier = 1,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): BrowserFreeCameraState {
+	const { right, up } = getCameraAxes(state);
+	const panScale =
+		state.focusDistance *
+		config.panScalePerPixelAtFocusDistance *
+		speedMultiplier;
+	const position = addVec3(
+		state.position,
 		addVec3(
 			scaleVec3(right, -deltaPixels.x * panScale),
 			scaleVec3(up, deltaPixels.y * panScale),
@@ -139,29 +282,135 @@ export function panDebugCamera(
 
 	return {
 		...state,
-		target,
+		position,
 		hasManualControl: true,
 	};
 }
 
-export function buildDebugOrbitCameraFrame(
-	state: DebugOrbitCameraState,
-): SceneCameraFrame {
-	const cosPitch = Math.cos(state.pitchRadians);
-	const offset = {
-		x: Math.cos(state.yawRadians) * cosPitch * state.distance,
-		y: Math.sin(-state.pitchRadians) * state.distance,
-		z: Math.sin(state.yawRadians) * cosPitch * state.distance,
-	};
+export function moveBrowserFreeCameraLocal(
+	state: BrowserFreeCameraState,
+	movement: { right: number; up: number; forward: number },
+	deltaSeconds: number,
+	speedMultiplier = 1,
+): BrowserFreeCameraState {
+	if (movement.right === 0 && movement.up === 0 && movement.forward === 0) {
+		return state;
+	}
+
+	const { forward, right, up } = getCameraAxes(state);
+	const direction = normalizeVec3(
+		addVec3(
+			addVec3(scaleVec3(right, movement.right), scaleVec3(up, movement.up)),
+			scaleVec3(forward, movement.forward),
+		),
+	);
 
 	return {
-		position: addVec3(state.target, offset),
-		target: { ...state.target },
-		up: DEFAULT_UP,
+		...state,
+		position: addVec3(
+			state.position,
+			scaleVec3(direction, state.moveSpeed * deltaSeconds * speedMultiplier),
+		),
+		hasManualControl: true,
+	};
+}
+
+export function getBrowserFreeCameraSpeedMultiplier(
+	isSlowModifierActive: boolean,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): number {
+	return isSlowModifierActive ? config.shiftSlowMultiplier : 1;
+}
+
+export function buildBrowserFreeCameraFrame(
+	state: BrowserFreeCameraState,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): SceneCameraFrame {
+	const axes = getCameraAxes(state);
+
+	return buildSceneCameraFrameFromPose({
+		position: state.position,
+		forward: axes.forward,
+		up: axes.up,
+		focusDistance: state.focusDistance,
 		aspect: 1,
-		fovDegrees: DEFAULT_FOV_DEGREES,
-		near: DEFAULT_NEAR,
-		far: DEFAULT_FAR,
+		config,
+	});
+}
+
+function calculateSceneHorizontalSpan(bounds: SceneBoundsFrame): number {
+	return Math.max(bounds.size.x, bounds.size.z, bounds.minimumSpan);
+}
+
+function calculateSceneFocusDistance(
+	bounds: SceneBoundsFrame,
+	config: BrowserFreeCameraConfig,
+): number {
+	const horizontalSpan = calculateSceneHorizontalSpan(bounds);
+	const verticalSpan = Math.max(bounds.size.y, config.fitMinimumVerticalSpan);
+
+	return clamp(
+		Math.max(
+			horizontalSpan * config.fitHorizontalDistanceScale,
+			verticalSpan * config.fitVerticalDistanceScale,
+		),
+		Math.max(
+			config.defaultMinFocusDistance,
+			horizontalSpan * config.fitFrameMinDistanceScale,
+		),
+		Math.max(
+			config.fitAbsoluteMaxFocusDistance,
+			horizontalSpan * config.fitFrameMaxDistanceScale,
+		),
+	);
+}
+
+function buildSceneCameraFrameFromPose({
+	position,
+	forward,
+	up,
+	focusDistance,
+	aspect,
+	config,
+}: {
+	position: Vec3Dto;
+	forward: Vec3Dto;
+	up: Vec3Dto;
+	focusDistance: number;
+	aspect: number;
+	config: BrowserFreeCameraConfig;
+}): SceneCameraFrame {
+	return {
+		position: { ...position },
+		target: addVec3(position, scaleVec3(forward, focusDistance)),
+		up,
+		aspect,
+		fovDegrees: config.fovDegrees,
+		near: config.near,
+		far: config.far,
+	};
+}
+
+function getCameraAxes(
+	state: Pick<BrowserFreeCameraState, "yawRadians" | "pitchRadians">,
+): {
+	forward: Vec3Dto;
+	right: Vec3Dto;
+	up: Vec3Dto;
+} {
+	const cosPitch = Math.cos(state.pitchRadians);
+	const forward = normalizeVec3({
+		x: -Math.cos(state.yawRadians) * cosPitch,
+		y: -Math.sin(-state.pitchRadians),
+		z: -Math.sin(state.yawRadians) * cosPitch,
+	});
+	const right = normalizeVec3(crossVec3(forward, DEFAULT_UP));
+	const up = normalizeVec3(crossVec3(right, forward));
+
+	return {
+		forward,
+		right,
+		up,
 	};
 }
 

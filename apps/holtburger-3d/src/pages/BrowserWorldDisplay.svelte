@@ -14,13 +14,16 @@
 	import { resolveRayPick, submitCameraHint } from "../lib/host/tauri";
 	import {
 		buildCameraHintFromSceneCameraFrame,
-		buildDebugOrbitCameraFrame,
-		createDebugOrbitCameraState,
-		fitDebugOrbitCameraToBounds,
-		orbitDebugCamera,
-		panDebugCamera,
-		zoomDebugCamera,
-		type DebugOrbitCameraState,
+		buildBrowserFreeCameraFrame,
+		createBrowserFreeCameraState,
+		fitBrowserFreeCameraToBounds,
+		getBrowserFreeCameraSpeedMultiplier,
+		moveBrowserFreeCameraLocalUpByWheel,
+		moveBrowserFreeCameraLocal,
+		panBrowserFreeCamera,
+		rotateBrowserFreeCamera,
+		rotateBrowserFreeCameraAroundLocalUp,
+		type BrowserFreeCameraState,
 		type SceneCameraFrame,
 		describeSceneCameraFrame,
 	} from "../lib/world-display/camera";
@@ -74,8 +77,8 @@
 	let rootElement = $state<HTMLDivElement | null>(null);
 	let worldDisplaySurface = $state<WorldDisplay | null>(null);
 	let renderMetrics = $state<WorldRenderMetrics | null>(null);
-	let browserCameraState = $state<DebugOrbitCameraState>(
-		createDebugOrbitCameraState(),
+	let browserCameraState = $state<BrowserFreeCameraState>(
+		createBrowserFreeCameraState(),
 	);
 	let browserCameraFrame = $state<SceneCameraFrame | null>(null);
 	let cameraAck = $state<CameraHintAckDto | null>(null);
@@ -98,6 +101,10 @@
 	let keyboardInputEventCount = $state(0);
 	let suppressNextBrowserClick = false;
 	let cameraHintTimer: ReturnType<typeof setTimeout> | null = null;
+	let cameraMovementFrameId: number | null = null;
+	let lastCameraMovementFrameAt: number | null = null;
+	let isCameraSlowModifierActive = false;
+	const pressedCameraControlKeys = new Set<string>();
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
 	const browserCameraSceneKey = $derived(
@@ -271,13 +278,14 @@
 		}
 
 		activeCameraSceneKey = browserCameraSceneKey;
-		browserCameraState = createDebugOrbitCameraState();
+		browserCameraState = createBrowserFreeCameraState();
 		browserCameraFrame = null;
 		activePointerDrag = null;
 		suppressNextBrowserClick = false;
+		stopCameraMovement();
 	});
 
-	// Browser orbit controls are a debug/navigation policy, not the future client camera.
+	// Browser free-camera controls are a navigation policy, not the future client camera.
 	function handleRenderMetricsChange(metrics: WorldRenderMetrics): void {
 		renderMetricsEventCount += 1;
 		renderMetrics = metrics;
@@ -293,7 +301,7 @@
 				metrics.geometry.terrainTileCount,
 				metrics.geometry.staticRenderablePartCount,
 			].join(":");
-			browserCameraState = fitDebugOrbitCameraToBounds(
+			browserCameraState = fitBrowserFreeCameraToBounds(
 				browserCameraState,
 				metrics.bounds,
 				fitKey,
@@ -386,10 +394,11 @@
 			lastY: event.clientY,
 			moved: drag.moved || Math.hypot(delta.x, delta.y) > 2,
 		};
+		const speedMultiplier = getBrowserFreeCameraSpeedMultiplier(event.shiftKey);
 		browserCameraState =
 			drag.mode === "orbit"
-				? orbitDebugCamera(browserCameraState, delta)
-				: panDebugCamera(browserCameraState, delta);
+				? rotateBrowserFreeCamera(browserCameraState, delta, speedMultiplier)
+				: panBrowserFreeCamera(browserCameraState, delta, speedMultiplier);
 		pointerInputEventCount += 1;
 		applyBrowserCameraFrame(getViewportPoint(event), false);
 		event.preventDefault();
@@ -411,18 +420,32 @@
 	}
 
 	function handleBrowserWheelCapture(event: WheelEvent): void {
-		browserCameraState = zoomDebugCamera(browserCameraState, event.deltaY);
+		browserCameraState = moveBrowserFreeCameraLocalUpByWheel(
+			browserCameraState,
+			getCameraWheelDelta(event),
+			getBrowserFreeCameraSpeedMultiplier(event.shiftKey),
+		);
 		pointerInputEventCount += 1;
 		applyBrowserCameraFrame(getViewportPoint(event), false);
 		event.preventDefault();
 	}
 
 	function handleBrowserKeyDownCapture(event: KeyboardEvent): void {
+		isCameraSlowModifierActive = event.shiftKey;
+		const movementKey = normalizeCameraMovementKey(event.key);
+		if (movementKey) {
+			pressedCameraControlKeys.add(movementKey);
+			startCameraMovement();
+			keyboardInputEventCount += 1;
+			event.preventDefault();
+			return;
+		}
+
 		if (event.key.toLowerCase() !== "f" || !renderMetrics?.bounds) {
 			return;
 		}
 
-		browserCameraState = fitDebugOrbitCameraToBounds(
+		browserCameraState = fitBrowserFreeCameraToBounds(
 			browserCameraState,
 			renderMetrics.bounds,
 			`forced:${Date.now()}`,
@@ -433,8 +456,29 @@
 		event.preventDefault();
 	}
 
+	function handleBrowserKeyUpCapture(event: KeyboardEvent): void {
+		isCameraSlowModifierActive = event.shiftKey;
+		const movementKey = normalizeCameraMovementKey(event.key);
+		if (!movementKey) {
+			if (event.key === "Shift") {
+				isCameraSlowModifierActive = false;
+			}
+			return;
+		}
+
+		pressedCameraControlKeys.delete(movementKey);
+		if (pressedCameraControlKeys.size === 0) {
+			stopCameraMovement();
+		}
+		event.preventDefault();
+	}
+
 	function handleBrowserContextMenuCapture(event: MouseEvent): void {
 		event.preventDefault();
+	}
+
+	function handleBrowserBlurCapture(): void {
+		stopCameraMovement();
 	}
 
 	async function handleBrowserClickCapture(event: MouseEvent): Promise<void> {
@@ -481,7 +525,7 @@
 		immediate: boolean,
 	): void {
 		const nextFrame = {
-			...buildDebugOrbitCameraFrame(browserCameraState),
+			...buildBrowserFreeCameraFrame(browserCameraState),
 			aspect:
 				renderMetrics?.cameraFrame?.aspect ?? browserCameraFrame?.aspect ?? 1,
 		};
@@ -525,6 +569,113 @@
 
 	function areNumbersClose(left: number, right: number): boolean {
 		return Math.abs(left - right) < 0.0001;
+	}
+
+	function startCameraMovement(): void {
+		if (cameraMovementFrameId !== null) {
+			return;
+		}
+
+		lastCameraMovementFrameAt = null;
+		cameraMovementFrameId = window.requestAnimationFrame(applyCameraMovement);
+	}
+
+	function stopCameraMovement(): void {
+		if (cameraMovementFrameId !== null) {
+			window.cancelAnimationFrame(cameraMovementFrameId);
+			cameraMovementFrameId = null;
+		}
+		lastCameraMovementFrameAt = null;
+		isCameraSlowModifierActive = false;
+		pressedCameraControlKeys.clear();
+	}
+
+	function applyCameraMovement(frameAt: number): void {
+		cameraMovementFrameId =
+			pressedCameraControlKeys.size === 0
+				? null
+				: window.requestAnimationFrame(applyCameraMovement);
+		if (pressedCameraControlKeys.size === 0) {
+			lastCameraMovementFrameAt = null;
+			return;
+		}
+
+		const deltaSeconds =
+			lastCameraMovementFrameAt === null
+				? 0
+				: Math.min((frameAt - lastCameraMovementFrameAt) / 1000, 0.05);
+		lastCameraMovementFrameAt = frameAt;
+		if (deltaSeconds === 0) {
+			return;
+		}
+
+		const movement = deriveCameraMovementVector();
+		const yawDirection = deriveCameraYawDirection();
+		const speedMultiplier = getBrowserFreeCameraSpeedMultiplier(
+			isCameraSlowModifierActive,
+		);
+		if (movement.right !== 0 || movement.up !== 0 || movement.forward !== 0) {
+			browserCameraState = moveBrowserFreeCameraLocal(
+				browserCameraState,
+				movement,
+				deltaSeconds,
+				speedMultiplier,
+			);
+		}
+		if (yawDirection !== 0) {
+			browserCameraState = rotateBrowserFreeCameraAroundLocalUp(
+				browserCameraState,
+				yawDirection,
+				deltaSeconds,
+				speedMultiplier,
+			);
+		}
+		keyboardInputEventCount += 1;
+		applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, false);
+	}
+
+	function deriveCameraMovementVector(): {
+		right: number;
+		up: number;
+		forward: number;
+	} {
+		return {
+			right:
+				(pressedCameraControlKeys.has("d") ? 1 : 0) -
+				(pressedCameraControlKeys.has("a") ? 1 : 0),
+			up: pressedCameraControlKeys.has("space") ? 1 : 0,
+			forward:
+				(pressedCameraControlKeys.has("w") ? 1 : 0) -
+				(pressedCameraControlKeys.has("s") ? 1 : 0),
+		};
+	}
+
+	function deriveCameraYawDirection(): -1 | 0 | 1 {
+		const direction =
+			(pressedCameraControlKeys.has("e") ? 1 : 0) -
+			(pressedCameraControlKeys.has("q") ? 1 : 0);
+
+		return direction === 0 ? 0 : direction > 0 ? 1 : -1;
+	}
+
+	function normalizeCameraMovementKey(key: string): string | null {
+		const normalizedKey = key.toLowerCase();
+		if (
+			normalizedKey === "w" ||
+			normalizedKey === "a" ||
+			normalizedKey === "s" ||
+			normalizedKey === "d" ||
+			normalizedKey === "q" ||
+			normalizedKey === "e"
+		) {
+			return normalizedKey;
+		}
+
+		return key === " " ? "space" : null;
+	}
+
+	function getCameraWheelDelta(event: WheelEvent): number {
+		return event.deltaY !== 0 ? event.deltaY : event.deltaX;
 	}
 
 	function getViewportPoint(
@@ -631,7 +782,7 @@
 
 	function describeBrowserCameraControlMode(): string {
 		return browserCameraState.hasManualControl
-			? "Browser camera: manual orbit."
+			? "Browser camera: manual free camera."
 			: "Browser camera: auto-fit.";
 	}
 
@@ -742,6 +893,7 @@
 		if (cameraHintTimer) {
 			clearTimeout(cameraHintTimer);
 		}
+		stopCameraMovement();
 	});
 </script>
 
@@ -755,6 +907,8 @@
 	onpointercancelcapture={handleBrowserPointerUpCapture}
 	onwheelcapture={handleBrowserWheelCapture}
 	onkeydowncapture={handleBrowserKeyDownCapture}
+	onkeyupcapture={handleBrowserKeyUpCapture}
+	onblurcapture={handleBrowserBlurCapture}
 	oncontextmenucapture={handleBrowserContextMenuCapture}
 	onclickcapture={handleBrowserClickCapture}
 >

@@ -2,7 +2,11 @@
 	import { frontendState } from "../app/frontend-state";
 	import {
 		MAX_LANDBLOCK_COVERAGE_RADIUS,
+		MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
+		MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
 		MIN_LANDBLOCK_COVERAGE_RADIUS,
+		MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
+		MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
 	} from "../app/browser-mode";
 
 	function handleDraftInput(event: Event): void {
@@ -21,6 +25,20 @@
 	function handleCoverageRadiusInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateLandblockCoverageRadius(Number(input.value));
+	}
+
+	function handleStructuredInteriorMaxEnvCellsInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateStructuredInteriorMaxEnvCells(Number(input.value));
+	}
+
+	function handleStructuredInteriorMaxVisibleCellDepthInput(
+		event: Event,
+	): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateStructuredInteriorMaxVisibleCellDepth(
+			Number(input.value),
+		);
 	}
 </script>
 
@@ -102,6 +120,32 @@
 			step="1"
 			value={$frontendState.browserMode.landblockCoverageRadius}
 			on:change={handleCoverageRadiusInput}
+		/>
+	</label>
+
+	<label class="browser-form__field" for="interior-max-cells-input">
+		<span>Interior env cells</span>
+		<input
+			id="interior-max-cells-input"
+			type="number"
+			min={MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS}
+			max={MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS}
+			step="1"
+			value={$frontendState.browserMode.structuredInteriorMaxEnvCells}
+			on:change={handleStructuredInteriorMaxEnvCellsInput}
+		/>
+	</label>
+
+	<label class="browser-form__field" for="interior-depth-input">
+		<span>Interior visible depth</span>
+		<input
+			id="interior-depth-input"
+			type="number"
+			min={MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH}
+			max={MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH}
+			step="1"
+			value={$frontendState.browserMode.structuredInteriorMaxVisibleCellDepth}
+			on:change={handleStructuredInteriorMaxVisibleCellDepthInput}
 		/>
 	</label>
 

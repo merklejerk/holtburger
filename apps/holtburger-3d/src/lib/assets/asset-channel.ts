@@ -12,7 +12,6 @@ import {
 } from "../../app/browser-mode";
 import {
 	buildOutdoorCoverageLandblockIds,
-	formatHex32,
 	formatOutdoorStaticSceneAssetId,
 	formatTerrainAssetId,
 	normalizeOutdoorLandblockId,
@@ -28,6 +27,15 @@ import type {
 	AssetWorkerRequestMessage,
 	AssetWorkerResponseMessage,
 } from "../../workers/asset-worker";
+import {
+	createDefaultStructuredInteriorCoverageOptions,
+	deriveStructuredInteriorCoverage,
+	formatEnvironmentAssetId,
+	formatIndoorEnvCellAssetId,
+	isPreparedIndoorEnvCellAsset,
+	type StructuredInteriorCoverageOptions,
+	type StructuredInteriorMembershipPolicy,
+} from "./structured-interior-coverage";
 
 export interface AssetWorkerLike {
 	onmessage: ((event: MessageEvent<AssetWorkerResponseMessage>) => void) | null;
@@ -71,10 +79,12 @@ export interface AssetPreparationGateway {
 
 export interface OutdoorCoverageOptions {
 	landblockRadius: number;
+	structuredInterior?: StructuredInteriorCoverageOptions;
 }
 
 const DEFAULT_OUTDOOR_COVERAGE_OPTIONS: OutdoorCoverageOptions = {
 	landblockRadius: 1,
+	structuredInterior: createDefaultStructuredInteriorCoverageOptions(),
 };
 
 export class AssetChannelController {
@@ -384,15 +394,22 @@ export function createSceneCoverageRequests(
 	if (!runtimeBatch) {
 		return [];
 	}
+	const structuredInteriorCoverageOptions =
+		resolveStructuredInteriorCoverageOptions(options);
 
 	if (isIndoorBrowserDestination(browserDestination)) {
 		return [
-			...createIndoorCoverageRequests(
+			...createStructuredInteriorCoverageRequests(
 				runtimeBatch,
 				priority,
 				preparedByAssetId,
 				pendingAssetIds,
-				browserDestination.envCellId,
+				structuredInteriorCoverageOptions,
+				{
+					kind: "visible-cell-closure",
+					seedEnvCellIds: [browserDestination.envCellId],
+				},
+				"destination",
 			),
 			...createStaticRenderableAssetRequests(
 				runtimeBatch,
@@ -407,11 +424,17 @@ export function createSceneCoverageRequests(
 
 	if (runtimeBatch.residency.indoors) {
 		return [
-			...createIndoorCoverageRequests(
+			...createStructuredInteriorCoverageRequests(
 				runtimeBatch,
 				priority,
 				preparedByAssetId,
 				pendingAssetIds,
+				structuredInteriorCoverageOptions,
+				createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch),
+				"runtime",
+				runtimeBatch.residency.environmentId === null
+					? []
+					: [runtimeBatch.residency.environmentId],
 			),
 			...createStaticRenderableAssetRequests(
 				runtimeBatch,
@@ -569,6 +592,8 @@ export function createStaticRenderableAssetRequests(
 	if (!runtimeBatch) {
 		return [];
 	}
+	const structuredInteriorCoverageOptions =
+		resolveStructuredInteriorCoverageOptions(options);
 
 	if (
 		runtimeBatch.residency.indoors ||
@@ -580,6 +605,7 @@ export function createStaticRenderableAssetRequests(
 			priority,
 			preparedByAssetId,
 			pendingAssetIds,
+			structuredInteriorCoverageOptions,
 		);
 	}
 
@@ -592,6 +618,14 @@ export function createStaticRenderableAssetRequests(
 	const linkedIndoorEnvCellIds = deriveOutdoorLinkedInteriorEnvCellIds(
 		preparedByAssetId,
 		activeLandblockIds,
+	);
+	const linkedInteriorCoverage = deriveStructuredInteriorCoverage(
+		{
+			kind: "visible-cell-closure",
+			seedEnvCellIds: [...linkedIndoorEnvCellIds],
+		},
+		preparedByAssetId,
+		structuredInteriorCoverageOptions,
 	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	const sourceAssetIds = Object.values(preparedByAssetId).flatMap((asset) => {
@@ -614,11 +648,10 @@ export function createStaticRenderableAssetRequests(
 			),
 		];
 	});
-	const linkedIndoorSourceAssetIds = [...linkedIndoorEnvCellIds].flatMap(
+	const linkedIndoorSourceAssetIds = linkedInteriorCoverage.envCellIds.flatMap(
 		(envCellId) => {
-			const asset =
-				preparedByAssetId[`indoor-env-cell/${formatHex32(envCellId)}`];
-			return asset?.payload.kind === "indoor-env-cell"
+			const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
+			return isPreparedIndoorEnvCellAsset(asset)
 				? asset.payload.staticObjects.map(
 						(staticObject) => staticObject.sourceAssetId,
 					)
@@ -659,27 +692,18 @@ function createOutdoorLinkedInteriorCoverageRequests(
 		preparedByAssetId,
 		activeLandblockIds,
 	);
-	const envCellAssetIds = [...linkedEnvCellIds].map(formatIndoorEnvCellAssetId);
-	const environmentAssetIds = envCellAssetIds.flatMap((assetId) => {
-		const asset = preparedByAssetId[assetId];
-		return asset?.payload.kind === "indoor-env-cell" &&
-			asset.payload.environmentId !== null
-			? [formatEnvironmentAssetId(asset.payload.environmentId)]
-			: [];
-	});
-	const pendingAssetIdSet = new Set(pendingAssetIds);
-
-	return [...new Set([...envCellAssetIds, ...environmentAssetIds])]
-		.sort()
-		.filter(
-			(assetId) =>
-				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
-		)
-		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-outdoor-linked-interior-${assetId}`,
-			assetId,
-			priority,
-		}));
+	return createStructuredInteriorCoverageRequests(
+		runtimeBatch,
+		priority,
+		preparedByAssetId,
+		pendingAssetIds,
+		resolveStructuredInteriorCoverageOptions(options),
+		{
+			kind: "visible-cell-closure",
+			seedEnvCellIds: [...linkedEnvCellIds],
+		},
+		"outdoor-linked-interior",
+	);
 }
 
 export function deriveOutdoorLinkedInteriorEnvCellIds(
@@ -713,17 +737,24 @@ function createIndoorStaticRenderableAssetRequests(
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[],
+	coverageOptions: StructuredInteriorCoverageOptions,
 ): AssetLookupRequestDto[] {
-	const activeEnvCellIds = deriveActiveIndoorEnvCellIds(
-		runtimeBatch,
-		browserDestination,
+	const browserFocusEnvCellId =
+		browserDestinationToIndoorEnvCellId(browserDestination);
+	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+		browserFocusEnvCellId === null
+			? createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch)
+			: {
+					kind: "visible-cell-closure",
+					seedEnvCellIds: [browserFocusEnvCellId],
+				},
 		preparedByAssetId,
-	);
+		coverageOptions,
+	).envCellIds;
 	const pendingAssetIdSet = new Set(pendingAssetIds);
-	const sourceAssetIds = [...activeEnvCellIds].flatMap((envCellId) => {
-		const asset =
-			preparedByAssetId[`indoor-env-cell/${formatHex32(envCellId)}`];
-		return asset?.payload.kind === "indoor-env-cell"
+	const sourceAssetIds = activeEnvCellIds.flatMap((envCellId) => {
+		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
+		return isPreparedIndoorEnvCellAsset(asset)
 			? asset.payload.staticObjects.map(
 					(staticObject) => staticObject.sourceAssetId,
 				)
@@ -743,34 +774,6 @@ function createIndoorStaticRenderableAssetRequests(
 			assetId,
 			priority,
 		}));
-}
-
-function deriveActiveIndoorEnvCellIds(
-	runtimeBatch: RuntimeBatchDto,
-	browserDestination: BrowserLocationSelection | null,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-): Set<number> {
-	const browserFocusEnvCellId =
-		browserDestinationToIndoorEnvCellId(browserDestination);
-	if (browserFocusEnvCellId !== null) {
-		const focusAsset =
-			preparedByAssetId[
-				`indoor-env-cell/${formatHex32(browserFocusEnvCellId)}`
-			];
-		return new Set([
-			browserFocusEnvCellId,
-			...(focusAsset?.payload.kind === "indoor-env-cell"
-				? focusAsset.payload.visibleCellIds
-				: []),
-		]);
-	}
-
-	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
-	if (focusEnvCellId === null) {
-		return new Set();
-	}
-
-	return new Set([focusEnvCellId, ...runtimeBatch.residency.visibleCellIds]);
 }
 
 export function deriveTerrainFocusLandblockId(
@@ -813,65 +816,76 @@ function isStaticRenderableAssetId(assetId: string): boolean {
 	);
 }
 
-function createIndoorCoverageRequests(
+function createRuntimeStructuredInteriorMembershipPolicy(
+	runtimeBatch: RuntimeBatchDto,
+): StructuredInteriorMembershipPolicy {
+	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
+	return {
+		kind: "direct",
+		envCellIds:
+			focusEnvCellId === null
+				? []
+				: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
+	};
+}
+
+function createStructuredInteriorCoverageRequests(
 	runtimeBatch: RuntimeBatchDto,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[],
-	overrideFocusEnvCellId: number | null = null,
+	coverageOptions: StructuredInteriorCoverageOptions,
+	membershipPolicy: StructuredInteriorMembershipPolicy,
+	requestScope: string,
+	extraEnvironmentIds: number[] = [],
 ): AssetLookupRequestDto[] {
-	const runtimeResidency = runtimeBatch.residency;
-	const focusEnvCellId =
-		overrideFocusEnvCellId ?? runtimeResidency.focusEnvCellId;
-	if (focusEnvCellId === null) {
+	const coverage = deriveStructuredInteriorCoverage(
+		membershipPolicy,
+		preparedByAssetId,
+		coverageOptions,
+	);
+	if (coverage.envCellIds.length === 0) {
 		return [];
 	}
 
-	const focusEnvCellAssetId = formatIndoorEnvCellAssetId(focusEnvCellId);
-	const preparedFocusEnvCell = preparedByAssetId[focusEnvCellAssetId];
-	const visibleCellIds =
-		overrideFocusEnvCellId !== null &&
-		preparedFocusEnvCell?.payload.kind === "indoor-env-cell"
-			? preparedFocusEnvCell.payload.visibleCellIds
-			: runtimeResidency.visibleCellIds;
-	const environmentId =
-		overrideFocusEnvCellId !== null ? null : runtimeResidency.environmentId;
-	const envCellAssetIds = [
-		focusEnvCellAssetId,
-		...visibleCellIds.map((cellId) => formatIndoorEnvCellAssetId(cellId)),
-	];
+	const envCellAssetIds = coverage.envCellIds.map(formatIndoorEnvCellAssetId);
 	const preparedEnvironmentAssetIds = envCellAssetIds.flatMap((assetId) => {
 		const asset = preparedByAssetId[assetId];
-		return asset?.payload.kind === "indoor-env-cell" &&
+		return isPreparedIndoorEnvCellAsset(asset) &&
 			asset.payload.environmentId !== null
 			? [formatEnvironmentAssetId(asset.payload.environmentId)]
 			: [];
 	});
-	const assetIds = [
-		...envCellAssetIds,
-		environmentId === null ? null : formatEnvironmentAssetId(environmentId),
-		...preparedEnvironmentAssetIds,
-	].filter((assetId): assetId is string => assetId !== null);
+	const extraEnvironmentAssetIds = extraEnvironmentIds.map(
+		formatEnvironmentAssetId,
+	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 
-	return [...new Set(assetIds)]
+	return [
+		...new Set([
+			...envCellAssetIds,
+			...preparedEnvironmentAssetIds,
+			...extraEnvironmentAssetIds,
+		]),
+	]
 		.filter(
 			(assetId) =>
 				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
 		)
 		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-${overrideFocusEnvCellId === null ? "runtime" : "destination"}-${assetId}`,
+			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
 			assetId,
 			priority,
 		}));
 }
 
-function formatIndoorEnvCellAssetId(envCellId: number): string {
-	return `indoor-env-cell/${formatHex32(envCellId)}`;
-}
-
-function formatEnvironmentAssetId(environmentId: number): string {
-	return `environment/${formatHex32(environmentId)}`;
+function resolveStructuredInteriorCoverageOptions(
+	options: OutdoorCoverageOptions,
+): StructuredInteriorCoverageOptions {
+	return (
+		options.structuredInterior ??
+		createDefaultStructuredInteriorCoverageOptions()
+	);
 }
 
 function createAssetWorker(): AssetWorkerLike {

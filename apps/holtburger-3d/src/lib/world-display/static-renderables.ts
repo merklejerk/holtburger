@@ -19,6 +19,13 @@ import {
 	deriveOutdoorLinkedInteriorEnvCellIds,
 	deriveTerrainFocusLandblockId,
 } from "../assets/asset-channel";
+import {
+	createDefaultStructuredInteriorCoverageOptions,
+	deriveStructuredInteriorCoverage,
+	formatIndoorEnvCellAssetId,
+	type StructuredInteriorCoverage,
+	type StructuredInteriorCoverageOptions,
+} from "../assets/structured-interior-coverage";
 import type {
 	PlacementTransformDto,
 	RuntimeBatchDto,
@@ -94,7 +101,8 @@ export function deriveStaticRenderableSceneModel(
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
 	landblockCoverageRadius = 1,
-	linkedOutdoorEnvCellIds: number[] = [],
+	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
+	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions = createDefaultStructuredInteriorCoverageOptions(),
 ): StaticRenderableSceneModel {
 	if (!runtimeBatch) {
 		return emptyStaticRenderableSceneModel();
@@ -108,6 +116,8 @@ export function deriveStaticRenderableSceneModel(
 			runtimeBatch,
 			assetState,
 			browserDestination,
+			structuredInteriorCoverage,
+			structuredInteriorCoverageOptions,
 		);
 	}
 
@@ -128,13 +138,22 @@ export function deriveStaticRenderableSceneModel(
 		.concat(
 			collectIndoorStaticRenderableSourceInstances(
 				assetState,
-				new Set([
-					...linkedOutdoorEnvCellIds,
-					...deriveOutdoorLinkedInteriorEnvCellIds(
-						assetState.preparedByAssetId,
-						activeLandblockSet,
-					),
-				]),
+				new Set(
+					structuredInteriorCoverage?.envCellIds ??
+						deriveStructuredInteriorCoverage(
+							{
+								kind: "visible-cell-closure",
+								seedEnvCellIds: [
+									...deriveOutdoorLinkedInteriorEnvCellIds(
+										assetState.preparedByAssetId,
+										activeLandblockSet,
+									),
+								],
+							},
+							assetState.preparedByAssetId,
+							structuredInteriorCoverageOptions,
+						).envCellIds,
+				),
 				focusLandblockId,
 			),
 		)
@@ -186,11 +205,15 @@ function deriveIndoorStaticRenderableSceneModel(
 	runtimeBatch: RuntimeBatchDto,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
+	structuredInteriorCoverage: StructuredInteriorCoverage | null,
+	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions,
 ): StaticRenderableSceneModel {
 	const activeEnvCellIds = deriveActiveIndoorEnvCellIds(
 		runtimeBatch,
 		assetState,
 		browserDestination,
+		structuredInteriorCoverage,
+		structuredInteriorCoverageOptions,
 	);
 	const sourceInstances = collectIndoorStaticRenderableSourceInstances(
 		assetState,
@@ -457,18 +480,26 @@ function deriveActiveIndoorEnvCellIds(
 	runtimeBatch: RuntimeBatchDto,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
+	structuredInteriorCoverage: StructuredInteriorCoverage | null,
+	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions,
 ): Set<number> {
+	if (structuredInteriorCoverage !== null) {
+		return new Set(structuredInteriorCoverage.envCellIds);
+	}
+
 	const browserFocusEnvCellId =
 		browserDestinationToIndoorEnvCellId(browserDestination);
 	if (browserFocusEnvCellId !== null) {
-		const focusEnvCell = getPreparedIndoorEnvCell(
-			assetState,
-			browserFocusEnvCellId,
+		return new Set(
+			deriveStructuredInteriorCoverage(
+				{
+					kind: "visible-cell-closure",
+					seedEnvCellIds: [browserFocusEnvCellId],
+				},
+				assetState.preparedByAssetId,
+				structuredInteriorCoverageOptions,
+			).envCellIds,
 		);
-		return new Set([
-			browserFocusEnvCellId,
-			...(focusEnvCell?.visibleCellIds ?? []),
-		]);
 	}
 
 	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
@@ -476,7 +507,16 @@ function deriveActiveIndoorEnvCellIds(
 		return new Set();
 	}
 
-	return new Set([focusEnvCellId, ...runtimeBatch.residency.visibleCellIds]);
+	return new Set(
+		deriveStructuredInteriorCoverage(
+			{
+				kind: "direct",
+				envCellIds: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
+			},
+			assetState.preparedByAssetId,
+			structuredInteriorCoverageOptions,
+		).envCellIds,
+	);
 }
 
 function collectIndoorStaticRenderableSourceInstances(
@@ -533,7 +573,7 @@ function getPreparedIndoorEnvCell(
 	envCellId: number,
 ): PreparedIndoorEnvCellPayload | null {
 	const asset =
-		assetState.preparedByAssetId[`indoor-env-cell/${formatHex32(envCellId)}`];
+		assetState.preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
 	return asset?.payload.kind === "indoor-env-cell" ? asset.payload : null;
 }
 

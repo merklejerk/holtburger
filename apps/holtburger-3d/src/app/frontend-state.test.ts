@@ -271,6 +271,8 @@ describe("frontend state store", () => {
 				validationMessage: null,
 				destination: null,
 				landblockCoverageRadius: 1,
+				structuredInteriorMaxEnvCells: 1024,
+				structuredInteriorMaxVisibleCellDepth: 16,
 				page: "location-entry",
 			},
 		);

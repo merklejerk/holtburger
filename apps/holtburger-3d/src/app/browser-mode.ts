@@ -45,6 +45,8 @@ export interface BrowserModeState {
 	validationMessage: string | null;
 	destination: BrowserLocationSelection | null;
 	landblockCoverageRadius: number;
+	structuredInteriorMaxEnvCells: number;
+	structuredInteriorMaxVisibleCellDepth: number;
 	page: BrowserPageId;
 }
 
@@ -56,8 +58,14 @@ const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 	"33.50S, 72.80E, 0.0Z",
 );
 const DEFAULT_LANDBLOCK_COVERAGE_RADIUS = 1;
+const DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1024;
+const DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 16;
 export const MIN_LANDBLOCK_COVERAGE_RADIUS = 0;
 export const MAX_LANDBLOCK_COVERAGE_RADIUS = 8;
+export const MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1;
+export const MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 8192;
+export const MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 0;
+export const MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 128;
 
 export function createBrowserModeState(): BrowserModeState {
 	return {
@@ -65,6 +73,9 @@ export function createBrowserModeState(): BrowserModeState {
 		validationMessage: null,
 		destination: DEFAULT_BROWSER_DESTINATION,
 		landblockCoverageRadius: DEFAULT_LANDBLOCK_COVERAGE_RADIUS,
+		structuredInteriorMaxEnvCells: DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
+		structuredInteriorMaxVisibleCellDepth:
+			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
 			: "location-entry",
@@ -156,6 +167,36 @@ export function updateLandblockCoverageRadius(
 	};
 }
 
+export function updateStructuredInteriorMaxEnvCells(
+	browserMode: BrowserModeState,
+	maxEnvCells: number,
+): BrowserModeState {
+	return {
+		...browserMode,
+		structuredInteriorMaxEnvCells: clampCoverageSetting(
+			maxEnvCells,
+			MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
+			MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
+			DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
+		),
+	};
+}
+
+export function updateStructuredInteriorMaxVisibleCellDepth(
+	browserMode: BrowserModeState,
+	maxVisibleCellDepth: number,
+): BrowserModeState {
+	return {
+		...browserMode,
+		structuredInteriorMaxVisibleCellDepth: clampCoverageSetting(
+			maxVisibleCellDepth,
+			MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+			MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		),
+	};
+}
+
 export function previewBrowserLocation(
 	browserMode: BrowserModeState,
 ): BrowserModeState {
@@ -176,6 +217,9 @@ export function previewBrowserLocation(
 		validationMessage: null,
 		destination: parsedLocation,
 		landblockCoverageRadius: browserMode.landblockCoverageRadius,
+		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
+		structuredInteriorMaxVisibleCellDepth:
+			browserMode.structuredInteriorMaxVisibleCellDepth,
 		page: "destination-preview",
 	};
 }
@@ -205,6 +249,9 @@ export function selectRuntimeResidencyDestination(
 		validationMessage: null,
 		destination: parsedLocation,
 		landblockCoverageRadius: browserMode.landblockCoverageRadius,
+		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
+		structuredInteriorMaxVisibleCellDepth:
+			browserMode.structuredInteriorMaxVisibleCellDepth,
 		page: "destination-preview",
 	};
 }
@@ -228,6 +275,9 @@ export function selectBrowserLandblockDestination(
 			landblockId: normalizedLandblockId,
 		},
 		landblockCoverageRadius: browserMode.landblockCoverageRadius,
+		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
+		structuredInteriorMaxVisibleCellDepth:
+			browserMode.structuredInteriorMaxVisibleCellDepth,
 		page: "destination-preview",
 	};
 }
@@ -347,12 +397,23 @@ function clampLandblockAxis(value: number): number {
 }
 
 function clampLandblockCoverageRadius(value: number): number {
+	return clampCoverageSetting(
+		value,
+		MIN_LANDBLOCK_COVERAGE_RADIUS,
+		MAX_LANDBLOCK_COVERAGE_RADIUS,
+		DEFAULT_LANDBLOCK_COVERAGE_RADIUS,
+	);
+}
+
+function clampCoverageSetting(
+	value: number,
+	min: number,
+	max: number,
+	defaultValue: number,
+): number {
 	if (!Number.isFinite(value)) {
-		return DEFAULT_LANDBLOCK_COVERAGE_RADIUS;
+		return defaultValue;
 	}
 
-	return Math.min(
-		Math.max(Math.trunc(value), MIN_LANDBLOCK_COVERAGE_RADIUS),
-		MAX_LANDBLOCK_COVERAGE_RADIUS,
-	);
+	return Math.min(Math.max(Math.trunc(value), min), max);
 }

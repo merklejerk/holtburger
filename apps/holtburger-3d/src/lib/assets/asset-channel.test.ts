@@ -595,6 +595,78 @@ describe("asset channel controller", () => {
 		]);
 	});
 
+	it("recursively expands browser-selected indoor coverage as visible cells are prepared", () => {
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch(),
+			{
+				kind: "indoor-env-cell",
+				label: "Env cell 0x016c0155",
+				source: "manual",
+				envCellId: 0x016c0155,
+				landblockId: 0x016cffff,
+			},
+			"streaming",
+			{
+				"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+					0x016c0155,
+					0x0d000001,
+					1,
+					[],
+					[0x016c0156],
+				),
+				"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
+					0x016c0156,
+					0x0d000001,
+					2,
+					[],
+					[0x016c0157],
+				),
+				"environment/0d000001": createPreparedEnvironmentAsset(0x0d000001),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).toEqual([
+			"indoor-env-cell/016c0157",
+		]);
+	});
+
+	it("does not recursively expand runtime indoor coverage through prepared visible cells", () => {
+		const runtimeBatch = createRuntimeBatch();
+		runtimeBatch.residency.indoors = true;
+		runtimeBatch.residency.focusEnvCellId = 0x016c0155;
+		runtimeBatch.residency.visibleCellIds = [0x016c0156];
+		runtimeBatch.residency.environmentId = null;
+
+		const requests = createSceneCoverageRequests(
+			runtimeBatch,
+			null,
+			"streaming",
+			{
+				"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+					0x016c0155,
+					0x0d000001,
+					1,
+					[],
+					[0x016c0156],
+				),
+				"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
+					0x016c0156,
+					0x0d000001,
+					2,
+					[],
+					[0x016c0157],
+				),
+				"environment/0d000001": createPreparedEnvironmentAsset(0x0d000001),
+			},
+			[],
+		);
+
+		expect(requests.map((request) => request.assetId)).not.toContain(
+			"indoor-env-cell/016c0157",
+		);
+	});
+
 	it("requests indoor static visual assets from prepared env-cell metadata", () => {
 		const preparedFocusEnvCell = prepareAssetPayload(
 			{
@@ -1925,6 +1997,7 @@ function createPreparedIndoorEnvCellAsset(
 	environmentId: number,
 	cellStructureId: number,
 	staticSourceAssetIds: string[] = [],
+	visibleCellIds: number[] = [],
 ): PreparedAssetRecord {
 	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
 	return prepareAssetPayload(
@@ -1948,7 +2021,7 @@ function createPreparedIndoorEnvCellAsset(
 					origin: { x: 0, y: 0, z: 0 },
 					orientation: { w: 1, x: 0, y: 0, z: 0 },
 				},
-				visibleCellIds: [],
+				visibleCellIds,
 				seenOutside: true,
 				surfaceIds: [],
 				portalCount: 0,
@@ -1973,6 +2046,40 @@ function createPreparedIndoorEnvCellAsset(
 			},
 		},
 	);
+}
+
+function createPreparedEnvironmentAsset(
+	environmentId: number,
+): PreparedAssetRecord {
+	const assetId = `environment/${environmentId.toString(16).padStart(8, "0")}`;
+	return {
+		request: { requestId: assetId, assetId, priority: "streaming" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: {},
+		},
+		payload: {
+			kind: "environment",
+			sourceAssetKind: "environment",
+			residencyKind: "indoor-env-cell",
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "environment",
+				errorCode: null,
+				detail: "test-cache",
+			},
+			debugPresentation: {
+				primitive: "environment-cell-structures",
+				paletteKey: assetId,
+			},
+			environmentId,
+			cellStructureIds: [],
+			cellStructures: [],
+		},
+		preparedAt: "2026-05-15T00:00:00.000Z",
+	};
 }
 
 function createSyntheticDependencyManifestResponse(

@@ -166,3 +166,18 @@ Add focused TypeScript tests:
 - Client/runtime mode remains AC-shaped and one visible-cell set deep.
 - Scene geometry and indoor static renderables use the same structured-interior coverage set.
 - Tests cover recursive browser expansion and runtime non-expansion.
+
+## Implementation Progress
+
+- In progress: adding a frontend-owned structured-interior coverage helper so request planning, scene geometry, and static renderables share one env-cell membership calculation.
+- Decision: keep `AssetGraphScheduler`, worker preparation, and `App.svelte` unchanged. The behavior belongs in scene coverage policy, not graph dependencies.
+- Course correction from the dry run: the helper should also expose small formatting helpers for `indoor-env-cell/*` and `environment/*` asset ids so callers do not keep private duplicate string construction.
+- Completed: asset request planning now uses `direct` coverage for runtime indoor residency and `visible-cell-closure` coverage for browser-selected and outdoor-linked interiors.
+- Completed: browser rendering now derives one structured-interior coverage result and passes it to both structured-interior geometry and static renderables.
+- Decision: runtime request planning still includes `RuntimeResidencyDto.environmentId` as an extra first-class environment request, preserving the existing client-mode fast path while keeping cell membership direct-only.
+- Completed: added focused TypeScript coverage tests for direct membership, progressive visible-cell closure, deterministic truncation, browser recursive request expansion, and runtime non-expansion.
+- Verified: `npm run test:ts`, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run format:check` pass in `apps/holtburger-3d`.
+- Completed: added a `maxVisibleCellDepth` guard in addition to total `maxEnvCells`; depth `0` means seed cells only, depth `1` means one `visibleCellIds` hop, and larger values allow recursive browser inspection without unbounded traversal.
+- Course correction: moved the coverage limits into browser mode state and threaded them through asset discovery and rendering instead of keeping them as hidden helper constants, so they can be surfaced or tuned from browser UI.
+- Completed: surfaced browser controls for structured-interior max env cells and visible-cell depth.
+- Verified after the depth/configuration change: `npm run test:ts`, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run format:check` pass in `apps/holtburger-3d`.

@@ -34,6 +34,8 @@
 			runtimeBatch: RuntimeBatchDto | null,
 			browserDestination: typeof $frontendState.browserMode.destination,
 			landblockCoverageRadius: number,
+			structuredInteriorMaxEnvCells: number,
+			structuredInteriorMaxVisibleCellDepth: number,
 			priority: AssetPriority,
 		): Promise<void> {
 			const assetState = get(frontendState).asset;
@@ -43,7 +45,13 @@
 				priority,
 				assetState.preparedByAssetId,
 				[...inFlightAssetIds],
-				{ landblockRadius: landblockCoverageRadius },
+				{
+					landblockRadius: landblockCoverageRadius,
+					structuredInterior: {
+						maxEnvCells: structuredInteriorMaxEnvCells,
+						maxVisibleCellDepth: structuredInteriorMaxVisibleCellDepth,
+					},
+				},
 			);
 
 			debugLog("scene-coverage", {
@@ -51,6 +59,8 @@
 				tick: runtimeBatch?.tick ?? null,
 				destination: browserDestination?.label ?? null,
 				landblockCoverageRadius,
+				structuredInteriorMaxEnvCells,
+				structuredInteriorMaxVisibleCellDepth,
 				preparedCount: Object.keys(assetState.preparedByAssetId).length,
 				inFlightAssetIds: [...inFlightAssetIds],
 				requestAssetIds: requests.map((request) => request.assetId),
@@ -119,13 +129,17 @@
 			const runtimeBatch = state.host.boundarySnapshot?.runtimeBatch ?? null;
 			const destination = state.browserMode.destination;
 			const landblockCoverageRadius = state.browserMode.landblockCoverageRadius;
+			const structuredInteriorMaxEnvCells =
+				state.browserMode.structuredInteriorMaxEnvCells;
+			const structuredInteriorMaxVisibleCellDepth =
+				state.browserMode.structuredInteriorMaxVisibleCellDepth;
 			const preparedSceneAssetKey = Object.keys(state.asset.preparedByAssetId)
 				.filter(isSceneCoverageAssetId)
 				.sort()
 				.join(",");
 			const coverageKey = destination
-				? `${destination.source}:${destination.label}:radius-${landblockCoverageRadius}:prepared-${preparedSceneAssetKey}`
-				: `runtime:radius-${landblockCoverageRadius}:prepared-${preparedSceneAssetKey}`;
+				? `${destination.source}:${destination.label}:radius-${landblockCoverageRadius}:interior-cells-${structuredInteriorMaxEnvCells}:interior-depth-${structuredInteriorMaxVisibleCellDepth}:prepared-${preparedSceneAssetKey}`
+				: `runtime:radius-${landblockCoverageRadius}:interior-cells-${structuredInteriorMaxEnvCells}:interior-depth-${structuredInteriorMaxVisibleCellDepth}:prepared-${preparedSceneAssetKey}`;
 
 			if (!runtimeBatch || coverageKey === lastBrowserCoverageKey) {
 				return;
@@ -136,18 +150,24 @@
 				coverageKey,
 				destination: destination?.label ?? null,
 				landblockCoverageRadius,
+				structuredInteriorMaxEnvCells,
+				structuredInteriorMaxVisibleCellDepth,
 				runtimeTick: runtimeBatch.tick,
 			});
 			void syncSceneCoverage(
 				runtimeBatch,
 				destination,
 				landblockCoverageRadius,
+				structuredInteriorMaxEnvCells,
+				structuredInteriorMaxVisibleCellDepth,
 				"bootstrap",
 			);
 			void syncSceneCoverage(
 				runtimeBatch,
 				destination,
 				landblockCoverageRadius,
+				structuredInteriorMaxEnvCells,
+				structuredInteriorMaxVisibleCellDepth,
 				"streaming",
 			);
 		});
@@ -169,6 +189,8 @@
 							notification.runtimeBatch,
 							$frontendState.browserMode.destination,
 							$frontendState.browserMode.landblockCoverageRadius,
+							$frontendState.browserMode.structuredInteriorMaxEnvCells,
+							$frontendState.browserMode.structuredInteriorMaxVisibleCellDepth,
 							"streaming",
 						);
 					}
@@ -226,6 +248,10 @@
 			browserDestination={$frontendState.browserMode.destination}
 			landblockCoverageRadius={$frontendState.browserMode
 				.landblockCoverageRadius}
+			structuredInteriorMaxEnvCells={$frontendState.browserMode
+				.structuredInteriorMaxEnvCells}
+			structuredInteriorMaxVisibleCellDepth={$frontendState.browserMode
+				.structuredInteriorMaxVisibleCellDepth}
 		/>
 
 		<div class="viewer-overlay viewer-overlay--right">

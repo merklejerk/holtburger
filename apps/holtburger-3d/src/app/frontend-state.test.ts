@@ -1,84 +1,20 @@
 import { get } from "svelte/store";
 import { describe, expect, it } from "vitest";
 
-import { createFrontendStateStore, deriveModeState } from "./frontend-state";
-import type {
-	FrontendStateFeedDto,
-	HostBoundarySnapshot,
-	RuntimeBatchDto,
-	RuntimeNotificationEnvelopeDto,
-} from "../lib/host/contracts";
-
-function createRuntimeBatch(
-	overrides: Partial<RuntimeBatchDto> = {},
-): RuntimeBatchDto {
-	return {
-		tick: 1,
-		entities: [],
-		residency: {
-			focusEntityId: null,
-			focusLandblockId: 0x01020003,
-			focusCellId: 3,
-			focusEnvCellId: null,
-			visibleCellIds: [],
-			seenOutside: null,
-			environmentId: null,
-			cellStructureId: null,
-			focusLocationLabel: "100.40S, 101.55W, 1.0Z",
-			indoors: false,
-			trackedBodyCount: 0,
-		},
-		...overrides,
-	};
-}
-
-function createViewModelFeed(
-	overrides: Partial<FrontendStateFeedDto> = {},
-): FrontendStateFeedDto {
-	return {
-		selectedEntityId: null,
-		interactionMode: "inspect",
-		busyState: "idle",
-		...overrides,
-	};
-}
-
-function createSnapshot(): HostBoundarySnapshot {
-	return {
-		source: "tauri",
-		lifecycleState: {
-			phase: "ready",
-			activeModeHint: "client",
-			sessionState: "disconnected",
-		},
-		runtimeBatch: createRuntimeBatch(),
-		viewModelFeed: createViewModelFeed(),
-		overview: {
-			assetChannel: "asset",
-			runtimeChannel: "runtime",
-			runtimeNotificationEvent: "runtime:notification",
-			runtimeLifecycleTopic: "lifecycle.state",
-			runtimeBatchCommand: "get_runtime_batch",
-			assetLookupCommand: "lookup_asset",
-			indoorContractBacklog: {
-				runtimeFieldIds: [
-					"focus-env-cell-id",
-					"visible-cell-ids",
-					"seen-outside",
-					"environment-id",
-					"cell-structure-id",
-				],
-				assetFamilyIds: ["indoor-env-cell", "environment"],
-			},
-		},
-	};
-}
+import { createFrontendStateStore } from "./frontend-state";
+import type { RuntimeNotificationEnvelopeDto } from "../lib/host/contracts";
+import {
+	createHostSnapshot,
+	createPreparedTerrainAsset,
+	createRuntimeBatch,
+	createViewModelFeed,
+} from "./test-fixtures";
 
 describe("frontend state store", () => {
 	it("seeds the navigation draft from the runtime residency snapshot", () => {
 		const store = createFrontendStateStore();
 
-		store.loadSnapshot(createSnapshot());
+		store.loadSnapshot(createHostSnapshot());
 
 		expect(get(store).browserMode.draftInput).toBe("33.50S, 72.80E, 0.0Z");
 		expect(get(store).browserMode.destination?.label).toBe(
@@ -117,7 +53,7 @@ describe("frontend state store", () => {
 			viewModelFeed: createViewModelFeed({ busyState: "loading" }),
 		};
 
-		store.loadSnapshot(createSnapshot());
+		store.loadSnapshot(createHostSnapshot());
 		store.applyRuntimeNotification(notification);
 
 		expect(get(store).host.boundarySnapshot?.runtimeBatch.tick).toBe(2);
@@ -135,50 +71,15 @@ describe("frontend state store", () => {
 	it("tracks asset preparation state separately from the host boundary snapshot", () => {
 		const store = createFrontendStateStore();
 
-		store.loadSnapshot(createSnapshot());
+		store.loadSnapshot(createHostSnapshot());
 		store.markAssetPending({
 			requestId: "bootstrap-asset",
 			assetId: "terrain/0102ffff",
 			priority: "bootstrap",
 		});
-		store.applyPreparedAsset({
-			request: {
-				requestId: "bootstrap-asset",
-				assetId: "terrain/0102ffff",
-				priority: "bootstrap",
-			},
-			response: {
-				requestId: "bootstrap-asset",
-				assetId: "terrain/0102ffff",
-				payloadKind: "json",
-				payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
-			},
-			payload: {
-				kind: "terrain-landblock",
-				sourceAssetKind: "cell-landblock",
-				residencyKind: "outdoor-landblock",
-				provenance: {
-					source: "unknown",
-					sourceAssetKind: "cell-landblock",
-					errorCode: null,
-					detail: null,
-				},
-				debugPresentation: {
-					primitive: "terrain-landblock-mesh",
-					paletteKey: "terrain-0102ffff",
-				},
-				terrainMesh: {
-					landblockId: 0x0102ffff,
-					gridSize: 9,
-					tileSize: 24,
-					vertices: [],
-					triangles: [],
-					minHeight: 0,
-					maxHeight: 24,
-				},
-			},
-			preparedAt: "2026-04-26T00:00:00.000Z",
-		});
+		store.applyPreparedAsset(
+			createPreparedTerrainAsset("bootstrap-asset", "terrain/0102ffff"),
+		);
 
 		expect(get(store).asset.status).toBe("ready");
 		expect(get(store).asset.preparedAsset?.request.assetId).toBe(
@@ -199,7 +100,7 @@ describe("frontend state store", () => {
 	it("can batch asset pending and prepared updates into one state transition", () => {
 		const store = createFrontendStateStore();
 
-		store.loadSnapshot(createSnapshot());
+		store.loadSnapshot(createHostSnapshot());
 		store.markAssetsPending([
 			{
 				requestId: "bootstrap-terrain-a",
@@ -237,7 +138,7 @@ describe("frontend state store", () => {
 		const browserModeStore = createFrontendStateStore();
 
 		browserModeStore.loadSnapshot({
-			...createSnapshot(),
+			...createHostSnapshot(),
 			lifecycleState: {
 				phase: "ready",
 				activeModeHint: "client",
@@ -261,68 +162,20 @@ describe("frontend state store", () => {
 		expect(get(store).mode.activePageId).toBe("destination-preview");
 	});
 
-	it("keeps the world-viewer page active when lifecycle facts are ready and connected", () => {
-		const mode = deriveModeState(
-			{
+	it("keeps mode derivation wired through the composed store", () => {
+		const store = createFrontendStateStore();
+
+		store.loadSnapshot({
+			...createHostSnapshot(),
+			lifecycleState: {
 				phase: "ready",
 				activeModeHint: "client",
 				sessionState: "connected",
 			},
-			{
-				draftInput: "",
-				validationMessage: null,
-				destination: null,
-				terrainLodRadius: 2,
-				buildingLodRadius: 1,
-				detailLodRadius: 1,
-				structuredInteriorMaxEnvCells: 1024,
-				structuredInteriorMaxVisibleCellDepth: 16,
-				page: "location-entry",
-			},
-		);
+		});
+		store.updateBrowserDraft("");
 
-		expect(mode.activeMode).toBe("client");
-		expect(mode.activePageId).toBe("world-viewer");
+		expect(get(store).mode.activeMode).toBe("client");
+		expect(get(store).mode.activePageId).toBe("destination-preview");
 	});
 });
-
-function createPreparedTerrainAsset(requestId: string, assetId: string) {
-	return {
-		request: {
-			requestId,
-			assetId,
-			priority: "bootstrap" as const,
-		},
-		response: {
-			requestId,
-			assetId,
-			payloadKind: "json" as const,
-			payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
-		},
-		payload: {
-			kind: "terrain-landblock" as const,
-			sourceAssetKind: "cell-landblock" as const,
-			residencyKind: "outdoor-landblock" as const,
-			provenance: {
-				source: "unknown" as const,
-				sourceAssetKind: "cell-landblock" as const,
-				errorCode: null,
-				detail: null,
-			},
-			debugPresentation: {
-				primitive: "terrain-landblock-mesh",
-				paletteKey: "terrain-0102ffff",
-			},
-			terrainMesh: {
-				landblockId: 0x0102ffff,
-				gridSize: 9,
-				tileSize: 24,
-				vertices: [],
-				triangles: [],
-				minHeight: 0,
-				maxHeight: 24,
-			},
-		},
-		preparedAt: "2026-04-26T00:00:00.000Z",
-	};
-}

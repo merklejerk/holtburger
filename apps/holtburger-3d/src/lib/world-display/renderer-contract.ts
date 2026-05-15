@@ -3,6 +3,7 @@ import type { SceneCameraFrame, SceneBoundsFrame } from "./camera";
 export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
 	cameraFrame: SceneCameraFrame | null;
+	performance: WorldRenderPerformanceMetrics | null;
 	geometry: {
 		terrainTileCount: number;
 		terrainVertexCount: number;
@@ -13,6 +14,12 @@ export interface WorldRenderMetrics {
 		structuredInteriorVertexCount: number;
 		structuredInteriorTriangleCount: number;
 	};
+}
+
+interface WorldRenderPerformanceMetrics {
+	fps: number;
+	frameMs: number;
+	renderMs: number;
 }
 
 export type WorldRenderMetricsChangeHandler = (

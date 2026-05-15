@@ -231,6 +231,11 @@
 			? `Center (${renderMetrics.bounds.center.x.toFixed(1)}, ${renderMetrics.bounds.center.y.toFixed(1)}, ${renderMetrics.bounds.center.z.toFixed(1)}) span (${renderMetrics.bounds.size.x.toFixed(1)}, ${renderMetrics.bounds.size.y.toFixed(1)}, ${renderMetrics.bounds.size.z.toFixed(1)}).`
 			: "Scene bounds are unavailable until terrain is framed.",
 	);
+	const renderPerformanceText = $derived(
+		renderMetrics?.performance
+			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render.`
+			: "Waiting for render performance sample.",
+	);
 	const cameraFrameText = $derived(
 		browserCameraFrame
 			? `${describeSceneCameraFrame(browserCameraFrame)} ${describeBrowserCameraControlMode()}`
@@ -782,6 +787,10 @@
 			<div>
 				<dt>Geometry</dt>
 				<dd>{sceneGeometryText}</dd>
+			</div>
+			<div>
+				<dt>Render</dt>
+				<dd>{renderPerformanceText}</dd>
 			</div>
 			<div>
 				<dt>Assets</dt>

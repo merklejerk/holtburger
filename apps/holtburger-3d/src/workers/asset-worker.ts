@@ -652,18 +652,20 @@ function buildPolygonSetRenderGeometry(
 					);
 				}
 
-				positions.push(vertex.origin.x, vertex.origin.y, vertex.origin.z);
-				normals.push(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+				const renderPosition = convertAcVectorToRenderSpace(vertex.origin);
+				const renderNormal = convertAcVectorToRenderSpace(vertex.normal);
+				positions.push(renderPosition.x, renderPosition.y, renderPosition.z);
+				normals.push(renderNormal.x, renderNormal.y, renderNormal.z);
 				const uvIndex = polygon.posUvIndices[polygonVertexOffset] ?? 0;
 				const uv = vertex.uvs[uvIndex] ?? { u: 0, v: 0 };
 				uvs.push(uv.u, uv.v);
 
-				minX = Math.min(minX, vertex.origin.x);
-				minY = Math.min(minY, vertex.origin.y);
-				minZ = Math.min(minZ, vertex.origin.z);
-				maxX = Math.max(maxX, vertex.origin.x);
-				maxY = Math.max(maxY, vertex.origin.y);
-				maxZ = Math.max(maxZ, vertex.origin.z);
+				minX = Math.min(minX, renderPosition.x);
+				minY = Math.min(minY, renderPosition.y);
+				minZ = Math.min(minZ, renderPosition.z);
+				maxX = Math.max(maxX, renderPosition.x);
+				maxY = Math.max(maxY, renderPosition.y);
+				maxZ = Math.max(maxZ, renderPosition.z);
 			}
 		}
 	}
@@ -687,6 +689,18 @@ function buildPolygonSetRenderGeometry(
 						min: { x: minX, y: minY, z: minZ },
 						max: { x: maxX, y: maxY, z: maxZ },
 					},
+	};
+}
+
+function convertAcVectorToRenderSpace(vector: {
+	x: number;
+	y: number;
+	z: number;
+}) {
+	return {
+		x: vector.x,
+		y: vector.z,
+		z: vector.y === 0 ? 0 : -vector.y,
 	};
 }
 

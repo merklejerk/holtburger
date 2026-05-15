@@ -89,6 +89,9 @@
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const terrainRaycaster = new Raycaster();
 	let lastReportedMetricsKey: string | null = null;
+	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
+
+	const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
@@ -149,6 +152,11 @@
 		syncRendererSize();
 
 		let frameId = 0;
+		let lastFrameAt: number | null = null;
+		let performanceWindowStartedAt = 0;
+		let performanceWindowFrameCount = 0;
+		let performanceWindowFrameMs = 0;
+		let performanceWindowRenderMs = 0;
 		const renderFrame = () => {
 			frameId = window.requestAnimationFrame(renderFrame);
 			if (
@@ -156,7 +164,37 @@
 				scene === nextScene &&
 				camera === nextCamera
 			) {
+				const frameStartedAt = window.performance.now();
 				nextRenderer.render(nextScene, nextCamera);
+				const renderMs = window.performance.now() - frameStartedAt;
+				if (lastFrameAt !== null) {
+					const frameMs = frameStartedAt - lastFrameAt;
+					performanceWindowFrameCount += 1;
+					performanceWindowFrameMs += frameMs;
+					performanceWindowRenderMs += renderMs;
+					if (
+						frameStartedAt - performanceWindowStartedAt >=
+						PERFORMANCE_REPORT_INTERVAL_MS
+					) {
+						const averageFrameMs =
+							performanceWindowFrameMs / performanceWindowFrameCount;
+						const averageRenderMs =
+							performanceWindowRenderMs / performanceWindowFrameCount;
+						latestPerformanceMetrics = {
+							fps: averageFrameMs > 0 ? 1000 / averageFrameMs : 0,
+							frameMs: averageFrameMs,
+							renderMs: averageRenderMs,
+						};
+						performanceWindowStartedAt = frameStartedAt;
+						performanceWindowFrameCount = 0;
+						performanceWindowFrameMs = 0;
+						performanceWindowRenderMs = 0;
+						reportRenderMetrics();
+					}
+				} else {
+					performanceWindowStartedAt = frameStartedAt;
+				}
+				lastFrameAt = frameStartedAt;
 			}
 		};
 		renderFrame();
@@ -435,6 +473,7 @@
 		const metrics: WorldRenderMetrics = {
 			bounds: calculateSceneBoundsFrame(),
 			cameraFrame: activeCameraFrame,
+			performance: latestPerformanceMetrics,
 			geometry: {
 				terrainTileCount: terrainScene.tiles.length,
 				terrainVertexCount,

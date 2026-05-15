@@ -112,7 +112,9 @@ interface WorldDisplayModelInput {
 	viewModelFeed: FrontendStateFeedDto | null;
 	assetState: AssetChannelState;
 	browserDestination: BrowserLocationSelection | null;
-	landblockCoverageRadius: number;
+	terrainLodRadius: number;
+	buildingLodRadius: number;
+	detailLodRadius: number;
 	cameraAck: CameraHintAckDto | null;
 	rayPickResponse: RayPickResponseDto | null;
 	pendingCameraHint: boolean;
@@ -132,7 +134,9 @@ export function deriveWorldDisplayModel({
 	viewModelFeed,
 	assetState,
 	browserDestination,
-	landblockCoverageRadius,
+	terrainLodRadius,
+	buildingLodRadius,
+	detailLodRadius,
 	cameraAck,
 	rayPickResponse,
 	pendingCameraHint,
@@ -160,7 +164,9 @@ export function deriveWorldDisplayModel({
 		runtimeBatch,
 		browserDestination,
 		assetState,
-		landblockCoverageRadius,
+		terrainLodRadius,
+		buildingLodRadius,
+		detailLodRadius,
 	);
 
 	return {
@@ -209,7 +215,9 @@ function deriveSceneContext(
 	runtimeBatch: RuntimeBatchDto,
 	browserDestination: BrowserLocationSelection | null,
 	assetState: AssetChannelState,
-	landblockCoverageRadius: number,
+	terrainLodRadius: number,
+	buildingLodRadius: number,
+	detailLodRadius: number,
 ): WorldDisplaySceneContext {
 	const browserFocusEnvCellId =
 		browserDestinationToIndoorEnvCellId(browserDestination);
@@ -227,8 +235,8 @@ function deriveSceneContext(
 		: normalizeOutdoorLandblockId(runtimeBatch.residency.focusLandblockId);
 	const focusLandblockLabel = formatLandblockLabel(focusLandblockId);
 	const destinationText = browserDestination
-		? `Manual destination focus is ${browserDestination.label}, and local terrain coverage now anchors to the selected landblock ${focusLandblockLabel}.`
-		: `No manual destination override is active, so local terrain coverage follows authoritative runtime landblock ${focusLandblockLabel}.`;
+		? `Manual destination focus is ${browserDestination.label}, and outdoor LoD now anchors to the selected landblock ${focusLandblockLabel}.`
+		: `No manual destination override is active, so outdoor LoD follows authoritative runtime landblock ${focusLandblockLabel}.`;
 
 	if (runtimeBatch.residency.indoors) {
 		return deriveIndoorSceneContext(
@@ -239,17 +247,26 @@ function deriveSceneContext(
 		);
 	}
 
-	const chunks = buildOutdoorChunkRing(
+	const chunks = buildOutdoorTerrainTiles(
 		focusLandblockId,
-		landblockCoverageRadius,
+		terrainLodRadius,
 	).map((chunk) => ({
 		...chunk,
 		reason:
 			chunk.role === "focus"
 				? "ACViewer loads the center outdoor landblock as the anchor for the local world view."
-				: "Browser mode expands a frontend-owned outdoor landblock ring around the focus block for render coverage.",
+				: "Browser mode expands frontend-owned terrain LoD around the focus block.",
 	}));
-	const activeLandblockIds = new Set(chunks.map((chunk) => chunk.landblockId));
+	const buildingLandblockIds = new Set(
+		buildOutdoorCoverageLandblocks(focusLandblockId, buildingLodRadius).map(
+			(landblock) => landblock.landblockId,
+		),
+	);
+	const detailLandblockIds = new Set(
+		buildOutdoorCoverageLandblocks(focusLandblockId, detailLodRadius).map(
+			(landblock) => landblock.landblockId,
+		),
+	);
 	const preparedStaticScenePayloads = Object.values(
 		assetState.preparedByAssetId,
 	)
@@ -257,28 +274,41 @@ function deriveSceneContext(
 		.filter(
 			(payload): payload is PreparedOutdoorStaticScenePayload =>
 				payload.kind === "outdoor-static-scene" &&
-				activeLandblockIds.has(payload.landblockId),
+				(buildingLandblockIds.has(payload.landblockId) ||
+					detailLandblockIds.has(payload.landblockId)),
 		);
 	const staticInstanceCount = preparedStaticScenePayloads.reduce(
-		(total, payload) => total + payload.sceneryInstances.length,
+		(total, payload) =>
+			total +
+			(detailLandblockIds.has(payload.landblockId)
+				? payload.sceneryInstances.length
+				: 0),
 		0,
 	);
 	const staticBuildingCount = preparedStaticScenePayloads.reduce(
-		(total, payload) => total + payload.buildingInstances.length,
+		(total, payload) =>
+			total +
+			(buildingLandblockIds.has(payload.landblockId)
+				? payload.buildingInstances.length
+				: 0),
 		0,
 	);
 	const generatedSceneryCount = preparedStaticScenePayloads.reduce(
-		(total, payload) => total + payload.generatedSceneryInstances.length,
+		(total, payload) =>
+			total +
+			(detailLandblockIds.has(payload.landblockId)
+				? payload.generatedSceneryInstances.length
+				: 0),
 		0,
 	);
 
 	return {
 		kind: "outdoor-landblock-ring",
 		statusText:
-			"Phase 7 gives WorldDisplay an honest outdoor scene context: one focus landblock plus its immediate neighbor ring, matching the first outdoor browsing assumption used by ACViewer.",
+			"Browser mode is using explicit outdoor LoD sets for terrain, buildings, and smaller detail objects.",
 		focusAnchorLabel: focusLandblockLabel,
 		destinationText,
-		coverageText: `Outdoor coverage currently selects ${chunks.length} landblocks, ${staticInstanceCount} explicit static object${staticInstanceCount === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"}, and ${generatedSceneryCount} generated outdoor scenery object${generatedSceneryCount === 1 ? "" : "s"} in a radius-${landblockCoverageRadius} ring around ${focusLandblockLabel}.`,
+		coverageText: `Outdoor LoD selects ${chunks.length} terrain tile${chunks.length === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} inside distance ${buildingLodRadius}, and ${staticInstanceCount + generatedSceneryCount} detail object${staticInstanceCount + generatedSceneryCount === 1 ? "" : "s"} inside distance ${detailLodRadius} around ${focusLandblockLabel}.`,
 		gapText:
 			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
@@ -367,22 +397,23 @@ function createTerrainContract(
 	};
 }
 
-function buildOutdoorChunkRing(
+function buildOutdoorTerrainTiles(
 	focusLandblockId: number,
-	landblockCoverageRadius: number,
+	terrainLodRadius: number,
 ): WorldDisplaySceneChunk[] {
-	return buildOutdoorCoverageLandblocks(
-		focusLandblockId,
-		landblockCoverageRadius,
-	).map((landblock) => ({
-		landblockId: landblock.landblockId,
-		label: formatLandblockLabel(landblock.landblockId),
-		role:
-			landblock.offsetX === 0 && landblock.offsetY === 0 ? "focus" : "neighbor",
-		offsetX: landblock.offsetX,
-		offsetY: landblock.offsetY,
-		reason: "",
-	}));
+	return buildOutdoorCoverageLandblocks(focusLandblockId, terrainLodRadius).map(
+		(landblock) => ({
+			landblockId: landblock.landblockId,
+			label: formatLandblockLabel(landblock.landblockId),
+			role:
+				landblock.offsetX === 0 && landblock.offsetY === 0
+					? "focus"
+					: "neighbor",
+			offsetX: landblock.offsetX,
+			offsetY: landblock.offsetY,
+			reason: "",
+		}),
+	);
 }
 
 function formatEnvCellLabel(envCellId: number): string {

@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { AssetChannelController, type AssetWorkerLike } from "./asset-channel";
 import {
-	AssetChannelController,
 	createSceneCoverageRequests,
 	createStaticRenderableAssetRequests,
 	deriveTerrainFocusLandblockId,
 	createTerrainCoverageRequest,
 	createTerrainCoverageRequests,
 	createFocusedAssetRequest,
-	type AssetWorkerLike,
-} from "./asset-channel";
+} from "./scene-asset-request-planner";
 import {
 	prepareAssetPayload,
 	type AssetWorkerResponseMessage,
@@ -278,7 +277,7 @@ describe("asset channel controller", () => {
 			"streaming",
 			{},
 			[],
-			{ landblockRadius: 2 },
+			{ terrainRadius: 2, buildingRadius: 2, detailRadius: 2 },
 		);
 
 		expect(requests).toHaveLength(25);
@@ -344,6 +343,21 @@ describe("asset channel controller", () => {
 		]);
 	});
 
+	it("requests terrain beyond the static-scene LoD ring", () => {
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch(),
+			null,
+			"streaming",
+			{},
+			[],
+			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
+		).map((request) => request.assetId);
+
+		expect(requests).toContain("terrain/0302ffff");
+		expect(requests).not.toContain("outdoor-static-scene/0302ffff");
+		expect(requests).toContain("outdoor-static-scene/0202ffff");
+	});
+
 	it("derives demand-driven static renderable requests from prepared outdoor static scene facts", () => {
 		const runtimeBatch = createRuntimeBatch();
 
@@ -389,6 +403,41 @@ describe("asset channel controller", () => {
 		expect(requests.map((request) => request.assetId)).toEqual([
 			"setup-model/02000003",
 		]);
+	});
+
+	it("hydrates building sources farther out than detail scenery sources", () => {
+		const requests = createStaticRenderableAssetRequests(
+			createRuntimeBatch(),
+			null,
+			"streaming",
+			{
+				"outdoor-static-scene/0202ffff":
+					createPreparedOutdoorStaticSceneWithBuildingPortal(
+						"outdoor-static-scene/0202ffff",
+						0x0202ffff,
+						[],
+					),
+				"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
+					"outdoor-static-scene/0102ffff",
+					0x0102ffff,
+					["setup-model/02000002"],
+					["setup-model/02000003"],
+				),
+				"outdoor-static-scene/0203ffff": createPreparedOutdoorStaticSceneAsset(
+					"outdoor-static-scene/0203ffff",
+					0x0203ffff,
+					["setup-model/02000004"],
+					[],
+				),
+			},
+			[],
+			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
+		).map((request) => request.assetId);
+
+		expect(requests).toContain("setup-model/02000001");
+		expect(requests).toContain("setup-model/02000002");
+		expect(requests).toContain("setup-model/02000003");
+		expect(requests).not.toContain("setup-model/02000004");
 	});
 
 	it("requests outdoor-linked interior env cells from building portal links", () => {

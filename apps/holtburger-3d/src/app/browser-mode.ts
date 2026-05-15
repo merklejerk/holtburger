@@ -6,6 +6,14 @@ import {
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 } from "../lib/landblocks";
+import {
+	clampOutdoorSceneLodRadius,
+	DEFAULT_BUILDING_LOD_RADIUS,
+	DEFAULT_DETAIL_LOD_RADIUS,
+	DEFAULT_TERRAIN_LOD_RADIUS,
+	MAX_OUTDOOR_SCENE_LOD_RADIUS,
+	MIN_OUTDOOR_SCENE_LOD_RADIUS,
+} from "../lib/world-display/outdoor-scene-interest";
 
 type BrowserPageId = "location-entry" | "destination-preview";
 
@@ -44,7 +52,9 @@ export interface BrowserModeState {
 	draftInput: string;
 	validationMessage: string | null;
 	destination: BrowserLocationSelection | null;
-	landblockCoverageRadius: number;
+	terrainLodRadius: number;
+	buildingLodRadius: number;
+	detailLodRadius: number;
 	structuredInteriorMaxEnvCells: number;
 	structuredInteriorMaxVisibleCellDepth: number;
 	page: BrowserPageId;
@@ -57,11 +67,10 @@ const CELL_ID_INPUT_PATTERN = /^\s*(?:0x)?([0-9a-f]{8})\s*$/i;
 const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 	"33.50S, 72.80E, 0.0Z",
 );
-const DEFAULT_LANDBLOCK_COVERAGE_RADIUS = 1;
 const DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1024;
 const DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 16;
-export const MIN_LANDBLOCK_COVERAGE_RADIUS = 0;
-export const MAX_LANDBLOCK_COVERAGE_RADIUS = 8;
+export const MIN_BROWSER_LOD_RADIUS = MIN_OUTDOOR_SCENE_LOD_RADIUS;
+export const MAX_BROWSER_LOD_RADIUS = MAX_OUTDOOR_SCENE_LOD_RADIUS;
 export const MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1;
 export const MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 8192;
 export const MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 0;
@@ -72,7 +81,9 @@ export function createBrowserModeState(): BrowserModeState {
 		draftInput: DEFAULT_BROWSER_DESTINATION?.label ?? "",
 		validationMessage: null,
 		destination: DEFAULT_BROWSER_DESTINATION,
-		landblockCoverageRadius: DEFAULT_LANDBLOCK_COVERAGE_RADIUS,
+		terrainLodRadius: DEFAULT_TERRAIN_LOD_RADIUS,
+		buildingLodRadius: DEFAULT_BUILDING_LOD_RADIUS,
+		detailLodRadius: DEFAULT_DETAIL_LOD_RADIUS,
 		structuredInteriorMaxEnvCells: DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		structuredInteriorMaxVisibleCellDepth:
 			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
@@ -155,14 +166,55 @@ export function updateBrowserDraft(
 	};
 }
 
-export function updateLandblockCoverageRadius(
+export function updateTerrainLodRadius(
 	browserMode: BrowserModeState,
-	landblockCoverageRadius: number,
+	terrainLodRadius: number,
+): BrowserModeState {
+	const nextTerrainLodRadius = clampOutdoorSceneLodRadius(terrainLodRadius);
+	const nextBuildingLodRadius = Math.min(
+		browserMode.buildingLodRadius,
+		nextTerrainLodRadius,
+	);
+
+	return {
+		...browserMode,
+		terrainLodRadius: nextTerrainLodRadius,
+		buildingLodRadius: nextBuildingLodRadius,
+		detailLodRadius: Math.min(
+			browserMode.detailLodRadius,
+			nextBuildingLodRadius,
+		),
+	};
+}
+
+export function updateBuildingLodRadius(
+	browserMode: BrowserModeState,
+	buildingLodRadius: number,
+): BrowserModeState {
+	const nextBuildingLodRadius = Math.min(
+		clampOutdoorSceneLodRadius(buildingLodRadius),
+		browserMode.terrainLodRadius,
+	);
+
+	return {
+		...browserMode,
+		buildingLodRadius: nextBuildingLodRadius,
+		detailLodRadius: Math.min(
+			browserMode.detailLodRadius,
+			nextBuildingLodRadius,
+		),
+	};
+}
+
+export function updateDetailLodRadius(
+	browserMode: BrowserModeState,
+	detailLodRadius: number,
 ): BrowserModeState {
 	return {
 		...browserMode,
-		landblockCoverageRadius: clampLandblockCoverageRadius(
-			landblockCoverageRadius,
+		detailLodRadius: Math.min(
+			clampOutdoorSceneLodRadius(detailLodRadius),
+			browserMode.buildingLodRadius,
 		),
 	};
 }
@@ -216,7 +268,9 @@ export function previewBrowserLocation(
 		draftInput: parsedLocation.label,
 		validationMessage: null,
 		destination: parsedLocation,
-		landblockCoverageRadius: browserMode.landblockCoverageRadius,
+		terrainLodRadius: browserMode.terrainLodRadius,
+		buildingLodRadius: browserMode.buildingLodRadius,
+		detailLodRadius: browserMode.detailLodRadius,
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
@@ -248,7 +302,9 @@ export function selectRuntimeResidencyDestination(
 		draftInput: parsedLocation.label,
 		validationMessage: null,
 		destination: parsedLocation,
-		landblockCoverageRadius: browserMode.landblockCoverageRadius,
+		terrainLodRadius: browserMode.terrainLodRadius,
+		buildingLodRadius: browserMode.buildingLodRadius,
+		detailLodRadius: browserMode.detailLodRadius,
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
@@ -274,7 +330,9 @@ export function selectBrowserLandblockDestination(
 			source: "landblock-pick",
 			landblockId: normalizedLandblockId,
 		},
-		landblockCoverageRadius: browserMode.landblockCoverageRadius,
+		terrainLodRadius: browserMode.terrainLodRadius,
+		buildingLodRadius: browserMode.buildingLodRadius,
+		detailLodRadius: browserMode.detailLodRadius,
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
@@ -394,15 +452,6 @@ function formatBrowserLocationLabel(
 
 function clampLandblockAxis(value: number): number {
 	return Math.min(Math.max(value, 0), 0xfe);
-}
-
-function clampLandblockCoverageRadius(value: number): number {
-	return clampCoverageSetting(
-		value,
-		MIN_LANDBLOCK_COVERAGE_RADIUS,
-		MAX_LANDBLOCK_COVERAGE_RADIUS,
-		DEFAULT_LANDBLOCK_COVERAGE_RADIUS,
-	);
 }
 
 function clampCoverageSetting(

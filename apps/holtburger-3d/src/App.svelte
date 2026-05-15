@@ -2,20 +2,13 @@
 	import { onMount } from "svelte";
 	import { get } from "svelte/store";
 	import { frontendState } from "./app/frontend-state";
-	import {
-		AssetChannelController,
-		createSceneCoverageRequests,
-	} from "./lib/assets/asset-channel";
-	import {
-		classifyAssetHydration,
-		isSceneCoverageAssetId,
-	} from "./lib/assets/asset-hydration-policy";
+	import { AssetChannelController } from "./lib/assets/asset-channel";
+	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
 	import {
 		listenForRuntimeLifecycle,
 		readDebugConfig,
 		readHostBoundarySnapshot,
 	} from "./lib/host/tauri";
-	import type { AssetPriority, RuntimeBatchDto } from "./lib/host/contracts";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
@@ -24,151 +17,33 @@
 
 	onMount(() => {
 		let dispose = () => {};
-		let disposed = false;
 		const assetChannel = new AssetChannelController();
-		const inFlightAssetIds = new Set<string>();
-		let lastBrowserCoverageKey: string | null = null;
-
-		async function syncSceneCoverage(
-			runtimeBatch: RuntimeBatchDto | null,
-			browserDestination: typeof $frontendState.browserMode.destination,
-			landblockCoverageRadius: number,
-			structuredInteriorMaxEnvCells: number,
-			structuredInteriorMaxVisibleCellDepth: number,
-			priority: AssetPriority,
-		): Promise<void> {
-			const assetState = get(frontendState).asset;
-			const requests = createSceneCoverageRequests(
-				runtimeBatch,
-				browserDestination,
-				priority,
-				assetState.preparedByAssetId,
-				[...inFlightAssetIds],
-				{
-					landblockRadius: landblockCoverageRadius,
-					structuredInterior: {
-						maxEnvCells: structuredInteriorMaxEnvCells,
-						maxVisibleCellDepth: structuredInteriorMaxVisibleCellDepth,
-					},
-				},
-			);
-
-			debugLog("scene-coverage", {
-				priority,
-				tick: runtimeBatch?.tick ?? null,
-				destination: browserDestination?.label ?? null,
-				landblockCoverageRadius,
-				structuredInteriorMaxEnvCells,
-				structuredInteriorMaxVisibleCellDepth,
-				preparedCount: Object.keys(assetState.preparedByAssetId).length,
-				inFlightAssetIds: [...inFlightAssetIds],
-				requestAssetIds: requests.map((request) => request.assetId),
-			});
-
-			if (requests.length === 0) {
-				return;
-			}
-
-			for (const request of requests) {
-				inFlightAssetIds.add(request.assetId);
-			}
-			frontendState.markAssetsPending(requests);
-
-			await Promise.allSettled(
-				requests.map(async (request) => {
-					debugLog("asset-request", request);
-					try {
-						const preparedAssets =
-							classifyAssetHydration(request.assetId) === "direct"
-								? [await assetChannel.prepareAsset(request)]
-								: (
-										await assetChannel.prepareAssetGraph(request, {
-											...get(frontendState).asset.preparedByAssetId,
-										})
-									).preparedAssets;
-						debugLog("asset-prepared", {
-							rootAssetId: request.assetId,
-							preparedAssetIds: preparedAssets.map(
-								(asset) => asset.request.assetId,
-							),
-						});
-						if (!disposed) {
-							for (const preparedAsset of preparedAssets) {
-								const invalidPolygons =
-									preparedAsset.payload.kind === "gfx-obj"
-										? preparedAsset.payload.renderGeometry.invalidPolygons
-										: undefined;
-								debugLog("asset-apply", {
-									assetId: preparedAsset.request.assetId,
-									kind: preparedAsset.payload.kind,
-									invalidPolygons,
-								});
-							}
-							frontendState.applyPreparedAssets(preparedAssets);
-						}
-					} catch (error) {
-						debugLog("asset-error", {
-							request,
-							message: error instanceof Error ? error.message : String(error),
-						});
-						if (!disposed) {
-							frontendState.applyAssetError(
-								request,
-								error instanceof Error ? error.message : String(error),
-							);
-						}
-					} finally {
-						inFlightAssetIds.delete(request.assetId);
-					}
-				}),
-			);
-		}
+		const sceneStreamer = new SceneAssetStreamingController({
+			assetChannel,
+			getPreparedByAssetId: () => get(frontendState).asset.preparedByAssetId,
+			markAssetsPending: (requests) =>
+				frontendState.markAssetsPending(requests),
+			applyPreparedAssets: (assets) =>
+				frontendState.applyPreparedAssets(assets),
+			applyAssetError: (request, message) =>
+				frontendState.applyAssetError(request, message),
+			debugLog,
+		});
 
 		const unsubscribeFrontendState = frontendState.subscribe((state) => {
 			const runtimeBatch = state.host.boundarySnapshot?.runtimeBatch ?? null;
-			const destination = state.browserMode.destination;
-			const landblockCoverageRadius = state.browserMode.landblockCoverageRadius;
-			const structuredInteriorMaxEnvCells =
-				state.browserMode.structuredInteriorMaxEnvCells;
-			const structuredInteriorMaxVisibleCellDepth =
-				state.browserMode.structuredInteriorMaxVisibleCellDepth;
-			const preparedSceneAssetKey = Object.keys(state.asset.preparedByAssetId)
-				.filter(isSceneCoverageAssetId)
-				.sort()
-				.join(",");
-			const coverageKey = destination
-				? `${destination.source}:${destination.label}:radius-${landblockCoverageRadius}:interior-cells-${structuredInteriorMaxEnvCells}:interior-depth-${structuredInteriorMaxVisibleCellDepth}:prepared-${preparedSceneAssetKey}`
-				: `runtime:radius-${landblockCoverageRadius}:interior-cells-${structuredInteriorMaxEnvCells}:interior-depth-${structuredInteriorMaxVisibleCellDepth}:prepared-${preparedSceneAssetKey}`;
-
-			if (!runtimeBatch || coverageKey === lastBrowserCoverageKey) {
-				return;
-			}
-
-			lastBrowserCoverageKey = coverageKey;
-			debugLog("coverage-key", {
-				coverageKey,
-				destination: destination?.label ?? null,
-				landblockCoverageRadius,
-				structuredInteriorMaxEnvCells,
-				structuredInteriorMaxVisibleCellDepth,
-				runtimeTick: runtimeBatch.tick,
+			sceneStreamer.syncSceneInterest({
+				runtimeBatch,
+				browserDestination: state.browserMode.destination,
+				terrainLodRadius: state.browserMode.terrainLodRadius,
+				buildingLodRadius: state.browserMode.buildingLodRadius,
+				detailLodRadius: state.browserMode.detailLodRadius,
+				structuredInteriorMaxEnvCells:
+					state.browserMode.structuredInteriorMaxEnvCells,
+				structuredInteriorMaxVisibleCellDepth:
+					state.browserMode.structuredInteriorMaxVisibleCellDepth,
+				preparedByAssetId: state.asset.preparedByAssetId,
 			});
-			void syncSceneCoverage(
-				runtimeBatch,
-				destination,
-				landblockCoverageRadius,
-				structuredInteriorMaxEnvCells,
-				structuredInteriorMaxVisibleCellDepth,
-				"bootstrap",
-			);
-			void syncSceneCoverage(
-				runtimeBatch,
-				destination,
-				landblockCoverageRadius,
-				structuredInteriorMaxEnvCells,
-				structuredInteriorMaxVisibleCellDepth,
-				"streaming",
-			);
 		});
 
 		void (async () => {
@@ -183,16 +58,6 @@
 						tick: notification.runtimeBatch?.tick ?? null,
 					});
 					frontendState.applyRuntimeNotification(notification);
-					if (notification.runtimeBatch) {
-						void syncSceneCoverage(
-							notification.runtimeBatch,
-							$frontendState.browserMode.destination,
-							$frontendState.browserMode.landblockCoverageRadius,
-							$frontendState.browserMode.structuredInteriorMaxEnvCells,
-							$frontendState.browserMode.structuredInteriorMaxVisibleCellDepth,
-							"streaming",
-						);
-					}
 				});
 
 				const snapshot = await readHostBoundarySnapshot();
@@ -210,9 +75,9 @@
 		})();
 
 		return () => {
-			disposed = true;
 			unsubscribeFrontendState();
 			dispose();
+			sceneStreamer.dispose();
 			assetChannel.dispose();
 		};
 	});
@@ -245,8 +110,9 @@
 				null}
 			assetState={$frontendState.asset}
 			browserDestination={$frontendState.browserMode.destination}
-			landblockCoverageRadius={$frontendState.browserMode
-				.landblockCoverageRadius}
+			terrainLodRadius={$frontendState.browserMode.terrainLodRadius}
+			buildingLodRadius={$frontendState.browserMode.buildingLodRadius}
+			detailLodRadius={$frontendState.browserMode.detailLodRadius}
 			structuredInteriorMaxEnvCells={$frontendState.browserMode
 				.structuredInteriorMaxEnvCells}
 			structuredInteriorMaxVisibleCellDepth={$frontendState.browserMode

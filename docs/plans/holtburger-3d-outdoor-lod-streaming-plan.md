@@ -139,6 +139,13 @@ Use three layers instead of growing any one file:
 
 ## Phase 1: Extract Pure Scene Request Planning
 
+### Progress
+
+- Extracted scene request policy into `scene-asset-request-planner.ts`.
+- `AssetChannelController` now owns only lookup, worker preparation, in-flight de-duplication, and graph scheduling gateway behavior.
+- Kept the planner's standalone default at radius `1/1/1` so existing non-browser helper callers preserve old behavior; browser mode passes its explicit `2/1/1` defaults from state.
+- Course correction: LoD behavior landed in the extracted planner immediately instead of doing a pure relocation first, because the state split and request split were tightly coupled and the tests cover the new behavior directly.
+
 ### Work
 
 - Move scene request planning helpers out of `asset-channel.ts` into a frontend-local module such as `scene-asset-request-planner.ts`.
@@ -159,6 +166,13 @@ Use three layers instead of growing any one file:
 - Existing browser mode behavior is unchanged.
 
 ## Phase 2: Extract Scene Asset Streaming From `App.svelte`
+
+### Progress
+
+- Added `SceneAssetStreamingController`.
+- Moved request keying, in-flight tracking, direct-vs-graph dispatch, prepared asset application, and error application out of `App.svelte`.
+- Runtime notifications now only update `frontendState`; the streamer reacts through the same state subscription path used by snapshots and UI changes.
+- The controller coalesces state changes while a pass is active and runs bootstrap then streaming from one pass with shared in-flight tracking.
 
 ### Work
 
@@ -198,6 +212,13 @@ class SceneAssetStreamingController {
 
 ## Phase 3: Introduce Outdoor Scene Interest Helpers
 
+### Progress
+
+- Added `outdoor-scene-interest.ts` as the pure frontend-local model for outdoor LoD policy.
+- The helper normalizes the focus landblock, clamps radii to integer non-negative values, enforces `terrain >= building >= detail`, and returns deterministic landblock arrays.
+- Kept the static-scene union out of canonical state; it remains a derived planner concern.
+- Added unit coverage for focus normalization, radius clamping, map-edge behavior, and stable union derivation.
+
 ### Work
 
 - Add a pure helper module for outdoor interest derivation.
@@ -215,6 +236,14 @@ class SceneAssetStreamingController {
 - Existing call sites can consume named sets without knowing the distance math.
 
 ## Phase 4: Split Request Planning By Interest Set
+
+### Progress
+
+- Terrain requests now use `terrainLandblockIds`.
+- Outdoor static-scene fact requests use the planner-local union of `buildingLandblockIds` and `detailLandblockIds`.
+- Static renderable roots are selected by kind: building sources follow building LoD; scenery/generated scenery follow detail LoD.
+- Outdoor-linked interior coverage follows the detail set.
+- Added planner tests proving terrain can extend beyond static-scene facts and buildings can hydrate farther than smaller detail scenery.
 
 ### Work
 
@@ -237,6 +266,13 @@ class SceneAssetStreamingController {
 
 ## Phase 5: Split Render Scene Selection
 
+### Progress
+
+- Terrain scene derivation can consume a prederived terrain landblock set.
+- Browser world display derives one `OutdoorSceneInterest` and passes its terrain/building/detail sets to scene derivation.
+- Static renderable scene derivation now accepts separate building/detail landblock sets and filters source instances by kind.
+- Outdoor-linked structured interiors now derive from detail landblocks, matching request planning.
+
 ### Work
 
 - Update terrain scene derivation to consume `terrainLandblockIds`.
@@ -256,6 +292,13 @@ class SceneAssetStreamingController {
 - Scene/debug rows report terrain/building/detail counts separately enough to diagnose streaming.
 
 ## Phase 6: Browser Panel UX
+
+### Progress
+
+- Replaced the old `Coverage` tab with `LoD`.
+- Browser state/store now expose three sliders: terrain, building, and detail.
+- Slider updates clamp dependent values in the state layer: terrain >= building >= detail.
+- The panel shows concrete tile counts for each LoD distance.
 
 ### Work
 
@@ -279,6 +322,22 @@ class SceneAssetStreamingController {
 - The labels describe user-observable behavior rather than implementation internals.
 
 ## Phase 7: Cleanup And Convergence
+
+### Progress
+
+- Removed the old `landblockCoverageRadius` browser state/store API and replaced it with terrain/building/detail LoD state.
+- Removed scene request planning from `asset-channel.ts`; no compatibility re-export was kept.
+- Updated older world-display debug/model text so it reports outdoor LoD rather than a single coverage ring.
+- Ran `knip` during cleanup and removed two unnecessary exports from the new streaming/interest helpers.
+- Confirmed browser-only LoD policy remains in `apps/holtburger-3d`; shared crates and the asset graph scheduler were not changed.
+- Validation completed:
+  - `npm run format:check`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+  - `npm run test:ts`
+  - `npm run build`
+- Build still reports the pre-existing Vite large chunk warning for the main bundle.
 
 ### Work
 

@@ -84,7 +84,9 @@ describe("frontend state store", () => {
 		expect(get(store).browserMode.destination?.label).toBe(
 			"33.50S, 72.80E, 0.0Z",
 		);
-		expect(get(store).browserMode.landblockCoverageRadius).toBe(1);
+		expect(get(store).browserMode.terrainLodRadius).toBe(2);
+		expect(get(store).browserMode.buildingLodRadius).toBe(1);
+		expect(get(store).browserMode.detailLodRadius).toBe(1);
 		expect(get(store).mode.activeMode).toBe("client");
 		expect(get(store).mode.activePageId).toBe("destination-preview");
 		expect(get(store).asset.channel).toBe("asset");
@@ -270,7 +272,9 @@ describe("frontend state store", () => {
 				draftInput: "",
 				validationMessage: null,
 				destination: null,
-				landblockCoverageRadius: 1,
+				terrainLodRadius: 2,
+				buildingLodRadius: 1,
+				detailLodRadius: 1,
 				structuredInteriorMaxEnvCells: 1024,
 				structuredInteriorMaxVisibleCellDepth: 16,
 				page: "location-entry",

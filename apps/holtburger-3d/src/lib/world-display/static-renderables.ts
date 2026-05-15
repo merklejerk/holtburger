@@ -18,7 +18,7 @@ import type {
 import {
 	deriveOutdoorLinkedInteriorEnvCellIds,
 	deriveTerrainFocusLandblockId,
-} from "../assets/asset-channel";
+} from "../assets/scene-asset-request-planner";
 import {
 	createDefaultStructuredInteriorCoverageOptions,
 	deriveStructuredInteriorCoverage,
@@ -89,6 +89,11 @@ export interface StaticRenderableSceneModel {
 	missingGfxAssetIds: string[];
 }
 
+export interface OutdoorStaticRenderableSelection {
+	buildingLandblockIds: readonly number[];
+	detailLandblockIds: readonly number[];
+}
+
 const IDENTITY_PLACEMENT: PlacementTransformDto = {
 	origin: { x: 0, y: 0, z: 0 },
 	orientation: { w: 1, x: 0, y: 0, z: 0 },
@@ -100,9 +105,10 @@ export function deriveStaticRenderableSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
-	landblockCoverageRadius = 1,
+	detailLodRadius = 1,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
 	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions = createDefaultStructuredInteriorCoverageOptions(),
+	outdoorSelection: OutdoorStaticRenderableSelection | null = null,
 ): StaticRenderableSceneModel {
 	if (!runtimeBatch) {
 		return emptyStaticRenderableSceneModel();
@@ -125,14 +131,26 @@ export function deriveStaticRenderableSceneModel(
 		runtimeBatch,
 		browserDestination,
 	);
-	const activeLandblockIds = buildOutdoorCoverageLandblockIds(
-		focusLandblockId,
-		landblockCoverageRadius,
-	).sort((left, right) => left - right);
-	const activeLandblockSet = new Set(activeLandblockIds);
+	const detailLandblockIds =
+		outdoorSelection?.detailLandblockIds ??
+		buildOutdoorCoverageLandblockIds(focusLandblockId, detailLodRadius);
+	const buildingLandblockIds =
+		outdoorSelection?.buildingLandblockIds ?? detailLandblockIds;
+	const detailLandblockSet = new Set(detailLandblockIds);
+	const buildingLandblockSet = new Set(buildingLandblockIds);
+	const activeLandblockSet = new Set([
+		...detailLandblockIds,
+		...buildingLandblockIds,
+	]);
+	const activeLandblockIds = [...activeLandblockSet].sort(
+		(left, right) => left - right,
+	);
 	const sourceInstances = collectStaticRenderableSourceInstances(
 		assetState,
-		activeLandblockSet,
+		{
+			buildingLandblockIds: buildingLandblockSet,
+			detailLandblockIds: detailLandblockSet,
+		},
 		focusLandblockId,
 	)
 		.concat(
@@ -146,7 +164,7 @@ export function deriveStaticRenderableSceneModel(
 								seedEnvCellIds: [
 									...deriveOutdoorLinkedInteriorEnvCellIds(
 										assetState.preparedByAssetId,
-										activeLandblockSet,
+										detailLandblockSet,
 									),
 								],
 							},
@@ -303,32 +321,44 @@ function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 
 function collectStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
-	activeLandblockSet: Set<number>,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+	},
 	focusLandblockId: number,
 ): StaticRenderableSourceInstance[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
-		if (
-			asset.payload.kind !== "outdoor-static-scene" ||
-			!activeLandblockSet.has(asset.payload.landblockId)
-		) {
+		if (asset.payload.kind !== "outdoor-static-scene") {
 			return [];
 		}
 
+		const landblockId = normalizeOutdoorLandblockId(asset.payload.landblockId);
 		return [
-			...asset.payload.sceneryInstances.map((instance) =>
-				normalizeSourceInstance("scenery", instance, null, focusLandblockId),
-			),
-			...asset.payload.buildingInstances.map((instance) =>
-				normalizeSourceInstance(
-					"building",
-					instance,
-					instance.numLeaves,
-					focusLandblockId,
-				),
-			),
-			...asset.payload.generatedSceneryInstances.map((instance) =>
-				normalizeGeneratedScenerySourceInstance(instance, focusLandblockId),
-			),
+			...(selection.detailLandblockIds.has(landblockId)
+				? asset.payload.sceneryInstances.map((instance) =>
+						normalizeSourceInstance(
+							"scenery",
+							instance,
+							null,
+							focusLandblockId,
+						),
+					)
+				: []),
+			...(selection.buildingLandblockIds.has(landblockId)
+				? asset.payload.buildingInstances.map((instance) =>
+						normalizeSourceInstance(
+							"building",
+							instance,
+							instance.numLeaves,
+							focusLandblockId,
+						),
+					)
+				: []),
+			...(selection.detailLandblockIds.has(landblockId)
+				? asset.payload.generatedSceneryInstances.map((instance) =>
+						normalizeGeneratedScenerySourceInstance(instance, focusLandblockId),
+					)
+				: []),
 		];
 	});
 }

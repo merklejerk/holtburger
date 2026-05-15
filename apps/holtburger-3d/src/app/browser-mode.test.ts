@@ -9,8 +9,10 @@ import {
 	previewBrowserLocation,
 	selectBrowserLandblockDestination,
 	selectRuntimeResidencyDestination,
+	updateBuildingLodRadius,
 	updateBrowserDraft,
-	updateLandblockCoverageRadius,
+	updateDetailLodRadius,
+	updateTerrainLodRadius,
 } from "./browser-mode";
 import type { RuntimeResidencyDto } from "../lib/host/contracts";
 
@@ -34,7 +36,9 @@ describe("browser-mode location policy", () => {
 
 		expect(state.draftInput).toBe("33.50S, 72.80E, 0.0Z");
 		expect(state.destination?.label).toBe("33.50S, 72.80E, 0.0Z");
-		expect(state.landblockCoverageRadius).toBe(1);
+		expect(state.terrainLodRadius).toBe(2);
+		expect(state.buildingLodRadius).toBe(1);
+		expect(state.detailLodRadius).toBe(1);
 		expect(state.page).toBe("destination-preview");
 	});
 
@@ -141,15 +145,25 @@ describe("browser-mode location policy", () => {
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0x016cffff);
 	});
 
-	it("clamps browser coverage radius to the supported debug range", () => {
+	it("clamps browser LoD radii to ordered supported values", () => {
 		expect(
-			updateLandblockCoverageRadius(createBrowserModeState(), -2)
-				.landblockCoverageRadius,
+			updateTerrainLodRadius(createBrowserModeState(), -2).terrainLodRadius,
 		).toBe(0);
 		expect(
-			updateLandblockCoverageRadius(createBrowserModeState(), 99)
-				.landblockCoverageRadius,
+			updateTerrainLodRadius(createBrowserModeState(), 99).terrainLodRadius,
 		).toBe(8);
+
+		const state = updateDetailLodRadius(
+			updateBuildingLodRadius(
+				updateTerrainLodRadius(createBrowserModeState(), 3),
+				2,
+			),
+			8,
+		);
+
+		expect(state.terrainLodRadius).toBe(3);
+		expect(state.buildingLodRadius).toBe(2);
+		expect(state.detailLodRadius).toBe(2);
 	});
 
 	it("converts browser coordinates into a normalized outdoor landblock id", () => {

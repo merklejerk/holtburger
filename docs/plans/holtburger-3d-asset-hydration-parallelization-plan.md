@@ -191,7 +191,7 @@ Use an explicit work-queue scheduler with a small state holder:
 - `activeLookupTasks`: currently running response lookup tasks, bounded by lookup concurrency.
 - `activePreparationTasks`: currently running worker preparation tasks, tracked for result assembly but not used to block dependency discovery.
 - `scheduledAssetIds`: asset ids already admitted to the graph.
-- `completedAssetIds`: asset ids whose graph work has finished.
+- `completedAssetIds`: optional if later result assembly needs a separate completion set.
 - `failedAssetIds`: asset ids whose graph work failed.
 - `preparedByAssetId`: graph-local prepared results, seeded from the caller's cache snapshot.
 - `preparedOrder`: deterministic return order, if needed.
@@ -231,6 +231,27 @@ function classifyAssetHydration(assetId: string): "direct" | "graph";
 ### Decision
 
 Do this first because the graph rewrite depends on a clear boundary between scene coverage facts and renderable dependency hydration. This is a small, low-risk cleanup that reduces ambiguity before touching concurrency.
+
+### Progress
+
+- Completed.
+- Added `asset-hydration-policy.ts` with `classifyAssetHydration` and `isSceneCoverageAssetId`.
+- Renamed `App.svelte`'s pending set from `inFlightSceneAssetIds` to `inFlightAssetIds`.
+- Moved direct-vs-graph policy out of `App.svelte`.
+- Added synthetic policy tests for scene coverage assets and renderable/dependency graph assets.
+
+### Decisions And Course Corrections
+
+- Kept the helper frontend-local under `lib/assets` because it is frontend hydration policy, not Rust/runtime semantics.
+- Used `classifyAssetHydration` in `App.svelte` and kept `isSceneCoverageAssetId` available for prepared scene coverage key derivation.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/asset-hydration-policy.test.ts`
+
+### Future Step Refinements
+
+- Phase 6 should become mostly verification because the progressive/direct policy now has a tested home.
 
 ## Phase 2: Response-Level Dependency Discovery
 
@@ -273,6 +294,28 @@ export function getAssetResponseDependencies(
 
 - Dependency discovery belongs at the decoded DTO/manifest level.
 - Worker preparation builds renderer-ready payloads; it should not be required to decide graph shape.
+
+### Progress
+
+- Completed.
+- Added `assets/dependencies.ts` with `getAssetResponseDependencies`.
+- Covered `outdoor-static-scene`, `indoor-env-cell`, `setup-model`, and `dependency-manifest` response payloads.
+- Unknown and non-json responses return no dependencies instead of throwing.
+
+### Decisions And Course Corrections
+
+- Kept prepared-record dependency extraction in place for diagnostics and compatibility during the migration.
+- Used schema `safeParse` on decoded DTO payloads so malformed or unrelated payloads do not crash dependency extraction.
+- Used `setupModel.parts[].gfxObjAssetId` rather than deriving asset ids from numeric DIDs.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/dependencies.test.ts`
+
+### Future Step Refinements
+
+- Phase 3 should wire `dependencyAssetIds` into looked-up response entries.
+- Phase 4/5 should use response dependencies for scheduling and keep prepared dependency status only as a post-preparation diagnostic.
 
 ## Phase 3: Unify In-Flight Response And Prepared De-Dupe
 
@@ -322,6 +365,31 @@ type LookedUpAssetResponse = {
 
 If `AssetLoadEntry` starts accumulating too much lifecycle state, split response/prepared tracking into small helper methods rather than adding controller-wide conditionals.
 
+### Progress
+
+- Completed.
+- Replaced prepared-only in-flight tracking with per-asset `AssetLoadEntry` records.
+- Added `LookedUpAssetResponse` and `AssetPreparationGateway` shapes.
+- Split channel work into `lookupAssetResponse` and `prepareLookedUpAsset`, with public `prepareAsset` composing both.
+- Added response-level dependency ids to looked-up responses.
+- Preserved caller-specific request metadata for both response reuse and prepared reuse.
+- Disposal now rejects in-flight response wrappers and pending worker requests.
+
+### Decisions And Course Corrections
+
+- Kept response and prepared lifecycle in one load entry per asset id. This avoided two maps with subtly different cleanup and request-rebinding rules.
+- Added small load-entry helper methods instead of spreading cleanup conditionals through the controller.
+- Tauri lookup is still not cancellable; disposal rejects the frontend wrapper and prevents the disposed channel from reporting late lookup success.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/asset-channel.test.ts`
+
+### Future Step Refinements
+
+- Phase 4 can now inject `AssetChannelController` as the scheduler gateway without giving the scheduler direct access to Tauri or worker internals.
+- Phase 5 should rely on `LookedUpAssetResponse.dependencyAssetIds` rather than asking prepared records for graph shape.
+
 ## Phase 4: Extract `AssetGraphScheduler`
 
 ### Work
@@ -348,6 +416,29 @@ If `AssetLoadEntry` starts accumulating too much lifecycle state, split response
 
 - `AssetGraphScheduler` is the right name because the component schedules bounded graph work; it does more than passively walk dependencies.
 - The scheduler boundary should make later worker-pool experiments possible without changing traversal logic.
+
+### Progress
+
+- Completed.
+- Added `asset-graph-scheduler.ts`.
+- Moved graph traversal, dependency request creation, graph-local state, and result assembly out of `AssetChannelController`.
+- Kept `AssetChannelController.prepareAssetGraph` as a thin facade for `App.svelte`.
+- Added scheduler tests with a fake gateway and no Tauri/worker dependency.
+
+### Decisions And Course Corrections
+
+- Used the scheduler extraction to start consuming response-level dependency ids for looked-up assets.
+- Kept prepared-record dependency extraction only for cache-seeded roots where no response DTO is available inside the graph walk.
+- Preserved fail-hard behavior for lookup failures.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/asset-graph-scheduler.test.ts src/lib/assets/asset-channel.test.ts`
+
+### Future Step Refinements
+
+- Phase 5 can focus entirely on replacing the scheduler's serial queue with bounded lookup/preparation task sets.
+- `createDependencyRequest` is now scheduler-owned and should stay the single source for graph dependency request ids.
 
 ## Phase 5: Parallel Graph Traversal With Bounded Concurrency
 
@@ -451,6 +542,31 @@ Also attach preparation failure handlers when the preparation task is created, n
 - This is **within asset graph traversal**, not "within a landblock" only. In practice it helps landblock-derived static renderable dependencies, but the abstraction should work for any asset graph.
 - Keep concurrency behind the asset-channel facade. The actual bounded graph logic should live in `AssetGraphScheduler`; `AssetChannelController` should provide the gateway and public facade.
 
+### Progress
+
+- Completed.
+- Replaced the scheduler's serial queue with bounded lookup scheduling.
+- Lookup tasks and worker preparation tasks are tracked separately.
+- Dependencies are enqueued from `LookedUpAssetResponse.dependencyAssetIds` as soon as lookup completes.
+- Worker preparation no longer holds a lookup scheduler slot.
+- Added a conservative default lookup concurrency limit of `4`.
+- Preserved deterministic `preparedAssets` return order using graph admission order rather than completion order.
+
+### Decisions And Course Corrections
+
+- Did not keep a separate `completedAssetIds` set in code because it was not needed for current result assembly or failure behavior. `preparedByAssetId`, return order, and failure tracking cover the actual behavior without dead state.
+- Kept fail-hard semantics. Lookup or preparation failure records the first graph failure, stops admitting new ready work, waits for already-started preparation handlers, then throws.
+- Attached preparation rejection handlers immediately when each prep task is created to avoid unhandled rejections.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/asset-graph-scheduler.test.ts src/lib/assets/asset-channel.test.ts`
+
+### Future Step Refinements
+
+- Phase 6 should verify that `App.svelte` still routes scene coverage assets directly and only uses graph traversal for renderable dependencies.
+- Phase 7 instrumentation can expose the lookup concurrency limit, but should avoid noisy per-asset console logging.
+
 ## Phase 6: Keep Scene Coverage Progressive
 
 ### Work
@@ -477,6 +593,26 @@ with tests, so policy does not live as an ambiguous inline condition. If Phase 1
 - `App.svelte` unit coverage is currently thin. Prefer extracting scheduler policy into testable helpers rather than testing component internals.
 - Synthetic tests should prove `outdoor-static-scene/*` applies without waiting for `setup-model/*` / `gfx-obj/*`.
 
+### Progress
+
+- Completed as a verification pass.
+- Confirmed `App.svelte` still calls direct `prepareAsset` for `classifyAssetHydration(assetId) === "direct"`.
+- Confirmed graph prep remains reserved for renderable/dependency roots.
+- Confirmed `outdoor-static-scene/*` is classified as direct scene coverage by focused tests.
+
+### Decisions And Course Corrections
+
+- No additional component-level test was added for `App.svelte`; the policy is now extracted and unit-tested, which keeps the behavior easier to verify without Svelte internals.
+- Phase 1's extraction was enough to keep progressive scene coverage explicit through the scheduler rewrite.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/asset-hydration-policy.test.ts src/lib/assets/asset-graph-scheduler.test.ts src/lib/assets/asset-channel.test.ts`
+
+### Future Step Refinements
+
+- Phase 7 should focus on cleanup, static analysis, and only low-noise diagnostics. No extra debug-log tests are needed.
+
 ## Phase 7: Instrumentation And Cleanup
 
 ### Work
@@ -502,6 +638,34 @@ with tests, so policy does not live as an ambiguous inline condition. If Phase 1
 - Do not add tests for debug logging.
 - Add tests for any reusable diagnostic counters if they affect state shape or scheduling behavior.
 
+### Progress
+
+- Completed.
+- Ran static analysis and formatting checks after the graph rewrite.
+- Removed the unused response dependency status helper after `knip` flagged it as a dead export.
+- Tightened response load-entry cleanup so `lookupAssetResponse` remains in-flight lifecycle state rather than an accidental permanent response cache.
+- Added worker `postMessage` error cleanup so failed synchronous posts do not leave stale pending request entries.
+
+### Decisions And Course Corrections
+
+- Did not add new HUD counters in this pass. The scheduler behavior is covered by focused tests, and adding new app-state diagnostics would introduce state-shape churn without a current consumer.
+- Kept `getPreparedAssetDependencies` because it is still used for prepared-record diagnostics and cache-seeded graph roots.
+- Kept coverage request planning in `asset-channel.ts` for now. It remains a cleanup candidate, but moving it was not necessary to finish graph traversal decoupling.
+
+### Verification
+
+- `npm run --prefix apps/holtburger-3d format`
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/asset-hydration-policy.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/asset-graph-scheduler.test.ts src/lib/assets/asset-channel.test.ts`
+- `npm run --prefix apps/holtburger-3d check`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d lint:dead`
+- `npm run --prefix apps/holtburger-3d format:check`
+
+### Future Step Refinements
+
+- If loading still feels slow after smoke testing, profile lookup concurrency before adding workers. The scheduler now has a single default concurrency limit that can be made configurable.
+- A later cleanup can move coverage request planning into a dedicated module, but it should be done separately from hydration scheduling to avoid mixing concerns again.
+
 ## Expected Impact
 
 - Scene facts should appear as soon as their own lookup + worker prep finishes.
@@ -518,11 +682,10 @@ with tests, so policy does not live as an ambiguous inline condition. If Phase 1
 
 ## Open Questions
 
-- Should the concurrency limit be static, environment-configured, or adaptive?
-- Should graph dependency failures fail the whole graph or produce partial-ready status?
+- Should the lookup concurrency limit remain static at `4`, become environment-configured, or become adaptive after profiling?
 - Do we want priority promotion when a bootstrap request arrives for an asset already in-flight as streaming?
-- Should prepared asset ordering be deterministic by discovery or sorted by asset id?
+- Do we need response/prepared de-dupe metrics surfaced in UI state, or are scheduler tests and smoke-test behavior enough for now?
 
-## Initial Recommendation
+## Post-Implementation Recommendation
 
-Implement Phases 1-3 before considering a worker pool. The current architecture still has scheduling inefficiency that extra workers would not fix. After response-level dependency discovery and bounded graph concurrency land, profile again before adding more workers.
+Do not add a worker pool yet. The current implementation now removes the main graph traversal bottleneck by discovering dependencies from lookup responses and running bounded lookup traversal independently from worker preparation. Smoke test the app at higher coverage radii first, then profile lookup pressure, worker utilization, and frontend state churn before increasing concurrency or adding workers.

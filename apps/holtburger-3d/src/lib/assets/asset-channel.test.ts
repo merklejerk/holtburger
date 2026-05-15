@@ -768,6 +768,102 @@ describe("asset channel controller", () => {
 		controller.dispose();
 	});
 
+	it("coalesces response lookups while preserving caller-specific metadata", async () => {
+		let lookupCount = 0;
+		let releaseLookup = () => {};
+		const lookupGate = new Promise<void>((resolve) => {
+			releaseLookup = resolve;
+		});
+		const controller = new AssetChannelController(
+			async (request) => {
+				lookupCount += 1;
+				await lookupGate;
+				return createSyntheticDependencyManifestResponse(request, [
+					"synthetic/leaf",
+				]);
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const first = controller.lookupAssetResponse({
+			requestId: "first-response-request",
+			assetId: "synthetic/root",
+			priority: "streaming",
+		});
+		const second = controller.lookupAssetResponse({
+			requestId: "second-response-request",
+			assetId: "synthetic/root",
+			priority: "bootstrap",
+		});
+		releaseLookup();
+		const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+		expect(lookupCount).toBe(1);
+		expect(firstResponse.request.requestId).toBe("first-response-request");
+		expect(firstResponse.response.requestId).toBe("first-response-request");
+		expect(secondResponse.request.requestId).toBe("second-response-request");
+		expect(secondResponse.request.priority).toBe("bootstrap");
+		expect(secondResponse.response.requestId).toBe("second-response-request");
+		expect(secondResponse.dependencyAssetIds).toEqual(["synthetic/leaf"]);
+		controller.dispose();
+	});
+
+	it("coalesces response lookup and preparation for the same asset id", async () => {
+		let lookupCount = 0;
+		let releaseLookup = () => {};
+		const lookupGate = new Promise<void>((resolve) => {
+			releaseLookup = resolve;
+		});
+		const controller = new AssetChannelController(
+			async (request) => {
+				lookupCount += 1;
+				await lookupGate;
+				return createSyntheticDependencyManifestResponse(request, [
+					"synthetic/leaf",
+				]);
+			},
+			() => new FakeAssetWorker(),
+		);
+
+		const lookup = controller.lookupAssetResponse({
+			requestId: "lookup-only",
+			assetId: "synthetic/root",
+			priority: "streaming",
+		});
+		const prepared = controller.prepareAsset({
+			requestId: "prepare-same-root",
+			assetId: "synthetic/root",
+			priority: "bootstrap",
+		});
+		releaseLookup();
+		const [lookedUp, preparedAsset] = await Promise.all([lookup, prepared]);
+
+		expect(lookupCount).toBe(1);
+		expect(lookedUp.request.requestId).toBe("lookup-only");
+		expect(preparedAsset.request.requestId).toBe("prepare-same-root");
+		expect(preparedAsset.response.requestId).toBe("prepare-same-root");
+		controller.dispose();
+	});
+
+	it("rejects in-flight response lookup wrappers on dispose", async () => {
+		const controller = new AssetChannelController(
+			async () => new Promise<AssetLookupResponseDto>(() => {}),
+			() => new FakeAssetWorker(),
+		);
+
+		const response = controller.lookupAssetResponse({
+			requestId: "never-resolves",
+			assetId: "synthetic/never",
+			priority: "streaming",
+		});
+		await waitForMicrotasks();
+		controller.dispose();
+
+		await expect(response).rejects.toThrow(
+			"Asset channel was disposed before preparation completed.",
+		);
+	});
+
 	it("orchestrates a synthetic dependency walk on the main thread without worker request-back", async () => {
 		const responsesByAssetId: Record<
 			string,

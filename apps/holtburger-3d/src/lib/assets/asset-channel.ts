@@ -19,11 +19,11 @@ import {
 } from "../landblocks";
 import { lookupAsset } from "../host/tauri";
 import {
-	derivePreparedAssetDependencyStatus,
-	getPreparedAssetDependencies,
-	type PreparedAssetDependencyStatus,
-	type PreparedAssetRecord,
-} from "./types";
+	AssetGraphScheduler,
+	type AssetGraphPreparationResult,
+} from "./asset-graph-scheduler";
+import { getAssetResponseDependencies } from "./dependencies";
+import type { PreparedAssetRecord } from "./types";
 import type {
 	AssetWorkerRequestMessage,
 	AssetWorkerResponseMessage,
@@ -45,16 +45,28 @@ type PendingAssetRequest = {
 	reject: (error: Error) => void;
 };
 
-interface InFlightAssetPreparation {
-	requestId: string;
-	promise: Promise<PreparedAssetRecord>;
+interface AssetLoadEntry {
+	responseRequestId: string | null;
+	responsePromise: Promise<LookedUpAssetResponse> | null;
+	responseReject: ((error: Error) => void) | null;
+	preparedRequestId: string | null;
+	preparedPromise: Promise<PreparedAssetRecord> | null;
 }
 
-export interface AssetGraphPreparationResult {
-	rootAsset: PreparedAssetRecord;
-	preparedAssets: PreparedAssetRecord[];
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
-	dependencyStatus: PreparedAssetDependencyStatus;
+export interface LookedUpAssetResponse {
+	request: AssetLookupRequestDto;
+	response: AssetLookupResponseDto;
+	dependencyAssetIds: string[];
+}
+
+export interface AssetPreparationGateway {
+	lookupAssetResponse(
+		request: AssetLookupRequestDto,
+	): Promise<LookedUpAssetResponse>;
+	prepareLookedUpAsset(
+		lookedUp: LookedUpAssetResponse,
+		request: AssetLookupRequestDto,
+	): Promise<PreparedAssetRecord>;
 }
 
 export interface OutdoorCoverageOptions {
@@ -70,10 +82,9 @@ export class AssetChannelController {
 
 	private readonly pendingRequests = new Map<string, PendingAssetRequest>();
 
-	private readonly inFlightByAssetId = new Map<
-		string,
-		InFlightAssetPreparation
-	>();
+	private readonly loadEntriesByAssetId = new Map<string, AssetLoadEntry>();
+
+	private disposed = false;
 
 	constructor(
 		private readonly lookupAssetFn: AssetLookupFn = lookupAsset,
@@ -119,135 +130,178 @@ export class AssetChannelController {
 	async prepareAsset(
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
-		const inFlight = this.inFlightByAssetId.get(request.assetId);
-		if (inFlight) {
-			return rebindPreparedAssetRequest(await inFlight.promise, request);
+		const lookedUp = await this.lookupAssetResponse(request);
+		return this.prepareLookedUpAsset(lookedUp, request);
+	}
+
+	async lookupAssetResponse(
+		request: AssetLookupRequestDto,
+	): Promise<LookedUpAssetResponse> {
+		this.throwIfDisposed();
+
+		const entry = this.getOrCreateLoadEntry(request.assetId);
+		if (entry.responsePromise) {
+			return rebindLookedUpAssetResponse(await entry.responsePromise, request);
 		}
 
-		const promise = this.prepareAssetUncached(request);
-		this.inFlightByAssetId.set(request.assetId, {
-			requestId: request.requestId,
-			promise,
-		});
+		entry.responseRequestId = request.requestId;
+		entry.responsePromise = new Promise<LookedUpAssetResponse>(
+			(resolve, reject) => {
+				entry.responseReject = reject;
+				void (async () => {
+					try {
+						const response = await this.lookupAssetFn(request);
+						this.throwIfDisposed();
+						const reboundResponse = rebindAssetLookupResponse(
+							response,
+							request,
+						);
+						resolve({
+							request,
+							response: reboundResponse,
+							dependencyAssetIds: getAssetResponseDependencies(
+								reboundResponse,
+							).map((dependency) => dependency.assetId),
+						});
+					} catch (error) {
+						reject(toError(error));
+					}
+				})();
+			},
+		);
 
 		try {
-			return await promise;
+			return await entry.responsePromise;
+		} catch (error) {
+			this.clearResponseLoadEntry(request.assetId, request.requestId);
+			throw error;
 		} finally {
-			const active = this.inFlightByAssetId.get(request.assetId);
-			if (active?.requestId === request.requestId) {
-				this.inFlightByAssetId.delete(request.assetId);
-			}
+			queueMicrotask(() => {
+				const active = this.loadEntriesByAssetId.get(request.assetId);
+				if (
+					active?.responseRequestId === request.requestId &&
+					!active.preparedPromise
+				) {
+					this.clearResponseLoadEntry(request.assetId, request.requestId);
+				}
+			});
 		}
 	}
 
-	private async prepareAssetUncached(
+	async prepareLookedUpAsset(
+		lookedUp: LookedUpAssetResponse,
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
-		const response = await this.lookupAssetFn(request);
+		this.throwIfDisposed();
 
-		return new Promise<PreparedAssetRecord>((resolve, reject) => {
-			this.pendingRequests.set(request.requestId, { resolve, reject });
-			this.worker.postMessage({
-				type: "prepare-asset",
-				request,
-				response,
-			});
-		});
+		const entry = this.getOrCreateLoadEntry(request.assetId);
+		if (entry.preparedPromise) {
+			return rebindPreparedAssetRequest(await entry.preparedPromise, request);
+		}
+
+		entry.preparedRequestId = request.requestId;
+		entry.preparedPromise = new Promise<PreparedAssetRecord>(
+			(resolve, reject) => {
+				this.pendingRequests.set(request.requestId, { resolve, reject });
+				try {
+					this.worker.postMessage({
+						type: "prepare-asset",
+						request,
+						response: rebindAssetLookupResponse(lookedUp.response, request),
+					});
+				} catch (error) {
+					this.pendingRequests.delete(request.requestId);
+					reject(toError(error));
+				}
+			},
+		);
+
+		try {
+			return await entry.preparedPromise;
+		} finally {
+			this.clearPreparedLoadEntry(request.assetId, request.requestId);
+		}
 	}
 
 	async prepareAssetGraph(
 		rootRequest: AssetLookupRequestDto,
 		preparedByAssetId: Record<string, PreparedAssetRecord> = {},
 	): Promise<AssetGraphPreparationResult> {
-		const preparedAssets: PreparedAssetRecord[] = [];
-		const nextRequests: AssetLookupRequestDto[] = [rootRequest];
-		const scheduledAssetIds = new Set<string>([
-			rootRequest.assetId,
-			...Object.keys(preparedByAssetId),
-		]);
-		let rootAsset: PreparedAssetRecord | null =
-			preparedByAssetId[rootRequest.assetId] ?? null;
-		if (rootAsset) {
-			this.enqueueMissingDependencyRequests(
-				rootRequest,
-				rootAsset,
-				preparedByAssetId,
-				scheduledAssetIds,
-				nextRequests,
-			);
-		}
-
-		while (nextRequests.length > 0) {
-			const request = nextRequests.shift();
-			if (!request || preparedByAssetId[request.assetId]) {
-				continue;
-			}
-
-			const asset = await this.prepareAsset(request);
-			preparedAssets.push(asset);
-			preparedByAssetId[asset.request.assetId] = asset;
-			if (asset.request.assetId === rootRequest.assetId) {
-				rootAsset = asset;
-			}
-
-			this.enqueueMissingDependencyRequests(
-				rootRequest,
-				asset,
-				preparedByAssetId,
-				scheduledAssetIds,
-				nextRequests,
-			);
-		}
-
-		if (!rootAsset) {
-			throw new Error(`Root asset ${rootRequest.assetId} was not prepared.`);
-		}
-
-		return {
-			rootAsset,
-			preparedAssets,
+		return new AssetGraphScheduler(this).prepareAssetGraph(
+			rootRequest,
 			preparedByAssetId,
-			dependencyStatus: derivePreparedAssetDependencyStatus(
-				rootAsset,
-				preparedByAssetId,
-			),
-		};
-	}
-
-	private enqueueMissingDependencyRequests(
-		rootRequest: AssetLookupRequestDto,
-		asset: PreparedAssetRecord,
-		preparedByAssetId: Record<string, PreparedAssetRecord>,
-		scheduledAssetIds: Set<string>,
-		nextRequests: AssetLookupRequestDto[],
-	): void {
-		for (const dependency of getPreparedAssetDependencies(asset)) {
-			if (
-				scheduledAssetIds.has(dependency.assetId) ||
-				preparedByAssetId[dependency.assetId]
-			) {
-				continue;
-			}
-
-			scheduledAssetIds.add(dependency.assetId);
-			nextRequests.push({
-				requestId: `${rootRequest.requestId}-dependency-${dependency.assetId}`,
-				assetId: dependency.assetId,
-				priority: rootRequest.priority,
-			});
-		}
+		);
 	}
 
 	dispose(): void {
+		this.disposed = true;
 		this.worker.terminate();
 		const error = new Error(
 			"Asset channel was disposed before preparation completed.",
 		);
+		for (const entry of this.loadEntriesByAssetId.values()) {
+			entry.responseReject?.(error);
+		}
+		this.loadEntriesByAssetId.clear();
 		for (const pending of this.pendingRequests.values()) {
 			pending.reject(error);
 		}
 		this.pendingRequests.clear();
-		this.inFlightByAssetId.clear();
+	}
+
+	private getOrCreateLoadEntry(assetId: string): AssetLoadEntry {
+		const existing = this.loadEntriesByAssetId.get(assetId);
+		if (existing) {
+			return existing;
+		}
+
+		const entry: AssetLoadEntry = {
+			responseRequestId: null,
+			responsePromise: null,
+			responseReject: null,
+			preparedRequestId: null,
+			preparedPromise: null,
+		};
+		this.loadEntriesByAssetId.set(assetId, entry);
+		return entry;
+	}
+
+	private clearResponseLoadEntry(assetId: string, requestId: string): void {
+		const entry = this.loadEntriesByAssetId.get(assetId);
+		if (!entry || entry.responseRequestId !== requestId) {
+			return;
+		}
+
+		entry.responseRequestId = null;
+		entry.responsePromise = null;
+		entry.responseReject = null;
+		this.deleteLoadEntryIfIdle(assetId, entry);
+	}
+
+	private clearPreparedLoadEntry(assetId: string, requestId: string): void {
+		const entry = this.loadEntriesByAssetId.get(assetId);
+		if (!entry || entry.preparedRequestId !== requestId) {
+			return;
+		}
+
+		entry.preparedRequestId = null;
+		entry.preparedPromise = null;
+		entry.responseRequestId = null;
+		entry.responsePromise = null;
+		entry.responseReject = null;
+		this.deleteLoadEntryIfIdle(assetId, entry);
+	}
+
+	private deleteLoadEntryIfIdle(assetId: string, entry: AssetLoadEntry): void {
+		if (!entry.responsePromise && !entry.preparedPromise) {
+			this.loadEntriesByAssetId.delete(assetId);
+		}
+	}
+
+	private throwIfDisposed(): void {
+		if (this.disposed) {
+			throw new Error("Asset channel was disposed before work completed.");
+		}
 	}
 }
 
@@ -264,6 +318,32 @@ function rebindPreparedAssetRequest(
 			assetId: request.assetId,
 		},
 	};
+}
+
+function rebindLookedUpAssetResponse(
+	lookedUp: LookedUpAssetResponse,
+	request: AssetLookupRequestDto,
+): LookedUpAssetResponse {
+	return {
+		...lookedUp,
+		request,
+		response: rebindAssetLookupResponse(lookedUp.response, request),
+	};
+}
+
+function rebindAssetLookupResponse(
+	response: AssetLookupResponseDto,
+	request: AssetLookupRequestDto,
+): AssetLookupResponseDto {
+	return {
+		...response,
+		requestId: request.requestId,
+		assetId: request.assetId,
+	};
+}
+
+function toError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
 }
 
 export function createFocusedAssetRequest(

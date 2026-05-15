@@ -87,6 +87,8 @@
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
 
 	const PERFORMANCE_REPORT_INTERVAL_MS = 500;
+	const UNFOCUSED_MAX_RENDER_FPS = 15;
+	const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
@@ -148,20 +150,57 @@
 
 		let frameId = 0;
 		let lastFrameAt: number | null = null;
+		let lastRenderedAt: number | null = null;
 		let performanceWindowStartedAt = 0;
 		let performanceWindowFrameCount = 0;
 		let performanceWindowFrameMs = 0;
 		let performanceWindowRenderMs = 0;
-		const renderFrame = () => {
+		let isReducedFrameRateActive = shouldUseReducedFrameRate();
+
+		function resetPerformanceWindow(): void {
+			lastFrameAt = null;
+			lastRenderedAt = null;
+			performanceWindowStartedAt = window.performance.now();
+			performanceWindowFrameCount = 0;
+			performanceWindowFrameMs = 0;
+			performanceWindowRenderMs = 0;
+		}
+
+		function syncReducedFrameRateState(): void {
+			const nextState = shouldUseReducedFrameRate();
+			if (nextState === isReducedFrameRateActive) {
+				return;
+			}
+
+			isReducedFrameRateActive = nextState;
+			resetPerformanceWindow();
+		}
+
+		window.addEventListener("focus", syncReducedFrameRateState);
+		window.addEventListener("blur", syncReducedFrameRateState);
+		document.addEventListener("visibilitychange", syncReducedFrameRateState);
+
+		const renderFrame = (frameAt: number) => {
 			frameId = window.requestAnimationFrame(renderFrame);
 			if (
 				renderer === nextRenderer &&
 				scene === nextScene &&
 				camera === nextCamera
 			) {
-				const frameStartedAt = window.performance.now();
+				syncReducedFrameRateState();
+				if (
+					isReducedFrameRateActive &&
+					lastRenderedAt !== null &&
+					frameAt - lastRenderedAt < UNFOCUSED_RENDER_INTERVAL_MS
+				) {
+					return;
+				}
+
+				const frameStartedAt = frameAt;
+				const renderStartedAt = window.performance.now();
 				nextRenderer.render(nextScene, nextCamera);
-				const renderMs = window.performance.now() - frameStartedAt;
+				const renderMs = window.performance.now() - renderStartedAt;
+				lastRenderedAt = frameStartedAt;
 				if (lastFrameAt !== null) {
 					const frameMs = frameStartedAt - lastFrameAt;
 					performanceWindowFrameCount += 1;
@@ -192,10 +231,16 @@
 				lastFrameAt = frameStartedAt;
 			}
 		};
-		renderFrame();
+		frameId = window.requestAnimationFrame(renderFrame);
 
 		return () => {
 			window.cancelAnimationFrame(frameId);
+			window.removeEventListener("focus", syncReducedFrameRateState);
+			window.removeEventListener("blur", syncReducedFrameRateState);
+			document.removeEventListener(
+				"visibilitychange",
+				syncReducedFrameRateState,
+			);
 			nextResizeObserver.disconnect();
 			if (resizeObserver === nextResizeObserver) {
 				resizeObserver = null;
@@ -467,6 +512,10 @@
 
 		lastReportedMetricsKey = metricsKey;
 		onRenderMetricsChange?.(metrics);
+	}
+
+	function shouldUseReducedFrameRate(): boolean {
+		return document.visibilityState !== "visible" || !document.hasFocus();
 	}
 
 	function syncStaticRenderableMeshes(): void {

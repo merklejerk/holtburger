@@ -3077,16 +3077,37 @@ Primary deliverables:
 
 - audit current decoded portal witnesses from `EnvCell`, `CellPortal`, `CBldPortal`, `VisibleCells`, portal polygon ids, and prepared `CellStruct` geometry, using ACE/ACViewer/retail only as semantic references
 - expose enough portal witness data through `indoor-env-cell/*` and/or `environment/*` payloads to let the frontend draw portal diagnostics without ad hoc topology guesses
-- add browser diagnostic toggles for portal overlays, per-cell color distinction, and portal/target-cell highlighting
+- add explicit browser UX toggles for portal polygon overlays and cell indicators, with browser-mode state owned above `WorldDisplay`
+- add browser diagnostic controls for per-cell color distinction and portal/target-cell highlighting
 - render portal polygons/frames in world space so we can visually confirm they line up with openings and adjacent cell geometry
+- render lightweight cell indicators in world space so active env cells can be identified without hiding or replacing their normal geometry
 - show portal target metadata where known, such as target env-cell id, target membership in `visibleCellIds`, and unsupported/missing witness diagnostics
 - keep `WorldDisplay` as the shared renderer surface; browser-mode toggle/state ownership remains above it
 - document what this diagnostic phase proves and what it deliberately does not prove about client-mode portal visibility
 
+Visualization direction:
+
+- keep normal structured-interior geometry visible by default; diagnostics should layer on top of the scene rather than replacing or hiding cell shells
+- give each active env cell a stable debug color, with separate visual emphasis for focus/resident cells, visible cells, and outdoor-linked inspection cells
+- render cell indicators as lightweight world-space markers at the env-cell placement origin or approximate bounds center, labeled with a compact env-cell suffix rather than full noisy ids
+- consider optional thin cell bounds or local axis indicators if they materially help validate transforms without cluttering portal openings
+- render portal polygons as thin overlay surfaces or frames, slightly offset from their source polygons to avoid z-fighting
+- use portal overlay color/style to distinguish known targets, loaded visible targets, and missing or unsupported target witnesses
+- clicking or hovering a portal/cell should highlight the source cell and known target cell when loaded, then surface the relationship in the browser diagnostics panel
+- keep all visualization diagnostic-only; portal overlays, cell markers, and highlights must not drive membership, masking, culling, or camera residency
+
+Debug-overlay asset boundary:
+
+- keep diagnostic overlay geometry separate from game/content assets; overlay meshes, lines, labels, markers, bounds, and axes are ephemeral renderer diagnostics
+- do not route debug overlays through the asset channel, do not assign them `gfx-obj/*`, `environment/*`, `indoor-env-cell/*`, or other content asset ids, and do not store them in `PreparedAssetRecord`
+- derive overlay geometry in memory from already prepared content witnesses, active scene models, browser toggle state, and current highlight/selection state
+- source facts such as portal polygon ids, env-cell placement, visible-cell ids, `CBldPortal` links, and cell-structure geometry remain real decoded content facts; only the diagnostic drawing primitives are debug-only
+- render overlays under a separate renderer root or equivalent lifecycle boundary so disposal, visibility, picking, and metrics stay distinct from terrain, static renderables, and structured-interior game geometry
+
 Acceptance:
 
 - browser free-camera mode still renders all active structured-interior cells by default
-- a user can distinguish cells, see portal locations, and inspect portal target relationships in a loaded indoor scene
+- a user can toggle portal polygons and cell indicators independently, distinguish cells, see portal locations, and inspect portal target relationships in a loaded indoor scene
 - missing or unsupported portal witness data is surfaced as diagnostics rather than silently ignored
 - no portal masking/culling is introduced, and no browser camera residency is implied
 - the phase records payload/model gaps that would block later resident-camera portal visibility work

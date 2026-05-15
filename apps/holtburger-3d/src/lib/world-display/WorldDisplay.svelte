@@ -41,10 +41,8 @@
 		StructuredInteriorSceneModel,
 	} from "./structured-interior-scene";
 	import {
-		buildDebugOrbitCameraFrame,
-		createDebugOrbitCameraState,
-		fitDebugOrbitCameraToBounds,
-		type DebugOrbitCameraState,
+		createFallbackSceneCameraFrame,
+		fitSceneCameraFrameToBounds,
 		type SceneCameraFrame,
 		type SceneBoundsFrame,
 	} from "./camera";
@@ -79,9 +77,6 @@
 	let staticRenderableRoot: Group | null = null;
 	let structuredInteriorRoot: Group | null = null;
 	let resizeObserver: ResizeObserver | null = null;
-	let debugCameraState = $state<DebugOrbitCameraState>(
-		createDebugOrbitCameraState(),
-	);
 	let activeCameraFrame = $state<SceneCameraFrame | null>(null);
 	const terrainMeshes = new Map<string, Mesh>();
 	const staticGeometryCache = new Map<string, BufferGeometry>();
@@ -345,7 +340,7 @@
 		untrack(() => updateCameraFrame());
 	}
 
-	function updateCameraFrame(forceFit = false): void {
+	function updateCameraFrame(): void {
 		if (
 			!camera ||
 			!terrainRoot ||
@@ -366,17 +361,7 @@
 			staticRenderableScene.parts.length === 0 &&
 			structuredInteriorScene.cells.length === 0
 		) {
-			const fallbackFrame: SceneCameraFrame = {
-				position: { x: 180, y: 220, z: 180 },
-				target: { x: 0, y: 0, z: 0 },
-				up: { x: 0, y: 1, z: 0 },
-				aspect: camera.aspect,
-				fovDegrees: 52,
-				near: 0.1,
-				far: 5000,
-			};
-			setActiveCameraFrame(fallbackFrame, { notifyParent: true });
-			reportRenderMetrics();
+			applyInternalCameraFrame(null);
 			return;
 		}
 
@@ -384,35 +369,18 @@
 		if (!boundsFrame) {
 			return;
 		}
-		const { center, size } = boundsFrame;
-		const fitKey = [
-			center.x.toFixed(2),
-			center.y.toFixed(2),
-			center.z.toFixed(2),
-			size.x.toFixed(2),
-			size.y.toFixed(2),
-			size.z.toFixed(2),
-			terrainScene.tiles.length,
-			staticRenderableScene.parts.length,
-			structuredInteriorScene.cells.length,
-		].join(":");
-
-		debugCameraState = fitDebugOrbitCameraToBounds(
-			debugCameraState,
-			boundsFrame,
-			fitKey,
-			{ force: forceFit },
-		);
-		applyDebugCameraFrame();
+		applyInternalCameraFrame(boundsFrame);
 		reportRenderMetrics();
 	}
 
-	function applyDebugCameraFrame(): void {
-		const debugCameraFrame: SceneCameraFrame = {
-			...buildDebugOrbitCameraFrame(debugCameraState),
-			aspect: camera?.aspect ?? 1,
-		};
-		setActiveCameraFrame(debugCameraFrame, { notifyParent: true });
+	function applyInternalCameraFrame(
+		boundsFrame: SceneBoundsFrame | null,
+	): void {
+		const aspect = camera?.aspect ?? 1;
+		const frame = boundsFrame
+			? fitSceneCameraFrameToBounds(boundsFrame, aspect)
+			: createFallbackSceneCameraFrame(aspect);
+		setActiveCameraFrame(frame, { notifyParent: true });
 		reportRenderMetrics();
 	}
 

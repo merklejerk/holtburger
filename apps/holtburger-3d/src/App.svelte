@@ -7,6 +7,10 @@
 		createSceneCoverageRequests,
 	} from "./lib/assets/asset-channel";
 	import {
+		classifyAssetHydration,
+		isSceneCoverageAssetId,
+	} from "./lib/assets/asset-hydration-policy";
+	import {
 		listenForRuntimeLifecycle,
 		readDebugConfig,
 		readHostBoundarySnapshot,
@@ -23,7 +27,7 @@
 		let dispose = () => {};
 		let disposed = false;
 		const assetChannel = new AssetChannelController();
-		const inFlightSceneAssetIds = new Set<string>();
+		const inFlightAssetIds = new Set<string>();
 		let lastBrowserCoverageKey: string | null = null;
 
 		async function syncSceneCoverage(
@@ -38,7 +42,7 @@
 				browserDestination,
 				priority,
 				assetState.preparedByAssetId,
-				[...inFlightSceneAssetIds],
+				[...inFlightAssetIds],
 				{ landblockRadius: landblockCoverageRadius },
 			);
 
@@ -48,7 +52,7 @@
 				destination: browserDestination?.label ?? null,
 				landblockCoverageRadius,
 				preparedCount: Object.keys(assetState.preparedByAssetId).length,
-				inFlightSceneAssetIds: [...inFlightSceneAssetIds],
+				inFlightAssetIds: [...inFlightAssetIds],
 				requestAssetIds: requests.map((request) => request.assetId),
 			});
 
@@ -57,7 +61,7 @@
 			}
 
 			for (const request of requests) {
-				inFlightSceneAssetIds.add(request.assetId);
+				inFlightAssetIds.add(request.assetId);
 			}
 			frontendState.markAssetsPending(requests);
 
@@ -65,13 +69,14 @@
 				requests.map(async (request) => {
 					debugLog("asset-request", request);
 					try {
-						const preparedAssets = isSceneCoverageAssetId(request.assetId)
-							? [await assetChannel.prepareAsset(request)]
-							: (
-									await assetChannel.prepareAssetGraph(request, {
-										...get(frontendState).asset.preparedByAssetId,
-									})
-								).preparedAssets;
+						const preparedAssets =
+							classifyAssetHydration(request.assetId) === "direct"
+								? [await assetChannel.prepareAsset(request)]
+								: (
+										await assetChannel.prepareAssetGraph(request, {
+											...get(frontendState).asset.preparedByAssetId,
+										})
+									).preparedAssets;
 						debugLog("asset-prepared", {
 							rootAssetId: request.assetId,
 							preparedAssetIds: preparedAssets.map(
@@ -104,7 +109,7 @@
 							);
 						}
 					} finally {
-						inFlightSceneAssetIds.delete(request.assetId);
+						inFlightAssetIds.delete(request.assetId);
 					}
 				}),
 			);
@@ -197,15 +202,6 @@
 		}
 
 		console.debug(`[holtburger-3d][${label}]`, detail);
-	}
-
-	function isSceneCoverageAssetId(assetId: string): boolean {
-		return (
-			assetId.startsWith("terrain/") ||
-			assetId.startsWith("outdoor-static-scene/") ||
-			assetId.startsWith("indoor-env-cell/") ||
-			assetId.startsWith("environment/")
-		);
 	}
 </script>
 

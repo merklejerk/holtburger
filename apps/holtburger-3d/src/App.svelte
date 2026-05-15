@@ -17,7 +17,6 @@
 	} from "./lib/host/tauri";
 	import type { AssetPriority, RuntimeBatchDto } from "./lib/host/contracts";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
-	import BrowserModePage from "./pages/BrowserModePage.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
 	let startupError = $state<string | null>(null);
@@ -253,10 +252,6 @@
 			structuredInteriorMaxVisibleCellDepth={$frontendState.browserMode
 				.structuredInteriorMaxVisibleCellDepth}
 		/>
-
-		<div class="viewer-overlay viewer-overlay--right">
-			<BrowserModePage />
-		</div>
 	{:else}
 		<section class="viewer-unavailable">
 			<p class="kicker">Tauri Required</p>

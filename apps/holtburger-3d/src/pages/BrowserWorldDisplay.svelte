@@ -57,6 +57,12 @@
 		buildOutdoorCoverageLandblockIds,
 		normalizeOutdoorLandblockId,
 	} from "../lib/landblocks";
+	import BrowserModePanel from "./BrowserModePanel.svelte";
+
+	interface BrowserPanelRow {
+		label: string;
+		value: string;
+	}
 
 	let {
 		activeMode,
@@ -308,6 +314,41 @@
 			pendingCameraHint,
 		}),
 	);
+	const sceneStatusText = $derived(
+		structuredInteriorScene.cells.length > 0
+			? structuredInteriorScene.statusText
+			: terrainScene.statusText,
+	);
+	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
+		{ label: "Focus", value: worldDisplay.focusLocationLabel },
+		{ label: "Coverage", value: terrainScene.cacheText },
+		{ label: "Source", value: terrainScene.dataSourceText },
+		{ label: "Geometry", value: sceneGeometryText },
+		{ label: "Statics", value: staticRenderableText },
+		{ label: "Interiors", value: structuredInteriorText },
+		{ label: "Heights", value: terrainHeightText },
+		{ label: "Bounds", value: sceneBoundsText },
+	]);
+	const browserPanelDebugRows = $derived<BrowserPanelRow[]>([
+		{ label: "Input", value: worldDisplay.inputText },
+		{
+			label: "Camera hint",
+			value:
+				describeCameraHintAck(cameraAck) ??
+				"Waiting for the first world-display camera hint acknowledgement.",
+		},
+		{
+			label: "Ray pick",
+			value:
+				describeRayPickResponse(rayPickResponse) ??
+				"No authority-sensitive debug pick has been resolved yet.",
+		},
+		{ label: "Camera", value: cameraFrameText },
+		{ label: "Pipeline", value: assetPipelineDebugText },
+		{ label: "Assets", value: assetDebugText },
+		{ label: "Layers", value: staticRenderableLayerText },
+		{ label: "Events", value: cameraPipelineDebugText },
+	]);
 
 	$effect(() => {
 		if (activeCameraSceneKey === null) {
@@ -398,6 +439,10 @@
 	}
 
 	function handleBrowserPointerDownCapture(event: PointerEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		if (event.button !== 0 && event.button !== 1 && event.button !== 2) {
 			return;
 		}
@@ -417,6 +462,10 @@
 	}
 
 	function handleBrowserPointerMoveCapture(event: PointerEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		const drag = activePointerDrag;
 		if (!drag || drag.pointerId !== event.pointerId) {
 			return;
@@ -447,6 +496,10 @@
 	}
 
 	function handleBrowserPointerUpCapture(event: PointerEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		const drag = activePointerDrag;
 		if (!drag || drag.pointerId !== event.pointerId) {
 			return;
@@ -462,6 +515,10 @@
 	}
 
 	function handleBrowserWheelCapture(event: WheelEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		browserCameraState = moveBrowserFreeCameraLocalUpByWheel(
 			browserCameraState,
 			getCameraWheelDelta(event),
@@ -473,6 +530,10 @@
 	}
 
 	function handleBrowserKeyDownCapture(event: KeyboardEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		isCameraSlowModifierActive = event.shiftKey;
 		const movementKey = normalizeCameraMovementKey(event.key);
 		if (movementKey) {
@@ -499,6 +560,10 @@
 	}
 
 	function handleBrowserKeyUpCapture(event: KeyboardEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		isCameraSlowModifierActive = event.shiftKey;
 		const movementKey = normalizeCameraMovementKey(event.key);
 		if (!movementKey) {
@@ -516,6 +581,10 @@
 	}
 
 	function handleBrowserContextMenuCapture(event: MouseEvent): void {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		event.preventDefault();
 	}
 
@@ -524,6 +593,10 @@
 	}
 
 	async function handleBrowserClickCapture(event: MouseEvent): Promise<void> {
+		if (isBrowserPanelEvent(event)) {
+			return;
+		}
+
 		if (suppressNextBrowserClick) {
 			suppressNextBrowserClick = false;
 			event.preventDefault();
@@ -560,6 +633,13 @@
 		event.preventDefault();
 		event.stopPropagation();
 		frontendState.selectBrowserLandblockDestination(landblockId);
+	}
+
+	function isBrowserPanelEvent(event: Event): boolean {
+		return (
+			event.target instanceof Element &&
+			event.target.closest("[data-browser-panel]") !== null
+		);
 	}
 
 	function applyBrowserCameraFrame(
@@ -965,87 +1045,13 @@
 		onRenderMetricsChange={handleRenderMetricsChange}
 	/>
 
-	<div class="world-display__hud world-display__hud--top-left">
-		<p class="world-display__eyebrow">Scene</p>
-		<dl class="world-display__hud-list">
-			<div>
-				<dt>Focus</dt>
-				<dd>{worldDisplay.focusLocationLabel}</dd>
-			</div>
-			<div>
-				<dt>Coverage</dt>
-				<dd>{terrainScene.cacheText}</dd>
-			</div>
-			<div>
-				<dt>Source</dt>
-				<dd>{terrainScene.dataSourceText}</dd>
-			</div>
-			<div>
-				<dt>Geometry</dt>
-				<dd>{sceneGeometryText}</dd>
-			</div>
-			<div>
-				<dt>Render</dt>
-				<dd>{renderPerformanceText}</dd>
-			</div>
-			<div>
-				<dt>Assets</dt>
-				<dd>{assetDebugText}</dd>
-			</div>
-			<div>
-				<dt>Pipeline</dt>
-				<dd>{assetPipelineDebugText}</dd>
-			</div>
-			<div>
-				<dt>Statics</dt>
-				<dd>{staticRenderableText}</dd>
-			</div>
-			<div>
-				<dt>Interiors</dt>
-				<dd>{structuredInteriorText}</dd>
-			</div>
-			<div>
-				<dt>Layers</dt>
-				<dd>{staticRenderableLayerText}</dd>
-			</div>
-			<div>
-				<dt>Heights</dt>
-				<dd>{terrainHeightText}</dd>
-			</div>
-			<div>
-				<dt>Bounds</dt>
-				<dd>{sceneBoundsText}</dd>
-			</div>
-			<div>
-				<dt>Camera</dt>
-				<dd>{cameraFrameText}</dd>
-			</div>
-			<div>
-				<dt>Input</dt>
-				<dd>{cameraPipelineDebugText}</dd>
-			</div>
-		</dl>
-	</div>
+	<div class="browser-world-display__fps">{renderPerformanceText}</div>
 
-	<div class="world-display__viewport-copy">
-		<p>
-			{structuredInteriorScene.cells.length > 0
-				? structuredInteriorScene.statusText
-				: terrainScene.statusText}
-		</p>
-		<p>{worldDisplay.inputText}</p>
-	</div>
-
-	<div class="world-display__telemetry">
-		<p>
-			Camera hint:{" "}
-			{describeCameraHintAck(cameraAck) ??
-				"Waiting for the first world-display camera hint acknowledgement."}
-		</p>
-		<p>
-			Ray pick:{" "}
-			{describeRayPickResponse(rayPickResponse) ??
-				"No authority-sensitive debug pick has been resolved yet."}
-		</p>
+	<div class="browser-world-display__panel">
+		<BrowserModePanel
+			{sceneStatusText}
+			sceneRows={browserPanelSceneRows}
+			debugRows={browserPanelDebugRows}
+		/>
 	</div>
 </div>

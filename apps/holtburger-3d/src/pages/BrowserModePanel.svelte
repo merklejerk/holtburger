@@ -2,16 +2,17 @@
 	import { frontendState } from "../app/frontend-state";
 	import {
 		browserLocationToLandblockId,
-		MAX_LANDBLOCK_COVERAGE_RADIUS,
+		MAX_BROWSER_LOD_RADIUS,
 		MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
-		MIN_LANDBLOCK_COVERAGE_RADIUS,
+		MIN_BROWSER_LOD_RADIUS,
 		MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
+	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
 
-	type BrowserPanelTabId = "navigate" | "coverage" | "scene" | "debug";
+	type BrowserPanelTabId = "navigate" | "lod" | "scene" | "debug";
 
 	interface BrowserPanelRow {
 		label: string;
@@ -91,9 +92,19 @@
 		frontendState.useRuntimeResidencyDestination();
 	}
 
-	function handleCoverageRadiusInput(event: Event): void {
+	function handleTerrainLodInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
-		frontendState.updateLandblockCoverageRadius(Number(input.value));
+		frontendState.updateTerrainLodRadius(Number(input.value));
+	}
+
+	function handleBuildingLodInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateBuildingLodRadius(Number(input.value));
+	}
+
+	function handleDetailLodInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateDetailLodRadius(Number(input.value));
 	}
 
 	function handleStructuredInteriorMaxEnvCellsInput(event: Event): void {
@@ -141,12 +152,12 @@
 				</button>
 				<button
 					type="button"
-					class:active={activeTab === "coverage"}
+					class:active={activeTab === "lod"}
 					role="tab"
-					aria-selected={activeTab === "coverage"}
-					onclick={() => selectTab("coverage")}
+					aria-selected={activeTab === "lod"}
+					onclick={() => selectTab("lod")}
 				>
-					Coverage
+					LoD
 				</button>
 				<button
 					type="button"
@@ -235,31 +246,75 @@
 				</p>
 			{/if}
 		</div>
-	{:else if !isCollapsed && activeTab === "coverage"}
+	{:else if !isCollapsed && activeTab === "lod"}
 		<div class="browser-panel__body" role="tabpanel">
-			<label
-				class="browser-form__field browser-form__field--range"
-				for="landblock-radius-input"
-			>
-				<span>Landblock coverage</span>
-				<strong>
-					Radius {$frontendState.browserMode.landblockCoverageRadius}
-					({Math.pow(
-						$frontendState.browserMode.landblockCoverageRadius * 2 + 1,
-						2,
-					)}
-					landblocks)
-				</strong>
-				<input
-					id="landblock-radius-input"
-					type="range"
-					min={MIN_LANDBLOCK_COVERAGE_RADIUS}
-					max={MAX_LANDBLOCK_COVERAGE_RADIUS}
-					step="1"
-					value={$frontendState.browserMode.landblockCoverageRadius}
-					oninput={handleCoverageRadiusInput}
-				/>
-			</label>
+			<div class="browser-form__slider-row browser-form__slider-row--triple">
+				<label
+					class="browser-form__field browser-form__field--range"
+					for="terrain-lod-input"
+				>
+					<span>Terrain distance</span>
+					<strong>
+						{$frontendState.browserMode.terrainLodRadius} out ({countOutdoorSceneLodTiles(
+							$frontendState.browserMode.terrainLodRadius,
+						)}
+						tiles)
+					</strong>
+					<input
+						id="terrain-lod-input"
+						type="range"
+						min={MIN_BROWSER_LOD_RADIUS}
+						max={MAX_BROWSER_LOD_RADIUS}
+						step="1"
+						value={$frontendState.browserMode.terrainLodRadius}
+						oninput={handleTerrainLodInput}
+					/>
+				</label>
+
+				<label
+					class="browser-form__field browser-form__field--range"
+					for="building-lod-input"
+				>
+					<span>Building distance</span>
+					<strong>
+						{$frontendState.browserMode.buildingLodRadius} out ({countOutdoorSceneLodTiles(
+							$frontendState.browserMode.buildingLodRadius,
+						)}
+						tiles)
+					</strong>
+					<input
+						id="building-lod-input"
+						type="range"
+						min={MIN_BROWSER_LOD_RADIUS}
+						max={$frontendState.browserMode.terrainLodRadius}
+						step="1"
+						value={$frontendState.browserMode.buildingLodRadius}
+						oninput={handleBuildingLodInput}
+					/>
+				</label>
+
+				<label
+					class="browser-form__field browser-form__field--range"
+					for="detail-lod-input"
+				>
+					<span>Detail distance</span>
+					<strong>
+						{$frontendState.browserMode.detailLodRadius} out ({countOutdoorSceneLodTiles(
+							$frontendState.browserMode.detailLodRadius,
+						)}
+						tiles)
+					</strong>
+					<input
+						id="detail-lod-input"
+						type="range"
+						min={MIN_BROWSER_LOD_RADIUS}
+						max={$frontendState.browserMode.buildingLodRadius}
+						step="1"
+						value={$frontendState.browserMode.detailLodRadius}
+						oninput={handleDetailLodInput}
+					/>
+				</label>
+			</div>
 
 			<fieldset class="browser-form__fieldset">
 				<legend>Env cells</legend>

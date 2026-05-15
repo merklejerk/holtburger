@@ -7,10 +7,12 @@ import {
 	selectBrowserLandblockDestination,
 	seedBrowserDraftFromResidency,
 	selectRuntimeResidencyDestination,
-	updateLandblockCoverageRadius,
+	updateBuildingLodRadius,
 	updateBrowserDraft,
+	updateDetailLodRadius,
 	updateStructuredInteriorMaxEnvCells,
 	updateStructuredInteriorMaxVisibleCellDepth,
+	updateTerrainLodRadius,
 	type BrowserModeState,
 } from "./browser-mode";
 import {
@@ -128,13 +130,35 @@ export function createFrontendStateStore() {
 				}),
 			);
 		},
-		updateLandblockCoverageRadius(landblockCoverageRadius: number): void {
+		updateTerrainLodRadius(terrainLodRadius: number): void {
 			update((state) =>
 				reconcileModeState({
 					...state,
-					browserMode: updateLandblockCoverageRadius(
+					browserMode: updateTerrainLodRadius(
 						state.browserMode,
-						landblockCoverageRadius,
+						terrainLodRadius,
+					),
+				}),
+			);
+		},
+		updateBuildingLodRadius(buildingLodRadius: number): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateBuildingLodRadius(
+						state.browserMode,
+						buildingLodRadius,
+					),
+				}),
+			);
+		},
+		updateDetailLodRadius(detailLodRadius: number): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateDetailLodRadius(
+						state.browserMode,
+						detailLodRadius,
 					),
 				}),
 			);

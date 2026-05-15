@@ -34,7 +34,7 @@
 	import {
 		deriveOutdoorLinkedInteriorEnvCellIds,
 		deriveTerrainFocusLandblockId,
-	} from "../lib/assets/asset-channel";
+	} from "../lib/assets/scene-asset-request-planner";
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
 	import {
 		buildCameraHint,
@@ -53,10 +53,8 @@
 	} from "../lib/world-display/static-renderables";
 	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
 	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
-	import {
-		buildOutdoorCoverageLandblockIds,
-		normalizeOutdoorLandblockId,
-	} from "../lib/landblocks";
+	import { normalizeOutdoorLandblockId } from "../lib/landblocks";
+	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
 	interface BrowserPanelRow {
@@ -72,7 +70,9 @@
 		viewModelFeed,
 		assetState,
 		browserDestination,
-		landblockCoverageRadius,
+		terrainLodRadius,
+		buildingLodRadius,
+		detailLodRadius,
 		structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth,
 	}: {
@@ -83,7 +83,9 @@
 		viewModelFeed: FrontendStateFeedDto | null;
 		assetState: AssetChannelState;
 		browserDestination: BrowserLocationSelection | null;
-		landblockCoverageRadius: number;
+		terrainLodRadius: number;
+		buildingLodRadius: number;
+		detailLodRadius: number;
 		structuredInteriorMaxEnvCells: number;
 		structuredInteriorMaxVisibleCellDepth: number;
 	} = $props();
@@ -125,14 +127,6 @@
 		describeBrowserCameraSceneKey(browserDestination, runtimeBatch),
 	);
 
-	const terrainScene = $derived(
-		deriveTerrainSceneModel(
-			runtimeBatch,
-			assetState,
-			browserDestination,
-			landblockCoverageRadius,
-		),
-	);
 	const outdoorFocusLandblockId = $derived(
 		runtimeBatch &&
 			!runtimeBatch.residency.indoors &&
@@ -140,21 +134,34 @@
 			? deriveTerrainFocusLandblockId(runtimeBatch, browserDestination)
 			: null,
 	);
+	const outdoorSceneInterest = $derived(
+		outdoorFocusLandblockId === null
+			? null
+			: deriveOutdoorSceneInterest({
+					focusLandblockId: outdoorFocusLandblockId,
+					terrainRadius: terrainLodRadius,
+					buildingRadius: buildingLodRadius,
+					detailRadius: detailLodRadius,
+				}),
+	);
+	const terrainScene = $derived(
+		deriveTerrainSceneModel(
+			runtimeBatch,
+			assetState,
+			browserDestination,
+			terrainLodRadius,
+			outdoorSceneInterest?.terrainLandblockIds ?? null,
+		),
+	);
 	const linkedOutdoorEnvCellIds = $derived.by(() => {
-		if (outdoorFocusLandblockId === null) {
+		if (outdoorSceneInterest === null) {
 			return [];
 		}
 
-		const activeLandblockIds = new Set(
-			buildOutdoorCoverageLandblockIds(
-				outdoorFocusLandblockId,
-				landblockCoverageRadius,
-			),
-		);
 		return [
 			...deriveOutdoorLinkedInteriorEnvCellIds(
 				assetState.preparedByAssetId,
-				activeLandblockIds,
+				new Set(outdoorSceneInterest.detailLandblockIds),
 			),
 		].sort((left, right) => left - right);
 	});
@@ -194,9 +201,15 @@
 			runtimeBatch,
 			assetState,
 			browserDestination,
-			landblockCoverageRadius,
+			detailLodRadius,
 			structuredInteriorCoverage,
 			structuredInteriorCoverageOptions,
+			outdoorSceneInterest === null
+				? null
+				: {
+						buildingLandblockIds: outdoorSceneInterest.buildingLandblockIds,
+						detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
+					},
 		),
 	);
 	const structuredInteriorScene = $derived(
@@ -308,7 +321,9 @@
 			viewModelFeed,
 			assetState,
 			browserDestination,
-			landblockCoverageRadius,
+			terrainLodRadius,
+			buildingLodRadius,
+			detailLodRadius,
 			cameraAck,
 			rayPickResponse,
 			pendingCameraHint,
@@ -321,7 +336,7 @@
 	);
 	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
 		{ label: "Focus", value: worldDisplay.focusLocationLabel },
-		{ label: "Coverage", value: terrainScene.cacheText },
+		{ label: "Terrain", value: terrainScene.cacheText },
 		{ label: "Source", value: terrainScene.dataSourceText },
 		{ label: "Geometry", value: sceneGeometryText },
 		{ label: "Statics", value: staticRenderableText },

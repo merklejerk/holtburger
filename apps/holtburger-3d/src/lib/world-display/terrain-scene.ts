@@ -7,7 +7,7 @@ import type {
 } from "../assets/types";
 import { isPreparedTerrainLandblock } from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
-import { deriveTerrainFocusLandblockId } from "../assets/asset-channel";
+import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatLandblockLabel,
@@ -39,7 +39,8 @@ export function deriveTerrainSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
-	landblockCoverageRadius = 1,
+	terrainLodRadius = 1,
+	terrainLandblockIds: readonly number[] | null = null,
 ): TerrainSceneModel {
 	if (!runtimeBatch) {
 		return {
@@ -79,7 +80,8 @@ export function deriveTerrainSceneModel(
 		browserDestination,
 	);
 	const activeLandblockIds = new Set(
-		buildOutdoorCoverageLandblockIds(focusLandblockId, landblockCoverageRadius),
+		terrainLandblockIds ??
+			buildOutdoorCoverageLandblockIds(focusLandblockId, terrainLodRadius),
 	);
 	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
 	const tiles = Object.values(assetState.preparedByAssetId)

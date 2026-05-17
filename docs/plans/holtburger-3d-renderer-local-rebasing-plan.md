@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 3 complete; Phase 4 is the next implementation step.
+Status: Phase 4 complete; Phase 5 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -497,6 +497,8 @@ Refined follow-up for Phase 4:
 
 ### Phase 4: Chunk Root Manager In WorldDisplay
 
+Status: complete.
+
 Introduce a shared chunk-root manager inside `WorldDisplay` before migrating render layers:
 
 - one root group per active render chunk
@@ -513,6 +515,59 @@ Tests/smoke:
 - empty chunks are removed cleanly
 - camera auto-fit and render metrics still see all active chunk roots
 - changing the active render anchor updates root positions without recreating chunk-local objects
+
+Implemented progress:
+
+- Added `apps/holtburger-3d/src/lib/world-display/chunk-root-manager.ts` with a focused,
+  testable root-record sync helper.
+- Added `apps/holtburger-3d/src/lib/world-display/chunk-root-manager.test.ts` covering root
+  creation, root position updates across rebases, root reuse, and removal of chunks that leave the
+  active transform set.
+- Added a `render-chunk-roots` container inside `WorldDisplay` and a `chunkRoots` map keyed by
+  `RenderChunkKey`.
+- Wired `WorldDisplay` to consume the Phase 3 `renderChunkTransforms` prop through a dedicated
+  sync effect. Anchor changes now update chunk root positions without recreating the WebGL renderer
+  or scene.
+- Kept the existing terrain, static renderable, structured interior, and debug overlay broad roots
+  as compatibility parents. No render layer was migrated under chunk roots in this phase.
+- Included the chunk-root container in scene bounds expansion so metrics/camera framing remains
+  aware of the root manager as content migrates under it.
+
+Decisions:
+
+- The root manager is renderer-local and lives under `world-display`; it is not a browser-mode
+  policy object.
+- Chunk roots are empty staging groups for now. They are created and transformed from the shared
+  transform set, but existing layer objects remain under their current broad roots until Phase 6/7.
+- Disposing a non-empty chunk root fails hard. Once layers start migrating under chunk roots, layer
+  sync code must remove or move its own children before a chunk root leaves the active set.
+- The renderer setup effect no longer depends on render-anchor values. Chunk-root syncing is a
+  separate effect to avoid full renderer recreation during anchor changes.
+
+Course corrections:
+
+- Phase 3 had an inert `renderAnchorDebugKey` read in the renderer setup effect. During Phase 4 this
+  was removed because it would have made anchor changes recreate the Three.js renderer instead of
+  updating chunk roots in place.
+- The root lifecycle logic was extracted into a small helper module so the important behaviors can
+  be tested without requiring a browser/WebGL test harness.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/chunk-root-manager.test.ts src/lib/world-display/render-anchor.test.ts src/lib/world-display/render-chunks.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 5:
+
+- Add explicit chunk-transform sink operations to `RenderSpatialIndex`; do not let `WorldDisplay`
+  mutate spatial-index transform state directly.
+- Keep query inputs in renderer-local coordinates and transform them internally per chunk.
+- Missing chunk transforms should fail visibly in tests for chunk-local items rather than silently
+  behaving as identity transforms.
+- The current chunk-root transform set from `BrowserWorldDisplay` should become the single source
+  for both `WorldDisplay` chunk roots and spatial-index chunk transforms.
 
 ### Phase 5: Chunked Render Spatial Index
 

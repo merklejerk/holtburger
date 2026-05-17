@@ -1562,6 +1562,199 @@ describe("asset channel controller", () => {
 		]);
 	});
 
+	it("does not synthesize missing positive sides for NoPos polygons", () => {
+		const environment = prepareAssetPayload(
+			{
+				requestId: "environment-with-no-pos",
+				assetId: "environment/0d000001",
+				priority: "streaming",
+			},
+			{
+				requestId: "environment-with-no-pos",
+				assetId: "environment/0d000001",
+				payloadKind: "json",
+				payload: {
+					kind: "environment",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "environment",
+					environmentId: 0x0d000001,
+					cellStructureIds: [1],
+					cellStructures: [
+						{
+							id: 1,
+							vertexArray: {
+								vertexType: null,
+								vertexCount: 3,
+								vertices: [
+									{
+										id: 0,
+										origin: { x: 0, y: 0, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 0, v: 0 }],
+									},
+									{
+										id: 1,
+										origin: { x: 2, y: 0, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 1, v: 0 }],
+									},
+									{
+										id: 2,
+										origin: { x: 0, y: 2, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 0, v: 1 }],
+									},
+								],
+							},
+							drawingPolygons: [
+								{
+									id: 11,
+									numPts: 3,
+									stippling: 0x04,
+									sidesType: 1,
+									posSurface: 0x08000002,
+									negSurface: 0,
+									vertexIds: [0, 1, 2],
+									posUvIndices: [],
+									negUvIndices: [],
+								},
+							],
+							portalPolygonIds: [],
+							cellBspWitness: {
+								hasBsp: true,
+								rootKind: "leaf",
+							},
+							physicsWitness: {
+								polygonCount: 1,
+								hasBsp: true,
+								rootKind: "leaf",
+							},
+							drawingBsp: null,
+						},
+					],
+					provenance: {
+						source: "app-local-stub",
+						sourceAssetKind: "environment",
+						errorCode: null,
+						detail: "synthetic-no-pos",
+					},
+				},
+			},
+		);
+
+		expect(environment.payload.kind).toBe("environment");
+		if (environment.payload.kind !== "environment") {
+			throw new Error("expected environment payload");
+		}
+		const cellStructure = environment.payload.cellStructures[0];
+		expect(cellStructure?.renderGeometry).toMatchObject({
+			vertexCount: 0,
+			triangleCount: 0,
+			skippedPolygonCount: 1,
+			surfaceIds: [],
+			bounds: null,
+		});
+	});
+
+	it("emits valid negative sides without relying on positive-side data", () => {
+		const environment = prepareAssetPayload(
+			{
+				requestId: "environment-with-negative-side",
+				assetId: "environment/0d000001",
+				priority: "streaming",
+			},
+			{
+				requestId: "environment-with-negative-side",
+				assetId: "environment/0d000001",
+				payloadKind: "json",
+				payload: {
+					kind: "environment",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "environment",
+					environmentId: 0x0d000001,
+					cellStructureIds: [1],
+					cellStructures: [
+						{
+							id: 1,
+							vertexArray: {
+								vertexType: null,
+								vertexCount: 3,
+								vertices: [
+									{
+										id: 0,
+										origin: { x: 0, y: 0, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 0, v: 0 }],
+									},
+									{
+										id: 1,
+										origin: { x: 2, y: 0, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 1, v: 0 }],
+									},
+									{
+										id: 2,
+										origin: { x: 0, y: 2, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 0, v: 1 }],
+									},
+								],
+							},
+							drawingPolygons: [
+								{
+									id: 12,
+									numPts: 3,
+									stippling: 0x04,
+									sidesType: 2,
+									posSurface: 0x08000002,
+									negSurface: 0x08000004,
+									vertexIds: [0, 1, 2],
+									posUvIndices: [],
+									negUvIndices: [0, 0, 0],
+								},
+							],
+							portalPolygonIds: [],
+							cellBspWitness: {
+								hasBsp: true,
+								rootKind: "leaf",
+							},
+							physicsWitness: {
+								polygonCount: 1,
+								hasBsp: true,
+								rootKind: "leaf",
+							},
+							drawingBsp: null,
+						},
+					],
+					provenance: {
+						source: "app-local-stub",
+						sourceAssetKind: "environment",
+						errorCode: null,
+						detail: "synthetic-negative-side",
+					},
+				},
+			},
+		);
+
+		expect(environment.payload.kind).toBe("environment");
+		if (environment.payload.kind !== "environment") {
+			throw new Error("expected environment payload");
+		}
+		const renderGeometry =
+			environment.payload.cellStructures[0]?.renderGeometry;
+		expect(renderGeometry).toMatchObject({
+			vertexCount: 3,
+			triangleCount: 1,
+			skippedPolygonCount: 0,
+			surfaceIds: [0x08000004],
+		});
+		expect(renderGeometry?.triangles).toEqual([
+			{ polygonId: 12, surfaceId: 0x08000004, firstVertex: 0 },
+		]);
+		expect(renderGeometry?.positions).toEqual([0, 0, 0, 0, 0, -2, 2, 0, 0]);
+		expect(renderGeometry?.normals).toEqual([0, -1, 0, 0, -1, 0, 0, -1, 0]);
+	});
+
 	it("prepares gfx-obj payloads as first-class geometry leaves", () => {
 		const gfxObj = prepareAssetPayload(
 			{

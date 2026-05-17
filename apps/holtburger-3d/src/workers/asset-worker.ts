@@ -584,6 +584,17 @@ interface PolygonSetGeometrySource {
 	excludedPolygonIds?: readonly number[];
 }
 
+const STIPPLING_NO_POS = 0x04;
+const STIPPLING_NO_NEG = 0x08;
+const CULL_MODE_CLOCKWISE = 2;
+
+interface PolygonRenderSide {
+	surfaceId: number | null;
+	uvIndices: readonly number[];
+	vertexOffsets: (vertexIndex: number) => [number, number, number];
+	normalScale: 1 | -1;
+}
+
 function buildPolygonSetRenderGeometry(
 	source: PolygonSetGeometrySource,
 ): PreparedPolygonSetRenderGeometry {
@@ -620,6 +631,11 @@ function buildPolygonSetRenderGeometry(
 		if (polygon.vertexIds.length < 3) {
 			continue;
 		}
+		const renderSides = derivePolygonRenderSides(source.sourceLabel, polygon);
+		if (renderSides.length === 0) {
+			skippedPolygonCount += 1;
+			continue;
+		}
 
 		const polygonVertices = polygon.vertexIds.map((vertexId) =>
 			verticesById.get(vertexId),
@@ -637,45 +653,59 @@ function buildPolygonSetRenderGeometry(
 			continue;
 		}
 
-		const surfaceId = normalizeSurfaceId(polygon.posSurface);
-		if (surfaceId !== null) {
-			surfaceIdSet.add(surfaceId);
-		}
+		for (const renderSide of renderSides) {
+			if (renderSide.surfaceId !== null) {
+				surfaceIdSet.add(renderSide.surfaceId);
+			}
 
-		for (
-			let vertexIndex = 1;
-			vertexIndex < polygon.vertexIds.length - 1;
-			vertexIndex += 1
-		) {
-			const triangleVertexOffsets = [0, vertexIndex, vertexIndex + 1];
-			triangles.push({
-				polygonId: polygon.id,
-				surfaceId,
-				firstVertex: positions.length / 3,
-			});
+			for (
+				let vertexIndex = 1;
+				vertexIndex < polygon.vertexIds.length - 1;
+				vertexIndex += 1
+			) {
+				const triangleVertexOffsets = renderSide.vertexOffsets(vertexIndex);
+				triangles.push({
+					polygonId: polygon.id,
+					surfaceId: renderSide.surfaceId,
+					firstVertex: positions.length / 3,
+				});
 
-			for (const polygonVertexOffset of triangleVertexOffsets) {
-				const vertex = polygonVertices[polygonVertexOffset];
-				if (!vertex) {
-					throw new Error(
-						`${source.sourceLabel} polygon ${polygon.id} failed internal vertex validation.`,
+				for (const polygonVertexOffset of triangleVertexOffsets) {
+					const vertex = polygonVertices[polygonVertexOffset];
+					if (!vertex) {
+						throw new Error(
+							`${source.sourceLabel} polygon ${polygon.id} failed internal vertex validation.`,
+						);
+					}
+
+					const renderPosition = convertAcVectorToRenderSpace(vertex.origin);
+					const renderNormal = convertAcVectorToRenderSpace(vertex.normal);
+					positions.push(
+						renderPosition.x,
+						renderPosition.y,
+						renderPosition.z,
 					);
+					normals.push(
+						scaleNormalComponent(renderNormal.x, renderSide.normalScale),
+						scaleNormalComponent(renderNormal.y, renderSide.normalScale),
+						scaleNormalComponent(renderNormal.z, renderSide.normalScale),
+					);
+					const uvIndex = renderSide.uvIndices[polygonVertexOffset];
+					const uv = vertex.uvs[uvIndex];
+					if (!uv) {
+						throw new Error(
+							`${source.sourceLabel} polygon ${polygon.id} references missing UV ${uvIndex} on vertex ${vertex.id}.`,
+						);
+					}
+					uvs.push(uv.u, uv.v);
+
+					minX = Math.min(minX, renderPosition.x);
+					minY = Math.min(minY, renderPosition.y);
+					minZ = Math.min(minZ, renderPosition.z);
+					maxX = Math.max(maxX, renderPosition.x);
+					maxY = Math.max(maxY, renderPosition.y);
+					maxZ = Math.max(maxZ, renderPosition.z);
 				}
-
-				const renderPosition = convertAcVectorToRenderSpace(vertex.origin);
-				const renderNormal = convertAcVectorToRenderSpace(vertex.normal);
-				positions.push(renderPosition.x, renderPosition.y, renderPosition.z);
-				normals.push(renderNormal.x, renderNormal.y, renderNormal.z);
-				const uvIndex = polygon.posUvIndices[polygonVertexOffset] ?? 0;
-				const uv = vertex.uvs[uvIndex] ?? { u: 0, v: 0 };
-				uvs.push(uv.u, uv.v);
-
-				minX = Math.min(minX, renderPosition.x);
-				minY = Math.min(minY, renderPosition.y);
-				minZ = Math.min(minZ, renderPosition.z);
-				maxX = Math.max(maxX, renderPosition.x);
-				maxY = Math.max(maxY, renderPosition.y);
-				maxZ = Math.max(maxZ, renderPosition.z);
 			}
 		}
 	}
@@ -700,6 +730,56 @@ function buildPolygonSetRenderGeometry(
 						max: { x: maxX, y: maxY, z: maxZ },
 					},
 	};
+}
+
+function scaleNormalComponent(value: number, scale: 1 | -1): number {
+	const scaled = value * scale;
+	return scaled === 0 ? 0 : scaled;
+}
+
+function derivePolygonRenderSides(
+	sourceLabel: string,
+	polygon: GfxObjPayloadDto["drawingPolygons"][number],
+): PolygonRenderSide[] {
+	const sides: PolygonRenderSide[] = [];
+	if ((polygon.stippling & STIPPLING_NO_POS) === 0) {
+		assertUvIndicesAvailable(sourceLabel, polygon, "positive");
+		sides.push({
+			surfaceId: normalizeSurfaceId(polygon.posSurface),
+			uvIndices: polygon.posUvIndices,
+			vertexOffsets: (vertexIndex) => [0, vertexIndex, vertexIndex + 1],
+			normalScale: 1,
+		});
+	}
+
+	if (
+		polygon.sidesType === CULL_MODE_CLOCKWISE &&
+		(polygon.stippling & STIPPLING_NO_NEG) === 0
+	) {
+		assertUvIndicesAvailable(sourceLabel, polygon, "negative");
+		sides.push({
+			surfaceId: normalizeSurfaceId(polygon.negSurface),
+			uvIndices: polygon.negUvIndices,
+			vertexOffsets: (vertexIndex) => [0, vertexIndex + 1, vertexIndex],
+			normalScale: -1,
+		});
+	}
+
+	return sides;
+}
+
+function assertUvIndicesAvailable(
+	sourceLabel: string,
+	polygon: GfxObjPayloadDto["drawingPolygons"][number],
+	side: "positive" | "negative",
+): void {
+	const uvIndices =
+		side === "positive" ? polygon.posUvIndices : polygon.negUvIndices;
+	if (uvIndices.length !== polygon.vertexIds.length) {
+		throw new Error(
+			`${sourceLabel} polygon ${polygon.id} has a renderable ${side} side but provides ${uvIndices.length} UV indices for ${polygon.vertexIds.length} vertices.`,
+		);
+	}
 }
 
 function convertAcVectorToRenderSpace(vector: {

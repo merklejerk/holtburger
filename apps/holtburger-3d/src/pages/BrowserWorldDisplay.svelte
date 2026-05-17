@@ -273,7 +273,6 @@
 				? null
 				: {
 						envCellIds: linkedOutdoorEnvCellIds,
-						focusLandblockId: outdoorFocusLandblockId,
 					},
 			structuredInteriorCoverage,
 			structuredInteriorCoverageOptions,

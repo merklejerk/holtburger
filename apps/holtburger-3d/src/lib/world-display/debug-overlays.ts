@@ -35,8 +35,6 @@ export interface CellDebugOverlay {
 	isFocus: boolean;
 	isSelected: boolean;
 	chunkLocalPlacement: StructuredInteriorCell["chunkLocalPlacement"];
-	localPlacement: StructuredInteriorCell["localPlacement"];
-	landblockWorldOffset: StructuredInteriorCell["landblockWorldOffset"];
 	bounds: { min: Vec3Dto; max: Vec3Dto } | null;
 }
 
@@ -51,8 +49,6 @@ export interface PortalDebugOverlay {
 	flags: number;
 	isSelected: boolean;
 	chunkLocalPlacement: StructuredInteriorCell["chunkLocalPlacement"];
-	localPlacement: StructuredInteriorCell["localPlacement"];
-	landblockWorldOffset: StructuredInteriorCell["landblockWorldOffset"];
 	points: Vec3Dto[];
 	colorKey: string;
 }
@@ -132,8 +128,6 @@ function createCellOverlay(
 		isFocus: cell.isFocus,
 		isSelected,
 		chunkLocalPlacement: cell.chunkLocalPlacement,
-		localPlacement: cell.localPlacement,
-		landblockWorldOffset: cell.landblockWorldOffset,
 		bounds: cell.renderGeometry.bounds,
 	};
 }
@@ -175,8 +169,6 @@ function createPortalOverlays(
 			flags: portal.flags,
 			isSelected: portal.portalId === selectedPortalId,
 			chunkLocalPlacement: cell.chunkLocalPlacement,
-			localPlacement: cell.localPlacement,
-			landblockWorldOffset: cell.landblockWorldOffset,
 			points,
 			colorKey: `${cell.debugColorKey}:portal:${portal.portalId}:${targetStatus}`,
 		};

@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 8 complete; Phase 9 is the next implementation step.
+Status: Phase 9 complete; renderer-local rebasing spike is complete.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -902,6 +902,8 @@ Refined follow-up for Phase 9:
 
 ### Phase 9: Cleanup And Simplification Pass
 
+Status: complete.
+
 After the mechanics are working, make a focused cleanup pass before exiting the spike:
 
 - remove duplicated offset math that should now flow through shared helpers
@@ -913,6 +915,75 @@ After the mechanics are working, make a focused cleanup pass before exiting the 
   lifecycle details
 - update this plan and the local-world simulation exploration plan with final status, decisions,
   course corrections, and adjusted next steps
+
+Implemented progress:
+
+- Removed the static renderable compatibility grouping `partsByGfxAssetId`; static renderer-facing
+  consumers now use only chunk-plus-gfx groups via `partsByRenderChunkAndGfxAssetId`.
+- Removed static renderable compatibility placement fields `instancePlacement` and
+  `landblockWorldOffset`; static part matrices now depend on `chunkLocalInstancePlacement` plus
+  parent/part placements only.
+- Removed the old static `deriveFocusRelativeAcPlacementOffset` path and its wrapper
+  `deriveLandblockWorldOffset`.
+- Removed structured-interior duplicate `localPlacement` and `landblockWorldOffset` fields from the
+  scene model and debug overlay DTOs; `chunkLocalPlacement` is now the sole renderer-facing placement
+  field for structured cells and portal/cell overlays.
+- Removed terrain tile `offsetX`/`offsetY` and `worldOffsetX`/`worldOffsetY`; terrain scene tiles now
+  expose chunk identity plus chunk-local placement, and sort order derives landblock-grid deltas
+  locally without storing them as renderer-facing fields.
+- Renamed the internal static source-instance placement field from `localPlacement` to
+  `chunkLocalInstancePlacement` so normalized static instances do not carry both source-style and
+  renderer-style placement names.
+- Made `RenderSpatialItem.chunkKey` required and simplified the spatial index so every item resolves
+  through a chunk transform. Missing transforms still fail visibly.
+- Removed empty broad `terrain`, `static-renderable`, `structured-interior`, and `debug-overlay`
+  roots from `WorldDisplay`. Scene bounds now expand the chunk-root container directly.
+- Renamed the render metric from `staticRenderableGeometryCount` to
+  `staticRenderableInstancedGroupCount` so the field describes the chunked instancing reality.
+- Updated tests to assert chunk-local placement and chunk-plus-gfx grouping instead of preserving
+  removed compatibility fields.
+
+Decisions:
+
+- Kept `RenderCameraFrame` in `render-chunks.ts` because it supports the generic
+  `convertCameraFrameBetweenAnchors` helper used by camera rebase tests; it is a narrow structural
+  constraint rather than a public scene-frame abstraction.
+- Did not move rebase policy out of `BrowserWorldDisplay` in this phase. The remaining policy there
+  is app/mode coordination, while `WorldDisplay` now owns only chunk-root mechanics and neutral
+  renderer queries.
+
+Course corrections:
+
+- The cleanup scan found structured-interior `landblockWorldOffset` was the same shim as the static
+  offset path, not an independent requirement. Removing it also let debug overlays become purely
+  chunk-local.
+- The spatial-index test fixtures had been relying on unchunked items for convenience. The tests now
+  install explicit default chunk transforms, matching production expectations instead of keeping the
+  optional field alive.
+- The old broad roots were confirmed empty after Phase 6/7 migrations, so removing them simplified
+  lifecycle and bounds calculation without changing object ownership.
+- Follow-up review removed two over-conservative leftovers: terrain no longer exposes stored focus
+  delta/world offset fields, and static source normalization no longer keeps a `localPlacement`
+  bridge name after converting prepared asset placement into chunk-local renderer placement.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/static-renderables.test.ts src/lib/world-display/static-renderable-geometry.test.ts src/lib/world-display/render-spatial-index.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/debug-overlays.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm exec prettier -- --check src/lib/world-display/WorldDisplay.svelte src/lib/world-display/debug-overlays.ts src/lib/world-display/debug-overlays.test.ts src/lib/world-display/render-chunks.ts src/lib/world-display/render-spatial-index.ts src/lib/world-display/render-spatial-index.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/renderer-contract.ts src/lib/world-display/static-renderable-geometry.test.ts src/lib/world-display/static-renderables.ts src/lib/world-display/static-renderables.test.ts src/lib/world-display/structured-interior-scene.ts src/lib/world-display/structured-interior-scene.test.ts src/pages/BrowserWorldDisplay.svelte`
+- `npm run test:ts -- src/lib/world-display/terrain-scene.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-renderables.test.ts src/lib/world-display/static-renderable-geometry.test.ts`
+- `npm exec prettier -- --check src/lib/world-display/terrain-scene.ts src/lib/world-display/terrain-scene.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-renderables.ts`
+
+Remaining follow-up:
+
+- Consider renaming `partsByRenderChunkAndGfxAssetId` to `partsByInstancedGroupKey` now that the old
+  flat `partsByGfxAssetId` contrast no longer exists.
+- Add host-side camera-hint semantics when the host starts consuming rendered camera hints for
+  behavior rather than storing acknowledgements.
+- Use the completed chunk-root model as input to the local-world simulation exploration before
+  implementing walkabout residency/collision.
 
 ## Risks And Footguns
 

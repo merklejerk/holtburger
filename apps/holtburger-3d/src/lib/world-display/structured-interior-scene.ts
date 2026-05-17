@@ -22,14 +22,12 @@ import {
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
 import { formatHex32 } from "../landblocks";
 import {
-	deriveFocusRelativeAcPlacementOffset,
 	deriveStructuredCellRenderChunk,
 	type RenderChunkPlacement,
 } from "./render-chunks";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
-	focusLandblockId: number;
 }
 
 export interface StructuredInteriorCell {
@@ -40,8 +38,6 @@ export interface StructuredInteriorCell {
 	cellStructureId: number;
 	isFocus: boolean;
 	chunkLocalPlacement: PlacementTransformDto;
-	localPlacement: PlacementTransformDto;
-	landblockWorldOffset: { x: number; y: number; z: number };
 	surfaceIds: number[];
 	portalCount: number;
 	portals: PreparedIndoorCellPortal[];
@@ -98,7 +94,6 @@ export function deriveStructuredInteriorSceneModel(
 						structuredInteriorCoverageOptions,
 					).envCellIds,
 				assetState,
-				linkedOutdoorInteriors.focusLandblockId,
 			);
 		}
 
@@ -163,7 +158,6 @@ function deriveStructuredInteriorSceneForEnvCells(
 	focusEnvCellId: number | null,
 	activeEnvCellIds: number[],
 	assetState: AssetChannelState,
-	outdoorFocusLandblockId: number | null = null,
 ): StructuredInteriorSceneModel {
 	const missingEnvCellAssetIds = new Set<string>();
 	const missingEnvironmentAssetIds = new Set<string>();
@@ -206,7 +200,6 @@ function deriveStructuredInteriorSceneForEnvCells(
 		}
 
 		const renderChunk = deriveStructuredCellRenderChunk(envCellId);
-		const localPlacement = envCellAsset.payload.localPlacement;
 		cells.push({
 			renderKey: `${envCellAssetId}/${environmentAssetId}/cell-structure/${formatHex32(cellStructureId)}`,
 			envCellId,
@@ -214,12 +207,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 			environmentId,
 			cellStructureId,
 			isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
-			chunkLocalPlacement: localPlacement,
-			localPlacement,
-			landblockWorldOffset:
-				outdoorFocusLandblockId === null
-					? { x: 0, y: 0, z: 0 }
-					: deriveLandblockWorldOffset(envCellId, outdoorFocusLandblockId),
+			chunkLocalPlacement: envCellAsset.payload.localPlacement,
 			surfaceIds: envCellAsset.payload.surfaceIds,
 			portalCount: envCellAsset.payload.portalCount,
 			portals: envCellAsset.payload.portals,
@@ -310,15 +298,4 @@ function emptyStructuredInteriorSceneModel(
 
 function formatEnvCellLabel(envCellId: number): string {
 	return `0x${formatHex32(envCellId)}`;
-}
-
-function deriveLandblockWorldOffset(
-	envCellId: number,
-	focusLandblockId: number,
-): { x: number; y: number; z: number } {
-	const renderChunk = deriveStructuredCellRenderChunk(envCellId);
-	return deriveFocusRelativeAcPlacementOffset(
-		renderChunk.chunkLandblockId,
-		focusLandblockId,
-	);
 }

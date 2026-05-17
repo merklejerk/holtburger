@@ -80,9 +80,13 @@ Current findings:
 - The renderer already uses an implicit focus-relative frame for outdoor terrain. Terrain tiles are
   placed by landblock delta around the current focus rather than by a single global Dereth-scale
   coordinate.
-- That frame is not modeled explicitly, so camera hints, inspector hit points, spatial-index picks,
-  labels, debug overlays, and future walkabout camera state can accidentally treat render-local
-  coordinates as canonical AC-space coordinates.
+- The renderer-local rebasing spike is complete. The 3D app now has explicit render anchors,
+  landblock chunk roots, chunk-local terrain/static/interior/debug geometry, chunk-transformed
+  render-spatial queries, anchor-aware camera hints, and metadata-only diagnostic selections.
+- Before the rebasing spike, that frame was not modeled explicitly, so camera hints, inspector hit
+  points, spatial-index picks, labels, debug overlays, and future walkabout camera state could
+  accidentally treat render-local coordinates as canonical AC-space coordinates. That risk is now
+  reduced for current renderer touchpoints, but future walkabout work must keep the same boundary.
 - Rebuilding the entire render scene from canonical preimages on every rebase is not obviously safer
   than shifting live render data. It would require every render/debug/selection feature to retain a
   perfect reconstruction source even when the renderer already owns complete working scene objects.

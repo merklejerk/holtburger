@@ -7,7 +7,7 @@ import {
 
 describe("createLinearRenderSpatialIndex", () => {
 	it("replaces and clears owner-scoped items", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("owner-a", [
 			createTerrainItem("near", "owner-a", 4, 6),
 		]);
@@ -22,7 +22,7 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 
 	it("filters picks by kind mask", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [
 			createTerrainItem("terrain", "owner", 4, 6),
 			createPortalItem("portal", "owner", 2, 3),
@@ -35,7 +35,7 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 
 	it("filters picks by owner key when requested", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("mesh-owner", [
 			createTerrainItem("mesh-cell", "mesh-owner", 2, 4),
 		]);
@@ -53,7 +53,7 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 
 	it("returns the nearest matching pick", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [
 			createTerrainItem("far", "owner", 8, 10),
 			createTerrainItem("near", "owner", 2, 4),
@@ -66,7 +66,7 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 
 	it("returns conservative frustum matches by kind mask", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [
 			createTerrainItem("inside", "owner", 2, 4),
 			createTerrainItem("outside", "owner", 12, 14),
@@ -91,7 +91,7 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 
 	it("returns the same renderer-space ray hit after a chunk transform update", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [
 			createChunkedTerrainItem("chunked", "owner", "landblock/da55ffff", 2, 4),
 		]);
@@ -119,7 +119,7 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 
 	it("respects chunk transforms when querying frustums", () => {
-		const index = createLinearRenderSpatialIndex();
+		const index = createTestIndex();
 		index.replaceOwnerItems("owner", [
 			createChunkedTerrainItem("visible", "owner", "landblock/da55ffff", 2, 4),
 			createChunkedTerrainItem("hidden", "owner", "landblock/db55ffff", 2, 4),
@@ -161,6 +161,16 @@ describe("createLinearRenderSpatialIndex", () => {
 	});
 });
 
+const DEFAULT_CHUNK_KEY = "landblock/da55ffff";
+
+function createTestIndex() {
+	const index = createLinearRenderSpatialIndex();
+	index.replaceChunkTransforms([
+		createChunkTransform(DEFAULT_CHUNK_KEY, { x: 0, y: 0, z: 0 }),
+	]);
+	return index;
+}
+
 function createTerrainItem(
 	id: string,
 	ownerKey: string,
@@ -175,6 +185,7 @@ function createTerrainItem(
 		id,
 		kind: "terrain",
 		ownerKey,
+		chunkKey: DEFAULT_CHUNK_KEY,
 		broadphaseBounds: bounds,
 		pickShape: { kind: "box", bounds },
 		metadata: {
@@ -199,7 +210,7 @@ function createChunkedTerrainItem(
 }
 
 function createChunkTransform(
-	chunkKey: NonNullable<RenderSpatialItem["chunkKey"]>,
+	chunkKey: RenderSpatialItem["chunkKey"],
 	offset: { x: number; y: number; z: number },
 ) {
 	return {
@@ -223,6 +234,7 @@ function createPortalItem(
 		id,
 		kind: "portal",
 		ownerKey,
+		chunkKey: DEFAULT_CHUNK_KEY,
 		broadphaseBounds: bounds,
 		pickShape: { kind: "box", bounds },
 		metadata: {

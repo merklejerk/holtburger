@@ -77,6 +77,8 @@
 		structuredCellSpatialItemId,
 		terrainSpatialItemId,
 	} from "./render-spatial-ids";
+	import type { RenderChunkTransform } from "./render-anchor";
+	import type { RenderLandblockAnchor } from "./render-chunks";
 
 	let {
 		assetState,
@@ -84,6 +86,8 @@
 		staticRenderableScene,
 		structuredInteriorScene,
 		debugOverlayScene,
+		activeRenderAnchor = null,
+		renderChunkTransforms = [],
 		renderSpatialQuery = null,
 		controlledCameraFrame = null,
 		onCameraFrameChange,
@@ -94,6 +98,8 @@
 		staticRenderableScene: StaticRenderableSceneModel;
 		structuredInteriorScene: StructuredInteriorSceneModel;
 		debugOverlayScene: WorldDebugOverlayModel;
+		activeRenderAnchor?: RenderLandblockAnchor | null;
+		renderChunkTransforms?: RenderChunkTransform[];
 		renderSpatialQuery?: RenderSpatialIndexQuery | null;
 		controlledCameraFrame?: SceneCameraFrame | null;
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
@@ -134,8 +140,14 @@
 			0,
 		),
 	);
+	const renderAnchorDebugKey = $derived(
+		activeRenderAnchor === null
+			? "none"
+			: `${activeRenderAnchor.landblockId}:${renderChunkTransforms.length}`,
+	);
 
 	$effect(() => {
+		void renderAnchorDebugKey;
 		if (!viewportHost) {
 			return;
 		}
@@ -555,9 +567,12 @@
 		}
 
 		if (controlledCameraFrame) {
-			setActiveCameraFrame(resolveControlledCameraFrame(controlledCameraFrame), {
-				notifyParent: false,
-			});
+			setActiveCameraFrame(
+				resolveControlledCameraFrame(controlledCameraFrame),
+				{
+					notifyParent: false,
+				},
+			);
 			reportRenderMetrics();
 			return;
 		}
@@ -997,7 +1012,9 @@
 	): Group {
 		const group = new Group();
 		const material = createSelectedDebugEdgeMaterial(color);
-		const vectors = points.map((point) => new Vector3(point.x, point.y, point.z));
+		const vectors = points.map(
+			(point) => new Vector3(point.x, point.y, point.z),
+		);
 		const segmentCount = closed ? vectors.length : vectors.length - 1;
 		for (let index = 0; index < segmentCount; index += 1) {
 			const start = vectors[index];

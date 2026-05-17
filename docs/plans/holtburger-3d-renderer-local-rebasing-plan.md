@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 2 complete; Phase 3 is the next implementation step.
+Status: Phase 3 complete; Phase 4 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -407,6 +407,8 @@ Refined follow-up for Phase 3:
 
 ### Phase 3: BrowserWorldDisplay Render Anchor Plumbing
 
+Status: complete.
+
 Make `BrowserWorldDisplay` the initial focus-anchor coordinator before chunk roots or spatial chunk
 transforms depend on it.
 
@@ -425,6 +427,73 @@ First pass:
 
 This phase should mostly lift the existing `outdoorFocusLandblockId` into a named render-anchor
 coordination path. It should not change scene membership by itself.
+
+Implemented progress:
+
+- Added `apps/holtburger-3d/src/lib/world-display/render-anchor.ts` as the app-local render-anchor
+  coordination helper.
+- Added explicit render-anchor candidate derivation:
+  - browser destinations produce `browser-destination` candidates and commit immediately
+  - runtime residency produces `runtime-residency` candidates when no browser destination is active
+  - browser free-camera movement is not a focus source
+- Added residency retain-radius modeling with a default radius of `3` landblocks and Chebyshev
+  landblock distance. Residency-backed candidates inside the radius preserve the current committed
+  anchor.
+- Added deterministic render chunk transform derivation from a committed `RenderLandblockAnchor`
+  plus the scene models' Phase 2 `renderChunk` fields.
+- Wired `BrowserWorldDisplay` to own the committed `activeRenderAnchor`, track its source, derive
+  active chunk placements from terrain, structured interiors, debug overlays, and static
+  renderables, and derive one shared chunk transform set.
+- Exposed the active render anchor and chunk transform set to `WorldDisplay` through additive props.
+  `WorldDisplay` accepts them but does not apply root transforms yet; that remains Phase 4.
+- Kept render-spatial-index item replacement unchanged. The transform set is derived in
+  `BrowserWorldDisplay` beside spatial item population so Phase 5 can add an explicit sink without
+  re-deriving anchor facts.
+- Added tests for explicit browser anchors, runtime-residency fallback anchors, retain-radius
+  commits, deterministic chunk transforms, and outdoor coordinate destination resolution.
+
+Decisions:
+
+- `BrowserWorldDisplay` is the concrete owner of the committed anchor for now. The helper module is
+  policy-only and does not own state.
+- Browser destinations always bypass the retain radius, including indoor env-cell destinations,
+  because they are explicit user focus choices.
+- Runtime residency uses the retain-radius policy immediately even though the current browser flow
+  usually changes focus through explicit destinations. This keeps the future walkabout/client
+  behavior modeled without making camera movement a focus source.
+- Chunk transforms are sorted and de-duplicated by `chunkKey`; duplicate layer ownership of the same
+  chunk does not produce duplicate transforms.
+- `WorldDisplay` receives anchor data now but deliberately treats it as inert staging data until the
+  chunk-root manager lands.
+
+Course corrections:
+
+- The commit helper was adjusted to preserve the existing anchor object when the candidate
+  landblock is unchanged. That prevents Svelte effects from repeatedly committing fresh object
+  identities for stable explicit destinations.
+- No render-spatial-index transform API was added in this phase. Adding a no-op or partial sink now
+  would create misleading ownership; Phase 5 remains the point where transform storage/query
+  behavior becomes real.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/render-anchor.test.ts src/lib/world-display/render-chunks.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 4:
+
+- `WorldDisplay` should consume the already-passed `activeRenderAnchor` and `renderChunkTransforms`
+  props to create/update chunk roots.
+- The chunk-root manager should use the transform set as its source of truth and avoid deriving
+  offsets independently inside individual layer sync functions.
+- Existing terrain/static/interior/debug layer roots should remain compatibility parents while
+  individual layers migrate under chunk roots.
+- Camera bounds and render metrics must include chunk-rooted content without assuming every chunk
+  has pickable spatial items.
+- Do not migrate static instanced batching in Phase 4; static chunk-plus-asset batching remains
+  Phase 7.
 
 ### Phase 4: Chunk Root Manager In WorldDisplay
 

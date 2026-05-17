@@ -49,16 +49,33 @@
 	import {
 		deriveStaticRenderableSceneModel,
 		isPreparedGfxObjAsset,
+		type StaticRenderableSceneModel,
 	} from "../lib/world-display/static-renderables";
-	import { deriveTerrainSceneModel } from "../lib/world-display/terrain-scene";
-	import { deriveWorldDebugOverlayModel } from "../lib/world-display/debug-overlays";
-	import { deriveStructuredInteriorSceneModel } from "../lib/world-display/structured-interior-scene";
+	import {
+		deriveTerrainSceneModel,
+		type TerrainSceneModel,
+	} from "../lib/world-display/terrain-scene";
+	import {
+		deriveWorldDebugOverlayModel,
+		type WorldDebugOverlayModel,
+	} from "../lib/world-display/debug-overlays";
+	import {
+		deriveStructuredInteriorSceneModel,
+		type StructuredInteriorSceneModel,
+	} from "../lib/world-display/structured-interior-scene";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
 	import {
 		createLinearRenderSpatialIndex,
 		type RenderSpatialPick,
 	} from "../lib/world-display/render-spatial-index";
+	import {
+		commitRenderAnchorCandidate,
+		deriveRenderAnchorCandidate,
+		deriveRenderChunkTransforms,
+		type RenderAnchorSource,
+		type RenderChunkTransform,
+	} from "../lib/world-display/render-anchor";
 	import {
 		DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
@@ -67,6 +84,10 @@
 		deriveStructuredInteriorSpatialItems,
 		deriveTerrainSpatialItems,
 	} from "../lib/world-display/render-spatial-scene";
+	import type {
+		RenderChunkPlacement,
+		RenderLandblockAnchor,
+	} from "../lib/world-display/render-chunks";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
 	interface BrowserPanelRow {
@@ -137,6 +158,8 @@
 		moved: boolean;
 	} | null>(null);
 	let activeCameraSceneKey = $state<string | null>(null);
+	let activeRenderAnchor = $state<RenderLandblockAnchor | null>(null);
+	let activeRenderAnchorSource = $state<RenderAnchorSource | null>(null);
 	let renderMetricsEventCount = $state(0);
 	let cameraFrameApplyCount = $state(0);
 	let pointerInputEventCount = $state(0);
@@ -151,6 +174,9 @@
 	const CAMERA_HINT_INTERVAL_MS = 250;
 	const browserCameraSceneKey = $derived(
 		describeBrowserCameraSceneKey(browserDestination, runtimeBatch),
+	);
+	const renderAnchorCandidate = $derived(
+		deriveRenderAnchorCandidate(runtimeBatch, browserDestination),
 	);
 
 	const outdoorFocusLandblockId = $derived(
@@ -281,6 +307,20 @@
 	const debugOverlaySpatialItems = $derived(
 		deriveDebugOverlaySpatialItems(debugOverlayScene),
 	);
+	const activeRenderChunkPlacements = $derived(
+		collectActiveRenderChunkPlacements(
+			terrainScene,
+			structuredInteriorScene,
+			debugOverlayScene,
+			staticRenderableScene,
+		),
+	);
+	const activeRenderChunkTransforms = $derived<RenderChunkTransform[]>(
+		deriveRenderChunkTransforms(
+			activeRenderAnchor,
+			activeRenderChunkPlacements,
+		),
+	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
 			(total, tile) => total + tile.mesh.vertices.length,
@@ -396,6 +436,17 @@
 			pendingCameraHint,
 		}),
 	);
+	$effect(() => {
+		const commit = commitRenderAnchorCandidate(
+			activeRenderAnchor,
+			renderAnchorCandidate,
+		);
+		activeRenderAnchor = commit.anchor;
+		activeRenderAnchorSource = commit.source;
+	});
+	$effect(() => {
+		void activeRenderChunkTransforms;
+	});
 	$effect(() => {
 		renderSpatialIndex.replaceOwnerItems(
 			TERRAIN_SPATIAL_OWNER_KEY,
@@ -852,6 +903,28 @@
 		return `0x${otherPortalId.toString(16).padStart(4, "0")}`;
 	}
 
+	function collectActiveRenderChunkPlacements(
+		terrain: TerrainSceneModel,
+		structuredInterior: StructuredInteriorSceneModel,
+		debugOverlay: WorldDebugOverlayModel,
+		staticRenderables: StaticRenderableSceneModel,
+	): RenderChunkPlacement[] {
+		const chunksByKey = new Map<string, RenderChunkPlacement>();
+		for (const chunk of [
+			...terrain.tiles.map((tile) => tile.renderChunk),
+			...structuredInterior.cells.map((cell) => cell.renderChunk),
+			...debugOverlay.cells.map((cell) => cell.renderChunk),
+			...debugOverlay.portals.map((portal) => portal.renderChunk),
+			...staticRenderables.parts.map((part) => part.renderChunk),
+		]) {
+			chunksByKey.set(chunk.chunkKey, chunk);
+		}
+
+		return [...chunksByKey.values()].sort((left, right) =>
+			left.chunkKey.localeCompare(right.chunkKey),
+		);
+	}
+
 	function formatPortalFlags(flags: number): string {
 		const knownFlags = [
 			{ mask: 0x1, label: "ExactMatch" },
@@ -1149,7 +1222,11 @@
 	}
 
 	function describeCameraPipelineDebugState(): string {
-		return `metrics ${renderMetricsEventCount}; frames ${cameraFrameApplyCount}; pointer ${pointerInputEventCount}; keys ${keyboardInputEventCount}; focus ${document.activeElement?.tagName.toLowerCase() ?? "none"}.`;
+		const renderAnchorText =
+			activeRenderAnchor === null
+				? "none"
+				: `${formatHex32(activeRenderAnchor.landblockId)} via ${activeRenderAnchorSource ?? "unknown"}; chunks ${activeRenderChunkTransforms.length}`;
+		return `metrics ${renderMetricsEventCount}; frames ${cameraFrameApplyCount}; pointer ${pointerInputEventCount}; keys ${keyboardInputEventCount}; anchor ${renderAnchorText}; focus ${document.activeElement?.tagName.toLowerCase() ?? "none"}.`;
 	}
 
 	function describeAssetDebugState(): string {
@@ -1281,6 +1358,8 @@
 		{staticRenderableScene}
 		{structuredInteriorScene}
 		{debugOverlayScene}
+		{activeRenderAnchor}
+		renderChunkTransforms={activeRenderChunkTransforms}
 		renderSpatialQuery={renderSpatialIndex}
 		controlledCameraFrame={browserCameraFrame}
 		onCameraFrameChange={handleRendererCameraFrameChange}

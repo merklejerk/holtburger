@@ -13,14 +13,21 @@ import {
 	formatLandblockLabel,
 	getOutdoorLandblockCoords,
 } from "../landblocks";
+import {
+	deriveChunkRootOffset,
+	deriveTerrainTileRenderChunk,
+	type RenderChunkPlacement,
+} from "./render-chunks";
 
 export interface TerrainSceneTile {
 	assetId: string;
 	landblockId: number;
+	renderChunk: RenderChunkPlacement;
 	label: string;
 	isFocus: boolean;
 	offsetX: number;
 	offsetY: number;
+	chunkLocalOffset: { x: number; y: number; z: number };
 	worldOffsetX: number;
 	worldOffsetY: number;
 	mesh: PreparedTerrainMesh;
@@ -97,19 +104,23 @@ export function deriveTerrainSceneModel(
 			const landblockCoords = getOutdoorLandblockCoords(landblockId);
 			const offsetX = landblockCoords.x - focusCoords.x;
 			const offsetY = landblockCoords.y - focusCoords.y;
-			const landblockSpan =
-				(asset.payload.terrainMesh.gridSize - 1) *
-				asset.payload.terrainMesh.tileSize;
+			const renderChunk = deriveTerrainTileRenderChunk(landblockId);
+			const chunkRootOffset = deriveChunkRootOffset(
+				renderChunk.chunkLandblockId,
+				focusLandblockId,
+			);
 
 			return {
 				assetId: asset.request.assetId,
 				landblockId,
+				renderChunk,
 				label: formatLandblockLabel(landblockId),
 				isFocus: landblockId === focusLandblockId,
 				offsetX,
 				offsetY,
-				worldOffsetX: offsetX * landblockSpan,
-				worldOffsetY: offsetY * landblockSpan,
+				chunkLocalOffset: { x: 0, y: 0, z: 0 },
+				worldOffsetX: chunkRootOffset.x,
+				worldOffsetY: -chunkRootOffset.z,
 				mesh: asset.payload.terrainMesh,
 				dataSource: inferTerrainDataSource(asset),
 			};

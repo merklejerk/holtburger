@@ -20,12 +20,12 @@ import {
 	type StructuredInteriorCoverageOptions,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
+import { formatHex32 } from "../landblocks";
 import {
-	formatHex32,
-	getOutdoorLandblockCoords,
-	normalizeOutdoorLandblockId,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-} from "../landblocks";
+	deriveFocusRelativeAcPlacementOffset,
+	deriveStructuredCellRenderChunk,
+	type RenderChunkPlacement,
+} from "./render-chunks";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
@@ -35,9 +35,11 @@ export interface LinkedOutdoorInteriorSelection {
 export interface StructuredInteriorCell {
 	renderKey: string;
 	envCellId: number;
+	renderChunk: RenderChunkPlacement;
 	environmentId: number;
 	cellStructureId: number;
 	isFocus: boolean;
+	chunkLocalPlacement: PlacementTransformDto;
 	localPlacement: PlacementTransformDto;
 	landblockWorldOffset: { x: number; y: number; z: number };
 	surfaceIds: number[];
@@ -203,13 +205,17 @@ function deriveStructuredInteriorSceneForEnvCells(
 			continue;
 		}
 
+		const renderChunk = deriveStructuredCellRenderChunk(envCellId);
+		const localPlacement = envCellAsset.payload.localPlacement;
 		cells.push({
 			renderKey: `${envCellAssetId}/${environmentAssetId}/cell-structure/${formatHex32(cellStructureId)}`,
 			envCellId,
+			renderChunk,
 			environmentId,
 			cellStructureId,
 			isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
-			localPlacement: envCellAsset.payload.localPlacement,
+			chunkLocalPlacement: localPlacement,
+			localPlacement,
 			landblockWorldOffset:
 				outdoorFocusLandblockId === null
 					? { x: 0, y: 0, z: 0 }
@@ -310,16 +316,9 @@ function deriveLandblockWorldOffset(
 	envCellId: number,
 	focusLandblockId: number,
 ): { x: number; y: number; z: number } {
-	const owningCoords = getOutdoorLandblockCoords(
-		normalizeOutdoorLandblockId(envCellId),
+	const renderChunk = deriveStructuredCellRenderChunk(envCellId);
+	return deriveFocusRelativeAcPlacementOffset(
+		renderChunk.chunkLandblockId,
+		focusLandblockId,
 	);
-	const focusCoords = getOutdoorLandblockCoords(
-		normalizeOutdoorLandblockId(focusLandblockId),
-	);
-
-	return {
-		x: (owningCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		y: (owningCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		z: 0,
-	};
 }

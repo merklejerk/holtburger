@@ -67,7 +67,7 @@
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
 	import {
 		createLinearRenderSpatialIndex,
-		type RenderSpatialPick,
+		type RenderSpatialMetadata,
 	} from "../lib/world-display/render-spatial-index";
 	import {
 		commitRenderAnchorCandidate,
@@ -145,7 +145,7 @@
 	let browserCameraFrame = $state<SceneCameraFrame | null>(null);
 	let cameraAck = $state<CameraHintAckDto | null>(null);
 	let rayPickResponse = $state<RayPickResponseDto | null>(null);
-	let diagnosticSelection = $state<RenderSpatialPick | null>(null);
+	let diagnosticSelection = $state<RenderSpatialMetadata | null>(null);
 	let lastCameraHintAt = $state<number | null>(null);
 	let trailingCameraHint = $state<ReturnType<typeof buildCameraHint> | null>(
 		null,
@@ -280,15 +280,15 @@
 		),
 	);
 	const selectedDiagnosticPortalId = $derived(
-		diagnosticSelection?.item.metadata.kind === "portal"
-			? diagnosticSelection.item.metadata.portalId
+		diagnosticSelection?.kind === "portal"
+			? diagnosticSelection.portalId
 			: null,
 	);
 	const selectedDiagnosticEnvCellId = $derived(
-		diagnosticSelection?.item.metadata.kind === "structured-cell"
-			? diagnosticSelection.item.metadata.envCellId
-			: diagnosticSelection?.item.metadata.kind === "portal"
-				? diagnosticSelection.item.metadata.sourceEnvCellId
+		diagnosticSelection?.kind === "structured-cell"
+			? diagnosticSelection.envCellId
+			: diagnosticSelection?.kind === "portal"
+				? diagnosticSelection.sourceEnvCellId
 				: null,
 	);
 	const debugOverlayScene = $derived(
@@ -774,7 +774,7 @@
 				return;
 			}
 
-			diagnosticSelection = diagnosticPick;
+			diagnosticSelection = diagnosticPick.item.metadata;
 			event.preventDefault();
 			event.stopPropagation();
 			return;
@@ -797,18 +797,17 @@
 	}
 
 	function deriveDiagnosticInspector(
-		selection: RenderSpatialPick | null,
+		selection: RenderSpatialMetadata | null,
 	): BrowserInspectorModel | null {
 		if (!selection) {
 			return null;
 		}
-		const { metadata } = selection.item;
-		const pickPoint = selection.point;
+		const metadata = selection;
 		const commonRows = [
-			{ label: "Distance", value: selection.distance.toFixed(2) },
 			{
-				label: "Point",
-				value: `${pickPoint.x.toFixed(2)}, ${pickPoint.y.toFixed(2)}, ${pickPoint.z.toFixed(2)}`,
+				label: "Pick data",
+				value:
+					"Hit point and distance are renderer-local query results and are not retained.",
 			},
 		];
 		if (metadata.kind === "structured-cell") {
@@ -1160,6 +1159,7 @@
 			browserDestination,
 			browserCameraFrame,
 			viewportPoint,
+			activeRenderAnchor,
 		);
 	}
 

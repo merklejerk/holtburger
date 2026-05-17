@@ -1,5 +1,7 @@
 import type { RenderSpatialItemId } from "./render-spatial-ids";
 import type { PortalOverlayTargetStatus } from "./debug-overlays";
+import type { RenderChunkTransform } from "./render-anchor";
+import type { RenderChunkKey } from "./render-chunks";
 
 export type RenderSpatialItemKind = "terrain" | "structured-cell" | "portal";
 
@@ -60,6 +62,7 @@ export interface RenderSpatialItem {
 	id: RenderSpatialItemId;
 	kind: RenderSpatialItemKind;
 	ownerKey: string;
+	chunkKey?: RenderChunkKey;
 	broadphaseBounds: RenderBounds;
 	pickShape?: RenderPickShape;
 	metadata: RenderSpatialMetadata;
@@ -78,6 +81,11 @@ export interface RenderSpatialIndexSink {
 	removeItem(itemId: RenderSpatialItemId): void;
 }
 
+export interface RenderSpatialChunkSink {
+	replaceChunkTransforms(transforms: RenderChunkTransform[]): void;
+	removeChunkTransform(chunkKey: RenderChunkKey): void;
+}
+
 export interface RenderSpatialIndexQuery {
 	hasItem(itemId: RenderSpatialItemId): boolean;
 	pickRay(
@@ -92,11 +100,15 @@ export interface RenderSpatialIndexQuery {
 }
 
 export interface RenderSpatialIndex
-	extends RenderSpatialIndexSink, RenderSpatialIndexQuery {}
+	extends
+		RenderSpatialIndexSink,
+		RenderSpatialChunkSink,
+		RenderSpatialIndexQuery {}
 
 export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 	const itemsById = new Map<RenderSpatialItemId, RenderSpatialItem>();
 	const itemIdsByOwner = new Map<string, Set<RenderSpatialItemId>>();
+	const chunkTransformsByKey = new Map<RenderChunkKey, RenderChunkTransform>();
 
 	function removeItemFromOwner(item: RenderSpatialItem): void {
 		const ownerItemIds = itemIdsByOwner.get(item.ownerKey);
@@ -143,6 +155,15 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 			itemsById.delete(itemId);
 			removeItemFromOwner(item);
 		},
+		replaceChunkTransforms(transforms) {
+			chunkTransformsByKey.clear();
+			for (const transform of transforms) {
+				chunkTransformsByKey.set(transform.chunkKey, transform);
+			}
+		},
+		removeChunkTransform(chunkKey) {
+			chunkTransformsByKey.delete(chunkKey);
+		},
 		hasItem(itemId) {
 			return itemsById.has(itemId);
 		},
@@ -155,8 +176,12 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 				if (ownerKeys && !ownerKeys.has(item.ownerKey)) {
 					continue;
 				}
+				const transform = resolveItemChunkTransform(item, chunkTransformsByKey);
+				const queryRay = transform
+					? rendererRayToChunkLocal(ray, transform.offset)
+					: ray;
 				const broadphaseDistance = intersectRayBounds(
-					ray,
+					queryRay,
 					item.broadphaseBounds,
 				);
 				if (broadphaseDistance === null) {
@@ -164,31 +189,106 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 				}
 
 				const precisePick = pickShape(
-					ray,
+					queryRay,
 					item.pickShape,
 					item.broadphaseBounds,
 				);
 				if (!precisePick) {
 					continue;
 				}
-				if (!nearestPick || precisePick.distance < nearestPick.distance) {
+				const renderPoint = transform
+					? chunkLocalPointToRendererLocal(precisePick.point, transform.offset)
+					: precisePick.point;
+				const renderDistance = distanceBetween(ray.origin, renderPoint);
+				if (!nearestPick || renderDistance < nearestPick.distance) {
 					nearestPick = {
 						item,
-						distance: precisePick.distance,
-						point: precisePick.point,
+						distance: renderDistance,
+						point: renderPoint,
 					};
 				}
 			}
 			return nearestPick;
 		},
 		queryFrustum(frustum, mask) {
-			return [...itemsById.values()].filter(
-				(item) =>
-					mask.has(item.kind) &&
-					intersectsFrustum(item.broadphaseBounds, frustum),
-			);
+			return [...itemsById.values()].filter((item) => {
+				if (!mask.has(item.kind)) {
+					return false;
+				}
+				const transform = resolveItemChunkTransform(item, chunkTransformsByKey);
+				return intersectsFrustum(
+					transform
+						? translateBounds(item.broadphaseBounds, transform.offset)
+						: item.broadphaseBounds,
+					frustum,
+				);
+			});
 		},
 	};
+}
+
+function resolveItemChunkTransform(
+	item: RenderSpatialItem,
+	chunkTransformsByKey: ReadonlyMap<RenderChunkKey, RenderChunkTransform>,
+): RenderChunkTransform | null {
+	if (!item.chunkKey) {
+		return null;
+	}
+
+	const transform = chunkTransformsByKey.get(item.chunkKey);
+	if (!transform) {
+		throw new Error(
+			`Render spatial item ${item.id} references missing chunk transform ${item.chunkKey}.`,
+		);
+	}
+	return transform;
+}
+
+function rendererRayToChunkLocal(
+	ray: RenderRay,
+	offset: RenderVec3,
+): RenderRay {
+	return {
+		origin: subtract(ray.origin, offset),
+		direction: ray.direction,
+	};
+}
+
+function chunkLocalPointToRendererLocal(
+	point: RenderVec3,
+	offset: RenderVec3,
+): RenderVec3 {
+	return add(point, offset);
+}
+
+function translateBounds(
+	bounds: RenderBounds,
+	offset: RenderVec3,
+): RenderBounds {
+	return {
+		min: add(bounds.min, offset),
+		max: add(bounds.max, offset),
+	};
+}
+
+function add(left: RenderVec3, right: RenderVec3): RenderVec3 {
+	return {
+		x: left.x + right.x,
+		y: left.y + right.y,
+		z: left.z + right.z,
+	};
+}
+
+function subtract(left: RenderVec3, right: RenderVec3): RenderVec3 {
+	return {
+		x: left.x - right.x,
+		y: left.y - right.y,
+		z: left.z - right.z,
+	};
+}
+
+function distanceBetween(left: RenderVec3, right: RenderVec3): number {
+	return Math.hypot(left.x - right.x, left.y - right.y, left.z - right.z);
 }
 
 function intersectsFrustum(
@@ -346,14 +446,6 @@ function pointOnRay(ray: RenderRay, distance: number): RenderVec3 {
 		x: ray.origin.x + ray.direction.x * distance,
 		y: ray.origin.y + ray.direction.y * distance,
 		z: ray.origin.z + ray.direction.z * distance,
-	};
-}
-
-function subtract(left: RenderVec3, right: RenderVec3): RenderVec3 {
-	return {
-		x: left.x - right.x,
-		y: left.y - right.y,
-		z: left.z - right.z,
 	};
 }
 

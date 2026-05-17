@@ -89,6 +89,76 @@ describe("createLinearRenderSpatialIndex", () => {
 
 		expect(visibleItems.map((item) => item.id)).toEqual(["inside"]);
 	});
+
+	it("returns the same renderer-space ray hit after a chunk transform update", () => {
+		const index = createLinearRenderSpatialIndex();
+		index.replaceOwnerItems("owner", [
+			createChunkedTerrainItem("chunked", "owner", "landblock/da55ffff", 2, 4),
+		]);
+		index.replaceChunkTransforms([
+			createChunkTransform("landblock/da55ffff", { x: 0, y: 0, z: 0 }),
+		]);
+		const initialPick = index.pickRay(createForwardRay(), new Set(["terrain"]));
+
+		index.replaceChunkTransforms([
+			createChunkTransform("landblock/da55ffff", { x: 0, y: 0, z: -2 }),
+		]);
+		const rebasedPick = index.pickRay(
+			{
+				origin: { x: 0, y: 0, z: -2 },
+				direction: { x: 0, y: 0, z: 1 },
+			},
+			new Set(["terrain"]),
+		);
+
+		expect(initialPick?.item.id).toBe("chunked");
+		expect(initialPick?.point).toEqual({ x: 0, y: 0, z: 2 });
+		expect(rebasedPick?.item.id).toBe("chunked");
+		expect(rebasedPick?.point).toEqual({ x: 0, y: 0, z: 0 });
+		expect(rebasedPick?.distance).toBe(2);
+	});
+
+	it("respects chunk transforms when querying frustums", () => {
+		const index = createLinearRenderSpatialIndex();
+		index.replaceOwnerItems("owner", [
+			createChunkedTerrainItem("visible", "owner", "landblock/da55ffff", 2, 4),
+			createChunkedTerrainItem("hidden", "owner", "landblock/db55ffff", 2, 4),
+		]);
+		index.replaceChunkTransforms([
+			createChunkTransform("landblock/da55ffff", { x: 0, y: 0, z: 0 }),
+			createChunkTransform("landblock/db55ffff", { x: 20, y: 0, z: 0 }),
+		]);
+
+		const visibleItems = index.queryFrustum(
+			{
+				planes: [
+					{ normal: { x: 1, y: 0, z: 0 }, constant: 1 },
+					{ normal: { x: -1, y: 0, z: 0 }, constant: 1 },
+					{ normal: { x: 0, y: 1, z: 0 }, constant: 1 },
+					{ normal: { x: 0, y: -1, z: 0 }, constant: 1 },
+					{ normal: { x: 0, y: 0, z: 1 }, constant: -1 },
+					{ normal: { x: 0, y: 0, z: -1 }, constant: 6 },
+				],
+			},
+			new Set(["terrain"]),
+		);
+
+		expect(visibleItems.map((item) => item.id)).toEqual(["visible"]);
+	});
+
+	it("fails visibly when a chunked item is missing its transform", () => {
+		const index = createLinearRenderSpatialIndex();
+		index.replaceOwnerItems("owner", [
+			createChunkedTerrainItem("chunked", "owner", "landblock/da55ffff", 2, 4),
+		]);
+
+		expect(() =>
+			index.pickRay(createForwardRay(), new Set(["terrain"])),
+		).toThrow(/missing chunk transform landblock\/da55ffff/);
+		expect(() =>
+			index.queryFrustum({ planes: [] }, new Set(["terrain"])),
+		).toThrow(/missing chunk transform landblock\/da55ffff/);
+	});
 });
 
 function createTerrainItem(
@@ -112,6 +182,30 @@ function createTerrainItem(
 			landblockId: minZ,
 			assetId: id,
 		},
+	};
+}
+
+function createChunkedTerrainItem(
+	id: string,
+	ownerKey: string,
+	chunkKey: RenderSpatialItem["chunkKey"],
+	minZ: number,
+	maxZ: number,
+): RenderSpatialItem {
+	return {
+		...createTerrainItem(id, ownerKey, minZ, maxZ),
+		chunkKey,
+	};
+}
+
+function createChunkTransform(
+	chunkKey: NonNullable<RenderSpatialItem["chunkKey"]>,
+	offset: { x: number; y: number; z: number },
+) {
+	return {
+		chunkKey,
+		chunkLandblockId: Number.parseInt(chunkKey.slice("landblock/".length), 16),
+		offset,
 	};
 }
 

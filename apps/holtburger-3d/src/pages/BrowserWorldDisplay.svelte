@@ -445,7 +445,7 @@
 		activeRenderAnchorSource = commit.source;
 	});
 	$effect(() => {
-		void activeRenderChunkTransforms;
+		renderSpatialIndex.replaceChunkTransforms(activeRenderChunkTransforms);
 	});
 	$effect(() => {
 		renderSpatialIndex.replaceOwnerItems(

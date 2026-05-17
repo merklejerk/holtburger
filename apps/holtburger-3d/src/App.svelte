@@ -21,10 +21,14 @@
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
 			getPreparedByAssetId: () => get(frontendState).asset.preparedByAssetId,
+			getCacheMetadataByAssetId: () =>
+				get(frontendState).asset.cacheMetadataByAssetId,
 			markAssetsPending: (requests) =>
 				frontendState.markAssetsPending(requests),
 			applyPreparedAssets: (assets) =>
 				frontendState.applyPreparedAssets(assets),
+			applyAssetCachePrune: (prunePlan) =>
+				frontendState.applyAssetCachePrune(prunePlan),
 			applyAssetError: (request, message) =>
 				frontendState.applyAssetError(request, message),
 			debugLog,

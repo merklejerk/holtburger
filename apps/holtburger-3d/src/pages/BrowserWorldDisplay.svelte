@@ -32,7 +32,7 @@
 	} from "../lib/world-display/camera";
 	import WorldDisplay from "../lib/world-display/WorldDisplay.svelte";
 	import {
-		deriveOutdoorLinkedInteriorEnvCellIds,
+		deriveOutdoorPortalInteriorSeedEnvCellIds,
 		deriveTerrainFocusLandblockId,
 	} from "../lib/assets/scene-asset-request-planner";
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
@@ -65,6 +65,7 @@
 	} from "../lib/world-display/structured-interior-scene";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
+	import { deriveOutdoorPortalViewGroups } from "../lib/world-display/outdoor-portal-view-groups";
 	import {
 		countPreparedAssetsByKind,
 		formatPreparedAssetKindCounts,
@@ -215,7 +216,7 @@
 		}
 
 		return [
-			...deriveOutdoorLinkedInteriorEnvCellIds(
+			...deriveOutdoorPortalInteriorSeedEnvCellIds(
 				assetState.preparedByAssetId,
 				new Set(outdoorSceneInterest.detailLandblockIds),
 			),
@@ -301,6 +302,14 @@
 			highlightPortalTargets,
 			selectedPortalId: selectedDiagnosticPortalId,
 			selectedEnvCellId: selectedDiagnosticEnvCellId,
+		}),
+	);
+	const outdoorPortalViewGroupModel = $derived(
+		deriveOutdoorPortalViewGroups({
+			assetState,
+			structuredInteriorScene,
+			activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
+			coverageOptions: structuredInteriorCoverageOptions,
 		}),
 	);
 	const terrainSpatialItems = $derived(deriveTerrainSpatialItems(terrainScene));
@@ -401,6 +410,19 @@
 			? `${debugOverlayScene.diagnostics.portalCount} portal overlay${debugOverlayScene.diagnostics.portalCount === 1 ? "" : "s"}; ${debugOverlayScene.diagnostics.loadedTargetCount}/${debugOverlayScene.diagnostics.knownTargetCount} known target${debugOverlayScene.diagnostics.knownTargetCount === 1 ? "" : "s"} loaded${debugOverlayScene.diagnostics.missingPortalPolygonCount > 0 ? `; ${debugOverlayScene.diagnostics.missingPortalPolygonCount} missing polygon witness${debugOverlayScene.diagnostics.missingPortalPolygonCount === 1 ? "" : "es"}` : ""}.`
 			: "Portal polygon overlays are hidden.",
 	);
+	const portalRenderText = $derived.by(() => {
+		const metrics = renderMetrics?.portal;
+		if (!metrics) {
+			return "Portal stencil metrics are waiting for the first rendered frame.";
+		}
+		const skipped =
+			metrics.skippedMissingApertureCount +
+			metrics.skippedMissingPolygonCount +
+			metrics.skippedOutsideFrustumCount +
+			metrics.skippedBackFacingCount +
+			metrics.skippedTooSmallCount;
+		return `${metrics.visiblePortalGroupCount}/${metrics.candidateOutdoorPortalCount} portal group${metrics.candidateOutdoorPortalCount === 1 ? "" : "s"} visible; ${metrics.maskedInteriorCellCount} masked env cell${metrics.maskedInteriorCellCount === 1 ? "" : "s"}; ${skipped} skipped.`;
+	});
 	const sceneBoundsText = $derived(
 		renderMetrics?.bounds
 			? `Center (${renderMetrics.bounds.center.x.toFixed(1)}, ${renderMetrics.bounds.center.y.toFixed(1)}, ${renderMetrics.bounds.center.z.toFixed(1)}) span (${renderMetrics.bounds.size.x.toFixed(1)}, ${renderMetrics.bounds.size.y.toFixed(1)}, ${renderMetrics.bounds.size.z.toFixed(1)}).`
@@ -411,6 +433,13 @@
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render.`
 			: "Waiting for render performance sample.",
 	);
+	const rendererDiagnosticsText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return "Renderer diagnostics are waiting for the first rendered frame.";
+		}
+		return `Passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalMaskMeshCount}/${debug.portalGroupCount}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+	});
 	const cameraFrameText = $derived(
 		browserCameraFrame
 			? `${describeSceneCameraFrame(browserCameraFrame)} ${describeBrowserCameraControlMode()}`
@@ -505,6 +534,8 @@
 		{ label: "Cache", value: assetCacheDebugText },
 		{ label: "Assets", value: assetDebugText },
 		{ label: "Layers", value: staticRenderableLayerText },
+		{ label: "Stencil", value: portalRenderText },
+		{ label: "Renderer", value: rendererDiagnosticsText },
 		{ label: "Events", value: cameraPipelineDebugText },
 	]);
 
@@ -1377,6 +1408,7 @@
 		{terrainScene}
 		{staticRenderableScene}
 		{structuredInteriorScene}
+		{outdoorPortalViewGroupModel}
 		{debugOverlayScene}
 		{activeRenderAnchor}
 		renderChunkTransforms={activeRenderChunkTransforms}

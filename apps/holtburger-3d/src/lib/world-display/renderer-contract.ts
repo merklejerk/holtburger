@@ -4,6 +4,8 @@ export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
 	cameraFrame: SceneCameraFrame | null;
 	performance: WorldRenderPerformanceMetrics | null;
+	portal: WorldRenderPortalMetrics;
+	debug: WorldRenderDebugMetrics;
 	geometry: {
 		terrainTileCount: number;
 		terrainVertexCount: number;
@@ -20,6 +22,38 @@ interface WorldRenderPerformanceMetrics {
 	fps: number;
 	frameMs: number;
 	renderMs: number;
+}
+
+export interface WorldRenderPortalMetrics {
+	candidateOutdoorPortalCount: number;
+	visiblePortalGroupCount: number;
+	maskedInteriorCellCount: number;
+	skippedMissingApertureCount: number;
+	skippedMissingPolygonCount: number;
+	skippedOutsideFrustumCount: number;
+	skippedBackFacingCount: number;
+	skippedTooSmallCount: number;
+}
+
+export interface WorldRenderDebugMetrics {
+	canvasWidth: number;
+	canvasHeight: number;
+	pixelRatio: number;
+	renderPassCount: number;
+	portalGroupCount: number;
+	portalMaskMeshCount: number;
+	terrainMeshCount: number;
+	visibleTerrainMeshCount: number;
+	staticGroupMeshCount: number;
+	visibleStaticGroupMeshCount: number;
+	structuredInteriorMeshCount: number;
+	visibleStructuredInteriorMeshCount: number;
+	debugOverlayObjectCount: number;
+	visibleDebugOverlayObjectCount: number;
+	renderCalls: number;
+	renderTriangles: number;
+	renderLines: number;
+	renderPoints: number;
 }
 
 export type WorldRenderMetricsChangeHandler = (

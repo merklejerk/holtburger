@@ -358,7 +358,7 @@
 	const staticRenderableText = $derived(
 		staticRenderableScene.parts.length === 0
 			? describeStaticRenderableIdleState()
-			: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByGfxAssetId.size} shared gfx geometr${staticRenderableScene.partsByGfxAssetId.size === 1 ? "y" : "ies"}.`,
+			: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderChunkAndGfxAssetId.size} chunked instanced group${staticRenderableScene.partsByRenderChunkAndGfxAssetId.size === 1 ? "" : "s"}.`,
 	);
 	const staticRenderableLayerText = $derived.by(() => {
 		const explicitCount = staticRenderableScene.sourceInstances.filter(

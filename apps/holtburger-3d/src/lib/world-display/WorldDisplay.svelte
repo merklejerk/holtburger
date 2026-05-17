@@ -122,7 +122,7 @@
 	let activeCameraFrame = $state<SceneCameraFrame | null>(null);
 	const terrainMeshes = new Map<string, Mesh>();
 	const staticGeometryCache = new Map<string, BufferGeometry>();
-	const staticRenderableMeshes = new Map<string, InstancedMesh>();
+	const staticRenderableGroupMeshes = new Map<string, InstancedMesh>();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
@@ -304,10 +304,10 @@
 				disposeMesh(mesh);
 			}
 			terrainMeshes.clear();
-			for (const mesh of staticRenderableMeshes.values()) {
+			for (const mesh of staticRenderableGroupMeshes.values()) {
 				disposeMeshMaterial(mesh);
 			}
-			staticRenderableMeshes.clear();
+			staticRenderableGroupMeshes.clear();
 			for (const geometry of staticGeometryCache.values()) {
 				geometry.dispose();
 			}
@@ -761,7 +761,7 @@
 				terrainTriangleCount,
 				staticRenderablePartCount: staticRenderableScene.parts.length,
 				staticRenderableGeometryCount:
-					staticRenderableScene.partsByGfxAssetId.size,
+					staticRenderableScene.partsByRenderChunkAndGfxAssetId.size,
 				structuredInteriorCellCount: structuredInteriorScene.cells.length,
 				structuredInteriorVertexCount: structuredInteriorScene.cells.reduce(
 					(total, cell) => total + cell.renderGeometry.vertexCount,
@@ -787,39 +787,54 @@
 	}
 
 	function syncStaticRenderableMeshes(): void {
-		if (!staticRenderableRoot) {
+		if (!staticRenderableRoot || !chunkRootContainer) {
 			return;
 		}
 
-		const partsByGfxAssetId = staticRenderableScene.partsByGfxAssetId;
-		const activeGfxAssetIds = new Set(partsByGfxAssetId.keys());
+		const partsByGroupKey =
+			staticRenderableScene.partsByRenderChunkAndGfxAssetId;
+		const activeGroupKeys = new Set(partsByGroupKey.keys());
+		const activeGfxAssetIds = new Set(
+			[...partsByGroupKey.values()].flatMap((parts) =>
+				parts[0] ? [parts[0].gfxObjAssetId] : [],
+			),
+		);
 
-		for (const [gfxAssetId, mesh] of staticRenderableMeshes.entries()) {
-			const activeParts = partsByGfxAssetId.get(gfxAssetId);
+		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
+			const activeParts = partsByGroupKey.get(groupKey);
 			if (activeParts && mesh.count === activeParts.length) {
 				continue;
 			}
 
-			staticRenderableRoot.remove(mesh);
+			mesh.removeFromParent();
 			disposeMeshMaterial(mesh);
-			staticRenderableMeshes.delete(gfxAssetId);
+			staticRenderableGroupMeshes.delete(groupKey);
 		}
 
-		for (const [gfxAssetId, parts] of partsByGfxAssetId.entries()) {
+		for (const [groupKey, parts] of partsByGroupKey.entries()) {
+			const firstPart = parts[0];
+			if (!firstPart) {
+				continue;
+			}
+			const gfxAssetId = firstPart.gfxObjAssetId;
 			const geometry = getStaticRenderableGeometry(gfxAssetId);
 			if (!geometry) {
 				continue;
 			}
 
-			let mesh = staticRenderableMeshes.get(gfxAssetId);
+			const chunkRoot = getRenderChunkRoot(firstPart.renderChunk.chunkKey);
+			let mesh = staticRenderableGroupMeshes.get(groupKey);
 			if (!mesh) {
 				mesh = createStaticRenderableInstancedMesh(
+					groupKey,
 					gfxAssetId,
 					geometry,
 					parts.length,
 				);
-				staticRenderableRoot.add(mesh);
-				staticRenderableMeshes.set(gfxAssetId, mesh);
+				chunkRoot.add(mesh);
+				staticRenderableGroupMeshes.set(groupKey, mesh);
+			} else {
+				chunkRoot.attach(mesh);
 			}
 
 			updateStaticRenderableInstancedMesh(mesh, parts);
@@ -834,6 +849,7 @@
 			staticGeometryCache.delete(gfxAssetId);
 		}
 
+		syncRenderChunkRoots();
 		untrack(() => updateCameraFrame());
 	}
 
@@ -1224,6 +1240,7 @@
 	}
 
 	function createStaticRenderableInstancedMesh(
+		groupKey: string,
 		gfxAssetId: string,
 		geometry: BufferGeometry,
 		count: number,
@@ -1235,7 +1252,8 @@
 			roughness: 0.88,
 		});
 		const mesh = new InstancedMesh(geometry, material, count);
-		mesh.name = `static-renderable/${gfxAssetId}`;
+		mesh.name = `static-renderable/${groupKey}`;
+		mesh.userData.gfxAssetId = gfxAssetId;
 		return mesh;
 	}
 

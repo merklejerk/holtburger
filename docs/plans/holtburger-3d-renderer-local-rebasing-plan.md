@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 6 complete; Phase 7 is the next implementation step.
+Status: Phase 7 complete; Phase 8 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -747,6 +747,8 @@ Refined follow-up for Phase 7:
 
 ### Phase 7: Static Renderable Chunk Partitioning
 
+Status: complete.
+
 Partition static renderables by owning render chunk and render asset:
 
 - one `InstancedMesh` group per chunk plus render asset
@@ -768,6 +770,65 @@ Tests/smoke:
 - static renderables still batch identical render assets within each chunk
 - chunk-level visibility can hide/show static groups without per-instance culling
 - disposal removes all chunked groups for assets leaving the scene
+
+Implemented progress:
+
+- Updated `WorldDisplay` to consume `partsByRenderChunkAndGfxAssetId` instead of the old global
+  `partsByGfxAssetId` renderer path.
+- Changed static renderable mesh ownership from one `InstancedMesh` per gfx asset to one
+  `InstancedMesh` per render chunk plus gfx asset group.
+- Static instanced groups now attach under their owning render chunk root.
+- Static instance matrices are now authored from `chunkLocalInstancePlacement` with a zero world
+  offset in `buildStaticRenderablePartMatrix`.
+- Static renderer disposal now removes chunked group meshes from their parent chunk roots and keeps
+  gfx geometry caching keyed by gfx asset id.
+- Browser diagnostics now report chunked instanced group count instead of global shared-gfx group
+  count.
+- Added a matrix-level test proving static renderable transforms ignore legacy
+  `landblockWorldOffset` and use chunk-local placement.
+
+Decisions:
+
+- Gfx geometry remains cached by gfx asset id. Chunk partitioning changes instanced group ownership,
+  not geometry upload identity.
+- `partsByGfxAssetId`, `instancePlacement`, and `landblockWorldOffset` remain in the scene model for
+  now as compatibility fields for tests and pending cleanup, but the active static renderer no
+  longer depends on them.
+- Static chunk-level visibility is represented by group ownership under chunk roots. Per-instance
+  culling remains out of scope.
+- The metrics field named `staticRenderableGeometryCount` now reports active chunked instanced
+  groups. The field name is a cleanup target because it no longer precisely describes the value.
+
+Course corrections:
+
+- The implementation reused the existing gfx geometry cache rather than introducing chunk-scoped
+  geometry caches. Duplicating geometry per chunk would have increased memory with no benefit to
+  the batching goal.
+- A lint pass caught an unused type import in the new geometry test; the test fixture now explicitly
+  uses the `StaticRenderablePart` type to keep coverage tied to the renderer contract.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/static-renderables.test.ts src/lib/world-display/static-renderable-geometry.test.ts src/lib/world-display/chunk-root-manager.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 8:
+
+- Camera hints and inspector hit points now need explicit anchor-aware semantics because visual
+  terrain, interiors, debug overlays, and static renderables are all chunk-rooted.
+- Inspector rows should label renderer-local hit points or convert them to a stable landblock/local
+  coordinate before presenting them as meaningful world facts.
+- Diagnostic selections should retain stable metadata ids only; hit points and distances should be
+  treated as ephemeral pick results.
+
+Cleanup targets carried forward:
+
+- Remove or split `partsByGfxAssetId` after all tests and diagnostics use chunk-plus-asset groups.
+- Remove `instancePlacement` and `landblockWorldOffset` from static renderer-facing types once no
+  compatibility tests or non-render consumers require them.
+- Rename `staticRenderableGeometryCount` or split it into geometry count and instanced group count.
 
 ### Phase 8: Camera Hints And Inspector Semantics
 

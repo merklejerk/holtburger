@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 7 complete; Phase 8 is the next implementation step.
+Status: Phase 8 complete; Phase 9 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -832,6 +832,8 @@ Cleanup targets carried forward:
 
 ### Phase 8: Camera Hints And Inspector Semantics
 
+Status: complete.
+
 Fix renderer-local camera and pick reporting at the same boundary:
 
 - camera hints sent to the host should be converted through the active anchor
@@ -843,13 +845,69 @@ Fix renderer-local camera and pick reporting at the same boundary:
 This phase should not make the render spatial index authoritative. It only prevents renderer-local
 numbers from masquerading as canonical facts.
 
+Implemented progress:
+
+- `buildCameraHintFromSceneCameraFrame` now accepts the active render anchor and converts the
+  renderer-local camera position through that anchor before sending the hint to the host.
+- `BrowserWorldDisplay` passes `activeRenderAnchor` into rendered camera hint derivation.
+- Camera hint direction remains a pure Three-to-AC axis conversion and normalization because anchor
+  rebasing is translational and should not affect forward vectors.
+- Diagnostic selection state now stores only `RenderSpatialMetadata`, not the full pick result.
+- Diagnostic clicks still use renderer-local pick points and distances internally, but those
+  ephemeral query results are no longer retained or displayed as stable inspector facts.
+- The inspector now labels pick data as renderer-local query data that is not retained.
+- Added a camera-helper regression test showing two rebased renderer-local camera positions resolve
+  to the same anchor-converted AC-style position.
+
+Decisions:
+
+- Did not change the TypeScript or Rust camera hint DTO shape in this phase. The current host
+  contract has no anchor field and currently stores hints rather than interpreting a richer camera
+  coordinate model.
+- The camera hint position is emitted as an anchor-derived AC-meter position using the outdoor
+  landblock base and `OUTDOOR_LANDBLOCK_WORLD_SIZE`; it is not a user-facing latitude/longitude
+  label.
+- Inspector selection retention is metadata-only so debug highlighting can survive without carrying
+  stale hit points or distances.
+
+Course corrections:
+
+- Chose metadata-only diagnostic selection instead of merely relabeling existing point/distance
+  rows. Relabeling would still leave stale click geometry in app state and would not meet the
+  phase's selection-retention goal.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/camera.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm exec prettier -- --check src/pages/BrowserWorldDisplay.svelte src/lib/world-display/camera.ts src/lib/world-display/camera.test.ts`
+
+Refined follow-up for Phase 9:
+
+- Treat cleanup as a compatibility-shim removal pass, not just naming polish.
+- Remove or split `partsByGfxAssetId` after tests and diagnostics are fully migrated to
+  chunk-plus-asset static groups.
+- Remove `instancePlacement` and `landblockWorldOffset` from static renderer-facing types once no
+  compatibility tests or non-render consumers require them.
+- Revisit `RenderSpatialItem.chunkKey`; either make it required for world items or split any
+  remaining genuinely unchunked/debug-only item shape so optionality is not contagious.
+- Rename `staticRenderableGeometryCount` or split it into separate geometry-cache and instanced-group
+  metrics.
+- Audit broad layer roots and old focus-relative offset helpers now that terrain, interiors, debug
+  overlays, static renderables, and spatial queries all flow through chunk ownership.
+- Revisit camera hint semantics when the host starts consuming hints for behavior rather than merely
+  storing/acknowledging them.
+
 ### Phase 9: Cleanup And Simplification Pass
 
 After the mechanics are working, make a focused cleanup pass before exiting the spike:
 
 - remove duplicated offset math that should now flow through shared helpers
 - remove stale focus-relative fields or names that imply flattened renderer-space ownership
-- simplify any compatibility shims introduced during the migration
+- simplify compatibility shims introduced during the migration, especially optional fields and
+  duplicate grouped/flat model surfaces
 - verify `WorldDisplay` has not accumulated browser-mode policy
 - verify `BrowserWorldDisplay` or the mode coordinator has not accumulated renderer object
   lifecycle details

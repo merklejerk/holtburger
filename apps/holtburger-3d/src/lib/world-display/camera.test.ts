@@ -288,6 +288,45 @@ describe("world display camera helpers", () => {
 		expect(hint?.destinationLabel).toBe("100.40S, 101.55W, 1.0Z");
 	});
 
+	it("converts camera hint positions through the active render anchor", () => {
+		const firstAnchorHint = buildCameraHintFromSceneCameraFrame(
+			"client",
+			createRuntimeBatch(),
+			null,
+			{
+				position: { x: 12, y: 3, z: -199 },
+				target: { x: 12, y: 3, z: -209 },
+				up: { x: 0, y: 1, z: 0 },
+				aspect: 1,
+				fovDegrees: 52,
+				near: 0.1,
+				far: 5000,
+			},
+			normalizeViewportPoint(40, 40, 80, 80),
+			{ landblockId: 0xdb55ffff },
+		);
+		const rebasedHint = buildCameraHintFromSceneCameraFrame(
+			"client",
+			createRuntimeBatch(),
+			null,
+			{
+				position: { x: 204, y: 3, z: -199 },
+				target: { x: 204, y: 3, z: -209 },
+				up: { x: 0, y: 1, z: 0 },
+				aspect: 1,
+				fovDegrees: 52,
+				near: 0.1,
+				far: 5000,
+			},
+			normalizeViewportPoint(40, 40, 80, 80),
+			{ landblockId: 0xda55ffff },
+		);
+
+		expect(firstAnchorHint?.position).toEqual({ x: 42060, y: 16519, z: 3 });
+		expect(rebasedHint?.position).toEqual(firstAnchorHint?.position);
+		expect(rebasedHint?.forward).toEqual({ x: 0, y: 1, z: 0 });
+	});
+
 	it("derives off-center pick rays from camera FOV and aspect", () => {
 		const hint = buildCameraHintFromSceneCameraFrame(
 			"client",

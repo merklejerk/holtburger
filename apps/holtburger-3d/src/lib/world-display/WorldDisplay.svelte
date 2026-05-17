@@ -182,6 +182,7 @@
 		resizeObserver = nextResizeObserver;
 
 		syncRendererSize();
+		untrack(() => syncSceneContent());
 
 		let frameId = 0;
 		let lastFrameAt: number | null = null;
@@ -323,23 +324,28 @@
 	});
 
 	$effect(() => {
-		syncRenderChunkRoots();
+		const transforms = renderChunkTransforms;
+		untrack(() => syncRenderChunkRoots(transforms));
 	});
 
 	$effect(() => {
-		syncTerrainMeshes();
+		const sceneModel = terrainScene;
+		untrack(() => syncTerrainMeshes(sceneModel));
 	});
 
 	$effect(() => {
-		syncStaticRenderableMeshes();
+		const sceneModel = staticRenderableScene;
+		untrack(() => syncStaticRenderableMeshes(sceneModel));
 	});
 
 	$effect(() => {
-		syncStructuredInteriorMeshes();
+		const sceneModel = structuredInteriorScene;
+		untrack(() => syncStructuredInteriorMeshes(sceneModel));
 	});
 
 	$effect(() => {
-		syncDebugOverlayMeshes();
+		const sceneModel = debugOverlayScene;
+		untrack(() => syncDebugOverlayMeshes(sceneModel));
 	});
 
 	$effect(() => {
@@ -392,12 +398,22 @@
 		camera.updateProjectionMatrix();
 	}
 
-	function syncRenderChunkRoots(): void {
+	function syncSceneContent(): void {
+		syncRenderChunkRoots(renderChunkTransforms);
+		syncTerrainMeshes(terrainScene);
+		syncStaticRenderableMeshes(staticRenderableScene);
+		syncStructuredInteriorMeshes(structuredInteriorScene);
+		syncDebugOverlayMeshes(debugOverlayScene);
+	}
+
+	function syncRenderChunkRoots(
+		transforms: readonly RenderChunkTransform[],
+	): void {
 		if (!chunkRootContainer) {
 			return;
 		}
 
-		syncRenderChunkRootRecords(chunkRoots, renderChunkTransforms, {
+		syncRenderChunkRootRecords(chunkRoots, transforms, {
 			createRoot: createRenderChunkRoot,
 			updateRootPosition: updateRenderChunkRootPosition,
 			canDisposeRoot: (root) => root.children.length === 0,
@@ -458,14 +474,13 @@
 		return { ...frame, aspect };
 	}
 
-	function syncTerrainMeshes(): void {
+	function syncTerrainMeshes(sceneModel: TerrainSceneModel): void {
 		if (!chunkRootContainer) {
 			return;
 		}
-		syncRenderChunkRoots();
 
 		const activeAssetIds = new Set(
-			terrainScene.tiles.map((tile) => tile.assetId),
+			sceneModel.tiles.map((tile) => tile.assetId),
 		);
 		for (const [assetId, mesh] of terrainMeshes.entries()) {
 			if (activeAssetIds.has(assetId)) {
@@ -477,7 +492,7 @@
 			terrainMeshes.delete(assetId);
 		}
 
-		for (const tile of terrainScene.tiles) {
+		for (const tile of sceneModel.tiles) {
 			const chunkRoot = getRenderChunkRoot(tile.renderChunk.chunkKey);
 			const existing = terrainMeshes.get(tile.assetId);
 			if (existing) {
@@ -501,7 +516,6 @@
 			chunkRoot.add(mesh);
 			terrainMeshes.set(tile.assetId, mesh);
 		}
-		syncRenderChunkRoots();
 		untrack(() => {
 			updateCameraFrame();
 			markSpatialVisibilityDirty();
@@ -750,14 +764,14 @@
 		return document.visibilityState !== "visible" || !document.hasFocus();
 	}
 
-	function syncStaticRenderableMeshes(): void {
+	function syncStaticRenderableMeshes(
+		sceneModel: StaticRenderableSceneModel,
+	): void {
 		if (!chunkRootContainer) {
 			return;
 		}
-		syncRenderChunkRoots();
 
-		const partsByGroupKey =
-			staticRenderableScene.partsByRenderChunkAndGfxAssetId;
+		const partsByGroupKey = sceneModel.partsByRenderChunkAndGfxAssetId;
 		const activeGroupKeys = new Set(partsByGroupKey.keys());
 		const activeGfxAssetIds = new Set(
 			[...partsByGroupKey.values()].flatMap((parts) =>
@@ -814,18 +828,16 @@
 			staticGeometryCache.delete(gfxAssetId);
 		}
 
-		syncRenderChunkRoots();
 		untrack(() => {
 			updateCameraFrame();
 			markSpatialVisibilityDirty();
 		});
 	}
 
-	function syncDebugOverlayMeshes(): void {
+	function syncDebugOverlayMeshes(sceneModel: WorldDebugOverlayModel): void {
 		if (!chunkRootContainer) {
 			return;
 		}
-		syncRenderChunkRoots();
 
 		for (const object of debugOverlayObjects.values()) {
 			object.removeFromParent();
@@ -833,8 +845,8 @@
 		}
 		debugOverlayObjects.clear();
 
-		if (debugOverlayScene.showCellIndicators) {
-			for (const cell of debugOverlayScene.cells) {
+		if (sceneModel.showCellIndicators) {
+			for (const cell of sceneModel.cells) {
 				const overlay = createCellDebugOverlayGroup(cell);
 				getRenderChunkRoot(cell.renderChunk.chunkKey).add(overlay);
 				debugOverlayObjects.set(
@@ -844,8 +856,8 @@
 			}
 		}
 
-		if (debugOverlayScene.showPortalPolygons) {
-			for (const portal of debugOverlayScene.portals) {
+		if (sceneModel.showPortalPolygons) {
+			for (const portal of sceneModel.portals) {
 				const overlay = createPortalDebugOverlayLine(portal);
 				if (overlay) {
 					getRenderChunkRoot(portal.renderChunk.chunkKey).add(overlay);
@@ -857,21 +869,21 @@
 			}
 		}
 
-		syncRenderChunkRoots();
 		untrack(() => {
 			updateCameraFrame();
 			markSpatialVisibilityDirty();
 		});
 	}
 
-	function syncStructuredInteriorMeshes(): void {
+	function syncStructuredInteriorMeshes(
+		sceneModel: StructuredInteriorSceneModel,
+	): void {
 		if (!chunkRootContainer) {
 			return;
 		}
-		syncRenderChunkRoots();
 
 		const activeRenderKeys = new Set(
-			structuredInteriorScene.cells.map((cell) => cell.renderKey),
+			sceneModel.cells.map((cell) => cell.renderKey),
 		);
 		for (const [renderKey, mesh] of structuredInteriorMeshes.entries()) {
 			if (activeRenderKeys.has(renderKey)) {
@@ -883,7 +895,7 @@
 			structuredInteriorMeshes.delete(renderKey);
 		}
 
-		for (const cell of structuredInteriorScene.cells) {
+		for (const cell of sceneModel.cells) {
 			const chunkRoot = getRenderChunkRoot(cell.renderChunk.chunkKey);
 			let mesh = structuredInteriorMeshes.get(cell.renderKey);
 			if (!mesh) {
@@ -897,7 +909,6 @@
 			updateStructuredInteriorCellMesh(mesh, cell);
 		}
 
-		syncRenderChunkRoots();
 		untrack(() => {
 			updateCameraFrame();
 			markSpatialVisibilityDirty();

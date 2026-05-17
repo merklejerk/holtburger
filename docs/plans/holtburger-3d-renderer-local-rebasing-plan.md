@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: draft implementation plan for review.
+Status: Phase 1 complete; Phase 2 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -256,6 +256,8 @@ and creates a natural chunk-level visibility hook. This plan does not require pe
 
 ### Phase 1: Chunk Identity And Placement Helpers
 
+Status: complete.
+
 Add small helper functions under `apps/holtburger-3d/src/lib/world-display/` or
 `apps/holtburger-3d/src/lib/landblocks.ts` if they are landblock-specific:
 
@@ -274,6 +276,53 @@ Tests:
 - rebasing from one anchor to an adjacent anchor shifts chunk roots while preserving chunk-local
   positions
 - camera frame conversion preserves canonical position across anchor change
+
+Implemented progress:
+
+- Added `apps/holtburger-3d/src/lib/world-display/render-chunks.ts` as the narrow helper module.
+- Added `RenderChunkKey`, `RenderLandblockAnchor`, `RenderChunkPlacement`, and a minimal
+  render-camera-frame shape without introducing a broad coordinate service object.
+- Added helpers for normalized landblock/env-cell chunk keys, chunk landblock identity, chunk root
+  offsets, chunk-local/renderer-local point conversion, anchor rebase offsets, and camera frame
+  conversion across anchors.
+- Added owning-chunk helpers for terrain tiles, structured cells, debug overlays, and static
+  renderable parts.
+- Added `apps/holtburger-3d/src/lib/world-display/render-chunks.test.ts` covering the Phase 1 test
+  cases.
+
+Decisions:
+
+- Helper code lives under `world-display` because the values are renderer-local mechanics, even
+  though the underlying identity normalization uses shared landblock helpers.
+- Chunk keys normalize all landblock-like ids to upper-16-bit `0x????ffff` chunks. That keeps
+  dungeon/interior env cells grouped under their landblock chunk for now.
+- Chunk root offsets are emitted in Three.js renderer coordinates: landblock X maps to render X,
+  landblock Y maps to negative render Z, and render Y remains vertical.
+- Camera frame conversion moves both `position` and `target` by the anchor rebase delta and leaves
+  `up` unchanged.
+
+Course corrections:
+
+- The first test run exposed JavaScript `-0` in zero Z offsets. The helper now normalizes `-0` to
+  `0` for stable strict equality, debug output, and future transform comparisons.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/render-chunks.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 2:
+
+- Thread `RenderChunkPlacement` through scene model records while keeping existing flattened
+  focus-relative fields as temporary compatibility values.
+- Replace local duplicated 192m offset derivation in scene model code with the new helpers when
+  adding chunk ownership, but do not migrate renderer roots yet.
+- For static renderables, add chunk identity to parts before changing `partsByGfxAssetId`; the
+  grouping/batching change remains Phase 7.
+- For debug overlays, inherit chunk placement directly from the structured cell model rather than
+  deriving it a second time.
 
 ### Phase 2: Scene Model Chunk Ownership
 

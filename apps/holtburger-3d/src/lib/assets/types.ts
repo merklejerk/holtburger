@@ -67,7 +67,7 @@ export interface PreparedOutdoorStaticSceneInstance {
 	localPlacement: PlacementTransformDto;
 }
 
-interface PreparedOutdoorStaticSceneBuildingPortal {
+export interface PreparedOutdoorStaticSceneBuildingPortal {
 	portalId: string;
 	sourceIndex: number;
 	flags: number;

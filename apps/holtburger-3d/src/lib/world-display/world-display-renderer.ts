@@ -1,14 +1,18 @@
 import {
 	AmbientLight,
+	AlwaysStencilFunc,
 	Box3,
 	BufferAttribute,
 	BufferGeometry,
 	Color,
 	CylinderGeometry,
 	DirectionalLight,
+	DoubleSide,
+	EqualStencilFunc,
 	Frustum,
 	Group,
 	InstancedMesh,
+	KeepStencilOp,
 	LineBasicMaterial,
 	LineLoop,
 	LineSegments,
@@ -19,6 +23,7 @@ import {
 	MeshStandardMaterial,
 	Object3D,
 	PerspectiveCamera,
+	ReplaceStencilOp,
 	Scene,
 	Vector2,
 	Vector3,
@@ -69,21 +74,38 @@ import {
 } from "./camera";
 import type {
 	WorldRenderCameraFrameChangeHandler,
+	WorldRenderDebugMetrics,
 	WorldRenderMetrics,
 	WorldRenderMetricsChangeHandler,
+	WorldRenderPortalMetrics,
 } from "./renderer-contract";
+import type {
+	OutdoorPortalViewGroup,
+	OutdoorPortalViewGroupModel,
+} from "./outdoor-portal-view-groups";
 import { buildTerrainGeometry } from "./terrain-geometry";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
 import {
 	syncRenderChunkRootRecords,
 	type RenderChunkRootRecord,
 } from "./chunk-root-manager";
+import {
+	WORLD_RENDER_LAYER,
+	deriveWorldRenderPasses,
+	staticRenderableLayerForKind,
+	type WorldRenderPass,
+} from "./render-passes";
+import {
+	evaluatePortalVisibility,
+	type PortalVisibilityResult,
+} from "./portal-visibility";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
+	outdoorPortalViewGroupModel: OutdoorPortalViewGroupModel;
 	debugOverlayScene: WorldDebugOverlayModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
@@ -97,6 +119,7 @@ export interface WorldDisplayRenderer {
 	setTerrainScene(scene: TerrainSceneModel): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
+	setOutdoorPortalViewGroupModel(model: OutdoorPortalViewGroupModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
@@ -122,6 +145,7 @@ const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
+const MIN_PORTAL_SCREEN_AREA_PX = 1;
 
 export function createWorldDisplayRenderer(
 	host: HTMLDivElement,
@@ -131,6 +155,7 @@ export function createWorldDisplayRenderer(
 	let terrainScene = options.terrainScene;
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
+	let outdoorPortalViewGroupModel = options.outdoorPortalViewGroupModel;
 	let debugOverlayScene = options.debugOverlayScene;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
@@ -138,20 +163,28 @@ export function createWorldDisplayRenderer(
 	let onCameraFrameChange = options.onCameraFrameChange;
 	let onRenderMetricsChange = options.onRenderMetricsChange;
 
-	const renderer = new WebGLRenderer({ antialias: true, alpha: true });
+	const renderer = new WebGLRenderer({
+		antialias: true,
+		alpha: true,
+		stencil: true,
+	});
 	renderer.setPixelRatio(window.devicePixelRatio);
 	renderer.outputColorSpace = "srgb";
+	renderer.autoClear = false;
+	renderer.info.autoReset = false;
+	renderer.setClearColor(new Color("#0e1a24"), 1);
 	renderer.domElement.className = "world-display__three-canvas";
 	host.append(renderer.domElement);
 
 	const scene = new Scene();
-	scene.background = new Color("#0e1a24");
 
 	const camera = new PerspectiveCamera(52, 1, 0.1, 5000);
 
 	const ambientLight = new AmbientLight("#d7e9f9", 1.4);
 	const sunLight = new DirectionalLight("#fff1d6", 2.1);
 	sunLight.position.set(220, 320, 160);
+	enableAllWorldRenderLayers(ambientLight);
+	enableAllWorldRenderLayers(sunLight);
 	scene.add(ambientLight, sunLight);
 
 	const chunkRootContainer = new Group();
@@ -163,10 +196,27 @@ export function createWorldDisplayRenderer(
 	const staticGeometryCache = new Map<string, BufferGeometry>();
 	const staticRenderableGroupMeshes = new Map<string, InstancedMesh>();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
+	const portalMaskMeshes = new Map<string, Mesh>();
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
+	let latestPortalMetrics: WorldRenderPortalMetrics =
+		createPortalRenderMetrics(outdoorPortalViewGroupModel);
+	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
+		createRenderDebugMetrics(renderer, {
+			renderPassCount: 0,
+			portalGroupCount: 0,
+			portalMaskMeshCount: 0,
+			terrainMeshCount: 0,
+			visibleTerrainMeshCount: 0,
+			staticGroupMeshCount: 0,
+			visibleStaticGroupMeshCount: 0,
+			structuredInteriorMeshCount: 0,
+			visibleStructuredInteriorMeshCount: 0,
+			debugOverlayObjectCount: 0,
+			visibleDebugOverlayObjectCount: 0,
+		});
 	let frameId = 0;
 	let lastFrameAt: number | null = null;
 	let lastRenderedAt: number | null = null;
@@ -205,6 +255,10 @@ export function createWorldDisplayRenderer(
 		setStructuredInteriorScene(nextScene) {
 			structuredInteriorScene = nextScene;
 			syncStructuredInteriorMeshes(nextScene);
+		},
+		setOutdoorPortalViewGroupModel(nextModel) {
+			outdoorPortalViewGroupModel = nextModel;
+			syncPortalMaskMeshes(nextModel);
 		},
 		setDebugOverlayScene(nextScene) {
 			debugOverlayScene = nextScene;
@@ -264,7 +318,7 @@ export function createWorldDisplayRenderer(
 
 		const frameStartedAt = frameAt;
 		const renderStartedAt = window.performance.now();
-		renderer.render(scene, camera);
+		renderWorldPasses();
 		const renderMs = window.performance.now() - renderStartedAt;
 		lastRenderedAt = frameStartedAt;
 		if (lastFrameAt !== null) {
@@ -343,8 +397,152 @@ export function createWorldDisplayRenderer(
 		root.name = `render-chunk/${transform.chunkKey}`;
 		root.userData.chunkKey = transform.chunkKey;
 		root.userData.chunkLandblockId = transform.chunkLandblockId;
+		enableAllWorldRenderLayers(root);
 		chunkRootContainer.add(root);
 		return root;
+	}
+
+	function renderWorldPasses(): void {
+		latestPortalMetrics = createPortalRenderMetrics(outdoorPortalViewGroupModel);
+		renderer.info.reset();
+		const passes = deriveWorldRenderPasses({
+			hasPortalViewGroups: outdoorPortalViewGroupModel.groups.length > 0,
+			showDiagnosticInterior: true,
+			showDebugOverlays: true,
+		});
+		for (const pass of passes) {
+			if (pass.kind === "portal-stencil-mask") {
+				renderPortalGroups();
+				continue;
+			}
+			if (pass.kind === "portal-composited-interior") {
+				continue;
+			}
+			applyPassClear(pass);
+			camera.layers.set(pass.layer);
+			renderer.render(scene, camera);
+		}
+		camera.layers.enableAll();
+		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
+			renderPassCount: passes.length,
+			portalGroupCount: outdoorPortalViewGroupModel.groups.length,
+			portalMaskMeshCount: portalMaskMeshes.size,
+			terrainMeshCount: terrainMeshes.size,
+			visibleTerrainMeshCount: countVisibleObjects(terrainMeshes.values()),
+			staticGroupMeshCount: staticRenderableGroupMeshes.size,
+			visibleStaticGroupMeshCount: countVisibleObjects(
+				staticRenderableGroupMeshes.values(),
+			),
+			structuredInteriorMeshCount: structuredInteriorMeshes.size,
+			visibleStructuredInteriorMeshCount: countVisibleObjects(
+				structuredInteriorMeshes.values(),
+			),
+			debugOverlayObjectCount: debugOverlayObjects.size,
+			visibleDebugOverlayObjectCount: countVisibleObjects(
+				debugOverlayObjects.values(),
+			),
+		});
+	}
+
+	function applyPassClear(pass: WorldRenderPass): void {
+		const { color, depth, stencil } = pass.clearBeforePass;
+		if (color || depth || stencil) {
+			renderer.clear(color, depth, stencil);
+		}
+	}
+
+	function renderPortalGroups(): void {
+		const visibleGroups: {
+			group: OutdoorPortalViewGroup;
+			screenAreaPx: number;
+		}[] = [];
+		const maskedInteriorCellIds = new Set<number>();
+		for (const group of outdoorPortalViewGroupModel.groups) {
+			const visibility = evaluatePortalViewGroupVisibility(group);
+			if (!visibility.visible) {
+				recordPortalVisibilitySkip(visibility.reason);
+				continue;
+			}
+			visibleGroups.push({
+				group,
+				screenAreaPx: visibility.screenAreaPx,
+			});
+			for (const envCellId of group.requestedInteriorEnvCellIds) {
+				maskedInteriorCellIds.add(envCellId);
+			}
+		}
+		visibleGroups.sort(
+			(left, right) =>
+				right.screenAreaPx - left.screenAreaPx ||
+				left.group.id.localeCompare(right.group.id),
+		);
+		latestPortalMetrics.visiblePortalGroupCount = visibleGroups.length;
+		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
+
+		for (const { group } of visibleGroups) {
+			const maskMesh = portalMaskMeshes.get(group.id);
+			if (!maskMesh) {
+				continue;
+			}
+
+			setPortalMaskVisibility(group.id);
+			renderer.clear(false, false, true);
+			camera.layers.set(WORLD_RENDER_LAYER.portalMask);
+			renderer.render(scene, camera);
+
+			setPortalInteriorVisibility(group);
+			applyPortalInteriorStencil(group.stencilRef);
+			camera.layers.set(WORLD_RENDER_LAYER.portalInterior);
+			renderer.render(scene, camera);
+		}
+
+		setPortalMaskVisibility(null);
+		clearPortalInteriorStencil();
+		restorePortalInteriorVisibility();
+		syncSpatialVisibility();
+	}
+
+	function evaluatePortalViewGroupVisibility(
+		group: OutdoorPortalViewGroup,
+	): PortalVisibilityResult {
+		const maskMesh = portalMaskMeshes.get(group.id);
+		if (!maskMesh) {
+			return { visible: false, reason: "missing-points", screenAreaPx: 0 };
+		}
+
+		maskMesh.updateMatrixWorld(true);
+		const worldPoints = group.aperture.points.map((point) =>
+			new Vector3(point.x, point.y, point.z).applyMatrix4(maskMesh.matrixWorld),
+		);
+		return evaluatePortalVisibility({
+			worldPoints: worldPoints.map((point) => ({
+				x: point.x,
+				y: point.y,
+				z: point.z,
+			})),
+			camera,
+			viewport: new Vector2(renderer.domElement.width, renderer.domElement.height),
+			minScreenAreaPx: MIN_PORTAL_SCREEN_AREA_PX,
+		});
+	}
+
+	function recordPortalVisibilitySkip(
+		reason: PortalVisibilityResult["reason"],
+	): void {
+		switch (reason) {
+			case "outside-frustum":
+				latestPortalMetrics.skippedOutsideFrustumCount += 1;
+				return;
+			case "back-facing":
+				latestPortalMetrics.skippedBackFacingCount += 1;
+				return;
+			case "too-small":
+				latestPortalMetrics.skippedTooSmallCount += 1;
+				return;
+			case "missing-points":
+			case "visible":
+				return;
+		}
 	}
 
 	function updateRenderChunkRootPosition(
@@ -419,6 +617,7 @@ export function createWorldDisplayRenderer(
 			);
 			mesh.userData.landblockId = tile.landblockId;
 			mesh.userData.spatialItemId = terrainSpatialItemId(tile.assetId);
+			mesh.layers.set(WORLD_RENDER_LAYER.exterior);
 			chunkRoot.add(mesh);
 			terrainMeshes.set(tile.assetId, mesh);
 		}
@@ -615,6 +814,8 @@ export function createWorldDisplayRenderer(
 			bounds: calculateSceneBoundsFrame(),
 			cameraFrame: activeCameraFrame,
 			performance: latestPerformanceMetrics,
+			portal: latestPortalMetrics,
+			debug: latestRenderDebugMetrics,
 			geometry: {
 				terrainTileCount: terrainScene.tiles.length,
 				terrainVertexCount: terrainVertexCount(),
@@ -709,6 +910,10 @@ export function createWorldDisplayRenderer(
 				chunkRoot.attach(mesh);
 			}
 
+			mesh.layers.set(staticRenderableLayerForKind(firstPart.kind));
+			if (firstPart.kind === "indoor-static") {
+				mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
+			}
 			updateStaticRenderableInstancedMesh(mesh, parts);
 		}
 
@@ -798,6 +1003,38 @@ export function createWorldDisplayRenderer(
 		updateCameraFrame();
 	}
 
+	function syncPortalMaskMeshes(model: OutdoorPortalViewGroupModel): void {
+		syncRenderChunkRoots(renderChunkTransforms);
+
+		const activeGroupIds = new Set(model.groups.map((group) => group.id));
+		for (const [groupId, mesh] of portalMaskMeshes.entries()) {
+			if (activeGroupIds.has(groupId)) {
+				continue;
+			}
+
+			mesh.removeFromParent();
+			disposeMesh(mesh);
+			portalMaskMeshes.delete(groupId);
+		}
+
+		for (const group of model.groups) {
+			const chunkRoot = getRenderChunkRoot(group.renderChunk.chunkKey);
+			let mesh = portalMaskMeshes.get(group.id);
+			if (!mesh) {
+				mesh = createPortalMaskMesh(group);
+				chunkRoot.add(mesh);
+				portalMaskMeshes.set(group.id, mesh);
+			} else {
+				chunkRoot.attach(mesh);
+				updatePortalMaskMesh(mesh, group);
+			}
+		}
+
+		setPortalMaskVisibility(null);
+		syncRenderChunkRoots(renderChunkTransforms);
+		updateCameraFrame();
+	}
+
 	function createStructuredInteriorCellMesh(
 		cell: StructuredInteriorCell,
 	): Mesh {
@@ -811,14 +1048,175 @@ export function createWorldDisplayRenderer(
 		const mesh = new Mesh(geometry, material);
 		mesh.name = `structured-interior/${cell.renderKey}`;
 		mesh.matrixAutoUpdate = false;
+		mesh.layers.set(WORLD_RENDER_LAYER.diagnosticInterior);
+		mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
 		mesh.userData.spatialItemId = structuredCellSpatialItemId(cell.renderKey);
 		return mesh;
+	}
+
+	function createPortalMaskMesh(group: OutdoorPortalViewGroup): Mesh {
+		const mesh = new Mesh(
+			buildPortalMaskGeometry(group.aperture.points),
+			createPortalMaskMaterial(group.stencilRef),
+		);
+		mesh.name = `portal-mask/${group.id}`;
+		mesh.layers.set(WORLD_RENDER_LAYER.portalMask);
+		mesh.matrixAutoUpdate = false;
+		updatePortalMaskMesh(mesh, group);
+		return mesh;
+	}
+
+	function updatePortalMaskMesh(mesh: Mesh, group: OutdoorPortalViewGroup): void {
+		mesh.geometry.dispose();
+		mesh.geometry = buildPortalMaskGeometry(group.aperture.points);
+		mesh.matrix.copy(
+			buildAcPlacementMatrix(
+				group.aperture.chunkLocalPlacement,
+				{ x: 0, y: 0, z: 0 },
+				{ x: 1, y: 1, z: 1 },
+			),
+		);
+		const material = mesh.material;
+		if (!Array.isArray(material)) {
+			material.stencilRef = group.stencilRef;
+		}
+	}
+
+	function buildPortalMaskGeometry(
+		points: OutdoorPortalViewGroup["aperture"]["points"],
+	): BufferGeometry {
+		const geometry = new BufferGeometry();
+		geometry.setAttribute(
+			"position",
+			new BufferAttribute(
+				new Float32Array(points.flatMap((point) => [point.x, point.y, point.z])),
+				3,
+			),
+		);
+		const indices: number[] = [];
+		for (let index = 1; index < points.length - 1; index += 1) {
+			indices.push(0, index, index + 1);
+		}
+		geometry.setIndex(indices);
+		geometry.computeVertexNormals();
+		return geometry;
+	}
+
+	function createPortalMaskMaterial(stencilRef: number): MeshBasicMaterial {
+		return new MeshBasicMaterial({
+			colorWrite: false,
+			depthTest: true,
+			depthWrite: false,
+			side: DoubleSide,
+			stencilWrite: true,
+			stencilRef,
+			stencilFunc: AlwaysStencilFunc,
+			stencilFail: KeepStencilOp,
+			stencilZFail: KeepStencilOp,
+			stencilZPass: ReplaceStencilOp,
+		});
+	}
+
+	function setPortalMaskVisibility(activeGroupId: string | null): void {
+		for (const [groupId, mesh] of portalMaskMeshes.entries()) {
+			mesh.visible = activeGroupId !== null && groupId === activeGroupId;
+		}
+	}
+
+	function setPortalInteriorVisibility(group: OutdoorPortalViewGroup): void {
+		const visibleEnvCellIds = new Set(group.requestedInteriorEnvCellIds);
+		for (const [renderKey, mesh] of structuredInteriorMeshes.entries()) {
+			const cell = structuredInteriorScene.cells.find(
+				(entry) => entry.renderKey === renderKey,
+			);
+			mesh.visible = cell ? visibleEnvCellIds.has(cell.envCellId) : false;
+		}
+		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
+			const parts = staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(
+				groupKey,
+			);
+			if (!parts?.[0] || parts[0].kind !== "indoor-static") {
+				continue;
+			}
+			mesh.visible = parts.some(
+				(part) =>
+					part.owningEnvCellId !== null &&
+					visibleEnvCellIds.has(part.owningEnvCellId),
+			);
+		}
+	}
+
+	function restorePortalInteriorVisibility(): void {
+		for (const mesh of structuredInteriorMeshes.values()) {
+			mesh.visible = true;
+		}
+		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
+			const parts = staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(
+				groupKey,
+			);
+			if (parts?.[0]?.kind === "indoor-static") {
+				mesh.visible = true;
+			}
+		}
+	}
+
+	function applyPortalInteriorStencil(stencilRef: number): void {
+		forEachPortalInteriorMaterial((material) => {
+			material.stencilWrite = true;
+			material.stencilRef = stencilRef;
+			material.stencilFunc = EqualStencilFunc;
+			material.stencilFail = KeepStencilOp;
+			material.stencilZFail = KeepStencilOp;
+			material.stencilZPass = KeepStencilOp;
+		});
+	}
+
+	function clearPortalInteriorStencil(): void {
+		forEachPortalInteriorMaterial((material) => {
+			material.stencilWrite = false;
+			material.stencilRef = 0;
+			material.stencilFunc = AlwaysStencilFunc;
+			material.stencilFail = KeepStencilOp;
+			material.stencilZFail = KeepStencilOp;
+			material.stencilZPass = KeepStencilOp;
+		});
+	}
+
+	function forEachPortalInteriorMaterial(
+		visit: (material: Material) => void,
+	): void {
+		for (const mesh of structuredInteriorMeshes.values()) {
+			visitMeshMaterials(mesh, visit);
+		}
+		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
+			const parts = staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(
+				groupKey,
+			);
+			if (parts?.[0]?.kind === "indoor-static") {
+				visitMeshMaterials(mesh, visit);
+			}
+		}
+	}
+
+	function visitMeshMaterials(
+		mesh: Mesh | InstancedMesh,
+		visit: (material: Material) => void,
+	): void {
+		if (Array.isArray(mesh.material)) {
+			for (const material of mesh.material) {
+				visit(material);
+			}
+			return;
+		}
+
+		visit(mesh.material);
 	}
 
 	function createCellDebugOverlayGroup(cell: CellDebugOverlay): Group {
 		const group = new Group();
 		group.name = `debug-cell/${cell.renderKey}`;
 		group.matrixAutoUpdate = false;
+		group.layers.set(WORLD_RENDER_LAYER.debugOverlay);
 		group.matrix.copy(
 			buildAcPlacementMatrix(
 				cell.chunkLocalPlacement,
@@ -852,6 +1250,7 @@ export function createWorldDisplayRenderer(
 			group.add(selectedBounds);
 		}
 
+		setObjectTreeLayer(group, WORLD_RENDER_LAYER.debugOverlay);
 		return group;
 	}
 
@@ -882,6 +1281,7 @@ export function createWorldDisplayRenderer(
 			}),
 		);
 		line.name = `debug-portal/${portal.portalId}`;
+		line.layers.set(WORLD_RENDER_LAYER.debugOverlay);
 		if (!portal.isSelected) {
 			line.matrixAutoUpdate = false;
 			line.matrix.copy(
@@ -901,6 +1301,7 @@ export function createWorldDisplayRenderer(
 		const group = new Group();
 		group.name = `debug-portal-selected/${portal.portalId}`;
 		group.matrixAutoUpdate = false;
+		group.layers.set(WORLD_RENDER_LAYER.debugOverlay);
 		group.matrix.copy(
 			buildAcPlacementMatrix(
 				portal.chunkLocalPlacement,
@@ -921,6 +1322,7 @@ export function createWorldDisplayRenderer(
 				SELECTED_DEBUG_EDGE_RADIUS,
 			),
 		);
+		setObjectTreeLayer(group, WORLD_RENDER_LAYER.debugOverlay);
 		return group;
 	}
 
@@ -1178,6 +1580,10 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		structuredInteriorMeshes.clear();
+		for (const mesh of portalMaskMeshes.values()) {
+			disposeMesh(mesh);
+		}
+		portalMaskMeshes.clear();
 		for (const object of debugOverlayObjects.values()) {
 			disposeObjectTree(object);
 		}
@@ -1216,6 +1622,79 @@ function disposeObjectTree(root: Object3D): void {
 
 function disposeMaterial(material: Material): void {
 	material.dispose();
+}
+
+function enableAllWorldRenderLayers(object: Object3D): void {
+	for (const layer of Object.values(WORLD_RENDER_LAYER)) {
+		object.layers.enable(layer);
+	}
+}
+
+function setObjectTreeLayer(root: Object3D, layer: number): void {
+	root.traverse((object) => object.layers.set(layer));
+}
+
+function countVisibleObjects(objects: Iterable<Object3D>): number {
+	let count = 0;
+	for (const object of objects) {
+		if (object.visible) {
+			count += 1;
+		}
+	}
+	return count;
+}
+
+function createPortalRenderMetrics(
+	model: OutdoorPortalViewGroupModel,
+): WorldRenderPortalMetrics {
+	return {
+		candidateOutdoorPortalCount: model.diagnostics.topologyPortalCount,
+		visiblePortalGroupCount: 0,
+		maskedInteriorCellCount: 0,
+		skippedMissingApertureCount:
+			model.diagnostics.skippedMissingApertureCount,
+		skippedMissingPolygonCount:
+			model.diagnostics.skippedMissingPolygonCount,
+		skippedOutsideFrustumCount: 0,
+		skippedBackFacingCount: 0,
+		skippedTooSmallCount: 0,
+	};
+}
+
+function createRenderDebugMetrics(
+	renderer: WebGLRenderer,
+	options: Omit<
+		WorldRenderDebugMetrics,
+		| "canvasWidth"
+		| "canvasHeight"
+		| "pixelRatio"
+		| "renderCalls"
+		| "renderTriangles"
+		| "renderLines"
+		| "renderPoints"
+	>,
+): WorldRenderDebugMetrics {
+	return {
+		canvasWidth: renderer.domElement.width,
+		canvasHeight: renderer.domElement.height,
+		pixelRatio: renderer.getPixelRatio(),
+		renderPassCount: options.renderPassCount,
+		portalGroupCount: options.portalGroupCount,
+		portalMaskMeshCount: options.portalMaskMeshCount,
+		terrainMeshCount: options.terrainMeshCount,
+		visibleTerrainMeshCount: options.visibleTerrainMeshCount,
+		staticGroupMeshCount: options.staticGroupMeshCount,
+		visibleStaticGroupMeshCount: options.visibleStaticGroupMeshCount,
+		structuredInteriorMeshCount: options.structuredInteriorMeshCount,
+		visibleStructuredInteriorMeshCount:
+			options.visibleStructuredInteriorMeshCount,
+		debugOverlayObjectCount: options.debugOverlayObjectCount,
+		visibleDebugOverlayObjectCount: options.visibleDebugOverlayObjectCount,
+		renderCalls: renderer.info.render.calls,
+		renderTriangles: renderer.info.render.triangles,
+		renderLines: renderer.info.render.lines,
+		renderPoints: renderer.info.render.points,
+	};
 }
 
 function disposeMeshMaterial(mesh: Mesh): void {

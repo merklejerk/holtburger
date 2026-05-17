@@ -16,7 +16,7 @@ import type {
 	PreparedSetupModelPayload,
 } from "../assets/types";
 import {
-	deriveOutdoorLinkedInteriorEnvCellIds,
+	deriveOutdoorPortalInteriorSeedEnvCellIds,
 	deriveTerrainFocusLandblockId,
 } from "../assets/scene-asset-request-planner";
 import {
@@ -160,7 +160,7 @@ export function deriveStaticRenderableSceneModel(
 							{
 								kind: "visible-cell-closure",
 								seedEnvCellIds: [
-									...deriveOutdoorLinkedInteriorEnvCellIds(
+									...deriveOutdoorPortalInteriorSeedEnvCellIds(
 										assetState.preparedByAssetId,
 										detailLandblockSet,
 									),

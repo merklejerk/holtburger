@@ -19,6 +19,7 @@
 	import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 	import type { TerrainSceneModel } from "./terrain-scene";
 	import type { WorldDebugOverlayModel } from "./debug-overlays";
+	import type { OutdoorPortalViewGroupModel } from "./outdoor-portal-view-groups";
 	import {
 		createWorldDisplayRenderer,
 		type WorldDisplayRenderer,
@@ -29,6 +30,7 @@
 		terrainScene,
 		staticRenderableScene,
 		structuredInteriorScene,
+		outdoorPortalViewGroupModel,
 		debugOverlayScene,
 		activeRenderAnchor: _activeRenderAnchor = null,
 		renderChunkTransforms = [],
@@ -41,6 +43,7 @@
 		terrainScene: TerrainSceneModel;
 		staticRenderableScene: StaticRenderableSceneModel;
 		structuredInteriorScene: StructuredInteriorSceneModel;
+		outdoorPortalViewGroupModel: OutdoorPortalViewGroupModel;
 		debugOverlayScene: WorldDebugOverlayModel;
 		activeRenderAnchor?: RenderLandblockAnchor | null;
 		renderChunkTransforms?: RenderChunkTransform[];
@@ -65,6 +68,7 @@
 				terrainScene,
 				staticRenderableScene,
 				structuredInteriorScene,
+				outdoorPortalViewGroupModel,
 				debugOverlayScene,
 				renderChunkTransforms,
 				renderSpatialQuery,
@@ -121,6 +125,14 @@
 			return;
 		}
 		controller.setStructuredInteriorScene(structuredInteriorScene);
+	});
+
+	$effect(() => {
+		const controller = rendererController;
+		if (!controller) {
+			return;
+		}
+		controller.setOutdoorPortalViewGroupModel(outdoorPortalViewGroupModel);
 	});
 
 	$effect(() => {

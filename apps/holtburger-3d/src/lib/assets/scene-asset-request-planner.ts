@@ -233,7 +233,7 @@ export function deriveSceneCoverageAssetIds(
 				{
 					kind: "visible-cell-closure",
 					seedEnvCellIds: [
-						...deriveOutdoorLinkedInteriorEnvCellIds(
+						...deriveOutdoorPortalInteriorSeedEnvCellIds(
 							preparedByAssetId,
 							new Set(interest.detailLandblockIds),
 						),
@@ -374,7 +374,7 @@ export function createStaticRenderableAssetRequests(
 		deriveOutdoorInterestForRuntime(runtimeBatch, browserDestination, options);
 	const buildingLandblockIds = new Set(outdoorInterest.buildingLandblockIds);
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
-	const linkedIndoorEnvCellIds = deriveOutdoorLinkedInteriorEnvCellIds(
+	const linkedIndoorEnvCellIds = deriveOutdoorPortalInteriorSeedEnvCellIds(
 		preparedByAssetId,
 		detailLandblockIds,
 	);
@@ -446,7 +446,7 @@ function createOutdoorLinkedInteriorCoverageRequests(
 	options: OutdoorSceneRequestOptions,
 	interest: NormalizedOutdoorSceneInterest,
 ): AssetLookupRequestDto[] {
-	const linkedEnvCellIds = deriveOutdoorLinkedInteriorEnvCellIds(
+	const linkedEnvCellIds = deriveOutdoorPortalInteriorSeedEnvCellIds(
 		preparedByAssetId,
 		new Set(interest.detailLandblockIds),
 	);
@@ -464,7 +464,7 @@ function createOutdoorLinkedInteriorCoverageRequests(
 	);
 }
 
-export function deriveOutdoorLinkedInteriorEnvCellIds(
+export function deriveOutdoorPortalInteriorSeedEnvCellIds(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	activeLandblockIds: ReadonlySet<number>,
 ): Set<number> {
@@ -484,11 +484,20 @@ export function deriveOutdoorLinkedInteriorEnvCellIds(
 				for (const envCellId of portal.linkedEnvCellIds) {
 					linkedEnvCellIds.add(envCellId);
 				}
+				for (const cellId of portal.stabList) {
+					if (isEnvCellId(cellId)) {
+						linkedEnvCellIds.add(cellId);
+					}
+				}
 			}
 		}
 	}
 
 	return linkedEnvCellIds;
+}
+
+function isEnvCellId(cellId: number): boolean {
+	return (cellId & 0xffff) !== 0xffff;
 }
 
 export function deriveTerrainFocusLandblockId(

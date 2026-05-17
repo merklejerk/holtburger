@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 4 complete; Phase 5 is the next implementation step.
+Status: Phase 5 complete; Phase 6 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -571,6 +571,8 @@ Refined follow-up for Phase 5:
 
 ### Phase 5: Chunked Render Spatial Index
 
+Status: complete.
+
 Extend the render spatial index with chunk transforms while keeping its query interface narrow.
 
 Candidate interface direction:
@@ -613,6 +615,62 @@ Tests:
 - ray pick returns the same renderer-space hit point before and after a chunk transform update
 - frustum query respects chunk transforms
 - missing chunk transforms fail visibly in tests rather than silently producing misleading hits
+
+Implemented progress:
+
+- Extended `RenderSpatialItem` with optional `chunkKey` support. Existing unchunked items remain
+  flattened renderer-space items.
+- Added `RenderSpatialChunkSink` operations to `RenderSpatialIndex`:
+  - `replaceChunkTransforms(transforms)`
+  - `removeChunkTransform(chunkKey)`
+- Updated `createLinearRenderSpatialIndex` to store chunk transforms internally and apply them
+  during queries for items that declare a `chunkKey`.
+- Kept `WorldDisplay` on the query side only. It still submits renderer-local rays and frustums and
+  does not mutate spatial-index transform state.
+- Wired `BrowserWorldDisplay` to call `renderSpatialIndex.replaceChunkTransforms` from the same
+  `activeRenderChunkTransforms` set already passed to `WorldDisplay` for chunk roots.
+- Added tests proving:
+  - ray picks return renderer-space hit points after a chunk transform update
+  - frustum queries respect chunk transforms
+  - chunked items with missing transforms throw visibly
+
+Decisions:
+
+- Chunking is opt-in per item via `chunkKey`. This avoids double-transforming the current terrain,
+  structured-interior, and debug spatial items, which are still derived as flattened renderer-space
+  bounds until Phase 6.
+- `BrowserWorldDisplay` remains the sole writer of spatial chunk transforms. `WorldDisplay` keeps
+  using only the query interface.
+- Query inputs remain renderer-local. For chunked items, the index transforms rays into chunk-local
+  space and translates chunk-local bounds to renderer space for frustum tests.
+- Pick results remain renderer-local. The index converts chunk-local precise hit points back through
+  the stored chunk transform before returning.
+
+Course corrections:
+
+- The first implementation pass introduced a duplicate vector helper name in
+  `render-spatial-index.ts`; the helper was consolidated with the existing math helpers.
+- Scene-derived spatial items were intentionally not marked with `chunkKey` in this phase. Their
+  geometry is still flattened by `render-spatial-scene.ts`, so marking them chunked before Phase 6
+  would apply transforms twice.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/render-spatial-index.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 6:
+
+- Migrate non-instanced scene spatial item derivation to chunk-local coordinates at the same time
+  those visual objects move under chunk roots.
+- Add `chunkKey` to terrain, structured-cell, debug-cell, and portal spatial items only after their
+  bounds/pick shapes are authored chunk-local.
+- Keep static renderable spatial/index behavior out of Phase 6 unless a specific non-instanced
+  static hook appears; static batching and chunk-local instance matrices remain Phase 7.
+- Verify pick result points remain renderer-local after Phase 6 by adapting the Phase 5 chunked
+  index tests to real scene-derived items.
 
 ### Phase 6: Non-Instanced Layer Migration
 

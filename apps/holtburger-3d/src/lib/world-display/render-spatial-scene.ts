@@ -62,6 +62,7 @@ function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 		id: terrainSpatialItemId(tile.assetId),
 		kind: "terrain",
 		ownerKey: TERRAIN_SPATIAL_OWNER_KEY,
+		chunkKey: tile.renderChunk.chunkKey,
 		broadphaseBounds: bounds,
 		pickShape: { kind: "box", bounds },
 		metadata: {
@@ -76,8 +77,8 @@ function deriveStructuredInteriorSpatialItem(
 	cell: StructuredInteriorCell,
 ): RenderSpatialItem {
 	const transform = buildAcPlacementMatrix(
-		cell.localPlacement,
-		cell.landblockWorldOffset,
+		cell.chunkLocalPlacement,
+		{ x: 0, y: 0, z: 0 },
 		{ x: 1, y: 1, z: 1 },
 	);
 	const center = transformPoint({ x: 0, y: 0, z: 0 }, transform);
@@ -89,6 +90,7 @@ function deriveStructuredInteriorSpatialItem(
 		id: structuredCellSpatialItemId(cell.renderKey),
 		kind: "structured-cell",
 		ownerKey: STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+		chunkKey: cell.renderChunk.chunkKey,
 		broadphaseBounds: bounds,
 		pickShape: cell.renderGeometry.bounds
 			? { kind: "box", bounds }
@@ -109,8 +111,8 @@ function deriveCellDebugOverlaySpatialItem(
 		return [];
 	}
 	const transform = buildAcPlacementMatrix(
-		cell.localPlacement,
-		cell.landblockWorldOffset,
+		cell.chunkLocalPlacement,
+		{ x: 0, y: 0, z: 0 },
 		{ x: 1, y: 1, z: 1 },
 	);
 	const bounds = transformBounds(cell.bounds, transform);
@@ -120,6 +122,7 @@ function deriveCellDebugOverlaySpatialItem(
 			id: debugCellSpatialItemId(cell.renderKey),
 			kind: "structured-cell",
 			ownerKey: DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+			chunkKey: cell.renderChunk.chunkKey,
 			broadphaseBounds: bounds,
 			pickShape: { kind: "box", bounds },
 			metadata: {
@@ -139,8 +142,8 @@ function derivePortalSpatialItem(
 		return [];
 	}
 	const transform = buildAcPlacementMatrix(
-		portal.localPlacement,
-		portal.landblockWorldOffset,
+		portal.chunkLocalPlacement,
+		{ x: 0, y: 0, z: 0 },
 		{ x: 1, y: 1, z: 1 },
 	);
 	const points = portal.points.map((point) => transformPoint(point, transform));
@@ -150,6 +153,7 @@ function derivePortalSpatialItem(
 			id: portalSpatialItemId(portal.portalId),
 			kind: "portal",
 			ownerKey: DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+			chunkKey: portal.renderChunk.chunkKey,
 			broadphaseBounds: bounds,
 			pickShape: { kind: "polygon", points, thickness: PORTAL_PICK_THICKNESS },
 			metadata: {
@@ -176,14 +180,14 @@ function deriveTerrainTileBounds(tile: TerrainSceneTile): RenderBounds {
 	);
 	return {
 		min: {
-			x: localBounds.min.x + tile.worldOffsetX,
+			x: localBounds.min.x + tile.chunkLocalOffset.x,
 			y: localBounds.min.y,
-			z: localBounds.min.z - tile.worldOffsetY,
+			z: localBounds.min.z + tile.chunkLocalOffset.z,
 		},
 		max: {
-			x: localBounds.max.x + tile.worldOffsetX,
+			x: localBounds.max.x + tile.chunkLocalOffset.x,
 			y: localBounds.max.y,
-			z: localBounds.max.z - tile.worldOffsetY,
+			z: localBounds.max.z + tile.chunkLocalOffset.z,
 		},
 	};
 }

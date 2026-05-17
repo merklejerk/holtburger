@@ -316,6 +316,9 @@
 				disposeMesh(mesh);
 			}
 			structuredInteriorMeshes.clear();
+			for (const object of debugOverlayObjects.values()) {
+				disposeObjectTree(object);
+			}
 			debugOverlayObjects.clear();
 			chunkRoots.clear();
 			nextTerrainRoot.clear();
@@ -426,6 +429,7 @@
 		syncRenderChunkRootRecords(chunkRoots, renderChunkTransforms, {
 			createRoot: createRenderChunkRoot,
 			updateRootPosition: updateRenderChunkRootPosition,
+			canDisposeRoot: (root) => root.children.length === 0,
 			disposeRoot: disposeRenderChunkRoot,
 		});
 		untrack(() => {
@@ -464,6 +468,15 @@
 		root.removeFromParent();
 	}
 
+	function getRenderChunkRoot(chunkKey: RenderChunkKey): Group {
+		syncRenderChunkRoots();
+		const record = chunkRoots.get(chunkKey);
+		if (!record) {
+			throw new Error(`Missing render chunk root ${chunkKey}.`);
+		}
+		return record.root;
+	}
+
 	function resolveControlledCameraFrame(
 		frame: SceneCameraFrame,
 	): SceneCameraFrame {
@@ -475,7 +488,7 @@
 	}
 
 	function syncTerrainMeshes(): void {
-		if (!terrainRoot) {
+		if (!terrainRoot || !chunkRootContainer) {
 			return;
 		}
 
@@ -487,25 +500,36 @@
 				continue;
 			}
 
-			terrainRoot.remove(mesh);
+			mesh.removeFromParent();
 			disposeMesh(mesh);
 			terrainMeshes.delete(assetId);
 		}
 
 		for (const tile of terrainScene.tiles) {
+			const chunkRoot = getRenderChunkRoot(tile.renderChunk.chunkKey);
 			const existing = terrainMeshes.get(tile.assetId);
 			if (existing) {
-				existing.position.set(tile.worldOffsetX, 0, -tile.worldOffsetY);
+				chunkRoot.attach(existing);
+				existing.position.set(
+					tile.chunkLocalOffset.x,
+					tile.chunkLocalOffset.y,
+					tile.chunkLocalOffset.z,
+				);
 				continue;
 			}
 
 			const mesh = createTerrainTileMesh(tile);
-			mesh.position.set(tile.worldOffsetX, 0, -tile.worldOffsetY);
+			mesh.position.set(
+				tile.chunkLocalOffset.x,
+				tile.chunkLocalOffset.y,
+				tile.chunkLocalOffset.z,
+			);
 			mesh.userData.landblockId = tile.landblockId;
 			mesh.userData.spatialItemId = terrainSpatialItemId(tile.assetId);
-			terrainRoot.add(mesh);
+			chunkRoot.add(mesh);
 			terrainMeshes.set(tile.assetId, mesh);
 		}
+		syncRenderChunkRoots();
 		untrack(() => updateCameraFrame());
 	}
 
@@ -814,18 +838,20 @@
 	}
 
 	function syncDebugOverlayMeshes(): void {
-		if (!debugOverlayRoot) {
+		if (!debugOverlayRoot || !chunkRootContainer) {
 			return;
 		}
 
-		disposeObjectChildren(debugOverlayRoot);
-		debugOverlayRoot.clear();
+		for (const object of debugOverlayObjects.values()) {
+			object.removeFromParent();
+			disposeObjectTree(object);
+		}
 		debugOverlayObjects.clear();
 
 		if (debugOverlayScene.showCellIndicators) {
 			for (const cell of debugOverlayScene.cells) {
 				const overlay = createCellDebugOverlayGroup(cell);
-				debugOverlayRoot.add(overlay);
+				getRenderChunkRoot(cell.renderChunk.chunkKey).add(overlay);
 				debugOverlayObjects.set(
 					debugCellSpatialItemId(cell.renderKey),
 					overlay,
@@ -837,7 +863,7 @@
 			for (const portal of debugOverlayScene.portals) {
 				const overlay = createPortalDebugOverlayLine(portal);
 				if (overlay) {
-					debugOverlayRoot.add(overlay);
+					getRenderChunkRoot(portal.renderChunk.chunkKey).add(overlay);
 					debugOverlayObjects.set(
 						portalSpatialItemId(portal.portalId),
 						overlay,
@@ -846,11 +872,12 @@
 			}
 		}
 
+		syncRenderChunkRoots();
 		untrack(() => updateCameraFrame());
 	}
 
 	function syncStructuredInteriorMeshes(): void {
-		if (!structuredInteriorRoot) {
+		if (!structuredInteriorRoot || !chunkRootContainer) {
 			return;
 		}
 
@@ -862,22 +889,26 @@
 				continue;
 			}
 
-			structuredInteriorRoot.remove(mesh);
+			mesh.removeFromParent();
 			disposeMesh(mesh);
 			structuredInteriorMeshes.delete(renderKey);
 		}
 
 		for (const cell of structuredInteriorScene.cells) {
+			const chunkRoot = getRenderChunkRoot(cell.renderChunk.chunkKey);
 			let mesh = structuredInteriorMeshes.get(cell.renderKey);
 			if (!mesh) {
 				mesh = createStructuredInteriorCellMesh(cell);
-				structuredInteriorRoot.add(mesh);
+				chunkRoot.add(mesh);
 				structuredInteriorMeshes.set(cell.renderKey, mesh);
+			} else {
+				chunkRoot.attach(mesh);
 			}
 
 			updateStructuredInteriorCellMesh(mesh, cell);
 		}
 
+		syncRenderChunkRoots();
 		untrack(() => updateCameraFrame());
 	}
 
@@ -905,11 +936,15 @@
 		group.name = `debug-cell/${cell.renderKey}`;
 		group.matrixAutoUpdate = false;
 		group.matrix.copy(
-			buildAcPlacementMatrix(cell.localPlacement, cell.landblockWorldOffset, {
-				x: 1,
-				y: 1,
-				z: 1,
-			}),
+			buildAcPlacementMatrix(
+				cell.chunkLocalPlacement,
+				{ x: 0, y: 0, z: 0 },
+				{
+					x: 1,
+					y: 1,
+					z: 1,
+				},
+			),
 		);
 
 		const color = buildStaticRenderableColor(cell.colorKey);
@@ -967,8 +1002,8 @@
 			line.matrixAutoUpdate = false;
 			line.matrix.copy(
 				buildAcPlacementMatrix(
-					portal.localPlacement,
-					portal.landblockWorldOffset,
+					portal.chunkLocalPlacement,
+					{ x: 0, y: 0, z: 0 },
 					{
 						x: 1,
 						y: 1,
@@ -984,8 +1019,8 @@
 		group.matrixAutoUpdate = false;
 		group.matrix.copy(
 			buildAcPlacementMatrix(
-				portal.localPlacement,
-				portal.landblockWorldOffset,
+				portal.chunkLocalPlacement,
+				{ x: 0, y: 0, z: 0 },
 				{
 					x: 1,
 					y: 1,
@@ -1154,11 +1189,15 @@
 		cell: StructuredInteriorCell,
 	): void {
 		mesh.matrix.copy(
-			buildAcPlacementMatrix(cell.localPlacement, cell.landblockWorldOffset, {
-				x: 1,
-				y: 1,
-				z: 1,
-			}),
+			buildAcPlacementMatrix(
+				cell.chunkLocalPlacement,
+				{ x: 0, y: 0, z: 0 },
+				{
+					x: 1,
+					y: 1,
+					z: 1,
+				},
+			),
 		);
 		mesh.matrixWorldNeedsUpdate = true;
 	}
@@ -1238,6 +1277,26 @@
 				return;
 			}
 
+			const maybeGeometry = (object as { geometry?: unknown }).geometry;
+			if (maybeGeometry instanceof BufferGeometry) {
+				maybeGeometry.dispose();
+			}
+
+			const maybeMaterial = (object as { material?: unknown }).material;
+			if (Array.isArray(maybeMaterial)) {
+				for (const material of maybeMaterial) {
+					disposeMaterial(material);
+				}
+				return;
+			}
+			if (maybeMaterial) {
+				disposeMaterial(maybeMaterial as Material);
+			}
+		});
+	}
+
+	function disposeObjectTree(root: Object3D): void {
+		root.traverse((object) => {
 			const maybeGeometry = (object as { geometry?: unknown }).geometry;
 			if (maybeGeometry instanceof BufferGeometry) {
 				maybeGeometry.dispose();

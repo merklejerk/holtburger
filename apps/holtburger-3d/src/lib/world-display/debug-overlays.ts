@@ -1,9 +1,9 @@
 import type { Vec3Dto } from "../host/contracts";
-import type {
-	PreparedIndoorCellPortal,
-	PreparedPolygonSetPolygon,
-	PreparedPolygonSetVertexArray,
-} from "../assets/types";
+import {
+	derivePortalAperturesFromStructuredInteriorScene,
+	type PortalAperture,
+	type PortalApertureTargetStatus,
+} from "./portal-apertures";
 import { formatHex32 } from "../landblocks";
 import type {
 	StructuredInteriorCell,
@@ -19,12 +19,7 @@ export interface WorldDebugOverlayOptions {
 	selectedEnvCellId?: number | null;
 }
 
-export type PortalOverlayTargetStatus =
-	| "loaded-visible"
-	| "known-unloaded"
-	| "outside"
-	| "unsupported"
-	| "missing-polygon";
+export type PortalOverlayTargetStatus = PortalApertureTargetStatus;
 
 export interface CellDebugOverlay {
 	envCellId: number;
@@ -72,19 +67,16 @@ export function deriveWorldDebugOverlayModel(
 	structuredInteriorScene: StructuredInteriorSceneModel,
 	options: WorldDebugOverlayOptions,
 ): WorldDebugOverlayModel {
-	const activeEnvCellIds = new Set(structuredInteriorScene.activeEnvCellIds);
 	const cells = options.showCellIndicators
 		? structuredInteriorScene.cells.map((cell) =>
 				createCellOverlay(cell, options.selectedEnvCellId ?? null),
 			)
 		: [];
 	const portals = options.showPortalPolygons
-		? structuredInteriorScene.cells.flatMap((cell) =>
-				createPortalOverlays(
-					cell,
-					activeEnvCellIds,
-					options.selectedPortalId ?? null,
-				),
+		? derivePortalAperturesFromStructuredInteriorScene(
+				structuredInteriorScene,
+			).map((aperture) =>
+				createPortalOverlay(aperture, options.selectedPortalId ?? null),
 			)
 		: [];
 	const knownTargetCount = portals.filter(
@@ -132,109 +124,23 @@ function createCellOverlay(
 	};
 }
 
-function createPortalOverlays(
-	cell: StructuredInteriorCell,
-	activeEnvCellIds: ReadonlySet<number>,
+function createPortalOverlay(
+	aperture: PortalAperture,
 	selectedPortalId: string | null,
-): PortalDebugOverlay[] {
-	const cellStructure = cell.cellStructure;
-	if (!cellStructure) {
-		return [];
-	}
-
-	const polygonsById = new Map(
-		cellStructure.drawingPolygons.map((polygon) => [polygon.id, polygon]),
-	);
-
-	return cell.portals.map((portal) => {
-		const polygon = polygonsById.get(portal.polygonId);
-		const points = polygon
-			? buildPortalPolygonPoints(cellStructure.vertexArray, polygon)
-			: [];
-		const targetEnvCellId = normalizePortalTargetEnvCellId(cell, portal);
-		const targetStatus = resolveTargetStatus(
-			targetEnvCellId,
-			activeEnvCellIds,
-			points,
-		);
-
-		return {
-			portalId: portal.portalId,
-			sourceEnvCellId: cell.envCellId,
-			renderChunk: cell.renderChunk,
-			targetEnvCellId,
-			targetStatus,
-			polygonId: portal.polygonId,
-			otherPortalId: portal.otherPortalId,
-			flags: portal.flags,
-			isSelected: portal.portalId === selectedPortalId,
-			chunkLocalPlacement: cell.chunkLocalPlacement,
-			points,
-			colorKey: `${cell.debugColorKey}:portal:${portal.portalId}:${targetStatus}`,
-		};
-	});
-}
-
-function buildPortalPolygonPoints(
-	vertexArray: PreparedPolygonSetVertexArray,
-	polygon: PreparedPolygonSetPolygon,
-): Vec3Dto[] {
-	const verticesById = new Map(
-		vertexArray.vertices.map((vertex) => [vertex.id, vertex]),
-	);
-
-	return polygon.vertexIds.flatMap((vertexId) => {
-		const vertex = verticesById.get(vertexId);
-		return vertex ? [toRenderSpace(vertex.origin)] : [];
-	});
-}
-
-function normalizePortalTargetEnvCellId(
-	cell: StructuredInteriorCell,
-	portal: PreparedIndoorCellPortal,
-): number | null {
-	if (isOutsidePortal(portal)) {
-		return (cell.envCellId & 0xffff_0000) | 0xffff;
-	}
-	if (portal.otherCellId === 0) {
-		return null;
-	}
-
-	return portal.targetEnvCellId;
-}
-
-function resolveTargetStatus(
-	targetEnvCellId: number | null,
-	activeEnvCellIds: ReadonlySet<number>,
-	points: Vec3Dto[],
-): PortalOverlayTargetStatus {
-	if (points.length < 3) {
-		return "missing-polygon";
-	}
-	if (targetEnvCellId !== null && (targetEnvCellId & 0xffff) === 0xffff) {
-		return "outside";
-	}
-	if (targetEnvCellId === null) {
-		return "unsupported";
-	}
-	if (activeEnvCellIds.has(targetEnvCellId)) {
-		return "loaded-visible";
-	}
-
-	return "known-unloaded";
-}
-
-function isOutsidePortal(portal: PreparedIndoorCellPortal): boolean {
-	// Retail CCellPortal::UnPack maps flag 0x4 to other_cell_id = -1, then
-	// transit resolves the crossing through outside landcell membership.
-	return (portal.flags & 0x4) !== 0;
-}
-
-function toRenderSpace(point: Vec3Dto): Vec3Dto {
+): PortalDebugOverlay {
 	return {
-		x: point.x,
-		y: point.z,
-		z: -point.y,
+		portalId: aperture.id,
+		sourceEnvCellId: aperture.source.envCellId,
+		renderChunk: aperture.renderChunk,
+		targetEnvCellId: aperture.targetEnvCellId,
+		targetStatus: aperture.targetStatus,
+		polygonId: aperture.source.polygonId,
+		otherPortalId: aperture.source.otherPortalId,
+		flags: aperture.source.flags,
+		isSelected: aperture.id === selectedPortalId,
+		chunkLocalPlacement: aperture.chunkLocalPlacement,
+		points: aperture.points,
+		colorKey: `${aperture.source.envCellId.toString(16)}:portal:${aperture.id}:${aperture.targetStatus}`,
 	};
 }
 

@@ -124,6 +124,7 @@
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
+	let isSpatialVisibilityDirty = true;
 
 	const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 	const UNFOCUSED_MAX_RENDER_FPS = 15;
@@ -221,7 +222,9 @@
 				scene === nextScene &&
 				camera === nextCamera
 			) {
-				syncSpatialVisibility();
+				if (isSpatialVisibilityDirty) {
+					syncSpatialVisibility();
+				}
 				syncReducedFrameRateState();
 				if (
 					isReducedFrameRateActive &&
@@ -350,6 +353,11 @@
 		reportRenderMetrics();
 	});
 
+	$effect(() => {
+		renderSpatialQuery;
+		markSpatialVisibilityDirty();
+	});
+
 	export function pickTerrainLandblockAtViewportPoint(
 		viewportPoint: NormalizedViewportPoint,
 	): number | null {
@@ -398,6 +406,7 @@
 		untrack(() => {
 			updateCameraFrame();
 			reportRenderMetrics();
+			markSpatialVisibilityDirty();
 		});
 	}
 
@@ -432,7 +441,6 @@
 	}
 
 	function getRenderChunkRoot(chunkKey: RenderChunkKey): Group {
-		syncRenderChunkRoots();
 		const record = chunkRoots.get(chunkKey);
 		if (!record) {
 			throw new Error(`Missing render chunk root ${chunkKey}.`);
@@ -454,6 +462,7 @@
 		if (!chunkRootContainer) {
 			return;
 		}
+		syncRenderChunkRoots();
 
 		const activeAssetIds = new Set(
 			terrainScene.tiles.map((tile) => tile.assetId),
@@ -493,7 +502,10 @@
 			terrainMeshes.set(tile.assetId, mesh);
 		}
 		syncRenderChunkRoots();
-		untrack(() => updateCameraFrame());
+		untrack(() => {
+			updateCameraFrame();
+			markSpatialVisibilityDirty();
+		});
 	}
 
 	function buildViewportRay(viewportPoint: NormalizedViewportPoint): {
@@ -524,6 +536,7 @@
 	}
 
 	function syncSpatialVisibility(): void {
+		isSpatialVisibilityDirty = false;
 		if (!camera || !renderSpatialQuery) {
 			setAllSpatiallyCullableObjectsVisible(true);
 			return;
@@ -655,6 +668,7 @@
 	): void {
 		activeCameraFrame = frame;
 		applySceneCameraFrame(activeCameraFrame);
+		markSpatialVisibilityDirty();
 		if (options.notifyParent) {
 			onCameraFrameChange?.(frame);
 		}
@@ -740,6 +754,7 @@
 		if (!chunkRootContainer) {
 			return;
 		}
+		syncRenderChunkRoots();
 
 		const partsByGroupKey =
 			staticRenderableScene.partsByRenderChunkAndGfxAssetId;
@@ -800,13 +815,17 @@
 		}
 
 		syncRenderChunkRoots();
-		untrack(() => updateCameraFrame());
+		untrack(() => {
+			updateCameraFrame();
+			markSpatialVisibilityDirty();
+		});
 	}
 
 	function syncDebugOverlayMeshes(): void {
 		if (!chunkRootContainer) {
 			return;
 		}
+		syncRenderChunkRoots();
 
 		for (const object of debugOverlayObjects.values()) {
 			object.removeFromParent();
@@ -839,13 +858,17 @@
 		}
 
 		syncRenderChunkRoots();
-		untrack(() => updateCameraFrame());
+		untrack(() => {
+			updateCameraFrame();
+			markSpatialVisibilityDirty();
+		});
 	}
 
 	function syncStructuredInteriorMeshes(): void {
 		if (!chunkRootContainer) {
 			return;
 		}
+		syncRenderChunkRoots();
 
 		const activeRenderKeys = new Set(
 			structuredInteriorScene.cells.map((cell) => cell.renderKey),
@@ -875,7 +898,14 @@
 		}
 
 		syncRenderChunkRoots();
-		untrack(() => updateCameraFrame());
+		untrack(() => {
+			updateCameraFrame();
+			markSpatialVisibilityDirty();
+		});
+	}
+
+	function markSpatialVisibilityDirty(): void {
+		isSpatialVisibilityDirty = true;
 	}
 
 	function createStructuredInteriorCellMesh(

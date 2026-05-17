@@ -965,6 +965,11 @@ Course corrections:
 - Follow-up review removed two over-conservative leftovers: terrain no longer exposes stored focus
   delta/world offset fields, and static source normalization no longer keeps a `localPlacement`
   bridge name after converting prepared asset placement into chunk-local renderer placement.
+- Post-phase performance review found two hot paths introduced by the chunk-root migration:
+  `WorldDisplay` was querying spatial visibility every animation frame, and `getRenderChunkRoot`
+  was resynchronizing every chunk root for every terrain tile, static group, debug overlay, and
+  structured cell during hydration. Visibility is now dirty-bit driven and chunk roots are
+  synchronized once at the layer sync boundaries instead of inside each root lookup.
 
 Validation:
 
@@ -975,11 +980,17 @@ Validation:
 - `npm exec prettier -- --check src/lib/world-display/WorldDisplay.svelte src/lib/world-display/debug-overlays.ts src/lib/world-display/debug-overlays.test.ts src/lib/world-display/render-chunks.ts src/lib/world-display/render-spatial-index.ts src/lib/world-display/render-spatial-index.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/renderer-contract.ts src/lib/world-display/static-renderable-geometry.test.ts src/lib/world-display/static-renderables.ts src/lib/world-display/static-renderables.test.ts src/lib/world-display/structured-interior-scene.ts src/lib/world-display/structured-interior-scene.test.ts src/pages/BrowserWorldDisplay.svelte`
 - `npm run test:ts -- src/lib/world-display/terrain-scene.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-renderables.test.ts src/lib/world-display/static-renderable-geometry.test.ts`
 - `npm exec prettier -- --check src/lib/world-display/terrain-scene.ts src/lib/world-display/terrain-scene.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-renderables.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
 
 Remaining follow-up:
 
 - Consider renaming `partsByRenderChunkAndGfxAssetId` to `partsByInstancedGroupKey` now that the old
   flat `partsByGfxAssetId` contrast no longer exists.
+- If culling still shows up in profiles during active camera movement, cache renderer-local
+  broadphase bounds in `RenderSpatialIndex` when owner items or chunk transforms change instead of
+  translating every item during every frustum query.
 - Add host-side camera-hint semantics when the host starts consuming rendered camera hints for
   behavior rather than storing acknowledgements.
 - Use the completed chunk-root model as input to the local-world simulation exploration before

@@ -968,14 +968,23 @@ Course corrections:
 - Post-phase performance review found two hot paths introduced by the chunk-root migration:
   `WorldDisplay` was querying spatial visibility every animation frame, and `getRenderChunkRoot`
   was resynchronizing every chunk root for every terrain tile, static group, debug overlay, and
-  structured cell during hydration. Visibility is now dirty-bit driven and chunk roots are
-  synchronized once at the layer sync boundaries instead of inside each root lookup.
+  structured cell during hydration. The initial fix made visibility dirty-bit driven and
+  synchronized chunk roots once at layer sync boundaries instead of inside each root lookup.
 - Follow-up WebKit profiling during active camera movement showed Svelte flushes still entering
   scene hydration effects such as `syncStaticRenderableMeshes`, `syncStructuredInteriorMeshes`,
   `syncTerrainMeshes`, and `syncDebugOverlayMeshes`. `WorldDisplay` now captures each effect's
   intended scene input explicitly and runs the imperative Three.js synchronization under Svelte
   `untrack`, so camera-frame and metrics reads inside shared renderer helpers do not become hidden
   dependencies of terrain, static renderable, structured-interior, or debug-overlay hydration.
+- The final renderer cleanup moved the Three.js scene lifecycle, mesh hydration, chunk-root
+  management, spatial visibility, camera application, picking, RAF loop, and render metrics into a
+  plain TypeScript `world-display-renderer` controller. `WorldDisplay.svelte` is now only a DOM
+  lifecycle and prop-forwarding bridge, keeping Svelte reactivity at the component boundary instead
+  of inside renderer internals.
+- After the renderer-controller extraction, the spatial-visibility dirty flag was removed in favor
+  of running culling as a normal render-loop phase. This keeps dynamic and animated entity semantics
+  simple; any future culling performance work should optimize the culling implementation rather
+  than reintroduce broad invalidation accounting.
 
 Validation:
 
@@ -1000,6 +1009,8 @@ Remaining follow-up:
 - If Three render time remains high after hydration effects stay cold during camera movement,
   profile material/program churn from the chunked static instancing path and consider sharing static
   materials or changing the chunked batching strategy.
+- Build frontend profiling hooks against `world-display-renderer` phase methods rather than Svelte
+  effects, so measurements line up with explicit renderer operations.
 - Add host-side camera-hint semantics when the host starts consuming rendered camera hints for
   behavior rather than storing acknowledgements.
 - Use the completed chunk-root model as input to the local-world simulation exploration before

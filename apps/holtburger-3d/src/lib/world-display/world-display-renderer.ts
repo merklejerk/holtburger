@@ -807,8 +807,6 @@ export function createWorldDisplayRenderer(
 			flatShading: true,
 			metalness: 0.02,
 			roughness: 0.9,
-			transparent: !cell.isFocus,
-			opacity: cell.isFocus ? 1 : 0.74,
 		});
 		const mesh = new Mesh(geometry, material);
 		mesh.name = `structured-interior/${cell.renderKey}`;

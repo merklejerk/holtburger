@@ -1448,6 +1448,120 @@ describe("asset channel controller", () => {
 		]);
 	});
 
+	it("omits environment portal polygons from render geometry", () => {
+		const environment = prepareAssetPayload(
+			{
+				requestId: "environment-with-portal",
+				assetId: "environment/0d000001",
+				priority: "streaming",
+			},
+			{
+				requestId: "environment-with-portal",
+				assetId: "environment/0d000001",
+				payloadKind: "json",
+				payload: {
+					kind: "environment",
+					residencyKind: "indoor-env-cell",
+					sourceAssetKind: "environment",
+					environmentId: 0x0d000001,
+					cellStructureIds: [1],
+					cellStructures: [
+						{
+							id: 1,
+							vertexArray: {
+								vertexType: null,
+								vertexCount: 4,
+								vertices: [
+									{
+										id: 0,
+										origin: { x: 0, y: 0, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 0, v: 0 }],
+									},
+									{
+										id: 1,
+										origin: { x: 2, y: 0, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 1, v: 0 }],
+									},
+									{
+										id: 2,
+										origin: { x: 2, y: 2, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 1, v: 1 }],
+									},
+									{
+										id: 3,
+										origin: { x: 0, y: 2, z: 0 },
+										normal: { x: 0, y: 0, z: 1 },
+										uvs: [{ u: 0, v: 1 }],
+									},
+								],
+							},
+							drawingPolygons: [
+								{
+									id: 7,
+									numPts: 3,
+									stippling: 0,
+									sidesType: 1,
+									posSurface: 0x08000002,
+									negSurface: 0,
+									vertexIds: [0, 1, 2],
+									posUvIndices: [0, 0, 0],
+									negUvIndices: [0, 0, 0],
+								},
+								{
+									id: 8,
+									numPts: 3,
+									stippling: 0,
+									sidesType: 1,
+									posSurface: 0x08000003,
+									negSurface: 0,
+									vertexIds: [0, 2, 3],
+									posUvIndices: [0, 0, 0],
+									negUvIndices: [0, 0, 0],
+								},
+							],
+							portalPolygonIds: [8],
+							cellBspWitness: {
+								hasBsp: true,
+								rootKind: "leaf",
+							},
+							physicsWitness: {
+								polygonCount: 2,
+								hasBsp: true,
+								rootKind: "leaf",
+							},
+							drawingBsp: null,
+						},
+					],
+					provenance: {
+						source: "app-local-stub",
+						sourceAssetKind: "environment",
+						errorCode: null,
+						detail: "portal-polygon-filter",
+					},
+				},
+			},
+		);
+
+		expect(environment.payload.kind).toBe("environment");
+		if (environment.payload.kind !== "environment") {
+			throw new Error("expected environment payload");
+		}
+		const cellStructure = environment.payload.cellStructures[0];
+		expect(cellStructure?.portalPolygonIds).toEqual([8]);
+		expect(cellStructure?.renderGeometry).toMatchObject({
+			vertexCount: 3,
+			triangleCount: 1,
+			skippedPolygonCount: 1,
+			surfaceIds: [0x08000002],
+		});
+		expect(cellStructure?.renderGeometry.triangles).toEqual([
+			{ polygonId: 7, surfaceId: 0x08000002, firstVertex: 0 },
+		]);
+	});
+
 	it("prepares gfx-obj payloads as first-class geometry leaves", () => {
 		const gfxObj = prepareAssetPayload(
 			{

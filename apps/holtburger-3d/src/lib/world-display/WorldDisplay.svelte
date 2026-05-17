@@ -78,7 +78,11 @@
 		terrainSpatialItemId,
 	} from "./render-spatial-ids";
 	import type { RenderChunkTransform } from "./render-anchor";
-	import type { RenderLandblockAnchor } from "./render-chunks";
+	import type { RenderChunkKey, RenderLandblockAnchor } from "./render-chunks";
+	import {
+		syncRenderChunkRootRecords,
+		type RenderChunkRootRecord,
+	} from "./chunk-root-manager";
 
 	let {
 		assetState,
@@ -113,6 +117,7 @@
 	let staticRenderableRoot: Group | null = null;
 	let structuredInteriorRoot: Group | null = null;
 	let debugOverlayRoot: Group | null = null;
+	let chunkRootContainer: Group | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let activeCameraFrame = $state<SceneCameraFrame | null>(null);
 	const terrainMeshes = new Map<string, Mesh>();
@@ -120,6 +125,7 @@
 	const staticRenderableMeshes = new Map<string, InstancedMesh>();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const debugOverlayObjects = new Map<string, Object3D>();
+	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
 
@@ -140,14 +146,7 @@
 			0,
 		),
 	);
-	const renderAnchorDebugKey = $derived(
-		activeRenderAnchor === null
-			? "none"
-			: `${activeRenderAnchor.landblockId}:${renderChunkTransforms.length}`,
-	);
-
 	$effect(() => {
-		void renderAnchorDebugKey;
 		if (!viewportHost) {
 			return;
 		}
@@ -173,10 +172,17 @@
 		const nextStaticRenderableRoot = new Group();
 		const nextStructuredInteriorRoot = new Group();
 		const nextDebugOverlayRoot = new Group();
+		const nextChunkRootContainer = new Group();
+		nextTerrainRoot.name = "terrain-root";
+		nextStaticRenderableRoot.name = "static-renderable-root";
+		nextStructuredInteriorRoot.name = "structured-interior-root";
+		nextDebugOverlayRoot.name = "debug-overlay-root";
+		nextChunkRootContainer.name = "render-chunk-roots";
 		nextScene.add(nextTerrainRoot);
 		nextScene.add(nextStaticRenderableRoot);
 		nextScene.add(nextStructuredInteriorRoot);
 		nextScene.add(nextDebugOverlayRoot);
+		nextScene.add(nextChunkRootContainer);
 
 		renderer = nextRenderer;
 		scene = nextScene;
@@ -185,6 +191,7 @@
 		staticRenderableRoot = nextStaticRenderableRoot;
 		structuredInteriorRoot = nextStructuredInteriorRoot;
 		debugOverlayRoot = nextDebugOverlayRoot;
+		chunkRootContainer = nextChunkRootContainer;
 
 		const nextResizeObserver = new ResizeObserver(() => {
 			syncRendererSize();
@@ -310,11 +317,13 @@
 			}
 			structuredInteriorMeshes.clear();
 			debugOverlayObjects.clear();
+			chunkRoots.clear();
 			nextTerrainRoot.clear();
 			nextStaticRenderableRoot.clear();
 			nextStructuredInteriorRoot.clear();
 			disposeObjectChildren(nextDebugOverlayRoot);
 			nextDebugOverlayRoot.clear();
+			nextChunkRootContainer.clear();
 			nextRenderer.dispose();
 			nextRenderer.domElement.remove();
 			if (renderer === nextRenderer) {
@@ -338,7 +347,14 @@
 			if (debugOverlayRoot === nextDebugOverlayRoot) {
 				debugOverlayRoot = null;
 			}
+			if (chunkRootContainer === nextChunkRootContainer) {
+				chunkRootContainer = null;
+			}
 		};
+	});
+
+	$effect(() => {
+		syncRenderChunkRoots();
 	});
 
 	$effect(() => {
@@ -400,6 +416,52 @@
 		renderer.setSize(width, height, false);
 		camera.aspect = width / height;
 		camera.updateProjectionMatrix();
+	}
+
+	function syncRenderChunkRoots(): void {
+		if (!chunkRootContainer) {
+			return;
+		}
+
+		syncRenderChunkRootRecords(chunkRoots, renderChunkTransforms, {
+			createRoot: createRenderChunkRoot,
+			updateRootPosition: updateRenderChunkRootPosition,
+			disposeRoot: disposeRenderChunkRoot,
+		});
+		untrack(() => {
+			updateCameraFrame();
+			reportRenderMetrics();
+		});
+	}
+
+	function createRenderChunkRoot(transform: RenderChunkTransform): Group {
+		if (!chunkRootContainer) {
+			throw new Error("Cannot create a render chunk root before scene setup.");
+		}
+
+		const root = new Group();
+		root.name = `render-chunk/${transform.chunkKey}`;
+		root.userData.chunkKey = transform.chunkKey;
+		root.userData.chunkLandblockId = transform.chunkLandblockId;
+		chunkRootContainer.add(root);
+		return root;
+	}
+
+	function updateRenderChunkRootPosition(
+		root: Group,
+		offset: RenderChunkTransform["offset"],
+	): void {
+		root.position.set(offset.x, offset.y, offset.z);
+		root.updateMatrixWorld(true);
+	}
+
+	function disposeRenderChunkRoot(root: Group): void {
+		if (root.children.length > 0) {
+			throw new Error(
+				`Cannot dispose non-empty render chunk root ${root.name}. Move or dispose layer objects before removing the chunk.`,
+			);
+		}
+		root.removeFromParent();
 	}
 
 	function resolveControlledCameraFrame(
@@ -632,7 +694,12 @@
 	}
 
 	function calculateSceneBoundsFrame(): SceneBoundsFrame | null {
-		if (!terrainRoot || !staticRenderableRoot || !structuredInteriorRoot) {
+		if (
+			!terrainRoot ||
+			!staticRenderableRoot ||
+			!structuredInteriorRoot ||
+			!chunkRootContainer
+		) {
 			return null;
 		}
 
@@ -648,6 +715,7 @@
 		bounds.expandByObject(terrainRoot);
 		bounds.expandByObject(staticRenderableRoot);
 		bounds.expandByObject(structuredInteriorRoot);
+		bounds.expandByObject(chunkRootContainer);
 		const center = bounds.getCenter(new Vector3());
 		const size = bounds.getSize(new Vector3());
 

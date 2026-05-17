@@ -3147,9 +3147,9 @@ Course corrections and next-step assessment:
 
 ##### Phase 13.8 — Resident Indoor Preview and Portal Visibility
 
-Status: planned; depends on Phase 13.7.
+Status: planned; depends on Phase 13.7 and the local world simulation exploration detour in [docs/plans/holtburger-local-world-simulation-exploration-plan.md](/home/me/code/holtburger/docs/plans/holtburger-local-world-simulation-exploration-plan.md).
 
-Scope: introduce a cell-constrained preview mode with a resident camera basis so portal visibility, masking, and culling have coherent semantics. This phase should bridge browser diagnostics toward future client-mode behavior without duplicating a full runtime spatial system.
+Scope: introduce a cell-constrained preview mode with a resident camera basis so portal visibility, masking, and culling have coherent semantics. This phase should bridge browser diagnostics toward future client-mode behavior without duplicating a full runtime spatial system. The prerequisite detour should resolve how browser mode reuses a Rust-owned local world/spatial simulator, how render coordinate rebasing stays frontend-owned, and which collision/residency facts are available before this phase tries to build walkabout or portal-visibility UX.
 
 Primary deliverables:
 

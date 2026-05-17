@@ -5,6 +5,7 @@ import type {
 	StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
 import { deriveWorldDebugOverlayModel } from "./debug-overlays";
+import { deriveStructuredCellRenderChunk } from "./render-chunks";
 
 const IDENTITY_PLACEMENT = {
 	origin: { x: 0, y: 0, z: 0 },
@@ -26,9 +27,21 @@ describe("debug overlays", () => {
 		);
 
 		expect(model.cells.map((cell) => cell.label)).toEqual(["0155", "0156"]);
+		expect(model.cells[0]).toMatchObject({
+			envCellId: 0x016c0155,
+			renderChunk: {
+				chunkKey: "landblock/016cffff",
+				chunkLandblockId: 0x016cffff,
+			},
+			chunkLocalPlacement: IDENTITY_PLACEMENT,
+		});
 		expect(model.portals).toHaveLength(2);
 		expect(model.portals[0]).toMatchObject({
 			sourceEnvCellId: 0x016c0155,
+			renderChunk: {
+				chunkKey: "landblock/016cffff",
+				chunkLandblockId: 0x016cffff,
+			},
 			targetEnvCellId: 0x016c0156,
 			targetStatus: "loaded-visible",
 			polygonId: 7,
@@ -127,12 +140,15 @@ function createStructuredInteriorCell(
 	envCellId: number,
 	targetSuffix: number,
 ): StructuredInteriorCell {
+	const renderChunk = deriveStructuredCellRenderChunk(envCellId);
 	return {
 		renderKey: `cell-${envCellId.toString(16)}`,
 		envCellId,
+		renderChunk,
 		environmentId: 0x0d000001,
 		cellStructureId: 1,
 		isFocus: envCellId === 0x016c0155,
+		chunkLocalPlacement: IDENTITY_PLACEMENT,
 		localPlacement: IDENTITY_PLACEMENT,
 		landblockWorldOffset: { x: 0, y: 0, z: 0 },
 		surfaceIds: [],

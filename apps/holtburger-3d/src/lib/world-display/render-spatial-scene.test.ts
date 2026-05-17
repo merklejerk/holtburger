@@ -11,6 +11,10 @@ import {
 } from "./render-spatial-scene";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
+import {
+	deriveStructuredCellRenderChunk,
+	deriveTerrainTileRenderChunk,
+} from "./render-chunks";
 
 describe("deriveTerrainSpatialItems", () => {
 	it("derives terrain tile bounds in render space", () => {
@@ -103,10 +107,12 @@ function createTerrainScene(): TerrainSceneModel {
 			{
 				assetId: "terrain/01020304",
 				landblockId: 0x01020304,
+				renderChunk: deriveTerrainTileRenderChunk(0x01020304),
 				label: "01020304",
 				isFocus: true,
 				offsetX: 0,
 				offsetY: 0,
+				chunkLocalOffset: { x: 0, y: 0, z: 0 },
 				worldOffsetX: 10,
 				worldOffsetY: 20,
 				mesh: {
@@ -135,9 +141,11 @@ function createStructuredInteriorScene(): StructuredInteriorSceneModel {
 			{
 				renderKey: "cell-1",
 				envCellId: 0x016c0155,
+				renderChunk: deriveStructuredCellRenderChunk(0x016c0155),
 				environmentId: 0x0d000001,
 				cellStructureId: 1,
 				isFocus: true,
+				chunkLocalPlacement: identityPlacement(),
 				localPlacement: identityPlacement(),
 				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 				surfaceIds: [],
@@ -178,11 +186,13 @@ function createDebugOverlayScene(): WorldDebugOverlayModel {
 		cells: [
 			{
 				envCellId: 0x016c0155,
+				renderChunk: deriveStructuredCellRenderChunk(0x016c0155),
 				renderKey: "cell-1",
 				label: "0155",
 				colorKey: "cell-1",
 				isFocus: true,
 				isSelected: false,
+				chunkLocalPlacement: identityPlacement(),
 				localPlacement: identityPlacement(),
 				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 				bounds: {
@@ -195,12 +205,14 @@ function createDebugOverlayScene(): WorldDebugOverlayModel {
 			{
 				portalId: "portal-1",
 				sourceEnvCellId: 0x016c0155,
+				renderChunk: deriveStructuredCellRenderChunk(0x016c0155),
 				targetEnvCellId: 0x016c0156,
 				targetStatus: "loaded-visible",
 				polygonId: 7,
 				otherPortalId: 8,
 				flags: 9,
 				isSelected: false,
+				chunkLocalPlacement: identityPlacement(),
 				localPlacement: identityPlacement(),
 				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 				points: [

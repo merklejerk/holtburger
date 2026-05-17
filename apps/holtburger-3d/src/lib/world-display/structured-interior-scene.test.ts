@@ -47,9 +47,14 @@ describe("structured interior scene model", () => {
 		]);
 		expect(model.cells[0]).toMatchObject({
 			envCellId: 0x016c0155,
+			renderChunk: {
+				chunkKey: "landblock/016cffff",
+				chunkLandblockId: 0x016cffff,
+			},
 			environmentId: 0x0d000001,
 			cellStructureId: 1,
 			isFocus: true,
+			chunkLocalPlacement: { origin: { x: 10, y: 20, z: 30 } },
 			localPlacement: { origin: { x: 10, y: 20, z: 30 } },
 			portalCount: 1,
 			staticObjectCount: 0,
@@ -151,7 +156,12 @@ describe("structured interior scene model", () => {
 		expect(model.cells).toContainEqual(
 			expect.objectContaining({
 				envCellId: 0x01020155,
+				renderChunk: {
+					chunkKey: "landblock/0102ffff",
+					chunkLandblockId: 0x0102ffff,
+				},
 				isFocus: false,
+				chunkLocalPlacement: IDENTITY_PLACEMENT,
 				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 			}),
 		);

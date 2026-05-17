@@ -9,6 +9,7 @@ import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
+import type { RenderChunkPlacement } from "./render-chunks";
 
 export interface WorldDebugOverlayOptions {
 	showPortalPolygons: boolean;
@@ -27,11 +28,13 @@ export type PortalOverlayTargetStatus =
 
 export interface CellDebugOverlay {
 	envCellId: number;
+	renderChunk: RenderChunkPlacement;
 	renderKey: string;
 	label: string;
 	colorKey: string;
 	isFocus: boolean;
 	isSelected: boolean;
+	chunkLocalPlacement: StructuredInteriorCell["chunkLocalPlacement"];
 	localPlacement: StructuredInteriorCell["localPlacement"];
 	landblockWorldOffset: StructuredInteriorCell["landblockWorldOffset"];
 	bounds: { min: Vec3Dto; max: Vec3Dto } | null;
@@ -40,12 +43,14 @@ export interface CellDebugOverlay {
 export interface PortalDebugOverlay {
 	portalId: string;
 	sourceEnvCellId: number;
+	renderChunk: RenderChunkPlacement;
 	targetEnvCellId: number | null;
 	targetStatus: PortalOverlayTargetStatus;
 	polygonId: number;
 	otherPortalId: number;
 	flags: number;
 	isSelected: boolean;
+	chunkLocalPlacement: StructuredInteriorCell["chunkLocalPlacement"];
 	localPlacement: StructuredInteriorCell["localPlacement"];
 	landblockWorldOffset: StructuredInteriorCell["landblockWorldOffset"];
 	points: Vec3Dto[];
@@ -116,6 +121,7 @@ function createCellOverlay(
 	const isSelected = cell.envCellId === selectedEnvCellId;
 	return {
 		envCellId: cell.envCellId,
+		renderChunk: cell.renderChunk,
 		renderKey: cell.renderKey,
 		label: formatEnvCellSuffix(cell.envCellId),
 		colorKey: isSelected
@@ -125,6 +131,7 @@ function createCellOverlay(
 				: cell.debugColorKey,
 		isFocus: cell.isFocus,
 		isSelected,
+		chunkLocalPlacement: cell.chunkLocalPlacement,
 		localPlacement: cell.localPlacement,
 		landblockWorldOffset: cell.landblockWorldOffset,
 		bounds: cell.renderGeometry.bounds,
@@ -160,12 +167,14 @@ function createPortalOverlays(
 		return {
 			portalId: portal.portalId,
 			sourceEnvCellId: cell.envCellId,
+			renderChunk: cell.renderChunk,
 			targetEnvCellId,
 			targetStatus,
 			polygonId: portal.polygonId,
 			otherPortalId: portal.otherPortalId,
 			flags: portal.flags,
 			isSelected: portal.portalId === selectedPortalId,
+			chunkLocalPlacement: cell.chunkLocalPlacement,
 			localPlacement: cell.localPlacement,
 			landblockWorldOffset: cell.landblockWorldOffset,
 			points,

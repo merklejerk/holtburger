@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 1 complete; Phase 2 is the next implementation step.
+Status: Phase 2 complete; Phase 3 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -326,6 +326,8 @@ Refined follow-up for Phase 2:
 
 ### Phase 2: Scene Model Chunk Ownership
 
+Status: complete.
+
 Thread render chunk identity through scene models before changing renderer roots:
 
 - terrain tiles expose their owning chunk key and chunk-local placement
@@ -342,6 +344,66 @@ Tests:
 - existing terrain/static/interior scene tests continue to prove the same visible placement
 - each scene item has deterministic chunk ownership
 - indoor/dungeon items group under the upper-16-bit dungeon landblock chunk
+
+Implemented progress:
+
+- Threaded `RenderChunkPlacement` through terrain tiles, structured-interior cells, debug cell
+  overlays, debug portal overlays, and static renderable parts.
+- Added chunk-local placement fields while retaining the old flattened compatibility fields:
+  - terrain tiles now expose `chunkLocalOffset` and still expose `worldOffsetX`/`worldOffsetY`
+  - structured cells now expose `chunkLocalPlacement` and still expose `localPlacement` plus
+    `landblockWorldOffset`
+  - debug overlays inherit `renderChunk` and `chunkLocalPlacement` from their structured cell
+  - static renderable parts now expose `chunkLocalInstancePlacement` and still expose
+    `instancePlacement` plus `landblockWorldOffset`
+- Added `partsByRenderChunkAndGfxAssetId` to the static renderable scene model so Phase 7 can move
+  batching from global render asset groups to chunk-plus-asset groups without first changing
+  renderer roots.
+- Replaced local duplicated focus-relative 192m offset math in structured interiors and static
+  renderables with the Phase 1 helper path.
+- Added `deriveFocusRelativeAcPlacementOffset` to `render-chunks.ts` as the narrow adapter for old
+  AC-placement-style compatibility offsets.
+- Expanded tests to prove deterministic chunk ownership for terrain, structured interiors, debug
+  overlays, and static renderables, including indoor/env-cell grouping under `0x????ffff` chunks and
+  static grouping by chunk plus render asset.
+
+Decisions:
+
+- Kept old flattened fields in place because `WorldDisplay`, `render-spatial-scene`, and
+  `static-renderable-geometry` still consume flattened renderer placement until later root and
+  spatial-index phases.
+- Used `renderChunk` as the common field name across scene models so Phase 4 and later renderer
+  migration code can consume chunk ownership consistently.
+- Left `partsByGfxAssetId` intact for the current renderer. `partsByRenderChunkAndGfxAssetId` is an
+  additive staging field, not an active batching change yet.
+- Chose a string group key for static chunk-plus-asset grouping via
+  `formatStaticRenderableChunkAssetGroupKey`. A richer key object can wait until the renderer needs
+  it; the current map is deterministic and simple to assert in tests.
+
+Course corrections:
+
+- The compatibility conversion from Three chunk-root offsets back into AC-placement-style offsets
+  initially reintroduced `-0` for unchanged landblock axes. Moving that conversion into
+  `deriveFocusRelativeAcPlacementOffset` keeps zero normalization shared and visible.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/terrain-scene.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/static-renderables.test.ts src/lib/world-display/debug-overlays.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/render-chunks.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 3:
+
+- Lift the existing browser/runtime focus landblock choice into an explicit active render-anchor
+  path in `BrowserWorldDisplay`.
+- Use the scene models' new `renderChunk` fields to derive the active chunk transform set once per
+  committed anchor, but keep `WorldDisplay` and `RenderSpatialIndex` consumption additive until
+  their later phases.
+- Keep browser free-camera movement from implicitly changing the anchor. Explicit browser
+  destination and runtime residency remain the only initial focus sources.
+- Do not remove flattened scene-model offsets in Phase 3; they are still needed until chunk roots
+  and the chunked spatial index land.
 
 ### Phase 3: BrowserWorldDisplay Render Anchor Plumbing
 

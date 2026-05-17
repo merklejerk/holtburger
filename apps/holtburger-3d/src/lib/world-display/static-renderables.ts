@@ -34,10 +34,14 @@ import type {
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatHex32,
-	getOutdoorLandblockCoords,
 	normalizeOutdoorLandblockId,
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
+import {
+	deriveFocusRelativeAcPlacementOffset,
+	deriveStaticRenderablePartRenderChunk,
+	type RenderChunkKey,
+	type RenderChunkPlacement,
+} from "./render-chunks";
 
 type StaticRenderableInstanceKind =
 	| "indoor-static"
@@ -67,11 +71,13 @@ export interface StaticRenderablePart {
 	sourceDid: number;
 	owningLandblockId: number;
 	owningEnvCellId: number | null;
+	renderChunk: RenderChunkPlacement;
 	kind: StaticRenderableInstanceKind;
 	partIndex: number;
 	gfxObjId: number;
 	gfxObjAssetId: string;
 	parentPlacements: PlacementTransformDto[];
+	chunkLocalInstancePlacement: PlacementTransformDto;
 	instancePlacement: PlacementTransformDto;
 	partPlacements: PlacementTransformDto[];
 	landblockWorldOffset: Vec3Dto;
@@ -85,6 +91,7 @@ export interface StaticRenderableSceneModel {
 	sourceInstances: StaticRenderableSourceInstance[];
 	parts: StaticRenderablePart[];
 	partsByGfxAssetId: Map<string, StaticRenderablePart[]>;
+	partsByRenderChunkAndGfxAssetId: Map<string, StaticRenderablePart[]>;
 	missingSourceAssetIds: string[];
 	missingGfxAssetIds: string[];
 }
@@ -214,6 +221,8 @@ export function deriveStaticRenderableSceneModel(
 		sourceInstances,
 		parts,
 		partsByGfxAssetId: groupStaticRenderablePartsByGfxAssetId(parts),
+		partsByRenderChunkAndGfxAssetId:
+			groupStaticRenderablePartsByRenderChunkAndGfxAssetId(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
@@ -274,6 +283,8 @@ function deriveIndoorStaticRenderableSceneModel(
 		sourceInstances,
 		parts,
 		partsByGfxAssetId: groupStaticRenderablePartsByGfxAssetId(parts),
+		partsByRenderChunkAndGfxAssetId:
+			groupStaticRenderablePartsByRenderChunkAndGfxAssetId(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
@@ -295,6 +306,33 @@ function groupStaticRenderablePartsByGfxAssetId(
 	return partsByGfxAssetId;
 }
 
+export function formatStaticRenderableChunkAssetGroupKey(
+	chunkKey: RenderChunkKey,
+	gfxObjAssetId: string,
+): string {
+	return `${chunkKey}|${gfxObjAssetId}`;
+}
+
+function groupStaticRenderablePartsByRenderChunkAndGfxAssetId(
+	parts: StaticRenderablePart[],
+): Map<string, StaticRenderablePart[]> {
+	const partsByChunkAndGfxAssetId = new Map<string, StaticRenderablePart[]>();
+	for (const part of parts) {
+		const groupKey = formatStaticRenderableChunkAssetGroupKey(
+			part.renderChunk.chunkKey,
+			part.gfxObjAssetId,
+		);
+		const groupedParts = partsByChunkAndGfxAssetId.get(groupKey);
+		if (groupedParts) {
+			groupedParts.push(part);
+		} else {
+			partsByChunkAndGfxAssetId.set(groupKey, [part]);
+		}
+	}
+
+	return partsByChunkAndGfxAssetId;
+}
+
 export function isPreparedGfxObjAsset(
 	asset: PreparedAssetRecord | undefined,
 ): asset is PreparedAssetRecord & { payload: PreparedGfxObjPayload } {
@@ -314,6 +352,7 @@ function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 		sourceInstances: [],
 		parts: [],
 		partsByGfxAssetId: new Map(),
+		partsByRenderChunkAndGfxAssetId: new Map(),
 		missingSourceAssetIds: [],
 		missingGfxAssetIds: [],
 	};
@@ -478,6 +517,7 @@ function createStaticRenderablePart(
 	},
 ): StaticRenderablePart {
 	const debugColorKey = `${instance.sourceAssetId}:${formatHexId(part.gfxObjId)}:${part.partIndex}`;
+	const renderChunk = deriveStaticRenderablePartRenderChunk(instance);
 	return {
 		renderKey: `${instance.instanceId}/part/${part.partIndex}/${part.gfxObjAssetId}`,
 		instanceId: instance.instanceId,
@@ -485,11 +525,13 @@ function createStaticRenderablePart(
 		sourceDid: instance.sourceDid,
 		owningLandblockId: instance.owningLandblockId,
 		owningEnvCellId: instance.owningEnvCellId,
+		renderChunk,
 		kind: instance.kind,
 		partIndex: part.partIndex,
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
 		parentPlacements: instance.parentPlacements,
+		chunkLocalInstancePlacement: instance.localPlacement,
 		instancePlacement: instance.localPlacement,
 		partPlacements: part.partPlacements,
 		landblockWorldOffset: instance.landblockWorldOffset,
@@ -611,14 +653,10 @@ function deriveLandblockWorldOffset(
 	owningLandblockId: number,
 	focusLandblockId: number,
 ): Vec3Dto {
-	const owningCoords = getOutdoorLandblockCoords(owningLandblockId);
-	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
-
-	return {
-		x: (owningCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		y: (owningCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		z: 0,
-	};
+	return deriveFocusRelativeAcPlacementOffset(
+		owningLandblockId,
+		focusLandblockId,
+	);
 }
 
 function deriveSetupPartLocalPlacements(

@@ -11,7 +11,10 @@ import type {
 	Vec3Dto,
 } from "../host/contracts";
 import { formatOutdoorStaticSceneAssetId } from "../landblocks";
-import { deriveStaticRenderableSceneModel } from "./static-renderables";
+import {
+	deriveStaticRenderableSceneModel,
+	formatStaticRenderableChunkAssetGroupKey,
+} from "./static-renderables";
 
 const IDENTITY_PLACEMENT: PlacementTransformDto = {
 	origin: { x: 0, y: 0, z: 0 },
@@ -130,6 +133,11 @@ describe("static renderable scene model", () => {
 			sourceAssetId: "gfx-obj/01000001",
 			partIndex: 0,
 			gfxObjAssetId: "gfx-obj/01000001",
+			renderChunk: {
+				chunkKey: "landblock/0102ffff",
+				chunkLandblockId: 0x0102ffff,
+			},
+			chunkLocalInstancePlacement: createPlacement({ x: 24, y: 48, z: 6 }),
 			scale: UNIT_SCALE,
 			partPlacements: [],
 		});
@@ -155,6 +163,15 @@ describe("static renderable scene model", () => {
 		expect(model.parts).toHaveLength(2);
 		expect(model.partsByGfxAssetId.size).toBe(1);
 		expect(model.partsByGfxAssetId.get("gfx-obj/01000001")).toHaveLength(2);
+		expect(model.partsByRenderChunkAndGfxAssetId.size).toBe(1);
+		expect(
+			model.partsByRenderChunkAndGfxAssetId.get(
+				formatStaticRenderableChunkAssetGroupKey(
+					"landblock/0102ffff",
+					"gfx-obj/01000001",
+				),
+			),
+		).toHaveLength(2);
 	});
 
 	it("includes outdoor-linked indoor static objects in outdoor scenes", () => {
@@ -188,6 +205,10 @@ describe("static renderable scene model", () => {
 			expect.objectContaining({
 				kind: "indoor-static",
 				owningEnvCellId: 0x01020155,
+				renderChunk: {
+					chunkKey: "landblock/0102ffff",
+					chunkLandblockId: 0x0102ffff,
+				},
 				gfxObjAssetId: "gfx-obj/01000001",
 				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 			}),
@@ -221,18 +242,38 @@ describe("static renderable scene model", () => {
 		expect(
 			model.parts.map((part) => ({
 				landblockId: part.owningLandblockId,
+				chunkKey: part.renderChunk.chunkKey,
 				offset: part.landblockWorldOffset,
 			})),
 		).toEqual([
 			{
 				landblockId: 0x0102ffff,
+				chunkKey: "landblock/0102ffff",
 				offset: { x: 0, y: 0, z: 0 },
 			},
 			{
 				landblockId: 0x0203ffff,
+				chunkKey: "landblock/0203ffff",
 				offset: { x: 192, y: 192, z: 0 },
 			},
 		]);
+		expect(model.partsByRenderChunkAndGfxAssetId.size).toBe(2);
+		expect(
+			model.partsByRenderChunkAndGfxAssetId.get(
+				formatStaticRenderableChunkAssetGroupKey(
+					"landblock/0102ffff",
+					"gfx-obj/01000001",
+				),
+			),
+		).toHaveLength(1);
+		expect(
+			model.partsByRenderChunkAndGfxAssetId.get(
+				formatStaticRenderableChunkAssetGroupKey(
+					"landblock/0203ffff",
+					"gfx-obj/01000001",
+				),
+			),
+		).toHaveLength(1);
 	});
 
 	it("tracks missing prepared assets and filters instances outside active landblock coverage", () => {

@@ -223,6 +223,7 @@ function prepareEnvironment(
 			sourceId: cellStructure.id,
 			vertexArray: cellStructure.vertexArray,
 			drawingPolygons: cellStructure.drawingPolygons,
+			excludedPolygonIds: cellStructure.portalPolygonIds,
 		}),
 	}));
 
@@ -580,6 +581,7 @@ interface PolygonSetGeometrySource {
 	sourceId: number;
 	vertexArray: GfxObjPayloadDto["vertexArray"];
 	drawingPolygons: GfxObjPayloadDto["drawingPolygons"];
+	excludedPolygonIds?: readonly number[];
 }
 
 function buildPolygonSetRenderGeometry(
@@ -593,9 +595,11 @@ function buildPolygonSetRenderGeometry(
 	const uvs: number[] = [];
 	const triangles: PreparedPolygonSetRenderGeometry["triangles"] = [];
 	const surfaceIdSet = new Set<number>();
+	const excludedPolygonIds = new Set(source.excludedPolygonIds ?? []);
 	const invalidPolygons: NonNullable<
 		PreparedPolygonSetRenderGeometry["invalidPolygons"]
 	> = [];
+	let skippedPolygonCount = 0;
 	let minX = Number.POSITIVE_INFINITY;
 	let minY = Number.POSITIVE_INFINITY;
 	let minZ = Number.POSITIVE_INFINITY;
@@ -604,6 +608,10 @@ function buildPolygonSetRenderGeometry(
 	let maxZ = Number.NEGATIVE_INFINITY;
 
 	for (const polygon of source.drawingPolygons) {
+		if (excludedPolygonIds.has(polygon.id)) {
+			skippedPolygonCount += 1;
+			continue;
+		}
 		if (polygon.numPts !== polygon.vertexIds.length) {
 			throw new Error(
 				`${source.sourceLabel} polygon ${polygon.id} declares ${polygon.numPts} points but provides ${polygon.vertexIds.length} vertices.`,
@@ -625,6 +633,7 @@ function buildPolygonSetRenderGeometry(
 				vertexIds: polygon.vertexIds,
 				missingVertexIds,
 			});
+			skippedPolygonCount += 1;
 			continue;
 		}
 
@@ -682,7 +691,7 @@ function buildPolygonSetRenderGeometry(
 		triangles,
 		surfaceIds: [...surfaceIdSet].sort((left, right) => left - right),
 		invalidPolygons,
-		skippedPolygonCount: invalidPolygons.length,
+		skippedPolygonCount,
 		bounds:
 			vertexCount === 0
 				? null

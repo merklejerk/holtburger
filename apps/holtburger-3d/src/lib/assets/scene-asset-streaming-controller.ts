@@ -8,9 +8,25 @@ import {
 	classifyAssetHydration,
 	isSceneCoverageAssetId,
 } from "./asset-hydration-policy";
-import type { AssetChannelController } from "./asset-channel";
-import { createSceneCoverageRequests } from "./scene-asset-request-planner";
-import type { PreparedAssetRecord } from "./types";
+import type { AssetGraphPreparationResult } from "./asset-graph-scheduler";
+import {
+	DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
+	planPreparedAssetCachePrune,
+	type PreparedAssetCachePrunePlan,
+} from "./asset-cache-policy";
+import {
+	createSceneCoverageRequests,
+	deriveSceneCoverageAssetIds,
+} from "./scene-asset-request-planner";
+import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
+
+export interface SceneAssetChannel {
+	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
+	prepareAssetGraph(
+		rootRequest: AssetLookupRequestDto,
+		preparedByAssetId?: Record<string, PreparedAssetRecord>,
+	): Promise<AssetGraphPreparationResult>;
+}
 
 export interface SceneAssetStreamingInput {
 	runtimeBatch: RuntimeBatchDto | null;
@@ -24,12 +40,16 @@ export interface SceneAssetStreamingInput {
 }
 
 export interface SceneAssetStreamingControllerDeps {
-	assetChannel: AssetChannelController;
+	assetChannel: SceneAssetChannel;
 	getPreparedByAssetId(): Record<string, PreparedAssetRecord>;
+	getCacheMetadataByAssetId(): Record<string, PreparedAssetCacheMetadata>;
 	markAssetsPending(requests: AssetLookupRequestDto[]): void;
 	applyPreparedAssets(assets: PreparedAssetRecord[]): void;
+	applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void;
 	applyAssetError(request: AssetLookupRequestDto, message: string): void;
 	debugLog(label: string, detail: unknown): void;
+	nowMs?(): number;
+	warmRetainMs?: number;
 }
 
 export class SceneAssetStreamingController {
@@ -85,6 +105,7 @@ export class SceneAssetStreamingController {
 
 				await this.syncPriority(input, "bootstrap");
 				await this.syncPriority(input, "streaming");
+				this.prunePreparedCache(input);
 
 				if (this.latestInput === input) {
 					break;
@@ -144,6 +165,7 @@ export class SceneAssetStreamingController {
 		});
 
 		if (requests.length === 0) {
+			this.prunePreparedCache(input);
 			return;
 		}
 
@@ -155,6 +177,45 @@ export class SceneAssetStreamingController {
 		await Promise.allSettled(
 			requests.map((request) => this.prepareAndApplyRequest(request)),
 		);
+		this.prunePreparedCache(input);
+	}
+
+	private prunePreparedCache(input: SceneAssetStreamingInput): void {
+		const runtimeBatch = input.runtimeBatch;
+		if (!runtimeBatch || this.disposed) {
+			return;
+		}
+
+		const preparedByAssetId = this.deps.getPreparedByAssetId();
+		const prunePlan = planPreparedAssetCachePrune({
+			preparedByAssetId,
+			cacheMetadataByAssetId: this.deps.getCacheMetadataByAssetId(),
+			activeCoverageAssetIds: deriveSceneCoverageAssetIds(
+				runtimeBatch,
+				input.browserDestination,
+				preparedByAssetId,
+				{
+					terrainRadius: input.terrainLodRadius,
+					buildingRadius: input.buildingLodRadius,
+					detailRadius: input.detailLodRadius,
+					structuredInterior: {
+						maxEnvCells: input.structuredInteriorMaxEnvCells,
+						maxVisibleCellDepth: input.structuredInteriorMaxVisibleCellDepth,
+					},
+				},
+			),
+			inFlightAssetIds: [...this.inFlightAssetIds],
+			nowMs: this.deps.nowMs?.() ?? Date.now(),
+			warmRetainMs:
+				this.deps.warmRetainMs ?? DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
+		});
+
+		this.deps.debugLog("asset-cache-prune", {
+			retainedAssetIds: prunePlan.retainedAssetIds,
+			evictedAssetIds: prunePlan.evictedAssetIds,
+			diagnostics: prunePlan.diagnostics,
+		});
+		this.deps.applyAssetCachePrune(prunePlan);
 	}
 
 	private async prepareAndApplyRequest(

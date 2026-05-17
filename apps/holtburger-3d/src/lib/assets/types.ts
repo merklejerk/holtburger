@@ -361,6 +361,19 @@ export type PreparedAssetPayload =
 	| PreparedDependencyManifestPayload
 	| PreparedUnknownAssetPayload;
 
+export type PreparedAssetKind = PreparedAssetPayload["kind"];
+
+export interface PreparedAssetKindCounts {
+	total: number;
+	byKind: Partial<Record<PreparedAssetKind, number>>;
+}
+
+export interface PreparedAssetCacheDiagnostics {
+	prepared: PreparedAssetKindCounts;
+	retained: PreparedAssetKindCounts;
+	evicted: PreparedAssetKindCounts;
+}
+
 export interface PreparedAssetRecord {
 	request: AssetLookupRequestDto;
 	response: AssetLookupResponseDto;
@@ -498,6 +511,11 @@ export interface AssetActivityRecord {
 	timestamp: string;
 }
 
+export interface PreparedAssetCacheMetadata {
+	lastPreparedAtMs: number;
+	lastRetainedAtMs: number;
+}
+
 export interface AssetChannelState {
 	channel: string;
 	status: AssetPreparationStatus;
@@ -508,6 +526,8 @@ export interface AssetChannelState {
 		PreparedAssetRecord | null
 	>;
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata>;
+	cacheDiagnostics: PreparedAssetCacheDiagnostics | null;
 	lastResponse: AssetLookupResponseDto | null;
 	errorMessage: string | null;
 	history: AssetActivityRecord[];
@@ -527,6 +547,8 @@ export function createInitialAssetChannelState(
 			prefetch: null,
 		},
 		preparedByAssetId: {},
+		cacheMetadataByAssetId: {},
+		cacheDiagnostics: null,
 		lastResponse: null,
 		errorMessage: null,
 		history: [],

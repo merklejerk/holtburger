@@ -20,12 +20,14 @@ import {
 	type BrowserModeState,
 } from "./browser-mode";
 import {
+	applyAssetCachePrune as applyAssetCachePruneToState,
 	applyAssetError as applyAssetErrorToState,
 	applyPreparedAssets as applyPreparedAssetsToState,
 	createAssetState,
 	markAssetsPending as markAssetsPendingInState,
 	updateAssetChannel,
 } from "./asset-state";
+import type { PreparedAssetCachePrunePlan } from "../lib/assets/asset-cache-policy";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
@@ -230,6 +232,12 @@ export function createFrontendStateStore() {
 			update((state) => ({
 				...state,
 				asset: applyPreparedAssetsToState(state.asset, assets),
+			}));
+		},
+		applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void {
+			update((state) => ({
+				...state,
+				asset: applyAssetCachePruneToState(state.asset, prunePlan),
 			}));
 		},
 		applyAssetError(

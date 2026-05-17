@@ -66,6 +66,10 @@
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
 	import {
+		countPreparedAssetsByKind,
+		formatPreparedAssetKindCounts,
+	} from "../lib/assets/asset-cache-diagnostics";
+	import {
 		createLinearRenderSpatialIndex,
 		type RenderSpatialMetadata,
 	} from "../lib/world-display/render-spatial-index";
@@ -415,6 +419,7 @@
 	const cameraPipelineDebugText = $derived(describeCameraPipelineDebugState());
 	const assetDebugText = $derived(describeAssetDebugState());
 	const assetPipelineDebugText = $derived(describeAssetPipelineDebugState());
+	const assetCacheDebugText = $derived(describeAssetCacheDebugState());
 	const diagnosticInspector = $derived(
 		deriveDiagnosticInspector(diagnosticSelection),
 	);
@@ -497,6 +502,7 @@
 		},
 		{ label: "Camera", value: cameraFrameText },
 		{ label: "Pipeline", value: assetPipelineDebugText },
+		{ label: "Cache", value: assetCacheDebugText },
 		{ label: "Assets", value: assetDebugText },
 		{ label: "Layers", value: staticRenderableLayerText },
 		{ label: "Events", value: cameraPipelineDebugText },
@@ -1233,18 +1239,21 @@
 			return `Error while preparing ${assetState.activeRequest?.assetId ?? "asset"}: ${assetState.errorMessage}`;
 		}
 
-		const preparedCount = Object.keys(assetState.preparedByAssetId).length;
+		const preparedCounts = countPreparedAssetsByKind(
+			assetState.preparedByAssetId,
+		);
 		const activeAssetId = assetState.activeRequest?.assetId ?? "none";
 		const recentActivity = assetState.history.at(-1);
 		const recentText = recentActivity
 			? `${recentActivity.status} ${recentActivity.assetId}`
 			: "no asset activity yet";
+		const preparedText = `${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)})`;
 		const renderDiagnostic = describeGfxObjRenderDiagnostics();
 		if (renderDiagnostic) {
-			return `${assetState.status}; ${renderDiagnostic}; active ${activeAssetId}; prepared ${preparedCount}; latest ${recentText}.`;
+			return `${assetState.status}; ${renderDiagnostic}; active ${activeAssetId}; prepared ${preparedText}; latest ${recentText}.`;
 		}
 
-		return `${assetState.status}; active ${activeAssetId}; prepared ${preparedCount}; latest ${recentText}.`;
+		return `${assetState.status}; active ${activeAssetId}; prepared ${preparedText}; latest ${recentText}.`;
 	}
 
 	function describeAssetPipelineDebugState(): string {
@@ -1255,6 +1264,18 @@
 			.map((entry) => `${entry.status}:${entry.assetId}`)
 			.join(" | ");
 		return `outdoor scenes ${preparedOutdoorSceneIds.length}: ${preparedOutdoorSceneIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
+	}
+
+	function describeAssetCacheDebugState(): string {
+		const cacheDiagnostics = assetState.cacheDiagnostics;
+		if (!cacheDiagnostics) {
+			const preparedCounts = countPreparedAssetsByKind(
+				assetState.preparedByAssetId,
+			);
+			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample.`;
+		}
+
+		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}).`;
 	}
 
 	function describeGfxObjRenderDiagnostics(): string | null {

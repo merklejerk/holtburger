@@ -1,6 +1,6 @@
 # Holtburger 3D Frontend Asset Cache Bounds Plan
 
-Status: draft.
+Status: complete.
 
 ## Purpose
 
@@ -160,6 +160,17 @@ enough.
 - Surface cache counts in existing browser asset diagnostics.
 - Add tests for the new bounded behavior, not tests that preserve the old unbounded-cache behavior.
 
+Progress:
+
+- Added `asset-cache-diagnostics.ts` with prepared-asset kind counting and debug formatting helpers.
+- Wired prepared cache kind counts into the existing browser asset debug summary.
+- Added targeted diagnostics tests. Bounded-retention behavior tests remain scheduled for the
+  policy/prune phases where the behavior exists.
+
+Validation:
+
+- `npm run test:ts -- asset-cache-diagnostics`
+
 ### Phase 2: Explicit Cache Metadata
 
 - Add cache metadata to asset state, likely parallel to `preparedByAssetId`:
@@ -168,6 +179,18 @@ enough.
   - optional retain/evict diagnostics
 - Update `applyPreparedAssets` to initialize/update metadata.
 - Keep `preparedByAssetId` shape stable for existing scene model consumers.
+
+Progress:
+
+- Added `cacheMetadataByAssetId` alongside `preparedByAssetId`.
+- Added `PreparedAssetCacheMetadata` with `lastPreparedAtMs` and `lastRetainedAtMs`.
+- Updated `applyPreparedAssets` to stamp prepared assets with an injectable `nowMs`.
+- Kept prepared asset records unchanged so scene model consumers still read `preparedByAssetId`
+  exactly as before.
+
+Validation:
+
+- `npm run test:ts -- asset-state`
 
 ### Phase 3: Active Root And Dependency Closure Policy
 
@@ -182,6 +205,27 @@ enough.
 - Retain warm assets by time TTL; do not add count or byte budgets.
 - Unit test outdoor, indoor, shared dependency, setup-model, and mixed coverage cases.
 
+Progress:
+
+- Added `deriveSceneCoverageAssetIds` to derive active scene coverage roots without filtering out
+  assets that are already prepared.
+- Added `asset-cache-policy.ts` with a pure `planPreparedAssetCachePrune` helper.
+- The policy retains active coverage roots, recursively prepared dependencies, in-flight ids, and
+  warm assets inside `warmRetainMs`.
+- Warm-only survivors keep their previous `lastRetainedAtMs`; active/dependency/in-flight prepared
+  assets are stamped with the current `nowMs`.
+- Kept LoD-aware static pruning out of v1. Outdoor static scene roots conservatively retain prepared
+  dependencies through `getPreparedAssetDependencies`.
+
+Course corrections:
+
+- Coverage-id tests use real prepared records where helper logic inspects payloads, instead of fake
+  partial records.
+
+Validation:
+
+- `npm run test:ts -- asset-cache-policy scene-asset-request-planner-cache`
+
 ### Phase 4: Prune State Mutation
 
 - Add `prunePreparedAssets` or `applyAssetCachePrune` to `asset-state.ts` and `frontendState`.
@@ -195,6 +239,24 @@ enough.
 - Keep history bounded as it is today; do not make history retain evicted payloads.
 - Do not use `preparedByPriority`, `preparedAsset`, or `lastResponse` as retention roots.
 
+Progress:
+
+- Added `applyAssetCachePrune` to `asset-state.ts`.
+- Added `frontendState.applyAssetCachePrune` as the store boundary method.
+- Pruning removes evicted ids from `preparedByAssetId`, cache metadata, and `preparedByPriority`.
+- `preparedAsset` and `lastResponse` remain latest-status fields, but are cleared when they point
+  at evicted assets.
+- History remains metadata-only and does not participate in retention.
+
+Decision:
+
+- Do not replace `preparedAsset`/`lastResponse` with metadata-only fields in this phase. Clearing
+  dangling references gives the needed cache safety without broad UI churn.
+
+Validation:
+
+- `npm run test:ts -- asset-state frontend-state`
+
 ### Phase 5: Streaming Integration
 
 - Have `SceneAssetStreamingController` invoke prune after applying prepared assets and after scene
@@ -206,6 +268,26 @@ enough.
 - Add tests proving recent backtracking reuses warm-retained assets and older revisits re-request
   only the missing root/dependencies.
 
+Progress:
+
+- Integrated `planPreparedAssetCachePrune` into `SceneAssetStreamingController`.
+- Added controller dependencies for cache metadata, prune application, injected clock, and TTL.
+- Added default `DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS = 120_000`.
+- The controller prunes after priority sync work and also when a priority has no new requests.
+- `App.svelte` now wires cache metadata and prune application through the frontend store.
+- Added streaming-controller tests for warm backtracking reuse and expired revisit re-requesting.
+
+Course corrections:
+
+- Changed the controller asset-channel dependency from the concrete `AssetChannelController` class
+  to a structural `SceneAssetChannel` interface so tests can use a fake without spinning up workers.
+- Streaming tests must provide `structuredInteriorMaxEnvCells >= 1`, matching the existing coverage
+  invariant.
+
+Validation:
+
+- `npm run test:ts -- scene-asset-streaming-controller`
+
 ### Phase 6: Tuning And UX
 
 - Choose a conservative default `warmRetainMs`.
@@ -213,6 +295,24 @@ enough.
 - Profile RAM behavior during long browser-mode roaming.
 - Adjust time TTL to avoid obvious thrashing.
 - Add count or byte budgets only if TTL-only retention is insufficient.
+
+Progress:
+
+- Set the first-pass default TTL in code as `DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS = 120_000`.
+- Added cache diagnostics to asset state.
+- `applyAssetCachePrune` records the latest prepared/retained/evicted counts by asset kind.
+- Browser asset pipeline debug text now includes retained and evicted cache counts from the latest
+  prune.
+
+Decision:
+
+- Do not add count or byte budgets in this implementation. Time TTL remains the only v1 bound.
+- Manual RAM profiling remains a follow-up after this implementation is available in the running
+  frontend.
+
+Validation:
+
+- `npm run test:ts -- asset-cache-diagnostics asset-state scene-asset-streaming-controller`
 
 ### Phase 7: Cleanup And Simplification
 
@@ -228,6 +328,28 @@ enough.
   covered by stable cache summaries.
 - Update this plan with final decisions, course corrections, validation, and any remaining targeted
   follow-up.
+
+Progress:
+
+- Collapsed duplicated structured-interior coverage asset id derivation so request planning and
+  cache root derivation share the same helper.
+- Kept request ordering stable for existing request consumers while sorting only cache-root outputs
+  that need deterministic set order.
+- No compatibility shims or deprecated cache behavior tests were left behind.
+- No special-case `gfx-obj` TTL, count budget, byte budget, or manual prune control was added.
+
+Course corrections:
+
+- A broad Prettier check over all `src` surfaced unrelated existing formatting drift in
+  `src/app/browser-mode.ts`. Left it untouched and ran targeted Prettier validation for files
+  changed by this implementation.
+
+Validation:
+
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- Targeted Prettier check for all files touched by this implementation and this plan.
 
 ## Risks And Footguns
 
@@ -256,3 +378,9 @@ enough.
 
 - Start with `warmRetainMs = 120_000`.
 - Tune after RAM profiling during long roaming.
+
+## Remaining Follow-Up
+
+- Profile browser-mode RAM during long roaming now that TTL pruning is active.
+- Revisit count or byte budgets only if profiling shows time TTL is insufficient.
+- Existing unrelated Prettier drift remains in `apps/holtburger-3d/src/app/browser-mode.ts`.

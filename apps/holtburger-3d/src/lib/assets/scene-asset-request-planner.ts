@@ -181,6 +181,69 @@ export function createSceneCoverageRequests(
 	];
 }
 
+export function deriveSceneCoverageAssetIds(
+	runtimeBatch: RuntimeBatchDto | null,
+	browserDestination: BrowserLocationSelection | null,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
+): string[] {
+	if (!runtimeBatch) {
+		return [];
+	}
+	const structuredInteriorCoverageOptions =
+		resolveStructuredInteriorCoverageOptions(options);
+
+	if (isIndoorBrowserDestination(browserDestination)) {
+		return deriveStructuredInteriorCoverageAssetIds(
+			preparedByAssetId,
+			structuredInteriorCoverageOptions,
+			{
+				kind: "visible-cell-closure",
+				seedEnvCellIds: [browserDestination.envCellId],
+			},
+		).sort();
+	}
+
+	if (runtimeBatch.residency.indoors) {
+		return deriveStructuredInteriorCoverageAssetIds(
+			preparedByAssetId,
+			structuredInteriorCoverageOptions,
+			createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch),
+			runtimeBatch.residency.environmentId === null
+				? []
+				: [runtimeBatch.residency.environmentId],
+		).sort();
+	}
+
+	const interest = deriveOutdoorInterestForRuntime(
+		runtimeBatch,
+		browserDestination,
+		options,
+	);
+	return [
+		...new Set([
+			...interest.terrainLandblockIds.map(formatTerrainAssetId),
+			...unionOutdoorSceneLandblockIds(
+				interest.buildingLandblockIds,
+				interest.detailLandblockIds,
+			).map(formatOutdoorStaticSceneAssetId),
+			...deriveStructuredInteriorCoverageAssetIds(
+				preparedByAssetId,
+				structuredInteriorCoverageOptions,
+				{
+					kind: "visible-cell-closure",
+					seedEnvCellIds: [
+						...deriveOutdoorLinkedInteriorEnvCellIds(
+							preparedByAssetId,
+							new Set(interest.detailLandblockIds),
+						),
+					],
+				},
+			),
+		]),
+	].sort();
+}
+
 export function createTerrainCoverageRequest(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
@@ -505,6 +568,29 @@ function createStructuredInteriorCoverageRequests(
 	requestScope: string,
 	extraEnvironmentIds: number[] = [],
 ): AssetLookupRequestDto[] {
+	const coverageAssetIds = deriveStructuredInteriorCoverageAssetIds(
+		preparedByAssetId,
+		coverageOptions,
+		membershipPolicy,
+		extraEnvironmentIds,
+	);
+
+	return createUnpreparedRequests(
+		coverageAssetIds,
+		runtimeBatch,
+		priority,
+		requestScope,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
+function deriveStructuredInteriorCoverageAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	coverageOptions: StructuredInteriorCoverageOptions,
+	membershipPolicy: StructuredInteriorMembershipPolicy,
+	extraEnvironmentIds: number[] = [],
+): string[] {
 	const coverage = deriveStructuredInteriorCoverage(
 		membershipPolicy,
 		preparedByAssetId,
@@ -526,20 +612,13 @@ function createStructuredInteriorCoverageRequests(
 		formatEnvironmentAssetId,
 	);
 
-	return createUnpreparedRequests(
-		[
-			...new Set([
-				...envCellAssetIds,
-				...preparedEnvironmentAssetIds,
-				...extraEnvironmentAssetIds,
-			]),
-		],
-		runtimeBatch,
-		priority,
-		requestScope,
-		preparedByAssetId,
-		pendingAssetIds,
-	);
+	return [
+		...new Set([
+			...envCellAssetIds,
+			...preparedEnvironmentAssetIds,
+			...extraEnvironmentAssetIds,
+		]),
+	];
 }
 
 function deriveOutdoorInterestForRuntime(

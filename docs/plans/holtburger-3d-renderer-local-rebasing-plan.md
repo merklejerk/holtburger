@@ -1,6 +1,6 @@
 # Holtburger 3D Renderer-Local Rebasing Plan
 
-Status: Phase 5 complete; Phase 6 is the next implementation step.
+Status: Phase 6 complete; Phase 7 is the next implementation step.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -674,6 +674,8 @@ Refined follow-up for Phase 6:
 
 ### Phase 6: Non-Instanced Layer Migration
 
+Status: complete.
+
 Move non-instanced render layers under chunk roots:
 
 - terrain meshes attach under their owning landblock root
@@ -688,6 +690,60 @@ Tests/smoke:
 - terrain still renders in the same place for the current focus
 - linked outdoor interiors remain aligned with their owning terrain landblock
 - portal/cell debug overlays remain aligned with structured-interior shells
+
+Implemented progress:
+
+- Migrated terrain meshes, structured-interior meshes, cell debug overlays, and portal debug
+  overlays to attach under their owning render chunk roots in `WorldDisplay`.
+- Updated non-instanced visual transforms to use chunk-local placement:
+  - terrain meshes use `chunkLocalOffset`
+  - structured interior meshes use `chunkLocalPlacement`
+  - debug cell/portal overlays inherit chunk-local placement from the structured cell model
+- Updated `render-spatial-scene.ts` so terrain, structured-cell, debug-cell, and portal spatial
+  items now carry `chunkKey` and author their bounds/pick shapes in chunk-local coordinates.
+- Added a real scene-derived spatial-index test proving a terrain item derived from
+  `render-spatial-scene.ts` returns a renderer-local pick point through the chunked index path.
+- Extended the chunk-root manager with an optional `canDisposeRoot` guard so inactive roots that
+  still have layer children are retained until layer sync removes those children.
+- Updated debug overlay disposal so objects attached under chunk roots are disposed directly instead
+  of relying on the old broad debug root traversal.
+
+Decisions:
+
+- Static renderables remain under the broad static root and still use flattened instance matrices.
+  Full static chunk partitioning remains Phase 7.
+- The old broad terrain, structured-interior, and debug roots remain in the scene as compatibility
+  roots for now, but the migrated non-instanced objects no longer attach to them.
+- `WorldDisplay` uses the transform set from `BrowserWorldDisplay` as the only source for chunk root
+  positions. Layer sync code chooses roots by `renderChunk.chunkKey`; it does not derive offsets.
+- Spatial item `chunkKey` is now present for the migrated non-instanced world items, but remains
+  optional at the type level until static/render-global compatibility is cleaned up.
+
+Course corrections:
+
+- Chunk root disposal needed a guard once layer objects started living under roots. Without that,
+  a reactive pass could try to remove an inactive root before all layer-specific sync functions had
+  removed their children.
+- Debug overlay disposal had to move from broad-root cleanup to tracked-object cleanup because
+  debug objects no longer live under `debugOverlayRoot`.
+
+Validation:
+
+- `npm run test:ts -- src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/render-spatial-index.test.ts src/lib/world-display/chunk-root-manager.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Refined follow-up for Phase 7:
+
+- Partition static renderable instanced meshes by chunk plus gfx asset and attach each group under
+  its chunk root.
+- Author static instance matrices in chunk-local coordinates using `chunkLocalInstancePlacement`
+  and remove the active renderer dependency on `landblockWorldOffset` for static parts.
+- Replace `partsByGfxAssetId` usage in `WorldDisplay` with `partsByRenderChunkAndGfxAssetId`, then
+  mark `partsByGfxAssetId` as a cleanup target.
+- After static renderables migrate, reassess whether normal world spatial items can require
+  `chunkKey` and whether any truly flat renderer-space item type needs a separate union branch.
 
 ### Phase 7: Static Renderable Chunk Partitioning
 

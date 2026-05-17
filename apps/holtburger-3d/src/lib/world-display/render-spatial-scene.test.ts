@@ -9,6 +9,7 @@ import {
 	deriveStructuredInteriorSpatialItems,
 	deriveTerrainSpatialItems,
 } from "./render-spatial-scene";
+import { createLinearRenderSpatialIndex } from "./render-spatial-index";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 import {
@@ -17,7 +18,7 @@ import {
 } from "./render-chunks";
 
 describe("deriveTerrainSpatialItems", () => {
-	it("derives terrain tile bounds in render space", () => {
+	it("derives terrain tile bounds in chunk-local space", () => {
 		const items = deriveTerrainSpatialItems(createTerrainScene());
 
 		expect(items).toHaveLength(1);
@@ -25,9 +26,10 @@ describe("deriveTerrainSpatialItems", () => {
 			id: "terrain:terrain/01020304",
 			kind: "terrain",
 			ownerKey: TERRAIN_SPATIAL_OWNER_KEY,
+			chunkKey: "landblock/0102ffff",
 			broadphaseBounds: {
-				min: { x: 10, y: -2, z: -26 },
-				max: { x: 14, y: 8, z: -20 },
+				min: { x: 0, y: -2, z: -6 },
+				max: { x: 4, y: 8, z: 0 },
 			},
 			metadata: {
 				kind: "terrain",
@@ -35,6 +37,33 @@ describe("deriveTerrainSpatialItems", () => {
 				assetId: "terrain/01020304",
 			},
 		});
+	});
+
+	it("feeds chunk-local terrain items into renderer-local index picks", () => {
+		const index = createLinearRenderSpatialIndex();
+		index.replaceChunkTransforms([
+			{
+				chunkKey: "landblock/0102ffff",
+				chunkLandblockId: 0x0102ffff,
+				offset: { x: 10, y: 0, z: -20 },
+			},
+		]);
+		index.replaceOwnerItems(
+			TERRAIN_SPATIAL_OWNER_KEY,
+			deriveTerrainSpatialItems(createTerrainScene()),
+		);
+
+		const pick = index.pickRay(
+			{
+				origin: { x: 12, y: 0, z: -30 },
+				direction: { x: 0, y: 0, z: 1 },
+			},
+			new Set(["terrain"]),
+		);
+
+		expect(pick?.item.id).toBe("terrain:terrain/01020304");
+		expect(pick?.point).toEqual({ x: 12, y: 0, z: -26 });
+		expect(pick?.distance).toBe(4);
 	});
 });
 
@@ -49,6 +78,7 @@ describe("deriveStructuredInteriorSpatialItems", () => {
 			id: "structured-cell:cell-1",
 			kind: "structured-cell",
 			ownerKey: STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+			chunkKey: "landblock/016cffff",
 			metadata: {
 				kind: "structured-cell",
 				envCellId: 0x016c0155,
@@ -69,6 +99,7 @@ describe("deriveDebugOverlaySpatialItems", () => {
 		expect(items[0]).toMatchObject({
 			id: "debug-cell:cell-1",
 			ownerKey: DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+			chunkKey: "landblock/016cffff",
 			metadata: {
 				kind: "structured-cell",
 				envCellId: 0x016c0155,
@@ -77,6 +108,7 @@ describe("deriveDebugOverlaySpatialItems", () => {
 		expect(items[1]).toMatchObject({
 			id: "portal:portal-1",
 			ownerKey: DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+			chunkKey: "landblock/016cffff",
 			metadata: {
 				kind: "portal",
 				portalId: "portal-1",

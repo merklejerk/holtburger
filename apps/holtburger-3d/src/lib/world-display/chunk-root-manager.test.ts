@@ -113,6 +113,37 @@ describe("syncRenderChunkRootRecords", () => {
 			z: 0,
 		});
 	});
+
+	it("keeps inactive roots that are not yet safe to dispose", () => {
+		const records = new Map<
+			RenderChunkTransform["chunkKey"],
+			RenderChunkRootRecord<TestRoot>
+		>();
+		const adapter: RenderChunkRootAdapter<TestRoot> = {
+			createRoot: (nextTransform) => ({
+				name: nextTransform.chunkKey,
+				position: { x: 0, y: 0, z: 0 },
+				disposed: false,
+			}),
+			updateRootPosition: (root, offset) => {
+				root.position = offset;
+			},
+			canDisposeRoot: (root) => root.name !== "landblock/da55ffff",
+			disposeRoot: (root) => {
+				root.disposed = true;
+			},
+		};
+
+		syncRenderChunkRootRecords(
+			records,
+			[transform("landblock/da55ffff", 0, 0)],
+			adapter,
+		);
+		syncRenderChunkRootRecords(records, [], adapter);
+
+		expect(records.has("landblock/da55ffff")).toBe(true);
+		expect(records.get("landblock/da55ffff")?.root.disposed).toBe(false);
+	});
 });
 
 function transform(

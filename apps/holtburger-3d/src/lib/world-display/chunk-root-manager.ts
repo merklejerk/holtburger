@@ -11,6 +11,7 @@ export interface RenderChunkRootRecord<TRoot> {
 export interface RenderChunkRootAdapter<TRoot> {
 	createRoot(transform: RenderChunkTransform): TRoot;
 	updateRootPosition(root: TRoot, offset: Vec3Dto): void;
+	canDisposeRoot?(root: TRoot): boolean;
 	disposeRoot(root: TRoot): void;
 }
 
@@ -25,6 +26,9 @@ export function syncRenderChunkRootRecords<TRoot>(
 
 	for (const [chunkKey, record] of records.entries()) {
 		if (activeChunkKeys.has(chunkKey)) {
+			continue;
+		}
+		if (adapter.canDisposeRoot && !adapter.canDisposeRoot(record.root)) {
 			continue;
 		}
 

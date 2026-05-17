@@ -37,7 +37,6 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import {
-	deriveFocusRelativeAcPlacementOffset,
 	deriveStaticRenderablePartRenderChunk,
 	type RenderChunkKey,
 	type RenderChunkPlacement,
@@ -58,8 +57,7 @@ interface StaticRenderableSourceInstance {
 	sourceAssetId: string;
 	sourceIndex: number;
 	parentPlacements: PlacementTransformDto[];
-	localPlacement: PlacementTransformDto;
-	landblockWorldOffset: Vec3Dto;
+	chunkLocalInstancePlacement: PlacementTransformDto;
 	sourceScale: Vec3Dto;
 	numLeaves: number | null;
 }
@@ -78,9 +76,7 @@ export interface StaticRenderablePart {
 	gfxObjAssetId: string;
 	parentPlacements: PlacementTransformDto[];
 	chunkLocalInstancePlacement: PlacementTransformDto;
-	instancePlacement: PlacementTransformDto;
 	partPlacements: PlacementTransformDto[];
-	landblockWorldOffset: Vec3Dto;
 	scale: Vec3Dto;
 	debugColorKey: string;
 }
@@ -90,7 +86,6 @@ export interface StaticRenderableSceneModel {
 	activeLandblockIds: number[];
 	sourceInstances: StaticRenderableSourceInstance[];
 	parts: StaticRenderablePart[];
-	partsByGfxAssetId: Map<string, StaticRenderablePart[]>;
 	partsByRenderChunkAndGfxAssetId: Map<string, StaticRenderablePart[]>;
 	missingSourceAssetIds: string[];
 	missingGfxAssetIds: string[];
@@ -152,14 +147,10 @@ export function deriveStaticRenderableSceneModel(
 	const activeLandblockIds = [...activeLandblockSet].sort(
 		(left, right) => left - right,
 	);
-	const sourceInstances = collectStaticRenderableSourceInstances(
-		assetState,
-		{
-			buildingLandblockIds: buildingLandblockSet,
-			detailLandblockIds: detailLandblockSet,
-		},
-		focusLandblockId,
-	)
+	const sourceInstances = collectStaticRenderableSourceInstances(assetState, {
+		buildingLandblockIds: buildingLandblockSet,
+		detailLandblockIds: detailLandblockSet,
+	})
 		.concat(
 			collectIndoorStaticRenderableSourceInstances(
 				assetState,
@@ -179,7 +170,6 @@ export function deriveStaticRenderableSceneModel(
 							structuredInteriorCoverageOptions,
 						).envCellIds,
 				),
-				focusLandblockId,
 			),
 		)
 		.filter((instance) => activeLandblockSet.has(instance.owningLandblockId))
@@ -220,7 +210,6 @@ export function deriveStaticRenderableSceneModel(
 		activeLandblockIds,
 		sourceInstances,
 		parts,
-		partsByGfxAssetId: groupStaticRenderablePartsByGfxAssetId(parts),
 		partsByRenderChunkAndGfxAssetId:
 			groupStaticRenderablePartsByRenderChunkAndGfxAssetId(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
@@ -282,28 +271,11 @@ function deriveIndoorStaticRenderableSceneModel(
 		activeLandblockIds: [],
 		sourceInstances,
 		parts,
-		partsByGfxAssetId: groupStaticRenderablePartsByGfxAssetId(parts),
 		partsByRenderChunkAndGfxAssetId:
 			groupStaticRenderablePartsByRenderChunkAndGfxAssetId(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
-}
-
-function groupStaticRenderablePartsByGfxAssetId(
-	parts: StaticRenderablePart[],
-): Map<string, StaticRenderablePart[]> {
-	const partsByGfxAssetId = new Map<string, StaticRenderablePart[]>();
-	for (const part of parts) {
-		const groupedParts = partsByGfxAssetId.get(part.gfxObjAssetId);
-		if (groupedParts) {
-			groupedParts.push(part);
-		} else {
-			partsByGfxAssetId.set(part.gfxObjAssetId, [part]);
-		}
-	}
-
-	return partsByGfxAssetId;
 }
 
 export function formatStaticRenderableChunkAssetGroupKey(
@@ -351,7 +323,6 @@ function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 		activeLandblockIds: [],
 		sourceInstances: [],
 		parts: [],
-		partsByGfxAssetId: new Map(),
 		partsByRenderChunkAndGfxAssetId: new Map(),
 		missingSourceAssetIds: [],
 		missingGfxAssetIds: [],
@@ -364,7 +335,6 @@ function collectStaticRenderableSourceInstances(
 		buildingLandblockIds: ReadonlySet<number>;
 		detailLandblockIds: ReadonlySet<number>;
 	},
-	focusLandblockId: number,
 ): StaticRenderableSourceInstance[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (asset.payload.kind !== "outdoor-static-scene") {
@@ -375,27 +345,17 @@ function collectStaticRenderableSourceInstances(
 		return [
 			...(selection.detailLandblockIds.has(landblockId)
 				? asset.payload.sceneryInstances.map((instance) =>
-						normalizeSourceInstance(
-							"scenery",
-							instance,
-							null,
-							focusLandblockId,
-						),
+						normalizeSourceInstance("scenery", instance, null),
 					)
 				: []),
 			...(selection.buildingLandblockIds.has(landblockId)
 				? asset.payload.buildingInstances.map((instance) =>
-						normalizeSourceInstance(
-							"building",
-							instance,
-							instance.numLeaves,
-							focusLandblockId,
-						),
+						normalizeSourceInstance("building", instance, instance.numLeaves),
 					)
 				: []),
 			...(selection.detailLandblockIds.has(landblockId)
 				? asset.payload.generatedSceneryInstances.map((instance) =>
-						normalizeGeneratedScenerySourceInstance(instance, focusLandblockId),
+						normalizeGeneratedScenerySourceInstance(instance),
 					)
 				: []),
 		];
@@ -408,7 +368,6 @@ function normalizeSourceInstance(
 		| PreparedOutdoorStaticSceneInstance
 		| PreparedOutdoorStaticSceneBuilding,
 	numLeaves: number | null,
-	focusLandblockId: number,
 ): StaticRenderableSourceInstance {
 	const owningLandblockId = normalizeOutdoorLandblockId(
 		instance.owningLandblockId,
@@ -422,11 +381,7 @@ function normalizeSourceInstance(
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
 		parentPlacements: [],
-		localPlacement: instance.localPlacement,
-		landblockWorldOffset: deriveLandblockWorldOffset(
-			owningLandblockId,
-			focusLandblockId,
-		),
+		chunkLocalInstancePlacement: instance.localPlacement,
 		sourceScale: UNIT_SCALE,
 		numLeaves,
 	};
@@ -434,7 +389,6 @@ function normalizeSourceInstance(
 
 function normalizeGeneratedScenerySourceInstance(
 	instance: PreparedOutdoorStaticSceneGeneratedSceneryInstance,
-	focusLandblockId: number,
 ): StaticRenderableSourceInstance {
 	const owningLandblockId = normalizeOutdoorLandblockId(
 		instance.owningLandblockId,
@@ -448,11 +402,7 @@ function normalizeGeneratedScenerySourceInstance(
 		sourceAssetId: instance.sourceAssetId,
 		sourceIndex: instance.sourceIndex,
 		parentPlacements: [],
-		localPlacement: instance.localPlacement,
-		landblockWorldOffset: deriveLandblockWorldOffset(
-			owningLandblockId,
-			focusLandblockId,
-		),
+		chunkLocalInstancePlacement: instance.localPlacement,
 		sourceScale: {
 			x: instance.scale,
 			y: instance.scale,
@@ -531,10 +481,8 @@ function createStaticRenderablePart(
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
 		parentPlacements: instance.parentPlacements,
-		chunkLocalInstancePlacement: instance.localPlacement,
-		instancePlacement: instance.localPlacement,
+		chunkLocalInstancePlacement: instance.chunkLocalInstancePlacement,
 		partPlacements: part.partPlacements,
-		landblockWorldOffset: instance.landblockWorldOffset,
 		scale: multiplyScale(instance.sourceScale, part.scale),
 		debugColorKey,
 	};
@@ -594,7 +542,6 @@ function deriveActiveIndoorEnvCellIds(
 function collectIndoorStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
 	activeEnvCellIds: Set<number>,
-	outdoorFocusLandblockId: number | null = null,
 ): StaticRenderableSourceInstance[] {
 	return [...activeEnvCellIds].flatMap((envCellId) => {
 		const envCell = getPreparedIndoorEnvCell(assetState, envCellId);
@@ -603,17 +550,13 @@ function collectIndoorStaticRenderableSourceInstances(
 		}
 
 		return envCell.staticObjects.map((staticObject) =>
-			normalizeIndoorStaticSourceInstance(
-				staticObject,
-				outdoorFocusLandblockId,
-			),
+			normalizeIndoorStaticSourceInstance(staticObject),
 		);
 	});
 }
 
 function normalizeIndoorStaticSourceInstance(
 	staticObject: PreparedIndoorStaticObject,
-	outdoorFocusLandblockId: number | null,
 ): StaticRenderableSourceInstance {
 	const owningLandblockId = normalizeOutdoorLandblockId(
 		staticObject.owningEnvCellId,
@@ -627,14 +570,7 @@ function normalizeIndoorStaticSourceInstance(
 		sourceAssetId: staticObject.sourceAssetId,
 		sourceIndex: staticObject.sourceIndex,
 		parentPlacements: [],
-		localPlacement: staticObject.localPlacement,
-		landblockWorldOffset:
-			outdoorFocusLandblockId === null
-				? { x: 0, y: 0, z: 0 }
-				: deriveLandblockWorldOffset(
-						owningLandblockId,
-						outdoorFocusLandblockId,
-					),
+		chunkLocalInstancePlacement: staticObject.localPlacement,
 		sourceScale: UNIT_SCALE,
 		numLeaves: null,
 	};
@@ -647,16 +583,6 @@ function getPreparedIndoorEnvCell(
 	const asset =
 		assetState.preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
 	return asset?.payload.kind === "indoor-env-cell" ? asset.payload : null;
-}
-
-function deriveLandblockWorldOffset(
-	owningLandblockId: number,
-	focusLandblockId: number,
-): Vec3Dto {
-	return deriveFocusRelativeAcPlacementOffset(
-		owningLandblockId,
-		focusLandblockId,
-	);
 }
 
 function deriveSetupPartLocalPlacements(

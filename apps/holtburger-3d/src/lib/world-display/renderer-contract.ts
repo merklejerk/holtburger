@@ -9,7 +9,7 @@ export interface WorldRenderMetrics {
 		terrainVertexCount: number;
 		terrainTriangleCount: number;
 		staticRenderablePartCount: number;
-		staticRenderableGeometryCount: number;
+		staticRenderableInstancedGroupCount: number;
 		structuredInteriorCellCount: number;
 		structuredInteriorVertexCount: number;
 		structuredInteriorTriangleCount: number;

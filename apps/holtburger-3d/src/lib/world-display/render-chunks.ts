@@ -92,22 +92,6 @@ export function deriveChunkRootOffset(
 	};
 }
 
-export function deriveFocusRelativeAcPlacementOffset(
-	chunkLandblockId: number,
-	anchorLandblockId: number,
-): Vec3Dto {
-	const chunkRootOffset = deriveChunkRootOffset(
-		chunkLandblockId,
-		anchorLandblockId,
-	);
-
-	return {
-		x: chunkRootOffset.x,
-		y: normalizeZero(-chunkRootOffset.z),
-		z: chunkRootOffset.y,
-	};
-}
-
 export function chunkLocalPointToRendererLocal(
 	point: Vec3Dto,
 	chunkLandblockId: number,

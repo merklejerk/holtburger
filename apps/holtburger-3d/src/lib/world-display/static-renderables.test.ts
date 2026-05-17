@@ -143,7 +143,7 @@ describe("static renderable scene model", () => {
 		});
 	});
 
-	it("groups duplicate parts by gfx asset id for shared geometry upload", () => {
+	it("groups duplicate parts by chunk and gfx asset id for instancing", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
 			"gfx-obj/01000001": createPreparedGfxObjAsset(
@@ -161,8 +161,6 @@ describe("static renderable scene model", () => {
 		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
 
 		expect(model.parts).toHaveLength(2);
-		expect(model.partsByGfxAssetId.size).toBe(1);
-		expect(model.partsByGfxAssetId.get("gfx-obj/01000001")).toHaveLength(2);
 		expect(model.partsByRenderChunkAndGfxAssetId.size).toBe(1);
 		expect(
 			model.partsByRenderChunkAndGfxAssetId.get(
@@ -198,9 +196,6 @@ describe("static renderable scene model", () => {
 			assetState,
 		);
 
-		expect(model.sourceInstances.map((instance) => instance.kind)).toContain(
-			"indoor-static",
-		);
 		expect(model.parts).toContainEqual(
 			expect.objectContaining({
 				kind: "indoor-static",
@@ -210,12 +205,11 @@ describe("static renderable scene model", () => {
 					chunkLandblockId: 0x0102ffff,
 				},
 				gfxObjAssetId: "gfx-obj/01000001",
-				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 			}),
 		);
 	});
 
-	it("offsets landblock-local static frames into the focused terrain scene", () => {
+	it("keeps static frames chunk-local across active landblocks", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
 			"gfx-obj/01000001": createPreparedGfxObjAsset(
@@ -243,18 +237,18 @@ describe("static renderable scene model", () => {
 			model.parts.map((part) => ({
 				landblockId: part.owningLandblockId,
 				chunkKey: part.renderChunk.chunkKey,
-				offset: part.landblockWorldOffset,
+				placement: part.chunkLocalInstancePlacement,
 			})),
 		).toEqual([
 			{
 				landblockId: 0x0102ffff,
 				chunkKey: "landblock/0102ffff",
-				offset: { x: 0, y: 0, z: 0 },
+				placement: createPlacement({ x: 24, y: 48, z: 6 }),
 			},
 			{
 				landblockId: 0x0203ffff,
 				chunkKey: "landblock/0203ffff",
-				offset: { x: 192, y: 192, z: 0 },
+				placement: createPlacement({ x: 24, y: 48, z: 6 }),
 			},
 		]);
 		expect(model.partsByRenderChunkAndGfxAssetId.size).toBe(2);
@@ -297,12 +291,6 @@ describe("static renderable scene model", () => {
 
 		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
 
-		expect(
-			model.sourceInstances.map((instance) => instance.instanceId),
-		).toEqual([
-			"outdoor-static-scene/0102ffff/object/0",
-			"outdoor-static-scene/0102ffff/object/1",
-		]);
 		expect(model.parts.map((part) => part.gfxObjAssetId)).toEqual([
 			"gfx-obj/01000001",
 		]);
@@ -310,7 +298,7 @@ describe("static renderable scene model", () => {
 		expect(model.missingGfxAssetIds).toEqual(["gfx-obj/01000002"]);
 	});
 
-	it("normalizes indoor env-cell static objects without parent cell placement", () => {
+	it("normalizes indoor env-cell static objects in chunk-local placement", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
 			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
@@ -334,20 +322,13 @@ describe("static renderable scene model", () => {
 
 		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
 
-		expect(
-			model.sourceInstances.map((instance) => instance.instanceId),
-		).toEqual(["indoor-env-cell/016c0155/static/0"]);
 		expect(model.parts).toHaveLength(2);
 		expect(model.parts[0]).toMatchObject({
 			kind: "indoor-static",
 			owningEnvCellId: 0x016c0155,
 			sourceAssetId: "setup-model/02000001",
-			landblockWorldOffset: { x: 0, y: 0, z: 0 },
+			chunkLocalInstancePlacement: createPlacement({ x: 2, y: 4, z: 6 }),
 		});
-		expect(model.parts[0]?.parentPlacements).toEqual([]);
-		expect(model.parts[0]?.instancePlacement).toEqual(
-			createPlacement({ x: 2, y: 4, z: 6 }),
-		);
 		expect(model.missingSourceAssetIds).toEqual([]);
 		expect(model.missingGfxAssetIds).toEqual([]);
 	});

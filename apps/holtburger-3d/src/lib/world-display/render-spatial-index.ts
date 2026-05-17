@@ -62,7 +62,7 @@ export interface RenderSpatialItem {
 	id: RenderSpatialItemId;
 	kind: RenderSpatialItemKind;
 	ownerKey: string;
-	chunkKey?: RenderChunkKey;
+	chunkKey: RenderChunkKey;
 	broadphaseBounds: RenderBounds;
 	pickShape?: RenderPickShape;
 	metadata: RenderSpatialMetadata;
@@ -177,9 +177,7 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 					continue;
 				}
 				const transform = resolveItemChunkTransform(item, chunkTransformsByKey);
-				const queryRay = transform
-					? rendererRayToChunkLocal(ray, transform.offset)
-					: ray;
+				const queryRay = rendererRayToChunkLocal(ray, transform.offset);
 				const broadphaseDistance = intersectRayBounds(
 					queryRay,
 					item.broadphaseBounds,
@@ -196,9 +194,10 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 				if (!precisePick) {
 					continue;
 				}
-				const renderPoint = transform
-					? chunkLocalPointToRendererLocal(precisePick.point, transform.offset)
-					: precisePick.point;
+				const renderPoint = chunkLocalPointToRendererLocal(
+					precisePick.point,
+					transform.offset,
+				);
 				const renderDistance = distanceBetween(ray.origin, renderPoint);
 				if (!nearestPick || renderDistance < nearestPick.distance) {
 					nearestPick = {
@@ -217,9 +216,7 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 				}
 				const transform = resolveItemChunkTransform(item, chunkTransformsByKey);
 				return intersectsFrustum(
-					transform
-						? translateBounds(item.broadphaseBounds, transform.offset)
-						: item.broadphaseBounds,
+					translateBounds(item.broadphaseBounds, transform.offset),
 					frustum,
 				);
 			});
@@ -230,11 +227,7 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 function resolveItemChunkTransform(
 	item: RenderSpatialItem,
 	chunkTransformsByKey: ReadonlyMap<RenderChunkKey, RenderChunkTransform>,
-): RenderChunkTransform | null {
-	if (!item.chunkKey) {
-		return null;
-	}
-
+): RenderChunkTransform {
 	const transform = chunkTransformsByKey.get(item.chunkKey);
 	if (!transform) {
 		throw new Error(

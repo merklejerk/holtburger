@@ -14,7 +14,6 @@ import {
 	getOutdoorLandblockCoords,
 } from "../landblocks";
 import {
-	deriveChunkRootOffset,
 	deriveTerrainTileRenderChunk,
 	type RenderChunkPlacement,
 } from "./render-chunks";
@@ -25,11 +24,7 @@ export interface TerrainSceneTile {
 	renderChunk: RenderChunkPlacement;
 	label: string;
 	isFocus: boolean;
-	offsetX: number;
-	offsetY: number;
 	chunkLocalOffset: { x: number; y: number; z: number };
-	worldOffsetX: number;
-	worldOffsetY: number;
 	mesh: PreparedTerrainMesh;
 	dataSource: "repo-local-cell-landblock" | "generated-fallback" | "unknown";
 }
@@ -101,14 +96,7 @@ export function deriveTerrainSceneModel(
 		)
 		.map((asset) => {
 			const landblockId = asset.payload.terrainMesh.landblockId;
-			const landblockCoords = getOutdoorLandblockCoords(landblockId);
-			const offsetX = landblockCoords.x - focusCoords.x;
-			const offsetY = landblockCoords.y - focusCoords.y;
 			const renderChunk = deriveTerrainTileRenderChunk(landblockId);
-			const chunkRootOffset = deriveChunkRootOffset(
-				renderChunk.chunkLandblockId,
-				focusLandblockId,
-			);
 
 			return {
 				assetId: asset.request.assetId,
@@ -116,11 +104,7 @@ export function deriveTerrainSceneModel(
 				renderChunk,
 				label: formatLandblockLabel(landblockId),
 				isFocus: landblockId === focusLandblockId,
-				offsetX,
-				offsetY,
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },
-				worldOffsetX: chunkRootOffset.x,
-				worldOffsetY: -chunkRootOffset.z,
 				mesh: asset.payload.terrainMesh,
 				dataSource: inferTerrainDataSource(asset),
 			};
@@ -130,10 +114,11 @@ export function deriveTerrainSceneModel(
 			if (left.isFocus !== right.isFocus) {
 				return left.isFocus ? -1 : 1;
 			}
-			if (left.offsetY !== right.offsetY) {
-				return left.offsetY - right.offsetY;
-			}
-			return left.offsetX - right.offsetX;
+			return compareLandblockGridPosition(
+				left.landblockId,
+				right.landblockId,
+				focusCoords,
+			);
 		});
 
 	const focusTile = tiles.find((tile) => tile.isFocus) ?? null;
@@ -150,6 +135,21 @@ export function deriveTerrainSceneModel(
 		dataSourceText,
 		tiles,
 	};
+}
+
+function compareLandblockGridPosition(
+	leftLandblockId: number,
+	rightLandblockId: number,
+	focusCoords: { x: number; y: number },
+): number {
+	const leftCoords = getOutdoorLandblockCoords(leftLandblockId);
+	const rightCoords = getOutdoorLandblockCoords(rightLandblockId);
+	const leftDeltaY = leftCoords.y - focusCoords.y;
+	const rightDeltaY = rightCoords.y - focusCoords.y;
+	if (leftDeltaY !== rightDeltaY) {
+		return leftDeltaY - rightDeltaY;
+	}
+	return leftCoords.x - focusCoords.x - (rightCoords.x - focusCoords.x);
 }
 
 function countPreparedTerrainAssets(

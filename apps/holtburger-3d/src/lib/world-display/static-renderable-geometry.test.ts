@@ -23,9 +23,7 @@ describe("static renderable geometry", () => {
 			gfxObjAssetId: "gfx-obj/01000001",
 			parentPlacements: [],
 			chunkLocalInstancePlacement: createPlacement({ x: 24, y: 48, z: 6 }),
-			instancePlacement: createPlacement({ x: 24, y: 48, z: 6 }),
 			partPlacements: [],
-			landblockWorldOffset: { x: 192, y: 192, z: 0 },
 			scale: { x: 1, y: 1, z: 1 },
 			debugColorKey: "part",
 		};

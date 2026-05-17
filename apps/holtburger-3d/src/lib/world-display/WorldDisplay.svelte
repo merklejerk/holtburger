@@ -113,10 +113,6 @@
 	let renderer: WebGLRenderer | null = null;
 	let scene: Scene | null = null;
 	let camera: PerspectiveCamera | null = null;
-	let terrainRoot: Group | null = null;
-	let staticRenderableRoot: Group | null = null;
-	let structuredInteriorRoot: Group | null = null;
-	let debugOverlayRoot: Group | null = null;
 	let chunkRootContainer: Group | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 	let activeCameraFrame = $state<SceneCameraFrame | null>(null);
@@ -168,29 +164,13 @@
 		sunLight.position.set(220, 320, 160);
 		nextScene.add(ambientLight, sunLight);
 
-		const nextTerrainRoot = new Group();
-		const nextStaticRenderableRoot = new Group();
-		const nextStructuredInteriorRoot = new Group();
-		const nextDebugOverlayRoot = new Group();
 		const nextChunkRootContainer = new Group();
-		nextTerrainRoot.name = "terrain-root";
-		nextStaticRenderableRoot.name = "static-renderable-root";
-		nextStructuredInteriorRoot.name = "structured-interior-root";
-		nextDebugOverlayRoot.name = "debug-overlay-root";
 		nextChunkRootContainer.name = "render-chunk-roots";
-		nextScene.add(nextTerrainRoot);
-		nextScene.add(nextStaticRenderableRoot);
-		nextScene.add(nextStructuredInteriorRoot);
-		nextScene.add(nextDebugOverlayRoot);
 		nextScene.add(nextChunkRootContainer);
 
 		renderer = nextRenderer;
 		scene = nextScene;
 		camera = nextCamera;
-		terrainRoot = nextTerrainRoot;
-		staticRenderableRoot = nextStaticRenderableRoot;
-		structuredInteriorRoot = nextStructuredInteriorRoot;
-		debugOverlayRoot = nextDebugOverlayRoot;
 		chunkRootContainer = nextChunkRootContainer;
 
 		const nextResizeObserver = new ResizeObserver(() => {
@@ -321,11 +301,6 @@
 			}
 			debugOverlayObjects.clear();
 			chunkRoots.clear();
-			nextTerrainRoot.clear();
-			nextStaticRenderableRoot.clear();
-			nextStructuredInteriorRoot.clear();
-			disposeObjectChildren(nextDebugOverlayRoot);
-			nextDebugOverlayRoot.clear();
 			nextChunkRootContainer.clear();
 			nextRenderer.dispose();
 			nextRenderer.domElement.remove();
@@ -337,18 +312,6 @@
 			}
 			if (camera === nextCamera) {
 				camera = null;
-			}
-			if (terrainRoot === nextTerrainRoot) {
-				terrainRoot = null;
-			}
-			if (staticRenderableRoot === nextStaticRenderableRoot) {
-				staticRenderableRoot = null;
-			}
-			if (structuredInteriorRoot === nextStructuredInteriorRoot) {
-				structuredInteriorRoot = null;
-			}
-			if (debugOverlayRoot === nextDebugOverlayRoot) {
-				debugOverlayRoot = null;
 			}
 			if (chunkRootContainer === nextChunkRootContainer) {
 				chunkRootContainer = null;
@@ -488,7 +451,7 @@
 	}
 
 	function syncTerrainMeshes(): void {
-		if (!terrainRoot || !chunkRootContainer) {
+		if (!chunkRootContainer) {
 			return;
 		}
 
@@ -643,12 +606,7 @@
 	}
 
 	function updateCameraFrame(): void {
-		if (
-			!camera ||
-			!terrainRoot ||
-			!staticRenderableRoot ||
-			!structuredInteriorRoot
-		) {
+		if (!camera) {
 			return;
 		}
 
@@ -718,12 +676,7 @@
 	}
 
 	function calculateSceneBoundsFrame(): SceneBoundsFrame | null {
-		if (
-			!terrainRoot ||
-			!staticRenderableRoot ||
-			!structuredInteriorRoot ||
-			!chunkRootContainer
-		) {
+		if (!chunkRootContainer) {
 			return null;
 		}
 
@@ -736,9 +689,6 @@
 		}
 
 		const bounds = new Box3();
-		bounds.expandByObject(terrainRoot);
-		bounds.expandByObject(staticRenderableRoot);
-		bounds.expandByObject(structuredInteriorRoot);
 		bounds.expandByObject(chunkRootContainer);
 		const center = bounds.getCenter(new Vector3());
 		const size = bounds.getSize(new Vector3());
@@ -760,7 +710,7 @@
 				terrainVertexCount,
 				terrainTriangleCount,
 				staticRenderablePartCount: staticRenderableScene.parts.length,
-				staticRenderableGeometryCount:
+				staticRenderableInstancedGroupCount:
 					staticRenderableScene.partsByRenderChunkAndGfxAssetId.size,
 				structuredInteriorCellCount: structuredInteriorScene.cells.length,
 				structuredInteriorVertexCount: structuredInteriorScene.cells.reduce(
@@ -787,7 +737,7 @@
 	}
 
 	function syncStaticRenderableMeshes(): void {
-		if (!staticRenderableRoot || !chunkRootContainer) {
+		if (!chunkRootContainer) {
 			return;
 		}
 
@@ -854,7 +804,7 @@
 	}
 
 	function syncDebugOverlayMeshes(): void {
-		if (!debugOverlayRoot || !chunkRootContainer) {
+		if (!chunkRootContainer) {
 			return;
 		}
 
@@ -893,7 +843,7 @@
 	}
 
 	function syncStructuredInteriorMeshes(): void {
-		if (!structuredInteriorRoot || !chunkRootContainer) {
+		if (!chunkRootContainer) {
 			return;
 		}
 
@@ -1287,30 +1237,6 @@
 	function disposeMesh(mesh: Mesh): void {
 		mesh.geometry.dispose();
 		disposeMeshMaterial(mesh);
-	}
-
-	function disposeObjectChildren(root: Object3D): void {
-		root.traverse((object) => {
-			if (object === root) {
-				return;
-			}
-
-			const maybeGeometry = (object as { geometry?: unknown }).geometry;
-			if (maybeGeometry instanceof BufferGeometry) {
-				maybeGeometry.dispose();
-			}
-
-			const maybeMaterial = (object as { material?: unknown }).material;
-			if (Array.isArray(maybeMaterial)) {
-				for (const material of maybeMaterial) {
-					disposeMaterial(material);
-				}
-				return;
-			}
-			if (maybeMaterial) {
-				disposeMaterial(maybeMaterial as Material);
-			}
-		});
 	}
 
 	function disposeObjectTree(root: Object3D): void {

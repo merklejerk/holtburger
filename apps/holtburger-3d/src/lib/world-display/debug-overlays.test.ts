@@ -149,8 +149,6 @@ function createStructuredInteriorCell(
 		cellStructureId: 1,
 		isFocus: envCellId === 0x016c0155,
 		chunkLocalPlacement: IDENTITY_PLACEMENT,
-		localPlacement: IDENTITY_PLACEMENT,
-		landblockWorldOffset: { x: 0, y: 0, z: 0 },
 		surfaceIds: [],
 		portalCount: 1,
 		portals: [

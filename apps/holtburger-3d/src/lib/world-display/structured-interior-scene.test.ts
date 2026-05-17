@@ -55,7 +55,6 @@ describe("structured interior scene model", () => {
 			cellStructureId: 1,
 			isFocus: true,
 			chunkLocalPlacement: { origin: { x: 10, y: 20, z: 30 } },
-			localPlacement: { origin: { x: 10, y: 20, z: 30 } },
 			portalCount: 1,
 			staticObjectCount: 0,
 		});
@@ -147,7 +146,6 @@ describe("structured interior scene model", () => {
 			null,
 			{
 				envCellIds: [0x01020155],
-				focusLandblockId: 0x0102ffff,
 			},
 		);
 
@@ -162,7 +160,6 @@ describe("structured interior scene model", () => {
 				},
 				isFocus: false,
 				chunkLocalPlacement: IDENTITY_PLACEMENT,
-				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 			}),
 		);
 	});

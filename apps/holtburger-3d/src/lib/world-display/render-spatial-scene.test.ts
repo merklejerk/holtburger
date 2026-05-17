@@ -142,11 +142,7 @@ function createTerrainScene(): TerrainSceneModel {
 				renderChunk: deriveTerrainTileRenderChunk(0x01020304),
 				label: "01020304",
 				isFocus: true,
-				offsetX: 0,
-				offsetY: 0,
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },
-				worldOffsetX: 10,
-				worldOffsetY: 20,
 				mesh: {
 					landblockId: 0x01020304,
 					gridSize: 2,
@@ -178,8 +174,6 @@ function createStructuredInteriorScene(): StructuredInteriorSceneModel {
 				cellStructureId: 1,
 				isFocus: true,
 				chunkLocalPlacement: identityPlacement(),
-				localPlacement: identityPlacement(),
-				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 				surfaceIds: [],
 				portalCount: 0,
 				portals: [],
@@ -225,8 +219,6 @@ function createDebugOverlayScene(): WorldDebugOverlayModel {
 				isFocus: true,
 				isSelected: false,
 				chunkLocalPlacement: identityPlacement(),
-				localPlacement: identityPlacement(),
-				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 				bounds: {
 					min: { x: -1, y: -1, z: -1 },
 					max: { x: 1, y: 1, z: 1 },
@@ -245,8 +237,6 @@ function createDebugOverlayScene(): WorldDebugOverlayModel {
 				flags: 9,
 				isSelected: false,
 				chunkLocalPlacement: identityPlacement(),
-				localPlacement: identityPlacement(),
-				landblockWorldOffset: { x: 0, y: 0, z: 0 },
 				points: [
 					{ x: 0, y: 0, z: 0 },
 					{ x: 1, y: 0, z: 0 },

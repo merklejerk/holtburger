@@ -116,8 +116,6 @@ describe("terrain scene model", () => {
 			chunkKey: "landblock/0102ffff",
 			chunkLandblockId: 0x0102ffff,
 		});
-		expect(model.tiles[0].chunkLocalOffset).toEqual({ x: 0, y: 0, z: 0 });
-		expect(model.tiles[1].offsetY).toBe(1);
 		expect(model.tiles[1].renderChunk).toEqual({
 			chunkKey: "landblock/0103ffff",
 			chunkLandblockId: 0x0103ffff,

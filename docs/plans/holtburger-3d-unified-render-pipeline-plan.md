@@ -257,7 +257,7 @@ Refinements to future steps:
 
 ## Phase 2: Portal Candidate Policy and Screen-Footprint Rejection
 
-Status: not started.
+Status: complete for code-auditable work; manual overview comparison deferred.
 
 Purpose: reduce portal work before changing render pass structure, and make candidate counts
 explainable.
@@ -288,6 +288,59 @@ Exit criteria:
 - Portal render work counts are explainable from diagnostics.
 - Zoomed-out outdoor transition apertures are rejected by footprint when they should be visually
   insignificant.
+
+Phase 2 progress:
+
+- Replaced clamped screen-space bounding-box area with clipped projected polygon area in
+  `apps/holtburger-3d/src/lib/world-display/portal-visibility.ts`. The helper now clips aperture
+  polygons against clip-space frustum planes before calculating pixel area, so offscreen or
+  near-edge apertures no longer survive because their points were clamped to viewport edges.
+- Added `createPortalVisibilityContext()` so each render frame computes camera world position,
+  projection-screen matrix, frustum, viewport, and threshold once before iterating portal work
+  candidates.
+- Raised the current browser/free-camera minimum portal footprint from `1px` to `16px`. This is a
+  named conservative policy guard, not a final budget cap.
+- Split portal metrics into:
+  - topology outdoor portal count;
+  - aperture candidate count;
+  - render work item candidate count;
+  - visible portal work item count.
+- Added projected-area bucket diagnostics for evaluated portal work items:
+  - `<16px`;
+  - `<64px`;
+  - `<256px`;
+  - `>=256px`.
+- Added min/max visible projected area diagnostics so the debug panel can explain whether surviving
+  portal work is actually large.
+- Updated the browser debug row to display topology, aperture candidates, work items, skipped
+  counts, screen-area buckets, and visible area range.
+- Added synthetic projected-footprint tests independent of DAT/HBA loading. These cover tiny
+  apertures and clipped near-edge slivers.
+
+Decisions and course corrections:
+
+- The first fix is geometric rejection, not a hard portal-count cap. A cap may still be useful for
+  browser diagnostic mode, but adding it before the footprint calculation is trustworthy would hide
+  bad candidate policy.
+- The visibility helper still performs a broad AABB/frustum rejection before clipped-area
+  evaluation. That is acceptable for Phase 2 because it is cheap and conservative; Phase 6 residency
+  can prune candidate sets earlier.
+- The screen-area bucket diagnostics count every evaluated work item, including rejected items with
+  zero or tiny area. This is intentional: the debug row should show whether Phase 2 is eliminating
+  tiny work instead of making it disappear from metrics.
+- Manual verification for zoomed-out overview frame time and visible work count is deferred because
+  it requires running the Tauri/WebView app and comparing the same camera pose.
+
+Refinements to future steps:
+
+- Phase 3 should preserve the new topology/aperture/work-item metric split when it introduces the
+  renderer working model.
+- Phase 4 should feed bidirectional transition work items into the same visibility context instead
+  of adding a second side-specific visibility path.
+- Phase 5 should batch only the visible work items that survive this policy. It should not re-run
+  footprint rejection inside the pass graph.
+- A browser diagnostic portal-count or total-area budget remains a possible follow-up after manual
+  overview measurements confirm the clipped-area threshold is not sufficient by itself.
 
 ## Phase 3: Renderer Working Model and Interior Render Sets
 

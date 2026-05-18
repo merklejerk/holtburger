@@ -26,7 +26,8 @@ interface WorldRenderPerformanceMetrics {
 
 export interface WorldRenderPortalMetrics {
 	topologyOutdoorPortalCount: number;
-	candidatePortalGroupCount: number;
+	apertureCandidateCount: number;
+	renderWorkItemCandidateCount: number;
 	visiblePortalGroupCount: number;
 	maskedInteriorCellCount: number;
 	skippedMissingApertureCount: number;
@@ -34,6 +35,14 @@ export interface WorldRenderPortalMetrics {
 	skippedOutsideFrustumCount: number;
 	skippedBackFacingCount: number;
 	skippedTooSmallCount: number;
+	screenAreaBuckets: {
+		lt16: number;
+		lt64: number;
+		lt256: number;
+		gte256: number;
+	};
+	minVisibleScreenAreaPx: number | null;
+	maxVisibleScreenAreaPx: number | null;
 }
 
 export interface WorldRenderDebugMetrics {

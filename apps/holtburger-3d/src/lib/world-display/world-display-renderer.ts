@@ -100,7 +100,9 @@ import {
 	type WorldRenderPass,
 } from "./render-passes";
 import {
+	createPortalVisibilityContext,
 	evaluatePortalVisibility,
+	type PortalVisibilityContext,
 	type PortalVisibilityResult,
 } from "./portal-visibility";
 
@@ -149,7 +151,7 @@ const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
-const MIN_PORTAL_SCREEN_AREA_PX = 1;
+const MIN_PORTAL_SCREEN_AREA_PX = 16;
 
 interface PortalDepthResetCapability {
 	supported: boolean;
@@ -474,12 +476,26 @@ export function createWorldDisplayRenderer(
 			screenAreaPx: number;
 		}[] = [];
 		const maskedInteriorCellIds = new Set<number>();
+		const visibilityContext = createPortalVisibilityContext({
+			camera,
+			viewport: new Vector2(
+				renderer.domElement.width,
+				renderer.domElement.height,
+			),
+			minScreenAreaPx: MIN_PORTAL_SCREEN_AREA_PX,
+		});
 		for (const group of outdoorPortalViewGroupModel.groups) {
-			const visibility = evaluatePortalViewGroupVisibility(group);
+			const visibility = evaluatePortalViewGroupVisibility(
+				group,
+				visibilityContext,
+			);
 			if (!visibility.visible) {
 				recordPortalVisibilitySkip(visibility.reason);
+				recordPortalScreenAreaBucket(visibility.screenAreaPx);
 				continue;
 			}
+			recordPortalScreenAreaBucket(visibility.screenAreaPx);
+			recordVisiblePortalScreenArea(visibility.screenAreaPx);
 			visibleGroups.push({
 				group,
 				screenAreaPx: visibility.screenAreaPx,
@@ -538,6 +554,7 @@ export function createWorldDisplayRenderer(
 
 	function evaluatePortalViewGroupVisibility(
 		group: OutdoorPortalViewGroup,
+		context: PortalVisibilityContext,
 	): PortalVisibilityResult {
 		const maskMesh = portalMaskMeshes.get(group.id);
 		if (!maskMesh) {
@@ -560,12 +577,7 @@ export function createWorldDisplayRenderer(
 			})),
 			worldPlane,
 			visibleSide: group.visibleSide,
-			camera,
-			viewport: new Vector2(
-				renderer.domElement.width,
-				renderer.domElement.height,
-			),
-			minScreenAreaPx: MIN_PORTAL_SCREEN_AREA_PX,
+			context,
 		});
 	}
 
@@ -609,6 +621,29 @@ export function createWorldDisplayRenderer(
 			case "visible":
 				return;
 		}
+	}
+
+	function recordPortalScreenAreaBucket(screenAreaPx: number): void {
+		if (screenAreaPx < 16) {
+			latestPortalMetrics.screenAreaBuckets.lt16 += 1;
+		} else if (screenAreaPx < 64) {
+			latestPortalMetrics.screenAreaBuckets.lt64 += 1;
+		} else if (screenAreaPx < 256) {
+			latestPortalMetrics.screenAreaBuckets.lt256 += 1;
+		} else {
+			latestPortalMetrics.screenAreaBuckets.gte256 += 1;
+		}
+	}
+
+	function recordVisiblePortalScreenArea(screenAreaPx: number): void {
+		latestPortalMetrics.minVisibleScreenAreaPx =
+			latestPortalMetrics.minVisibleScreenAreaPx === null
+				? screenAreaPx
+				: Math.min(latestPortalMetrics.minVisibleScreenAreaPx, screenAreaPx);
+		latestPortalMetrics.maxVisibleScreenAreaPx =
+			latestPortalMetrics.maxVisibleScreenAreaPx === null
+				? screenAreaPx
+				: Math.max(latestPortalMetrics.maxVisibleScreenAreaPx, screenAreaPx);
 	}
 
 	function updateRenderChunkRootPosition(
@@ -1801,7 +1836,8 @@ function createPortalRenderMetrics(
 ): WorldRenderPortalMetrics {
 	return {
 		topologyOutdoorPortalCount: model.diagnostics.topologyPortalCount,
-		candidatePortalGroupCount: model.diagnostics.viewGroupCount,
+		apertureCandidateCount: model.diagnostics.apertureCandidateCount,
+		renderWorkItemCandidateCount: model.diagnostics.viewGroupCount,
 		visiblePortalGroupCount: 0,
 		maskedInteriorCellCount: 0,
 		skippedMissingApertureCount: model.diagnostics.skippedMissingApertureCount,
@@ -1809,6 +1845,14 @@ function createPortalRenderMetrics(
 		skippedOutsideFrustumCount: 0,
 		skippedBackFacingCount: 0,
 		skippedTooSmallCount: 0,
+		screenAreaBuckets: {
+			lt16: 0,
+			lt64: 0,
+			lt256: 0,
+			gte256: 0,
+		},
+		minVisibleScreenAreaPx: null,
+		maxVisibleScreenAreaPx: null,
 	};
 }
 

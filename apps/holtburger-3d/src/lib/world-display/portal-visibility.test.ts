@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { PerspectiveCamera, Vector2 } from "three";
 
-import { evaluatePortalVisibility } from "./portal-visibility";
+import {
+	createPortalVisibilityContext,
+	evaluatePortalVisibility,
+} from "./portal-visibility";
 
 describe("portal visibility", () => {
 	it("accepts front-facing aperture polygons in the camera frustum", () => {
@@ -14,9 +17,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-5),
 			visibleSide: "positive",
-			camera: createCamera(),
-			viewport: new Vector2(800, 600),
-			minScreenAreaPx: 1,
+			context: createTestContext(),
 		});
 
 		expect(result.visible).toBe(true);
@@ -34,9 +35,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-5),
 			visibleSide: "negative",
-			camera: createCamera(),
-			viewport: new Vector2(800, 600),
-			minScreenAreaPx: 1,
+			context: createTestContext(),
 		});
 
 		expect(result.visible).toBe(false);
@@ -53,9 +52,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-5),
 			visibleSide: "negative",
-			camera: createCamera({ positionZ: -10, targetZ: -5 }),
-			viewport: new Vector2(800, 600),
-			minScreenAreaPx: 1,
+			context: createTestContext({ positionZ: -10, targetZ: -5 }),
 		});
 
 		expect(result.visible).toBe(true);
@@ -71,9 +68,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-50),
 			visibleSide: "positive",
-			camera: createCamera(),
-			viewport: new Vector2(800, 600),
-			minScreenAreaPx: 10,
+			context: createTestContext({ minScreenAreaPx: 10 }),
 		});
 
 		expect(result.visible).toBe(false);
@@ -94,13 +89,47 @@ describe("portal visibility", () => {
 				source: "drawing-bsp-portal",
 			},
 			visibleSide: "positive",
-			camera: createCamera(),
-			viewport: new Vector2(800, 600),
-			minScreenAreaPx: 1,
+			context: createTestContext(),
 		});
 
 		expect(result.visible).toBe(false);
 		expect(result.reason).toBe("back-facing");
+	});
+
+	it("measures clipped polygon footprint instead of a clamped viewport rectangle", () => {
+		const result = evaluatePortalVisibility({
+			worldPoints: [
+				{ x: 800, y: -0.01, z: -5 },
+				{ x: 900, y: -0.01, z: -5 },
+				{ x: 900, y: 0.01, z: -5 },
+				{ x: 800, y: 0.01, z: -5 },
+			],
+			worldPlane: createZPlane(-5),
+			visibleSide: "positive",
+			context: createTestContext({ minScreenAreaPx: 10 }),
+		});
+
+		expect(result.visible).toBe(false);
+		expect(result.reason).toBe("outside-frustum");
+		expect(result.screenAreaPx).toBe(0);
+	});
+
+	it("rejects near-edge slivers by clipped area rather than clamped bounding area", () => {
+		const result = evaluatePortalVisibility({
+			worldPoints: [
+				{ x: 3.7, y: -0.01, z: -5 },
+				{ x: 3.9, y: -0.01, z: -5 },
+				{ x: 3.9, y: 0.01, z: -5 },
+				{ x: 3.7, y: 0.01, z: -5 },
+			],
+			worldPlane: createZPlane(-5),
+			visibleSide: "positive",
+			context: createTestContext({ minScreenAreaPx: 200 }),
+		});
+
+		expect(result.visible).toBe(false);
+		expect(result.reason).toBe("too-small");
+		expect(result.screenAreaPx).toBeLessThan(200);
 	});
 });
 
@@ -121,4 +150,18 @@ function createCamera(
 	camera.updateProjectionMatrix();
 	camera.updateMatrixWorld(true);
 	return camera;
+}
+
+function createTestContext(
+	options: {
+		positionZ?: number;
+		targetZ?: number;
+		minScreenAreaPx?: number;
+	} = {},
+) {
+	return createPortalVisibilityContext({
+		camera: createCamera(options),
+		viewport: new Vector2(800, 600),
+		minScreenAreaPx: options.minScreenAreaPx ?? 1,
+	});
 }

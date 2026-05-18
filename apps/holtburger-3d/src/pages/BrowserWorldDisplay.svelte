@@ -432,7 +432,12 @@
 			metrics.skippedOutsideFrustumCount +
 			metrics.skippedBackFacingCount +
 			metrics.skippedTooSmallCount;
-		return `${metrics.visiblePortalGroupCount}/${metrics.candidatePortalGroupCount} portal group${metrics.candidatePortalGroupCount === 1 ? "" : "s"} visible; ${metrics.topologyOutdoorPortalCount} topology portal${metrics.topologyOutdoorPortalCount === 1 ? "" : "s"}; ${metrics.maskedInteriorCellCount} masked env cell${metrics.maskedInteriorCellCount === 1 ? "" : "s"}; ${skipped} skipped.`;
+		const visibleArea =
+			metrics.minVisibleScreenAreaPx === null ||
+			metrics.maxVisibleScreenAreaPx === null
+				? "visible area n/a"
+				: `visible area ${metrics.minVisibleScreenAreaPx.toFixed(1)}-${metrics.maxVisibleScreenAreaPx.toFixed(1)}px`;
+		return `${metrics.visiblePortalGroupCount}/${metrics.renderWorkItemCandidateCount} portal work item${metrics.renderWorkItemCandidateCount === 1 ? "" : "s"} visible; ${metrics.topologyOutdoorPortalCount} topology portal${metrics.topologyOutdoorPortalCount === 1 ? "" : "s"}, ${metrics.apertureCandidateCount} aperture candidate${metrics.apertureCandidateCount === 1 ? "" : "s"}; ${metrics.maskedInteriorCellCount} masked env cell${metrics.maskedInteriorCellCount === 1 ? "" : "s"}; ${skipped} skipped; area buckets <16 ${metrics.screenAreaBuckets.lt16}, <64 ${metrics.screenAreaBuckets.lt64}, <256 ${metrics.screenAreaBuckets.lt256}, >=256 ${metrics.screenAreaBuckets.gte256}; ${visibleArea}.`;
 	});
 	const sceneBoundsText = $derived(
 		renderMetrics?.bounds

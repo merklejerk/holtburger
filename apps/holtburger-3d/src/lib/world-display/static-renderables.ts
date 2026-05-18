@@ -41,6 +41,11 @@ import {
 	type RenderChunkKey,
 	type RenderChunkPlacement,
 } from "./render-chunks";
+import {
+	WORLD_RENDER_DOMAIN,
+	formatRenderDomainKey,
+	type StaticRenderableRenderDomain,
+} from "./render-domains";
 
 type StaticRenderableInstanceKind =
 	| "indoor-static"
@@ -64,6 +69,7 @@ interface StaticRenderableSourceInstance {
 
 export interface StaticRenderablePart {
 	renderKey: string;
+	renderDomain: StaticRenderableRenderDomain;
 	instanceId: string;
 	sourceAssetId: string;
 	sourceDid: number;
@@ -86,7 +92,7 @@ export interface StaticRenderableSceneModel {
 	activeLandblockIds: number[];
 	sourceInstances: StaticRenderableSourceInstance[];
 	parts: StaticRenderablePart[];
-	partsByRenderChunkAndGfxAssetId: Map<string, StaticRenderablePart[]>;
+	partsByRenderDomainChunkAndGfxAssetId: Map<string, StaticRenderablePart[]>;
 	missingSourceAssetIds: string[];
 	missingGfxAssetIds: string[];
 }
@@ -210,8 +216,8 @@ export function deriveStaticRenderableSceneModel(
 		activeLandblockIds,
 		sourceInstances,
 		parts,
-		partsByRenderChunkAndGfxAssetId:
-			groupStaticRenderablePartsByRenderChunkAndGfxAssetId(parts),
+		partsByRenderDomainChunkAndGfxAssetId:
+			groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
@@ -271,38 +277,43 @@ function deriveIndoorStaticRenderableSceneModel(
 		activeLandblockIds: [],
 		sourceInstances,
 		parts,
-		partsByRenderChunkAndGfxAssetId:
-			groupStaticRenderablePartsByRenderChunkAndGfxAssetId(parts),
+		partsByRenderDomainChunkAndGfxAssetId:
+			groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(parts),
 		missingSourceAssetIds: [...missingSourceAssetIds].sort(),
 		missingGfxAssetIds: [...missingGfxAssetIds].sort(),
 	};
 }
 
-export function formatStaticRenderableChunkAssetGroupKey(
+export function formatStaticRenderableRenderGroupKey(
+	renderDomain: StaticRenderableRenderDomain,
 	chunkKey: RenderChunkKey,
 	gfxObjAssetId: string,
 ): string {
-	return `${chunkKey}|${gfxObjAssetId}`;
+	return `${renderDomain}|${chunkKey}|${gfxObjAssetId}`;
 }
 
-function groupStaticRenderablePartsByRenderChunkAndGfxAssetId(
+function groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(
 	parts: StaticRenderablePart[],
 ): Map<string, StaticRenderablePart[]> {
-	const partsByChunkAndGfxAssetId = new Map<string, StaticRenderablePart[]>();
+	const partsByDomainChunkAndGfxAssetId = new Map<
+		string,
+		StaticRenderablePart[]
+	>();
 	for (const part of parts) {
-		const groupKey = formatStaticRenderableChunkAssetGroupKey(
+		const groupKey = formatStaticRenderableRenderGroupKey(
+			part.renderDomain,
 			part.renderChunk.chunkKey,
 			part.gfxObjAssetId,
 		);
-		const groupedParts = partsByChunkAndGfxAssetId.get(groupKey);
+		const groupedParts = partsByDomainChunkAndGfxAssetId.get(groupKey);
 		if (groupedParts) {
 			groupedParts.push(part);
 		} else {
-			partsByChunkAndGfxAssetId.set(groupKey, [part]);
+			partsByDomainChunkAndGfxAssetId.set(groupKey, [part]);
 		}
 	}
 
-	return partsByChunkAndGfxAssetId;
+	return partsByDomainChunkAndGfxAssetId;
 }
 
 export function isPreparedGfxObjAsset(
@@ -323,7 +334,7 @@ function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 		activeLandblockIds: [],
 		sourceInstances: [],
 		parts: [],
-		partsByRenderChunkAndGfxAssetId: new Map(),
+		partsByRenderDomainChunkAndGfxAssetId: new Map(),
 		missingSourceAssetIds: [],
 		missingGfxAssetIds: [],
 	};
@@ -468,8 +479,11 @@ function createStaticRenderablePart(
 ): StaticRenderablePart {
 	const debugColorKey = `${instance.sourceAssetId}:${formatHexId(part.gfxObjId)}:${part.partIndex}`;
 	const renderChunk = deriveStaticRenderablePartRenderChunk(instance);
+	const renderDomain = staticRenderableRenderDomainForKind(instance.kind);
+	const localRenderKey = `${instance.instanceId}/part/${part.partIndex}/${part.gfxObjAssetId}`;
 	return {
-		renderKey: `${instance.instanceId}/part/${part.partIndex}/${part.gfxObjAssetId}`,
+		renderKey: formatRenderDomainKey(renderDomain, localRenderKey),
+		renderDomain,
 		instanceId: instance.instanceId,
 		sourceAssetId: instance.sourceAssetId,
 		sourceDid: instance.sourceDid,
@@ -486,6 +500,14 @@ function createStaticRenderablePart(
 		scale: multiplyScale(instance.sourceScale, part.scale),
 		debugColorKey,
 	};
+}
+
+function staticRenderableRenderDomainForKind(
+	kind: StaticRenderableInstanceKind,
+): StaticRenderableRenderDomain {
+	return kind === "indoor-static"
+		? WORLD_RENDER_DOMAIN.interiorStatic
+		: WORLD_RENDER_DOMAIN.exteriorStatic;
 }
 
 function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {

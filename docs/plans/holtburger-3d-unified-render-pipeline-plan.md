@@ -168,7 +168,7 @@ Phase 0 progress:
 
 ## Phase 1: Render Domains and Render Key Hygiene
 
-Status: not started.
+Status: complete.
 
 Purpose: make render batching correct by construction before changing pass order.
 
@@ -204,6 +204,56 @@ Exit criteria:
 
 - No render group can mix indoor and outdoor static geometry by construction.
 - Portal aperture renderables are domain-separated from ordinary cell shell geometry.
+
+Phase 1 progress:
+
+- Added explicit render-domain identifiers in
+  `apps/holtburger-3d/src/lib/world-display/render-domains.ts`:
+  - `terrain`;
+  - `exterior-static`;
+  - `interior-cell-shell`;
+  - `interior-static`;
+  - `portal-aperture`;
+  - `debug-overlay`.
+- Static renderable parts now carry a `renderDomain`, and production static render keys are prefixed
+  with that domain.
+- Replaced `partsByRenderChunkAndGfxAssetId` with
+  `partsByRenderDomainChunkAndGfxAssetId`. The group key now includes render domain, render chunk,
+  and gfx object asset id, so indoor and outdoor static geometry cannot share an instanced mesh even
+  when they use the same gfx object in the same landblock chunk.
+- Replaced layer assignment from `staticRenderableLayerForKind(kind)` with
+  `staticRenderableLayerForDomain(renderDomain)`. `WORLD_RENDER_LAYER` remains a pass-visibility
+  mechanism; render domains now own batching identity.
+- Production structured interior cell-shell render keys are now prefixed with
+  `interior-cell-shell/`.
+- Browser diagnostics now report static renderable groups as domain-safe and include exterior versus
+  interior static group counts.
+- Added focused tests proving identical gfx assets in exterior and interior static domains produce
+  separate render groups.
+
+Decisions and course corrections:
+
+- The domain split is intentionally strongest for static renderables because that was the known
+  correctness hole: static batching could mix indoor and outdoor parts and then inherit the first
+  part's layer assignment.
+- Terrain still remains exterior-only by construction in `terrain-scene.ts`; no terrain data shape
+  change was needed in this phase.
+- Portal aperture meshes are already kept in `portalMaskMeshes` and rendered through portal mask /
+  depth-reset layers rather than ordinary color render groups. Phase 4/5 should still move aperture
+  work into a domain-aware transition work-item model using the `portal-aperture` domain.
+- Debug overlay render keys were not churned in this phase because overlays are diagnostic-only and
+  already separated by owner keys and debug-overlay render layer. Phase 8 should revisit debug
+  overlay naming only if it helps cleanup.
+
+Refinements to future steps:
+
+- Phase 3 can build broad interior and exterior render sets directly from
+  `partsByRenderDomainChunkAndGfxAssetId`; it should not recover static render domain from instance
+  kind or Three.js layer.
+- Phase 5 can assume static render groups are domain-safe before building batched portal graph
+  passes. It should still remove per-portal material mutation and per-portal visibility toggling.
+- Phase 8 should delete any remaining references to old non-domain group naming if later phases
+  introduce new renderer working-model names.
 
 ## Phase 2: Portal Candidate Policy and Screen-Footprint Rejection
 

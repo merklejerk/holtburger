@@ -2,12 +2,14 @@ import { Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
 import type { StaticRenderablePart } from "./static-renderables";
+import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import { buildStaticRenderablePartMatrix } from "./static-renderable-geometry";
 
 describe("static renderable geometry", () => {
 	it("authors instance matrices in chunk-local coordinates", () => {
 		const part: StaticRenderablePart = {
-			renderKey: "part",
+			renderKey: "exterior-static/part",
+			renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
 			instanceId: "instance",
 			sourceAssetId: "gfx-obj/01000001",
 			sourceDid: 0x01000001,

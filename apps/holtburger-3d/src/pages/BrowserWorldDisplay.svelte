@@ -51,6 +51,7 @@
 		isPreparedGfxObjAsset,
 		type StaticRenderableSceneModel,
 	} from "../lib/world-display/static-renderables";
+	import { WORLD_RENDER_DOMAIN } from "../lib/world-display/render-domains";
 	import {
 		deriveTerrainSceneModel,
 		type TerrainSceneModel,
@@ -370,7 +371,7 @@
 	const staticRenderableText = $derived(
 		staticRenderableScene.parts.length === 0
 			? describeStaticRenderableIdleState()
-			: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderChunkAndGfxAssetId.size} chunked instanced group${staticRenderableScene.partsByRenderChunkAndGfxAssetId.size === 1 ? "" : "s"}.`,
+			: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size} domain-safe chunked instanced group${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size === 1 ? "" : "s"}.`,
 	);
 	const staticRenderableLayerText = $derived.by(() => {
 		const explicitCount = staticRenderableScene.sourceInstances.filter(
@@ -385,7 +386,17 @@
 		const indoorCount = staticRenderableScene.sourceInstances.filter(
 			(instance) => instance.kind === "indoor-static",
 		).length;
-		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}, indoor ${indoorCount}.`;
+		const exteriorGroupCount = [
+			...staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.values(),
+		].filter(
+			(parts) => parts[0]?.renderDomain === WORLD_RENDER_DOMAIN.exteriorStatic,
+		).length;
+		const interiorGroupCount = [
+			...staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.values(),
+		].filter(
+			(parts) => parts[0]?.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic,
+		).length;
+		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}, indoor ${indoorCount}; groups exterior ${exteriorGroupCount}, interior ${interiorGroupCount}.`;
 	});
 	const structuredInteriorEnvironmentCount = $derived(
 		new Set(structuredInteriorScene.cells.map((cell) => cell.environmentId))

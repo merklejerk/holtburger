@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
 	WORLD_RENDER_LAYER,
 	deriveWorldRenderPasses,
-	staticRenderableLayerForKind,
+	staticRenderableLayerForDomain,
 } from "./render-passes";
+import { WORLD_RENDER_DOMAIN } from "./render-domains";
 
 describe("world render passes", () => {
 	it("preserves current exterior plus diagnostic interior ordering when no portal groups exist", () => {
@@ -50,14 +51,25 @@ describe("world render passes", () => {
 	});
 
 	it("classifies indoor static renderables separately from exterior opaque renderables", () => {
-		expect(staticRenderableLayerForKind("indoor-static")).toBe(
-			WORLD_RENDER_LAYER.diagnosticInterior,
-		);
-		expect(staticRenderableLayerForKind("building")).toBe(
-			WORLD_RENDER_LAYER.exterior,
-		);
-		expect(staticRenderableLayerForKind("generated-scenery")).toBe(
-			WORLD_RENDER_LAYER.exterior,
-		);
+		expect(
+			staticRenderableLayerForDomain(WORLD_RENDER_DOMAIN.interiorStatic),
+		).toBe(WORLD_RENDER_LAYER.diagnosticInterior);
+		expect(
+			staticRenderableLayerForDomain(WORLD_RENDER_DOMAIN.exteriorStatic),
+		).toBe(WORLD_RENDER_LAYER.exterior);
+	});
+
+	it("defines the explicit render domains consumed by the unified pipeline plan", () => {
+		expect(Object.values(WORLD_RENDER_DOMAIN)).toEqual([
+			"terrain",
+			"exterior-static",
+			"interior-cell-shell",
+			"interior-static",
+			"portal-aperture",
+			"debug-overlay",
+		]);
+		expect(
+			staticRenderableLayerForDomain(WORLD_RENDER_DOMAIN.interiorStatic),
+		).toBe(WORLD_RENDER_LAYER.diagnosticInterior);
 	});
 });

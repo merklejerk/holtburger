@@ -1,4 +1,7 @@
-import type { StaticRenderablePart } from "./static-renderables";
+import {
+	WORLD_RENDER_DOMAIN,
+	type StaticRenderableRenderDomain,
+} from "./render-domains";
 
 export const WORLD_RENDER_LAYER = {
 	exterior: 0,
@@ -102,10 +105,10 @@ export function deriveWorldRenderPasses(options: {
 	return passes;
 }
 
-export function staticRenderableLayerForKind(
-	kind: StaticRenderablePart["kind"],
+export function staticRenderableLayerForDomain(
+	renderDomain: StaticRenderableRenderDomain,
 ): WorldRenderLayer {
-	return kind === "indoor-static"
+	return renderDomain === WORLD_RENDER_DOMAIN.interiorStatic
 		? WORLD_RENDER_LAYER.diagnosticInterior
 		: WORLD_RENDER_LAYER.exterior;
 }

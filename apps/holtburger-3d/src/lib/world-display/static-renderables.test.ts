@@ -13,8 +13,9 @@ import type {
 import { formatOutdoorStaticSceneAssetId } from "../landblocks";
 import {
 	deriveStaticRenderableSceneModel,
-	formatStaticRenderableChunkAssetGroupKey,
+	formatStaticRenderableRenderGroupKey,
 } from "./static-renderables";
+import { WORLD_RENDER_DOMAIN } from "./render-domains";
 
 const IDENTITY_PLACEMENT: PlacementTransformDto = {
 	origin: { x: 0, y: 0, z: 0 },
@@ -161,10 +162,11 @@ describe("static renderable scene model", () => {
 		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
 
 		expect(model.parts).toHaveLength(2);
-		expect(model.partsByRenderChunkAndGfxAssetId.size).toBe(1);
+		expect(model.partsByRenderDomainChunkAndGfxAssetId.size).toBe(1);
 		expect(
-			model.partsByRenderChunkAndGfxAssetId.get(
-				formatStaticRenderableChunkAssetGroupKey(
+			model.partsByRenderDomainChunkAndGfxAssetId.get(
+				formatStaticRenderableRenderGroupKey(
+					WORLD_RENDER_DOMAIN.exteriorStatic,
 					"landblock/0102ffff",
 					"gfx-obj/01000001",
 				),
@@ -251,18 +253,20 @@ describe("static renderable scene model", () => {
 				placement: createPlacement({ x: 24, y: 48, z: 6 }),
 			},
 		]);
-		expect(model.partsByRenderChunkAndGfxAssetId.size).toBe(2);
+		expect(model.partsByRenderDomainChunkAndGfxAssetId.size).toBe(2);
 		expect(
-			model.partsByRenderChunkAndGfxAssetId.get(
-				formatStaticRenderableChunkAssetGroupKey(
+			model.partsByRenderDomainChunkAndGfxAssetId.get(
+				formatStaticRenderableRenderGroupKey(
+					WORLD_RENDER_DOMAIN.exteriorStatic,
 					"landblock/0102ffff",
 					"gfx-obj/01000001",
 				),
 			),
 		).toHaveLength(1);
 		expect(
-			model.partsByRenderChunkAndGfxAssetId.get(
-				formatStaticRenderableChunkAssetGroupKey(
+			model.partsByRenderDomainChunkAndGfxAssetId.get(
+				formatStaticRenderableRenderGroupKey(
+					WORLD_RENDER_DOMAIN.exteriorStatic,
 					"landblock/0203ffff",
 					"gfx-obj/01000001",
 				),
@@ -332,6 +336,69 @@ describe("static renderable scene model", () => {
 		expect(model.missingSourceAssetIds).toEqual([]);
 		expect(model.missingGfxAssetIds).toEqual([]);
 	});
+
+	it("keeps indoor and exterior statics in separate render-domain groups", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"gfx-obj/01000001": createPreparedGfxObjAsset(
+				"gfx-obj/01000001",
+				0x01000001,
+			),
+			"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+				0x01020155,
+				IDENTITY_PLACEMENT,
+				["gfx-obj/01000001"],
+			),
+			"outdoor-static-scene/0102ffff":
+				createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
+					0x0102ffff,
+					[0x01020155],
+					["gfx-obj/01000001"],
+				),
+		};
+
+		const model = deriveStaticRenderableSceneModel(
+			createRuntimeBatch(),
+			assetState,
+		);
+
+		expect(
+			model.parts.map((part) => ({
+				renderDomain: part.renderDomain,
+				renderKey: part.renderKey,
+			})),
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					renderDomain: WORLD_RENDER_DOMAIN.exteriorStatic,
+					renderKey: expect.stringMatching(/^exterior-static\//),
+				}),
+				expect.objectContaining({
+					renderDomain: WORLD_RENDER_DOMAIN.interiorStatic,
+					renderKey: expect.stringMatching(/^interior-static\//),
+				}),
+			]),
+		);
+		expect(model.partsByRenderDomainChunkAndGfxAssetId.size).toBe(2);
+		expect(
+			model.partsByRenderDomainChunkAndGfxAssetId.get(
+				formatStaticRenderableRenderGroupKey(
+					WORLD_RENDER_DOMAIN.exteriorStatic,
+					"landblock/0102ffff",
+					"gfx-obj/01000001",
+				),
+			),
+		).toHaveLength(1);
+		expect(
+			model.partsByRenderDomainChunkAndGfxAssetId.get(
+				formatStaticRenderableRenderGroupKey(
+					WORLD_RENDER_DOMAIN.interiorStatic,
+					"landblock/0102ffff",
+					"gfx-obj/01000001",
+				),
+			),
+		).toHaveLength(1);
+	});
 });
 
 function createRuntimeBatch(): RuntimeBatchDto {
@@ -397,6 +464,7 @@ function createPreparedOutdoorStaticSceneAsset(
 function createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
 	landblockId: number,
 	linkedEnvCellIds: number[],
+	scenerySourceAssetIds: string[] = [],
 ): PreparedAssetRecord {
 	const assetId = formatOutdoorStaticSceneAssetId(landblockId);
 	return createPreparedAsset(assetId, {
@@ -404,7 +472,14 @@ function createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
 		sourceAssetKind: "outdoor-static-scene",
 		residencyKind: "outdoor-landblock",
 		landblockId,
-		sceneryInstances: [],
+		sceneryInstances: scenerySourceAssetIds.map((sourceAssetId, index) => ({
+			instanceId: `${assetId}/object/${index}`,
+			owningLandblockId: landblockId,
+			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+			sourceAssetId,
+			sourceIndex: index,
+			localPlacement: createPlacement({ x: 24 + index, y: 48, z: 6 }),
+		})),
 		buildingInstances: [
 			{
 				instanceId: `${assetId}/building/0`,

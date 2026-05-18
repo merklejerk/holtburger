@@ -25,6 +25,7 @@ import {
 	deriveStructuredCellRenderChunk,
 	type RenderChunkPlacement,
 } from "./render-chunks";
+import { WORLD_RENDER_DOMAIN, formatRenderDomainKey } from "./render-domains";
 
 export interface LinkedOutdoorInteriorSelection {
 	envCellIds: number[];
@@ -200,8 +201,12 @@ function deriveStructuredInteriorSceneForEnvCells(
 		}
 
 		const renderChunk = deriveStructuredCellRenderChunk(envCellId);
+		const localRenderKey = `${envCellAssetId}/${environmentAssetId}/cell-structure/${formatHex32(cellStructureId)}`;
 		cells.push({
-			renderKey: `${envCellAssetId}/${environmentAssetId}/cell-structure/${formatHex32(cellStructureId)}`,
+			renderKey: formatRenderDomainKey(
+				WORLD_RENDER_DOMAIN.interiorCellShell,
+				localRenderKey,
+			),
 			envCellId,
 			renderChunk,
 			environmentId,

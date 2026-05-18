@@ -96,7 +96,7 @@ import {
 import {
 	WORLD_RENDER_LAYER,
 	deriveWorldRenderPasses,
-	staticRenderableLayerForKind,
+	staticRenderableLayerForDomain,
 	type WorldRenderPass,
 } from "./render-passes";
 import {
@@ -888,7 +888,7 @@ export function createWorldDisplayRenderer(
 				terrainTriangleCount: terrainTriangleCount(),
 				staticRenderablePartCount: staticRenderableScene.parts.length,
 				staticRenderableInstancedGroupCount:
-					staticRenderableScene.partsByRenderChunkAndGfxAssetId.size,
+					staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size,
 				structuredInteriorCellCount: structuredInteriorScene.cells.length,
 				structuredInteriorVertexCount: structuredInteriorScene.cells.reduce(
 					(total, cell) => total + cell.renderGeometry.vertexCount,
@@ -932,7 +932,7 @@ export function createWorldDisplayRenderer(
 	): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
-		const partsByGroupKey = sceneModel.partsByRenderChunkAndGfxAssetId;
+		const partsByGroupKey = sceneModel.partsByRenderDomainChunkAndGfxAssetId;
 		const activeGfxAssetIds = new Set(
 			[...partsByGroupKey.values()].flatMap((parts) =>
 				parts[0] ? [parts[0].gfxObjAssetId] : [],
@@ -976,7 +976,7 @@ export function createWorldDisplayRenderer(
 				chunkRoot.attach(mesh);
 			}
 
-			mesh.layers.set(staticRenderableLayerForKind(firstPart.kind));
+			mesh.layers.set(staticRenderableLayerForDomain(firstPart.renderDomain));
 			if (firstPart.kind === "indoor-static") {
 				mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
 			}
@@ -1238,7 +1238,9 @@ export function createWorldDisplayRenderer(
 		}
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
 			const parts =
-				staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(groupKey);
+				staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
+					groupKey,
+				);
 			if (!parts?.[0] || parts[0].kind !== "indoor-static") {
 				continue;
 			}
@@ -1256,7 +1258,9 @@ export function createWorldDisplayRenderer(
 		}
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
 			const parts =
-				staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(groupKey);
+				staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
+					groupKey,
+				);
 			if (parts?.[0]?.kind === "indoor-static") {
 				mesh.visible = true;
 			}
@@ -1293,7 +1297,9 @@ export function createWorldDisplayRenderer(
 		}
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
 			const parts =
-				staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(groupKey);
+				staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
+					groupKey,
+				);
 			if (parts?.[0]?.kind === "indoor-static") {
 				visitMeshMaterials(mesh, visit);
 			}

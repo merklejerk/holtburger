@@ -103,7 +103,7 @@ These findings came from checking the plan against the current `apps/holtburger-
 
 ## Phase 0: Baseline and Safety Rails
 
-Status: not started.
+Status: complete for code-auditable work; manual metric capture deferred.
 
 Purpose: capture current behavior and prevent the rewrite from hiding correctness regressions.
 
@@ -126,6 +126,45 @@ Exit criteria:
 - Current metrics and manual scenarios are documented in this plan or linked from it.
 - Prototype/debug cleanup targets are listed before new code depends on them.
 - No implementation behavior changes beyond testable helper extraction.
+
+Phase 0 progress:
+
+- Manual renderer metric capture was intentionally skipped for this pass because it requires
+  interactive Tauri/WebView inspection. The manual baseline scenarios remain:
+  - close outdoor-to-indoor transition aperture;
+  - indoor-to-outdoor transition aperture;
+  - zoomed-out outdoor overview;
+  - underground transition aperture where terrain should be punched by portal compositing.
+- Existing synthetic safety rails already cover:
+  - retail `PortalSide` decoding in
+    `apps/holtburger-3d/src/lib/world-display/portal-apertures.test.ts`;
+  - portal side culling against source-backed planes in
+    `apps/holtburger-3d/src/lib/world-display/portal-visibility.test.ts`;
+  - outdoor topology portal to outside-transition aperture joining in
+    `apps/holtburger-3d/src/lib/world-display/outdoor-portal-view-groups.test.ts`;
+  - render pass ordering in
+    `apps/holtburger-3d/src/lib/world-display/render-passes.test.ts`.
+- Added a synthetic aperture test proving drawing-BSP portal planes are matched by polygon id even
+  when the BSP portal index differs from the env-cell portal source index. This protects the
+  source-backed plane path without loading DAT/HBA data.
+- `rg` found no remaining `localStorage` debug render switches in `apps/holtburger-3d/src`.
+  Earlier console-driven `holtburger.debug.renderMode` values should therefore be treated as stale
+  local browser state, not an app-supported code path.
+- Current prototype render paths and cleanup targets:
+  - `renderPortalGroups()` still performs per-visible-group full-scene mask, depth-reset, and
+    composited-interior renders;
+  - `setPortalInteriorVisibility()` still toggles exact requested env-cell subsets and performs
+    source-array lookups;
+  - `applyPortalInteriorStencil()` and `clearPortalInteriorStencil()` still mutate material stencil
+    state in the hot path;
+  - `outdoor-portal-view-groups.ts` still exposes a one-way outdoor-to-indoor group shape and
+    mints one stencil ref per group;
+  - `apps/holtburger-3d/src/dev/PortalDepthResetProbe.svelte` and
+    `apps/holtburger-3d/src/dev/portal-depth-reset-probe.ts` remain useful compatibility probes
+    until Phase 5 replaces the prototype portal pass structure.
+- Course correction: Phase 0 should not create new renderer debug modes or debug-log tests. Future
+  phase verification should rely on synthetic helpers, renderer metrics, and the manual scenarios
+  listed above.
 
 ## Phase 1: Render Domains and Render Key Hygiene
 

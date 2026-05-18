@@ -88,6 +88,33 @@ describe("portal apertures", () => {
 		});
 	});
 
+	it("matches source drawing-BSP portal planes by polygon id when portal index differs", () => {
+		const cell = createStructuredInteriorCell(0x016c0155, 0x016c0156);
+		if (!cell.cellStructure) {
+			throw new Error("test cell should include a cell structure");
+		}
+		cell.cellStructure.drawingBsp = {
+			kind: "port",
+			plane: {
+				normal: { x: 1, y: 2, z: 3 },
+				d: -4,
+			},
+			pos: { kind: "leaf" },
+			neg: { kind: "leaf" },
+			portalPolys: [{ portalIndex: 99, polyId: 7 }],
+		};
+
+		const apertures = derivePortalAperturesFromStructuredInteriorScene(
+			createStructuredInteriorSceneModel([cell]),
+		);
+
+		expect(apertures[0]?.plane).toEqual({
+			normal: { x: 1, y: 3, z: -2 },
+			constant: 4,
+			source: "drawing-bsp-portal",
+		});
+	});
+
 	it("decodes retail portal side from the inverted raw 0x2 flag", () => {
 		expect(decodePortalVisibleSide(0x0)).toBe("negative");
 		expect(decodePortalVisibleSide(0x2)).toBe("positive");

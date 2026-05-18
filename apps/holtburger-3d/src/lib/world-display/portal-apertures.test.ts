@@ -5,8 +5,10 @@ import type {
 	StructuredInteriorSceneModel,
 } from "./structured-interior-scene";
 import {
+	decodePortalVisibleSide,
 	derivePortalAperturesFromStructuredInteriorScene,
 	isOutsideTransitionPortal,
+	oppositePortalVisibleSide,
 } from "./portal-apertures";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
 
@@ -41,6 +43,7 @@ describe("portal apertures", () => {
 				chunkLandblockId: 0x016cffff,
 			},
 			chunkLocalPlacement: IDENTITY_PLACEMENT,
+			visibleSide: "negative",
 			targetEnvCellId: 0x016c0156,
 			targetStatus: "loaded-visible",
 			outsideTransition: false,
@@ -56,6 +59,44 @@ describe("portal apertures", () => {
 			source: "derived-from-render-points",
 		});
 		expect(apertures[1]?.targetStatus).toBe("unsupported");
+	});
+
+	it("prefers source drawing-BSP portal planes over render-point winding", () => {
+		const cell = createStructuredInteriorCell(0x016c0155, 0x016c0156);
+		if (!cell.cellStructure) {
+			throw new Error("test cell should include a cell structure");
+		}
+		cell.cellStructure.drawingBsp = {
+			kind: "port",
+			plane: {
+				normal: { x: 0, y: -1, z: 0 },
+				d: -7,
+			},
+			pos: { kind: "leaf" },
+			neg: { kind: "leaf" },
+			portalPolys: [{ portalIndex: 0, polyId: 7 }],
+		};
+
+		const apertures = derivePortalAperturesFromStructuredInteriorScene(
+			createStructuredInteriorSceneModel([cell]),
+		);
+
+		expect(apertures[0]?.plane).toEqual({
+			normal: { x: 0, y: 0, z: 1 },
+			constant: 7,
+			source: "drawing-bsp-portal",
+		});
+	});
+
+	it("decodes retail portal side from the inverted raw 0x2 flag", () => {
+		expect(decodePortalVisibleSide(0x0)).toBe("negative");
+		expect(decodePortalVisibleSide(0x2)).toBe("positive");
+		expect(decodePortalVisibleSide(0x6)).toBe("positive");
+	});
+
+	it("derives the reciprocal portal side for outside-to-inside views", () => {
+		expect(oppositePortalVisibleSide("negative")).toBe("positive");
+		expect(oppositePortalVisibleSide("positive")).toBe("negative");
 	});
 
 	it("classifies missing polygons and outside transitions", () => {

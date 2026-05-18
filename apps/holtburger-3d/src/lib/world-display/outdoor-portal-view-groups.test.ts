@@ -55,6 +55,7 @@ describe("outdoor portal view groups", () => {
 			source: "browser-free-camera",
 			outdoorPortalId: "outdoor-topology/00",
 			entryEnvCellId: 0x016c0155,
+			visibleSide: "positive",
 			targetStatus: "outside",
 			stencilRef: 1,
 			requestedInteriorEnvCellIds: [

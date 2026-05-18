@@ -33,7 +33,7 @@ describe("world render passes", () => {
 		]);
 	});
 
-	it("inserts portal mask and composited interior passes before diagnostic interiors", () => {
+	it("inserts portal mask, depth reset, and composited interior passes before diagnostic interiors", () => {
 		expect(
 			deriveWorldRenderPasses({
 				hasPortalViewGroups: true,
@@ -43,6 +43,7 @@ describe("world render passes", () => {
 		).toEqual([
 			"exterior-opaque",
 			"portal-stencil-mask",
+			"portal-depth-reset",
 			"portal-composited-interior",
 			"diagnostic-interior",
 		]);

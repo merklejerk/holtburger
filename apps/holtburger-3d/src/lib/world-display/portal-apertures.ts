@@ -1,7 +1,10 @@
 import type { Vec3Dto } from "../host/contracts";
 import type {
 	PreparedIndoorCellPortal,
+	PreparedPolygonSetBspNode,
+	PreparedPolygonSetPortalPoly,
 	PreparedPolygonSetPolygon,
+	PreparedPolygonSetPlane,
 	PreparedPolygonSetVertexArray,
 } from "../assets/types";
 import type {
@@ -20,8 +23,10 @@ export type PortalApertureTargetStatus =
 export interface PortalAperturePlane {
 	normal: Vec3Dto;
 	constant: number;
-	source: "derived-from-render-points";
+	source: "drawing-bsp-portal" | "derived-from-render-points";
 }
+
+export type PortalApertureVisibleSide = "positive" | "negative";
 
 export interface PortalAperture {
 	id: string;
@@ -38,6 +43,7 @@ export interface PortalAperture {
 	chunkLocalPlacement: StructuredInteriorCell["chunkLocalPlacement"];
 	points: Vec3Dto[];
 	plane: PortalAperturePlane | null;
+	visibleSide: PortalApertureVisibleSide;
 	targetEnvCellId: number | null;
 	targetStatus: PortalApertureTargetStatus;
 	outsideTransition: boolean;
@@ -99,12 +105,30 @@ function createCellPortalApertures(
 			renderChunk: cell.renderChunk,
 			chunkLocalPlacement: cell.chunkLocalPlacement,
 			points,
-			plane: derivePortalAperturePlane(points),
+			plane:
+				derivePortalApertureSourcePlane(cellStructure.drawingBsp, portal) ??
+				derivePortalAperturePlaneFromPoints(points),
+			visibleSide: decodePortalVisibleSide(portal.flags),
 			targetEnvCellId,
 			targetStatus,
 			outsideTransition: isOutsideTransitionPortal(portal),
 		};
 	});
+}
+
+export function decodePortalVisibleSide(
+	flags: number,
+): PortalApertureVisibleSide {
+	// Retail decodes portal_side as ((~flags >> 1) & 1). A true portal_side
+	// accepts the negative side of the portal plane; raw flag 0x2 therefore
+	// selects the positive visible side.
+	return (flags & 0x2) === 0 ? "negative" : "positive";
+}
+
+export function oppositePortalVisibleSide(
+	side: PortalApertureVisibleSide,
+): PortalApertureVisibleSide {
+	return side === "positive" ? "negative" : "positive";
 }
 
 function buildPortalPolygonPoints(
@@ -156,7 +180,122 @@ function resolveTargetStatus(
 	return "known-unloaded";
 }
 
-function derivePortalAperturePlane(points: Vec3Dto[]): PortalAperturePlane | null {
+function derivePortalApertureSourcePlane(
+	drawingBsp: PreparedPolygonSetBspNode | null,
+	portal: PreparedIndoorCellPortal,
+): PortalAperturePlane | null {
+	const sourcePlane = findPortalPlaneByPortalReference(drawingBsp, portal);
+	if (!sourcePlane) {
+		return null;
+	}
+
+	return convertAcPlaneToRenderPlane(sourcePlane);
+}
+
+function findPortalPlaneByPortalReference(
+	node: PreparedPolygonSetBspNode | null,
+	portal: PreparedIndoorCellPortal,
+): PreparedPolygonSetPlane | null {
+	if (!node) {
+		return null;
+	}
+
+	if (node.kind === "port") {
+		const plane = readBspPlane(node.plane);
+		const portalPolys = readBspPortalPolys(node.portalPolys);
+		const positiveNode = readBspChild(node.pos);
+		const negativeNode = readBspChild(node.neg);
+		const hasPortalPoly = portalPolys.some(
+			(portalPoly) =>
+				portalPoly.portalIndex === portal.sourceIndex ||
+				portalPoly.polyId === portal.polygonId,
+		);
+		if (hasPortalPoly && plane) {
+			return plane;
+		}
+
+		return (
+			findPortalPlaneByPortalReference(positiveNode, portal) ??
+			findPortalPlaneByPortalReference(negativeNode, portal)
+		);
+	}
+
+	if (node.kind === "internal") {
+		const positiveNode = readBspChild(node.pos);
+		const negativeNode = readBspChild(node.neg);
+		return (
+			findPortalPlaneByPortalReference(positiveNode, portal) ??
+			findPortalPlaneByPortalReference(negativeNode, portal)
+		);
+	}
+
+	return null;
+}
+
+function readBspChild(value: unknown): PreparedPolygonSetBspNode | null {
+	if (!isRecord(value) || typeof value.kind !== "string") {
+		return null;
+	}
+
+	return value as PreparedPolygonSetBspNode;
+}
+
+function readBspPlane(value: unknown): PreparedPolygonSetPlane | null {
+	if (!isRecord(value) || !isVec3Dto(value.normal) || typeof value.d !== "number") {
+		return null;
+	}
+
+	return {
+		normal: value.normal,
+		d: value.d,
+	};
+}
+
+function readBspPortalPolys(value: unknown): PreparedPolygonSetPortalPoly[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return value.filter(isPreparedPolygonSetPortalPoly);
+}
+
+function isPreparedPolygonSetPortalPoly(
+	value: unknown,
+): value is PreparedPolygonSetPortalPoly {
+	return (
+		isRecord(value) &&
+		typeof value.portalIndex === "number" &&
+		typeof value.polyId === "number"
+	);
+}
+
+function isVec3Dto(value: unknown): value is Vec3Dto {
+	return (
+		isRecord(value) &&
+		typeof value.x === "number" &&
+		typeof value.y === "number" &&
+		typeof value.z === "number"
+	);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function convertAcPlaneToRenderPlane(
+	plane: PreparedPolygonSetPlane,
+): PortalAperturePlane {
+	const normal = toRenderSpace(plane.normal);
+	return {
+		normal,
+		constant: -plane.d,
+		source: "drawing-bsp-portal",
+	};
+}
+
+function derivePortalAperturePlaneFromPoints(
+	points: Vec3Dto[],
+): PortalAperturePlane | null {
 	const first = points[0];
 	const second = points[1];
 	const third = points[2];

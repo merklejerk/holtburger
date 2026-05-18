@@ -1,9 +1,15 @@
 import { Box3, Frustum, Matrix4, PerspectiveCamera, Vector2, Vector3 } from "three";
 
 import type { Vec3Dto } from "../host/contracts";
+import type {
+	PortalAperturePlane,
+	PortalApertureVisibleSide,
+} from "./portal-apertures";
 
 export interface PortalVisibilityInput {
 	worldPoints: readonly Vec3Dto[];
+	worldPlane: PortalAperturePlane | null;
+	visibleSide: PortalApertureVisibleSide;
 	camera: PerspectiveCamera;
 	viewport: Vector2;
 	minScreenAreaPx: number;
@@ -17,6 +23,8 @@ export interface PortalVisibilityResult {
 
 export function evaluatePortalVisibility({
 	worldPoints,
+	worldPlane,
+	visibleSide,
 	camera,
 	viewport,
 	minScreenAreaPx,
@@ -30,7 +38,7 @@ export function evaluatePortalVisibility({
 		return { visible: false, reason: "outside-frustum", screenAreaPx: 0 };
 	}
 
-	if (!isPortalFrontFacing(vectors, camera)) {
+	if (!worldPlane || !isCameraOnPortalVisibleSide(worldPlane, visibleSide, camera)) {
 		return { visible: false, reason: "back-facing", screenAreaPx: 0 };
 	}
 
@@ -55,21 +63,22 @@ function buildCameraFrustum(camera: PerspectiveCamera): Frustum {
 	return new Frustum().setFromProjectionMatrix(projectionScreenMatrix);
 }
 
-function isPortalFrontFacing(
-	points: readonly Vector3[],
+function isCameraOnPortalVisibleSide(
+	plane: PortalAperturePlane,
+	visibleSide: PortalApertureVisibleSide,
 	camera: PerspectiveCamera,
 ): boolean {
-	const normal = new Vector3()
-		.subVectors(points[1], points[0])
-		.cross(new Vector3().subVectors(points[2], points[0]))
-		.normalize();
+	const normal = toVector3(plane.normal).normalize();
 	if (normal.lengthSq() === 0) {
 		return false;
 	}
 
 	const cameraPosition = new Vector3();
 	camera.getWorldPosition(cameraPosition);
-	return normal.dot(cameraPosition.sub(points[0])) > 0;
+	const signedDistance = normal.dot(cameraPosition) - plane.constant;
+	return visibleSide === "positive"
+		? signedDistance > 0
+		: signedDistance < 0;
 }
 
 function calculateProjectedBoundingAreaPx(

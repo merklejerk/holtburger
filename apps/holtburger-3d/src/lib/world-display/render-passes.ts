@@ -3,9 +3,10 @@ import type { StaticRenderablePart } from "./static-renderables";
 export const WORLD_RENDER_LAYER = {
 	exterior: 0,
 	portalMask: 1,
-	portalInterior: 2,
-	diagnosticInterior: 3,
-	debugOverlay: 4,
+	portalDepthReset: 2,
+	portalInterior: 3,
+	diagnosticInterior: 4,
+	debugOverlay: 5,
 } as const;
 
 export type WorldRenderLayer =
@@ -14,6 +15,7 @@ export type WorldRenderLayer =
 export type WorldRenderPassKind =
 	| "exterior-opaque"
 	| "portal-stencil-mask"
+	| "portal-depth-reset"
 	| "portal-composited-interior"
 	| "diagnostic-interior"
 	| "debug-overlay";
@@ -53,6 +55,15 @@ export function deriveWorldRenderPasses(options: {
 					color: false,
 					depth: false,
 					stencil: true,
+				},
+			},
+			{
+				kind: "portal-depth-reset",
+				layer: WORLD_RENDER_LAYER.portalDepthReset,
+				clearBeforePass: {
+					color: false,
+					depth: false,
+					stencil: false,
 				},
 			},
 			{

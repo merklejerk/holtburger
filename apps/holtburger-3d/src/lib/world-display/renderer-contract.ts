@@ -25,7 +25,8 @@ interface WorldRenderPerformanceMetrics {
 }
 
 export interface WorldRenderPortalMetrics {
-	candidateOutdoorPortalCount: number;
+	topologyOutdoorPortalCount: number;
+	candidatePortalGroupCount: number;
 	visiblePortalGroupCount: number;
 	maskedInteriorCellCount: number;
 	skippedMissingApertureCount: number;

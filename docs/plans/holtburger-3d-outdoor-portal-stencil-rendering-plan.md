@@ -1,6 +1,6 @@
 # Holtburger 3D Outdoor Portal Stencil Rendering Plan
 
-Status: Phase 9 complete; Phase 10 planned.
+Status: Phase 10 implemented; manual scene verification pending.
 
 ## Purpose
 
@@ -742,24 +742,40 @@ Progress:
   `apps/holtburger-3d/src/lib/world-display/portal-visibility.ts` and
   `apps/holtburger-3d/src/lib/world-display/world-display-renderer.ts`.
 - Added frustum rejection using the current Three.js camera and a world-space aperture bounding box.
-- Added front/back facing rejection from the transformed aperture polygon winding.
+- Added source-backed portal-side rejection. `PortalAperture` now decodes the retail visible side
+  from the raw portal flags, including the inverted `0x2` `PortalSide` bit, and the renderer culls
+  cameras on the opposite side of the aperture plane.
+- Portal aperture planes now prefer source drawing-BSP `PORT` node planes matched through
+  `portalPolys`; render-point-derived planes are only a fallback when the source plane is missing.
+- Outdoor portal view groups use the reciprocal side of the source env-cell outside-transition
+  aperture. The source aperture describes the env-cell portal side; the outdoor free-camera render
+  path views the same aperture from outside into the interior.
 - Added projected screen-area rejection using a clamped projected bounding box with a low
   `1px` threshold.
 - The renderer now filters portal groups immediately before stencil rendering, after mask meshes
   have current chunk/world transforms.
 - Added synthetic tests in `apps/holtburger-3d/src/lib/world-display/portal-visibility.test.ts`
-  for visible, back-facing, and too-small aperture cases.
-- Verified with `npm run test:ts -- src/lib/world-display/portal-visibility.test.ts
-  src/lib/world-display/render-passes.test.ts` and `npm run check`.
+  for visible, decoded-side rejection, source-plane-over-winding behavior, negative-side
+  acceptance, and too-small aperture cases.
+- Added `PortalSide` decode and reciprocal outside-view coverage in
+  `apps/holtburger-3d/src/lib/world-display/portal-apertures.test.ts` and
+  `apps/holtburger-3d/src/lib/world-display/outdoor-portal-view-groups.test.ts`.
+- Verified with `npm run test:ts -- src/lib/world-display/portal-apertures.test.ts
+  src/lib/world-display/portal-visibility.test.ts
+  src/lib/world-display/outdoor-portal-view-groups.test.ts
+  src/lib/world-display/render-passes.test.ts`, `npm run lint:ts`, and `npm run check`.
 
 Decisions and course corrections:
 
 - Culling is renderer-local for now because it depends on the active camera, viewport size, and
   current render-chunk transforms.
-- The facing check currently uses transformed aperture winding. This keeps the implementation
-  testable, but it is still provisional because Phase 0 plane data is derived from render points.
-  A future refinement should compare this against AC portal side semantics before raising the
-  screen-area threshold or relying on culling as a correctness boundary.
+- The visible side is decoded from AC portal flags instead of inferred from polygon winding, and
+  the side test now uses source drawing-BSP portal planes when available. The remaining fallback is
+  point-derived for malformed or incomplete source payloads.
+- The first portal-side pass incorrectly applied the source env-cell side directly to outdoor
+  free-camera rendering, which made outside-transition portals behave inside-out. Outdoor portal
+  groups now use the reciprocal side for outside-to-inside rendering while preserving the decoded
+  source aperture side as a separate fact.
 - Debug overlays remain independent. Selected portal outlines can still be drawn by the debug pass
   even when a portal is rejected for stencil rendering.
 
@@ -1163,6 +1179,53 @@ Decisions and course corrections:
   authoritative outside that aperture.
 - Exact implementation parity with retail's D3D path is not required, but the chosen modern
   implementation must explain how it maps to retail's depth-mask/depth-clear behavior.
+- The production stencil mask is depth-tested and depth-writing. This keeps nearer exterior
+  statics/occluders authoritative while still allowing the following aperture-local depth reset to
+  clear depth only for pixels where the portal aperture is actually visible. Manual scene checking
+  showed this still reveals the underground terrain aperture correctly.
+
+Progress:
+
+- Added the production `portal-depth-reset` pass to the world render-pass model. The pass is ordered
+  after `portal-stencil-mask` and before `portal-composited-interior`.
+- Added a focused pass-derivation test that locks the Phase 10 ordering:
+  `exterior-opaque`, `portal-stencil-mask`, `portal-depth-reset`,
+  `portal-composited-interior`, then diagnostic interiors.
+- Implemented the renderer pass in `WorldDisplayRenderer`:
+  - visible outdoor portal groups are still selected by the existing frustum, decoded portal-side,
+    screen-area, and aperture-geometry checks;
+  - each visible group clears and writes its own stencil ref only for pixels that pass the current
+    exterior depth buffer;
+  - the same source-backed aperture mesh is then rendered with a shader material that writes
+    `gl_FragDepth = 1.0`, with color writes disabled, depth writes enabled, `AlwaysDepth`, and
+    stencil equality for the active group;
+  - linked interior env cells and indoor static objects are rendered afterward with normal depth
+    testing/writing and the same stencil equality.
+- Added renderer capability gating for the production path. If a visible portal group exists but
+  the renderer is not WebGL2 or lacks stencil bits, the renderer throws a clear error instead of
+  silently drawing incorrect portal interiors.
+- Kept broad free-camera diagnostic interior rendering separate from portal-composited interiors.
+  The diagnostic pass still runs after portal compositing and is not used to prove portal parity.
+- Reused the existing aperture mesh lifecycle and per-group stencil refs rather than adding another
+  aperture extraction path.
+
+Verification:
+
+- `npm run test:ts -- src/lib/world-display/render-passes.test.ts`
+- `npm run lint:ts`
+- `npm run check`
+
+Course corrections:
+
+- The previous stencil-only implementation was incomplete for underground apertures because
+  exterior terrain depth could block linked interiors. The Phase 10 implementation now resets depth
+  only inside the active aperture before drawing linked interiors.
+- A depth-independent stencil mask was rejected after manual verification because it let portals
+  punch through nearer static geometry. The corrected mask is depth-tested/depth-writing, so the
+  depth reset cannot erase valid exterior occluders.
+- User manual verification confirmed the underground terrain aperture still cuts out correctly with
+  the depth-tested mask. Broader scene checks for multiple nearby portals and back-side views remain
+  useful before marking all done criteria complete.
 
 ## Test Strategy
 

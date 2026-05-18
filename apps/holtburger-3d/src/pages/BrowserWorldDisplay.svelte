@@ -421,7 +421,7 @@
 			metrics.skippedOutsideFrustumCount +
 			metrics.skippedBackFacingCount +
 			metrics.skippedTooSmallCount;
-		return `${metrics.visiblePortalGroupCount}/${metrics.candidateOutdoorPortalCount} portal group${metrics.candidateOutdoorPortalCount === 1 ? "" : "s"} visible; ${metrics.maskedInteriorCellCount} masked env cell${metrics.maskedInteriorCellCount === 1 ? "" : "s"}; ${skipped} skipped.`;
+		return `${metrics.visiblePortalGroupCount}/${metrics.candidatePortalGroupCount} portal group${metrics.candidatePortalGroupCount === 1 ? "" : "s"} visible; ${metrics.topologyOutdoorPortalCount} topology portal${metrics.topologyOutdoorPortalCount === 1 ? "" : "s"}; ${metrics.maskedInteriorCellCount} masked env cell${metrics.maskedInteriorCellCount === 1 ? "" : "s"}; ${skipped} skipped.`;
 	});
 	const sceneBoundsText = $derived(
 		renderMetrics?.bounds

@@ -1,5 +1,6 @@
 import {
 	AmbientLight,
+	AlwaysDepth,
 	AlwaysStencilFunc,
 	Box3,
 	BufferAttribute,
@@ -10,6 +11,7 @@ import {
 	DoubleSide,
 	EqualStencilFunc,
 	Frustum,
+	GLSL3,
 	Group,
 	InstancedMesh,
 	KeepStencilOp,
@@ -23,8 +25,10 @@ import {
 	MeshStandardMaterial,
 	Object3D,
 	PerspectiveCamera,
+	Plane,
 	ReplaceStencilOp,
 	Scene,
+	ShaderMaterial,
 	Vector2,
 	Vector3,
 	WebGLRenderer,
@@ -147,6 +151,11 @@ const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
 const MIN_PORTAL_SCREEN_AREA_PX = 1;
 
+interface PortalDepthResetCapability {
+	supported: boolean;
+	reason: string | null;
+}
+
 export function createWorldDisplayRenderer(
 	host: HTMLDivElement,
 	options: WorldDisplayRendererOptions,
@@ -175,6 +184,8 @@ export function createWorldDisplayRenderer(
 	renderer.setClearColor(new Color("#0e1a24"), 1);
 	renderer.domElement.className = "world-display__three-canvas";
 	host.append(renderer.domElement);
+	const portalDepthResetCapability = detectPortalDepthResetCapability(renderer);
+	const portalDepthResetMaterial = createPortalDepthResetMaterial();
 
 	const scene = new Scene();
 
@@ -201,8 +212,9 @@ export function createWorldDisplayRenderer(
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
-	let latestPortalMetrics: WorldRenderPortalMetrics =
-		createPortalRenderMetrics(outdoorPortalViewGroupModel);
+	let latestPortalMetrics: WorldRenderPortalMetrics = createPortalRenderMetrics(
+		outdoorPortalViewGroupModel,
+	);
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
@@ -403,7 +415,9 @@ export function createWorldDisplayRenderer(
 	}
 
 	function renderWorldPasses(): void {
-		latestPortalMetrics = createPortalRenderMetrics(outdoorPortalViewGroupModel);
+		latestPortalMetrics = createPortalRenderMetrics(
+			outdoorPortalViewGroupModel,
+		);
 		renderer.info.reset();
 		const passes = deriveWorldRenderPasses({
 			hasPortalViewGroups: outdoorPortalViewGroupModel.groups.length > 0,
@@ -413,6 +427,9 @@ export function createWorldDisplayRenderer(
 		for (const pass of passes) {
 			if (pass.kind === "portal-stencil-mask") {
 				renderPortalGroups();
+				continue;
+			}
+			if (pass.kind === "portal-depth-reset") {
 				continue;
 			}
 			if (pass.kind === "portal-composited-interior") {
@@ -478,6 +495,9 @@ export function createWorldDisplayRenderer(
 		);
 		latestPortalMetrics.visiblePortalGroupCount = visibleGroups.length;
 		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
+		if (visibleGroups.length > 0) {
+			assertPortalDepthResetSupported(portalDepthResetCapability);
+		}
 
 		for (const { group } of visibleGroups) {
 			const maskMesh = portalMaskMeshes.get(group.id);
@@ -490,6 +510,8 @@ export function createWorldDisplayRenderer(
 			camera.layers.set(WORLD_RENDER_LAYER.portalMask);
 			renderer.render(scene, camera);
 
+			renderPortalDepthReset(maskMesh, group.stencilRef);
+
 			setPortalInteriorVisibility(group);
 			applyPortalInteriorStencil(group.stencilRef);
 			camera.layers.set(WORLD_RENDER_LAYER.portalInterior);
@@ -500,6 +522,18 @@ export function createWorldDisplayRenderer(
 		clearPortalInteriorStencil();
 		restorePortalInteriorVisibility();
 		syncSpatialVisibility();
+	}
+
+	function renderPortalDepthReset(maskMesh: Mesh, stencilRef: number): void {
+		const originalMaterial = maskMesh.material;
+		portalDepthResetMaterial.stencilRef = stencilRef;
+		maskMesh.material = portalDepthResetMaterial;
+		try {
+			camera.layers.set(WORLD_RENDER_LAYER.portalDepthReset);
+			renderer.render(scene, camera);
+		} finally {
+			maskMesh.material = originalMaterial;
+		}
 	}
 
 	function evaluatePortalViewGroupVisibility(
@@ -514,16 +548,48 @@ export function createWorldDisplayRenderer(
 		const worldPoints = group.aperture.points.map((point) =>
 			new Vector3(point.x, point.y, point.z).applyMatrix4(maskMesh.matrixWorld),
 		);
+		const worldPlane = transformAperturePlaneToWorld(
+			group.aperture.plane,
+			maskMesh.matrixWorld,
+		);
 		return evaluatePortalVisibility({
 			worldPoints: worldPoints.map((point) => ({
 				x: point.x,
 				y: point.y,
 				z: point.z,
 			})),
+			worldPlane,
+			visibleSide: group.visibleSide,
 			camera,
-			viewport: new Vector2(renderer.domElement.width, renderer.domElement.height),
+			viewport: new Vector2(
+				renderer.domElement.width,
+				renderer.domElement.height,
+			),
 			minScreenAreaPx: MIN_PORTAL_SCREEN_AREA_PX,
 		});
+	}
+
+	function transformAperturePlaneToWorld(
+		plane: OutdoorPortalViewGroup["aperture"]["plane"],
+		matrixWorld: Matrix4,
+	): OutdoorPortalViewGroup["aperture"]["plane"] {
+		if (!plane) {
+			return null;
+		}
+
+		const transformed = new Plane(
+			new Vector3(plane.normal.x, plane.normal.y, plane.normal.z),
+			-plane.constant,
+		).applyMatrix4(matrixWorld);
+		return {
+			normal: {
+				x: transformed.normal.x,
+				y: transformed.normal.y,
+				z: transformed.normal.z,
+			},
+			constant: -transformed.constant,
+			source: plane.source,
+		};
 	}
 
 	function recordPortalVisibilitySkip(
@@ -1061,12 +1127,16 @@ export function createWorldDisplayRenderer(
 		);
 		mesh.name = `portal-mask/${group.id}`;
 		mesh.layers.set(WORLD_RENDER_LAYER.portalMask);
+		mesh.layers.enable(WORLD_RENDER_LAYER.portalDepthReset);
 		mesh.matrixAutoUpdate = false;
 		updatePortalMaskMesh(mesh, group);
 		return mesh;
 	}
 
-	function updatePortalMaskMesh(mesh: Mesh, group: OutdoorPortalViewGroup): void {
+	function updatePortalMaskMesh(
+		mesh: Mesh,
+		group: OutdoorPortalViewGroup,
+	): void {
 		mesh.geometry.dispose();
 		mesh.geometry = buildPortalMaskGeometry(group.aperture.points);
 		mesh.matrix.copy(
@@ -1089,7 +1159,9 @@ export function createWorldDisplayRenderer(
 		geometry.setAttribute(
 			"position",
 			new BufferAttribute(
-				new Float32Array(points.flatMap((point) => [point.x, point.y, point.z])),
+				new Float32Array(
+					points.flatMap((point) => [point.x, point.y, point.z]),
+				),
 				3,
 			),
 		);
@@ -1105,8 +1177,11 @@ export function createWorldDisplayRenderer(
 	function createPortalMaskMaterial(stencilRef: number): MeshBasicMaterial {
 		return new MeshBasicMaterial({
 			colorWrite: false,
+			// The mask must be depth-tested so nearer exterior statics can occlude
+			// the aperture; the following depth-reset pass only touches pixels that
+			// survived this visible-aperture test.
 			depthTest: true,
-			depthWrite: false,
+			depthWrite: true,
 			side: DoubleSide,
 			stencilWrite: true,
 			stencilRef,
@@ -1114,6 +1189,36 @@ export function createWorldDisplayRenderer(
 			stencilFail: KeepStencilOp,
 			stencilZFail: KeepStencilOp,
 			stencilZPass: ReplaceStencilOp,
+		});
+	}
+
+	function createPortalDepthResetMaterial(): ShaderMaterial {
+		return new ShaderMaterial({
+			glslVersion: GLSL3,
+			vertexShader: `
+				void main() {
+					gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+				}
+			`,
+			fragmentShader: `
+				out vec4 outputColor;
+
+				void main() {
+					gl_FragDepth = 1.0;
+					outputColor = vec4(0.0, 0.0, 0.0, 1.0);
+				}
+			`,
+			colorWrite: false,
+			depthFunc: AlwaysDepth,
+			depthTest: true,
+			depthWrite: true,
+			side: DoubleSide,
+			stencilWrite: true,
+			stencilFunc: EqualStencilFunc,
+			stencilRef: 0,
+			stencilFail: KeepStencilOp,
+			stencilZFail: KeepStencilOp,
+			stencilZPass: KeepStencilOp,
 		});
 	}
 
@@ -1132,9 +1237,8 @@ export function createWorldDisplayRenderer(
 			mesh.visible = cell ? visibleEnvCellIds.has(cell.envCellId) : false;
 		}
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
-			const parts = staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(
-				groupKey,
-			);
+			const parts =
+				staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(groupKey);
 			if (!parts?.[0] || parts[0].kind !== "indoor-static") {
 				continue;
 			}
@@ -1151,9 +1255,8 @@ export function createWorldDisplayRenderer(
 			mesh.visible = true;
 		}
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
-			const parts = staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(
-				groupKey,
-			);
+			const parts =
+				staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(groupKey);
 			if (parts?.[0]?.kind === "indoor-static") {
 				mesh.visible = true;
 			}
@@ -1189,9 +1292,8 @@ export function createWorldDisplayRenderer(
 			visitMeshMaterials(mesh, visit);
 		}
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
-			const parts = staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(
-				groupKey,
-			);
+			const parts =
+				staticRenderableScene.partsByRenderChunkAndGfxAssetId.get(groupKey);
 			if (parts?.[0]?.kind === "indoor-static") {
 				visitMeshMaterials(mesh, visit);
 			}
@@ -1590,6 +1692,7 @@ export function createWorldDisplayRenderer(
 		debugOverlayObjects.clear();
 		chunkRoots.clear();
 		chunkRootContainer.clear();
+		portalDepthResetMaterial.dispose();
 		renderer.dispose();
 		renderer.domElement.remove();
 	}
@@ -1630,6 +1733,49 @@ function enableAllWorldRenderLayers(object: Object3D): void {
 	}
 }
 
+function detectPortalDepthResetCapability(
+	renderer: WebGLRenderer,
+): PortalDepthResetCapability {
+	const gl = renderer.getContext();
+	if (!isWebGL2RenderingContext(gl)) {
+		return {
+			supported: false,
+			reason:
+				"Outdoor portal aperture depth reset requires WebGL2 gl_FragDepth support.",
+		};
+	}
+
+	const stencilBits = Number(gl.getParameter(gl.STENCIL_BITS));
+	if (stencilBits <= 0) {
+		return {
+			supported: false,
+			reason: "Outdoor portal aperture depth reset requires a stencil buffer.",
+		};
+	}
+
+	return { supported: true, reason: null };
+}
+
+function assertPortalDepthResetSupported(
+	capability: PortalDepthResetCapability,
+): void {
+	if (!capability.supported) {
+		throw new Error(
+			capability.reason ??
+				"Outdoor portal aperture depth reset is unavailable.",
+		);
+	}
+}
+
+function isWebGL2RenderingContext(
+	context: WebGLRenderingContext | WebGL2RenderingContext,
+): context is WebGL2RenderingContext {
+	return (
+		typeof WebGL2RenderingContext !== "undefined" &&
+		context instanceof WebGL2RenderingContext
+	);
+}
+
 function setObjectTreeLayer(root: Object3D, layer: number): void {
 	root.traverse((object) => object.layers.set(layer));
 }
@@ -1648,13 +1794,12 @@ function createPortalRenderMetrics(
 	model: OutdoorPortalViewGroupModel,
 ): WorldRenderPortalMetrics {
 	return {
-		candidateOutdoorPortalCount: model.diagnostics.topologyPortalCount,
+		topologyOutdoorPortalCount: model.diagnostics.topologyPortalCount,
+		candidatePortalGroupCount: model.diagnostics.viewGroupCount,
 		visiblePortalGroupCount: 0,
 		maskedInteriorCellCount: 0,
-		skippedMissingApertureCount:
-			model.diagnostics.skippedMissingApertureCount,
-		skippedMissingPolygonCount:
-			model.diagnostics.skippedMissingPolygonCount,
+		skippedMissingApertureCount: model.diagnostics.skippedMissingApertureCount,
+		skippedMissingPolygonCount: model.diagnostics.skippedMissingPolygonCount,
 		skippedOutsideFrustumCount: 0,
 		skippedBackFacingCount: 0,
 		skippedTooSmallCount: 0,

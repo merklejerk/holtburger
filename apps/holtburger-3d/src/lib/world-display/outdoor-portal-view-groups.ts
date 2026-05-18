@@ -9,8 +9,10 @@ import type {
 import { normalizeOutdoorLandblockId } from "../landblocks";
 import {
 	derivePortalAperturesFromStructuredInteriorScene,
+	oppositePortalVisibleSide,
 	type PortalAperture,
 	type PortalApertureTargetStatus,
+	type PortalApertureVisibleSide,
 } from "./portal-apertures";
 import type { RenderChunkPlacement } from "./render-chunks";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
@@ -25,6 +27,7 @@ export interface OutdoorPortalViewGroup {
 	source: OutdoorPortalViewGroupSource;
 	outdoorPortalId: string;
 	aperture: PortalAperture;
+	visibleSide: PortalApertureVisibleSide;
 	renderChunk: RenderChunkPlacement;
 	entryEnvCellId: number;
 	requestedInteriorEnvCellIds: number[];
@@ -230,6 +233,7 @@ function createOutdoorPortalViewGroup({
 			source,
 			outdoorPortalId: portal.portalId,
 			aperture,
+			visibleSide: oppositePortalVisibleSide(aperture.visibleSide),
 			renderChunk: aperture.renderChunk,
 			entryEnvCellId: aperture.source.envCellId,
 			requestedInteriorEnvCellIds: coverage.envCellIds,

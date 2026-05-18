@@ -200,9 +200,19 @@ export interface PreparedPolygonSetPolygon {
 	negUvIndices: number[];
 }
 
-interface PreparedPolygonSetBspNode {
-	kind: string;
+export interface PreparedPolygonSetPlane {
+	normal: Vec3Dto;
+	d: number;
+}
+
+export interface PreparedPolygonSetPortalPoly {
+	portalIndex: number;
+	polyId: number;
+}
+
+export interface PreparedPolygonSetBspNode {
 	[key: string]: unknown;
+	kind: string;
 }
 
 interface PreparedGfxObjPhysicsWitness {

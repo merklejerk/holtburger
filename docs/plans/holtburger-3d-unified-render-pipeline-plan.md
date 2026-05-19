@@ -778,7 +778,7 @@ Refinements to future steps:
 
 ## Phase 7: Mode Policy Integration
 
-Status: not started.
+Status: complete for browser free-camera policy and renderer-facing walkabout/client policy shapes.
 
 Purpose: wire the unified pipeline into browser free-camera now and prepare walkabout/client policy
 without moving browser UX into shared crates.
@@ -811,6 +811,73 @@ Exit criteria:
 
 - Browser policy is explicit and isolated from future client/walkabout policy.
 - Metrics explain active render graph work without requiring a browser profiler.
+
+Phase 7 progress:
+
+- Added explicit renderer policy derivation in
+  `apps/holtburger-3d/src/lib/world-display/render-policy.ts`.
+- Browser free-camera now has a named `browser-free-camera` policy:
+  - exterior base scene;
+  - broad diagnostic interior pass enabled;
+  - both outdoor-to-indoor and indoor-to-outdoor transition directions allowed;
+  - transition portal candidate minimum screen area recorded as policy data;
+  - debug overlays remain graph nodes separate from production render passes.
+- Added a renderer-facing `residency-focused` policy for future walkabout/client use:
+  - `env-cell` camera/view residency selects an interior base scene and only
+    indoor-to-outdoor transition composites by default;
+  - `outdoor-landblock` residency selects an exterior base scene and only
+    outdoor-to-indoor transition composites by default;
+  - `unknown` residency falls back to exterior base plus broad diagnostic interiors, preserving a
+    safe browser-style inspection mode instead of silently dropping loaded interiors.
+- Replaced direct free-camera graph derivation inside
+  `apps/holtburger-3d/src/lib/world-display/world-display-renderer.ts` with policy-derived graph
+  derivation. The app still chooses the browser free-camera policy today because walkabout/client
+  mode is not wired through this renderer yet.
+- Added an explicit renderer policy mode input with `browser-free-camera` as the default, so future
+  walkabout/client callers can opt into `residency-focused` policy without forking the renderer.
+- Transition portal work collection now applies the active policy's candidate screen-area threshold
+  and allowed transition directions after source-backed per-aperture direction classification.
+- Added graph-summary metrics for:
+  - active policy mode;
+  - base scene;
+  - transition render work item count;
+  - aperture mask pass count;
+  - depth-reset pass count;
+  - interior composite pass count;
+  - exterior composite pass count.
+- Updated the browser Debug tab renderer row to surface the policy and graph work counts alongside
+  existing draw-call, geometry, residency, and portal candidate counts.
+- Added synthetic tests in
+  `apps/holtburger-3d/src/lib/world-display/render-policy.test.ts` covering:
+  - browser free-camera broad diagnostic behavior;
+  - env-cell residency selecting an interior base scene;
+  - outdoor-landblock residency selecting an exterior base scene;
+  - unknown residency broad diagnostic fallback;
+  - graph-summary counts used by renderer diagnostics.
+
+Decisions and course corrections:
+
+- Phase 7 did not add a browser UI toggle for diagnostic interiors. Browser free-camera remains the
+  whole-level inspection mode by requirement, so the diagnostic interior pass stays explicit in the
+  policy rather than hidden behind a new control.
+- Residency-focused policy is defined and tested but not activated in the current browser renderer.
+  Activating it requires a mode boundary that can choose free-camera versus walkabout/client
+  behavior; that belongs with the future walkabout/client integration, not an implicit behavior
+  change in browser free-camera.
+- Candidate pruning remains direction/policy based at the graph boundary. Per-aperture direction
+  still comes from source-backed portal planes and `PortalSide`; residency does not replace that
+  classification.
+- The old `deriveFreeCameraWorldRenderGraph()` helper still exists because Phase 8 owns cleanup of
+  compatibility/dead helper paths. The renderer no longer calls it.
+
+Refinements to future steps:
+
+- Walkabout/client integration should pass an explicit renderer mode policy instead of relying on
+  browser free-camera defaults.
+- Phase 8 should retire or consolidate the old free-camera graph helper if no remaining code path
+  needs it after tests are migrated to `render-policy.ts`.
+- Phase 9 profiling should compare policy-derived metrics against profiler traces so the debug row
+  can explain both portal candidate volume and actual graph pass work.
 
 ## Phase 8: Cleanup, Hardening, and Documentation
 

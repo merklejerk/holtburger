@@ -100,12 +100,19 @@ import {
 } from "./chunk-root-manager";
 import {
 	WORLD_RENDER_LAYER,
-	deriveFreeCameraWorldRenderGraph,
 	staticRenderableLayerForDomain,
 	type TransitionPortalGraphDirection,
 	type TransitionPortalGraphScene,
 	type WorldRenderGraphNode,
 } from "./render-passes";
+import {
+	deriveBrowserFreeCameraRenderPolicy,
+	deriveResidencyFocusedRenderPolicy,
+	deriveWorldRenderGraphForPolicy,
+	summarizeWorldRenderGraph,
+	type WorldRenderModePolicy,
+	type WorldRenderPolicyMode,
+} from "./render-policy";
 import {
 	createPortalVisibilityContext,
 	evaluatePortalVisibility,
@@ -132,6 +139,7 @@ export interface WorldDisplayRendererOptions {
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
 	debugOverlayScene: WorldDebugOverlayModel;
+	renderPolicyMode?: WorldRenderPolicyMode;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
 	controlledCameraFrame: SceneCameraFrame | null;
@@ -146,6 +154,7 @@ export interface WorldDisplayRenderer {
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
+	setRenderPolicyMode(mode: WorldRenderPolicyMode): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
@@ -170,7 +179,6 @@ const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
-const MIN_PORTAL_SCREEN_AREA_PX = 16;
 
 type TransitionPortalBatchKey = `${TransitionPortalGraphDirection}:${number}`;
 
@@ -195,6 +203,7 @@ export function createWorldDisplayRenderer(
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
 	let debugOverlayScene = options.debugOverlayScene;
+	let renderPolicyMode = options.renderPolicyMode ?? "browser-free-camera";
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
 	let controlledCameraFrame = options.controlledCameraFrame;
@@ -259,6 +268,13 @@ export function createWorldDisplayRenderer(
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
+			renderGraphPolicy: "browser-free-camera",
+			renderGraphBaseScene: "exterior",
+			portalRenderWorkItemCount: 0,
+			transitionApertureMaskPassCount: 0,
+			apertureDepthResetPassCount: 0,
+			interiorCompositePassCount: 0,
+			exteriorCompositePassCount: 0,
 			portalGroupCount: 0,
 			portalMaskMeshCount: 0,
 			cameraViewResidency:
@@ -320,6 +336,9 @@ export function createWorldDisplayRenderer(
 		setDebugOverlayScene(nextScene) {
 			debugOverlayScene = nextScene;
 			syncDebugOverlayMeshes(nextScene);
+		},
+		setRenderPolicyMode(nextMode) {
+			renderPolicyMode = nextMode;
 		},
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
@@ -468,15 +487,20 @@ export function createWorldDisplayRenderer(
 			z: camera.position.z,
 		});
 		renderer.info.reset();
-		const transitionWorkBatches = collectVisibleTransitionPortalWorkBatches();
-		const graph = deriveFreeCameraWorldRenderGraph({
+		const renderPolicy = deriveActiveRenderPolicy();
+		const transitionWorkBatches =
+			collectVisibleTransitionPortalWorkBatches(renderPolicy);
+		const visibleTransitions = {
 			hasOutdoorToIndoorTransitions:
 				getTransitionPortalBatch(transitionWorkBatches, "outdoor-to-indoor", 1)
 					.length > 0,
 			hasIndoorToOutdoorTransitions:
 				getTransitionPortalBatch(transitionWorkBatches, "indoor-to-outdoor", 1)
 					.length > 0,
-			showDiagnosticInterior: true,
+		};
+		const graph = deriveWorldRenderGraphForPolicy({
+			policy: renderPolicy,
+			visibleTransitions,
 			showDebugOverlays: true,
 		});
 		if (transitionWorkBatches.size > 0) {
@@ -486,8 +510,22 @@ export function createWorldDisplayRenderer(
 			renderWorldGraphNode(node, transitionWorkBatches);
 		}
 		camera.layers.enableAll();
+		const graphSummary = summarizeWorldRenderGraph({
+			policy: renderPolicy,
+			graph,
+		});
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
 			renderPassCount: graph.length,
+			renderGraphPolicy: graphSummary.policyMode,
+			renderGraphBaseScene: graphSummary.baseScene,
+			portalRenderWorkItemCount: countTransitionPortalRenderWorkItems(
+				transitionWorkBatches,
+			),
+			transitionApertureMaskPassCount:
+				graphSummary.transitionApertureMaskPassCount,
+			apertureDepthResetPassCount: graphSummary.apertureDepthResetPassCount,
+			interiorCompositePassCount: graphSummary.interiorCompositePassCount,
+			exteriorCompositePassCount: graphSummary.exteriorCompositePassCount,
 			portalGroupCount: transitionPortalModel.candidates.length,
 			portalMaskMeshCount: portalMaskMeshes.size,
 			cameraViewResidency:
@@ -546,10 +584,9 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
-	function collectVisibleTransitionPortalWorkBatches(): Map<
-		TransitionPortalBatchKey,
-		VisibleTransitionPortalWork[]
-	> {
+	function collectVisibleTransitionPortalWorkBatches(
+		renderPolicy: WorldRenderModePolicy,
+	): Map<TransitionPortalBatchKey, VisibleTransitionPortalWork[]> {
 		const batches = new Map<
 			TransitionPortalBatchKey,
 			VisibleTransitionPortalWork[]
@@ -561,7 +598,7 @@ export function createWorldDisplayRenderer(
 				renderer.domElement.width,
 				renderer.domElement.height,
 			),
-			minScreenAreaPx: MIN_PORTAL_SCREEN_AREA_PX,
+			minScreenAreaPx: renderPolicy.portalCandidates.minScreenAreaPx,
 		});
 		for (const candidate of transitionPortalModel.candidates) {
 			const visibility = evaluateTransitionPortalVisibility(
@@ -577,6 +614,11 @@ export function createWorldDisplayRenderer(
 			recordVisiblePortalScreenArea(visibility.screenAreaPx);
 			const workItem = visibility.workItem;
 			if (!workItem) {
+				continue;
+			}
+			if (
+				!renderPolicy.allowedTransitionDirections.includes(workItem.direction)
+			) {
 				continue;
 			}
 			const maskMesh = portalMaskMeshes.get(workItem.id);
@@ -709,6 +751,19 @@ export function createWorldDisplayRenderer(
 		);
 	}
 
+	function countTransitionPortalRenderWorkItems(
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+	): number {
+		let count = 0;
+		for (const batch of transitionWorkBatches.values()) {
+			count += batch.length;
+		}
+		return count;
+	}
+
 	function transitionPortalBatchKey(
 		direction: TransitionPortalGraphDirection,
 		recursionDepth: number,
@@ -727,6 +782,12 @@ export function createWorldDisplayRenderer(
 		} finally {
 			clearPortalAperturePassScene();
 		}
+	}
+
+	function deriveActiveRenderPolicy(): WorldRenderModePolicy {
+		return renderPolicyMode === "residency-focused"
+			? deriveResidencyFocusedRenderPolicy(cameraViewResidency)
+			: deriveBrowserFreeCameraRenderPolicy();
 	}
 
 	function evaluateTransitionPortalVisibility(
@@ -2104,7 +2165,14 @@ function createRenderDebugMetrics(
 		cameraViewResidency: options.cameraViewResidency,
 		residencyCellCount: options.residencyCellCount,
 		residencyLandblockCount: options.residencyLandblockCount,
+		renderGraphPolicy: options.renderGraphPolicy,
+		renderGraphBaseScene: options.renderGraphBaseScene,
 		renderPassCount: options.renderPassCount,
+		portalRenderWorkItemCount: options.portalRenderWorkItemCount,
+		transitionApertureMaskPassCount: options.transitionApertureMaskPassCount,
+		apertureDepthResetPassCount: options.apertureDepthResetPassCount,
+		interiorCompositePassCount: options.interiorCompositePassCount,
+		exteriorCompositePassCount: options.exteriorCompositePassCount,
 		portalGroupCount: options.portalGroupCount,
 		portalMaskMeshCount: options.portalMaskMeshCount,
 		terrainMeshCount: options.terrainMeshCount,

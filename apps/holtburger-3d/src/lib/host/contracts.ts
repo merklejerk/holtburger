@@ -304,16 +304,40 @@ const gfxObjPolygonDtoSchema = z.object({
 	negUvIndices: z.array(z.number().int().nonnegative()),
 });
 
-const gfxObjBspNodeDtoSchema: z.ZodType<{
-	kind: string;
-	[key: string]: unknown;
-}> = z.lazy(() =>
+type PolygonSetBspNodeDto =
+	| {
+			kind: "port";
+			plane: { normal: Vec3Dto; d: number };
+			pos: PolygonSetBspNodeDto;
+			neg: PolygonSetBspNodeDto;
+			sphere: SphereDto | null;
+			polyIds: number[];
+			portalPolys: { portalIndex: number; polyId: number }[];
+	  }
+	| {
+			kind: "leaf";
+			index: number;
+			solid: number;
+			sphere: SphereDto | null;
+			polyIds: number[];
+	  }
+	| {
+			kind: "internal";
+			tag: string;
+			plane: { normal: Vec3Dto; d: number };
+			pos: PolygonSetBspNodeDto | null;
+			neg: PolygonSetBspNodeDto | null;
+			sphere: SphereDto | null;
+			polyIds: number[];
+	  };
+
+const polygonSetBspNodeDtoSchema: z.ZodType<PolygonSetBspNodeDto> = z.lazy(() =>
 	z.discriminatedUnion("kind", [
 		z.object({
 			kind: z.literal("port"),
 			plane: z.object({ normal: vec3DtoSchema, d: z.number().finite() }),
-			pos: gfxObjBspNodeDtoSchema,
-			neg: gfxObjBspNodeDtoSchema,
+			pos: polygonSetBspNodeDtoSchema,
+			neg: polygonSetBspNodeDtoSchema,
 			sphere: z
 				.object({ center: vec3DtoSchema, radius: z.number().finite() })
 				.nullable(),
@@ -338,8 +362,8 @@ const gfxObjBspNodeDtoSchema: z.ZodType<{
 			kind: z.literal("internal"),
 			tag: z.string(),
 			plane: z.object({ normal: vec3DtoSchema, d: z.number().finite() }),
-			pos: gfxObjBspNodeDtoSchema.nullable(),
-			neg: gfxObjBspNodeDtoSchema.nullable(),
+			pos: polygonSetBspNodeDtoSchema.nullable(),
+			neg: polygonSetBspNodeDtoSchema.nullable(),
 			sphere: z
 				.object({ center: vec3DtoSchema, radius: z.number().finite() })
 				.nullable(),
@@ -365,8 +389,9 @@ const environmentCellStructDtoSchema = z.object({
 	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
 	portalPolygonIds: z.array(z.number().int().nonnegative()),
 	cellBspWitness: cellStructBspWitnessDtoSchema,
+	cellBsp: polygonSetBspNodeDtoSchema,
 	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
-	drawingBsp: gfxObjBspNodeDtoSchema.nullable(),
+	drawingBsp: polygonSetBspNodeDtoSchema.nullable(),
 });
 
 export const environmentPayloadDtoSchema = z.object({
@@ -389,7 +414,7 @@ export const gfxObjPayloadDtoSchema = z.object({
 	surfaceIds: z.array(z.number().int().nonnegative()),
 	vertexArray: gfxObjVertexArrayDtoSchema,
 	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
-	drawingBsp: gfxObjBspNodeDtoSchema.nullable(),
+	drawingBsp: polygonSetBspNodeDtoSchema.nullable(),
 	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
 	sortCenter: vec3DtoSchema.nullable(),
 	didDegrade: z.number().int().nonnegative().nullable(),

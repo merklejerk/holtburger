@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { PreparedPolygonSetBspNode } from "../assets/types";
 import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
@@ -72,8 +73,10 @@ describe("portal apertures", () => {
 				normal: { x: 0, y: -1, z: 0 },
 				d: -7,
 			},
-			pos: { kind: "leaf" },
-			neg: { kind: "leaf" },
+			pos: createLeafBspNode(),
+			neg: createLeafBspNode(),
+			sphere: null,
+			polyIds: [],
 			portalPolys: [{ portalIndex: 0, polyId: 7 }],
 		};
 
@@ -99,8 +102,10 @@ describe("portal apertures", () => {
 				normal: { x: 1, y: 2, z: 3 },
 				d: -4,
 			},
-			pos: { kind: "leaf" },
-			neg: { kind: "leaf" },
+			pos: createLeafBspNode(),
+			neg: createLeafBspNode(),
+			sphere: null,
+			polyIds: [],
 			portalPolys: [{ portalIndex: 99, polyId: 7 }],
 		};
 
@@ -259,6 +264,7 @@ function createStructuredInteriorCell(
 				hasBsp: true,
 				rootKind: "port",
 			},
+			cellBsp: createLeafBspNode(),
 			physicsWitness: {
 				polygonCount: 0,
 				hasBsp: false,
@@ -269,6 +275,16 @@ function createStructuredInteriorCell(
 		},
 		renderGeometry: createRenderGeometry(),
 		debugColorKey: `cell-${envCellId.toString(16)}`,
+	};
+}
+
+function createLeafBspNode(): PreparedPolygonSetBspNode {
+	return {
+		kind: "leaf",
+		index: 0,
+		solid: 0,
+		sphere: null,
+		polyIds: [],
 	};
 }
 

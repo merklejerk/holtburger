@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { Matrix4 } from "three";
 
-import type { PreparedPolygonSetRenderGeometry } from "../assets/types";
+import type {
+	PreparedPolygonSetBspNode,
+	PreparedPolygonSetRenderGeometry,
+	PreparedPolygonSetVertexArray,
+} from "../assets/types";
 import type { PlacementTransformDto } from "../host/contracts";
 import { makeOutdoorLandblockId } from "../landblocks";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -8,6 +13,7 @@ import type { StructuredInteriorCell } from "./structured-interior-scene";
 import {
 	buildWorldResidencyIndex,
 	computeRendererPositionLandblockResidency,
+	deriveConservativeResidencyCellBounds,
 	deriveResidencyCellBounds,
 	inferRenderAnchor,
 } from "./world-residency-index";
@@ -55,6 +61,33 @@ describe("world residency index", () => {
 		expect(bounds?.max.toArray()).toEqual([14, 35, -14]);
 	});
 
+	it("derives conservative residency bounds from all source vertices", () => {
+		const bounds = deriveConservativeResidencyCellBounds(
+			{
+				vertexType: null,
+				vertexCount: 2,
+				vertices: [
+					{
+						id: 0,
+						origin: { x: -1, y: 5, z: 2 },
+						normal: { x: 0, y: 0, z: 1 },
+						uvs: [],
+					},
+					{
+						id: 1,
+						origin: { x: 4, y: -3, z: 6 },
+						normal: { x: 0, y: 0, z: 1 },
+						uvs: [],
+					},
+				],
+			},
+			new Matrix4().makeTranslation(10, 20, 30),
+		);
+
+		expect(bounds?.min.toArray()).toEqual([9, 22, 25]);
+		expect(bounds?.max.toArray()).toEqual([14, 26, 33]);
+	});
+
 	it("queries an env cell when the camera point is inside a loaded cell AABB", () => {
 		const landblockId = makeOutdoorLandblockId(1, 2);
 		const index = buildWorldResidencyIndex({
@@ -93,6 +126,33 @@ describe("world residency index", () => {
 		expect(index.query({ x: 100, y: 35, z: -100 })).toEqual({
 			kind: "outdoor-landblock",
 			landblockId,
+		});
+	});
+
+	it("returns outdoor when a point hits the broad AABB but fails the exact CellBSP check", () => {
+		const landblockId = makeOutdoorLandblockId(1, 2);
+		const index = buildWorldResidencyIndex({
+			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
+			cells: [
+				createCell({
+					envCellId: 0x01020001,
+					origin: { x: 10, y: 20, z: 30 },
+					boundsMin: { x: 0, y: 0, z: 0 },
+					boundsMax: { x: 10, y: 10, z: 10 },
+					cellBspMinX: 8,
+				}),
+			],
+		});
+
+		const result = index.queryDetailed({ x: 15, y: 35, z: -15 });
+		expect(result.context).toEqual({
+			kind: "outdoor-landblock",
+			landblockId,
+		});
+		expect(result.diagnostics).toMatchObject({
+			aabbCandidateCount: 1,
+			cellBspMatchCount: 0,
+			source: "outdoor",
 		});
 	});
 
@@ -148,6 +208,7 @@ function createCell(options: {
 	origin: { x: number; y: number; z: number };
 	boundsMin: { x: number; y: number; z: number };
 	boundsMax: { x: number; y: number; z: number };
+	cellBspMinX?: number;
 }): StructuredInteriorCell {
 	return {
 		renderKey: `interior-cell-shell/test/${options.envCellId}`,
@@ -164,7 +225,17 @@ function createCell(options: {
 		portalCount: 0,
 		portals: [],
 		staticObjectCount: 0,
-		cellStructure: null,
+		cellStructure: {
+			id: 1,
+			vertexArray: createVertexArray(options.boundsMin, options.boundsMax),
+			drawingPolygons: [],
+			portalPolygonIds: [],
+			cellBspWitness: { hasBsp: true, rootKind: "internal" },
+			cellBsp: createCellBsp(options.cellBspMinX ?? options.boundsMin.x),
+			physicsWitness: { polygonCount: 0, hasBsp: false, rootKind: null },
+			drawingBsp: null,
+			renderGeometry: createRenderGeometry(options.boundsMin, options.boundsMax),
+		},
 		renderGeometry: createRenderGeometry(options.boundsMin, options.boundsMax),
 		debugColorKey: "test",
 	};
@@ -195,5 +266,41 @@ function createRenderGeometry(
 		triangles: [],
 		surfaceIds: [],
 		bounds: { min, max },
+	};
+}
+
+function createVertexArray(
+	min: { x: number; y: number; z: number },
+	max: { x: number; y: number; z: number },
+): PreparedPolygonSetVertexArray {
+	return {
+		vertexType: null,
+		vertexCount: 2,
+		vertices: [
+			{
+				id: 0,
+				origin: { x: min.x, y: -min.z, z: min.y },
+				normal: { x: 0, y: 0, z: 1 },
+				uvs: [],
+			},
+			{
+				id: 1,
+				origin: { x: max.x, y: -max.z, z: max.y },
+				normal: { x: 0, y: 0, z: 1 },
+				uvs: [],
+			},
+		],
+	};
+}
+
+function createCellBsp(minX: number): PreparedPolygonSetBspNode {
+	return {
+		kind: "internal",
+		tag: "test",
+		plane: { normal: { x: 1, y: 0, z: 0 }, d: -minX },
+		pos: { kind: "leaf", index: 0, solid: 0, sphere: null, polyIds: [] },
+		neg: { kind: "leaf", index: 1, solid: 1, sphere: null, polyIds: [] },
+		sphere: null,
+		polyIds: [],
 	};
 }

@@ -1,6 +1,10 @@
 import { Box3, Matrix4, Vector3 } from "three";
 
-import type { PreparedPolygonSetRenderGeometry } from "../assets/types";
+import type {
+	PreparedPolygonSetBspNode,
+	PreparedPolygonSetRenderGeometry,
+	PreparedPolygonSetVertexArray,
+} from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -9,6 +13,10 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import { buildAcPlacementMatrix } from "./static-renderable-geometry";
+import {
+	landblockRenderPointToCellAcLocalPoint,
+	pointInsideCellBsp,
+} from "./cell-bsp-residency";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 
@@ -31,6 +39,20 @@ export interface WorldResidencyIndex {
 	cellCount: number;
 	landblockCount: number;
 	query(position: Vec3Dto): CameraViewResidencyContext;
+	queryDetailed(position: Vec3Dto): WorldResidencyQueryResult;
+}
+
+export interface WorldResidencyQueryResult {
+	context: CameraViewResidencyContext;
+	diagnostics: WorldResidencyQueryDiagnostics;
+}
+
+export interface WorldResidencyQueryDiagnostics {
+	landblockId: number | null;
+	aabbCandidateCount: number;
+	cellBspMatchCount: number;
+	aabbFallbackCount: number;
+	source: "cell-bsp" | "aabb-fallback" | "outdoor" | "unknown";
 }
 
 interface ResidencyLandblockIndex {
@@ -51,6 +73,8 @@ interface ResidencyCellItem {
 	landblockId: number;
 	bounds: Box3;
 	center: Vector3;
+	inverseCellRenderMatrix: Matrix4;
+	cellBsp: PreparedPolygonSetBspNode;
 }
 
 interface RenderAnchorInference {
@@ -62,6 +86,13 @@ export function createEmptyWorldResidencyIndex(): WorldResidencyIndex {
 		cellCount: 0,
 		landblockCount: 0,
 		query: () => ({ kind: "unknown", landblockId: null }),
+		queryDetailed: () => ({
+			context: { kind: "unknown", landblockId: null },
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: null,
+				source: "unknown",
+			}),
+		}),
 	};
 }
 
@@ -100,7 +131,10 @@ export function buildWorldResidencyIndex(options: {
 	return {
 		cellCount,
 		landblockCount: landblocks.size,
-		query: (position) => queryWorldResidencyIndex(position, anchor, landblocks),
+		query: (position) =>
+			queryWorldResidencyIndex(position, anchor, landblocks).context,
+		queryDetailed: (position) =>
+			queryWorldResidencyIndex(position, anchor, landblocks),
 	};
 }
 
@@ -201,49 +235,94 @@ function queryWorldResidencyIndex(
 	position: Vec3Dto,
 	anchor: RenderAnchorInference,
 	landblocks: ReadonlyMap<number, ResidencyLandblockIndex>,
-): CameraViewResidencyContext {
+): WorldResidencyQueryResult {
 	const landblockResidency = computeRendererPositionLandblockResidency(
 		position,
 		anchor,
 	);
 	if (!landblockResidency) {
-		return { kind: "unknown", landblockId: null };
+		return {
+			context: { kind: "unknown", landblockId: null },
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: null,
+				source: "unknown",
+			}),
+		};
 	}
 
 	const landblock = landblocks.get(landblockResidency.landblockId);
 	if (!landblock) {
 		return {
-			kind: "outdoor-landblock",
-			landblockId: landblockResidency.landblockId,
+			context: {
+				kind: "outdoor-landblock",
+				landblockId: landblockResidency.landblockId,
+			},
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: landblockResidency.landblockId,
+				source: "outdoor",
+			}),
 		};
 	}
 
-	const matches = queryResidencyBvh(
+	const aabbCandidates = queryResidencyBvh(
 		landblock.root,
 		landblockResidency.landblockRelativePosition,
 	);
+	const cellBspMatches = filterCellBspMatches(
+		aabbCandidates,
+		landblockResidency.landblockRelativePosition,
+	);
 	const nearest = selectNearestResidencyCell(
-		matches,
+		cellBspMatches,
 		landblockResidency.landblockRelativePosition,
 	);
 	if (!nearest) {
 		return {
-			kind: "outdoor-landblock",
-			landblockId: landblock.landblockId,
+			context: {
+				kind: "outdoor-landblock",
+				landblockId: landblock.landblockId,
+			},
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: landblock.landblockId,
+				aabbCandidateCount: aabbCandidates.length,
+				cellBspMatchCount: cellBspMatches.length,
+				source: "outdoor",
+			}),
 		};
 	}
 
 	return {
-		kind: "env-cell",
-		landblockId: nearest.landblockId,
-		envCellId: nearest.envCellId,
+		context: {
+			kind: "env-cell",
+			landblockId: nearest.landblockId,
+			envCellId: nearest.envCellId,
+		},
+		diagnostics: createResidencyQueryDiagnostics({
+			landblockId: nearest.landblockId,
+			aabbCandidateCount: aabbCandidates.length,
+			cellBspMatchCount: cellBspMatches.length,
+			source: "cell-bsp",
+		}),
 	};
 }
 
 function deriveResidencyCellItem(
 	cell: StructuredInteriorCell,
 ): ResidencyCellItem | null {
-	const bounds = deriveResidencyCellBounds(cell);
+	if (!cell.cellStructure) {
+		return null;
+	}
+
+	const cellRenderMatrix = buildAcPlacementMatrix(
+		cell.chunkLocalPlacement,
+		{ x: 0, y: 0, z: 0 },
+		{ x: 1, y: 1, z: 1 },
+	);
+	const bounds =
+		deriveConservativeResidencyCellBounds(
+			cell.cellStructure.vertexArray,
+			cellRenderMatrix,
+		) ?? deriveResidencyCellBounds(cell);
 	if (!bounds) {
 		return null;
 	}
@@ -255,7 +334,40 @@ function deriveResidencyCellItem(
 		landblockId: normalizeOutdoorLandblockId(cell.envCellId),
 		bounds,
 		center,
+		inverseCellRenderMatrix: cellRenderMatrix.clone().invert(),
+		cellBsp: cell.cellStructure.cellBsp,
 	};
+}
+
+export function deriveConservativeResidencyCellBounds(
+	vertexArray: PreparedPolygonSetVertexArray,
+	matrix: Matrix4,
+): Box3 | null {
+	if (vertexArray.vertices.length === 0) {
+		return null;
+	}
+
+	const points = vertexArray.vertices.map((vertex) =>
+		new Vector3(
+			vertex.origin.x,
+			vertex.origin.z,
+			-vertex.origin.y,
+		).applyMatrix4(matrix),
+	);
+	return new Box3().setFromPoints(points);
+}
+
+function filterCellBspMatches(
+	items: readonly ResidencyCellItem[],
+	landblockRelativePosition: Vector3,
+): ResidencyCellItem[] {
+	return items.filter((item) => {
+		const cellLocalPoint = landblockRenderPointToCellAcLocalPoint(
+			landblockRelativePosition,
+			item.inverseCellRenderMatrix,
+		);
+		return pointInsideCellBsp(item.cellBsp, cellLocalPoint);
+	});
 }
 
 function transformRenderGeometryBounds(
@@ -370,4 +482,20 @@ function longestBoxAxis(bounds: Box3): 0 | 1 | 2 {
 
 function formatResidencyHex(value: number): string {
 	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function createResidencyQueryDiagnostics(options: {
+	landblockId: number | null;
+	aabbCandidateCount?: number;
+	cellBspMatchCount?: number;
+	aabbFallbackCount?: number;
+	source: WorldResidencyQueryDiagnostics["source"];
+}): WorldResidencyQueryDiagnostics {
+	return {
+		landblockId: options.landblockId,
+		aabbCandidateCount: options.aabbCandidateCount ?? 0,
+		cellBspMatchCount: options.cellBspMatchCount ?? 0,
+		aabbFallbackCount: options.aabbFallbackCount ?? 0,
+		source: options.source,
+	};
 }

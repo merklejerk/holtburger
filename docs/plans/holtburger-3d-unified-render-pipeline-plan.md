@@ -1134,7 +1134,7 @@ Refinements to future steps:
 
 ## Phase 7.2: Exact Cell Residency Narrow Phase
 
-Status: not started.
+Status: complete; manual Tauri/WebView inspection still recommended.
 
 Purpose: make camera/view residency accurate at doorframes, transition apertures, and odd-shaped
 env cells by adding CellBSP point containment after the Phase 6 per-landblock AABB BVH broad phase.
@@ -1268,6 +1268,70 @@ Exit criteria:
 - Renderer diagnostics explain whether the current result came from exact CellBSP containment or an
   explicit fallback.
 - Portal direction classification remains source-plane/`PortalSide` based.
+
+Phase 7.2 progress:
+
+- The Tauri adapter now serializes actual decoded `cell_structure.cell_bsp` as `cellBsp` for
+  environment cell structures. Adapter coverage asserts that `cellBspWitness.rootKind` agrees with
+  `cellBsp.kind`.
+- The frontend contract now treats the shared BSP payload shape as a generic polygon-set BSP rather
+  than a gfx-object-only DTO. `PreparedEnvironmentCellStruct` carries required `cellBsp` alongside
+  `cellBspWitness`; drawing BSPs and gfx-object BSPs continue to use the same typed shape.
+- The asset worker threads `cellBsp` through environment preparation without changing render
+  geometry generation.
+- Added `cell-bsp-residency.ts`, a small containment helper that:
+  - converts render-local points back to source AC local coordinates;
+  - transforms landblock-relative render points through the inverse cell render matrix;
+  - evaluates CellBSP planes with signed distance `dot(normal, point) + d`;
+  - uses the retail-compatible `0.0002` close/on-plane epsilon;
+  - accepts positive/front and close/on-plane, rejects negative/behind, and succeeds when the
+    positive chain ends.
+- `world-residency-index.ts` now keeps the per-landblock AABB BVH as a broad phase only. Candidate
+  bounds are derived from all source cell-structure vertices transformed into landblock-relative
+  render space, so portal/non-rendered vertices can still expand the candidate volume before the
+  exact test.
+- Loaded env-cell residency now requires CellBSP containment. AABB candidates that fail CellBSP are
+  classified as outdoor landblock rather than interior, which addresses the doorframe/tight-cell
+  overreach problem by construction.
+- Renderer diagnostics now report current-query AABB candidate count, CellBSP match count,
+  AABB-fallback count, and selected residency source (`cell-bsp`, `outdoor`, or `unknown` in the
+  current required-CellBSP path).
+- Added DAT/HBA-independent tests for:
+  - render-local to AC-local coordinate conversion;
+  - CellBSP front/close/behind semantics;
+  - transforming landblock render points through inverse cell placement;
+  - conservative source-vertex residency bounds;
+  - AABB-hit but CellBSP-miss returning outdoor;
+  - AABB and CellBSP hit returning env-cell;
+  - deterministic overlapping-candidate selection after exact narrowing.
+
+Decisions and course corrections:
+
+- `cellBsp` is required for prepared environment cell structures. The earlier fallback question is
+  resolved for this implementation: loaded env-cell assets from the current source path already
+  decode CellBSP, so silently preserving AABB-as-truth would keep the exact bug Phase 7.2 exists to
+  remove.
+- `cellBspWitness` remains diagnostic metadata only. It is no longer enough for prepared residency
+  data.
+- The BVH is still intentionally per-landblock and AABB-based. Phase 7.2 does not replace it with a
+  BSP/BVH hybrid; it adds the exact CellBSP narrow phase after broad-phase candidate retrieval.
+- DrawingBSP remains scoped to aperture source planes and drawing/portal work. It is not used for
+  camera/view residency.
+- The renderer still needs manual WebView inspection for the originally observed doorframe cases.
+  The automated tests prove the semantics and synthetic edge cases but do not load those exact
+  retail assets.
+
+Refinements to future steps:
+
+- Phase 8 cleanup should remove wording and helper names that imply AABB containment is residency
+  truth. It should also keep the required `cellBsp` contract rather than adding compatibility shims
+  for older test payloads.
+- Phase 9 profiling should include the new narrow-phase counters and measure broad-candidate count
+  separately from CellBSP-match count. If the exact phase has measurable cost in large dungeon-only
+  landblocks, optimize the broad phase or cache query-local transforms after correctness is
+  preserved.
+- Future residency debugging should prefer the new `residencySource`, AABB candidate count, and
+  CellBSP match count over ad hoc portal/base-scene guesses.
 
 Downstream impact:
 

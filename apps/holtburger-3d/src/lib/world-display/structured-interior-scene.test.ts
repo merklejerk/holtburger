@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	createInitialAssetChannelState,
 	type PreparedAssetRecord,
+	type PreparedPolygonSetBspNode,
 	type PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
@@ -288,6 +289,7 @@ function createCellStructure(id: number, vertexCount: number) {
 			hasBsp: true,
 			rootKind: "leaf" as const,
 		},
+		cellBsp: createLeafBspNode(),
 		physicsWitness: {
 			polygonCount: 0,
 			hasBsp: false,
@@ -295,6 +297,16 @@ function createCellStructure(id: number, vertexCount: number) {
 		},
 		drawingBsp: null,
 		renderGeometry: createRenderGeometry(id, vertexCount),
+	};
+}
+
+function createLeafBspNode(): PreparedPolygonSetBspNode {
+	return {
+		kind: "leaf",
+		index: 0,
+		solid: 0,
+		sphere: null,
+		polyIds: [],
 	};
 }
 

@@ -52,6 +52,10 @@ export interface WorldRenderDebugMetrics {
 	cameraViewResidency: string;
 	residencyCellCount: number;
 	residencyLandblockCount: number;
+	residencyAabbCandidateCount: number;
+	residencyCellBspMatchCount: number;
+	residencyAabbFallbackCount: number;
+	residencySource: string;
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
 	transitionPortalMaxDepth: number;

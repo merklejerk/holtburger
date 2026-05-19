@@ -288,6 +288,10 @@ export function createWorldDisplayRenderer(
 				describeCameraViewResidencyContext(cameraViewResidency),
 			residencyCellCount: residencyIndex.cellCount,
 			residencyLandblockCount: residencyIndex.landblockCount,
+			residencyAabbCandidateCount: 0,
+			residencyCellBspMatchCount: 0,
+			residencyAabbFallbackCount: 0,
+			residencySource: "unknown",
 			terrainMeshCount: 0,
 			visibleTerrainMeshCount: 0,
 			staticGroupMeshCount: 0,
@@ -488,11 +492,12 @@ export function createWorldDisplayRenderer(
 
 	function renderWorldPasses(): void {
 		latestPortalMetrics = createPortalRenderMetrics(transitionPortalModel);
-		cameraViewResidency = residencyIndex.query({
+		const cameraResidencyQuery = residencyIndex.queryDetailed({
 			x: camera.position.x,
 			y: camera.position.y,
 			z: camera.position.z,
 		});
+		cameraViewResidency = cameraResidencyQuery.context;
 		renderer.info.reset();
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
@@ -535,6 +540,13 @@ export function createWorldDisplayRenderer(
 				describeCameraViewResidencyContext(cameraViewResidency),
 			residencyCellCount: residencyIndex.cellCount,
 			residencyLandblockCount: residencyIndex.landblockCount,
+			residencyAabbCandidateCount:
+				cameraResidencyQuery.diagnostics.aabbCandidateCount,
+			residencyCellBspMatchCount:
+				cameraResidencyQuery.diagnostics.cellBspMatchCount,
+			residencyAabbFallbackCount:
+				cameraResidencyQuery.diagnostics.aabbFallbackCount,
+			residencySource: cameraResidencyQuery.diagnostics.source,
 			terrainMeshCount: terrainMeshes.size,
 			visibleTerrainMeshCount: countVisibleObjects(terrainMeshes.values()),
 			staticGroupMeshCount: staticRenderableGroupMeshes.size,
@@ -2209,6 +2221,10 @@ function createRenderDebugMetrics(
 		cameraViewResidency: options.cameraViewResidency,
 		residencyCellCount: options.residencyCellCount,
 		residencyLandblockCount: options.residencyLandblockCount,
+		residencyAabbCandidateCount: options.residencyAabbCandidateCount,
+		residencyCellBspMatchCount: options.residencyCellBspMatchCount,
+		residencyAabbFallbackCount: options.residencyAabbFallbackCount,
+		residencySource: options.residencySource,
 		renderGraphPolicy: options.renderGraphPolicy,
 		renderGraphBaseScene: options.renderGraphBaseScene,
 		transitionPortalMaxDepth: options.transitionPortalMaxDepth,

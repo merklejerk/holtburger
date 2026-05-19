@@ -1,4 +1,3 @@
-import type { CameraViewResidencyContext } from "./world-residency-index";
 import {
 	TRANSITION_PORTAL_STENCIL_REFS,
 	WORLD_RENDER_LAYER,
@@ -6,16 +5,20 @@ import {
 	type TransitionPortalGraphDirection,
 	type WorldRenderGraphNode,
 } from "./render-passes";
-
-export type WorldRenderPolicyMode = "browser-free-camera" | "residency-focused";
+import type { CameraViewResidencyContext } from "./world-residency-index";
 
 export type WorldRenderBaseScene = "exterior" | "interior";
 
-export interface WorldRenderModePolicy {
-	mode: WorldRenderPolicyMode;
+export interface WorldRenderPolicyOptions {
+	minPortalScreenAreaPx: number;
+	enableUnknownResidencyDiagnosticFallback: boolean;
+}
+
+export interface WorldRenderPolicy {
+	label: "residency-aware";
 	baseScene: WorldRenderBaseScene;
 	showDiagnosticInterior: boolean;
-	allowedTransitionDirections: readonly TransitionPortalGraphDirection[];
+	initialTransitionDirections: readonly TransitionPortalGraphDirection[];
 	portalCandidates: TransitionPortalCandidatePolicy;
 }
 
@@ -29,7 +32,7 @@ export interface TransitionPortalCandidatePolicy {
 }
 
 export interface WorldRenderGraphSummary {
-	policyMode: WorldRenderPolicyMode;
+	policyLabel: WorldRenderPolicy["label"];
 	baseScene: WorldRenderBaseScene;
 	transitionApertureMaskPassCount: number;
 	apertureDepthResetPassCount: number;
@@ -39,57 +42,66 @@ export interface WorldRenderGraphSummary {
 	debugOverlayPassCount: number;
 }
 
-export function deriveBrowserFreeCameraRenderPolicy(): WorldRenderModePolicy {
-	return {
-		mode: "browser-free-camera",
-		baseScene: "exterior",
-		showDiagnosticInterior: true,
-		allowedTransitionDirections: ["outdoor-to-indoor", "indoor-to-outdoor"],
-		portalCandidates: {
-			minScreenAreaPx: 16,
-		},
-	};
-}
+export const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
+	minPortalScreenAreaPx: 16,
+	enableUnknownResidencyDiagnosticFallback: true,
+};
 
-export function deriveResidencyFocusedRenderPolicy(
+export function deriveWorldRenderPolicy(
 	context: CameraViewResidencyContext,
-): WorldRenderModePolicy {
+	options: WorldRenderPolicyOptions = DEFAULT_WORLD_RENDER_POLICY_OPTIONS,
+): WorldRenderPolicy {
 	switch (context.kind) {
 		case "env-cell":
-			return {
-				mode: "residency-focused",
+			return createWorldRenderPolicy({
 				baseScene: "interior",
 				showDiagnosticInterior: false,
-				allowedTransitionDirections: ["indoor-to-outdoor"],
-				portalCandidates: {
-					minScreenAreaPx: 16,
-				},
-			};
+				initialTransitionDirections: [
+					directionForTransitionDepth("interior", 1),
+				],
+				options,
+			});
 		case "outdoor-landblock":
-			return {
-				mode: "residency-focused",
+			return createWorldRenderPolicy({
 				baseScene: "exterior",
 				showDiagnosticInterior: false,
-				allowedTransitionDirections: ["outdoor-to-indoor"],
-				portalCandidates: {
-					minScreenAreaPx: 16,
-				},
-			};
+				initialTransitionDirections: [
+					directionForTransitionDepth("exterior", 1),
+				],
+				options,
+			});
 		case "unknown":
-			return {
-				mode: "residency-focused",
+			return createWorldRenderPolicy({
 				baseScene: "exterior",
-				showDiagnosticInterior: true,
-				allowedTransitionDirections: ["outdoor-to-indoor", "indoor-to-outdoor"],
-				portalCandidates: {
-					minScreenAreaPx: 16,
-				},
-			};
+				showDiagnosticInterior:
+					options.enableUnknownResidencyDiagnosticFallback,
+				initialTransitionDirections:
+					options.enableUnknownResidencyDiagnosticFallback
+						? ["outdoor-to-indoor", "indoor-to-outdoor"]
+						: [directionForTransitionDepth("exterior", 1)],
+				options,
+			});
 	}
 }
 
+export function directionForTransitionDepth(
+	baseScene: WorldRenderBaseScene,
+	recursionDepth: number,
+): TransitionPortalGraphDirection {
+	if (!Number.isInteger(recursionDepth) || recursionDepth < 1) {
+		throw new Error(
+			`Transition recursion depth must be a positive integer, got ${recursionDepth}.`,
+		);
+	}
+	const oddDepth = recursionDepth % 2 === 1;
+	if (baseScene === "exterior") {
+		return oddDepth ? "outdoor-to-indoor" : "indoor-to-outdoor";
+	}
+	return oddDepth ? "indoor-to-outdoor" : "outdoor-to-indoor";
+}
+
 export function deriveWorldRenderGraphForPolicy(options: {
-	policy: WorldRenderModePolicy;
+	policy: WorldRenderPolicy;
 	visibleTransitions: VisibleTransitionBatches;
 	showDebugOverlays: boolean;
 }): WorldRenderGraphNode[] {
@@ -173,7 +185,7 @@ export function deriveWorldRenderGraphForPolicy(options: {
 }
 
 export function summarizeWorldRenderGraph(options: {
-	policy: WorldRenderModePolicy;
+	policy: WorldRenderPolicy;
 	graph: readonly WorldRenderGraphNode[];
 }): WorldRenderGraphSummary {
 	let transitionApertureMaskPassCount = 0;
@@ -211,7 +223,7 @@ export function summarizeWorldRenderGraph(options: {
 	}
 
 	return {
-		policyMode: options.policy.mode,
+		policyLabel: options.policy.label,
 		baseScene: options.policy.baseScene,
 		transitionApertureMaskPassCount,
 		apertureDepthResetPassCount,
@@ -222,12 +234,29 @@ export function summarizeWorldRenderGraph(options: {
 	};
 }
 
+function createWorldRenderPolicy(options: {
+	baseScene: WorldRenderBaseScene;
+	showDiagnosticInterior: boolean;
+	initialTransitionDirections: readonly TransitionPortalGraphDirection[];
+	options: WorldRenderPolicyOptions;
+}): WorldRenderPolicy {
+	return {
+		label: "residency-aware",
+		baseScene: options.baseScene,
+		showDiagnosticInterior: options.showDiagnosticInterior,
+		initialTransitionDirections: options.initialTransitionDirections,
+		portalCandidates: {
+			minScreenAreaPx: options.options.minPortalScreenAreaPx,
+		},
+	};
+}
+
 function shouldRenderTransitionDirection(
-	policy: WorldRenderModePolicy,
+	policy: WorldRenderPolicy,
 	visibleTransitions: VisibleTransitionBatches,
 	direction: TransitionPortalGraphDirection,
 ): boolean {
-	if (!policy.allowedTransitionDirections.includes(direction)) {
+	if (!policy.initialTransitionDirections.includes(direction)) {
 		return false;
 	}
 	return direction === "outdoor-to-indoor"

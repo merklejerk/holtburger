@@ -1,45 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	deriveBrowserFreeCameraRenderPolicy,
-	deriveResidencyFocusedRenderPolicy,
 	deriveWorldRenderGraphForPolicy,
+	deriveWorldRenderPolicy,
+	directionForTransitionDepth,
 	summarizeWorldRenderGraph,
 } from "./render-policy";
 
 describe("world render policy", () => {
-	it("keeps browser free-camera broad diagnostics and both transition directions", () => {
-		const policy = deriveBrowserFreeCameraRenderPolicy();
-		const graph = deriveWorldRenderGraphForPolicy({
-			policy,
-			visibleTransitions: {
-				hasOutdoorToIndoorTransitions: true,
-				hasIndoorToOutdoorTransitions: true,
-			},
-			showDebugOverlays: true,
-		});
-
-		expect(policy).toMatchObject({
-			mode: "browser-free-camera",
-			baseScene: "exterior",
-			showDiagnosticInterior: true,
-			allowedTransitionDirections: ["outdoor-to-indoor", "indoor-to-outdoor"],
-		});
-		expect(graph.map((node) => node.kind)).toEqual([
-			"exterior-base",
-			"transition-aperture-mask",
-			"aperture-depth-reset",
-			"opposite-scene-portal-composite",
-			"diagnostic-interior",
-			"transition-aperture-mask",
-			"aperture-depth-reset",
-			"opposite-scene-portal-composite",
-			"debug-overlay",
-		]);
-	});
-
-	it("selects interior base and exterior transition composites for env-cell residency", () => {
-		const policy = deriveResidencyFocusedRenderPolicy({
+	it("selects interior base and indoor-to-outdoor initial transitions for env-cell residency", () => {
+		const policy = deriveWorldRenderPolicy({
 			kind: "env-cell",
 			landblockId: 0x0102ffff,
 			envCellId: 0x01020001,
@@ -54,10 +24,10 @@ describe("world render policy", () => {
 		});
 
 		expect(policy).toMatchObject({
-			mode: "residency-focused",
+			label: "residency-aware",
 			baseScene: "interior",
 			showDiagnosticInterior: false,
-			allowedTransitionDirections: ["indoor-to-outdoor"],
+			initialTransitionDirections: ["indoor-to-outdoor"],
 		});
 		expect(graph.map((node) => node.kind)).toEqual([
 			"interior-base",
@@ -68,8 +38,8 @@ describe("world render policy", () => {
 		expect(graph[3]?.transition?.compositeScene).toBe("exterior");
 	});
 
-	it("selects exterior base and interior transition composites for outdoor residency", () => {
-		const policy = deriveResidencyFocusedRenderPolicy({
+	it("selects exterior base and outdoor-to-indoor initial transitions for outdoor residency", () => {
+		const policy = deriveWorldRenderPolicy({
 			kind: "outdoor-landblock",
 			landblockId: 0x0102ffff,
 		});
@@ -83,10 +53,10 @@ describe("world render policy", () => {
 		});
 
 		expect(policy).toMatchObject({
-			mode: "residency-focused",
+			label: "residency-aware",
 			baseScene: "exterior",
 			showDiagnosticInterior: false,
-			allowedTransitionDirections: ["outdoor-to-indoor"],
+			initialTransitionDirections: ["outdoor-to-indoor"],
 		});
 		expect(graph.map((node) => node.kind)).toEqual([
 			"exterior-base",
@@ -98,32 +68,79 @@ describe("world render policy", () => {
 	});
 
 	it("falls back to broad diagnostic rendering for unknown residency", () => {
-		const policy = deriveResidencyFocusedRenderPolicy({
+		const policy = deriveWorldRenderPolicy({
 			kind: "unknown",
 			landblockId: null,
 		});
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
 			visibleTransitions: {
-				hasOutdoorToIndoorTransitions: false,
-				hasIndoorToOutdoorTransitions: false,
+				hasOutdoorToIndoorTransitions: true,
+				hasIndoorToOutdoorTransitions: true,
 			},
 			showDebugOverlays: false,
 		});
 
 		expect(policy).toMatchObject({
-			mode: "residency-focused",
+			label: "residency-aware",
 			baseScene: "exterior",
 			showDiagnosticInterior: true,
+			initialTransitionDirections: ["outdoor-to-indoor", "indoor-to-outdoor"],
 		});
 		expect(graph.map((node) => node.kind)).toEqual([
 			"exterior-base",
+			"transition-aperture-mask",
+			"aperture-depth-reset",
+			"opposite-scene-portal-composite",
 			"diagnostic-interior",
+			"transition-aperture-mask",
+			"aperture-depth-reset",
+			"opposite-scene-portal-composite",
 		]);
 	});
 
+	it("supports disabling unknown-residency broad diagnostic fallback", () => {
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "unknown",
+				landblockId: 0x0102ffff,
+			},
+			{
+				minPortalScreenAreaPx: 64,
+				enableUnknownResidencyDiagnosticFallback: false,
+			},
+		);
+
+		expect(policy).toMatchObject({
+			baseScene: "exterior",
+			showDiagnosticInterior: false,
+			initialTransitionDirections: ["outdoor-to-indoor"],
+			portalCandidates: {
+				minScreenAreaPx: 64,
+			},
+		});
+	});
+
+	it("derives transition direction by alternating scene context per recursion depth", () => {
+		expect(directionForTransitionDepth("exterior", 1)).toBe(
+			"outdoor-to-indoor",
+		);
+		expect(directionForTransitionDepth("exterior", 2)).toBe(
+			"indoor-to-outdoor",
+		);
+		expect(directionForTransitionDepth("interior", 1)).toBe(
+			"indoor-to-outdoor",
+		);
+		expect(directionForTransitionDepth("interior", 2)).toBe(
+			"outdoor-to-indoor",
+		);
+	});
+
 	it("summarizes active render graph work for diagnostics", () => {
-		const policy = deriveBrowserFreeCameraRenderPolicy();
+		const policy = deriveWorldRenderPolicy({
+			kind: "unknown",
+			landblockId: null,
+		});
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
 			visibleTransitions: {
@@ -134,7 +151,7 @@ describe("world render policy", () => {
 		});
 
 		expect(summarizeWorldRenderGraph({ policy, graph })).toEqual({
-			policyMode: "browser-free-camera",
+			policyLabel: "residency-aware",
 			baseScene: "exterior",
 			transitionApertureMaskPassCount: 2,
 			apertureDepthResetPassCount: 2,

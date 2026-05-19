@@ -15,7 +15,6 @@
 		WorldRenderCameraFrameChangeHandler,
 		WorldRenderMetricsChangeHandler,
 	} from "./renderer-contract";
-	import type { WorldRenderPolicyMode } from "./render-policy";
 	import type { StaticRenderableSceneModel } from "./static-renderables";
 	import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 	import type { TerrainSceneModel } from "./terrain-scene";
@@ -33,7 +32,6 @@
 		structuredInteriorScene,
 		transitionPortalModel,
 		debugOverlayScene,
-		renderPolicyMode = "browser-free-camera",
 		activeRenderAnchor: _activeRenderAnchor = null,
 		renderChunkTransforms = [],
 		renderSpatialQuery = null,
@@ -47,7 +45,6 @@
 		structuredInteriorScene: StructuredInteriorSceneModel;
 		transitionPortalModel: TransitionPortalCandidateModel;
 		debugOverlayScene: WorldDebugOverlayModel;
-		renderPolicyMode?: WorldRenderPolicyMode;
 		activeRenderAnchor?: RenderLandblockAnchor | null;
 		renderChunkTransforms?: RenderChunkTransform[];
 		renderSpatialQuery?: RenderSpatialIndexQuery | null;
@@ -73,7 +70,6 @@
 				structuredInteriorScene,
 				transitionPortalModel,
 				debugOverlayScene,
-				renderPolicyMode,
 				renderChunkTransforms,
 				renderSpatialQuery,
 				controlledCameraFrame,
@@ -145,14 +141,6 @@
 			return;
 		}
 		controller.setDebugOverlayScene(debugOverlayScene);
-	});
-
-	$effect(() => {
-		const controller = rendererController;
-		if (!controller) {
-			return;
-		}
-		controller.setRenderPolicyMode(renderPolicyMode);
 	});
 
 	$effect(() => {

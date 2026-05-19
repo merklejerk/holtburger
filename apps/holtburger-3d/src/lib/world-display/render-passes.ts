@@ -208,7 +208,7 @@ export const TRANSITION_PORTAL_STENCIL_REFS = {
 	indoorToOutdoorDepth1: 2,
 } as const;
 
-function deriveTransitionPortalGraphNodes(options: {
+export function deriveTransitionPortalGraphNodes(options: {
 	direction: TransitionPortalGraphDirection;
 	recursionDepth: number;
 	stencilRef: number;

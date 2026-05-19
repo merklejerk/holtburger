@@ -52,7 +52,14 @@ export interface WorldRenderDebugMetrics {
 	cameraViewResidency: string;
 	residencyCellCount: number;
 	residencyLandblockCount: number;
+	renderGraphPolicy: string;
+	renderGraphBaseScene: string;
 	renderPassCount: number;
+	portalRenderWorkItemCount: number;
+	transitionApertureMaskPassCount: number;
+	apertureDepthResetPassCount: number;
+	interiorCompositePassCount: number;
+	exteriorCompositePassCount: number;
 	portalGroupCount: number;
 	portalMaskMeshCount: number;
 	terrainMeshCount: number;

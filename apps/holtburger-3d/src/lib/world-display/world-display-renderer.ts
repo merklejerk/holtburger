@@ -106,12 +106,10 @@ import {
 	type WorldRenderGraphNode,
 } from "./render-passes";
 import {
-	deriveBrowserFreeCameraRenderPolicy,
-	deriveResidencyFocusedRenderPolicy,
 	deriveWorldRenderGraphForPolicy,
+	deriveWorldRenderPolicy,
 	summarizeWorldRenderGraph,
-	type WorldRenderModePolicy,
-	type WorldRenderPolicyMode,
+	type WorldRenderPolicy,
 } from "./render-policy";
 import {
 	createPortalVisibilityContext,
@@ -139,7 +137,6 @@ export interface WorldDisplayRendererOptions {
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
 	debugOverlayScene: WorldDebugOverlayModel;
-	renderPolicyMode?: WorldRenderPolicyMode;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
 	controlledCameraFrame: SceneCameraFrame | null;
@@ -154,7 +151,6 @@ export interface WorldDisplayRenderer {
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
-	setRenderPolicyMode(mode: WorldRenderPolicyMode): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
@@ -203,7 +199,6 @@ export function createWorldDisplayRenderer(
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
 	let debugOverlayScene = options.debugOverlayScene;
-	let renderPolicyMode = options.renderPolicyMode ?? "browser-free-camera";
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
 	let controlledCameraFrame = options.controlledCameraFrame;
@@ -268,7 +263,7 @@ export function createWorldDisplayRenderer(
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
 			renderPassCount: 0,
-			renderGraphPolicy: "browser-free-camera",
+			renderGraphPolicy: "residency-aware",
 			renderGraphBaseScene: "exterior",
 			portalRenderWorkItemCount: 0,
 			transitionApertureMaskPassCount: 0,
@@ -336,9 +331,6 @@ export function createWorldDisplayRenderer(
 		setDebugOverlayScene(nextScene) {
 			debugOverlayScene = nextScene;
 			syncDebugOverlayMeshes(nextScene);
-		},
-		setRenderPolicyMode(nextMode) {
-			renderPolicyMode = nextMode;
 		},
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
@@ -516,7 +508,7 @@ export function createWorldDisplayRenderer(
 		});
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
 			renderPassCount: graph.length,
-			renderGraphPolicy: graphSummary.policyMode,
+			renderGraphPolicy: graphSummary.policyLabel,
 			renderGraphBaseScene: graphSummary.baseScene,
 			portalRenderWorkItemCount: countTransitionPortalRenderWorkItems(
 				transitionWorkBatches,
@@ -585,7 +577,7 @@ export function createWorldDisplayRenderer(
 	}
 
 	function collectVisibleTransitionPortalWorkBatches(
-		renderPolicy: WorldRenderModePolicy,
+		renderPolicy: WorldRenderPolicy,
 	): Map<TransitionPortalBatchKey, VisibleTransitionPortalWork[]> {
 		const batches = new Map<
 			TransitionPortalBatchKey,
@@ -617,7 +609,7 @@ export function createWorldDisplayRenderer(
 				continue;
 			}
 			if (
-				!renderPolicy.allowedTransitionDirections.includes(workItem.direction)
+				!renderPolicy.initialTransitionDirections.includes(workItem.direction)
 			) {
 				continue;
 			}
@@ -784,10 +776,8 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
-	function deriveActiveRenderPolicy(): WorldRenderModePolicy {
-		return renderPolicyMode === "residency-focused"
-			? deriveResidencyFocusedRenderPolicy(cameraViewResidency)
-			: deriveBrowserFreeCameraRenderPolicy();
+	function deriveActiveRenderPolicy(): WorldRenderPolicy {
+		return deriveWorldRenderPolicy(cameraViewResidency);
 	}
 
 	function evaluateTransitionPortalVisibility(

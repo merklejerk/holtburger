@@ -13,6 +13,7 @@ import {
 	Frustum,
 	GLSL3,
 	Group,
+	IncrementStencilOp,
 	InstancedMesh,
 	KeepStencilOp,
 	LineBasicMaterial,
@@ -88,10 +89,7 @@ import type {
 	TransitionPortalCandidateModel,
 	TransitionPortalWorkItem,
 } from "./transition-portal-work-items";
-import {
-	createTransitionPortalWorkItem,
-	createTransitionPortalWorkItemPolicy,
-} from "./transition-portal-work-items";
+import { createTransitionPortalWorkItem } from "./transition-portal-work-items";
 import { buildTerrainGeometry } from "./terrain-geometry";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
 import {
@@ -109,7 +107,10 @@ import {
 	deriveWorldRenderGraphForPolicy,
 	deriveWorldRenderPolicy,
 	summarizeWorldRenderGraph,
+	DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
+	clampTransitionPortalMaxDepth,
 	type WorldRenderPolicy,
+	type TransitionPortalRenderLevel,
 } from "./render-policy";
 import {
 	createPortalVisibilityContext,
@@ -140,6 +141,7 @@ export interface WorldDisplayRendererOptions {
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
 	controlledCameraFrame: SceneCameraFrame | null;
+	transitionPortalMaxDepth?: number;
 	onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 	onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 }
@@ -154,6 +156,7 @@ export interface WorldDisplayRenderer {
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
+	setTransitionPortalMaxDepth(maxDepth: number): void;
 	setCameraFrameChangeHandler(
 		handler: WorldRenderCameraFrameChangeHandler | undefined,
 	): void;
@@ -176,7 +179,7 @@ const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
 
-type TransitionPortalBatchKey = `${TransitionPortalGraphDirection}:${number}`;
+type TransitionPortalBatchKey = TransitionPortalGraphDirection;
 
 interface VisibleTransitionPortalWork {
 	workItem: TransitionPortalWorkItem;
@@ -202,6 +205,9 @@ export function createWorldDisplayRenderer(
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
 	let controlledCameraFrame = options.controlledCameraFrame;
+	let transitionPortalMaxDepth = clampTransitionPortalMaxDepth(
+		options.transitionPortalMaxDepth ?? DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
+	);
 	let onCameraFrameChange = options.onCameraFrameChange;
 	let onRenderMetricsChange = options.onRenderMetricsChange;
 
@@ -252,7 +258,6 @@ export function createWorldDisplayRenderer(
 		kind: "unknown",
 		landblockId: null,
 	};
-	const transitionPortalPolicy = createTransitionPortalWorkItemPolicy();
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
@@ -265,6 +270,7 @@ export function createWorldDisplayRenderer(
 			renderPassCount: 0,
 			renderGraphPolicy: "residency-aware",
 			renderGraphBaseScene: "exterior",
+			transitionPortalMaxDepth,
 			portalRenderWorkItemCount: 0,
 			transitionApertureMaskPassCount: 0,
 			apertureDepthResetPassCount: 0,
@@ -343,6 +349,9 @@ export function createWorldDisplayRenderer(
 		setControlledCameraFrame(nextFrame) {
 			controlledCameraFrame = nextFrame;
 			updateCameraFrame();
+		},
+		setTransitionPortalMaxDepth(maxDepth) {
+			transitionPortalMaxDepth = clampTransitionPortalMaxDepth(maxDepth);
 		},
 		setCameraFrameChangeHandler(handler) {
 			onCameraFrameChange = handler;
@@ -482,17 +491,12 @@ export function createWorldDisplayRenderer(
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
 			collectVisibleTransitionPortalWorkBatches(renderPolicy);
-		const visibleTransitions = {
-			hasOutdoorToIndoorTransitions:
-				getTransitionPortalBatch(transitionWorkBatches, "outdoor-to-indoor", 1)
-					.length > 0,
-			hasIndoorToOutdoorTransitions:
-				getTransitionPortalBatch(transitionWorkBatches, "indoor-to-outdoor", 1)
-					.length > 0,
-		};
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy: renderPolicy,
-			visibleTransitions,
+			visibleTransitions: {
+				hasVisibleTransitionLevel: (level) =>
+					hasVisibleTransitionLevel(transitionWorkBatches, level),
+			},
 			showDebugOverlays: true,
 		});
 		if (transitionWorkBatches.size > 0) {
@@ -510,6 +514,7 @@ export function createWorldDisplayRenderer(
 			renderPassCount: graph.length,
 			renderGraphPolicy: graphSummary.policyLabel,
 			renderGraphBaseScene: graphSummary.baseScene,
+			transitionPortalMaxDepth,
 			portalRenderWorkItemCount: countTransitionPortalRenderWorkItems(
 				transitionWorkBatches,
 			),
@@ -584,6 +589,12 @@ export function createWorldDisplayRenderer(
 			VisibleTransitionPortalWork[]
 		>();
 		const maskedInteriorCellIds = new Set<number>();
+		if (renderPolicy.transitionLevels.length === 0) {
+			latestPortalMetrics.visiblePortalGroupCount = 0;
+			latestPortalMetrics.maskedInteriorCellCount = 0;
+			return batches;
+		}
+
 		const visibilityContext = createPortalVisibilityContext({
 			camera,
 			viewport: new Vector2(
@@ -592,6 +603,9 @@ export function createWorldDisplayRenderer(
 			),
 			minScreenAreaPx: renderPolicy.portalCandidates.minScreenAreaPx,
 		});
+		const eligibleDirections = new Set(
+			renderPolicy.transitionLevels.map((level) => level.direction),
+		);
 		for (const candidate of transitionPortalModel.candidates) {
 			const visibility = evaluateTransitionPortalVisibility(
 				candidate,
@@ -608,19 +622,14 @@ export function createWorldDisplayRenderer(
 			if (!workItem) {
 				continue;
 			}
-			if (
-				!renderPolicy.initialTransitionDirections.includes(workItem.direction)
-			) {
+			if (!eligibleDirections.has(workItem.direction)) {
 				continue;
 			}
 			const maskMesh = portalMaskMeshes.get(workItem.id);
 			if (!maskMesh) {
 				continue;
 			}
-			const batchKey = transitionPortalBatchKey(
-				workItem.direction,
-				workItem.recursionDepth,
-			);
+			const batchKey = transitionPortalBatchKey(workItem.direction);
 			const batch = batches.get(batchKey) ?? [];
 			batch.push({
 				workItem,
@@ -661,7 +670,7 @@ export function createWorldDisplayRenderer(
 			return;
 		}
 
-		portalBatchMaskMaterial.stencilRef = node.transition.stencilRef;
+		applyPortalMaskStencilState(portalBatchMaskMaterial, node.transition);
 		renderPortalAperturePassScene(batch, portalBatchMaskMaterial);
 	}
 
@@ -723,9 +732,21 @@ export function createWorldDisplayRenderer(
 		const batch = getTransitionPortalBatch(
 			transitionWorkBatches,
 			node.transition.direction,
-			node.transition.recursionDepth,
 		);
 		return batch.length > 0 ? batch : null;
+	}
+
+	function hasVisibleTransitionLevel(
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+		level: TransitionPortalRenderLevel,
+	): boolean {
+		return getTransitionPortalBatch(
+			transitionWorkBatches,
+			level.direction,
+		).length > 0;
 	}
 
 	function getTransitionPortalBatch(
@@ -734,13 +755,8 @@ export function createWorldDisplayRenderer(
 			readonly VisibleTransitionPortalWork[]
 		>,
 		direction: TransitionPortalGraphDirection,
-		recursionDepth: number,
 	): readonly VisibleTransitionPortalWork[] {
-		return (
-			transitionWorkBatches.get(
-				transitionPortalBatchKey(direction, recursionDepth),
-			) ?? []
-		);
+		return transitionWorkBatches.get(transitionPortalBatchKey(direction)) ?? [];
 	}
 
 	function countTransitionPortalRenderWorkItems(
@@ -758,9 +774,8 @@ export function createWorldDisplayRenderer(
 
 	function transitionPortalBatchKey(
 		direction: TransitionPortalGraphDirection,
-		recursionDepth: number,
 	): TransitionPortalBatchKey {
-		return `${direction}:${recursionDepth}`;
+		return direction;
 	}
 
 	function renderPortalAperturePassScene(
@@ -777,7 +792,9 @@ export function createWorldDisplayRenderer(
 	}
 
 	function deriveActiveRenderPolicy(): WorldRenderPolicy {
-		return deriveWorldRenderPolicy(cameraViewResidency);
+		return deriveWorldRenderPolicy(cameraViewResidency, {
+			transitionPortalMaxDepth,
+		});
 	}
 
 	function evaluateTransitionPortalVisibility(
@@ -805,7 +822,6 @@ export function createWorldDisplayRenderer(
 				z: context.cameraPosition.z,
 			},
 			worldPlane,
-			policy: transitionPortalPolicy,
 		});
 		if (!workItem) {
 			return { visible: false, reason: "back-facing", screenAreaPx: 0 };
@@ -1497,6 +1513,26 @@ export function createWorldDisplayRenderer(
 		});
 	}
 
+	function applyPortalMaskStencilState(
+		material: MeshBasicMaterial,
+		transition: NonNullable<WorldRenderGraphNode["transition"]>,
+	): void {
+		material.stencilWrite = true;
+		if (transition.parentStencilRef === null) {
+			material.stencilRef = transition.stencilRef;
+			material.stencilFunc = AlwaysStencilFunc;
+			material.stencilZPass = ReplaceStencilOp;
+			return;
+		}
+
+		material.stencilRef = transition.parentStencilRef;
+		material.stencilFunc = EqualStencilFunc;
+		// WebGL has one stencil reference for both comparison and replacement.
+		// Because transition refs are sequential, incrementing the parent value
+		// produces the current depth while still requiring the parent aperture.
+		material.stencilZPass = IncrementStencilOp;
+	}
+
 	function createPortalDepthResetMaterial(): ShaderMaterial {
 		return new ShaderMaterial({
 			glslVersion: GLSL3,
@@ -2157,6 +2193,7 @@ function createRenderDebugMetrics(
 		residencyLandblockCount: options.residencyLandblockCount,
 		renderGraphPolicy: options.renderGraphPolicy,
 		renderGraphBaseScene: options.renderGraphBaseScene,
+		transitionPortalMaxDepth: options.transitionPortalMaxDepth,
 		renderPassCount: options.renderPassCount,
 		portalRenderWorkItemCount: options.portalRenderWorkItemCount,
 		transitionApertureMaskPassCount: options.transitionApertureMaskPassCount,

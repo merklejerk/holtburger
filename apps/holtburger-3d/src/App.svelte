@@ -130,6 +130,8 @@
 				.structuredInteriorMaxEnvCells}
 			structuredInteriorMaxVisibleCellDepth={$frontendState.browserMode
 				.structuredInteriorMaxVisibleCellDepth}
+			transitionPortalMaxDepth={$frontendState.browserMode
+				.transitionPortalMaxDepth}
 			showPortalPolygons={$frontendState.browserMode.showPortalPolygons}
 			showCellIndicators={$frontendState.browserMode.showCellIndicators}
 			highlightPortalTargets={$frontendState.browserMode.highlightPortalTargets}

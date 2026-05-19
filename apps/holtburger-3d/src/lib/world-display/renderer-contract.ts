@@ -54,6 +54,7 @@ export interface WorldRenderDebugMetrics {
 	residencyLandblockCount: number;
 	renderGraphPolicy: string;
 	renderGraphBaseScene: string;
+	transitionPortalMaxDepth: number;
 	renderPassCount: number;
 	portalRenderWorkItemCount: number;
 	transitionApertureMaskPassCount: number;

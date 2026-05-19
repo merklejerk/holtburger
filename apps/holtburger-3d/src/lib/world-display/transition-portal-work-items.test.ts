@@ -8,7 +8,6 @@ import {
 import { formatIndoorEnvCellAssetId } from "../assets/structured-interior-coverage";
 import {
 	classifyTransitionPortalDirection,
-	createTransitionPortalWorkItemPolicy,
 	createTransitionPortalWorkItem,
 	deriveTransitionPortalCandidates,
 	type TransitionPortalCandidateModel,
@@ -198,30 +197,14 @@ describe("transition portal work items", () => {
 				constant: 0,
 				source: "drawing-bsp-portal",
 			},
-			policy: createTransitionPortalWorkItemPolicy(),
 		});
 
 		expect(workItem).toMatchObject({
 			direction: "outdoor-to-indoor",
-			recursionDepth: 1,
 			baseScene: "exterior",
 			compositeScene: "interior",
 			visibleSide: "positive",
 		});
-	});
-
-	it("names the supported transition recursion depth policy", () => {
-		expect(createTransitionPortalWorkItemPolicy()).toEqual({
-			recursionDepth: 1,
-		});
-		expect(createTransitionPortalWorkItemPolicy({ recursionDepth: 2 })).toEqual(
-			{
-				recursionDepth: 2,
-			},
-		);
-		expect(() =>
-			createTransitionPortalWorkItemPolicy({ recursionDepth: 3 }),
-		).toThrow("Unsupported transition portal recursion depth 3.");
 	});
 });
 

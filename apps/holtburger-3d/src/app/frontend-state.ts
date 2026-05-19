@@ -16,6 +16,7 @@ import {
 	updateStructuredInteriorMaxEnvCells,
 	updateStructuredInteriorMaxVisibleCellDepth,
 	updateTerrainLodRadius,
+	updateTransitionPortalMaxDepth,
 	type BrowserLandblockInputMode,
 	type BrowserModeState,
 } from "./browser-mode";
@@ -153,6 +154,17 @@ export function createFrontendStateStore() {
 					browserMode: updateStructuredInteriorMaxVisibleCellDepth(
 						state.browserMode,
 						maxVisibleCellDepth,
+					),
+				}),
+			);
+		},
+		updateTransitionPortalMaxDepth(maxDepth: number): void {
+			update((state) =>
+				reconcileModeState({
+					...state,
+					browserMode: updateTransitionPortalMaxDepth(
+						state.browserMode,
+						maxDepth,
 					),
 				}),
 			);

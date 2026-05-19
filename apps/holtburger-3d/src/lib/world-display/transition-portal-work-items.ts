@@ -46,34 +46,9 @@ export interface TransitionPortalCandidate {
 
 export interface TransitionPortalWorkItem extends TransitionPortalCandidate {
 	direction: TransitionPortalDirection;
-	recursionDepth: number;
 	baseScene: TransitionPortalScene;
 	compositeScene: TransitionPortalScene;
 	visibleSide: PortalApertureVisibleSide;
-}
-
-export interface TransitionPortalWorkItemPolicy {
-	recursionDepth: number;
-}
-
-export const DEFAULT_TRANSITION_PORTAL_RECURSION_DEPTH = 1;
-export const DEBUG_TRANSITION_PORTAL_RECURSION_DEPTH = 2;
-
-export function createTransitionPortalWorkItemPolicy({
-	recursionDepth = DEFAULT_TRANSITION_PORTAL_RECURSION_DEPTH,
-}: {
-	recursionDepth?: number;
-} = {}): TransitionPortalWorkItemPolicy {
-	if (
-		recursionDepth !== DEFAULT_TRANSITION_PORTAL_RECURSION_DEPTH &&
-		recursionDepth !== DEBUG_TRANSITION_PORTAL_RECURSION_DEPTH
-	) {
-		throw new Error(
-			`Unsupported transition portal recursion depth ${recursionDepth}.`,
-		);
-	}
-
-	return { recursionDepth };
 }
 
 export interface TransitionPortalCandidateDiagnostics {
@@ -218,12 +193,10 @@ export function createTransitionPortalWorkItem({
 	candidate,
 	cameraPosition,
 	worldPlane,
-	policy,
 }: {
 	candidate: TransitionPortalCandidate;
 	cameraPosition: Vec3Dto;
 	worldPlane: PortalAperturePlane | null;
-	policy: TransitionPortalWorkItemPolicy;
 }): TransitionPortalWorkItem | null {
 	const direction = classifyTransitionPortalDirection({
 		cameraPosition,
@@ -237,7 +210,6 @@ export function createTransitionPortalWorkItem({
 	return {
 		...candidate,
 		direction,
-		recursionDepth: policy.recursionDepth,
 		visibleSide:
 			direction === "indoor-to-outdoor"
 				? candidate.insideVisibleSide

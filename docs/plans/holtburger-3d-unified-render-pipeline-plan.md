@@ -830,9 +830,9 @@ Phase 7 progress:
     indoor-to-outdoor transition layer;
   - `outdoor-landblock` residency selects an exterior base scene and an initial
     outdoor-to-indoor transition layer;
-  - `unknown` residency falls back to exterior base plus broad diagnostic interiors and both
-    transition directions, preserving safe inspection when the renderer cannot establish camera
-    residency.
+  - `unknown` residency falls back to exterior base plus broad diagnostic interiors, while
+    transition rendering still follows the same base-derived direction sequence as ordinary
+    exterior residency.
 - Replaced direct free-camera graph derivation inside
   `apps/holtburger-3d/src/lib/world-display/world-display-renderer.ts` with residency-derived
   policy graph derivation. There is no longer a distinct browser free-camera policy type.
@@ -887,7 +887,7 @@ Refinements to future steps:
 
 ## Phase 7.1: Adjustable Transition Portal Recursion Depth
 
-Status: not started.
+Status: complete.
 
 Purpose: extend the residency-aware batched portal graph from depth `1` to an adjustable bounded
 max transition depth without returning to per-portal or per-chain rendering.
@@ -918,7 +918,7 @@ Design model:
   - stencil `2`: exact visible pixels for transition depth `2`;
   - and so on up to the configured cap.
 - Do not clear stencil between transition levels. Each depth-level mask derives from the previous
-  level's stencil value, then replaces surviving pixels with the current depth value.
+  level's stencil value, then advances surviving pixels to the current depth value.
 - Each depth level remains batched:
   - render all candidate apertures for that level's direction into the current depth stencil ref;
   - reset depth inside the current depth stencil;
@@ -930,15 +930,16 @@ Tasks:
   - default max depth `1`;
   - browser/debug maximum initially small, such as `4`, unless WebView stencil limits or testing
     require a lower cap;
-  - reject non-integer, zero, negative, or above-cap values loudly.
+  - clamp browser/runtime configuration to the supported range. Depth `0` is supported as a
+    deliberate portal-compositing-off setting for diagnostics.
 - Define the bounded-depth constants in renderer policy code and import them into browser-mode
   state/UI. Do not duplicate caps in Svelte components.
 - Add renderer policy options for max transition depth and derive ordered transition levels from
   `directionForTransitionDepth(baseScene, depth)`.
 - Change render graph construction to emit transition mask, depth-reset, and composite nodes for
   every visible transition level from `1..maxTransitionDepth`.
-- Replace direction-only visibility batches with direction-plus-depth render batches where depth
-  comes from the graph level, not from a one-off work-item policy object.
+- Replace work-item-owned depth with graph-owned transition depth. The per-frame visible candidate
+  pools remain direction-keyed, and graph execution pairs those pools with each depth level.
 - Split transition portal work into two concepts:
   - a depthless per-frame visible aperture candidate carrying direction, screen area, mask mesh, and
     source facts;
@@ -948,10 +949,10 @@ Tasks:
   directional candidate pools for each applicable depth level.
 - Add stencil-state support for parent-constrained mask passes:
   - depth `1` mask writes stencil ref `1` without requiring a parent ref;
-  - depth `N > 1` mask requires stencil ref `N - 1` and replaces surviving pixels with `N`;
+  - depth `N > 1` mask requires stencil ref `N - 1` and advances surviving pixels to `N`;
   - depth reset and scene composite require stencil ref `N`.
 - Extend graph transition metadata to carry both current and parent stencil refs:
-  - `currentStencilRef`;
+  - `stencilRef`;
   - `parentStencilRef: number | null`.
   Avoid deriving parent refs ad hoc inside renderer material setup.
 - Stop clearing stencil on transition mask nodes. The base scene node should clear stencil before
@@ -960,14 +961,14 @@ Tasks:
   deeper portal masks.
 - Configure aperture mask material stencil state per graph node:
   - depth `1`: `Always` test, replace surviving fragments with current ref;
-  - depth `N > 1`: `Equal(parentRef)` test, replace surviving fragments with current ref.
+  - depth `N > 1`: `Equal(parentRef)` test, increment surviving fragments to the current ref.
   Keep color writes disabled and depth testing/writing enabled for aperture masks.
 - Expose a browser Settings slider for max transition depth, constrained to the supported renderer
   cap. The label should make clear this is transition depth, not env-cell traversal depth.
 - Thread the setting through `BrowserModeState`, `frontend-state`, `BrowserWorldDisplay.svelte`,
   `WorldDisplay.svelte`, and `createWorldDisplayRenderer()` with an explicit renderer setter so
   runtime slider changes do not recreate the renderer.
-- Surface max transition depth and active transition-level counts in renderer diagnostics.
+- Surface max transition depth and transition pass counts in renderer diagnostics.
 - Keep unknown-residency diagnostic fallback broad, but still apply the same bounded transition
   depth loop when portal compositing is enabled.
 
@@ -1004,8 +1005,18 @@ Decisions and course corrections:
   bounded but adjustable.
 - "Arbitrary transition depth" means arbitrary within the renderer cap. Unbounded recursion remains
   out of scope.
-- Stencil refs should map directly to transition depth in the first implementation. Avoid bit-flip,
-  increment/decrement, or ping-pong stencil tricks until a measured need exists.
+- Stencil refs map directly to transition depth in the first implementation.
+- Course correction: WebGL's fixed stencil state has one stencil reference used for both comparison
+  and `ReplaceStencilOp`. A single draw cannot compare against parent ref `N - 1` while replacing
+  with current ref `N`. Because refs are sequential, depth `N > 1` uses `Equal(N - 1)` plus
+  `IncrementStencilOp` to advance surviving pixels to `N`.
+- Course correction: the implementation does not create direction-plus-depth CPU batches. It keeps
+  depthless directional pools and lets graph nodes pair those pools with a depth. This is the
+  cleaner expression of the "CPU rejection once per frame" requirement.
+- Candidate pooling is enforced by the renderer structure rather than a separate pure unit test in
+  this phase: `collectVisibleTransitionPortalWorkBatches()` builds direction-keyed pools once, and
+  graph nodes reuse those pools by direction. Phase 8 can extract that closed-over renderer logic if
+  a focused pure test becomes useful during cleanup.
 - The implementation should keep the current broad two-scene concession: all loaded interiors are
   one composited interior scene, and all exterior terrain/statics are one composited exterior scene.
   Do not add per-chain interior cell pruning in this phase.
@@ -1023,10 +1034,65 @@ Decisions and course corrections:
   env-cell limits. Reuse that pattern for transition depth, but keep the new control in a separate
   portal-rendering fieldset to avoid confusing transition recursion with env-cell traversal depth.
 
+Phase 7.1 progress:
+
+- Removed recursion-depth ownership from `TransitionPortalWorkItem` and deleted the temporary
+  work-item recursion-depth policy in
+  `apps/holtburger-3d/src/lib/world-display/transition-portal-work-items.ts`.
+- Added bounded transition-depth policy helpers in
+  `apps/holtburger-3d/src/lib/world-display/render-policy.ts`:
+  - default max depth `1`;
+  - supported range `0..4`;
+  - max depth `0` disables transition compositing and skips portal visibility work for the frame;
+  - ordered transition levels derived from the residency-selected base scene;
+  - sequential stencil refs where ref equals transition depth.
+- Changed render graph construction so it emits mask, depth-reset, and composite nodes for visible
+  levels in order and stops at the first empty nested level.
+- Changed transition work batching in
+  `apps/holtburger-3d/src/lib/world-display/world-display-renderer.ts` from depth-keyed work items
+  to one per-frame CPU visibility pass that builds direction-keyed visible aperture pools. Those
+  pools are reused by each graph depth level.
+- Preserved stencil across transition levels by stopping transition mask nodes from clearing the
+  stencil buffer. The base scene node remains responsible for clearing stencil before transition
+  rendering starts.
+- Added parent-constrained aperture mask stencil state:
+  - depth `1`: `Always` plus `ReplaceStencilOp` to write ref `1`;
+  - depth `N > 1`: `Equal(parentRef)` plus `IncrementStencilOp` to advance parent pixels to the
+    current depth ref.
+- Added the browser Settings `Portal rendering` fieldset with a max transition-depth slider.
+  The value is stored in `BrowserModeState`, updated through `frontend-state`, passed through
+  `BrowserWorldDisplay.svelte` and `WorldDisplay.svelte`, and applied through an explicit renderer
+  setter so the renderer is not recreated when the slider moves.
+- Extended renderer diagnostics with the configured transition depth and kept existing transition
+  pass counts as the active graph-level signal.
+- Added or updated tests covering:
+  - browser-state transition-depth clamping;
+  - render-policy transition-level generation for bounded recursion;
+  - graph stopping at the first invisible nested level;
+  - transition graph metadata carrying parent stencil refs;
+  - transition work items no longer carrying recursion depth.
+
+Phase 7.1 validation:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/world-display/render-policy.test.ts src/lib/world-display/render-passes.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/app/browser-mode.test.ts`
+  passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+
+Open manual verification:
+
+- Manual WebView inspection is still needed for nested transition views at max depth greater than
+  `1`, especially the case where foreground interior geometry occludes a deeper opposite-direction
+  transition aperture.
+- Manual performance profiling should compare max depth `0`, `1`, and a higher value before
+  raising the cap beyond `4`.
+
 Refinements to future steps:
 
-- Phase 8 cleanup should remove stale depth-1-only helper names, tests, or comments after Phase 7.1
-  lands.
+- Phase 8 cleanup should remove stale depth-1-only helper names, legacy free-camera graph helpers,
+  old `portal group` terminology, and any remaining tests that protect helper paths no production
+  renderer uses.
 - Phase 9 profiling should profile at max depth `1` and at least one higher configured depth so the
   team can see active-frame scaling per transition level.
 - If the configured cap exposes stencil-value limits or material-state churn, document that evidence

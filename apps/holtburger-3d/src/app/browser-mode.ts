@@ -14,6 +14,12 @@ import {
 	MAX_OUTDOOR_SCENE_LOD_RADIUS,
 	MIN_OUTDOOR_SCENE_LOD_RADIUS,
 } from "../lib/world-display/outdoor-scene-interest";
+import {
+	DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
+	MAX_TRANSITION_PORTAL_MAX_DEPTH,
+	MIN_TRANSITION_PORTAL_MAX_DEPTH,
+	clampTransitionPortalMaxDepth,
+} from "../lib/world-display/render-policy";
 
 type BrowserPageId = "location-entry" | "destination-preview";
 
@@ -59,6 +65,7 @@ export interface BrowserModeState {
 	detailLodRadius: number;
 	structuredInteriorMaxEnvCells: number;
 	structuredInteriorMaxVisibleCellDepth: number;
+	transitionPortalMaxDepth: number;
 	landblockInputMode: BrowserLandblockInputMode;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
@@ -82,6 +89,10 @@ export const MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1;
 export const MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 8192;
 export const MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 0;
 export const MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 128;
+export {
+	MIN_TRANSITION_PORTAL_MAX_DEPTH,
+	MAX_TRANSITION_PORTAL_MAX_DEPTH,
+};
 
 export function createBrowserModeState(): BrowserModeState {
 	return {
@@ -95,6 +106,7 @@ export function createBrowserModeState(): BrowserModeState {
 		structuredInteriorMaxEnvCells: DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		structuredInteriorMaxVisibleCellDepth:
 			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
 		landblockInputMode: "dungeon",
 		showPortalPolygons: false,
 		showCellIndicators: false,
@@ -271,6 +283,16 @@ export function updateStructuredInteriorMaxVisibleCellDepth(
 	};
 }
 
+export function updateTransitionPortalMaxDepth(
+	browserMode: BrowserModeState,
+	maxDepth: number,
+): BrowserModeState {
+	return {
+		...browserMode,
+		transitionPortalMaxDepth: clampTransitionPortalMaxDepth(maxDepth),
+	};
+}
+
 export function updateLandblockInputMode(
 	browserMode: BrowserModeState,
 	landblockInputMode: BrowserLandblockInputMode,
@@ -342,6 +364,7 @@ export function previewBrowserLocation(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
@@ -382,6 +405,7 @@ export function selectRuntimeResidencyDestination(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
@@ -415,6 +439,7 @@ export function selectBrowserLandblockDestination(
 		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth:
 			browserMode.structuredInteriorMaxVisibleCellDepth,
+		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,

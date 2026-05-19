@@ -3,9 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
 	deriveWorldRenderGraphForPolicy,
 	deriveWorldRenderPolicy,
+	deriveTransitionPortalRenderLevels,
 	directionForTransitionDepth,
 	summarizeWorldRenderGraph,
+	type TransitionPortalRenderLevel,
 } from "./render-policy";
+
+function visibleDirections(
+	directions: readonly string[],
+): { hasVisibleTransitionLevel(level: TransitionPortalRenderLevel): boolean } {
+	return {
+		hasVisibleTransitionLevel: (level) =>
+			directions.includes(level.direction),
+	};
+}
 
 describe("world render policy", () => {
 	it("selects interior base and indoor-to-outdoor initial transitions for env-cell residency", () => {
@@ -16,10 +27,10 @@ describe("world render policy", () => {
 		});
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
-			visibleTransitions: {
-				hasOutdoorToIndoorTransitions: true,
-				hasIndoorToOutdoorTransitions: true,
-			},
+			visibleTransitions: visibleDirections([
+				"outdoor-to-indoor",
+				"indoor-to-outdoor",
+			]),
 			showDebugOverlays: false,
 		});
 
@@ -27,7 +38,13 @@ describe("world render policy", () => {
 			label: "residency-aware",
 			baseScene: "interior",
 			showDiagnosticInterior: false,
-			initialTransitionDirections: ["indoor-to-outdoor"],
+			transitionLevels: [
+				expect.objectContaining({
+					direction: "indoor-to-outdoor",
+					recursionDepth: 1,
+					parentStencilRef: null,
+				}),
+			],
 		});
 		expect(graph.map((node) => node.kind)).toEqual([
 			"interior-base",
@@ -45,10 +62,10 @@ describe("world render policy", () => {
 		});
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
-			visibleTransitions: {
-				hasOutdoorToIndoorTransitions: true,
-				hasIndoorToOutdoorTransitions: true,
-			},
+			visibleTransitions: visibleDirections([
+				"outdoor-to-indoor",
+				"indoor-to-outdoor",
+			]),
 			showDebugOverlays: false,
 		});
 
@@ -56,7 +73,13 @@ describe("world render policy", () => {
 			label: "residency-aware",
 			baseScene: "exterior",
 			showDiagnosticInterior: false,
-			initialTransitionDirections: ["outdoor-to-indoor"],
+			transitionLevels: [
+				expect.objectContaining({
+					direction: "outdoor-to-indoor",
+					recursionDepth: 1,
+					parentStencilRef: null,
+				}),
+			],
 		});
 		expect(graph.map((node) => node.kind)).toEqual([
 			"exterior-base",
@@ -74,10 +97,10 @@ describe("world render policy", () => {
 		});
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
-			visibleTransitions: {
-				hasOutdoorToIndoorTransitions: true,
-				hasIndoorToOutdoorTransitions: true,
-			},
+			visibleTransitions: visibleDirections([
+				"outdoor-to-indoor",
+				"indoor-to-outdoor",
+			]),
 			showDebugOverlays: false,
 		});
 
@@ -85,7 +108,12 @@ describe("world render policy", () => {
 			label: "residency-aware",
 			baseScene: "exterior",
 			showDiagnosticInterior: true,
-			initialTransitionDirections: ["outdoor-to-indoor", "indoor-to-outdoor"],
+			transitionLevels: [
+				expect.objectContaining({
+					direction: "outdoor-to-indoor",
+					recursionDepth: 1,
+				}),
+			],
 		});
 		expect(graph.map((node) => node.kind)).toEqual([
 			"exterior-base",
@@ -93,9 +121,6 @@ describe("world render policy", () => {
 			"aperture-depth-reset",
 			"opposite-scene-portal-composite",
 			"diagnostic-interior",
-			"transition-aperture-mask",
-			"aperture-depth-reset",
-			"opposite-scene-portal-composite",
 		]);
 	});
 
@@ -114,7 +139,12 @@ describe("world render policy", () => {
 		expect(policy).toMatchObject({
 			baseScene: "exterior",
 			showDiagnosticInterior: false,
-			initialTransitionDirections: ["outdoor-to-indoor"],
+			transitionLevels: [
+				expect.objectContaining({
+					direction: "outdoor-to-indoor",
+					recursionDepth: 1,
+				}),
+			],
 			portalCandidates: {
 				minScreenAreaPx: 64,
 			},
@@ -136,6 +166,64 @@ describe("world render policy", () => {
 		);
 	});
 
+	it("derives bounded transition levels with sequential stencil refs", () => {
+		expect(
+			deriveTransitionPortalRenderLevels({
+				baseScene: "exterior",
+				maxDepth: 3,
+			}),
+		).toEqual([
+			{
+				direction: "outdoor-to-indoor",
+				recursionDepth: 1,
+				stencilRef: 1,
+				parentStencilRef: null,
+				compositeScene: "interior",
+			},
+			{
+				direction: "indoor-to-outdoor",
+				recursionDepth: 2,
+				stencilRef: 2,
+				parentStencilRef: 1,
+				compositeScene: "exterior",
+			},
+			{
+				direction: "outdoor-to-indoor",
+				recursionDepth: 3,
+				stencilRef: 3,
+				parentStencilRef: 2,
+				compositeScene: "interior",
+			},
+		]);
+	});
+
+	it("stops transition graph expansion at the first invisible nested level", () => {
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "outdoor-landblock",
+				landblockId: 0x0102ffff,
+			},
+			{ transitionPortalMaxDepth: 3 },
+		);
+		const graph = deriveWorldRenderGraphForPolicy({
+			policy,
+			visibleTransitions: visibleDirections(["outdoor-to-indoor"]),
+			showDebugOverlays: false,
+		});
+
+		expect(graph.map((node) => node.kind)).toEqual([
+			"exterior-base",
+			"transition-aperture-mask",
+			"aperture-depth-reset",
+			"opposite-scene-portal-composite",
+		]);
+		expect(graph[1]?.transition).toMatchObject({
+			recursionDepth: 1,
+			stencilRef: 1,
+			parentStencilRef: null,
+		});
+	});
+
 	it("summarizes active render graph work for diagnostics", () => {
 		const policy = deriveWorldRenderPolicy({
 			kind: "unknown",
@@ -143,20 +231,20 @@ describe("world render policy", () => {
 		});
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
-			visibleTransitions: {
-				hasOutdoorToIndoorTransitions: true,
-				hasIndoorToOutdoorTransitions: true,
-			},
+			visibleTransitions: visibleDirections([
+				"outdoor-to-indoor",
+				"indoor-to-outdoor",
+			]),
 			showDebugOverlays: true,
 		});
 
 		expect(summarizeWorldRenderGraph({ policy, graph })).toEqual({
 			policyLabel: "residency-aware",
 			baseScene: "exterior",
-			transitionApertureMaskPassCount: 2,
-			apertureDepthResetPassCount: 2,
+			transitionApertureMaskPassCount: 1,
+			apertureDepthResetPassCount: 1,
 			interiorCompositePassCount: 1,
-			exteriorCompositePassCount: 1,
+			exteriorCompositePassCount: 0,
 			diagnosticInteriorPassCount: 1,
 			debugOverlayPassCount: 1,
 		});

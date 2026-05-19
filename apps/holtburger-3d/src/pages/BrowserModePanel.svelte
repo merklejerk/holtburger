@@ -22,6 +22,11 @@
 		value: string;
 	}
 
+	interface BrowserPanelSection {
+		title: string;
+		rows: BrowserPanelRow[];
+	}
+
 	interface FocusedCellReference {
 		landblockId: number | null;
 		cellId: number | null;
@@ -29,12 +34,16 @@
 
 	let {
 		sceneStatusText,
-		sceneRows,
-		debugRows,
+		sceneSummaryRows,
+		sceneDetailSections,
+		debugSummaryRows,
+		debugDetailSections,
 	}: {
 		sceneStatusText: string;
-		sceneRows: BrowserPanelRow[];
-		debugRows: BrowserPanelRow[];
+		sceneSummaryRows: BrowserPanelRow[];
+		sceneDetailSections: BrowserPanelSection[];
+		debugSummaryRows: BrowserPanelRow[];
+		debugDetailSections: BrowserPanelSection[];
 	} = $props();
 
 	let activeTab = $state<BrowserPanelTabId>("navigate");
@@ -492,25 +501,55 @@
 	{:else if !isCollapsed && activeTab === "scene"}
 		<div class="browser-panel__body" role="tabpanel">
 			<p class="browser-panel__status">{sceneStatusText}</p>
-			<dl class="data-list compact-data-list">
-				{#each sceneRows as row}
+			<dl class="data-list compact-data-list browser-panel__summary-list">
+				{#each sceneSummaryRows as row}
 					<div>
 						<dt>{row.label}</dt>
 						<dd>{row.value}</dd>
 					</div>
 				{/each}
 			</dl>
+			<div class="browser-panel__section-stack">
+				{#each sceneDetailSections as section}
+					<details class="browser-panel__details">
+						<summary>{section.title}</summary>
+						<dl class="data-list compact-data-list">
+							{#each section.rows as row}
+								<div>
+									<dt>{row.label}</dt>
+									<dd>{row.value}</dd>
+								</div>
+							{/each}
+						</dl>
+					</details>
+				{/each}
+			</div>
 		</div>
 	{:else if !isCollapsed}
 		<div class="browser-panel__body" role="tabpanel">
-			<dl class="data-list compact-data-list">
-				{#each debugRows as row}
+			<dl class="data-list compact-data-list browser-panel__summary-list">
+				{#each debugSummaryRows as row}
 					<div>
 						<dt>{row.label}</dt>
 						<dd>{row.value}</dd>
 					</div>
 				{/each}
 			</dl>
+			<div class="browser-panel__section-stack">
+				{#each debugDetailSections as section}
+					<details class="browser-panel__details">
+						<summary>{section.title}</summary>
+						<dl class="data-list compact-data-list">
+							{#each section.rows as row}
+								<div>
+									<dt>{row.label}</dt>
+									<dd>{row.value}</dd>
+								</div>
+							{/each}
+						</dl>
+					</details>
+				{/each}
+			</div>
 		</div>
 	{/if}
 </section>

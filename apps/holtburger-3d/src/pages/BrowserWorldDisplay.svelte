@@ -82,6 +82,7 @@
 		type RenderAnchorSource,
 		type RenderChunkTransform,
 	} from "../lib/world-display/render-anchor";
+	import { deriveWorldRenderSceneContext } from "../lib/world-display/render-scene-context";
 	import {
 		DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
@@ -99,6 +100,11 @@
 	interface BrowserPanelRow {
 		label: string;
 		value: string;
+	}
+
+	interface BrowserPanelSection {
+		title: string;
+		rows: BrowserPanelRow[];
 	}
 
 	interface BrowserInspectorModel {
@@ -336,6 +342,13 @@
 			activeRenderChunkPlacements,
 		),
 	);
+	const renderSceneContext = $derived(
+		deriveWorldRenderSceneContext({
+			activeRenderAnchor,
+			terrainScene,
+			structuredInteriorScene,
+		}),
+	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
 			(total, tile) => total + tile.mesh.vertices.length,
@@ -458,12 +471,60 @@
 		}
 		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalMaskMeshCount}/${debug.portalGroupCount}; residency ${debug.cameraViewResidency} via ${debug.residencySource} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks, ${debug.residencyAabbCandidateCount} AABB candidates, ${debug.residencyCellBspMatchCount} CellBSP matches, ${debug.residencyAabbFallbackCount} AABB fallbacks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
+	const sceneContextText = $derived(
+		`${renderSceneContext.kind === "dungeon" ? "Dungeon" : "Outdoor"}${renderSceneContext.anchorLandblockId === null ? "" : ` anchored at 0x${formatHex32(renderSceneContext.anchorLandblockId)}`}`,
+	);
+	const cameraResidencyText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return "Waiting for renderer residency.";
+		}
+		return `${debug.cameraViewResidency} via ${debug.residencySource}`;
+	});
+	const renderGraphText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return "Waiting for render graph.";
+		}
+		return `${debug.renderGraphBaseScene} base, transition depth ${debug.transitionPortalMaxDepth}`;
+	});
+	const landblockVisibilityText = $derived.by(() => {
+		if (renderSceneContext.kind === "dungeon") {
+			return "Dungeon context; outdoor landblock rendering is inactive.";
+		}
+		if (!outdoorSceneInterest) {
+			return "Outdoor landblock selection is waiting for focus.";
+		}
+		return `Terrain ${terrainScene.tiles.length}/${outdoorSceneInterest.terrainLandblockIds.length}, buildings ${outdoorSceneInterest.buildingLandblockIds.length}, detail ${outdoorSceneInterest.detailLandblockIds.length}.`;
+	});
+	const cellVisibilityText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return `${structuredInteriorScene.cells.length} loaded env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}; renderer visibility pending.`;
+		}
+		return `${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount} rendered mesh${debug.structuredInteriorMeshCount === 1 ? "" : "es"}; ${structuredInteriorScene.cells.length} loaded cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}.`;
+	});
+	const portalRenderSummaryText = $derived.by(() => {
+		const metrics = renderMetrics?.portal;
+		if (!metrics) {
+			return "Waiting for portal metrics.";
+		}
+		return `${metrics.visiblePortalGroupCount}/${metrics.renderWorkItemCandidateCount} visible work item${metrics.renderWorkItemCandidateCount === 1 ? "" : "s"}; ${metrics.maskedInteriorCellCount} masked cell${metrics.maskedInteriorCellCount === 1 ? "" : "s"}.`;
+	});
+	const rendererSummaryText = $derived.by(() => {
+		const debug = renderMetrics?.debug;
+		if (!debug) {
+			return "Waiting for renderer metrics.";
+		}
+		return `${debug.renderPassCount} pass${debug.renderPassCount === 1 ? "" : "es"}, ${debug.renderCalls} call${debug.renderCalls === 1 ? "" : "s"}, ${debug.renderTriangles} tris.`;
+	});
 	const cameraFrameText = $derived(
 		browserCameraFrame
 			? `${describeSceneCameraFrame(browserCameraFrame)} ${describeBrowserCameraControlMode()}`
 			: "Camera frame is waiting for terrain.",
 	);
 	const cameraPipelineDebugText = $derived(describeCameraPipelineDebugState());
+	const assetSummaryText = $derived(describeAssetSummaryState());
 	const assetDebugText = $derived(describeAssetDebugState());
 	const assetPipelineDebugText = $derived(describeAssetPipelineDebugState());
 	const assetCacheDebugText = $derived(describeAssetCacheDebugState());
@@ -522,39 +583,82 @@
 			: terrainScene.statusText,
 	);
 	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
+		{ label: "Mode", value: sceneContextText },
 		{ label: "Focus", value: worldDisplay.focusLocationLabel },
-		{ label: "Terrain", value: terrainScene.cacheText },
-		{ label: "Source", value: terrainScene.dataSourceText },
-		{ label: "Geometry", value: sceneGeometryText },
-		{ label: "Statics", value: staticRenderableText },
-		{ label: "Interiors", value: structuredInteriorText },
-		{ label: "Cells", value: cellIndicatorText },
-		{ label: "Portals", value: portalDiagnosticsText },
-		{ label: "Heights", value: terrainHeightText },
-		{ label: "Bounds", value: sceneBoundsText },
+		{ label: "Camera residency", value: cameraResidencyText },
+		{ label: "Base scene", value: renderGraphText },
+		{ label: "Landblocks", value: landblockVisibilityText },
+		{ label: "Cells", value: cellVisibilityText },
+	]);
+	const browserPanelSceneDetailSections = $derived<BrowserPanelSection[]>([
+		{
+			title: "Geometry",
+			rows: [
+				{ label: "Terrain", value: terrainScene.cacheText },
+				{ label: "Source", value: terrainScene.dataSourceText },
+				{ label: "Meshes", value: sceneGeometryText },
+				{ label: "Statics", value: staticRenderableText },
+				{ label: "Heights", value: terrainHeightText },
+				{ label: "Bounds", value: sceneBoundsText },
+			],
+		},
+		{
+			title: "Interior Cells",
+			rows: [
+				{ label: "Visibility", value: structuredInteriorText },
+				{ label: "Rendered", value: cellVisibilityText },
+				{ label: "Debug overlay", value: cellIndicatorText },
+			],
+		},
+		{
+			title: "Portals",
+			rows: [
+				{ label: "Rendering", value: portalRenderSummaryText },
+				{ label: "Overlay", value: portalDiagnosticsText },
+				{ label: "Stencil", value: portalRenderText },
+			],
+		},
 	]);
 	const browserPanelDebugRows = $derived<BrowserPanelRow[]>([
-		{ label: "Input", value: worldDisplay.inputText },
-		{
-			label: "Camera hint",
-			value:
-				describeCameraHintAck(cameraAck) ??
-				"Waiting for the first world-display camera hint acknowledgement.",
-		},
-		{
-			label: "Ray pick",
-			value:
-				describeRayPickResponse(rayPickResponse) ??
-				"No authority-sensitive debug pick has been resolved yet.",
-		},
 		{ label: "Camera", value: cameraFrameText },
-		{ label: "Pipeline", value: assetPipelineDebugText },
-		{ label: "Cache", value: assetCacheDebugText },
-		{ label: "Assets", value: assetDebugText },
-		{ label: "Layers", value: staticRenderableLayerText },
-		{ label: "Stencil", value: portalRenderText },
-		{ label: "Renderer", value: rendererDiagnosticsText },
-		{ label: "Events", value: cameraPipelineDebugText },
+		{ label: "Renderer", value: rendererSummaryText },
+		{ label: "Assets", value: assetSummaryText },
+	]);
+	const browserPanelDebugDetailSections = $derived<BrowserPanelSection[]>([
+		{
+			title: "Input And Camera",
+			rows: [
+				{
+					label: "Camera hint",
+					value:
+						describeCameraHintAck(cameraAck) ??
+						"Waiting for the first world-display camera hint acknowledgement.",
+				},
+				{
+					label: "Ray pick",
+					value:
+						describeRayPickResponse(rayPickResponse) ??
+						"No authority-sensitive debug pick has been resolved yet.",
+				},
+				{ label: "Events", value: cameraPipelineDebugText },
+			],
+		},
+		{
+			title: "Asset Pipeline",
+			rows: [
+				{ label: "Active", value: assetDebugText },
+				{ label: "Pipeline", value: assetPipelineDebugText },
+				{ label: "Cache", value: assetCacheDebugText },
+				{ label: "Layers", value: staticRenderableLayerText },
+			],
+		},
+		{
+			title: "Render Pipeline",
+			rows: [
+				{ label: "Renderer", value: rendererDiagnosticsText },
+				{ label: "Stencil", value: portalRenderText },
+			],
+		},
 	]);
 
 	$effect(() => {
@@ -1283,6 +1387,17 @@
 		return `metrics ${renderMetricsEventCount}; frames ${cameraFrameApplyCount}; pointer ${pointerInputEventCount}; keys ${keyboardInputEventCount}; anchor ${renderAnchorText}; focus ${document.activeElement?.tagName.toLowerCase() ?? "none"}.`;
 	}
 
+	function describeAssetSummaryState(): string {
+		if (assetState.errorMessage) {
+			return `error preparing ${assetState.activeRequest?.assetId ?? "asset"}`;
+		}
+
+		const preparedCounts = countPreparedAssetsByKind(
+			assetState.preparedByAssetId,
+		);
+		return `${assetState.status}; ${preparedCounts.total} prepared asset${preparedCounts.total === 1 ? "" : "s"}.`;
+	}
+
 	function describeAssetDebugState(): string {
 		if (assetState.errorMessage) {
 			return `Error while preparing ${assetState.activeRequest?.assetId ?? "asset"}: ${assetState.errorMessage}`;
@@ -1429,6 +1544,7 @@
 		{transitionPortalModel}
 		{transitionPortalMaxDepth}
 		{debugOverlayScene}
+		{renderSceneContext}
 		{activeRenderAnchor}
 		renderChunkTransforms={activeRenderChunkTransforms}
 		renderSpatialQuery={renderSpatialIndex}
@@ -1442,8 +1558,10 @@
 	<div class="browser-world-display__panel">
 		<BrowserModePanel
 			{sceneStatusText}
-			sceneRows={browserPanelSceneRows}
-			debugRows={browserPanelDebugRows}
+			sceneSummaryRows={browserPanelSceneRows}
+			sceneDetailSections={browserPanelSceneDetailSections}
+			debugSummaryRows={browserPanelDebugRows}
+			debugDetailSections={browserPanelDebugDetailSections}
 		/>
 	</div>
 

@@ -207,6 +207,7 @@ function createPreparedIndoorEnvCellAsset(
 		cellStructureId: 1,
 		localPlacement: createPlacement(),
 		visibleCellIds: [],
+		landblockEnvCellIds: [],
 		seenOutside: false,
 		surfaceIds: [],
 		portalCount: 0,

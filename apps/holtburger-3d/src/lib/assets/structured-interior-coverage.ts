@@ -70,6 +70,27 @@ export function isPreparedIndoorEnvCellAsset(
 	return asset?.payload.kind === "indoor-env-cell";
 }
 
+export function deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+	focusEnvCellId: number,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): StructuredInteriorMembershipPolicy {
+	const focusAsset = preparedByAssetId[formatIndoorEnvCellAssetId(focusEnvCellId)];
+	if (
+		isPreparedIndoorEnvCellAsset(focusAsset) &&
+		focusAsset.payload.landblockEnvCellIds.length > 0
+	) {
+		return {
+			kind: "direct",
+			envCellIds: focusAsset.payload.landblockEnvCellIds,
+		};
+	}
+
+	return {
+		kind: "visible-cell-closure",
+		seedEnvCellIds: [focusEnvCellId],
+	};
+}
+
 function deriveVisibleCellClosureCoverage(
 	seedEnvCellIds: number[],
 	preparedByAssetId: Record<string, PreparedAssetRecord>,

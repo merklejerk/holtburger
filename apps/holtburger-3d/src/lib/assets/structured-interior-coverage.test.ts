@@ -131,6 +131,7 @@ function createPreparedIndoorEnvCellAsset(
 				orientation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			visibleCellIds,
+			landblockEnvCellIds: [],
 			seenOutside: false,
 			surfaceIds: [],
 			portalCount: 0,

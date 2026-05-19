@@ -17,6 +17,7 @@ import {
 import type { PreparedAssetRecord } from "./types";
 import {
 	createDefaultStructuredInteriorCoverageOptions,
+	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
 	formatEnvironmentAssetId,
 	formatIndoorEnvCellAssetId,
@@ -88,6 +89,12 @@ export function createSceneCoverageRequests(
 		resolveStructuredInteriorCoverageOptions(options);
 
 	if (isIndoorBrowserDestination(browserDestination)) {
+		const focusEnvCellId = browserDestination.envCellId;
+		const membershipPolicy =
+			deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+				focusEnvCellId,
+				preparedByAssetId,
+			);
 		return [
 			...createStructuredInteriorCoverageRequests(
 				runtimeBatch,
@@ -95,10 +102,7 @@ export function createSceneCoverageRequests(
 				preparedByAssetId,
 				pendingAssetIds,
 				structuredInteriorCoverageOptions,
-				{
-					kind: "visible-cell-closure",
-					seedEnvCellIds: [browserDestination.envCellId],
-				},
+				membershipPolicy,
 				"destination",
 			),
 			...createStaticRenderableAssetRequests(
@@ -194,13 +198,15 @@ export function deriveSceneCoverageAssetIds(
 		resolveStructuredInteriorCoverageOptions(options);
 
 	if (isIndoorBrowserDestination(browserDestination)) {
+		const membershipPolicy =
+			deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+				browserDestination.envCellId,
+				preparedByAssetId,
+			);
 		return deriveStructuredInteriorCoverageAssetIds(
 			preparedByAssetId,
 			structuredInteriorCoverageOptions,
-			{
-				kind: "visible-cell-closure",
-				seedEnvCellIds: [browserDestination.envCellId],
-			},
+			membershipPolicy,
 		).sort();
 	}
 
@@ -522,10 +528,10 @@ function createIndoorStaticRenderableAssetRequests(
 	const activeEnvCellIds = deriveStructuredInteriorCoverage(
 		browserFocusEnvCellId === null
 			? createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch)
-			: {
-					kind: "visible-cell-closure",
-					seedEnvCellIds: [browserFocusEnvCellId],
-				},
+			: deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+					browserFocusEnvCellId,
+					preparedByAssetId,
+				),
 		preparedByAssetId,
 		coverageOptions,
 	).envCellIds;

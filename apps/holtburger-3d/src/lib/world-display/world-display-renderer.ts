@@ -135,6 +135,7 @@ import {
 	type CameraViewResidencyContext,
 	type WorldResidencyIndex,
 } from "./world-residency-index";
+import type { WorldRenderSceneContext } from "./render-scene-context";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
@@ -143,6 +144,7 @@ export interface WorldDisplayRendererOptions {
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	transitionPortalModel: TransitionPortalCandidateModel;
 	debugOverlayScene: WorldDebugOverlayModel;
+	renderSceneContext: WorldRenderSceneContext;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
 	controlledCameraFrame: SceneCameraFrame | null;
@@ -158,6 +160,7 @@ export interface WorldDisplayRenderer {
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
 	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
+	setRenderSceneContext(context: WorldRenderSceneContext): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
@@ -208,6 +211,7 @@ export function createWorldDisplayRenderer(
 	let structuredInteriorScene = options.structuredInteriorScene;
 	let transitionPortalModel = options.transitionPortalModel;
 	let debugOverlayScene = options.debugOverlayScene;
+	let renderSceneContext = options.renderSceneContext;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
 	let controlledCameraFrame = options.controlledCameraFrame;
@@ -347,6 +351,10 @@ export function createWorldDisplayRenderer(
 		setDebugOverlayScene(nextScene) {
 			debugOverlayScene = nextScene;
 			syncDebugOverlayMeshes(nextScene);
+		},
+		setRenderSceneContext(nextContext) {
+			renderSceneContext = nextContext;
+			updateResidencyIndex();
 		},
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
@@ -823,6 +831,7 @@ export function createWorldDisplayRenderer(
 
 	function deriveActiveRenderPolicy(): WorldRenderPolicy {
 		return deriveWorldRenderPolicy(cameraViewResidency, {
+			sceneContext: renderSceneContext,
 			transitionPortalMaxDepth,
 		});
 	}
@@ -1030,6 +1039,7 @@ export function createWorldDisplayRenderer(
 		residencyIndex = buildWorldResidencyIndex({
 			cells: structuredInteriorScene.cells,
 			renderChunkTransforms,
+			sceneContext: renderSceneContext,
 		});
 	}
 

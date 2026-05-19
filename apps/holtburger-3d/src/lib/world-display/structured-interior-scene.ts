@@ -12,6 +12,7 @@ import type {
 } from "../assets/types";
 import {
 	createDefaultStructuredInteriorCoverageOptions,
+	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
 	formatEnvironmentAssetId,
 	formatIndoorEnvCellAssetId,
@@ -140,10 +141,10 @@ function deriveBrowserFocusedStructuredInteriorSceneModel(
 	const activeEnvCellIds =
 		structuredInteriorCoverage?.envCellIds ??
 		deriveStructuredInteriorCoverage(
-			{
-				kind: "visible-cell-closure",
-				seedEnvCellIds: [focusEnvCellId],
-			},
+			deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+				focusEnvCellId,
+				assetState.preparedByAssetId,
+			),
 			assetState.preparedByAssetId,
 			structuredInteriorCoverageOptions,
 		).envCellIds;

@@ -971,7 +971,6 @@ impl HostBoundaryAdapter {
         })
     }
 
-    #[cfg(test)]
     fn load_landblock_info(
         &self,
         landblock_id: u32,
@@ -1198,6 +1197,13 @@ impl HostBoundaryAdapter {
                     "asset-decode-failed",
                 )
             })?;
+        let landblock_env_cell_ids = self
+            .load_landblock_info(env_cell_id)
+            .map(|info| {
+                (0..info.num_cells)
+                    .map(|index| (env_cell_id & 0xFFFF_0000) | (0x0100 + index))
+                    .collect::<Vec<_>>()
+            })?;
 
         Ok(serde_json::json!({
             "kind": "indoor-env-cell",
@@ -1208,6 +1214,7 @@ impl HostBoundaryAdapter {
             "cellStructureId": u32::from(env_cell.cell_structure),
             "localPlacement": serialize_frame(&env_cell.position),
             "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
+            "landblockEnvCellIds": landblock_env_cell_ids,
             "seenOutside": (env_cell.flags & 0x01) != 0,
             "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
             "portalCount": env_cell.portals.len(),

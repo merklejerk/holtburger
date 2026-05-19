@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	WORLD_RENDER_LAYER,
+	TRANSITION_PORTAL_STENCIL_REFS,
+	deriveFreeCameraWorldRenderGraph,
 	deriveWorldRenderPasses,
 	staticRenderableLayerForDomain,
 } from "./render-passes";
@@ -71,5 +73,38 @@ describe("world render passes", () => {
 		expect(
 			staticRenderableLayerForDomain(WORLD_RENDER_DOMAIN.interiorStatic),
 		).toBe(WORLD_RENDER_LAYER.diagnosticInterior);
+	});
+
+	it("derives a batched free-camera transition graph by direction and broad scene", () => {
+		const graph = deriveFreeCameraWorldRenderGraph({
+			hasOutdoorToIndoorTransitions: true,
+			hasIndoorToOutdoorTransitions: true,
+			showDiagnosticInterior: true,
+			showDebugOverlays: true,
+		});
+
+		expect(graph.map((node) => node.kind)).toEqual([
+			"exterior-base",
+			"transition-aperture-mask",
+			"aperture-depth-reset",
+			"opposite-scene-portal-composite",
+			"diagnostic-interior",
+			"transition-aperture-mask",
+			"aperture-depth-reset",
+			"opposite-scene-portal-composite",
+			"debug-overlay",
+		]);
+		expect(graph[1]?.transition).toEqual({
+			direction: "outdoor-to-indoor",
+			recursionDepth: 1,
+			stencilRef: TRANSITION_PORTAL_STENCIL_REFS.outdoorToIndoorDepth1,
+			compositeScene: "interior",
+		});
+		expect(graph[5]?.transition).toEqual({
+			direction: "indoor-to-outdoor",
+			recursionDepth: 1,
+			stencilRef: TRANSITION_PORTAL_STENCIL_REFS.indoorToOutdoorDepth1,
+			compositeScene: "exterior",
+		});
 	});
 });

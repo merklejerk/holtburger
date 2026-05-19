@@ -100,9 +100,11 @@ import {
 } from "./chunk-root-manager";
 import {
 	WORLD_RENDER_LAYER,
-	deriveWorldRenderPasses,
+	deriveFreeCameraWorldRenderGraph,
 	staticRenderableLayerForDomain,
-	type WorldRenderPass,
+	type TransitionPortalGraphDirection,
+	type TransitionPortalGraphScene,
+	type WorldRenderGraphNode,
 } from "./render-passes";
 import {
 	createPortalVisibilityContext,
@@ -163,6 +165,14 @@ const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
 const MIN_PORTAL_SCREEN_AREA_PX = 16;
 
+type TransitionPortalBatchKey = `${TransitionPortalGraphDirection}:${number}`;
+
+interface VisibleTransitionPortalWork {
+	workItem: TransitionPortalWorkItem;
+	screenAreaPx: number;
+	maskMesh: Mesh;
+}
+
 interface PortalDepthResetCapability {
 	supported: boolean;
 	reason: string | null;
@@ -198,6 +208,10 @@ export function createWorldDisplayRenderer(
 	host.append(renderer.domElement);
 	const portalDepthResetCapability = detectPortalDepthResetCapability(renderer);
 	const portalDepthResetMaterial = createPortalDepthResetMaterial();
+	const portalBatchMaskMaterial = createPortalMaskMaterial(0);
+	const portalAperturePassScene = new Scene();
+	portalAperturePassScene.name = "portal-aperture-pass-scene";
+	const portalAperturePassMeshes = new Map<string, Mesh>();
 
 	const scene = new Scene();
 
@@ -432,29 +446,26 @@ export function createWorldDisplayRenderer(
 	function renderWorldPasses(): void {
 		latestPortalMetrics = createPortalRenderMetrics(transitionPortalModel);
 		renderer.info.reset();
-		const passes = deriveWorldRenderPasses({
-			hasPortalViewGroups: transitionPortalModel.candidates.length > 0,
+		const transitionWorkBatches = collectVisibleTransitionPortalWorkBatches();
+		const graph = deriveFreeCameraWorldRenderGraph({
+			hasOutdoorToIndoorTransitions:
+				getTransitionPortalBatch(transitionWorkBatches, "outdoor-to-indoor", 1)
+					.length > 0,
+			hasIndoorToOutdoorTransitions:
+				getTransitionPortalBatch(transitionWorkBatches, "indoor-to-outdoor", 1)
+					.length > 0,
 			showDiagnosticInterior: true,
 			showDebugOverlays: true,
 		});
-		for (const pass of passes) {
-			if (pass.kind === "portal-stencil-mask") {
-				renderTransitionPortals();
-				continue;
-			}
-			if (pass.kind === "portal-depth-reset") {
-				continue;
-			}
-			if (pass.kind === "portal-composited-interior") {
-				continue;
-			}
-			applyPassClear(pass);
-			camera.layers.set(pass.layer);
-			renderer.render(scene, camera);
+		if (transitionWorkBatches.size > 0) {
+			assertPortalDepthResetSupported(portalDepthResetCapability);
+		}
+		for (const node of graph) {
+			renderWorldGraphNode(node, transitionWorkBatches);
 		}
 		camera.layers.enableAll();
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
-			renderPassCount: passes.length,
+			renderPassCount: graph.length,
 			portalGroupCount: transitionPortalModel.candidates.length,
 			portalMaskMeshCount: portalMaskMeshes.size,
 			terrainMeshCount: terrainMeshes.size,
@@ -474,18 +485,49 @@ export function createWorldDisplayRenderer(
 		});
 	}
 
-	function applyPassClear(pass: WorldRenderPass): void {
-		const { color, depth, stencil } = pass.clearBeforePass;
+	function renderWorldGraphNode(
+		node: WorldRenderGraphNode,
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+	): void {
+		applyGraphNodeClear(node);
+		switch (node.kind) {
+			case "transition-aperture-mask":
+				renderTransitionApertureMaskNode(node, transitionWorkBatches);
+				return;
+			case "aperture-depth-reset":
+				renderTransitionDepthResetNode(node, transitionWorkBatches);
+				return;
+			case "opposite-scene-portal-composite":
+				renderTransitionCompositeNode(node, transitionWorkBatches);
+				return;
+			case "exterior-base":
+			case "interior-base":
+			case "diagnostic-interior":
+			case "debug-overlay":
+				camera.layers.set(node.layer);
+				renderer.render(scene, camera);
+				return;
+		}
+	}
+
+	function applyGraphNodeClear(node: WorldRenderGraphNode): void {
+		const { color, depth, stencil } = node.clearBeforePass;
 		if (color || depth || stencil) {
 			renderer.clear(color, depth, stencil);
 		}
 	}
 
-	function renderTransitionPortals(): void {
-		const visibleWorkItems: {
-			workItem: TransitionPortalWorkItem;
-			screenAreaPx: number;
-		}[] = [];
+	function collectVisibleTransitionPortalWorkBatches(): Map<
+		TransitionPortalBatchKey,
+		VisibleTransitionPortalWork[]
+	> {
+		const batches = new Map<
+			TransitionPortalBatchKey,
+			VisibleTransitionPortalWork[]
+		>();
 		const maskedInteriorCellIds = new Set<number>();
 		const visibilityContext = createPortalVisibilityContext({
 			camera,
@@ -508,62 +550,156 @@ export function createWorldDisplayRenderer(
 			recordPortalScreenAreaBucket(visibility.screenAreaPx);
 			recordVisiblePortalScreenArea(visibility.screenAreaPx);
 			const workItem = visibility.workItem;
-			if (!workItem || workItem.compositeScene !== "interior") {
+			if (!workItem) {
 				continue;
 			}
-			visibleWorkItems.push({
-				workItem,
-				screenAreaPx: visibility.screenAreaPx,
-			});
-			for (const envCellId of candidate.requestedInteriorEnvCellIds) {
-				maskedInteriorCellIds.add(envCellId);
-			}
-		}
-		visibleWorkItems.sort(
-			(left, right) =>
-				right.screenAreaPx - left.screenAreaPx ||
-				left.workItem.id.localeCompare(right.workItem.id),
-		);
-		latestPortalMetrics.visiblePortalGroupCount = visibleWorkItems.length;
-		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
-		if (visibleWorkItems.length > 0) {
-			assertPortalDepthResetSupported(portalDepthResetCapability);
-		}
-
-		for (const { workItem } of visibleWorkItems) {
 			const maskMesh = portalMaskMeshes.get(workItem.id);
 			if (!maskMesh) {
 				continue;
 			}
-
-			setPortalMaskVisibility(workItem.id);
-			renderer.clear(false, false, true);
-			camera.layers.set(WORLD_RENDER_LAYER.portalMask);
-			renderer.render(scene, camera);
-
-			renderPortalDepthReset(maskMesh, workItem.stencilRef);
-
-			setPortalInteriorVisibility();
-			applyPortalInteriorStencil(workItem.stencilRef);
-			camera.layers.set(WORLD_RENDER_LAYER.portalInterior);
-			renderer.render(scene, camera);
+			const batchKey = transitionPortalBatchKey(
+				workItem.direction,
+				workItem.recursionDepth,
+			);
+			const batch = batches.get(batchKey) ?? [];
+			batch.push({
+				workItem,
+				screenAreaPx: visibility.screenAreaPx,
+				maskMesh,
+			});
+			batches.set(batchKey, batch);
+			for (const envCellId of candidate.requestedInteriorEnvCellIds) {
+				maskedInteriorCellIds.add(envCellId);
+			}
 		}
-
-		setPortalMaskVisibility(null);
-		clearPortalInteriorStencil();
-		restorePortalInteriorVisibility();
-		syncSpatialVisibility();
+		let visibleWorkItemCount = 0;
+		for (const batch of batches.values()) {
+			batch.sort(
+				(left, right) =>
+					right.screenAreaPx - left.screenAreaPx ||
+					left.workItem.id.localeCompare(right.workItem.id),
+			);
+			visibleWorkItemCount += batch.length;
+		}
+		latestPortalMetrics.visiblePortalGroupCount = visibleWorkItemCount;
+		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
+		return batches;
 	}
 
-	function renderPortalDepthReset(maskMesh: Mesh, stencilRef: number): void {
-		const originalMaterial = maskMesh.material;
-		portalDepthResetMaterial.stencilRef = stencilRef;
-		maskMesh.material = portalDepthResetMaterial;
+	function renderTransitionApertureMaskNode(
+		node: WorldRenderGraphNode,
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+	): void {
+		if (!node.transition) {
+			return;
+		}
+		const batch = getGraphNodeTransitionBatch(node, transitionWorkBatches);
+		if (!batch) {
+			return;
+		}
+
+		portalBatchMaskMaterial.stencilRef = node.transition.stencilRef;
+		renderPortalAperturePassScene(batch, portalBatchMaskMaterial);
+	}
+
+	function renderTransitionDepthResetNode(
+		node: WorldRenderGraphNode,
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+	): void {
+		if (!node.transition) {
+			return;
+		}
+		const batch = getGraphNodeTransitionBatch(node, transitionWorkBatches);
+		if (!batch) {
+			return;
+		}
+
+		portalDepthResetMaterial.stencilRef = node.transition.stencilRef;
+		renderPortalAperturePassScene(batch, portalDepthResetMaterial);
+	}
+
+	function renderTransitionCompositeNode(
+		node: WorldRenderGraphNode,
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+	): void {
+		if (!node.transition) {
+			return;
+		}
+		if (!getGraphNodeTransitionBatch(node, transitionWorkBatches)) {
+			return;
+		}
+
+		applyPortalCompositeStencil(
+			node.transition.compositeScene,
+			node.transition.stencilRef,
+		);
 		try {
-			camera.layers.set(WORLD_RENDER_LAYER.portalDepthReset);
+			camera.layers.set(node.layer);
 			renderer.render(scene, camera);
 		} finally {
-			maskMesh.material = originalMaterial;
+			clearPortalCompositeStencil(node.transition.compositeScene);
+		}
+	}
+
+	function getGraphNodeTransitionBatch(
+		node: WorldRenderGraphNode,
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+	): readonly VisibleTransitionPortalWork[] | null {
+		if (!node.transition) {
+			return null;
+		}
+		const batch = getTransitionPortalBatch(
+			transitionWorkBatches,
+			node.transition.direction,
+			node.transition.recursionDepth,
+		);
+		return batch.length > 0 ? batch : null;
+	}
+
+	function getTransitionPortalBatch(
+		transitionWorkBatches: ReadonlyMap<
+			TransitionPortalBatchKey,
+			readonly VisibleTransitionPortalWork[]
+		>,
+		direction: TransitionPortalGraphDirection,
+		recursionDepth: number,
+	): readonly VisibleTransitionPortalWork[] {
+		return (
+			transitionWorkBatches.get(
+				transitionPortalBatchKey(direction, recursionDepth),
+			) ?? []
+		);
+	}
+
+	function transitionPortalBatchKey(
+		direction: TransitionPortalGraphDirection,
+		recursionDepth: number,
+	): TransitionPortalBatchKey {
+		return `${direction}:${recursionDepth}`;
+	}
+
+	function renderPortalAperturePassScene(
+		batch: readonly VisibleTransitionPortalWork[],
+		material: Material,
+	): void {
+		syncPortalAperturePassScene(batch, material);
+		try {
+			camera.layers.enableAll();
+			renderer.render(portalAperturePassScene, camera);
+		} finally {
+			clearPortalAperturePassScene();
 		}
 	}
 
@@ -1160,6 +1296,11 @@ export function createWorldDisplayRenderer(
 			mesh.removeFromParent();
 			disposeMesh(mesh);
 			portalMaskMeshes.delete(groupId);
+			const passMesh = portalAperturePassMeshes.get(groupId);
+			if (passMesh) {
+				passMesh.removeFromParent();
+				portalAperturePassMeshes.delete(groupId);
+			}
 		}
 
 		for (const candidate of model.candidates) {
@@ -1307,26 +1448,46 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
-	function setPortalInteriorVisibility(): void {
-		for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
-			mesh.visible = true;
-		}
-		for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
-			mesh.visible = true;
+	function syncPortalAperturePassScene(
+		batch: readonly VisibleTransitionPortalWork[],
+		material: Material,
+	): void {
+		for (const work of batch) {
+			const sourceMesh = work.maskMesh;
+			const passMesh = getPortalAperturePassMesh(work.workItem.id);
+			sourceMesh.updateMatrixWorld(true);
+			passMesh.geometry = sourceMesh.geometry;
+			passMesh.material = material;
+			passMesh.matrix.copy(sourceMesh.matrixWorld);
+			passMesh.matrixWorldNeedsUpdate = true;
+			if (passMesh.parent !== portalAperturePassScene) {
+				portalAperturePassScene.add(passMesh);
+			}
 		}
 	}
 
-	function restorePortalInteriorVisibility(): void {
-		for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
-			mesh.visible = true;
+	function getPortalAperturePassMesh(workItemId: string): Mesh {
+		const existing = portalAperturePassMeshes.get(workItemId);
+		if (existing) {
+			return existing;
 		}
-		for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
-			mesh.visible = true;
-		}
+
+		const mesh = new Mesh();
+		mesh.name = `portal-aperture-pass/${workItemId}`;
+		mesh.matrixAutoUpdate = false;
+		portalAperturePassMeshes.set(workItemId, mesh);
+		return mesh;
 	}
 
-	function applyPortalInteriorStencil(stencilRef: number): void {
-		forEachPortalInteriorMaterial((material) => {
+	function clearPortalAperturePassScene(): void {
+		portalAperturePassScene.clear();
+	}
+
+	function applyPortalCompositeStencil(
+		sceneSet: TransitionPortalGraphScene,
+		stencilRef: number,
+	): void {
+		forEachPortalCompositeMaterial(sceneSet, (material) => {
 			material.stencilWrite = true;
 			material.stencilRef = stencilRef;
 			material.stencilFunc = EqualStencilFunc;
@@ -1336,8 +1497,10 @@ export function createWorldDisplayRenderer(
 		});
 	}
 
-	function clearPortalInteriorStencil(): void {
-		forEachPortalInteriorMaterial((material) => {
+	function clearPortalCompositeStencil(
+		sceneSet: TransitionPortalGraphScene,
+	): void {
+		forEachPortalCompositeMaterial(sceneSet, (material) => {
 			material.stencilWrite = false;
 			material.stencilRef = 0;
 			material.stencilFunc = AlwaysStencilFunc;
@@ -1347,13 +1510,24 @@ export function createWorldDisplayRenderer(
 		});
 	}
 
-	function forEachPortalInteriorMaterial(
+	function forEachPortalCompositeMaterial(
+		sceneSet: TransitionPortalGraphScene,
 		visit: (material: Material) => void,
 	): void {
-		for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
+		if (sceneSet === "interior") {
+			for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
+				visitMeshMaterials(mesh, visit);
+			}
+			for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
+				visitMeshMaterials(mesh, visit);
+			}
+			return;
+		}
+
+		for (const mesh of renderWorkingModel.exterior.terrainMeshes) {
 			visitMeshMaterials(mesh, visit);
 		}
-		for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
+		for (const mesh of renderWorkingModel.exterior.staticRenderableMeshes) {
 			visitMeshMaterials(mesh, visit);
 		}
 	}
@@ -1744,12 +1918,15 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		portalMaskMeshes.clear();
+		portalAperturePassScene.clear();
+		portalAperturePassMeshes.clear();
 		for (const object of debugOverlayObjects.values()) {
 			disposeObjectTree(object);
 		}
 		debugOverlayObjects.clear();
 		chunkRoots.clear();
 		chunkRootContainer.clear();
+		portalBatchMaskMaterial.dispose();
 		portalDepthResetMaterial.dispose();
 		renderer.dispose();
 		renderer.domElement.remove();

@@ -154,15 +154,14 @@ Phase 0 progress:
 - `rg` found no remaining `localStorage` debug render switches in `apps/holtburger-3d/src`.
   Earlier console-driven `holtburger.debug.renderMode` values should therefore be treated as stale
   local browser state, not an app-supported code path.
-- Current prototype render paths and cleanup targets:
-  - `renderPortalGroups()` still performs per-visible-group full-scene mask, depth-reset, and
-    composited-interior renders;
-  - `setPortalInteriorVisibility()` still toggles exact requested env-cell subsets and performs
-    source-array lookups;
-  - `applyPortalInteriorStencil()` and `clearPortalInteriorStencil()` still mutate material stencil
-    state in the hot path;
+- Prototype render paths and cleanup targets identified during Phase 0:
+  - the original per-visible-group full-scene mask, depth-reset, and composited-interior render loop
+    was a Phase 5 replacement target;
+  - the original exact requested-env-cell visibility toggles and source-array lookups were a Phase 3
+    replacement target;
+  - the original per-portal interior material stencil mutation was a Phase 5 replacement target;
   - the original `outdoor-portal-view-groups.ts` exposed a one-way outdoor-to-indoor group shape
-    and minted one stencil ref per group;
+    and minted one stencil ref per group before Phase 4 replaced it;
   - `apps/holtburger-3d/src/dev/PortalDepthResetProbe.svelte` and
     `apps/holtburger-3d/src/dev/portal-depth-reset-probe.ts` remain useful compatibility probes
     until Phase 5 replaces the prototype portal pass structure.
@@ -555,7 +554,7 @@ Refinements to future steps:
 
 ## Phase 5: Batched Transition Portal Render Graph
 
-Status: not started.
+Status: complete for the free-camera diagnostic graph.
 
 Purpose: replace per-portal full-scene render passes with batched direction/depth render graph
 passes.
@@ -610,6 +609,77 @@ Exit criteria:
 - Portal compositing scales by direction/depth level instead of by portal group.
 - Close portal correctness remains at least as good as the existing stencil/depth-reset prototype.
 - Prototype render modes replaced by this graph are deleted or marked for Phase 8 cleanup.
+
+Phase 5 progress:
+
+- Added explicit renderer graph nodes in
+  `apps/holtburger-3d/src/lib/world-display/render-passes.ts`:
+  - `exterior-base`;
+  - `interior-base`;
+  - `transition-aperture-mask`;
+  - `aperture-depth-reset`;
+  - `opposite-scene-portal-composite`;
+  - `diagnostic-interior`;
+  - `debug-overlay`.
+- Added `deriveFreeCameraWorldRenderGraph()`, which currently emits the browser/free-camera
+  diagnostic graph:
+  - exterior base;
+  - batched outdoor-to-indoor aperture mask, depth reset, and broad interior composite;
+  - diagnostic broad interiors;
+  - batched indoor-to-outdoor aperture mask, depth reset, and broad exterior composite;
+  - debug overlays.
+- Replaced the old per-visible-portal full-scene loop in
+  `apps/holtburger-3d/src/lib/world-display/world-display-renderer.ts` with:
+  - one visibility/classification collection pass;
+  - work batches keyed by transition direction plus recursion depth;
+  - one shared stencil ref per direction/depth level;
+  - one broad opposite-scene composite render per visible direction/depth level.
+- Added a pass-local `portal-aperture-pass-scene` for transition aperture mask and depth-reset
+  nodes. The pass scene contains only temporary aperture pass meshes that reference the cached
+  aperture geometry and copy the source mesh's current world matrix.
+- Removed the hot-path one-render-per-portal mask/depth-reset/composite loop. Mask and depth-reset
+  nodes no longer call `renderer.render(scene, camera)` against the full world scene.
+- Replaced per-portal composite material mutation with per-graph-node composite stencil state over
+  the broad target scene set. The renderer now applies stencil state once for the interior or
+  exterior composite node and clears it in a `finally` block.
+- Kept the visible aperture depth test/depth write behavior from the corrected prototype: foreground
+  geometry can occlude aperture masks, and the following depth-reset node only affects pixels that
+  survived the visible-aperture stencil pass.
+- Added render-graph tests proving the free-camera graph batches both directions at depth `1` and
+  uses distinct direction/depth stencil refs.
+
+Decisions and course corrections:
+
+- Phase 5 deliberately implements the free-camera diagnostic graph first. Residency-aware base-scene
+  selection remains Phase 6/7 work; the current graph preserves whole-level browser diagnostics
+  while making both transition directions first-class graph nodes.
+- `interior-base` is represented in the graph type but is not emitted by
+  `deriveFreeCameraWorldRenderGraph()` yet. It becomes active once Phase 7 selects an interior base
+  scene from camera/view residency.
+- Batching currently targets recursion depth `1`, matching the default policy. The graph shape is
+  direction/depth keyed so depth `2` can be added without returning to per-portal full-scene
+  rendering.
+- Individual aperture meshes still exist as cached source geometry owners and for debug/picking
+  integration. Stencil identity no longer comes from those individual candidates in the graph path.
+- Broad scene composite renders still use the main Three.js scene and layers. This is intentional:
+  the Phase 5 bottleneck was repeated full-scene traversal for tiny mask/depth-reset jobs. Exterior
+  and interior broad composites now happen once per direction/depth level, not once per portal.
+
+Refinements to future steps:
+
+- Phase 6/7 should choose whether the primary base scene is exterior or interior from renderer
+  camera/view residency, then emit either `exterior-base` or `interior-base` as the production base
+  node. The current free-camera graph can remain a diagnostic mode.
+- Phase 7 should decide how much broad diagnostic interior rendering is allowed outside browser
+  free-camera mode. Walkabout/client mode should not need the always-on diagnostic interior pass.
+- Phase 8 cleanup should remove or rename legacy "portal group" metrics/test wording that now
+  refers to transition work items, and should retire `deriveWorldRenderPasses()` if no remaining
+  code path consumes it.
+- Manual verification is still required in Tauri/WebView for:
+  - underground terrain openings;
+  - foreground geometry occluding aperture masks;
+  - outdoor-to-indoor and indoor-to-outdoor views of the same transition aperture;
+  - before/after frame timing on a zoomed-out overview.
 
 ## Phase 6: Camera/View Residency Index
 

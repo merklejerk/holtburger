@@ -1343,7 +1343,7 @@ Downstream impact:
 
 ## Phase 8: Cleanup, Hardening, and Documentation
 
-Status: not started.
+Status: complete for currently identified prototype debt.
 
 Purpose: remove prototype debt and make the new pipeline the only maintained path.
 
@@ -1364,6 +1364,64 @@ Exit criteria:
 - Debug switches correspond to maintained diagnostics only.
 - Tests cover source-backed helpers and render data derivation rather than dead implementation
   seams.
+
+Phase 8 progress:
+
+- Deleted the superseded WebGL compatibility probe route and files:
+  - `apps/holtburger-3d/src/dev/PortalDepthResetProbe.svelte`;
+  - `apps/holtburger-3d/src/dev/portal-depth-reset-probe.ts`.
+- Removed the `?probe=portal-depth-reset` app branch and the probe-only CSS. The Tauri/WebView
+  depth-reset capability was already proven in Phase 9 of the older outdoor stencil plan and is now
+  production code in the unified render graph.
+- Removed dead render-pass helpers from
+  `apps/holtburger-3d/src/lib/world-display/render-passes.ts`:
+  - `deriveWorldRenderPasses()`;
+  - `deriveFreeCameraWorldRenderGraph()`;
+  - the old `WorldRenderPass`/`WorldRenderPassKind` shape;
+  - the stale depth-1-only `TRANSITION_PORTAL_STENCIL_REFS` constants.
+- Updated render-pass tests to cover the maintained explicit transition graph-node helper rather
+  than the deleted prototype/free-camera graph helpers.
+- Renamed remaining production metric fields away from legacy "portal group" terminology:
+  - `visiblePortalGroupCount` -> `visiblePortalWorkItemCount`;
+  - `portalGroupCount` -> `transitionPortalCandidateCount`;
+  - `portalMaskMeshCount` -> `portalApertureMeshCount`.
+- Updated browser renderer diagnostics to use portal work-item/candidate/aperture terminology.
+- Updated
+  [holtburger-3d-outdoor-portal-stencil-rendering-plan.md](holtburger-3d-outdoor-portal-stencil-rendering-plan.md)
+  to mark it as superseded by this unified render pipeline plan while retaining it as historical
+  research/prototype context.
+- Tightened an overspecified browser-mode test that asserted the exact default transition depth.
+  It now checks that the default is inside the supported range; exact values remain asserted only
+  where clamping behavior is the actual contract.
+
+Decisions and course corrections:
+
+- The probe was removed rather than kept as a hidden route because it was a one-off compatibility
+  fixture for the old stencil/depth-reset plan. Keeping it would preserve a second diagnostic entry
+  point that is no longer part of the maintained renderer pipeline.
+- `diagnostic-interior` remains a valid render graph node name. It is not a prototype shim; it is
+  the explicit unknown-residency/broad-inspection fallback path.
+- Historical "portal group" wording remains in earlier progress notes in this file where it
+  describes pre-migration code or prototype history. Production code and active diagnostics now use
+  transition work-item/candidate/aperture terminology.
+- No cleanup change altered portal classification, residency, stencil state, or render graph pass
+  ordering.
+
+Phase 8 validation:
+
+- `npm run --prefix apps/holtburger-3d check` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `git diff --check` passed.
+
+Refinements to future steps:
+
+- Phase 9 profiling should use the renamed diagnostics:
+  - visible portal work items;
+  - transition portal candidates;
+  - portal aperture meshes.
+- If Phase 9 finds additional stale helper names during profiling, handle them as follow-up cleanup
+  tied to measured profiler paths rather than expanding Phase 8 into unrelated refactors.
 
 ## Phase 9: Reprofile and Decide Deferred Tracks
 

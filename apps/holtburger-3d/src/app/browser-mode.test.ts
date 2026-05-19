@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	MAX_TRANSITION_PORTAL_MAX_DEPTH,
+	MIN_TRANSITION_PORTAL_MAX_DEPTH,
 	browserDestinationToIndoorEnvCellId,
 	browserLocationToLandblockId,
 	createBrowserModeState,
@@ -46,7 +48,12 @@ describe("browser-mode location policy", () => {
 		expect(state.terrainLodRadius).toBe(2);
 		expect(state.buildingLodRadius).toBe(1);
 		expect(state.detailLodRadius).toBe(1);
-		expect(state.transitionPortalMaxDepth).toBe(1);
+		expect(state.transitionPortalMaxDepth).toBeGreaterThanOrEqual(
+			MIN_TRANSITION_PORTAL_MAX_DEPTH,
+		);
+		expect(state.transitionPortalMaxDepth).toBeLessThanOrEqual(
+			MAX_TRANSITION_PORTAL_MAX_DEPTH,
+		);
 		expect(state.landblockInputMode).toBe("dungeon");
 		expect(state.showPortalPolygons).toBe(false);
 		expect(state.showCellIndicators).toBe(false);
@@ -76,7 +83,7 @@ describe("browser-mode location policy", () => {
 		expect(
 			updateTransitionPortalMaxDepth(createBrowserModeState(), 99)
 				.transitionPortalMaxDepth,
-		).toBe(4);
+		).toBe(MAX_TRANSITION_PORTAL_MAX_DEPTH);
 		expect(
 			updateTransitionPortalMaxDepth(createBrowserModeState(), 3.8)
 				.transitionPortalMaxDepth,

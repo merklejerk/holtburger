@@ -20,11 +20,14 @@ function visibleDirections(
 
 describe("world render policy", () => {
 	it("selects interior base and indoor-to-outdoor initial transitions for env-cell residency", () => {
-		const policy = deriveWorldRenderPolicy({
-			kind: "env-cell",
-			landblockId: 0x0102ffff,
-			envCellId: 0x01020001,
-		});
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "env-cell",
+				landblockId: 0x0102ffff,
+				envCellId: 0x01020001,
+			},
+			{ transitionPortalMaxDepth: 1 },
+		);
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
 			visibleTransitions: visibleDirections([
@@ -56,10 +59,13 @@ describe("world render policy", () => {
 	});
 
 	it("selects exterior base and outdoor-to-indoor initial transitions for outdoor residency", () => {
-		const policy = deriveWorldRenderPolicy({
-			kind: "outdoor-landblock",
-			landblockId: 0x0102ffff,
-		});
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "outdoor-landblock",
+				landblockId: 0x0102ffff,
+			},
+			{ transitionPortalMaxDepth: 1 },
+		);
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
 			visibleTransitions: visibleDirections([
@@ -91,10 +97,13 @@ describe("world render policy", () => {
 	});
 
 	it("falls back to broad diagnostic rendering for unknown residency", () => {
-		const policy = deriveWorldRenderPolicy({
-			kind: "unknown",
-			landblockId: null,
-		});
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "unknown",
+				landblockId: null,
+			},
+			{ transitionPortalMaxDepth: 1 },
+		);
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
 			visibleTransitions: visibleDirections([
@@ -162,8 +171,9 @@ describe("world render policy", () => {
 				landblockId: 0x0102ffff,
 			},
 			{
-				minPortalScreenAreaPx: 64,
+				minPortalScreenAreaRatio: 0.00005,
 				enableUnknownResidencyDiagnosticFallback: false,
+				transitionPortalMaxDepth: 1,
 			},
 		);
 
@@ -177,7 +187,7 @@ describe("world render policy", () => {
 				}),
 			],
 			portalCandidates: {
-				minScreenAreaPx: 64,
+				minScreenAreaRatio: 0.00005,
 			},
 		});
 	});
@@ -256,10 +266,13 @@ describe("world render policy", () => {
 	});
 
 	it("summarizes active render graph work for diagnostics", () => {
-		const policy = deriveWorldRenderPolicy({
-			kind: "unknown",
-			landblockId: null,
-		});
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "unknown",
+				landblockId: null,
+			},
+			{ transitionPortalMaxDepth: 1 },
+		);
 		const graph = deriveWorldRenderGraphForPolicy({
 			policy,
 			visibleTransitions: visibleDirections([

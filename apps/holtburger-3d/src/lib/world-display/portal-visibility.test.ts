@@ -68,7 +68,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-50),
 			visibleSide: "positive",
-			context: createTestContext({ minScreenAreaPx: 10 }),
+			context: createTestContext({ minScreenAreaPxEquivalent: 10 }),
 		});
 
 		expect(result.visible).toBe(false);
@@ -106,7 +106,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-5),
 			visibleSide: "positive",
-			context: createTestContext({ minScreenAreaPx: 10 }),
+			context: createTestContext({ minScreenAreaPxEquivalent: 10 }),
 		});
 
 		expect(result.visible).toBe(false);
@@ -124,7 +124,7 @@ describe("portal visibility", () => {
 			],
 			worldPlane: createZPlane(-5),
 			visibleSide: "positive",
-			context: createTestContext({ minScreenAreaPx: 200 }),
+			context: createTestContext({ minScreenAreaPxEquivalent: 200 }),
 		});
 
 		expect(result.visible).toBe(false);
@@ -156,12 +156,14 @@ function createTestContext(
 	options: {
 		positionZ?: number;
 		targetZ?: number;
-		minScreenAreaPx?: number;
+		minScreenAreaPxEquivalent?: number;
 	} = {},
 ) {
+	const viewport = new Vector2(800, 600);
 	return createPortalVisibilityContext({
 		camera: createCamera(options),
-		viewport: new Vector2(800, 600),
-		minScreenAreaPx: options.minScreenAreaPx ?? 1,
+		viewport,
+		minScreenAreaRatio:
+			(options.minScreenAreaPxEquivalent ?? 1) / viewport.x / viewport.y,
 	});
 }

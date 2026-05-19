@@ -1,12 +1,19 @@
 # Holtburger 3D Outdoor Portal Stencil Rendering Plan
 
-Status: Phase 10 implemented; manual scene verification pending.
+Status: superseded by
+[holtburger-3d-unified-render-pipeline-plan.md](holtburger-3d-unified-render-pipeline-plan.md).
+This document is retained as historical research and prototype context.
 
 ## Purpose
 
 Implement outdoor-to-indoor portal rendering in `apps/holtburger-3d` so exterior views can show
 interior env cells through door, window, and underground-transition apertures without cutting
 terrain meshes or rendering portal polygons as opaque walls.
+
+The maintained implementation plan is now the unified render pipeline plan linked above. That plan
+replaces the Phase 10 prototype's per-portal group model with residency-aware transition work
+items, batched direction/depth render graph passes, adjustable bounded transition depth, and exact
+CellBSP camera residency.
 
 The first target is browser/free-camera outdoor scenes. This work should not depend on live runtime
 residency or the future walkabout simulator. It should consume static scene coverage, camera state,

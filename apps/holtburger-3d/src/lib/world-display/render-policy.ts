@@ -12,7 +12,7 @@ import type { CameraViewResidencyContext } from "./world-residency-index";
 export type WorldRenderBaseScene = "exterior" | "interior";
 
 export interface WorldRenderPolicyOptions {
-	minPortalScreenAreaPx: number;
+	minPortalScreenAreaRatio: number;
 	enableUnknownResidencyDiagnosticFallback: boolean;
 	transitionPortalMaxDepth: number;
 	sceneContext: WorldRenderSceneContext;
@@ -39,7 +39,7 @@ export interface VisibleTransitionLevels {
 }
 
 export interface TransitionPortalCandidatePolicy {
-	minScreenAreaPx: number;
+	minScreenAreaRatio: number;
 }
 
 export interface WorldRenderGraphSummary {
@@ -54,11 +54,12 @@ export interface WorldRenderGraphSummary {
 }
 
 export const MIN_TRANSITION_PORTAL_MAX_DEPTH = 0;
-export const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 1;
-export const MAX_TRANSITION_PORTAL_MAX_DEPTH = 4;
+export const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 3;
+export const MAX_TRANSITION_PORTAL_MAX_DEPTH = 8;
+export const DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO = 0.0001;
 
 export const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
-	minPortalScreenAreaPx: 16,
+	minPortalScreenAreaRatio: DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO,
 	enableUnknownResidencyDiagnosticFallback: true,
 	transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
 	sceneContext: { kind: "outdoor", anchorLandblockId: null },
@@ -299,7 +300,7 @@ function createWorldRenderPolicy(options: {
 			maxDepth: options.options.transitionPortalMaxDepth,
 		}),
 		portalCandidates: {
-			minScreenAreaPx: options.options.minPortalScreenAreaPx,
+			minScreenAreaRatio: options.options.minPortalScreenAreaRatio,
 		},
 	};
 }

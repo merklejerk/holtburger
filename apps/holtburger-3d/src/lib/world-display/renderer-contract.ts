@@ -28,7 +28,7 @@ export interface WorldRenderPortalMetrics {
 	topologyOutdoorPortalCount: number;
 	apertureCandidateCount: number;
 	renderWorkItemCandidateCount: number;
-	visiblePortalGroupCount: number;
+	visiblePortalWorkItemCount: number;
 	maskedInteriorCellCount: number;
 	skippedMissingApertureCount: number;
 	skippedMissingPolygonCount: number;
@@ -65,8 +65,8 @@ export interface WorldRenderDebugMetrics {
 	apertureDepthResetPassCount: number;
 	interiorCompositePassCount: number;
 	exteriorCompositePassCount: number;
-	portalGroupCount: number;
-	portalMaskMeshCount: number;
+	transitionPortalCandidateCount: number;
+	portalApertureMeshCount: number;
 	terrainMeshCount: number;
 	visibleTerrainMeshCount: number;
 	staticGroupMeshCount: number;

@@ -4,6 +4,7 @@ import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
 	type PreparedAssetRecord,
+	type PreparedPolygonSetBspNode,
 } from "../assets/types";
 import { formatIndoorEnvCellAssetId } from "../assets/structured-interior-coverage";
 import {
@@ -407,6 +408,7 @@ function createStructuredInteriorCell(
 				hasBsp: true,
 				rootKind: "port",
 			},
+			cellBsp: createLeafBspNode(),
 			physicsWitness: {
 				polygonCount: 0,
 				hasBsp: false,
@@ -417,6 +419,16 @@ function createStructuredInteriorCell(
 		},
 		renderGeometry: createRenderGeometry(),
 		debugColorKey: `cell-${envCellId.toString(16)}`,
+	};
+}
+
+function createLeafBspNode(): PreparedPolygonSetBspNode {
+	return {
+		kind: "leaf",
+		index: 0,
+		solid: 0,
+		sphere: null,
+		polyIds: [],
 	};
 }
 

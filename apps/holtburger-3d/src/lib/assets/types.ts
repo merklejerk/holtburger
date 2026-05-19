@@ -210,10 +210,32 @@ export interface PreparedPolygonSetPortalPoly {
 	polyId: number;
 }
 
-export interface PreparedPolygonSetBspNode {
-	[key: string]: unknown;
-	kind: string;
-}
+export type PreparedPolygonSetBspNode =
+	| {
+			kind: "port";
+			plane: PreparedPolygonSetPlane;
+			pos: PreparedPolygonSetBspNode;
+			neg: PreparedPolygonSetBspNode;
+			sphere: SphereDto | null;
+			polyIds: number[];
+			portalPolys: PreparedPolygonSetPortalPoly[];
+	  }
+	| {
+			kind: "leaf";
+			index: number;
+			solid: number;
+			sphere: SphereDto | null;
+			polyIds: number[];
+	  }
+	| {
+			kind: "internal";
+			tag: string;
+			plane: PreparedPolygonSetPlane;
+			pos: PreparedPolygonSetBspNode | null;
+			neg: PreparedPolygonSetBspNode | null;
+			sphere: SphereDto | null;
+			polyIds: number[];
+	  };
 
 interface PreparedGfxObjPhysicsWitness {
 	polygonCount: number;
@@ -232,6 +254,7 @@ export interface PreparedEnvironmentCellStruct {
 	drawingPolygons: PreparedPolygonSetPolygon[];
 	portalPolygonIds: number[];
 	cellBspWitness: PreparedCellStructBspWitness;
+	cellBsp: PreparedPolygonSetBspNode;
 	physicsWitness: PreparedGfxObjPhysicsWitness;
 	drawingBsp: PreparedPolygonSetBspNode | null;
 	renderGeometry: PreparedPolygonSetRenderGeometry;

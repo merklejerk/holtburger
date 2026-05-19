@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { PreparedPolygonSetBspNode } from "../assets/types";
 import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
@@ -208,6 +209,7 @@ function createStructuredInteriorCell(
 				hasBsp: true,
 				rootKind: "port",
 			},
+			cellBsp: createLeafBspNode(),
 			physicsWitness: {
 				polygonCount: 0,
 				hasBsp: false,
@@ -244,5 +246,15 @@ function createStructuredInteriorCell(
 			},
 		},
 		debugColorKey: `cell-${envCellId.toString(16)}`,
+	};
+}
+
+function createLeafBspNode(): PreparedPolygonSetBspNode {
+	return {
+		kind: "leaf",
+		index: 0,
+		solid: 0,
+		sphere: null,
+		polyIds: [],
 	};
 }

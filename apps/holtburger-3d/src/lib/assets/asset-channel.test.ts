@@ -1389,6 +1389,13 @@ describe("asset channel controller", () => {
 								hasBsp: true,
 								rootKind: "leaf",
 							},
+							cellBsp: {
+								kind: "leaf",
+								index: 0,
+								solid: 0,
+								sphere: null,
+								polyIds: [],
+							},
 							physicsWitness: {
 								polygonCount: 1,
 								hasBsp: true,
@@ -1527,6 +1534,13 @@ describe("asset channel controller", () => {
 								hasBsp: true,
 								rootKind: "leaf",
 							},
+							cellBsp: {
+								kind: "leaf",
+								index: 0,
+								solid: 0,
+								sphere: null,
+								polyIds: [],
+							},
 							physicsWitness: {
 								polygonCount: 2,
 								hasBsp: true,
@@ -1624,6 +1638,13 @@ describe("asset channel controller", () => {
 								hasBsp: true,
 								rootKind: "leaf",
 							},
+							cellBsp: {
+								kind: "leaf",
+								index: 0,
+								solid: 0,
+								sphere: null,
+								polyIds: [],
+							},
 							physicsWitness: {
 								polygonCount: 1,
 								hasBsp: true,
@@ -1717,6 +1738,13 @@ describe("asset channel controller", () => {
 							cellBspWitness: {
 								hasBsp: true,
 								rootKind: "leaf",
+							},
+							cellBsp: {
+								kind: "leaf",
+								index: 0,
+								solid: 0,
+								sphere: null,
+								polyIds: [],
 							},
 							physicsWitness: {
 								polygonCount: 1,

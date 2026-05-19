@@ -385,6 +385,13 @@ describe("host contracts", () => {
 						hasBsp: true,
 						rootKind: "leaf",
 					},
+					cellBsp: {
+						kind: "leaf",
+						index: 0,
+						solid: 0,
+						sphere: null,
+						polyIds: [],
+					},
 					physicsWitness: {
 						polygonCount: 2,
 						hasBsp: true,
@@ -403,6 +410,9 @@ describe("host contracts", () => {
 
 		expect(payload.cellStructureIds).toEqual([1]);
 		expect(payload.cellStructures[0]?.drawingPolygons).toHaveLength(1);
+		expect(payload.cellStructures[0]?.cellBspWitness.rootKind).toBe(
+			payload.cellStructures[0]?.cellBsp.kind,
+		);
 	});
 
 	it("parses setup-model payloads with ordered part references", () => {

@@ -1584,6 +1584,7 @@ fn serialize_cell_structure(cell_structure: &CellStruct) -> serde_json::Value {
             "hasBsp": true,
             "rootKind": bsp_node_kind(&cell_structure.cell_bsp),
         },
+        "cellBsp": serialize_bsp_node(&cell_structure.cell_bsp),
         "physicsWitness": {
             "polygonCount": cell_structure.physics_polygons.len(),
             "hasBsp": true,
@@ -2128,6 +2129,10 @@ mod tests {
         assert_eq!(
             selected_cell_structure["physicsWitness"]["hasBsp"].as_bool(),
             Some(true)
+        );
+        assert_eq!(
+            selected_cell_structure["cellBspWitness"]["rootKind"],
+            selected_cell_structure["cellBsp"]["kind"]
         );
     }
 

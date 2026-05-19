@@ -18,6 +18,7 @@ import {
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
 	updateTerrainLodRadius,
+	updateTransitionPortalMaxDepth,
 } from "./browser-mode";
 import type { RuntimeResidencyDto } from "../lib/host/contracts";
 
@@ -45,6 +46,7 @@ describe("browser-mode location policy", () => {
 		expect(state.terrainLodRadius).toBe(2);
 		expect(state.buildingLodRadius).toBe(1);
 		expect(state.detailLodRadius).toBe(1);
+		expect(state.transitionPortalMaxDepth).toBe(1);
 		expect(state.landblockInputMode).toBe("dungeon");
 		expect(state.showPortalPolygons).toBe(false);
 		expect(state.showCellIndicators).toBe(false);
@@ -64,6 +66,21 @@ describe("browser-mode location policy", () => {
 		expect(state.showPortalPolygons).toBe(true);
 		expect(state.showCellIndicators).toBe(false);
 		expect(state.highlightPortalTargets).toBe(false);
+	});
+
+	it("clamps transition portal recursion depth in browser-owned mode state", () => {
+		expect(
+			updateTransitionPortalMaxDepth(createBrowserModeState(), -1)
+				.transitionPortalMaxDepth,
+		).toBe(0);
+		expect(
+			updateTransitionPortalMaxDepth(createBrowserModeState(), 99)
+				.transitionPortalMaxDepth,
+		).toBe(4);
+		expect(
+			updateTransitionPortalMaxDepth(createBrowserModeState(), 3.8)
+				.transitionPortalMaxDepth,
+		).toBe(3);
 	});
 
 	it("parses AC-style coordinate input into a stable selection label", () => {

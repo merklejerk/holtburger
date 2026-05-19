@@ -50,6 +50,7 @@ export interface WorldRenderGraphNode {
 		direction: TransitionPortalGraphDirection;
 		recursionDepth: number;
 		stencilRef: number;
+		parentStencilRef: number | null;
 		compositeScene: TransitionPortalGraphScene;
 	};
 }
@@ -160,6 +161,7 @@ export function deriveFreeCameraWorldRenderGraph(options: {
 				direction: "outdoor-to-indoor",
 				recursionDepth: 1,
 				stencilRef: TRANSITION_PORTAL_STENCIL_REFS.outdoorToIndoorDepth1,
+				parentStencilRef: null,
 				compositeScene: "interior",
 			}),
 		);
@@ -183,6 +185,7 @@ export function deriveFreeCameraWorldRenderGraph(options: {
 				direction: "indoor-to-outdoor",
 				recursionDepth: 1,
 				stencilRef: TRANSITION_PORTAL_STENCIL_REFS.indoorToOutdoorDepth1,
+				parentStencilRef: null,
 				compositeScene: "exterior",
 			}),
 		);
@@ -208,16 +211,29 @@ export const TRANSITION_PORTAL_STENCIL_REFS = {
 	indoorToOutdoorDepth1: 2,
 } as const;
 
+export function transitionPortalStencilRefForDepth(
+	recursionDepth: number,
+): number {
+	if (!Number.isInteger(recursionDepth) || recursionDepth < 1) {
+		throw new Error(
+			`Transition portal stencil depth must be a positive integer, got ${recursionDepth}.`,
+		);
+	}
+	return recursionDepth;
+}
+
 export function deriveTransitionPortalGraphNodes(options: {
 	direction: TransitionPortalGraphDirection;
 	recursionDepth: number;
 	stencilRef: number;
+	parentStencilRef: number | null;
 	compositeScene: TransitionPortalGraphScene;
 }): WorldRenderGraphNode[] {
 	const transition = {
 		direction: options.direction,
 		recursionDepth: options.recursionDepth,
 		stencilRef: options.stencilRef,
+		parentStencilRef: options.parentStencilRef,
 		compositeScene: options.compositeScene,
 	};
 	return [
@@ -227,7 +243,7 @@ export function deriveTransitionPortalGraphNodes(options: {
 			clearBeforePass: {
 				color: false,
 				depth: false,
-				stencil: true,
+				stencil: false,
 			},
 			transition,
 		},

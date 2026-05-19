@@ -31,6 +31,7 @@
 		staticRenderableScene,
 		structuredInteriorScene,
 		transitionPortalModel,
+		transitionPortalMaxDepth = 1,
 		debugOverlayScene,
 		activeRenderAnchor: _activeRenderAnchor = null,
 		renderChunkTransforms = [],
@@ -44,6 +45,7 @@
 		staticRenderableScene: StaticRenderableSceneModel;
 		structuredInteriorScene: StructuredInteriorSceneModel;
 		transitionPortalModel: TransitionPortalCandidateModel;
+		transitionPortalMaxDepth?: number;
 		debugOverlayScene: WorldDebugOverlayModel;
 		activeRenderAnchor?: RenderLandblockAnchor | null;
 		renderChunkTransforms?: RenderChunkTransform[];
@@ -69,6 +71,7 @@
 				staticRenderableScene,
 				structuredInteriorScene,
 				transitionPortalModel,
+				transitionPortalMaxDepth,
 				debugOverlayScene,
 				renderChunkTransforms,
 				renderSpatialQuery,
@@ -133,6 +136,14 @@
 			return;
 		}
 		controller.setTransitionPortalModel(transitionPortalModel);
+	});
+
+	$effect(() => {
+		const controller = rendererController;
+		if (!controller) {
+			return;
+		}
+		controller.setTransitionPortalMaxDepth(transitionPortalMaxDepth);
 	});
 
 	$effect(() => {

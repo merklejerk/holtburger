@@ -6,9 +6,11 @@
 		MAX_BROWSER_LOD_RADIUS,
 		MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		MAX_TRANSITION_PORTAL_MAX_DEPTH,
 		MIN_BROWSER_LOD_RADIUS,
 		MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
 		MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		MIN_TRANSITION_PORTAL_MAX_DEPTH,
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
@@ -135,6 +137,11 @@
 		frontendState.updateStructuredInteriorMaxVisibleCellDepth(
 			Number(input.value),
 		);
+	}
+
+	function handleTransitionPortalMaxDepthInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		frontendState.updateTransitionPortalMaxDepth(Number(input.value));
 	}
 
 	function handlePortalPolygonsToggle(event: Event): void {
@@ -413,6 +420,33 @@
 							value={$frontendState.browserMode
 								.structuredInteriorMaxVisibleCellDepth}
 							oninput={handleStructuredInteriorMaxVisibleCellDepthInput}
+						/>
+					</label>
+				</div>
+			</fieldset>
+
+			<fieldset class="browser-form__fieldset">
+				<legend>Portal rendering</legend>
+				<div class="browser-form__slider-row">
+					<label
+						class="browser-form__field browser-form__field--range"
+						for="transition-portal-depth-input"
+					>
+						<span>Transition depth</span>
+						<strong>
+							{$frontendState.browserMode.transitionPortalMaxDepth} level{$frontendState
+								.browserMode.transitionPortalMaxDepth === 1
+								? ""
+								: "s"}
+						</strong>
+						<input
+							id="transition-portal-depth-input"
+							type="range"
+							min={MIN_TRANSITION_PORTAL_MAX_DEPTH}
+							max={MAX_TRANSITION_PORTAL_MAX_DEPTH}
+							step="1"
+							value={$frontendState.browserMode.transitionPortalMaxDepth}
+							oninput={handleTransitionPortalMaxDepthInput}
 						/>
 					</label>
 				</div>

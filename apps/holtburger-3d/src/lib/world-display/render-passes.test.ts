@@ -98,12 +98,14 @@ describe("world render passes", () => {
 			direction: "outdoor-to-indoor",
 			recursionDepth: 1,
 			stencilRef: TRANSITION_PORTAL_STENCIL_REFS.outdoorToIndoorDepth1,
+			parentStencilRef: null,
 			compositeScene: "interior",
 		});
 		expect(graph[5]?.transition).toEqual({
 			direction: "indoor-to-outdoor",
 			recursionDepth: 1,
 			stencilRef: TRANSITION_PORTAL_STENCIL_REFS.indoorToOutdoorDepth1,
+			parentStencilRef: null,
 			compositeScene: "exterior",
 		});
 	});

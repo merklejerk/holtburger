@@ -120,6 +120,7 @@
 		detailLodRadius,
 		structuredInteriorMaxEnvCells,
 		structuredInteriorMaxVisibleCellDepth,
+		transitionPortalMaxDepth,
 		showPortalPolygons,
 		showCellIndicators,
 		highlightPortalTargets,
@@ -136,6 +137,7 @@
 		detailLodRadius: number;
 		structuredInteriorMaxEnvCells: number;
 		structuredInteriorMaxVisibleCellDepth: number;
+		transitionPortalMaxDepth: number;
 		showPortalPolygons: boolean;
 		showCellIndicators: boolean;
 		highlightPortalTargets: boolean;
@@ -454,7 +456,7 @@
 		if (!debug) {
 			return "Renderer diagnostics are waiting for the first rendered frame.";
 		}
-		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalMaskMeshCount}/${debug.portalGroupCount}; residency ${debug.cameraViewResidency} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Policy ${debug.renderGraphPolicy}, base ${debug.renderGraphBaseScene}, transition depth ${debug.transitionPortalMaxDepth}; passes ${debug.renderPassCount}, calls ${debug.renderCalls}, tris ${debug.renderTriangles}; portal work ${debug.portalRenderWorkItemCount}, masks ${debug.transitionApertureMaskPassCount}, depth resets ${debug.apertureDepthResetPassCount}, composites interior ${debug.interiorCompositePassCount}/exterior ${debug.exteriorCompositePassCount}; terrain ${debug.visibleTerrainMeshCount}/${debug.terrainMeshCount}, static ${debug.visibleStaticGroupMeshCount}/${debug.staticGroupMeshCount}, interiors ${debug.visibleStructuredInteriorMeshCount}/${debug.structuredInteriorMeshCount}, overlays ${debug.visibleDebugOverlayObjectCount}/${debug.debugOverlayObjectCount}; portals ${debug.portalMaskMeshCount}/${debug.portalGroupCount}; residency ${debug.cameraViewResidency} (${debug.residencyCellCount} cells, ${debug.residencyLandblockCount} landblocks); canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const cameraFrameText = $derived(
 		browserCameraFrame
@@ -1425,6 +1427,7 @@
 		{staticRenderableScene}
 		{structuredInteriorScene}
 		{transitionPortalModel}
+		{transitionPortalMaxDepth}
 		{debugOverlayScene}
 		{activeRenderAnchor}
 		renderChunkTransforms={activeRenderChunkTransforms}

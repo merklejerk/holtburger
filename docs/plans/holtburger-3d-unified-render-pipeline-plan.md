@@ -904,8 +904,9 @@ Design model:
   - frustum and clipped projected footprint;
   - broad screen-area diagnostics and budget policy;
   - directional eligibility lists for outdoor-to-indoor and indoor-to-outdoor.
-- Per-depth rendering chooses the precomputed directional candidate list by depth parity. It should
-  not re-run full CPU candidate projection for every depth.
+- Per-depth rendering chooses from precomputed directional candidate pools by depth parity, then
+  applies a depth-frontier eligibility filter. It should not re-run full CPU candidate projection
+  for every depth.
 - Exact nested visibility is proven by GPU state at each depth level:
   - depth `1` mask writes only pixels visible in the base scene;
   - depth `N > 1` mask is stencil-constrained to depth `N - 1` and depth-tested against the
@@ -920,7 +921,8 @@ Design model:
 - Do not clear stencil between transition levels. Each depth-level mask derives from the previous
   level's stencil value, then advances surviving pixels to the current depth value.
 - Each depth level remains batched:
-  - render all candidate apertures for that level's direction into the current depth stencil ref;
+  - render all frontier-eligible candidate apertures for that level's direction into the current
+    depth stencil ref;
   - reset depth inside the current depth stencil;
   - render the opposite broad scene once through the current depth stencil.
 
@@ -946,7 +948,15 @@ Tasks:
   - a graph-level render batch that pairs those candidates with the current transition depth.
   This avoids pretending a portal candidate intrinsically belongs to one recursion depth.
 - Keep CPU candidate projection/frustum/area work one-pass-per-frame, then reuse the surviving
-  directional candidate pools for each applicable depth level.
+  directional candidate pools for each applicable depth level after applying depth-frontier
+  eligibility.
+- Track a lightweight transition frontier while deriving depth batches:
+  - interior-base rendering starts with the camera-resident env cell;
+  - outdoor-to-indoor levels add the reached entry/requested interior env cells to the next interior
+    frontier;
+  - indoor-to-outdoor levels are eligible when their source/entry env cell or requested interior
+    coverage intersects the current interior frontier;
+  - exterior-base/outdoor levels remain broad and rely on GPU stencil/depth constraints.
 - Add stencil-state support for parent-constrained mask passes:
   - depth `1` mask writes stencil ref `1` without requiring a parent ref;
   - depth `N > 1` mask requires stencil ref `N - 1` and advances surviving pixels to `N`;
@@ -1013,13 +1023,21 @@ Decisions and course corrections:
 - Course correction: the implementation does not create direction-plus-depth CPU batches. It keeps
   depthless directional pools and lets graph nodes pair those pools with a depth. This is the
   cleaner expression of the "CPU rejection once per frame" requirement.
-- Candidate pooling is enforced by the renderer structure rather than a separate pure unit test in
-  this phase: `collectVisibleTransitionPortalWorkBatches()` builds direction-keyed pools once, and
-  graph nodes reuse those pools by direction. Phase 8 can extract that closed-over renderer logic if
-  a focused pure test becomes useful during cleanup.
+- Course correction after manual WebView inspection: direction-only reuse was too broad at nested
+  depths. In an interior-base view, a depth-3 indoor-to-outdoor mask could reuse an unrelated
+  indoor-to-outdoor aperture that merely overlapped the depth-2 stencil in screen space, causing
+  exterior compositing to overwrite a far building interior. Depth batches now apply an interior
+  frontier so deeper indoor-to-outdoor candidates must belong to the interior reached by the
+  previous outdoor-to-indoor level.
+- Course correction after interior-to-outdoor manual inspection: exact source-cell matching was too
+  narrow for depth-1 indoor-to-outdoor exits. A camera can reside in one env cell while the visible
+  transition aperture is authored on a neighboring frame cell. Indoor-to-outdoor eligibility now
+  accepts candidates whose requested interior coverage intersects the current frontier, while still
+  rejecting unrelated interiors.
 - The implementation should keep the current broad two-scene concession: all loaded interiors are
   one composited interior scene, and all exterior terrain/statics are one composited exterior scene.
-  Do not add per-chain interior cell pruning in this phase.
+  Do not add per-chain interior cell pruning for scene drawing in this phase; only portal candidate
+  eligibility is frontier-filtered.
 - Dry-run finding: `TransitionPortalWorkItem.recursionDepth` is currently owned by the work-item
   policy. Phase 7.1 should remove that depth ownership from per-frame candidate classification.
   Depth belongs to the render graph level.
@@ -1051,7 +1069,11 @@ Phase 7.1 progress:
 - Changed transition work batching in
   `apps/holtburger-3d/src/lib/world-display/world-display-renderer.ts` from depth-keyed work items
   to one per-frame CPU visibility pass that builds direction-keyed visible aperture pools. Those
-  pools are reused by each graph depth level.
+  pools are reused by each graph depth level after a frontier eligibility pass.
+- Added `apps/holtburger-3d/src/lib/world-display/transition-portal-depth-batches.ts` to derive
+  depth-level batches from visible directional pools without recomputing projection/frustum/screen
+  area. This helper is where the interior frontier is maintained; indoor-to-outdoor candidates are
+  accepted when either their entry cell or requested interior coverage touches that frontier.
 - Preserved stencil across transition levels by stopping transition mask nodes from clearing the
   stencil buffer. The base scene node remains responsible for clearing stencil before transition
   rendering starts.
@@ -1070,7 +1092,11 @@ Phase 7.1 progress:
   - render-policy transition-level generation for bounded recursion;
   - graph stopping at the first invisible nested level;
   - transition graph metadata carrying parent stencil refs;
-  - transition work items no longer carrying recursion depth.
+  - transition work items no longer carrying recursion depth;
+  - odd-depth regression coverage proving unrelated indoor-to-outdoor candidates are not reused at
+    deeper levels;
+  - depth-1 regression coverage proving a frame-cell exit is still accepted when its interior
+    coverage contains the camera-resident cell.
 
 Phase 7.1 validation:
 
@@ -1079,6 +1105,9 @@ Phase 7.1 validation:
 - `npm run --prefix apps/holtburger-3d check` passed.
 - `npm run --prefix apps/holtburger-3d test:ts` passed.
 - `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- After the depth-frontier correction, `npm run --prefix apps/holtburger-3d test:ts`,
+  `npm run --prefix apps/holtburger-3d check`, and
+  `npm run --prefix apps/holtburger-3d lint:ts` passed again.
 
 Open manual verification:
 

@@ -99,7 +99,6 @@ import {
 import {
 	WORLD_RENDER_LAYER,
 	staticRenderableLayerForDomain,
-	type TransitionPortalGraphDirection,
 	type TransitionPortalGraphScene,
 	type WorldRenderGraphNode,
 } from "./render-passes";
@@ -112,6 +111,12 @@ import {
 	type WorldRenderPolicy,
 	type TransitionPortalRenderLevel,
 } from "./render-policy";
+import {
+	deriveTransitionPortalDepthBatches,
+	transitionPortalDepthBatchKey,
+	type TransitionPortalDepthBatchKey,
+	type TransitionPortalVisiblePools,
+} from "./transition-portal-depth-batches";
 import {
 	createPortalVisibilityContext,
 	evaluatePortalVisibility,
@@ -179,10 +184,11 @@ const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
 
-type TransitionPortalBatchKey = TransitionPortalGraphDirection;
-
 interface VisibleTransitionPortalWork {
 	workItem: TransitionPortalWorkItem;
+	direction: TransitionPortalWorkItem["direction"];
+	entryEnvCellId: number;
+	requestedInteriorEnvCellIds: readonly number[];
 	screenAreaPx: number;
 	maskMesh: Mesh;
 }
@@ -549,7 +555,7 @@ export function createWorldDisplayRenderer(
 	function renderWorldGraphNode(
 		node: WorldRenderGraphNode,
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 	): void {
@@ -583,18 +589,18 @@ export function createWorldDisplayRenderer(
 
 	function collectVisibleTransitionPortalWorkBatches(
 		renderPolicy: WorldRenderPolicy,
-	): Map<TransitionPortalBatchKey, VisibleTransitionPortalWork[]> {
-		const batches = new Map<
-			TransitionPortalBatchKey,
-			VisibleTransitionPortalWork[]
-		>();
-		const maskedInteriorCellIds = new Set<number>();
+	): Map<TransitionPortalDepthBatchKey, VisibleTransitionPortalWork[]> {
 		if (renderPolicy.transitionLevels.length === 0) {
 			latestPortalMetrics.visiblePortalGroupCount = 0;
 			latestPortalMetrics.maskedInteriorCellCount = 0;
-			return batches;
+			return new Map();
 		}
 
+		const visiblePools: TransitionPortalVisiblePools<VisibleTransitionPortalWork> =
+			{
+				outdoorToIndoor: [],
+				indoorToOutdoor: [],
+			};
 		const visibilityContext = createPortalVisibilityContext({
 			camera,
 			viewport: new Vector2(
@@ -629,27 +635,38 @@ export function createWorldDisplayRenderer(
 			if (!maskMesh) {
 				continue;
 			}
-			const batchKey = transitionPortalBatchKey(workItem.direction);
-			const batch = batches.get(batchKey) ?? [];
-			batch.push({
+			const work: VisibleTransitionPortalWork = {
 				workItem,
+				direction: workItem.direction,
+				entryEnvCellId: workItem.entryEnvCellId,
+				requestedInteriorEnvCellIds: workItem.requestedInteriorEnvCellIds,
 				screenAreaPx: visibility.screenAreaPx,
 				maskMesh,
-			});
-			batches.set(batchKey, batch);
-			for (const envCellId of candidate.requestedInteriorEnvCellIds) {
-				maskedInteriorCellIds.add(envCellId);
+			};
+			if (workItem.direction === "outdoor-to-indoor") {
+				visiblePools.outdoorToIndoor.push(work);
+			} else {
+				visiblePools.indoorToOutdoor.push(work);
 			}
 		}
 		let visibleWorkItemCount = 0;
-		for (const batch of batches.values()) {
-			batch.sort(
-				(left, right) =>
-					right.screenAreaPx - left.screenAreaPx ||
-					left.workItem.id.localeCompare(right.workItem.id),
-			);
-			visibleWorkItemCount += batch.length;
+		for (const pool of [
+			visiblePools.outdoorToIndoor,
+			visiblePools.indoorToOutdoor,
+		]) {
+			pool.sort(compareVisibleTransitionPortalWork);
+			visibleWorkItemCount += pool.length;
 		}
+		const { batches, maskedInteriorCellIds } =
+			deriveTransitionPortalDepthBatches({
+				levels: renderPolicy.transitionLevels,
+				baseScene: renderPolicy.baseScene,
+				initialEnvCellId:
+					cameraViewResidency.kind === "env-cell"
+						? cameraViewResidency.envCellId
+						: null,
+				visiblePools,
+			});
 		latestPortalMetrics.visiblePortalGroupCount = visibleWorkItemCount;
 		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
 		return batches;
@@ -658,7 +675,7 @@ export function createWorldDisplayRenderer(
 	function renderTransitionApertureMaskNode(
 		node: WorldRenderGraphNode,
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 	): void {
@@ -677,7 +694,7 @@ export function createWorldDisplayRenderer(
 	function renderTransitionDepthResetNode(
 		node: WorldRenderGraphNode,
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 	): void {
@@ -696,7 +713,7 @@ export function createWorldDisplayRenderer(
 	function renderTransitionCompositeNode(
 		node: WorldRenderGraphNode,
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 	): void {
@@ -722,7 +739,7 @@ export function createWorldDisplayRenderer(
 	function getGraphNodeTransitionBatch(
 		node: WorldRenderGraphNode,
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 	): readonly VisibleTransitionPortalWork[] | null {
@@ -731,37 +748,34 @@ export function createWorldDisplayRenderer(
 		}
 		const batch = getTransitionPortalBatch(
 			transitionWorkBatches,
-			node.transition.direction,
+			node.transition,
 		);
 		return batch.length > 0 ? batch : null;
 	}
 
 	function hasVisibleTransitionLevel(
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 		level: TransitionPortalRenderLevel,
 	): boolean {
-		return getTransitionPortalBatch(
-			transitionWorkBatches,
-			level.direction,
-		).length > 0;
+		return getTransitionPortalBatch(transitionWorkBatches, level).length > 0;
 	}
 
 	function getTransitionPortalBatch(
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
-		direction: TransitionPortalGraphDirection,
+		level: Pick<TransitionPortalRenderLevel, "direction" | "recursionDepth">,
 	): readonly VisibleTransitionPortalWork[] {
-		return transitionWorkBatches.get(transitionPortalBatchKey(direction)) ?? [];
+		return transitionWorkBatches.get(transitionPortalDepthBatchKey(level)) ?? [];
 	}
 
 	function countTransitionPortalRenderWorkItems(
 		transitionWorkBatches: ReadonlyMap<
-			TransitionPortalBatchKey,
+			TransitionPortalDepthBatchKey,
 			readonly VisibleTransitionPortalWork[]
 		>,
 	): number {
@@ -772,10 +786,14 @@ export function createWorldDisplayRenderer(
 		return count;
 	}
 
-	function transitionPortalBatchKey(
-		direction: TransitionPortalGraphDirection,
-	): TransitionPortalBatchKey {
-		return direction;
+	function compareVisibleTransitionPortalWork(
+		left: VisibleTransitionPortalWork,
+		right: VisibleTransitionPortalWork,
+	): number {
+		return (
+			right.screenAreaPx - left.screenAreaPx ||
+			left.workItem.id.localeCompare(right.workItem.id)
+		);
 	}
 
 	function renderPortalAperturePassScene(

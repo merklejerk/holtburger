@@ -66,6 +66,7 @@ describe("asset response dependencies", () => {
 			cellStructureId: 1,
 			localPlacement,
 			visibleCellIds: [],
+			landblockEnvCellIds: [],
 			seenOutside: true,
 			surfaceIds: [],
 			portalCount: 0,

@@ -6,6 +6,7 @@ import {
 	type TransitionPortalGraphScene,
 	type WorldRenderGraphNode,
 } from "./render-passes";
+import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { CameraViewResidencyContext } from "./world-residency-index";
 
 export type WorldRenderBaseScene = "exterior" | "interior";
@@ -14,6 +15,7 @@ export interface WorldRenderPolicyOptions {
 	minPortalScreenAreaPx: number;
 	enableUnknownResidencyDiagnosticFallback: boolean;
 	transitionPortalMaxDepth: number;
+	sceneContext: WorldRenderSceneContext;
 }
 
 export interface WorldRenderPolicy {
@@ -51,14 +53,16 @@ export interface WorldRenderGraphSummary {
 	debugOverlayPassCount: number;
 }
 
-export const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
-	minPortalScreenAreaPx: 16,
-	enableUnknownResidencyDiagnosticFallback: true,
-	transitionPortalMaxDepth: 1,
-};
 export const MIN_TRANSITION_PORTAL_MAX_DEPTH = 0;
 export const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 1;
 export const MAX_TRANSITION_PORTAL_MAX_DEPTH = 4;
+
+export const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
+	minPortalScreenAreaPx: 16,
+	enableUnknownResidencyDiagnosticFallback: true,
+	transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
+	sceneContext: { kind: "outdoor", anchorLandblockId: null },
+};
 
 export function deriveWorldRenderPolicy(
 	context: CameraViewResidencyContext,
@@ -72,6 +76,16 @@ export function deriveWorldRenderPolicy(
 				DEFAULT_WORLD_RENDER_POLICY_OPTIONS.transitionPortalMaxDepth,
 		),
 	};
+	if (resolvedOptions.sceneContext.kind === "dungeon") {
+		return createWorldRenderPolicy({
+			baseScene: "interior",
+			showDiagnosticInterior: false,
+			options: {
+				...resolvedOptions,
+				transitionPortalMaxDepth: 0,
+			},
+		});
+	}
 	switch (context.kind) {
 		case "env-cell":
 			return createWorldRenderPolicy({
@@ -133,7 +147,11 @@ export function deriveTransitionPortalRenderLevels(options: {
 }): TransitionPortalRenderLevel[] {
 	const maxDepth = clampTransitionPortalMaxDepth(options.maxDepth);
 	const levels: TransitionPortalRenderLevel[] = [];
-	for (let recursionDepth = 1; recursionDepth <= maxDepth; recursionDepth += 1) {
+	for (
+		let recursionDepth = 1;
+		recursionDepth <= maxDepth;
+		recursionDepth += 1
+	) {
 		const direction = directionForTransitionDepth(
 			options.baseScene,
 			recursionDepth,

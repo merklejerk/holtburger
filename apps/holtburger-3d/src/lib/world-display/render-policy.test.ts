@@ -124,6 +124,37 @@ describe("world render policy", () => {
 		]);
 	});
 
+	it("uses interior base without portal passes for dungeon render context", () => {
+		const policy = deriveWorldRenderPolicy(
+			{
+				kind: "unknown",
+				landblockId: 0x8a04ffff,
+			},
+			{
+				sceneContext: {
+					kind: "dungeon",
+					anchorLandblockId: 0x8a04ffff,
+				},
+				transitionPortalMaxDepth: 4,
+			},
+		);
+		const graph = deriveWorldRenderGraphForPolicy({
+			policy,
+			visibleTransitions: visibleDirections([
+				"outdoor-to-indoor",
+				"indoor-to-outdoor",
+			]),
+			showDebugOverlays: false,
+		});
+
+		expect(policy).toMatchObject({
+			baseScene: "interior",
+			showDiagnosticInterior: false,
+			transitionLevels: [],
+		});
+		expect(graph.map((node) => node.kind)).toEqual(["interior-base"]);
+	});
+
 	it("supports disabling unknown-residency broad diagnostic fallback", () => {
 		const policy = deriveWorldRenderPolicy(
 			{

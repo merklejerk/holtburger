@@ -18,6 +18,7 @@ import {
 	pointInsideCellBsp,
 } from "./cell-bsp-residency";
 import type { RenderChunkTransform } from "./render-anchor";
+import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
 
 export type CameraViewResidencyContext =
@@ -57,6 +58,7 @@ export interface WorldResidencyQueryDiagnostics {
 
 interface ResidencyLandblockIndex {
 	landblockId: number;
+	chunkOffset: Vector3;
 	root: ResidencyBvhNode | null;
 	items: ResidencyCellItem[];
 }
@@ -99,12 +101,16 @@ export function createEmptyWorldResidencyIndex(): WorldResidencyIndex {
 export function buildWorldResidencyIndex(options: {
 	cells: readonly StructuredInteriorCell[];
 	renderChunkTransforms: readonly RenderChunkTransform[];
+	sceneContext?: WorldRenderSceneContext;
 }): WorldResidencyIndex {
 	const anchor = inferRenderAnchor(options.renderChunkTransforms);
 	if (!anchor) {
 		return createEmptyWorldResidencyIndex();
 	}
 
+	const chunkOffsetByLandblockId = deriveChunkOffsetByLandblockId(
+		options.renderChunkTransforms,
+	);
 	const itemsByLandblockId = new Map<number, ResidencyCellItem[]>();
 	for (const cell of options.cells) {
 		const item = deriveResidencyCellItem(cell);
@@ -123,18 +129,25 @@ export function buildWorldResidencyIndex(options: {
 		cellCount += items.length;
 		landblocks.set(landblockId, {
 			landblockId,
+			chunkOffset:
+				chunkOffsetByLandblockId.get(landblockId) ?? new Vector3(0, 0, 0),
 			items,
 			root: buildResidencyBvh(items),
 		});
 	}
 
+	const sceneContext = options.sceneContext ?? {
+		kind: "outdoor",
+		anchorLandblockId: anchor.landblockId,
+	};
 	return {
 		cellCount,
 		landblockCount: landblocks.size,
 		query: (position) =>
-			queryWorldResidencyIndex(position, anchor, landblocks).context,
+			queryWorldResidencyIndex(position, anchor, landblocks, sceneContext)
+				.context,
 		queryDetailed: (position) =>
-			queryWorldResidencyIndex(position, anchor, landblocks),
+			queryWorldResidencyIndex(position, anchor, landblocks, sceneContext),
 	};
 }
 
@@ -235,7 +248,12 @@ function queryWorldResidencyIndex(
 	position: Vec3Dto,
 	anchor: RenderAnchorInference,
 	landblocks: ReadonlyMap<number, ResidencyLandblockIndex>,
+	sceneContext: WorldRenderSceneContext,
 ): WorldResidencyQueryResult {
+	if (sceneContext.kind === "dungeon") {
+		return queryDungeonResidencyIndex(position, landblocks, sceneContext);
+	}
+
 	const landblockResidency = computeRendererPositionLandblockResidency(
 		position,
 		anchor,
@@ -287,6 +305,78 @@ function queryWorldResidencyIndex(
 				aabbCandidateCount: aabbCandidates.length,
 				cellBspMatchCount: cellBspMatches.length,
 				source: "outdoor",
+			}),
+		};
+	}
+
+	return {
+		context: {
+			kind: "env-cell",
+			landblockId: nearest.landblockId,
+			envCellId: nearest.envCellId,
+		},
+		diagnostics: createResidencyQueryDiagnostics({
+			landblockId: nearest.landblockId,
+			aabbCandidateCount: aabbCandidates.length,
+			cellBspMatchCount: cellBspMatches.length,
+			source: "cell-bsp",
+		}),
+	};
+}
+
+function queryDungeonResidencyIndex(
+	position: Vec3Dto,
+	landblocks: ReadonlyMap<number, ResidencyLandblockIndex>,
+	sceneContext: WorldRenderSceneContext,
+): WorldResidencyQueryResult {
+	const targetLandblockId =
+		sceneContext.anchorLandblockId ?? firstLandblockId(landblocks);
+	if (targetLandblockId === null) {
+		return {
+			context: { kind: "unknown", landblockId: null },
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: null,
+				source: "unknown",
+			}),
+		};
+	}
+
+	const landblock = landblocks.get(targetLandblockId);
+	if (!landblock) {
+		return {
+			context: { kind: "unknown", landblockId: targetLandblockId },
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: targetLandblockId,
+				source: "unknown",
+			}),
+		};
+	}
+
+	const landblockRelativePosition = new Vector3(
+		position.x - landblock.chunkOffset.x,
+		position.y - landblock.chunkOffset.y,
+		position.z - landblock.chunkOffset.z,
+	);
+	const aabbCandidates = queryResidencyBvh(
+		landblock.root,
+		landblockRelativePosition,
+	);
+	const cellBspMatches = filterCellBspMatches(
+		aabbCandidates,
+		landblockRelativePosition,
+	);
+	const nearest = selectNearestResidencyCell(
+		cellBspMatches,
+		landblockRelativePosition,
+	);
+	if (!nearest) {
+		return {
+			context: { kind: "unknown", landblockId: landblock.landblockId },
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: landblock.landblockId,
+				aabbCandidateCount: aabbCandidates.length,
+				cellBspMatchCount: cellBspMatches.length,
+				source: "unknown",
 			}),
 		};
 	}
@@ -482,6 +572,28 @@ function longestBoxAxis(bounds: Box3): 0 | 1 | 2 {
 
 function formatResidencyHex(value: number): string {
 	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+function deriveChunkOffsetByLandblockId(
+	transforms: readonly RenderChunkTransform[],
+): Map<number, Vector3> {
+	return new Map(
+		transforms.map((transform) => [
+			transform.chunkLandblockId,
+			new Vector3(
+				transform.offset.x,
+				transform.offset.y,
+				transform.offset.z,
+			),
+		]),
+	);
+}
+
+function firstLandblockId(
+	landblocks: ReadonlyMap<number, ResidencyLandblockIndex>,
+): number | null {
+	const first = landblocks.keys().next();
+	return first.done ? null : first.value;
 }
 
 function createResidencyQueryDiagnostics(options: {

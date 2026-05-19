@@ -4,6 +4,7 @@ import {
 	createPreparedTerrainAsset,
 	createRuntimeBatch,
 } from "../../app/test-fixtures";
+import type { BrowserLocationSelection } from "../../app/browser-mode";
 import {
 	deriveSceneCoverageAssetIds,
 	createSceneCoverageRequests,
@@ -74,6 +75,38 @@ describe("scene coverage asset ids", () => {
 			"environment/0d000001",
 			"indoor-env-cell/016c0155",
 			"indoor-env-cell/016c0156",
+		]);
+	});
+
+	it("derives browser dungeon focus from the full parent landblock env-cell set", () => {
+		const browserDestination: BrowserLocationSelection = {
+			kind: "indoor-env-cell",
+			source: "manual",
+			label: "0x8a04ffff",
+			landblockId: 0x8a04ffff,
+			envCellId: 0x8a040100,
+		};
+
+		expect(
+			deriveSceneCoverageAssetIds(
+				createRuntimeBatch(),
+				browserDestination,
+				{
+					"indoor-env-cell/8a040100": createPreparedIndoorEnvCellAsset(
+						0x8a040100,
+						0x0d000001,
+						[0x8a040101],
+						[0x8a040100, 0x8a040101, 0x8a040102, 0x8a040103],
+					),
+				},
+				SINGLE_LANDBLOCK_OPTIONS,
+			),
+		).toEqual([
+			"environment/0d000001",
+			"indoor-env-cell/8a040100",
+			"indoor-env-cell/8a040101",
+			"indoor-env-cell/8a040102",
+			"indoor-env-cell/8a040103",
 		]);
 	});
 
@@ -229,6 +262,7 @@ function createPreparedIndoorEnvCellAsset(
 	envCellId: number,
 	environmentId: number,
 	visibleCellIds: number[],
+	landblockEnvCellIds: number[] = [],
 ): PreparedAssetRecord {
 	return createPreparedAssetRecord(
 		`indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`,
@@ -249,6 +283,7 @@ function createPreparedIndoorEnvCellAsset(
 				orientation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			visibleCellIds,
+			landblockEnvCellIds,
 			seenOutside: true,
 			surfaceIds: [],
 			portalCount: 0,

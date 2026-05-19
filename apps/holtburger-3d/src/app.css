@@ -419,6 +419,34 @@ ul {
 	color: #d2dde9;
 }
 
+.browser-panel__summary-list {
+	margin-bottom: 0;
+}
+
+.browser-panel__section-stack {
+	display: grid;
+	gap: 0.5rem;
+}
+
+.browser-panel__details {
+	border: 1px solid rgba(162, 183, 209, 0.14);
+	border-radius: 8px;
+	background: rgba(0, 0, 0, 0.12);
+}
+
+.browser-panel__details summary {
+	cursor: pointer;
+	padding: 0.65rem 0.75rem;
+	color: #d2dde9;
+	font-weight: 700;
+	list-style-position: inside;
+}
+
+.browser-panel__details .data-list {
+	margin: 0;
+	padding: 0 0.75rem 0.75rem;
+}
+
 .browser-form {
 	display: grid;
 	gap: 0.85rem;

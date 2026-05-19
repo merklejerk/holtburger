@@ -529,6 +529,17 @@ function parseBrowserCellIdInput(
 	const cellId = Number.parseInt(match[1], 16) >>> 0;
 	const landblockId = normalizeOutdoorLandblockId(cellId);
 	if ((cellId & 0xffff) === 0xffff) {
+		if (landblockInputMode === "dungeon") {
+			const envCellId = ((landblockId & 0xffff0000) | 0x0100) >>> 0;
+			return {
+				kind: "indoor-env-cell",
+				label: `Env cell 0x${formatHex32(envCellId)} (${formatLandblockLabel(landblockId)})`,
+				source,
+				envCellId,
+				landblockId,
+			};
+		}
+
 		const centerLocation =
 			outdoorLandblockIdToApproximateCenterLocation(landblockId);
 

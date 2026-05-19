@@ -248,6 +248,7 @@ export const indoorEnvCellPayloadDtoSchema = z.object({
 	cellStructureId: z.number().int().nonnegative().nullable(),
 	localPlacement: placementTransformDtoSchema,
 	visibleCellIds: z.array(z.number().int().nonnegative()),
+	landblockEnvCellIds: z.array(z.number().int().nonnegative()),
 	seenOutside: z.boolean().nullable(),
 	surfaceIds: z.array(z.number().int().nonnegative()),
 	portalCount: z.number().int().nonnegative(),

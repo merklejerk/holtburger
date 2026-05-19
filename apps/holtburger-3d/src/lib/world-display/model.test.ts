@@ -329,6 +329,7 @@ describe("world display model helpers", () => {
 								orientation: { w: 1, x: 0, y: 0, z: 0 },
 							},
 							visibleCellIds: [0x016c0156, 0x016c0157],
+							landblockEnvCellIds: [],
 							seenOutside: false,
 							surfaceIds: [],
 							portalCount: 0,

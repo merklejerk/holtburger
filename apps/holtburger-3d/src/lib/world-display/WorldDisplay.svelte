@@ -20,6 +20,7 @@
 	import type { TerrainSceneModel } from "./terrain-scene";
 	import type { WorldDebugOverlayModel } from "./debug-overlays";
 	import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
+	import type { WorldRenderSceneContext } from "./render-scene-context";
 	import {
 		createWorldDisplayRenderer,
 		type WorldDisplayRenderer,
@@ -33,6 +34,7 @@
 		transitionPortalModel,
 		transitionPortalMaxDepth = 1,
 		debugOverlayScene,
+		renderSceneContext,
 		activeRenderAnchor: _activeRenderAnchor = null,
 		renderChunkTransforms = [],
 		renderSpatialQuery = null,
@@ -47,6 +49,7 @@
 		transitionPortalModel: TransitionPortalCandidateModel;
 		transitionPortalMaxDepth?: number;
 		debugOverlayScene: WorldDebugOverlayModel;
+		renderSceneContext: WorldRenderSceneContext;
 		activeRenderAnchor?: RenderLandblockAnchor | null;
 		renderChunkTransforms?: RenderChunkTransform[];
 		renderSpatialQuery?: RenderSpatialIndexQuery | null;
@@ -73,6 +76,7 @@
 				transitionPortalModel,
 				transitionPortalMaxDepth,
 				debugOverlayScene,
+				renderSceneContext,
 				renderChunkTransforms,
 				renderSpatialQuery,
 				controlledCameraFrame,
@@ -96,6 +100,14 @@
 			return;
 		}
 		controller.setAssetState(assetState);
+	});
+
+	$effect(() => {
+		const controller = rendererController;
+		if (!controller) {
+			return;
+		}
+		controller.setRenderSceneContext(renderSceneContext);
 	});
 
 	$effect(() => {

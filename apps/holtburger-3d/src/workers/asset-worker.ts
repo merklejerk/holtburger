@@ -200,6 +200,7 @@ function prepareIndoorEnvCell(
 			cellStructureId: payload.cellStructureId,
 			localPlacement: payload.localPlacement,
 			visibleCellIds: payload.visibleCellIds,
+			landblockEnvCellIds: payload.landblockEnvCellIds,
 			seenOutside: payload.seenOutside,
 			surfaceIds: payload.surfaceIds,
 			portalCount: payload.portalCount,

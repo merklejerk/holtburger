@@ -156,6 +156,54 @@ describe("world residency index", () => {
 		});
 	});
 
+	it("queries dungeon residency against the anchor landblock instead of outdoor modular coordinates", () => {
+		const landblockId = makeOutdoorLandblockId(0x8a, 0x04);
+		const index = buildWorldResidencyIndex({
+			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
+			sceneContext: { kind: "dungeon", anchorLandblockId: landblockId },
+			cells: [
+				createCell({
+					envCellId: 0x8a040101,
+					origin: { x: -20, y: -60, z: 0 },
+					boundsMin: { x: 0, y: 0, z: 0 },
+					boundsMax: { x: 30, y: 20, z: 30 },
+				}),
+			],
+		});
+
+		expect(index.query({ x: -9, y: 10, z: 75 })).toEqual({
+			kind: "env-cell",
+			landblockId,
+			envCellId: 0x8a040101,
+		});
+	});
+
+	it("returns unknown instead of outdoor when dungeon residency misses loaded cells", () => {
+		const landblockId = makeOutdoorLandblockId(0x8a, 0x04);
+		const index = buildWorldResidencyIndex({
+			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
+			sceneContext: { kind: "dungeon", anchorLandblockId: landblockId },
+			cells: [
+				createCell({
+					envCellId: 0x8a040101,
+					origin: { x: -20, y: -60, z: 0 },
+					boundsMin: { x: 0, y: 0, z: 0 },
+					boundsMax: { x: 30, y: 20, z: 30 },
+				}),
+			],
+		});
+
+		const result = index.queryDetailed({ x: 80, y: 10, z: 75 });
+		expect(result.context).toEqual({
+			kind: "unknown",
+			landblockId,
+		});
+		expect(result.diagnostics).toMatchObject({
+			landblockId,
+			source: "unknown",
+		});
+	});
+
 	it("resolves overlapping cell AABBs with deterministic nearest-center selection", () => {
 		const landblockId = makeOutdoorLandblockId(1, 2);
 		const index = buildWorldResidencyIndex({

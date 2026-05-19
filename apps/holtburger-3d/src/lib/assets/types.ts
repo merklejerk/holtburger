@@ -153,6 +153,7 @@ export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
 	cellStructureId: number | null;
 	localPlacement: PlacementTransformDto;
 	visibleCellIds: number[];
+	landblockEnvCellIds: number[];
 	seenOutside: boolean | null;
 	surfaceIds: number[];
 	portalCount: number;

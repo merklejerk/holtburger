@@ -306,6 +306,7 @@ function createIndoorEnvCellAsset(
 		cellStructureId: 1,
 		localPlacement: IDENTITY_PLACEMENT,
 		visibleCellIds,
+		landblockEnvCellIds: [],
 		seenOutside: true,
 		surfaceIds: [],
 		portalCount: 0,

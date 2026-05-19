@@ -164,15 +164,31 @@ describe("browser-mode location policy", () => {
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
 	});
 
-	it("can select an outdoor landblock from an explicit 32-bit landblock id", () => {
+	it("defaults an explicit 32-bit landblock id to dungeon focus", () => {
 		const state = previewBrowserLocation(
 			updateBrowserDraft(createBrowserModeState(), "0xda55ffff"),
+		);
+
+		expect(isIndoorBrowserDestination(state.destination)).toBe(true);
+		expect(state.destination?.landblockId).toBe(0xda55ffff);
+		expect(state.draftInput).toBe("0xda55ffff");
+		expect(browserDestinationToIndoorEnvCellId(state.destination)).toBe(
+			0xda550100,
+		);
+		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
+	});
+
+	it("can resolve an explicit 32-bit landblock id to outdoor focus", () => {
+		const state = previewBrowserLocation(
+			updateLandblockInputMode(
+				updateBrowserDraft(createBrowserModeState(), "0xda55ffff"),
+				"outdoor",
+			),
 		);
 
 		expect(state.destination?.kind).toBe("outdoor-location");
 		expect(state.destination?.source).toBe("manual");
 		expect(state.destination?.landblockId).toBe(0xda55ffff);
-		expect(state.draftInput).toBe("0xda55ffff");
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
 	});
 

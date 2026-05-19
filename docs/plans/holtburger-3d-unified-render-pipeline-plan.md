@@ -90,8 +90,9 @@ These findings came from checking the plan against the current `apps/holtburger-
 - Phase 2 should precede Phase 5 because reducing portal work item volume makes the render graph
   prototype easier to measure and prevents the first batched implementation from encoding bad
   candidate policy.
-- Phase 3 should precede Phase 5 because broad interior render sets and direct indexes remove the
-  current per-group visibility toggling model.
+- Phase 3 should precede Phase 5 because broad scene render sets remove the current per-group
+  interior visibility toggling model. It should stay minimal: render-set handles and direct cell
+  identity maps, not a premature fine-grained traversal index for every future query.
 - Phase 4 should precede Phase 5 because the batched render graph needs direction/depth work items,
   not one-way outdoor portal groups.
 - Phase 6 can proceed in parallel after Phase 3 data is available, but it does not block Phase 5.
@@ -342,34 +343,45 @@ Refinements to future steps:
 - A browser diagnostic portal-count or total-area budget remains a possible follow-up after manual
   overview measurements confirm the clipped-area threshold is not sufficient by itself.
 
-## Phase 3: Renderer Working Model and Interior Render Sets
+## Phase 3: Renderer Working Model and Broad Render Sets
 
-Status: not started.
+Status: complete.
 
-Purpose: replace per-frame flat searches with direct renderer-owned traversal data.
+Purpose: replace per-frame flat searches and per-portal exact-cell visibility toggles with direct
+renderer-owned broad render sets.
 
 Tasks:
 
-- Introduce a renderer working model derived from source scene models.
-- Add direct indexes for common render questions:
-  - render key to env-cell id;
-  - env-cell id to cell-shell mesh;
-  - broad interior cell-shell render set;
-  - broad interior static render set;
-  - exterior terrain/static render sets;
-  - portal aperture render sets.
+- Introduce a renderer working model derived from source scene models. Treat the first-pass
+  production renderer as two broad scenes:
+  - exterior: terrain plus exterior static renderables;
+  - interior: interior cell shells plus interior static renderables.
+- Add only the direct identity maps needed to remove the current flat search path:
+  - interior cell-shell render key to env-cell id;
+  - env-cell id to interior cell-shell mesh.
+- Add broad render-set handles:
+  - interior cell-shell meshes;
+  - interior static render groups;
+  - exterior terrain meshes;
+  - exterior static render groups.
 - Keep source DTOs and asset hydration models unchanged except where they already expose missing
   source facts required by rendering.
 - Preserve the accepted concession that interior statics remain broadly instanced across loaded
   cells.
+- Do not add per-portal cell membership indexes or env-cell-to-indoor-static indexes in this phase.
+  Portal compositing should render the broad interior or exterior set through stencil/depth state.
 - Remove render-time `cell.find()` style searches from portal visibility/render preparation paths.
 - Replace portal-compositing visibility toggles over individual interior cells with broad interior
   render-set selection. Keep per-portal requested env-cell ids only for hydration, diagnostics, or
   future tighter policies.
+- Defer formal portal aperture render-set ownership to Phase 4/5 unless it falls out naturally from
+  existing `portalMaskMeshes`. Aperture work is tied to transition work items and batched render
+  graph nodes, not the interior working model.
 
 Tests and verification:
 
-- Add focused tests for derived indexes using synthetic scene models.
+- Add focused tests for the derived broad render sets and minimal identity maps using synthetic
+  scene models.
 - Verify index output matches source scene membership for loaded interior cells.
 - Profile the same close and overview scenes to confirm flat-search cost is removed.
 - Verify portal compositing no longer spends per-group CPU toggling cell-shell and indoor-static
@@ -379,7 +391,65 @@ Exit criteria:
 
 - Portal render preparation no longer recovers env-cell identity through repeated source-array
   searches.
-- Broad interior render sets are explicit data, not incidental scene traversal.
+- Broad interior and exterior render sets are explicit data, not incidental scene traversal.
+- Phase 3 does not introduce fine-grained render culling structures beyond the minimal identity maps
+  required to delete the legacy search path.
+
+Downstream implications:
+
+- Phase 4 should consume transition portal source facts and visibility policy, then attach visible
+  transition work items to these broad scene targets. It should not revive per-portal cell subset
+  pruning.
+- Phase 5 should render broad scene sets through batched direction/depth portal graph passes. Any
+  extra culling should come from portal candidate rejection, ordinary Three.js object frustum
+  culling, and later residency policy rather than Phase 3 cell-level render indexes.
+- Phase 6 residency still derives cell AABBs from `StructuredInteriorSceneModel` cells. It does not
+  require Phase 3 to build a generalized cell traversal index.
+
+Phase 3 progress:
+
+- Added a renderer-owned working-model helper in
+  `apps/holtburger-3d/src/lib/world-display/world-render-working-model.ts`.
+- The working model exposes two broad render scenes:
+  - exterior: terrain meshes plus exterior static renderable meshes;
+  - interior: interior cell-shell meshes plus interior static renderable meshes.
+- The working model also exposes the minimal interior identity maps needed to remove flat source
+  searches:
+  - interior cell-shell render key to env-cell id;
+  - env-cell id to interior cell-shell mesh.
+- Wired `world-display-renderer.ts` to refresh the working model when terrain, static renderables,
+  or structured interiors are synchronized.
+- Replaced the legacy per-portal exact-cell interior visibility path with broad interior render-set
+  selection. Portal compositing now renders all loaded interior shell/static renderables through the
+  existing portal stencil/depth state, matching the accepted shared-interior concession.
+- Replaced portal-interior material iteration over renderer maps plus static-scene lookups with
+  iteration over the broad interior working-model sets.
+- Added synthetic tests in
+  `apps/holtburger-3d/src/lib/world-display/world-render-working-model.test.ts` covering broad
+  scene-set derivation and missing-cell-shell mesh behavior.
+
+Decisions and course corrections:
+
+- Phase 3 deliberately did not add per-portal cell membership indexes or
+  env-cell-to-indoor-static indexes. Those would reintroduce the fine-grained pruning model this
+  phase is meant to leave behind.
+- Phase 3 did not formalize portal aperture render-set ownership. The existing `portalMaskMeshes`
+  remains the bridge until Phase 4/5 replaces one-way portal groups with transition work items and a
+  batched render graph.
+- The remaining per-visible-group full-scene render calls are intentionally left for Phase 5. Phase
+  3 only removes the per-group source-array search and exact-subset visibility toggling.
+
+Refinements to future steps:
+
+- Phase 4 should target transition work items at `interior` or `exterior` broad render scenes. It
+  should keep per-portal requested env-cell ids as hydration/diagnostic facts, not render-set
+  membership.
+- Phase 5 can consume the broad working-model scene sets directly when building batched
+  direction/depth passes. It should still replace full-world scene traversal for mask and
+  depth-reset passes with pass-local aperture work.
+- Phase 6 should continue deriving residency from `StructuredInteriorSceneModel` cells rather than
+  from the Phase 3 working model. The working model is render traversal state; residency is a
+  containment/query structure.
 
 ## Phase 4: Bidirectional Transition Direction and Bounded Recursion
 

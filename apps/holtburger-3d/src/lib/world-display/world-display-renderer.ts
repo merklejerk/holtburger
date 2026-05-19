@@ -105,6 +105,11 @@ import {
 	type PortalVisibilityContext,
 	type PortalVisibilityResult,
 } from "./portal-visibility";
+import {
+	createEmptyWorldRenderWorkingModel,
+	deriveWorldRenderWorkingModel,
+	type WorldRenderWorkingModel,
+} from "./world-render-working-model";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
@@ -210,6 +215,8 @@ export function createWorldDisplayRenderer(
 	const staticRenderableGroupMeshes = new Map<string, InstancedMesh>();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const portalMaskMeshes = new Map<string, Mesh>();
+	let renderWorkingModel: WorldRenderWorkingModel =
+		createEmptyWorldRenderWorkingModel();
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
@@ -528,7 +535,7 @@ export function createWorldDisplayRenderer(
 
 			renderPortalDepthReset(maskMesh, group.stencilRef);
 
-			setPortalInteriorVisibility(group);
+			setPortalInteriorVisibility();
 			applyPortalInteriorStencil(group.stencilRef);
 			camera.layers.set(WORLD_RENDER_LAYER.portalInterior);
 			renderer.render(scene, camera);
@@ -723,7 +730,18 @@ export function createWorldDisplayRenderer(
 			terrainMeshes.set(tile.assetId, mesh);
 		}
 		syncRenderChunkRoots(renderChunkTransforms);
+		updateRenderWorkingModel();
 		updateCameraFrame();
+	}
+
+	function updateRenderWorkingModel(): void {
+		renderWorkingModel = deriveWorldRenderWorkingModel({
+			terrainMeshes,
+			staticRenderableGroupMeshes,
+			structuredInteriorMeshes,
+			staticRenderableScene,
+			structuredInteriorScene,
+		});
 	}
 
 	function buildViewportRay(viewportPoint: NormalizedViewportPoint): {
@@ -1101,6 +1119,7 @@ export function createWorldDisplayRenderer(
 		}
 
 		syncRenderChunkRoots(renderChunkTransforms);
+		updateRenderWorkingModel();
 		updateCameraFrame();
 	}
 
@@ -1263,42 +1282,21 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
-	function setPortalInteriorVisibility(group: OutdoorPortalViewGroup): void {
-		const visibleEnvCellIds = new Set(group.requestedInteriorEnvCellIds);
-		for (const [renderKey, mesh] of structuredInteriorMeshes.entries()) {
-			const cell = structuredInteriorScene.cells.find(
-				(entry) => entry.renderKey === renderKey,
-			);
-			mesh.visible = cell ? visibleEnvCellIds.has(cell.envCellId) : false;
+	function setPortalInteriorVisibility(): void {
+		for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
+			mesh.visible = true;
 		}
-		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
-			const parts =
-				staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
-					groupKey,
-				);
-			if (!parts?.[0] || parts[0].kind !== "indoor-static") {
-				continue;
-			}
-			mesh.visible = parts.some(
-				(part) =>
-					part.owningEnvCellId !== null &&
-					visibleEnvCellIds.has(part.owningEnvCellId),
-			);
+		for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
+			mesh.visible = true;
 		}
 	}
 
 	function restorePortalInteriorVisibility(): void {
-		for (const mesh of structuredInteriorMeshes.values()) {
+		for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
 			mesh.visible = true;
 		}
-		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
-			const parts =
-				staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
-					groupKey,
-				);
-			if (parts?.[0]?.kind === "indoor-static") {
-				mesh.visible = true;
-			}
+		for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
+			mesh.visible = true;
 		}
 	}
 
@@ -1327,17 +1325,11 @@ export function createWorldDisplayRenderer(
 	function forEachPortalInteriorMaterial(
 		visit: (material: Material) => void,
 	): void {
-		for (const mesh of structuredInteriorMeshes.values()) {
+		for (const mesh of renderWorkingModel.interior.cellShellMeshes) {
 			visitMeshMaterials(mesh, visit);
 		}
-		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
-			const parts =
-				staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.get(
-					groupKey,
-				);
-			if (parts?.[0]?.kind === "indoor-static") {
-				visitMeshMaterials(mesh, visit);
-			}
+		for (const mesh of renderWorkingModel.interior.staticRenderableMeshes) {
+			visitMeshMaterials(mesh, visit);
 		}
 	}
 

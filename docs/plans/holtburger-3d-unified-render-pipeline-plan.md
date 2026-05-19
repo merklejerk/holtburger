@@ -687,6 +687,9 @@ Refinements to future steps:
   - foreground geometry occluding aperture masks;
   - outdoor-to-indoor and indoor-to-outdoor views of the same transition aperture;
   - before/after frame timing on a zoomed-out overview.
+- Phase 7.2 should follow Phase 7.1 before Phase 8 cleanup. Real doorframe/tight-cell inspection
+  showed that the Phase 6 AABB residency broad phase is not accurate enough to choose base scene
+  reliably at transition boundaries.
 
 ## Phase 6: Camera/View Residency Index
 
@@ -709,8 +712,9 @@ Tasks:
   - `{ kind: "env-cell", landblockId, envCellId }`;
   - `{ kind: "unknown", landblockId | null }`.
 - Resolve multiple AABB hits with nearest-center tie-breaker.
-- Keep exact cell plane/BSP containment as a later narrow-phase escalation only if real scenes need
-  it.
+- Keep exact cell plane/BSP containment as a later narrow-phase escalation. Phase 7.2 now owns that
+  escalation because real scenes showed AABB-only residency can misclassify tight doorframe and
+  odd-shaped cells.
 
 Tests and verification:
 
@@ -761,8 +765,7 @@ Phase 6 progress:
 Decisions and course corrections:
 
 - The first implementation uses a simple median-split AABB BVH per landblock. This keeps the data
-  structure direct and testable while leaving exact BSP/plane containment as a later narrow-phase
-  option only if real scenes prove AABB containment is insufficient.
+  structure direct and testable while leaving exact BSP/plane containment to Phase 7.2.
 - Rebuilds happen at existing renderer sync boundaries instead of adding a timer debounce. In the
   current app, structured interior cells are synchronized as scene-model batches; adding debounce
   here would complicate correctness without reducing per-frame cost. The debug row now exposes
@@ -782,6 +785,8 @@ Refinements to future steps:
 - If large dungeon-only or sprawling interior landblocks make BVH rebuilds expensive, a later pass
   should move construction toward landblock asset packs or Rust-side preprocessing. No such
   complexity is needed before measuring this first renderer-owned index.
+- Phase 7.2 should preserve the Phase 6 BVH as a broad phase and add exact CellBSP containment as
+  a narrow phase, rather than replacing the per-landblock BVH.
 
 ## Phase 7: Mode Policy Integration
 
@@ -1127,6 +1132,151 @@ Refinements to future steps:
 - If the configured cap exposes stencil-value limits or material-state churn, document that evidence
   before considering a mask-texture backend.
 
+## Phase 7.2: Exact Cell Residency Narrow Phase
+
+Status: not started.
+
+Purpose: make camera/view residency accurate at doorframes, transition apertures, and odd-shaped
+env cells by adding CellBSP point containment after the Phase 6 per-landblock AABB BVH broad phase.
+
+Problem statement:
+
+- Phase 6 currently uses render-shell AABBs as both broad-phase candidates and residency truth.
+  This is deterministic and fast, but it can classify empty AABB space as interior.
+- Manual inspection after Phase 7.1 found cases where standing in doorframes or tight/odd cells
+  causes the renderer to choose an interior base scene while the camera is visually exterior, or the
+  reverse.
+- The fix should not make portal direction depend on residency. Portal direction remains
+  source-backed by the decoded portal plane and `PortalSide`; residency chooses base scene and the
+  initial transition direction sequence.
+
+References:
+
+- Retail `CEnvCell::point_in_cell` transforms the point through the env-cell frame and delegates to
+  `CCellStruct::point_in_cell`.
+- Retail `CCellStruct::point_in_cell` walks `cell_bsp->root_node`, rejects the negative side of any
+  splitting plane, treats close/on-plane as inside, follows `pos_node`, and succeeds when no
+  positive child remains.
+- ACE mirrors this: `EnvCell.point_in_cell()` calls `CellStructure.point_in_cell(localPoint)`;
+  `CellStruct.point_in_cell()` calls `CellBSP.point_inside_cell_bsp(point)`; and
+  `BSPNode.point_inside_cell_bsp()` accepts `Front`/`Close`, recurses to `PosNode`, and rejects
+  `Behind`.
+- ACViewer's visual renderer is not the source of truth for portal rendering, but its bundled
+  physics/common code has the same point-in-cell path and is useful as a readable reference.
+
+Design model:
+
+- Keep the Phase 6 per-landblock cell AABB BVH as a broad phase.
+- Treat broad-phase AABBs as residency candidate bounds, not render bounds. They must be
+  conservative enough to avoid false negatives before CellBSP containment.
+- Extend prepared environment cell structures to carry the actual decoded `CellBSP`, not only
+  `cellBspWitness`.
+- Keep `cellBspWitness` as diagnostics proving whether CellBSP exists and what root kind was
+  decoded.
+- Store or derive each residency item's cell-local source-space transform/inverse so query points
+  can be tested in the same local AC coordinate space used by retail/ACE containment.
+- Query flow:
+  - compute landblock residency with the existing AC landblock coordinate math;
+  - query the selected landblock's AABB BVH for candidate env cells;
+  - transform the render-space query point into each candidate cell's local AC space;
+  - run CellBSP point containment on the candidate;
+  - select an env-cell residency only from candidates that pass CellBSP containment;
+  - return outdoor-landblock residency when no candidate passes;
+  - if multiple candidates pass, keep deterministic nearest-center selection, with env-cell id as
+    the final tie-breaker.
+- Treat CellBSP as the residency narrow phase. Do not use DrawingBSP for residency. DrawingBSP
+  remains useful for drawing/portal aperture source-plane work, but retail/ACE containment uses
+  CellBSP.
+- Keep a temporary/manual probe path for known problematic cells, such as a doorframe cell observed
+  in browser mode, but do not bake real DAT/HBA assets into permanent tests.
+
+Implementation tasks:
+
+- Extend the Tauri adapter's environment serialization so `serialize_cell_structure()` emits the
+  already-decoded `cell_structure.cell_bsp` as `cellBsp`. No DAT decoder change should be needed;
+  `crates/holtburger-dat` already decodes `CellStruct.cell_bsp`.
+- Rename or generalize the frontend `gfxObjBspNodeDtoSchema`/`PreparedPolygonSetBspNode` naming
+  while threading `cellBsp`, because the same serialized BSP shape is now used by gfx objects,
+  drawing BSPs, and cell BSPs. Avoid adding a parallel incompatible CellBSP DTO.
+- Extend host contracts and prepared asset types so `PreparedEnvironmentCellStruct` includes
+  `cellBsp` alongside existing `cellBspWitness`.
+- Thread `cellBsp` through the worker preparation path without changing render-geometry generation.
+- Add dedicated residency candidate bounds. Prefer bounds derived from source cell structure
+  geometry that includes portal polygons or all referenced cell-structure vertices, transformed
+  into landblock-relative render space. Do not depend on `renderGeometry.bounds` as final
+  residency candidate coverage because render geometry excludes portal polygons and render-only
+  side rules may make it non-conservative.
+- Add a small, typed CellBSP containment helper in `apps/holtburger-3d/src/lib/world-display` or a
+  nearby asset-geometry module:
+  - supports the decoded `port`, `internal`, and `leaf` node shapes currently accepted by host
+    contracts;
+  - computes signed distance as `dot(normal, point) + d`;
+  - uses a retail-compatible epsilon around `0.0002` unless references justify a different value;
+  - treats positive/front and close as inside, negative/behind as outside;
+  - follows positive children and succeeds when there is no positive child.
+- Add a coordinate helper for residency containment:
+  - input is the landblock-relative render-space camera point;
+  - invert the env-cell placement in render space;
+  - convert the resulting render-local point back to source AC local coordinates
+    (`x = render.x`, `y = -render.z`, `z = render.y`);
+  - evaluate CellBSP planes in that AC local coordinate space instead of converting planes to
+    render space ad hoc.
+- Update `world-residency-index.ts` so AABB results become candidates and CellBSP containment is the
+  authoritative env-cell match when available.
+- Decide and document fallback behavior for cells without CellBSP:
+  - preferred first implementation: count/report AABB-only fallbacks in diagnostics and preserve
+    current AABB behavior only for those cells;
+  - if real content shows missing CellBSP is rare or impossible for loaded env cells, fail loudly in
+    development/test paths rather than silently classifying.
+- Extend renderer diagnostics with narrow-phase facts:
+  - AABB candidate count for the current query;
+  - exact CellBSP match count;
+  - AABB-only fallback count;
+  - selected residency source (`cell-bsp`, `aabb-fallback`, `outdoor`, or `unknown`).
+- Keep all tests independent of DAT/HBA loading.
+
+Tests and verification:
+
+- Add Tauri adapter/contract tests proving environment cell structures include `cellBsp` and that
+  the existing `cellBspWitness.rootKind` agrees with `cellBsp.kind`.
+- Add source-to-render coordinate conversion tests for the residency containment helper, especially
+  the `render-local -> AC local` basis conversion.
+- Add residency-bounds tests proving portal polygons or otherwise non-rendered cell-structure
+  vertices can still expand the broad-phase candidate AABB.
+- Add synthetic CellBSP traversal tests:
+  - positive/front side recurses or accepts;
+  - close/on-plane counts as inside;
+  - negative/behind rejects;
+  - a positive chain with no child succeeds;
+  - multiple candidates still resolve deterministically.
+- Add residency-index tests proving:
+  - a point inside a cell AABB but outside its CellBSP returns outdoor-landblock residency;
+  - a point inside both AABB and CellBSP returns env-cell residency;
+  - overlapping AABB candidates are narrowed by CellBSP before nearest-center selection.
+- Manually verify in Tauri/WebView:
+  - standing just outside a doorframe picks exterior base scene;
+  - standing just inside the same transition picks interior base scene;
+  - tight/odd cell AABBs no longer flip base scene incorrectly;
+  - outdoor-to-indoor and indoor-to-outdoor portal compositing still works after the residency
+    correction.
+
+Exit criteria:
+
+- Camera/view residency is AABB-broad-phase plus CellBSP-narrow-phase for loaded env cells.
+- Doorframe and tight-cell base-scene classification no longer depends on render-shell AABB
+  overreach.
+- Renderer diagnostics explain whether the current result came from exact CellBSP containment or an
+  explicit fallback.
+- Portal direction classification remains source-plane/`PortalSide` based.
+
+Downstream impact:
+
+- Phase 8 cleanup should remove or rename any diagnostics implying AABB containment is final
+  residency truth.
+- Phase 9 profiling should include the narrow-phase query counters and measure whether CellBSP
+  containment has any meaningful per-frame cost. If cost is measurable, optimize after correctness
+  is proven rather than reverting to AABB truth.
+
 ## Phase 8: Cleanup, Hardening, and Documentation
 
 Status: not started.
@@ -1200,6 +1350,7 @@ Required automated coverage:
 - Renderer working-model indexes.
 - Cell AABB BVH build/query and deterministic tie-break.
 - Bounded transition-depth graph generation, parent stencil constraints, and pass-count scaling.
+- CellBSP narrow-phase residency traversal and AABB-candidate rejection.
 
 ## Open Follow-Ups
 
@@ -1208,5 +1359,5 @@ Required automated coverage:
   are measured.
 - Whether overlapping same-depth apertures ever require per-chain stencil identity.
 - Whether pass-local Three.js scenes remain sufficient after Phase 5.
-- Whether exact env-cell containment is needed after the AABB BVH residency model is exercised on
-  real content.
+- Final fallback policy for loaded env cells whose CellBSP is missing or unusable, after Phase 7.2
+  diagnostics show how often that occurs in real content.

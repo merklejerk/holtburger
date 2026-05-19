@@ -675,7 +675,7 @@ Refinements to future steps:
 - Phase 8 cleanup should remove or rename legacy "portal group" metrics/test wording that now
   refers to transition work items, and should retire `deriveWorldRenderPasses()` if no remaining
   code path consumes it.
-- Manual verification is still required in Tauri/WebView for:
+- Manual Tauri/WebView inspection after Phase 5 looked good. Keep these as regression scenarios:
   - underground terrain openings;
   - foreground geometry occluding aperture masks;
   - outdoor-to-indoor and indoor-to-outdoor views of the same transition aperture;
@@ -683,7 +683,7 @@ Refinements to future steps:
 
 ## Phase 6: Camera/View Residency Index
 
-Status: not started.
+Status: complete for renderer-owned cell-AABB residency lookup.
 
 Purpose: provide renderer scene context and future candidate pruning across browser free-camera,
 browser walkabout, and client mode.
@@ -718,6 +718,63 @@ Exit criteria:
 
 - Renderer modes can consume camera/view scene context from one common query model.
 - Browser free-camera can still fall back to broad diagnostic rendering for unknown context.
+
+Phase 6 progress:
+
+- Added a renderer-adjacent residency index in
+  `apps/holtburger-3d/src/lib/world-display/world-residency-index.ts`.
+- The index returns one shared camera/view context shape:
+  - `{ kind: "outdoor-landblock", landblockId }`;
+  - `{ kind: "env-cell", landblockId, envCellId }`;
+  - `{ kind: "unknown", landblockId | null }`.
+- Landblock residency is computed from the camera's renderer-local position plus the active render
+  anchor. The implementation infers the active anchor from existing render chunk transforms instead
+  of adding a new browser-mode prop.
+- Built one BVH per loaded landblock from current `StructuredInteriorSceneModel.cells`.
+- Each cell item uses `StructuredInteriorCell.renderGeometry.bounds` transformed by
+  `StructuredInteriorCell.chunkLocalPlacement` through the same AC-to-render placement matrix used
+  by mesh construction.
+- BVH storage is landblock-relative. Render chunk offsets are used only to infer the active anchor
+  for camera position lookup; they are not baked into cell bounds.
+- Multiple AABB hits resolve by nearest cell-center distance, with env-cell id as the deterministic
+  final tie-breaker.
+- Wired the renderer to rebuild the residency index when structured interiors or render chunk
+  transforms change.
+- Added camera/view residency diagnostics to the existing browser Debug tab renderer row, including
+  indexed cell and landblock counts.
+- Added synthetic tests in
+  `apps/holtburger-3d/src/lib/world-display/world-residency-index.test.ts` covering:
+  - render-anchor inference from chunk transforms;
+  - renderer-local landblock residency math;
+  - transformed render-geometry bounds;
+  - env-cell hits;
+  - outdoor fallback when no loaded cell contains the camera point;
+  - deterministic nearest-center overlap resolution.
+
+Decisions and course corrections:
+
+- The first implementation uses a simple median-split AABB BVH per landblock. This keeps the data
+  structure direct and testable while leaving exact BSP/plane containment as a later narrow-phase
+  option only if real scenes prove AABB containment is insufficient.
+- Rebuilds happen at existing renderer sync boundaries instead of adding a timer debounce. In the
+  current app, structured interior cells are synchronized as scene-model batches; adding debounce
+  here would complicate correctness without reducing per-frame cost. The debug row now exposes
+  indexed counts as lightweight instrumentation.
+- The renderer does not use residency to classify individual transition aperture direction.
+  Direction remains source-backed by portal plane and `PortalSide` semantics from Phase 4.
+- Phase 6 does not change pass selection or candidate pruning. Browser free-camera still renders
+  broad diagnostics; Phase 7 consumes the residency context to decide mode policy.
+
+Refinements to future steps:
+
+- Phase 7 should consume the shared camera/view residency context to choose the primary base scene:
+  exterior for `outdoor-landblock`, interior for `env-cell`, and broad diagnostic fallback for
+  `unknown`.
+- Phase 7 should use residency for mode-level portal candidate policy, but not as a replacement for
+  per-aperture direction classification.
+- If large dungeon-only or sprawling interior landblocks make BVH rebuilds expensive, a later pass
+  should move construction toward landblock asset packs or Rust-side preprocessing. No such
+  complexity is needed before measuring this first renderer-owned index.
 
 ## Phase 7: Mode Policy Integration
 

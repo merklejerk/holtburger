@@ -49,6 +49,9 @@ export interface WorldRenderDebugMetrics {
 	canvasWidth: number;
 	canvasHeight: number;
 	pixelRatio: number;
+	cameraViewResidency: string;
+	residencyCellCount: number;
+	residencyLandblockCount: number;
 	renderPassCount: number;
 	portalGroupCount: number;
 	portalMaskMeshCount: number;

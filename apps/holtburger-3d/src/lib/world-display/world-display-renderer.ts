@@ -117,6 +117,13 @@ import {
 	deriveWorldRenderWorkingModel,
 	type WorldRenderWorkingModel,
 } from "./world-render-working-model";
+import {
+	buildWorldResidencyIndex,
+	createEmptyWorldResidencyIndex,
+	describeCameraViewResidencyContext,
+	type CameraViewResidencyContext,
+	type WorldResidencyIndex,
+} from "./world-residency-index";
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
@@ -236,6 +243,11 @@ export function createWorldDisplayRenderer(
 	const portalMaskMeshes = new Map<string, Mesh>();
 	let renderWorkingModel: WorldRenderWorkingModel =
 		createEmptyWorldRenderWorkingModel();
+	let residencyIndex: WorldResidencyIndex = createEmptyWorldResidencyIndex();
+	let cameraViewResidency: CameraViewResidencyContext = {
+		kind: "unknown",
+		landblockId: null,
+	};
 	const transitionPortalPolicy = createTransitionPortalWorkItemPolicy();
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
@@ -249,6 +261,10 @@ export function createWorldDisplayRenderer(
 			renderPassCount: 0,
 			portalGroupCount: 0,
 			portalMaskMeshCount: 0,
+			cameraViewResidency:
+				describeCameraViewResidencyContext(cameraViewResidency),
+			residencyCellCount: residencyIndex.cellCount,
+			residencyLandblockCount: residencyIndex.landblockCount,
 			terrainMeshCount: 0,
 			visibleTerrainMeshCount: 0,
 			staticGroupMeshCount: 0,
@@ -308,6 +324,7 @@ export function createWorldDisplayRenderer(
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
 			syncRenderChunkRoots(nextTransforms);
+			updateResidencyIndex();
 		},
 		setRenderSpatialQuery(nextQuery) {
 			renderSpatialQuery = nextQuery;
@@ -445,6 +462,11 @@ export function createWorldDisplayRenderer(
 
 	function renderWorldPasses(): void {
 		latestPortalMetrics = createPortalRenderMetrics(transitionPortalModel);
+		cameraViewResidency = residencyIndex.query({
+			x: camera.position.x,
+			y: camera.position.y,
+			z: camera.position.z,
+		});
 		renderer.info.reset();
 		const transitionWorkBatches = collectVisibleTransitionPortalWorkBatches();
 		const graph = deriveFreeCameraWorldRenderGraph({
@@ -468,6 +490,10 @@ export function createWorldDisplayRenderer(
 			renderPassCount: graph.length,
 			portalGroupCount: transitionPortalModel.candidates.length,
 			portalMaskMeshCount: portalMaskMeshes.size,
+			cameraViewResidency:
+				describeCameraViewResidencyContext(cameraViewResidency),
+			residencyCellCount: residencyIndex.cellCount,
+			residencyLandblockCount: residencyIndex.landblockCount,
 			terrainMeshCount: terrainMeshes.size,
 			visibleTerrainMeshCount: countVisibleObjects(terrainMeshes.values()),
 			staticGroupMeshCount: staticRenderableGroupMeshes.size,
@@ -903,6 +929,13 @@ export function createWorldDisplayRenderer(
 		});
 	}
 
+	function updateResidencyIndex(): void {
+		residencyIndex = buildWorldResidencyIndex({
+			cells: structuredInteriorScene.cells,
+			renderChunkTransforms,
+		});
+	}
+
 	function buildViewportRay(viewportPoint: NormalizedViewportPoint): {
 		origin: { x: number; y: number; z: number };
 		direction: { x: number; y: number; z: number };
@@ -1278,6 +1311,7 @@ export function createWorldDisplayRenderer(
 		}
 
 		syncRenderChunkRoots(renderChunkTransforms);
+		updateResidencyIndex();
 		updateRenderWorkingModel();
 		updateCameraFrame();
 	}
@@ -2067,6 +2101,9 @@ function createRenderDebugMetrics(
 		canvasWidth: renderer.domElement.width,
 		canvasHeight: renderer.domElement.height,
 		pixelRatio: renderer.getPixelRatio(),
+		cameraViewResidency: options.cameraViewResidency,
+		residencyCellCount: options.residencyCellCount,
+		residencyLandblockCount: options.residencyLandblockCount,
 		renderPassCount: options.renderPassCount,
 		portalGroupCount: options.portalGroupCount,
 		portalMaskMeshCount: options.portalMaskMeshCount,

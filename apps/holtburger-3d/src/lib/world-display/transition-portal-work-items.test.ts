@@ -7,9 +7,12 @@ import {
 } from "../assets/types";
 import { formatIndoorEnvCellAssetId } from "../assets/structured-interior-coverage";
 import {
-	deriveOutdoorPortalViewGroups,
-	type OutdoorPortalViewGroupModel,
-} from "./outdoor-portal-view-groups";
+	classifyTransitionPortalDirection,
+	createTransitionPortalWorkItemPolicy,
+	createTransitionPortalWorkItem,
+	deriveTransitionPortalCandidates,
+	type TransitionPortalCandidateModel,
+} from "./transition-portal-work-items";
 import { deriveStructuredCellRenderChunk } from "./render-chunks";
 import type {
 	StructuredInteriorCell,
@@ -21,7 +24,7 @@ const IDENTITY_PLACEMENT = {
 	orientation: { w: 1, x: 0, y: 0, z: 0 },
 };
 
-describe("outdoor portal view groups", () => {
+describe("transition portal work items", () => {
 	it("joins topology-only outdoor portals to loaded outside-transition env-cell apertures", () => {
 		const assetState = createAssetState([
 			createOutdoorStaticSceneAsset({
@@ -46,23 +49,22 @@ describe("outdoor portal view groups", () => {
 			topologyPortalCount: 1,
 			linkedTopologyPortalCount: 1,
 			apertureCandidateCount: 1,
-			viewGroupCount: 1,
+			workItemCandidateCount: 1,
 			skippedMissingApertureCount: 0,
 			skippedMissingPolygonCount: 0,
 		});
-		expect(model.groups[0]).toMatchObject({
+		expect(model.candidates[0]).toMatchObject({
 			id: "outdoor-topology/00:cell-outside/01",
 			source: "browser-free-camera",
 			outdoorPortalId: "outdoor-topology/00",
 			entryEnvCellId: 0x016c0155,
-			visibleSide: "positive",
+			insideVisibleSide: "negative",
+			outsideVisibleSide: "positive",
 			targetStatus: "outside",
 			stencilRef: 1,
-			requestedInteriorEnvCellIds: [
-				0x016c0155, 0x016c0156, 0x016c0157,
-			],
+			requestedInteriorEnvCellIds: [0x016c0155, 0x016c0156, 0x016c0157],
 		});
-		expect(model.groups[0]?.aperture.id).toBe("cell-outside/01");
+		expect(model.candidates[0]?.aperture.id).toBe("cell-outside/01");
 	});
 
 	it("skips topology portals when aperture geometry is not loaded yet", () => {
@@ -77,17 +79,17 @@ describe("outdoor portal view groups", () => {
 			[],
 		);
 
-		expect(model.groups).toEqual([]);
+		expect(model.candidates).toEqual([]);
 		expect(model.diagnostics).toMatchObject({
 			topologyPortalCount: 1,
 			linkedTopologyPortalCount: 1,
 			apertureCandidateCount: 0,
-			viewGroupCount: 0,
+			workItemCandidateCount: 0,
 			skippedMissingApertureCount: 1,
 		});
 	});
 
-	it("keeps the view group source injectable for future runtime providers", () => {
+	it("keeps the candidate source injectable for future runtime providers", () => {
 		const assetState = createAssetState([
 			createOutdoorStaticSceneAsset({
 				portalId: "outdoor-topology/00",
@@ -96,7 +98,7 @@ describe("outdoor portal view groups", () => {
 			}),
 			createIndoorEnvCellAsset(0x016c0155, []),
 		]);
-		const model = deriveOutdoorPortalViewGroups({
+		const model = deriveTransitionPortalCandidates({
 			assetState,
 			structuredInteriorScene: createStructuredInteriorSceneModel([
 				createStructuredInteriorCell(0x016c0155),
@@ -109,16 +111,16 @@ describe("outdoor portal view groups", () => {
 			source: "runtime",
 		});
 
-		expect(model.groups[0]?.source).toBe("runtime");
+		expect(model.candidates[0]?.source).toBe("runtime");
 	});
 
 	it("rejects malformed outside apertures without treating them as walls", () => {
 		const assetState = createAssetState([
 			createOutdoorStaticSceneAsset({
 				portalId: "outdoor-topology/00",
-					linkedEnvCellIds: [0x016c0155],
-					stabList: [],
-				}),
+				linkedEnvCellIds: [0x016c0155],
+				stabList: [],
+			}),
 			createIndoorEnvCellAsset(0x016c0155, []),
 		]);
 		const model = deriveModel(assetState, [
@@ -130,19 +132,104 @@ describe("outdoor portal view groups", () => {
 			}),
 		]);
 
-		expect(model.groups).toEqual([]);
+		expect(model.candidates).toEqual([]);
 		expect(model.diagnostics).toMatchObject({
 			apertureCandidateCount: 1,
 			skippedMissingPolygonCount: 1,
 		});
+	});
+
+	it("classifies the outside side of one transition aperture as outdoor-to-indoor", () => {
+		expect(
+			classifyTransitionPortalDirection({
+				cameraPosition: { x: 0, y: 0, z: 10 },
+				worldPlane: {
+					normal: { x: 0, y: 0, z: 1 },
+					constant: 0,
+					source: "drawing-bsp-portal",
+				},
+				insideVisibleSide: "negative",
+			}),
+		).toBe("outdoor-to-indoor");
+	});
+
+	it("classifies the inside side of one transition aperture as indoor-to-outdoor", () => {
+		expect(
+			classifyTransitionPortalDirection({
+				cameraPosition: { x: 0, y: 0, z: -10 },
+				worldPlane: {
+					normal: { x: 0, y: 0, z: 1 },
+					constant: 0,
+					source: "drawing-bsp-portal",
+				},
+				insideVisibleSide: "negative",
+			}),
+		).toBe("indoor-to-outdoor");
+	});
+
+	it("builds per-frame work items with explicit direction and broad scene targets", () => {
+		const model = deriveModel(
+			createAssetState([
+				createOutdoorStaticSceneAsset({
+					portalId: "outdoor-topology/00",
+					linkedEnvCellIds: [0x016c0155],
+					stabList: [],
+				}),
+				createIndoorEnvCellAsset(0x016c0155, []),
+			]),
+			[
+				createStructuredInteriorCell(0x016c0155, {
+					portalId: "cell-outside/01",
+					flags: 0x4,
+					targetEnvCellId: 0x016cffff,
+				}),
+			],
+		);
+		const candidate = model.candidates[0];
+		if (!candidate) {
+			throw new Error("test should derive a transition portal candidate");
+		}
+
+		const workItem = createTransitionPortalWorkItem({
+			candidate,
+			cameraPosition: { x: 0, y: 0, z: 10 },
+			worldPlane: {
+				normal: { x: 0, y: 0, z: 1 },
+				constant: 0,
+				source: "drawing-bsp-portal",
+			},
+			policy: createTransitionPortalWorkItemPolicy(),
+		});
+
+		expect(workItem).toMatchObject({
+			direction: "outdoor-to-indoor",
+			recursionDepth: 1,
+			baseScene: "exterior",
+			compositeScene: "interior",
+			visibleSide: "positive",
+		});
+	});
+
+	it("names the supported transition recursion depth policy", () => {
+		expect(createTransitionPortalWorkItemPolicy()).toEqual({
+			recursionDepth: 1,
+		});
+		expect(createTransitionPortalWorkItemPolicy({ recursionDepth: 2 })).toEqual(
+			{
+				recursionDepth: 2,
+			},
+		);
+		expect(() =>
+			createTransitionPortalWorkItemPolicy({ recursionDepth: 3 }),
+		).toThrow("Unsupported transition portal recursion depth 3.");
 	});
 });
 
 function deriveModel(
 	assetState: AssetChannelState,
 	cells: StructuredInteriorCell[],
-): OutdoorPortalViewGroupModel {
-	return deriveOutdoorPortalViewGroups({
+): TransitionPortalCandidateModel {
+	return deriveTransitionPortalCandidates({
 		assetState,
 		structuredInteriorScene: createStructuredInteriorSceneModel(cells),
 		activeLandblockIds: [0x016cffff],
@@ -270,7 +357,7 @@ function createStructuredInteriorCell(
 ): StructuredInteriorCell {
 	const renderChunk = deriveStructuredCellRenderChunk(envCellId);
 	const targetEnvCellId =
-		portalOptions.targetEnvCellId ?? ((envCellId & 0xffff0000) | 0xffff);
+		portalOptions.targetEnvCellId ?? (envCellId & 0xffff0000) | 0xffff;
 	return {
 		renderKey: `cell-${envCellId.toString(16)}`,
 		envCellId,

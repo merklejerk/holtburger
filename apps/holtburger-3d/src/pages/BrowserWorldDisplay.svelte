@@ -66,7 +66,7 @@
 	} from "../lib/world-display/structured-interior-scene";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
-	import { deriveOutdoorPortalViewGroups } from "../lib/world-display/outdoor-portal-view-groups";
+	import { deriveTransitionPortalCandidates } from "../lib/world-display/transition-portal-work-items";
 	import {
 		countPreparedAssetsByKind,
 		formatPreparedAssetKindCounts,
@@ -305,8 +305,8 @@
 			selectedEnvCellId: selectedDiagnosticEnvCellId,
 		}),
 	);
-	const outdoorPortalViewGroupModel = $derived(
-		deriveOutdoorPortalViewGroups({
+	const transitionPortalModel = $derived(
+		deriveTransitionPortalCandidates({
 			assetState,
 			structuredInteriorScene,
 			activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
@@ -1424,7 +1424,7 @@
 		{terrainScene}
 		{staticRenderableScene}
 		{structuredInteriorScene}
-		{outdoorPortalViewGroupModel}
+		{transitionPortalModel}
 		{debugOverlayScene}
 		{activeRenderAnchor}
 		renderChunkTransforms={activeRenderChunkTransforms}

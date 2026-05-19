@@ -6,10 +6,12 @@ import type {
 	AssetChannelState,
 	PreparedOutdoorStaticSceneBuildingPortal,
 } from "../assets/types";
+import type { Vec3Dto } from "../host/contracts";
 import { normalizeOutdoorLandblockId } from "../landblocks";
 import {
 	derivePortalAperturesFromStructuredInteriorScene,
 	oppositePortalVisibleSide,
+	type PortalAperturePlane,
 	type PortalAperture,
 	type PortalApertureTargetStatus,
 	type PortalApertureVisibleSide,
@@ -17,17 +19,24 @@ import {
 import type { RenderChunkPlacement } from "./render-chunks";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
-export type OutdoorPortalViewGroupSource =
+export type TransitionPortalSource =
 	| "browser-free-camera"
 	| "walkabout"
 	| "runtime";
 
-export interface OutdoorPortalViewGroup {
+export type TransitionPortalDirection =
+	| "outdoor-to-indoor"
+	| "indoor-to-outdoor";
+
+export type TransitionPortalScene = "exterior" | "interior";
+
+export interface TransitionPortalCandidate {
 	id: string;
-	source: OutdoorPortalViewGroupSource;
+	source: TransitionPortalSource;
 	outdoorPortalId: string;
 	aperture: PortalAperture;
-	visibleSide: PortalApertureVisibleSide;
+	insideVisibleSide: PortalApertureVisibleSide;
+	outsideVisibleSide: PortalApertureVisibleSide;
 	renderChunk: RenderChunkPlacement;
 	entryEnvCellId: number;
 	requestedInteriorEnvCellIds: number[];
@@ -35,52 +44,84 @@ export interface OutdoorPortalViewGroup {
 	stencilRef: number;
 }
 
-export interface OutdoorPortalViewGroupDiagnostics {
+export interface TransitionPortalWorkItem extends TransitionPortalCandidate {
+	direction: TransitionPortalDirection;
+	recursionDepth: number;
+	baseScene: TransitionPortalScene;
+	compositeScene: TransitionPortalScene;
+	visibleSide: PortalApertureVisibleSide;
+}
+
+export interface TransitionPortalWorkItemPolicy {
+	recursionDepth: number;
+}
+
+export const DEFAULT_TRANSITION_PORTAL_RECURSION_DEPTH = 1;
+export const DEBUG_TRANSITION_PORTAL_RECURSION_DEPTH = 2;
+
+export function createTransitionPortalWorkItemPolicy({
+	recursionDepth = DEFAULT_TRANSITION_PORTAL_RECURSION_DEPTH,
+}: {
+	recursionDepth?: number;
+} = {}): TransitionPortalWorkItemPolicy {
+	if (
+		recursionDepth !== DEFAULT_TRANSITION_PORTAL_RECURSION_DEPTH &&
+		recursionDepth !== DEBUG_TRANSITION_PORTAL_RECURSION_DEPTH
+	) {
+		throw new Error(
+			`Unsupported transition portal recursion depth ${recursionDepth}.`,
+		);
+	}
+
+	return { recursionDepth };
+}
+
+export interface TransitionPortalCandidateDiagnostics {
 	topologyPortalCount: number;
 	linkedTopologyPortalCount: number;
 	apertureCandidateCount: number;
-	viewGroupCount: number;
+	workItemCandidateCount: number;
 	skippedMissingApertureCount: number;
 	skippedMissingPolygonCount: number;
 	truncatedInteriorGroupCount: number;
 }
 
-export interface OutdoorPortalViewGroupModel {
-	groups: OutdoorPortalViewGroup[];
-	diagnostics: OutdoorPortalViewGroupDiagnostics;
+export interface TransitionPortalCandidateModel {
+	candidates: TransitionPortalCandidate[];
+	diagnostics: TransitionPortalCandidateDiagnostics;
 }
 
-export interface OutdoorPortalViewGroupInput {
+export interface TransitionPortalCandidateInput {
 	assetState: AssetChannelState;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	activeLandblockIds: readonly number[];
 	coverageOptions: StructuredInteriorCoverageOptions;
-	source?: OutdoorPortalViewGroupSource;
+	source?: TransitionPortalSource;
 }
 
-export function deriveOutdoorPortalViewGroups({
+export function deriveTransitionPortalCandidates({
 	assetState,
 	structuredInteriorScene,
 	activeLandblockIds,
 	coverageOptions,
 	source = "browser-free-camera",
-}: OutdoorPortalViewGroupInput): OutdoorPortalViewGroupModel {
+}: TransitionPortalCandidateInput): TransitionPortalCandidateModel {
 	const activeLandblockIdSet = new Set(
 		activeLandblockIds.map(normalizeOutdoorLandblockId),
 	);
 	const aperturesBySourceEnvCellId = groupOutsideAperturesBySourceEnvCellId(
 		derivePortalAperturesFromStructuredInteriorScene(structuredInteriorScene),
 	);
-	const diagnostics: OutdoorPortalViewGroupDiagnostics = {
+	const diagnostics: TransitionPortalCandidateDiagnostics = {
 		topologyPortalCount: 0,
 		linkedTopologyPortalCount: 0,
 		apertureCandidateCount: 0,
-		viewGroupCount: 0,
+		workItemCandidateCount: 0,
 		skippedMissingApertureCount: 0,
 		skippedMissingPolygonCount: 0,
 		truncatedInteriorGroupCount: 0,
 	};
-	const groups: OutdoorPortalViewGroup[] = [];
+	const candidates: TransitionPortalCandidate[] = [];
 	let nextStencilRef = 1;
 
 	for (const portal of collectActiveOutdoorBuildingPortals(
@@ -98,7 +139,7 @@ export function deriveOutdoorPortalViewGroups({
 			const apertures = aperturesBySourceEnvCellId.get(linkedEnvCellId) ?? [];
 			apertureCountForPortal += apertures.length;
 			for (const aperture of apertures) {
-				const group = createOutdoorPortalViewGroup({
+				const candidate = createTransitionPortalCandidate({
 					aperture,
 					portal,
 					stencilRef: nextStencilRef,
@@ -106,15 +147,15 @@ export function deriveOutdoorPortalViewGroups({
 					assetState,
 					coverageOptions,
 				});
-				if (group.kind === "skip") {
-					diagnostics[group.reason] += 1;
+				if (candidate.kind === "skip") {
+					diagnostics[candidate.reason] += 1;
 					continue;
 				}
 
-				if (group.truncatedInteriorCoverage) {
+				if (candidate.truncatedInteriorCoverage) {
 					diagnostics.truncatedInteriorGroupCount += 1;
 				}
-				groups.push(group.viewGroup);
+				candidates.push(candidate.candidate);
 				nextStencilRef += 1;
 			}
 		}
@@ -125,9 +166,9 @@ export function deriveOutdoorPortalViewGroups({
 		diagnostics.apertureCandidateCount += apertureCountForPortal;
 	}
 
-	groups.sort(compareOutdoorPortalViewGroups);
-	diagnostics.viewGroupCount = groups.length;
-	return { groups, diagnostics };
+	candidates.sort(compareTransitionPortalCandidates);
+	diagnostics.workItemCandidateCount = candidates.length;
+	return { candidates, diagnostics };
 }
 
 function collectActiveOutdoorBuildingPortals(
@@ -173,10 +214,82 @@ function groupOutsideAperturesBySourceEnvCellId(
 	return grouped;
 }
 
-type OutdoorPortalGroupCreationResult =
+export function createTransitionPortalWorkItem({
+	candidate,
+	cameraPosition,
+	worldPlane,
+	policy,
+}: {
+	candidate: TransitionPortalCandidate;
+	cameraPosition: Vec3Dto;
+	worldPlane: PortalAperturePlane | null;
+	policy: TransitionPortalWorkItemPolicy;
+}): TransitionPortalWorkItem | null {
+	const direction = classifyTransitionPortalDirection({
+		cameraPosition,
+		worldPlane,
+		insideVisibleSide: candidate.insideVisibleSide,
+	});
+	if (!direction) {
+		return null;
+	}
+
+	return {
+		...candidate,
+		direction,
+		recursionDepth: policy.recursionDepth,
+		visibleSide:
+			direction === "indoor-to-outdoor"
+				? candidate.insideVisibleSide
+				: candidate.outsideVisibleSide,
+		baseScene: direction === "indoor-to-outdoor" ? "interior" : "exterior",
+		compositeScene: direction === "indoor-to-outdoor" ? "exterior" : "interior",
+	};
+}
+
+export function classifyTransitionPortalDirection({
+	cameraPosition,
+	worldPlane,
+	insideVisibleSide,
+}: {
+	cameraPosition: Vec3Dto;
+	worldPlane: PortalAperturePlane | null;
+	insideVisibleSide: PortalApertureVisibleSide;
+}): TransitionPortalDirection | null {
+	if (!worldPlane) {
+		return null;
+	}
+
+	const normalLength = Math.hypot(
+		worldPlane.normal.x,
+		worldPlane.normal.y,
+		worldPlane.normal.z,
+	);
+	if (normalLength === 0) {
+		return null;
+	}
+
+	const signedDistance =
+		(worldPlane.normal.x * cameraPosition.x +
+			worldPlane.normal.y * cameraPosition.y +
+			worldPlane.normal.z * cameraPosition.z) /
+			normalLength -
+		worldPlane.constant / normalLength;
+	if (signedDistance === 0) {
+		return null;
+	}
+
+	const cameraSide: PortalApertureVisibleSide =
+		signedDistance > 0 ? "positive" : "negative";
+	return cameraSide === insideVisibleSide
+		? "indoor-to-outdoor"
+		: "outdoor-to-indoor";
+}
+
+type TransitionPortalCandidateCreationResult =
 	| {
-			kind: "group";
-			viewGroup: OutdoorPortalViewGroup;
+			kind: "candidate";
+			candidate: TransitionPortalCandidate;
 			truncatedInteriorCoverage: boolean;
 	  }
 	| {
@@ -184,7 +297,7 @@ type OutdoorPortalGroupCreationResult =
 			reason: "skippedMissingPolygonCount";
 	  };
 
-function createOutdoorPortalViewGroup({
+function createTransitionPortalCandidate({
 	aperture,
 	portal,
 	stencilRef,
@@ -195,11 +308,14 @@ function createOutdoorPortalViewGroup({
 	aperture: PortalAperture;
 	portal: PreparedOutdoorStaticSceneBuildingPortal;
 	stencilRef: number;
-	source: OutdoorPortalViewGroupSource;
+	source: TransitionPortalSource;
 	assetState: AssetChannelState;
 	coverageOptions: StructuredInteriorCoverageOptions;
-}): OutdoorPortalGroupCreationResult {
-	if (aperture.targetStatus === "missing-polygon" || aperture.points.length < 3) {
+}): TransitionPortalCandidateCreationResult {
+	if (
+		aperture.targetStatus === "missing-polygon" ||
+		aperture.points.length < 3
+	) {
 		return {
 			kind: "skip",
 			reason: "skippedMissingPolygonCount",
@@ -207,7 +323,7 @@ function createOutdoorPortalViewGroup({
 	}
 	if (aperture.targetStatus !== "outside") {
 		throw new Error(
-			`Outdoor portal group ${portal.portalId} joined non-outside aperture ${aperture.id}.`,
+			`Transition portal candidate ${portal.portalId} joined non-outside aperture ${aperture.id}.`,
 		);
 	}
 
@@ -226,14 +342,15 @@ function createOutdoorPortalViewGroup({
 	);
 
 	return {
-		kind: "group",
+		kind: "candidate",
 		truncatedInteriorCoverage: coverage.truncated,
-		viewGroup: {
+		candidate: {
 			id: `${portal.portalId}:${aperture.id}`,
 			source,
 			outdoorPortalId: portal.portalId,
 			aperture,
-			visibleSide: oppositePortalVisibleSide(aperture.visibleSide),
+			insideVisibleSide: aperture.visibleSide,
+			outsideVisibleSide: oppositePortalVisibleSide(aperture.visibleSide),
 			renderChunk: aperture.renderChunk,
 			entryEnvCellId: aperture.source.envCellId,
 			requestedInteriorEnvCellIds: coverage.envCellIds,
@@ -247,9 +364,9 @@ function isEnvCellId(cellId: number): boolean {
 	return (cellId & 0xffff) !== 0xffff;
 }
 
-function compareOutdoorPortalViewGroups(
-	left: OutdoorPortalViewGroup,
-	right: OutdoorPortalViewGroup,
+function compareTransitionPortalCandidates(
+	left: TransitionPortalCandidate,
+	right: TransitionPortalCandidate,
 ): number {
 	return (
 		left.entryEnvCellId - right.entryEnvCellId ||

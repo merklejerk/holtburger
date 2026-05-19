@@ -57,9 +57,11 @@ is the execution plan.
 - Preserve broad interior rendering in browser free-camera diagnostics.
 - Treat hollow tests, dead code paths, and stale debug switches as cleanup targets, not assets.
 
-## Codebase Dry-Run Findings
+## Initial Codebase Dry-Run Findings
 
-These findings came from checking the plan against the current `apps/holtburger-3d` renderer.
+These findings came from checking the plan against the pre-implementation
+`apps/holtburger-3d` renderer. Later phase progress notes supersede items that have already been
+completed.
 
 - `render-passes.ts` defines Three.js layers for exterior, portal mask, portal depth reset,
   portal interior, diagnostic interior, and debug overlay. Those layers are pass visibility masks,
@@ -67,17 +69,18 @@ These findings came from checking the plan against the current `apps/holtburger-
 - `static-renderables.ts` currently groups static parts by `renderChunk|gfxObjAssetId`; the key does
   not include indoor/outdoor kind. The renderer assigns layer from the first part in the group, so
   Phase 1 must fix grouping before later pass work depends on it.
-- `renderPortalGroups()` in `world-display-renderer.ts` still loops one visible portal group at a
+- The original portal renderer in `world-display-renderer.ts` still looped one visible portal group
+  at a
   time, clears stencil, renders the full scene for the mask, performs a full-scene depth-reset pass,
   toggles interior visibility, mutates portal-interior material stencil state, and renders the full
   scene again.
-- `setPortalInteriorVisibility()` currently prunes interiors per portal group using
+- The original `setPortalInteriorVisibility()` pruned interiors per portal group using
   `requestedInteriorEnvCellIds` and repeated source-array lookups. The unified pipeline should
   replace that with broad interior render sets for portal compositing; per-portal requested cells
   can remain useful for asset hydration and diagnostics.
-- `outdoor-portal-view-groups.ts` is currently shaped as an outdoor-to-indoor view group builder.
-  Bidirectional transition rendering needs a more general transition portal work-item model with an
-  explicit direction field.
+- The original `outdoor-portal-view-groups.ts` was shaped as an outdoor-to-indoor view group
+  builder. Bidirectional transition rendering needs a more general transition portal work-item model
+  with an explicit direction field.
 - `portal-visibility.ts` rebuilds the camera frustum and allocates projected vectors per candidate.
   Phase 2 should evaluate visibility from a per-frame camera/projection context.
 - Structured interior cell bounds already exist through `renderGeometry.bounds` and
@@ -142,7 +145,7 @@ Phase 0 progress:
   - portal side culling against source-backed planes in
     `apps/holtburger-3d/src/lib/world-display/portal-visibility.test.ts`;
   - outdoor topology portal to outside-transition aperture joining in
-    `apps/holtburger-3d/src/lib/world-display/outdoor-portal-view-groups.test.ts`;
+    `apps/holtburger-3d/src/lib/world-display/transition-portal-work-items.test.ts`;
   - render pass ordering in
     `apps/holtburger-3d/src/lib/world-display/render-passes.test.ts`.
 - Added a synthetic aperture test proving drawing-BSP portal planes are matched by polygon id even
@@ -158,8 +161,8 @@ Phase 0 progress:
     source-array lookups;
   - `applyPortalInteriorStencil()` and `clearPortalInteriorStencil()` still mutate material stencil
     state in the hot path;
-  - `outdoor-portal-view-groups.ts` still exposes a one-way outdoor-to-indoor group shape and
-    mints one stencil ref per group;
+  - the original `outdoor-portal-view-groups.ts` exposed a one-way outdoor-to-indoor group shape
+    and minted one stencil ref per group;
   - `apps/holtburger-3d/src/dev/PortalDepthResetProbe.svelte` and
     `apps/holtburger-3d/src/dev/portal-depth-reset-probe.ts` remain useful compatibility probes
     until Phase 5 replaces the prototype portal pass structure.
@@ -453,7 +456,8 @@ Refinements to future steps:
 
 ## Phase 4: Bidirectional Transition Direction and Bounded Recursion
 
-Status: not started.
+Status: complete for the semantic work-item model; full indoor-to-outdoor rendering remains Phase 5
+render-graph work.
 
 Purpose: centralize the transition portal semantics that the batched render graph consumes.
 
@@ -492,6 +496,62 @@ Exit criteria:
 - Bidirectional transition rendering does not depend on a mirror portal record.
 - Portal direction behavior is source-backed and covered by synthetic tests.
 - Transition recursion depth is a named policy rather than hidden renderer control flow.
+
+Phase 4 progress:
+
+- Replaced the one-way outdoor portal view-group module with
+  `apps/holtburger-3d/src/lib/world-display/transition-portal-work-items.ts`.
+- The source-derived model is now `TransitionPortalCandidateModel`, which keeps outdoor building
+  topology portals and env-cell outside-transition aperture polygons as joined but distinct source
+  facts.
+- Added `TransitionPortalWorkItem`, carrying:
+  - explicit `direction`;
+  - `recursionDepth`;
+  - source-backed aperture data;
+  - inside/outside visible-side facts;
+  - broad `baseScene` and `compositeScene` targets.
+- Centralized per-frame direction classification in `classifyTransitionPortalDirection()` and
+  `createTransitionPortalWorkItem()`. The classifier uses the world-space portal plane, decoded
+  inside visible side, and camera/view position. It does not look for a paired mirror portal.
+- Added named transition recursion policy with supported depths:
+  - default depth `1`;
+  - debug/quality depth `2`;
+  - any other depth throws.
+- Updated `WorldDisplay.svelte`, `BrowserWorldDisplay.svelte`, and `world-display-renderer.ts` to
+  consume `transitionPortalModel` instead of the old one-way `outdoorPortalViewGroupModel`.
+- The current renderer now classifies transition portal direction per frame before running
+  visibility. The existing Phase 5-bound render path still renders only work items whose composite
+  scene is `interior`, because its pass order is still the old exterior-base/interior-composite
+  prototype.
+- Added synthetic tests in
+  `apps/holtburger-3d/src/lib/world-display/transition-portal-work-items.test.ts` covering:
+  - topology portal plus outside-transition aperture joining;
+  - both sides of one transition aperture;
+  - previously backwards `PortalSide` behavior;
+  - explicit broad scene targets on work items;
+  - supported recursion depth policy.
+
+Decisions and course corrections:
+
+- Direction classification is intentionally per-frame renderer work. The Svelte-derived candidate
+  model cannot know direction because the camera position and transformed portal plane are renderer
+  state.
+- Phase 4 produces candidate facts plus per-frame work items rather than trying to choose the
+  global base scene. Camera/view residency and mode-level base-scene policy remain Phase 6/7 work.
+- Indoor-to-outdoor work items are now represented and tested, but the old render pass order cannot
+  correctly composite exterior-through-interior yet. Phase 5 must make indoor-to-outdoor rendering a
+  first-class render graph path rather than squeezing it into the old exterior-base prototype.
+- Stencil refs are still minted per candidate as a compatibility bridge for the existing renderer.
+  Phase 5 should replace that with direction/depth-level stencil refs.
+
+Refinements to future steps:
+
+- Phase 5 should consume `TransitionPortalWorkItem.direction`, `baseScene`, `compositeScene`, and
+  `recursionDepth` directly when building batched graph passes.
+- Phase 5 should stop calling the current full-scene portal mask/depth reset path and should render
+  pass-local aperture objects for visible work items grouped by direction/depth.
+- Phase 6 residency should prune candidate sets and choose mode-level base scene, but it should not
+  replace the per-aperture direction classifier introduced here.
 
 ## Phase 5: Batched Transition Portal Render Graph
 

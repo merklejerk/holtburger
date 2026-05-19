@@ -19,7 +19,7 @@
 	import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 	import type { TerrainSceneModel } from "./terrain-scene";
 	import type { WorldDebugOverlayModel } from "./debug-overlays";
-	import type { OutdoorPortalViewGroupModel } from "./outdoor-portal-view-groups";
+	import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 	import {
 		createWorldDisplayRenderer,
 		type WorldDisplayRenderer,
@@ -30,7 +30,7 @@
 		terrainScene,
 		staticRenderableScene,
 		structuredInteriorScene,
-		outdoorPortalViewGroupModel,
+		transitionPortalModel,
 		debugOverlayScene,
 		activeRenderAnchor: _activeRenderAnchor = null,
 		renderChunkTransforms = [],
@@ -43,7 +43,7 @@
 		terrainScene: TerrainSceneModel;
 		staticRenderableScene: StaticRenderableSceneModel;
 		structuredInteriorScene: StructuredInteriorSceneModel;
-		outdoorPortalViewGroupModel: OutdoorPortalViewGroupModel;
+		transitionPortalModel: TransitionPortalCandidateModel;
 		debugOverlayScene: WorldDebugOverlayModel;
 		activeRenderAnchor?: RenderLandblockAnchor | null;
 		renderChunkTransforms?: RenderChunkTransform[];
@@ -68,7 +68,7 @@
 				terrainScene,
 				staticRenderableScene,
 				structuredInteriorScene,
-				outdoorPortalViewGroupModel,
+				transitionPortalModel,
 				debugOverlayScene,
 				renderChunkTransforms,
 				renderSpatialQuery,
@@ -132,7 +132,7 @@
 		if (!controller) {
 			return;
 		}
-		controller.setOutdoorPortalViewGroupModel(outdoorPortalViewGroupModel);
+		controller.setTransitionPortalModel(transitionPortalModel);
 	});
 
 	$effect(() => {

@@ -84,9 +84,14 @@ import type {
 	WorldRenderPortalMetrics,
 } from "./renderer-contract";
 import type {
-	OutdoorPortalViewGroup,
-	OutdoorPortalViewGroupModel,
-} from "./outdoor-portal-view-groups";
+	TransitionPortalCandidate,
+	TransitionPortalCandidateModel,
+	TransitionPortalWorkItem,
+} from "./transition-portal-work-items";
+import {
+	createTransitionPortalWorkItem,
+	createTransitionPortalWorkItemPolicy,
+} from "./transition-portal-work-items";
 import { buildTerrainGeometry } from "./terrain-geometry";
 import type { TerrainSceneModel, TerrainSceneTile } from "./terrain-scene";
 import {
@@ -116,7 +121,7 @@ export interface WorldDisplayRendererOptions {
 	terrainScene: TerrainSceneModel;
 	staticRenderableScene: StaticRenderableSceneModel;
 	structuredInteriorScene: StructuredInteriorSceneModel;
-	outdoorPortalViewGroupModel: OutdoorPortalViewGroupModel;
+	transitionPortalModel: TransitionPortalCandidateModel;
 	debugOverlayScene: WorldDebugOverlayModel;
 	renderChunkTransforms: readonly RenderChunkTransform[];
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
@@ -130,7 +135,7 @@ export interface WorldDisplayRenderer {
 	setTerrainScene(scene: TerrainSceneModel): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
-	setOutdoorPortalViewGroupModel(model: OutdoorPortalViewGroupModel): void;
+	setTransitionPortalModel(model: TransitionPortalCandidateModel): void;
 	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
 	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
@@ -171,7 +176,7 @@ export function createWorldDisplayRenderer(
 	let terrainScene = options.terrainScene;
 	let staticRenderableScene = options.staticRenderableScene;
 	let structuredInteriorScene = options.structuredInteriorScene;
-	let outdoorPortalViewGroupModel = options.outdoorPortalViewGroupModel;
+	let transitionPortalModel = options.transitionPortalModel;
 	let debugOverlayScene = options.debugOverlayScene;
 	let renderChunkTransforms = options.renderChunkTransforms;
 	let renderSpatialQuery = options.renderSpatialQuery;
@@ -217,12 +222,13 @@ export function createWorldDisplayRenderer(
 	const portalMaskMeshes = new Map<string, Mesh>();
 	let renderWorkingModel: WorldRenderWorkingModel =
 		createEmptyWorldRenderWorkingModel();
+	const transitionPortalPolicy = createTransitionPortalWorkItemPolicy();
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
 	let latestPerformanceMetrics: WorldRenderMetrics["performance"] = null;
 	let latestPortalMetrics: WorldRenderPortalMetrics = createPortalRenderMetrics(
-		outdoorPortalViewGroupModel,
+		transitionPortalModel,
 	);
 	let latestRenderDebugMetrics: WorldRenderDebugMetrics =
 		createRenderDebugMetrics(renderer, {
@@ -277,8 +283,8 @@ export function createWorldDisplayRenderer(
 			structuredInteriorScene = nextScene;
 			syncStructuredInteriorMeshes(nextScene);
 		},
-		setOutdoorPortalViewGroupModel(nextModel) {
-			outdoorPortalViewGroupModel = nextModel;
+		setTransitionPortalModel(nextModel) {
+			transitionPortalModel = nextModel;
 			syncPortalMaskMeshes(nextModel);
 		},
 		setDebugOverlayScene(nextScene) {
@@ -424,18 +430,16 @@ export function createWorldDisplayRenderer(
 	}
 
 	function renderWorldPasses(): void {
-		latestPortalMetrics = createPortalRenderMetrics(
-			outdoorPortalViewGroupModel,
-		);
+		latestPortalMetrics = createPortalRenderMetrics(transitionPortalModel);
 		renderer.info.reset();
 		const passes = deriveWorldRenderPasses({
-			hasPortalViewGroups: outdoorPortalViewGroupModel.groups.length > 0,
+			hasPortalViewGroups: transitionPortalModel.candidates.length > 0,
 			showDiagnosticInterior: true,
 			showDebugOverlays: true,
 		});
 		for (const pass of passes) {
 			if (pass.kind === "portal-stencil-mask") {
-				renderPortalGroups();
+				renderTransitionPortals();
 				continue;
 			}
 			if (pass.kind === "portal-depth-reset") {
@@ -451,7 +455,7 @@ export function createWorldDisplayRenderer(
 		camera.layers.enableAll();
 		latestRenderDebugMetrics = createRenderDebugMetrics(renderer, {
 			renderPassCount: passes.length,
-			portalGroupCount: outdoorPortalViewGroupModel.groups.length,
+			portalGroupCount: transitionPortalModel.candidates.length,
 			portalMaskMeshCount: portalMaskMeshes.size,
 			terrainMeshCount: terrainMeshes.size,
 			visibleTerrainMeshCount: countVisibleObjects(terrainMeshes.values()),
@@ -477,9 +481,9 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
-	function renderPortalGroups(): void {
-		const visibleGroups: {
-			group: OutdoorPortalViewGroup;
+	function renderTransitionPortals(): void {
+		const visibleWorkItems: {
+			workItem: TransitionPortalWorkItem;
 			screenAreaPx: number;
 		}[] = [];
 		const maskedInteriorCellIds = new Set<number>();
@@ -491,9 +495,9 @@ export function createWorldDisplayRenderer(
 			),
 			minScreenAreaPx: MIN_PORTAL_SCREEN_AREA_PX,
 		});
-		for (const group of outdoorPortalViewGroupModel.groups) {
-			const visibility = evaluatePortalViewGroupVisibility(
-				group,
+		for (const candidate of transitionPortalModel.candidates) {
+			const visibility = evaluateTransitionPortalVisibility(
+				candidate,
 				visibilityContext,
 			);
 			if (!visibility.visible) {
@@ -503,40 +507,44 @@ export function createWorldDisplayRenderer(
 			}
 			recordPortalScreenAreaBucket(visibility.screenAreaPx);
 			recordVisiblePortalScreenArea(visibility.screenAreaPx);
-			visibleGroups.push({
-				group,
+			const workItem = visibility.workItem;
+			if (!workItem || workItem.compositeScene !== "interior") {
+				continue;
+			}
+			visibleWorkItems.push({
+				workItem,
 				screenAreaPx: visibility.screenAreaPx,
 			});
-			for (const envCellId of group.requestedInteriorEnvCellIds) {
+			for (const envCellId of candidate.requestedInteriorEnvCellIds) {
 				maskedInteriorCellIds.add(envCellId);
 			}
 		}
-		visibleGroups.sort(
+		visibleWorkItems.sort(
 			(left, right) =>
 				right.screenAreaPx - left.screenAreaPx ||
-				left.group.id.localeCompare(right.group.id),
+				left.workItem.id.localeCompare(right.workItem.id),
 		);
-		latestPortalMetrics.visiblePortalGroupCount = visibleGroups.length;
+		latestPortalMetrics.visiblePortalGroupCount = visibleWorkItems.length;
 		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
-		if (visibleGroups.length > 0) {
+		if (visibleWorkItems.length > 0) {
 			assertPortalDepthResetSupported(portalDepthResetCapability);
 		}
 
-		for (const { group } of visibleGroups) {
-			const maskMesh = portalMaskMeshes.get(group.id);
+		for (const { workItem } of visibleWorkItems) {
+			const maskMesh = portalMaskMeshes.get(workItem.id);
 			if (!maskMesh) {
 				continue;
 			}
 
-			setPortalMaskVisibility(group.id);
+			setPortalMaskVisibility(workItem.id);
 			renderer.clear(false, false, true);
 			camera.layers.set(WORLD_RENDER_LAYER.portalMask);
 			renderer.render(scene, camera);
 
-			renderPortalDepthReset(maskMesh, group.stencilRef);
+			renderPortalDepthReset(maskMesh, workItem.stencilRef);
 
 			setPortalInteriorVisibility();
-			applyPortalInteriorStencil(group.stencilRef);
+			applyPortalInteriorStencil(workItem.stencilRef);
 			camera.layers.set(WORLD_RENDER_LAYER.portalInterior);
 			renderer.render(scene, camera);
 		}
@@ -559,39 +567,54 @@ export function createWorldDisplayRenderer(
 		}
 	}
 
-	function evaluatePortalViewGroupVisibility(
-		group: OutdoorPortalViewGroup,
+	function evaluateTransitionPortalVisibility(
+		candidate: TransitionPortalCandidate,
 		context: PortalVisibilityContext,
-	): PortalVisibilityResult {
-		const maskMesh = portalMaskMeshes.get(group.id);
+	): PortalVisibilityResult & { workItem?: TransitionPortalWorkItem } {
+		const maskMesh = portalMaskMeshes.get(candidate.id);
 		if (!maskMesh) {
 			return { visible: false, reason: "missing-points", screenAreaPx: 0 };
 		}
 
 		maskMesh.updateMatrixWorld(true);
-		const worldPoints = group.aperture.points.map((point) =>
+		const worldPoints = candidate.aperture.points.map((point) =>
 			new Vector3(point.x, point.y, point.z).applyMatrix4(maskMesh.matrixWorld),
 		);
 		const worldPlane = transformAperturePlaneToWorld(
-			group.aperture.plane,
+			candidate.aperture.plane,
 			maskMesh.matrixWorld,
 		);
-		return evaluatePortalVisibility({
+		const workItem = createTransitionPortalWorkItem({
+			candidate,
+			cameraPosition: {
+				x: context.cameraPosition.x,
+				y: context.cameraPosition.y,
+				z: context.cameraPosition.z,
+			},
+			worldPlane,
+			policy: transitionPortalPolicy,
+		});
+		if (!workItem) {
+			return { visible: false, reason: "back-facing", screenAreaPx: 0 };
+		}
+
+		const visibility = evaluatePortalVisibility({
 			worldPoints: worldPoints.map((point) => ({
 				x: point.x,
 				y: point.y,
 				z: point.z,
 			})),
 			worldPlane,
-			visibleSide: group.visibleSide,
+			visibleSide: workItem.visibleSide,
 			context,
 		});
+		return { ...visibility, workItem };
 	}
 
 	function transformAperturePlaneToWorld(
-		plane: OutdoorPortalViewGroup["aperture"]["plane"],
+		plane: TransitionPortalCandidate["aperture"]["plane"],
 		matrixWorld: Matrix4,
-	): OutdoorPortalViewGroup["aperture"]["plane"] {
+	): TransitionPortalCandidate["aperture"]["plane"] {
 		if (!plane) {
 			return null;
 		}
@@ -1123,10 +1146,12 @@ export function createWorldDisplayRenderer(
 		updateCameraFrame();
 	}
 
-	function syncPortalMaskMeshes(model: OutdoorPortalViewGroupModel): void {
+	function syncPortalMaskMeshes(model: TransitionPortalCandidateModel): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
-		const activeGroupIds = new Set(model.groups.map((group) => group.id));
+		const activeGroupIds = new Set(
+			model.candidates.map((candidate) => candidate.id),
+		);
 		for (const [groupId, mesh] of portalMaskMeshes.entries()) {
 			if (activeGroupIds.has(groupId)) {
 				continue;
@@ -1137,16 +1162,16 @@ export function createWorldDisplayRenderer(
 			portalMaskMeshes.delete(groupId);
 		}
 
-		for (const group of model.groups) {
-			const chunkRoot = getRenderChunkRoot(group.renderChunk.chunkKey);
-			let mesh = portalMaskMeshes.get(group.id);
+		for (const candidate of model.candidates) {
+			const chunkRoot = getRenderChunkRoot(candidate.renderChunk.chunkKey);
+			let mesh = portalMaskMeshes.get(candidate.id);
 			if (!mesh) {
-				mesh = createPortalMaskMesh(group);
+				mesh = createPortalMaskMesh(candidate);
 				chunkRoot.add(mesh);
-				portalMaskMeshes.set(group.id, mesh);
+				portalMaskMeshes.set(candidate.id, mesh);
 			} else {
 				chunkRoot.attach(mesh);
-				updatePortalMaskMesh(mesh, group);
+				updatePortalMaskMesh(mesh, candidate);
 			}
 		}
 
@@ -1174,7 +1199,7 @@ export function createWorldDisplayRenderer(
 		return mesh;
 	}
 
-	function createPortalMaskMesh(group: OutdoorPortalViewGroup): Mesh {
+	function createPortalMaskMesh(group: TransitionPortalCandidate): Mesh {
 		const mesh = new Mesh(
 			buildPortalMaskGeometry(group.aperture.points),
 			createPortalMaskMaterial(group.stencilRef),
@@ -1189,7 +1214,7 @@ export function createWorldDisplayRenderer(
 
 	function updatePortalMaskMesh(
 		mesh: Mesh,
-		group: OutdoorPortalViewGroup,
+		group: TransitionPortalCandidate,
 	): void {
 		mesh.geometry.dispose();
 		mesh.geometry = buildPortalMaskGeometry(group.aperture.points);
@@ -1207,7 +1232,7 @@ export function createWorldDisplayRenderer(
 	}
 
 	function buildPortalMaskGeometry(
-		points: OutdoorPortalViewGroup["aperture"]["points"],
+		points: TransitionPortalCandidate["aperture"]["points"],
 	): BufferGeometry {
 		const geometry = new BufferGeometry();
 		geometry.setAttribute(
@@ -1824,12 +1849,12 @@ function countVisibleObjects(objects: Iterable<Object3D>): number {
 }
 
 function createPortalRenderMetrics(
-	model: OutdoorPortalViewGroupModel,
+	model: TransitionPortalCandidateModel,
 ): WorldRenderPortalMetrics {
 	return {
 		topologyOutdoorPortalCount: model.diagnostics.topologyPortalCount,
 		apertureCandidateCount: model.diagnostics.apertureCandidateCount,
-		renderWorkItemCandidateCount: model.diagnostics.viewGroupCount,
+		renderWorkItemCandidateCount: model.diagnostics.workItemCandidateCount,
 		visiblePortalGroupCount: 0,
 		maskedInteriorCellCount: 0,
 		skippedMissingApertureCount: model.diagnostics.skippedMissingApertureCount,

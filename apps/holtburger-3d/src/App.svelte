@@ -9,20 +9,13 @@
 		readDebugConfig,
 		readHostBoundarySnapshot,
 	} from "./lib/host/tauri";
-	import PortalDepthResetProbe from "./dev/PortalDepthResetProbe.svelte";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
-	const activeProbe =
-		new URLSearchParams(window.location.search).get("probe") ?? null;
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
 
 	onMount(() => {
-		if (activeProbe === "portal-depth-reset") {
-			return;
-		}
-
 		let dispose = () => {};
 		const assetChannel = new AssetChannelController();
 		const sceneStreamer = new SceneAssetStreamingController({
@@ -111,9 +104,7 @@
 </svelte:head>
 
 <main class="viewer-shell">
-	{#if activeProbe === "portal-depth-reset"}
-		<PortalDepthResetProbe />
-	{:else if $frontendState.host.boundarySnapshot}
+	{#if $frontendState.host.boundarySnapshot}
 		<BrowserWorldDisplay
 			activeMode={$frontendState.mode.activeMode}
 			activeModeLabel={$frontendState.mode.activeModeLabel}

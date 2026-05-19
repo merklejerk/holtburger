@@ -286,8 +286,8 @@ export function createWorldDisplayRenderer(
 			apertureDepthResetPassCount: 0,
 			interiorCompositePassCount: 0,
 			exteriorCompositePassCount: 0,
-			portalGroupCount: 0,
-			portalMaskMeshCount: 0,
+			transitionPortalCandidateCount: 0,
+			portalApertureMeshCount: 0,
 			cameraViewResidency:
 				describeCameraViewResidencyContext(cameraViewResidency),
 			residencyCellCount: residencyIndex.cellCount,
@@ -542,8 +542,8 @@ export function createWorldDisplayRenderer(
 			apertureDepthResetPassCount: graphSummary.apertureDepthResetPassCount,
 			interiorCompositePassCount: graphSummary.interiorCompositePassCount,
 			exteriorCompositePassCount: graphSummary.exteriorCompositePassCount,
-			portalGroupCount: transitionPortalModel.candidates.length,
-			portalMaskMeshCount: portalMaskMeshes.size,
+			transitionPortalCandidateCount: transitionPortalModel.candidates.length,
+			portalApertureMeshCount: portalMaskMeshes.size,
 			cameraViewResidency:
 				describeCameraViewResidencyContext(cameraViewResidency),
 			residencyCellCount: residencyIndex.cellCount,
@@ -611,7 +611,7 @@ export function createWorldDisplayRenderer(
 		renderPolicy: WorldRenderPolicy,
 	): Map<TransitionPortalDepthBatchKey, VisibleTransitionPortalWork[]> {
 		if (renderPolicy.transitionLevels.length === 0) {
-			latestPortalMetrics.visiblePortalGroupCount = 0;
+			latestPortalMetrics.visiblePortalWorkItemCount = 0;
 			latestPortalMetrics.maskedInteriorCellCount = 0;
 			return new Map();
 		}
@@ -627,7 +627,7 @@ export function createWorldDisplayRenderer(
 				renderer.domElement.width,
 				renderer.domElement.height,
 			),
-			minScreenAreaPx: renderPolicy.portalCandidates.minScreenAreaPx,
+			minScreenAreaRatio: renderPolicy.portalCandidates.minScreenAreaRatio,
 		});
 		const eligibleDirections = new Set(
 			renderPolicy.transitionLevels.map((level) => level.direction),
@@ -687,7 +687,7 @@ export function createWorldDisplayRenderer(
 						: null,
 				visiblePools,
 			});
-		latestPortalMetrics.visiblePortalGroupCount = visibleWorkItemCount;
+		latestPortalMetrics.visiblePortalWorkItemCount = visibleWorkItemCount;
 		latestPortalMetrics.maskedInteriorCellCount = maskedInteriorCellIds.size;
 		return batches;
 	}
@@ -2193,7 +2193,7 @@ function createPortalRenderMetrics(
 		topologyOutdoorPortalCount: model.diagnostics.topologyPortalCount,
 		apertureCandidateCount: model.diagnostics.apertureCandidateCount,
 		renderWorkItemCandidateCount: model.diagnostics.workItemCandidateCount,
-		visiblePortalGroupCount: 0,
+		visiblePortalWorkItemCount: 0,
 		maskedInteriorCellCount: 0,
 		skippedMissingApertureCount: model.diagnostics.skippedMissingApertureCount,
 		skippedMissingPolygonCount: model.diagnostics.skippedMissingPolygonCount,
@@ -2244,8 +2244,8 @@ function createRenderDebugMetrics(
 		apertureDepthResetPassCount: options.apertureDepthResetPassCount,
 		interiorCompositePassCount: options.interiorCompositePassCount,
 		exteriorCompositePassCount: options.exteriorCompositePassCount,
-		portalGroupCount: options.portalGroupCount,
-		portalMaskMeshCount: options.portalMaskMeshCount,
+		transitionPortalCandidateCount: options.transitionPortalCandidateCount,
+		portalApertureMeshCount: options.portalApertureMeshCount,
 		terrainMeshCount: options.terrainMeshCount,
 		visibleTerrainMeshCount: options.visibleTerrainMeshCount,
 		staticGroupMeshCount: options.staticGroupMeshCount,

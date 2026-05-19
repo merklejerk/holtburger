@@ -38,6 +38,7 @@ export interface PortalVisibilityContext {
 	frustum: Frustum;
 	projectionScreenMatrix: Matrix4;
 	viewport: Vector2;
+	minScreenAreaRatio: number;
 	minScreenAreaPx: number;
 }
 
@@ -55,11 +56,11 @@ const CLIP_PLANES: readonly ClipPlane[] = [
 export function createPortalVisibilityContext({
 	camera,
 	viewport,
-	minScreenAreaPx,
+	minScreenAreaRatio,
 }: {
 	camera: PerspectiveCamera;
 	viewport: Vector2;
-	minScreenAreaPx: number;
+	minScreenAreaRatio: number;
 }): PortalVisibilityContext {
 	camera.updateMatrixWorld();
 	const projectionScreenMatrix = new Matrix4().multiplyMatrices(
@@ -74,7 +75,8 @@ export function createPortalVisibilityContext({
 		frustum: new Frustum().setFromProjectionMatrix(projectionScreenMatrix),
 		projectionScreenMatrix,
 		viewport,
-		minScreenAreaPx,
+		minScreenAreaRatio,
+		minScreenAreaPx: viewport.x * viewport.y * minScreenAreaRatio,
 	};
 }
 

@@ -23,6 +23,9 @@ is the execution plan.
 - Treat outdoor-transition portals as single boundary apertures with two possible per-view render
   directions. Do not require paired mirror portal records.
 - Batch transition portal rendering by direction and recursion depth.
+- Support adjustable, bounded transition recursion depths by rendering one batched portal level per
+  configured depth. The pass count may scale with the configured max depth, but not with individual
+  portal chains.
 - Render broad shared interior render sets through outdoor-transition apertures in the first
   optimized path rather than pruning per portal to exact env-cell subsets.
 - Preserve browser free-camera whole-level diagnostics.
@@ -34,7 +37,8 @@ is the execution plan.
 ## Non-Goals
 
 - Do not implement full interior-to-interior recursive portal traversal in this plan.
-- Do not implement unbounded transition portal recursion.
+- Do not implement unbounded transition portal recursion. "Arbitrary" transition recursion in this
+  plan means a configurable bounded integer depth with a renderer-enforced cap.
 - Do not physically cut terrain meshes around underground entrances.
 - Do not move browser-mode render policy into shared Rust crates.
 - Do not rewrite the renderer below Three.js before the batched render graph has been measured.
@@ -104,6 +108,9 @@ completed.
 - Phases 8 and 9 should not be pulled earlier except to delete code made unreachable by a completed
   phase. Early dirty-render or matrix-lifecycle work would risk hiding active-frame render graph
   costs.
+- Phase 7.1 should happen before Phase 8 cleanup and Phase 9 profiling. Cleanup should not delete
+  depth-recursion scaffolding that Phase 7.1 will reuse, and profiling before adjustable recursion
+  lands would only measure the depth-1 pipeline.
 
 ## Phase 0: Baseline and Safety Rails
 
@@ -870,10 +877,160 @@ Refinements to future steps:
 
 - Walkabout/client integration should consume the same residency-aware policy path. It may pass
   different policy options later, but it should not introduce a separate render-semantics mode.
+- Phase 7.1 should replace the current depth-1-only graph emission with a configurable bounded
+  transition-depth loop. It should keep the Phase 7 residency-derived base scene and direction
+  alternation model.
 - Phase 8 should retire or consolidate the old free-camera graph helper if no remaining code path
   needs it after tests are migrated to `render-policy.ts`.
 - Phase 9 profiling should compare policy-derived metrics against profiler traces so the debug row
   can explain both portal candidate volume and actual graph pass work.
+
+## Phase 7.1: Adjustable Transition Portal Recursion Depth
+
+Status: not started.
+
+Purpose: extend the residency-aware batched portal graph from depth `1` to an adjustable bounded
+max transition depth without returning to per-portal or per-chain rendering.
+
+Design model:
+
+- Treat recursion depth as a render level, not a source-data property.
+- The base scene comes from Phase 7 camera/view residency:
+  - exterior base starts with outdoor-to-indoor at depth `1`;
+  - interior base starts with indoor-to-outdoor at depth `1`;
+  - each deeper level alternates direction from that base scene.
+- CPU candidate rejection should run once per frame against the shared camera/view/projection:
+  - world transform and projection;
+  - frustum and clipped projected footprint;
+  - broad screen-area diagnostics and budget policy;
+  - directional eligibility lists for outdoor-to-indoor and indoor-to-outdoor.
+- Per-depth rendering chooses the precomputed directional candidate list by depth parity. It should
+  not re-run full CPU candidate projection for every depth.
+- Exact nested visibility is proven by GPU state at each depth level:
+  - depth `1` mask writes only pixels visible in the base scene;
+  - depth `N > 1` mask is stencil-constrained to depth `N - 1` and depth-tested against the
+    already-composited opposite scene from the previous level;
+  - foreground geometry such as interior columns naturally occludes deeper transition apertures
+    through the depth test.
+- Use one stencil value per transition depth in the first implementation:
+  - stencil `0`: no active transition clip;
+  - stencil `1`: exact visible pixels for transition depth `1`;
+  - stencil `2`: exact visible pixels for transition depth `2`;
+  - and so on up to the configured cap.
+- Do not clear stencil between transition levels. Each depth-level mask derives from the previous
+  level's stencil value, then replaces surviving pixels with the current depth value.
+- Each depth level remains batched:
+  - render all candidate apertures for that level's direction into the current depth stencil ref;
+  - reset depth inside the current depth stencil;
+  - render the opposite broad scene once through the current depth stencil.
+
+Tasks:
+
+- Replace the hard-coded supported recursion-depth policy with a bounded integer policy:
+  - default max depth `1`;
+  - browser/debug maximum initially small, such as `4`, unless WebView stencil limits or testing
+    require a lower cap;
+  - reject non-integer, zero, negative, or above-cap values loudly.
+- Define the bounded-depth constants in renderer policy code and import them into browser-mode
+  state/UI. Do not duplicate caps in Svelte components.
+- Add renderer policy options for max transition depth and derive ordered transition levels from
+  `directionForTransitionDepth(baseScene, depth)`.
+- Change render graph construction to emit transition mask, depth-reset, and composite nodes for
+  every visible transition level from `1..maxTransitionDepth`.
+- Replace direction-only visibility batches with direction-plus-depth render batches where depth
+  comes from the graph level, not from a one-off work-item policy object.
+- Split transition portal work into two concepts:
+  - a depthless per-frame visible aperture candidate carrying direction, screen area, mask mesh, and
+    source facts;
+  - a graph-level render batch that pairs those candidates with the current transition depth.
+  This avoids pretending a portal candidate intrinsically belongs to one recursion depth.
+- Keep CPU candidate projection/frustum/area work one-pass-per-frame, then reuse the surviving
+  directional candidate pools for each applicable depth level.
+- Add stencil-state support for parent-constrained mask passes:
+  - depth `1` mask writes stencil ref `1` without requiring a parent ref;
+  - depth `N > 1` mask requires stencil ref `N - 1` and replaces surviving pixels with `N`;
+  - depth reset and scene composite require stencil ref `N`.
+- Extend graph transition metadata to carry both current and parent stencil refs:
+  - `currentStencilRef`;
+  - `parentStencilRef: number | null`.
+  Avoid deriving parent refs ad hoc inside renderer material setup.
+- Stop clearing stencil on transition mask nodes. The base scene node should clear stencil before
+  the first transition level; depth-level mask nodes must preserve earlier depth refs.
+- Ensure aperture mask depth testing remains enabled so already-rendered scene geometry occludes
+  deeper portal masks.
+- Configure aperture mask material stencil state per graph node:
+  - depth `1`: `Always` test, replace surviving fragments with current ref;
+  - depth `N > 1`: `Equal(parentRef)` test, replace surviving fragments with current ref.
+  Keep color writes disabled and depth testing/writing enabled for aperture masks.
+- Expose a browser Settings slider for max transition depth, constrained to the supported renderer
+  cap. The label should make clear this is transition depth, not env-cell traversal depth.
+- Thread the setting through `BrowserModeState`, `frontend-state`, `BrowserWorldDisplay.svelte`,
+  `WorldDisplay.svelte`, and `createWorldDisplayRenderer()` with an explicit renderer setter so
+  runtime slider changes do not recreate the renderer.
+- Surface max transition depth and active transition-level counts in renderer diagnostics.
+- Keep unknown-residency diagnostic fallback broad, but still apply the same bounded transition
+  depth loop when portal compositing is enabled.
+
+Tests and verification:
+
+- Add pure render-policy tests for generated transition levels from exterior and interior base
+  scenes at depths `1..N`.
+- Add render-graph tests proving:
+  - depth-level stencil refs increase by depth;
+  - depth `N > 1` mask nodes depend on parent stencil `N - 1`;
+  - depth reset and composite nodes use the current depth stencil;
+  - graph pass count scales with max depth, not portal count.
+- Add candidate-pooling tests proving projection/screen-area rejection is depth-invariant and is not
+  recomputed per depth.
+- Manually verify:
+  - exterior looking through an outdoor-to-indoor aperture;
+  - interior looking through an indoor-to-outdoor aperture;
+  - exterior looking through a building aperture toward a far indoor-to-outdoor aperture;
+  - foreground interior geometry occluding a deeper aperture;
+  - underground transition apertures still punch terrain through depth-reset compositing.
+
+Exit criteria:
+
+- Browser Settings exposes a supported max transition depth control.
+- The production render graph supports every configured transition depth from `1` to the cap.
+- Portal compositing still batches by depth level and direction, not by individual portal chain.
+- CPU portal candidate projection/frustum/area work remains one-pass-per-frame.
+- Nested transition masks are constrained by prior-depth stencil and current depth buffer, preserving
+  occlusion from already-composited geometry.
+
+Decisions and course corrections:
+
+- This phase supersedes the Phase 4 temporary `1` or `2` recursion-depth policy. The new policy is
+  bounded but adjustable.
+- "Arbitrary transition depth" means arbitrary within the renderer cap. Unbounded recursion remains
+  out of scope.
+- Stencil refs should map directly to transition depth in the first implementation. Avoid bit-flip,
+  increment/decrement, or ping-pong stencil tricks until a measured need exists.
+- The implementation should keep the current broad two-scene concession: all loaded interiors are
+  one composited interior scene, and all exterior terrain/statics are one composited exterior scene.
+  Do not add per-chain interior cell pruning in this phase.
+- Dry-run finding: `TransitionPortalWorkItem.recursionDepth` is currently owned by the work-item
+  policy. Phase 7.1 should remove that depth ownership from per-frame candidate classification.
+  Depth belongs to the render graph level.
+- Dry-run finding: `deriveTransitionPortalGraphNodes()` currently clears stencil on every mask node
+  and only stores one `stencilRef`. Phase 7.1 must make stencil parent/current refs explicit and
+  preserve stencil across transition levels.
+- Dry-run finding: `deriveWorldRenderGraphForPolicy()` currently receives depth-1 visibility
+  booleans. Replace that with a depth-aware callback or set, such as
+  `hasVisibleTransitionLevel(direction, depth)`, so graph construction can skip empty depth levels
+  without encoding direction-only assumptions.
+- Dry-run finding: the browser Settings tab already has established range-slider state plumbing for
+  env-cell limits. Reuse that pattern for transition depth, but keep the new control in a separate
+  portal-rendering fieldset to avoid confusing transition recursion with env-cell traversal depth.
+
+Refinements to future steps:
+
+- Phase 8 cleanup should remove stale depth-1-only helper names, tests, or comments after Phase 7.1
+  lands.
+- Phase 9 profiling should profile at max depth `1` and at least one higher configured depth so the
+  team can see active-frame scaling per transition level.
+- If the configured cap exposes stencil-value limits or material-state churn, document that evidence
+  before considering a mask-texture backend.
 
 ## Phase 8: Cleanup, Hardening, and Documentation
 
@@ -938,7 +1095,7 @@ Required manual scenarios:
 - Portal aperture partially or fully occluded by foreground static geometry.
 - Zoomed-out outdoor overview with many tiny apertures.
 - Browser free-camera diagnostic view with broad interiors enabled.
-- Nested transition view when debug recursion depth `2` is enabled.
+- Nested transition view when max transition depth is configured above `1`.
 
 Required automated coverage:
 
@@ -947,10 +1104,13 @@ Required automated coverage:
 - Screen-footprint rejection for synthetic apertures.
 - Renderer working-model indexes.
 - Cell AABB BVH build/query and deterministic tie-break.
+- Bounded transition-depth graph generation, parent stencil constraints, and pass-count scaling.
 
 ## Open Follow-Ups
 
 - Exact browser/free-camera portal budget values after projected-footprint rejection is fixed.
+- Final browser/debug max transition-depth cap after WebView stencil behavior and frame-time scaling
+  are measured.
 - Whether overlapping same-depth apertures ever require per-chain stencil identity.
 - Whether pass-local Three.js scenes remain sufficient after Phase 5.
 - Whether exact env-cell containment is needed after the AABB BVH residency model is exercised on

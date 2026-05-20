@@ -56,6 +56,8 @@ export interface BrowserFreeCameraConfig {
 	pointerYawRadiansPerPixel: number;
 	pointerPitchRadiansPerPixel: number;
 	keyboardYawRadiansPerSecond: number;
+	keyboardMoveInitialSpeedMultiplier: number;
+	keyboardMoveAccelerationSeconds: number;
 	shiftSlowMultiplier: number;
 	wheelDeltaClamp: number;
 	wheelLocalUpUnitsPerDelta: number;
@@ -69,8 +71,6 @@ export interface BrowserFreeCameraConfig {
 	fitMinimumVerticalSpan: number;
 	fitAbsoluteMinFocusDistance: number;
 	fitAbsoluteMaxFocusDistance: number;
-	fitAbsoluteMinMoveSpeed: number;
-	fitMoveSpeedScale: number;
 }
 
 const DEFAULT_UP: Vec3Dto = { x: 0, y: 1, z: 0 };
@@ -84,7 +84,7 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	defaultFocusDistance: 360,
 	defaultMinFocusDistance: 18,
 	defaultMaxFocusDistance: 4000,
-	defaultMoveSpeed: 180,
+	defaultMoveSpeed: 120,
 	fovDegrees: 52,
 	near: 0.1,
 	far: 5000,
@@ -93,9 +93,11 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	pointerYawRadiansPerPixel: 0.006,
 	pointerPitchRadiansPerPixel: 0.005,
 	keyboardYawRadiansPerSecond: 1.8,
+	keyboardMoveInitialSpeedMultiplier: 0.125,
+	keyboardMoveAccelerationSeconds: 3,
 	shiftSlowMultiplier: 0.05,
 	wheelDeltaClamp: 900,
-	wheelLocalUpUnitsPerDelta: -0.35,
+	wheelLocalUpUnitsPerDelta: -0.025,
 	panScalePerPixelAtFocusDistance: 0.0018,
 	fitHorizontalDistanceScale: 1.65,
 	fitVerticalDistanceScale: 3.4,
@@ -106,8 +108,6 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	fitMinimumVerticalSpan: 24,
 	fitAbsoluteMinFocusDistance: 6,
 	fitAbsoluteMaxFocusDistance: 1200,
-	fitAbsoluteMinMoveSpeed: 24,
-	fitMoveSpeedScale: 0.75,
 };
 
 export function createBrowserFreeCameraState(
@@ -191,10 +191,6 @@ export function fitBrowserFreeCameraToBounds(
 		maxFocusDistance: Math.max(
 			config.fitAbsoluteMaxFocusDistance,
 			horizontalSpan * config.fitMaxDistanceScale,
-		),
-		moveSpeed: Math.max(
-			config.fitAbsoluteMinMoveSpeed,
-			horizontalSpan * config.fitMoveSpeedScale,
 		),
 		hasManualControl: options.force ? false : state.hasManualControl,
 		lastFitKey: fitKey,
@@ -325,6 +321,25 @@ export function getBrowserFreeCameraSpeedMultiplier(
 	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
 ): number {
 	return isSlowModifierActive ? config.shiftSlowMultiplier : 1;
+}
+
+export function getBrowserFreeCameraKeyboardMoveSpeedMultiplier(
+	elapsedSeconds: number,
+	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
+): number {
+	if (config.keyboardMoveAccelerationSeconds <= 0) {
+		return 1;
+	}
+
+	const accelerationProgress = clamp(
+		elapsedSeconds / config.keyboardMoveAccelerationSeconds,
+		0,
+		1,
+	);
+	return (
+		config.keyboardMoveInitialSpeedMultiplier +
+		(1 - config.keyboardMoveInitialSpeedMultiplier) * accelerationProgress
+	);
 }
 
 export function buildBrowserFreeCameraFrame(

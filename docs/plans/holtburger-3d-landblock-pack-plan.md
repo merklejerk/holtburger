@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 5 implemented. Later phases remain planning.
+Status: Phase 5.1 implemented. Later phases remain planning.
 
 ## Context
 
@@ -892,7 +892,7 @@ Refinements from Phase 4:
 
 ### Phase 5.1: Subdivide Terrain Spatial Items
 
-Status: planned.
+Status: completed.
 
 Phase 5 currently emits one `terrain` spatial item for the whole landblock terrain mesh. That is enough to include terrain in the mixed landblock BVH, but it is coarse for ray picking, frustum broadphase, occluder discovery, and terrain-candidate lookup.
 
@@ -910,6 +910,38 @@ Exit criteria:
 - BVH terrain candidates are terrain quads, not whole landblocks.
 - Terrain ray-pick/frustum broadphase can use quad-level candidates before running terrain triangle/grid narrowphase.
 - Terrain render batching remains one mesh per landblock.
+
+Implemented:
+
+- Rust now emits one `terrain` spatial item per terrain quad instead of one whole-landblock terrain item.
+- Terrain quad bounds are computed from the four prepared terrain mesh vertices using the same `landblock-render-local` axis basis as the rest of the pack spatial data.
+- Terrain quad item ids use `landblock-pack/<XXYYFFFF>/spatial/terrain/quad/<row>/<col>`, where row and col are stable zero-based terrain quad coordinates.
+- Each terrain quad spatial item carries typed metadata with row, col, quad index, and the two prepared terrain triangle indices needed by future terrain narrowphase checks.
+- Terrain quad items participate in the existing mixed `staticLandblockBvh` under the normal `terrain` kind mask bit.
+- The landblock terrain mesh and renderer GPU upload path remain unchanged; this phase only subdivides spatial broadphase products.
+- The frontend pack spatial adapter preserves terrain quad metadata in terrain spatial metadata so later pick/frustum code can recover the exact terrain quad and triangle candidates.
+
+Decisions and course corrections:
+
+- Terrain subdivision is a spatial-indexing concern, not a render-batching change. Keeping one terrain mesh per landblock avoids prematurely adding 64 draw surfaces per landblock.
+- The metadata is modeled as a typed spatial-item metadata union instead of terrain-only nullable fields on every spatial item. Non-terrain items explicitly carry `metadata.kind = "none"`.
+- The existing renderer spatial index still performs the immediate query work. The pack BVH now contains finer terrain candidates, and the frontend adapter carries enough metadata for a later direct Rust-BVH masked-query path.
+
+Validation performed:
+
+- `cargo test -p holtburger-content landblock_pack --lib`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml landblock_pack_lookup_returns_manifest_source_facts`
+- `npm run test:ts -- src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/render-spatial-index.test.ts`
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/render-spatial-index.test.ts src/lib/world-display/static-renderables.test.ts`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `npm run check`
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
+
+Refinements for later phases:
+
+- Terrain narrowphase should use the quad metadata first, then test only the two prepared terrain triangles for that quad.
+- Direct Rust-BVH traversal should support kind-mask pruning before expanding items into the existing frontend spatial index.
+- If profiling later shows terrain draw-call or culling pressure, render subdivision can be considered separately from this spatial subdivision.
 
 ### Phase 6: Switch Scene Request Planning To Landblock Packs
 
@@ -973,6 +1005,8 @@ Initial cleanup targets:
 - Collapse duplicate terrain/env-cell spatial owners once landblock-pack request planning is the normal path; today pack-backed terrain/env-cell spatial items can coexist with legacy-derived owner items during migration.
 - Replace the current render spatial adapter's BVH-to-item expansion with direct Rust-BVH masked query traversal after duplicate legacy owners are retired.
 - Audit `landblock-render-local` naming against any future non-render consumers. If physics/collision wants raw AC source-space bounds, split spatial products instead of overloading this coordinate space.
+- Revisit `PreparedSpatialItem.metadata.kind = "none"` during contract tightening. It is explicit and honest for the current mixed list, but a discriminated spatial-item union may become cleaner once more item kinds gain item-specific metadata.
+- Remove or rename legacy whole-terrain spatial item assumptions in frontend tests and helpers once pack-backed terrain replaces `terrain/*` as the normal scene source.
 
 Exit criteria:
 

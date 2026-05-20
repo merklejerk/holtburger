@@ -38,6 +38,7 @@ describe("deriveTerrainSpatialItems", () => {
 				kind: "terrain",
 				landblockId: 0x01020304,
 				assetId: "terrain/01020304",
+				terrainQuad: null,
 			},
 		});
 	});
@@ -180,6 +181,7 @@ describe("deriveLandblockPackSpatialItems", () => {
 									min: { x: 1, y: 2, z: 3 },
 									max: { x: 4, y: 5, z: 6 },
 								},
+								metadata: { kind: "none" },
 							},
 						],
 						staticLandblockBvh: {
@@ -239,6 +241,112 @@ describe("deriveLandblockPackSpatialItems", () => {
 				},
 			}),
 		]);
+	});
+
+	it("preserves pack terrain quad metadata for terrain narrowphase", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"landblock-pack/0102ffff": {
+				request: {
+					requestId: "pack",
+					assetId: "landblock-pack/0102ffff",
+					priority: "streaming",
+				},
+				response: {
+					requestId: "pack",
+					assetId: "landblock-pack/0102ffff",
+					payloadKind: "json",
+					payload: {},
+				},
+				payload: {
+					kind: "landblock-pack",
+					sourceAssetKind: "landblock-pack",
+					residencyKind: "landblock",
+					landblockId: 0x0102ffff,
+					landblockInfoId: 0x0102fffe,
+					classification: "outdoor",
+					sourceFacts: {
+						cellLandblock: null,
+						landblockInfo: null,
+						outdoor: {
+							explicitObjects: [],
+							buildings: [],
+							generatedScenery: [],
+						},
+						interiors: { envCells: [], environments: [] },
+					},
+					prepared: {
+						terrainMesh: null,
+						outdoorStaticInstances: [],
+						interiorCells: [],
+						staticMeshes: [],
+						spatialItems: [
+							{
+								id: "landblock-pack/0102ffff/spatial/terrain/quad/03/04",
+								kind: "terrain",
+								ownerId: 0x0102ffff,
+								sourceAssetId: null,
+								bounds: {
+									min: { x: 96, y: 1, z: -96 },
+									max: { x: 120, y: 8, z: -72 },
+								},
+								metadata: {
+									kind: "terrain-quad",
+									row: 3,
+									col: 4,
+									quadIndex: 28,
+									triangleIndices: [56, 57],
+								},
+							},
+						],
+						staticLandblockBvh: {
+							coordinateSpace: "landblock-render-local",
+							landblockId: 0x0102ffff,
+							scope: "static-landblock",
+							nodes: [
+								{
+									bounds: {
+										min: { x: 96, y: 1, z: -96 },
+										max: { x: 120, y: 8, z: -72 },
+									},
+									left: null,
+									right: null,
+									itemIndices: [0],
+									kindMask: 1,
+								},
+							],
+						},
+					},
+					dependencies: {
+						cellDatIds: [],
+						portalDatIds: [],
+						renderableAssetIds: [],
+					},
+					diagnostics: { sourceRecords: [], errors: [] },
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "landblock-pack",
+						errorCode: null,
+						detail: "test",
+					},
+				},
+				preparedAt: "2026-05-20T00:00:00.000Z",
+			},
+		};
+
+		const items = deriveLandblockPackSpatialItems(assetState);
+
+		expect(items[0]?.metadata).toEqual({
+			kind: "terrain",
+			landblockId: 0x0102ffff,
+			assetId: "landblock-pack/0102ffff/spatial/terrain/quad/03/04",
+			terrainQuad: {
+				row: 3,
+				col: 4,
+				quadIndex: 28,
+				triangleIndices: [56, 57],
+			},
+		});
 	});
 });
 

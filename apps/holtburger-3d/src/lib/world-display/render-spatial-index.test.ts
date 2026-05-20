@@ -192,6 +192,7 @@ function createTerrainItem(
 			kind: "terrain",
 			landblockId: minZ,
 			assetId: id,
+			terrainQuad: null,
 		},
 	};
 }

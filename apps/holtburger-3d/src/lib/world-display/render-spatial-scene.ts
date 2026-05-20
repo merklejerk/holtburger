@@ -89,6 +89,7 @@ function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 			kind: "terrain",
 			landblockId: tile.landblockId,
 			assetId: tile.assetId,
+			terrainQuad: null,
 		},
 	};
 }
@@ -181,10 +182,20 @@ function derivePreparedPackSpatialMetadata(
 	kind: RenderSpatialItem["kind"],
 ): RenderSpatialItem["metadata"] {
 	if (kind === "terrain") {
+		const terrainQuad =
+			item.metadata.kind === "terrain-quad"
+				? {
+						row: item.metadata.row,
+						col: item.metadata.col,
+						quadIndex: item.metadata.quadIndex,
+						triangleIndices: item.metadata.triangleIndices,
+					}
+				: null;
 		return {
 			kind: "terrain",
 			landblockId: pack.landblockId,
 			assetId: item.id,
+			terrainQuad,
 		};
 	}
 	if (kind === "structured-cell") {

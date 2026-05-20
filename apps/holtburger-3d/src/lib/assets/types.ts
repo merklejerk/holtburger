@@ -309,12 +309,23 @@ export type PreparedLandblockSpatialItemKind =
 	| "indoor-static"
 	| "portal";
 
+export type PreparedLandblockSpatialItemMetadata =
+	| { kind: "none" }
+	| {
+			kind: "terrain-quad";
+			row: number;
+			col: number;
+			quadIndex: number;
+			triangleIndices: [number, number];
+	  };
+
 export interface PreparedLandblockSpatialItem {
 	id: string;
 	kind: PreparedLandblockSpatialItemKind;
 	ownerId: number | null;
 	sourceAssetId: string | null;
 	bounds: PreparedBounds;
+	metadata: PreparedLandblockSpatialItemMetadata;
 }
 
 export interface PreparedLandblockBvh {

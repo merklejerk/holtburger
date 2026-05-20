@@ -9,12 +9,11 @@ import {
 	updateBuildingLodRadius,
 	updateBrowserDraft,
 	updateDetailLodRadius,
+	updateEnvCellLodRadius,
 	updateCellIndicatorVisibility,
 	updateLandblockInputMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
-	updateStructuredInteriorMaxEnvCells,
-	updateStructuredInteriorMaxVisibleCellDepth,
 	updateTerrainLodRadius,
 	updateTransitionPortalMaxDepth,
 	type BrowserLandblockInputMode,
@@ -134,26 +133,13 @@ export function createFrontendStateStore() {
 				}),
 			);
 		},
-		updateStructuredInteriorMaxEnvCells(maxEnvCells: number): void {
+		updateEnvCellLodRadius(envCellLodRadius: number): void {
 			update((state) =>
 				reconcileModeState({
 					...state,
-					browserMode: updateStructuredInteriorMaxEnvCells(
+					browserMode: updateEnvCellLodRadius(
 						state.browserMode,
-						maxEnvCells,
-					),
-				}),
-			);
-		},
-		updateStructuredInteriorMaxVisibleCellDepth(
-			maxVisibleCellDepth: number,
-		): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateStructuredInteriorMaxVisibleCellDepth(
-						state.browserMode,
-						maxVisibleCellDepth,
+						envCellLodRadius,
 					),
 				}),
 			);

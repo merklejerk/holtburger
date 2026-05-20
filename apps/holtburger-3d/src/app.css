@@ -585,6 +585,10 @@ ul {
 	grid-template-columns: 1fr;
 }
 
+.browser-form__slider-row--single {
+	grid-template-columns: minmax(0, 1fr);
+}
+
 .browser-form__field span {
 	color: #90a8c7;
 	font-size: 0.88rem;

@@ -4,12 +4,8 @@
 		browserLocationToLandblockId,
 		isLandblockPrefixInput,
 		MAX_BROWSER_LOD_RADIUS,
-		MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
-		MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
 		MAX_TRANSITION_PORTAL_MAX_DEPTH,
 		MIN_BROWSER_LOD_RADIUS,
-		MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
-		MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
@@ -134,18 +130,9 @@
 		frontendState.updateDetailLodRadius(Number(input.value));
 	}
 
-	function handleStructuredInteriorMaxEnvCellsInput(event: Event): void {
+	function handleEnvCellLodInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
-		frontendState.updateStructuredInteriorMaxEnvCells(Number(input.value));
-	}
-
-	function handleStructuredInteriorMaxVisibleCellDepthInput(
-		event: Event,
-	): void {
-		const input = event.currentTarget as HTMLInputElement;
-		frontendState.updateStructuredInteriorMaxVisibleCellDepth(
-			Number(input.value),
-		);
+		frontendState.updateEnvCellLodRadius(Number(input.value));
 	}
 
 	function handleTransitionPortalMaxDepthInput(event: Event): void {
@@ -390,53 +377,33 @@
 				</label>
 			</div>
 
-			<fieldset class="browser-form__fieldset">
-				<legend>Env cells</legend>
-				<div class="browser-form__slider-row">
-					<label
-						class="browser-form__field browser-form__field--range"
-						for="interior-max-cells-input"
-					>
-						<span>Max limit</span>
-						<strong>
-							{$frontendState.browserMode.structuredInteriorMaxEnvCells} cells
-						</strong>
-						<input
-							id="interior-max-cells-input"
-							type="range"
-							min={MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS}
-							max={MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS}
-							step="1"
-							value={$frontendState.browserMode.structuredInteriorMaxEnvCells}
-							oninput={handleStructuredInteriorMaxEnvCellsInput}
-						/>
-					</label>
-
-					<label
-						class="browser-form__field browser-form__field--range"
-						for="interior-depth-input"
-					>
-						<span>Max depth</span>
-						<strong>
-							{$frontendState.browserMode.structuredInteriorMaxVisibleCellDepth} hops
-						</strong>
-						<input
-							id="interior-depth-input"
-							type="range"
-							min={MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH}
-							max={MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH}
-							step="1"
-							value={$frontendState.browserMode
-								.structuredInteriorMaxVisibleCellDepth}
-							oninput={handleStructuredInteriorMaxVisibleCellDepthInput}
-						/>
-					</label>
-				</div>
-			</fieldset>
+			<div class="browser-form__slider-row browser-form__slider-row--single">
+				<label
+					class="browser-form__field browser-form__field--range"
+					for="env-cell-lod-input"
+				>
+					<span>Env cell distance</span>
+					<strong>
+						{$frontendState.browserMode.envCellLodRadius} out ({countOutdoorSceneLodTiles(
+							$frontendState.browserMode.envCellLodRadius,
+						)}
+						tiles)
+					</strong>
+					<input
+						id="env-cell-lod-input"
+						type="range"
+						min={MIN_BROWSER_LOD_RADIUS}
+						max={$frontendState.browserMode.terrainLodRadius}
+						step="1"
+						value={$frontendState.browserMode.envCellLodRadius}
+						oninput={handleEnvCellLodInput}
+					/>
+				</label>
+			</div>
 
 			<fieldset class="browser-form__fieldset">
 				<legend>Portal rendering</legend>
-				<div class="browser-form__slider-row">
+				<div class="browser-form__slider-row browser-form__slider-row--single">
 					<label
 						class="browser-form__field browser-form__field--range"
 						for="transition-portal-depth-input"

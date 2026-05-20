@@ -158,8 +158,7 @@ function createStreamingInput(
 		terrainLodRadius: 0,
 		buildingLodRadius: 0,
 		detailLodRadius: 0,
-		structuredInteriorMaxEnvCells: 1,
-		structuredInteriorMaxVisibleCellDepth: 0,
+		envCellLodRadius: 0,
 		preparedByAssetId: assetState.preparedByAssetId,
 	};
 }

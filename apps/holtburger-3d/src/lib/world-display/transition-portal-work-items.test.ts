@@ -32,7 +32,9 @@ describe("transition portal work items", () => {
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [0x016c0157],
 			}),
-			createIndoorEnvCellAsset(0x016c0155, [0x016c0156]),
+			createIndoorEnvCellAsset(0x016c0155, [0x016c0156], [
+				0x016c0155, 0x016c0156,
+			]),
 			createIndoorEnvCellAsset(0x016c0156, []),
 			createIndoorEnvCellAsset(0x016c0157, []),
 		]);
@@ -104,10 +106,6 @@ describe("transition portal work items", () => {
 				createStructuredInteriorCell(0x016c0155),
 			]),
 			activeLandblockIds: [0x016cffff],
-			coverageOptions: {
-				maxEnvCells: 16,
-				maxVisibleCellDepth: 4,
-			},
 			source: "runtime",
 		});
 
@@ -217,10 +215,6 @@ function deriveModel(
 		assetState,
 		structuredInteriorScene: createStructuredInteriorSceneModel(cells),
 		activeLandblockIds: [0x016cffff],
-		coverageOptions: {
-			maxEnvCells: 16,
-			maxVisibleCellDepth: 4,
-		},
 	});
 }
 
@@ -291,6 +285,7 @@ function createOutdoorStaticSceneAsset(options: {
 function createIndoorEnvCellAsset(
 	envCellId: number,
 	visibleCellIds: number[],
+	landblockEnvCellIds: number[] = [],
 ): PreparedAssetRecord {
 	return createPreparedAssetRecord(formatIndoorEnvCellAssetId(envCellId), {
 		kind: "indoor-env-cell",
@@ -306,7 +301,7 @@ function createIndoorEnvCellAsset(
 		cellStructureId: 1,
 		localPlacement: IDENTITY_PLACEMENT,
 		visibleCellIds,
-		landblockEnvCellIds: [],
+		landblockEnvCellIds,
 		seenOutside: true,
 		surfaceIds: [],
 		portalCount: 0,

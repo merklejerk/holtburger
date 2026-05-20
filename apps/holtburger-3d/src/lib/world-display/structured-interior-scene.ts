@@ -11,14 +11,12 @@ import type {
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import {
-	createDefaultStructuredInteriorCoverageOptions,
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
 	formatEnvironmentAssetId,
 	formatIndoorEnvCellAssetId,
 	isPreparedIndoorEnvCellAsset,
 	type StructuredInteriorCoverage,
-	type StructuredInteriorCoverageOptions,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
 import { formatHex32 } from "../landblocks";
@@ -75,7 +73,6 @@ export function deriveStructuredInteriorSceneModel(
 	browserDestination: BrowserLocationSelection | null = null,
 	linkedOutdoorInteriors: LinkedOutdoorInteriorSelection | null = null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
-	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions = createDefaultStructuredInteriorCoverageOptions(),
 ): StructuredInteriorSceneModel {
 	const browserFocusEnvCellId =
 		browserDestinationToIndoorEnvCellId(browserDestination);
@@ -84,7 +81,6 @@ export function deriveStructuredInteriorSceneModel(
 			browserFocusEnvCellId,
 			assetState,
 			structuredInteriorCoverage,
-			structuredInteriorCoverageOptions,
 		);
 	}
 
@@ -98,11 +94,10 @@ export function deriveStructuredInteriorSceneModel(
 				structuredInteriorCoverage?.envCellIds ??
 					deriveStructuredInteriorCoverage(
 						{
-							kind: "visible-cell-closure",
+							kind: "landblock-closure",
 							seedEnvCellIds: linkedOutdoorInteriors.envCellIds,
 						},
 						assetState.preparedByAssetId,
-						structuredInteriorCoverageOptions,
 					).envCellIds,
 				assetState,
 			);
@@ -128,11 +123,10 @@ export function deriveStructuredInteriorSceneModel(
 
 	const activeEnvCellIds = deriveStructuredInteriorCoverage(
 		{
-			kind: "direct",
-			envCellIds: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
+			kind: "landblock-closure",
+			seedEnvCellIds: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
 		},
 		assetState.preparedByAssetId,
-		structuredInteriorCoverageOptions,
 	).envCellIds;
 	return deriveStructuredInteriorSceneForEnvCells(
 		focusEnvCellId,
@@ -145,17 +139,12 @@ function deriveBrowserFocusedStructuredInteriorSceneModel(
 	focusEnvCellId: number,
 	assetState: AssetChannelState,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
-	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions,
 ): StructuredInteriorSceneModel {
 	const activeEnvCellIds =
 		structuredInteriorCoverage?.envCellIds ??
 		deriveStructuredInteriorCoverage(
-			deriveBrowserFocusedStructuredInteriorMembershipPolicy(
-				focusEnvCellId,
-				assetState.preparedByAssetId,
-			),
+			deriveBrowserFocusedStructuredInteriorMembershipPolicy(focusEnvCellId),
 			assetState.preparedByAssetId,
-			structuredInteriorCoverageOptions,
 		).envCellIds;
 
 	return deriveStructuredInteriorSceneForEnvCells(

@@ -42,10 +42,7 @@
 				terrainLodRadius: state.browserMode.terrainLodRadius,
 				buildingLodRadius: state.browserMode.buildingLodRadius,
 				detailLodRadius: state.browserMode.detailLodRadius,
-				structuredInteriorMaxEnvCells:
-					state.browserMode.structuredInteriorMaxEnvCells,
-				structuredInteriorMaxVisibleCellDepth:
-					state.browserMode.structuredInteriorMaxVisibleCellDepth,
+				envCellLodRadius: state.browserMode.envCellLodRadius,
 				preparedByAssetId: state.asset.preparedByAssetId,
 			});
 		});
@@ -117,10 +114,7 @@
 			terrainLodRadius={$frontendState.browserMode.terrainLodRadius}
 			buildingLodRadius={$frontendState.browserMode.buildingLodRadius}
 			detailLodRadius={$frontendState.browserMode.detailLodRadius}
-			structuredInteriorMaxEnvCells={$frontendState.browserMode
-				.structuredInteriorMaxEnvCells}
-			structuredInteriorMaxVisibleCellDepth={$frontendState.browserMode
-				.structuredInteriorMaxVisibleCellDepth}
+			envCellLodRadius={$frontendState.browserMode.envCellLodRadius}
 			transitionPortalMaxDepth={$frontendState.browserMode
 				.transitionPortalMaxDepth}
 			showPortalPolygons={$frontendState.browserMode.showPortalPolygons}

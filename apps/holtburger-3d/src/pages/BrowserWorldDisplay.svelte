@@ -32,7 +32,7 @@
 	} from "../lib/world-display/camera";
 	import WorldDisplay from "../lib/world-display/WorldDisplay.svelte";
 	import {
-		deriveOutdoorPortalInteriorSeedEnvCellIds,
+		deriveOutdoorInteriorSeedEnvCellIds,
 		deriveTerrainFocusLandblockId,
 	} from "../lib/assets/scene-asset-request-planner";
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
@@ -130,8 +130,7 @@
 		terrainLodRadius,
 		buildingLodRadius,
 		detailLodRadius,
-		structuredInteriorMaxEnvCells,
-		structuredInteriorMaxVisibleCellDepth,
+		envCellLodRadius,
 		transitionPortalMaxDepth,
 		showPortalPolygons,
 		showCellIndicators,
@@ -147,8 +146,7 @@
 		terrainLodRadius: number;
 		buildingLodRadius: number;
 		detailLodRadius: number;
-		structuredInteriorMaxEnvCells: number;
-		structuredInteriorMaxVisibleCellDepth: number;
+		envCellLodRadius: number;
 		transitionPortalMaxDepth: number;
 		showPortalPolygons: boolean;
 		showCellIndicators: boolean;
@@ -214,6 +212,7 @@
 					terrainRadius: terrainLodRadius,
 					buildingRadius: buildingLodRadius,
 					detailRadius: detailLodRadius,
+					envCellRadius: envCellLodRadius,
 				}),
 	);
 	const terrainScene = $derived(
@@ -231,15 +230,11 @@
 		}
 
 		return [
-			...deriveOutdoorPortalInteriorSeedEnvCellIds(
+			...deriveOutdoorInteriorSeedEnvCellIds(
 				assetState.preparedByAssetId,
-				new Set(outdoorSceneInterest.detailLandblockIds),
+				new Set(outdoorSceneInterest.envCellLandblockIds),
 			),
 		].sort((left, right) => left - right);
-	});
-	const structuredInteriorCoverageOptions = $derived({
-		maxEnvCells: structuredInteriorMaxEnvCells,
-		maxVisibleCellDepth: structuredInteriorMaxVisibleCellDepth,
 	});
 	const structuredInteriorCoverage = $derived.by(() => {
 		const browserFocusEnvCellId =
@@ -247,22 +242,20 @@
 		if (browserFocusEnvCellId !== null) {
 			return deriveStructuredInteriorCoverage(
 				{
-					kind: "visible-cell-closure",
+					kind: "landblock-closure",
 					seedEnvCellIds: [browserFocusEnvCellId],
 				},
 				assetState.preparedByAssetId,
-				structuredInteriorCoverageOptions,
 			);
 		}
 
 		if (linkedOutdoorEnvCellIds.length > 0) {
 			return deriveStructuredInteriorCoverage(
 				{
-					kind: "visible-cell-closure",
+					kind: "landblock-closure",
 					seedEnvCellIds: linkedOutdoorEnvCellIds,
 				},
 				assetState.preparedByAssetId,
-				structuredInteriorCoverageOptions,
 			);
 		}
 
@@ -275,12 +268,12 @@
 			browserDestination,
 			detailLodRadius,
 			structuredInteriorCoverage,
-			structuredInteriorCoverageOptions,
 			outdoorSceneInterest === null
 				? null
 				: {
 						buildingLandblockIds: outdoorSceneInterest.buildingLandblockIds,
 						detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
+						envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
 					},
 		),
 	);
@@ -295,7 +288,6 @@
 						envCellIds: linkedOutdoorEnvCellIds,
 					},
 			structuredInteriorCoverage,
-			structuredInteriorCoverageOptions,
 		),
 	);
 	const selectedDiagnosticPortalId = $derived(
@@ -324,7 +316,6 @@
 			assetState,
 			structuredInteriorScene,
 			activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
-			coverageOptions: structuredInteriorCoverageOptions,
 		}),
 	);
 	const terrainSpatialItems = $derived(deriveTerrainSpatialItems(terrainScene));
@@ -1608,7 +1599,9 @@
 		return "Structured interior source facts are active, but no drawable cell geometry is ready.";
 	}
 
-	function describeAssetStateResourceRevision(state: AssetChannelState): string {
+	function describeAssetStateResourceRevision(
+		state: AssetChannelState,
+	): string {
 		return [
 			state.channel,
 			state.status,

@@ -6,54 +6,25 @@ import type {
 
 export type StructuredInteriorMembershipPolicy =
 	| { kind: "direct"; envCellIds: number[] }
-	| { kind: "visible-cell-closure"; seedEnvCellIds: number[] };
-
-export interface StructuredInteriorCoverageOptions {
-	maxEnvCells: number;
-	maxVisibleCellDepth: number;
-}
+	| { kind: "landblock-closure"; seedEnvCellIds: number[] };
 
 export interface StructuredInteriorCoverage {
 	envCellIds: number[];
 	truncated: boolean;
 }
 
-export function createDefaultStructuredInteriorCoverageOptions(): StructuredInteriorCoverageOptions {
-	return {
-		maxEnvCells: 1024,
-		maxVisibleCellDepth: 16,
-	};
-}
-
 export function deriveStructuredInteriorCoverage(
 	policy: StructuredInteriorMembershipPolicy,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	options: StructuredInteriorCoverageOptions,
 ): StructuredInteriorCoverage {
-	const { maxEnvCells, maxVisibleCellDepth } = options;
-	if (maxEnvCells < 1) {
-		throw new Error("Structured interior coverage requires maxEnvCells >= 1.");
-	}
-	if (maxVisibleCellDepth < 0) {
-		throw new Error(
-			"Structured interior coverage requires maxVisibleCellDepth >= 0.",
-		);
-	}
-
 	if (policy.kind === "direct") {
-		const envCellIds = uniqueSorted(policy.envCellIds);
 		return {
-			envCellIds: envCellIds.slice(0, maxEnvCells),
-			truncated: envCellIds.length > maxEnvCells,
+			envCellIds: uniqueSorted(policy.envCellIds),
+			truncated: false,
 		};
 	}
 
-	return deriveVisibleCellClosureCoverage(
-		policy.seedEnvCellIds,
-		preparedByAssetId,
-		maxEnvCells,
-		maxVisibleCellDepth,
-	);
+	return deriveLandblockClosureCoverage(policy.seedEnvCellIds, preparedByAssetId);
 }
 
 export function formatIndoorEnvCellAssetId(envCellId: number): string {
@@ -72,80 +43,34 @@ export function isPreparedIndoorEnvCellAsset(
 
 export function deriveBrowserFocusedStructuredInteriorMembershipPolicy(
 	focusEnvCellId: number,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
 ): StructuredInteriorMembershipPolicy {
-	const focusAsset = preparedByAssetId[formatIndoorEnvCellAssetId(focusEnvCellId)];
-	if (
-		isPreparedIndoorEnvCellAsset(focusAsset) &&
-		focusAsset.payload.landblockEnvCellIds.length > 0
-	) {
-		return {
-			kind: "direct",
-			envCellIds: focusAsset.payload.landblockEnvCellIds,
-		};
-	}
-
 	return {
-		kind: "visible-cell-closure",
+		kind: "landblock-closure",
 		seedEnvCellIds: [focusEnvCellId],
 	};
 }
 
-function deriveVisibleCellClosureCoverage(
+function deriveLandblockClosureCoverage(
 	seedEnvCellIds: number[],
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	maxEnvCells: number,
-	maxVisibleCellDepth: number,
 ): StructuredInteriorCoverage {
 	const envCellIds = new Set<number>();
-	const visitedEnvCellIds = new Set<number>();
-	const seedQueueEntries = uniqueSorted(seedEnvCellIds).map((envCellId) => ({
-		envCellId,
-		depth: 0,
-	}));
-	const queue = seedQueueEntries.slice(0, maxEnvCells);
-	let truncated = seedQueueEntries.length > maxEnvCells;
+	for (const seedEnvCellId of uniqueSorted(seedEnvCellIds)) {
+		envCellIds.add(seedEnvCellId);
 
-	for (const entry of queue) {
-		envCellIds.add(entry.envCellId);
-	}
-
-	for (let index = 0; index < queue.length; index += 1) {
-		const { envCellId, depth } = queue[index];
-		if (visitedEnvCellIds.has(envCellId)) {
-			continue;
-		}
-		visitedEnvCellIds.add(envCellId);
-
-		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
+		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(seedEnvCellId)];
 		if (!isPreparedIndoorEnvCellAsset(asset)) {
 			continue;
 		}
 
-		for (const visibleCellId of uniqueSorted(asset.payload.visibleCellIds)) {
-			if (envCellIds.has(visibleCellId)) {
-				continue;
-			}
-			if (depth >= maxVisibleCellDepth) {
-				truncated = true;
-				continue;
-			}
-			if (envCellIds.size >= maxEnvCells) {
-				truncated = true;
-				continue;
-			}
-
-			envCellIds.add(visibleCellId);
-			queue.push({
-				envCellId: visibleCellId,
-				depth: depth + 1,
-			});
+		for (const landblockEnvCellId of asset.payload.landblockEnvCellIds) {
+			envCellIds.add(landblockEnvCellId);
 		}
 	}
 
 	return {
 		envCellIds: [...envCellIds].sort((left, right) => left - right),
-		truncated,
+		truncated: false,
 	};
 }
 

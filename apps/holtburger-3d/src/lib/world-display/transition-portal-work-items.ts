@@ -1,7 +1,4 @@
-import {
-	deriveStructuredInteriorCoverage,
-	type StructuredInteriorCoverageOptions,
-} from "../assets/structured-interior-coverage";
+import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
 import type {
 	AssetChannelState,
 	PreparedOutdoorStaticSceneBuildingPortal,
@@ -70,7 +67,6 @@ export interface TransitionPortalCandidateInput {
 	assetState: AssetChannelState;
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	activeLandblockIds: readonly number[];
-	coverageOptions: StructuredInteriorCoverageOptions;
 	source?: TransitionPortalSource;
 }
 
@@ -93,7 +89,6 @@ export function deriveTransitionPortalCandidates({
 	assetState,
 	structuredInteriorScene,
 	activeLandblockIds,
-	coverageOptions,
 	source = "browser-free-camera",
 }: TransitionPortalCandidateInput): TransitionPortalCandidateModel {
 	const activeLandblockIdSet = new Set(
@@ -135,7 +130,6 @@ export function deriveTransitionPortalCandidates({
 					stencilRef: nextStencilRef,
 					source,
 					assetState,
-					coverageOptions,
 				});
 				if (candidate.kind === "skip") {
 					diagnostics[candidate.reason] += 1;
@@ -290,14 +284,12 @@ function createTransitionPortalCandidate({
 	stencilRef,
 	source,
 	assetState,
-	coverageOptions,
 }: {
 	aperture: PortalAperture;
 	portal: PreparedOutdoorStaticSceneBuildingPortal;
 	stencilRef: number;
 	source: TransitionPortalSource;
 	assetState: AssetChannelState;
-	coverageOptions: StructuredInteriorCoverageOptions;
 }): TransitionPortalCandidateCreationResult {
 	if (
 		aperture.targetStatus === "missing-polygon" ||
@@ -321,11 +313,10 @@ function createTransitionPortalCandidate({
 	]);
 	const coverage = deriveStructuredInteriorCoverage(
 		{
-			kind: "visible-cell-closure",
+			kind: "landblock-closure",
 			seedEnvCellIds,
 		},
 		assetState.preparedByAssetId,
-		coverageOptions,
 	);
 
 	return {

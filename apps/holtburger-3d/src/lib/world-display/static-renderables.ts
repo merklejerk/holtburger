@@ -16,15 +16,13 @@ import type {
 	PreparedSetupModelPayload,
 } from "../assets/types";
 import {
-	deriveOutdoorPortalInteriorSeedEnvCellIds,
+	deriveOutdoorInteriorSeedEnvCellIds,
 	deriveTerrainFocusLandblockId,
 } from "../assets/scene-asset-request-planner";
 import {
-	createDefaultStructuredInteriorCoverageOptions,
 	deriveStructuredInteriorCoverage,
 	formatIndoorEnvCellAssetId,
 	type StructuredInteriorCoverage,
-	type StructuredInteriorCoverageOptions,
 } from "../assets/structured-interior-coverage";
 import type {
 	PlacementTransformDto,
@@ -100,6 +98,7 @@ export interface StaticRenderableSceneModel {
 export interface OutdoorStaticRenderableSelection {
 	buildingLandblockIds: readonly number[];
 	detailLandblockIds: readonly number[];
+	envCellLandblockIds: readonly number[];
 }
 
 const IDENTITY_PLACEMENT: PlacementTransformDto = {
@@ -115,7 +114,6 @@ export function deriveStaticRenderableSceneModel(
 	browserDestination: BrowserLocationSelection | null = null,
 	detailLodRadius = 1,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
-	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions = createDefaultStructuredInteriorCoverageOptions(),
 	outdoorSelection: OutdoorStaticRenderableSelection | null = null,
 ): StaticRenderableSceneModel {
 	if (!runtimeBatch) {
@@ -131,7 +129,6 @@ export function deriveStaticRenderableSceneModel(
 			assetState,
 			browserDestination,
 			structuredInteriorCoverage,
-			structuredInteriorCoverageOptions,
 		);
 	}
 
@@ -144,11 +141,15 @@ export function deriveStaticRenderableSceneModel(
 		buildOutdoorCoverageLandblockIds(focusLandblockId, detailLodRadius);
 	const buildingLandblockIds =
 		outdoorSelection?.buildingLandblockIds ?? detailLandblockIds;
+	const envCellLandblockIds =
+		outdoorSelection?.envCellLandblockIds ?? detailLandblockIds;
 	const detailLandblockSet = new Set(detailLandblockIds);
 	const buildingLandblockSet = new Set(buildingLandblockIds);
+	const envCellLandblockSet = new Set(envCellLandblockIds);
 	const activeLandblockSet = new Set([
 		...detailLandblockIds,
 		...buildingLandblockIds,
+		...envCellLandblockIds,
 	]);
 	const activeLandblockIds = [...activeLandblockSet].sort(
 		(left, right) => left - right,
@@ -164,16 +165,15 @@ export function deriveStaticRenderableSceneModel(
 					structuredInteriorCoverage?.envCellIds ??
 						deriveStructuredInteriorCoverage(
 							{
-								kind: "visible-cell-closure",
+								kind: "landblock-closure",
 								seedEnvCellIds: [
-									...deriveOutdoorPortalInteriorSeedEnvCellIds(
+									...deriveOutdoorInteriorSeedEnvCellIds(
 										assetState.preparedByAssetId,
-										detailLandblockSet,
+										envCellLandblockSet,
 									),
 								],
 							},
 							assetState.preparedByAssetId,
-							structuredInteriorCoverageOptions,
 						).envCellIds,
 				),
 			),
@@ -228,14 +228,12 @@ function deriveIndoorStaticRenderableSceneModel(
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
-	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions,
 ): StaticRenderableSceneModel {
 	const activeEnvCellIds = deriveActiveIndoorEnvCellIds(
 		runtimeBatch,
 		assetState,
 		browserDestination,
 		structuredInteriorCoverage,
-		structuredInteriorCoverageOptions,
 	);
 	const sourceInstances = collectIndoorStaticRenderableSourceInstances(
 		assetState,
@@ -523,7 +521,6 @@ function deriveActiveIndoorEnvCellIds(
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
-	structuredInteriorCoverageOptions: StructuredInteriorCoverageOptions,
 ): Set<number> {
 	if (structuredInteriorCoverage !== null) {
 		return new Set(structuredInteriorCoverage.envCellIds);
@@ -535,11 +532,10 @@ function deriveActiveIndoorEnvCellIds(
 		return new Set(
 			deriveStructuredInteriorCoverage(
 				{
-					kind: "visible-cell-closure",
+					kind: "landblock-closure",
 					seedEnvCellIds: [browserFocusEnvCellId],
 				},
 				assetState.preparedByAssetId,
-				structuredInteriorCoverageOptions,
 			).envCellIds,
 		);
 	}
@@ -552,11 +548,13 @@ function deriveActiveIndoorEnvCellIds(
 	return new Set(
 		deriveStructuredInteriorCoverage(
 			{
-				kind: "direct",
-				envCellIds: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
+				kind: "landblock-closure",
+				seedEnvCellIds: [
+					focusEnvCellId,
+					...runtimeBatch.residency.visibleCellIds,
+				],
 			},
 			assetState.preparedByAssetId,
-			structuredInteriorCoverageOptions,
 		).envCellIds,
 	);
 }

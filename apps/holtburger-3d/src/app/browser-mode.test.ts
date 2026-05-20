@@ -16,6 +16,7 @@ import {
 	updateBrowserDraft,
 	updateCellIndicatorVisibility,
 	updateDetailLodRadius,
+	updateEnvCellLodRadius,
 	updateLandblockInputMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
@@ -48,6 +49,7 @@ describe("browser-mode location policy", () => {
 		expect(state.terrainLodRadius).toBe(2);
 		expect(state.buildingLodRadius).toBe(1);
 		expect(state.detailLodRadius).toBe(1);
+		expect(state.envCellLodRadius).toBe(1);
 		expect(state.transitionPortalMaxDepth).toBeGreaterThanOrEqual(
 			MIN_TRANSITION_PORTAL_MAX_DEPTH,
 		);
@@ -275,6 +277,12 @@ describe("browser-mode location policy", () => {
 		expect(state.terrainLodRadius).toBe(3);
 		expect(state.buildingLodRadius).toBe(2);
 		expect(state.detailLodRadius).toBe(2);
+
+		const envCellState = updateEnvCellLodRadius(
+			updateBuildingLodRadius(createBrowserModeState(), 1),
+			8,
+		);
+		expect(envCellState.envCellLodRadius).toBe(2);
 	});
 
 	it("converts browser coordinates into a normalized outdoor landblock id", () => {

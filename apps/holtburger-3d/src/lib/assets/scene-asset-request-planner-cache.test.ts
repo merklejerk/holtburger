@@ -18,6 +18,13 @@ const SINGLE_LANDBLOCK_OPTIONS: OutdoorSceneRequestOptions = {
 	detailRadius: 0,
 };
 
+const ENV_CELL_EXTENDED_OPTIONS: OutdoorSceneRequestOptions = {
+	terrainRadius: 1,
+	buildingRadius: 0,
+	detailRadius: 0,
+	envCellRadius: 1,
+};
+
 describe("scene coverage asset ids", () => {
 	it("derives outdoor terrain and static-scene roots without filtering prepared assets", () => {
 		expect(
@@ -130,11 +137,13 @@ describe("scene coverage asset ids", () => {
 				}),
 				null,
 				{
-					"outdoor-static-scene/016cffff": createPreparedOutdoorStaticSceneAsset(),
+					"outdoor-static-scene/016cffff":
+						createPreparedOutdoorStaticSceneAsset(),
 					"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 						0x016c0155,
 						0x0d000001,
 						[0x016c0156],
+						[0x016c0155, 0x016c0156],
 					),
 					"indoor-env-cell/016c0157": createPreparedIndoorEnvCellAsset(
 						0x016c0157,
@@ -180,11 +189,13 @@ describe("scene coverage asset ids", () => {
 					"terrain",
 					"terrain/016cffff",
 				),
-				"outdoor-static-scene/016cffff": createPreparedOutdoorStaticSceneAsset(),
+				"outdoor-static-scene/016cffff":
+					createPreparedOutdoorStaticSceneAsset(),
 				"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 					0x016c0155,
 					0x0d000001,
 					[0x016c0156],
+					[0x016c0155, 0x016c0156, 0x016c0157],
 				),
 			},
 			["indoor-env-cell/016c0156"],
@@ -200,6 +211,67 @@ describe("scene coverage asset ids", () => {
 		expect(requests.map((request) => request.assetId)).not.toContain(
 			"indoor-env-cell/016c0156",
 		);
+	});
+
+	it("uses prepared env cells to discover wider outdoor env-cell coverage", () => {
+		expect(
+			deriveSceneCoverageAssetIds(
+				createRuntimeBatch({
+					residency: {
+						focusEntityId: null,
+						focusLandblockId: 0x016c0001,
+						focusCellId: 1,
+						focusEnvCellId: null,
+						visibleCellIds: [],
+						seenOutside: null,
+						environmentId: null,
+						cellStructureId: null,
+						focusLocationLabel: "outdoor",
+						indoors: false,
+						trackedBodyCount: 0,
+					},
+				}),
+				null,
+				{
+					"terrain/016cffff": createPreparedTerrainAsset(
+						"terrain",
+						"terrain/016cffff",
+					),
+					"indoor-env-cell/016d0100": createPreparedIndoorEnvCellAsset(
+						0x016d0100,
+						0x0d000001,
+						[],
+						[0x016d0100, 0x016d0101],
+					),
+				},
+				ENV_CELL_EXTENDED_OPTIONS,
+			),
+		).toContain("indoor-env-cell/016d0101");
+	});
+
+	it("loads static scene facts for env-cell landblocks beyond detail range", () => {
+		const assetIds = deriveSceneCoverageAssetIds(
+			createRuntimeBatch({
+				residency: {
+					focusEntityId: null,
+					focusLandblockId: 0x016c0001,
+					focusCellId: 1,
+					focusEnvCellId: null,
+					visibleCellIds: [],
+					seenOutside: null,
+					environmentId: null,
+					cellStructureId: null,
+					focusLocationLabel: "outdoor",
+					indoors: false,
+					trackedBodyCount: 0,
+				},
+			}),
+			null,
+			{},
+			ENV_CELL_EXTENDED_OPTIONS,
+		);
+
+		expect(assetIds).toContain("outdoor-static-scene/016dffff");
 	});
 });
 

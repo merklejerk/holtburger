@@ -224,7 +224,6 @@ function prepareEnvironment(
 			sourceId: cellStructure.id,
 			vertexArray: cellStructure.vertexArray,
 			drawingPolygons: cellStructure.drawingPolygons,
-			excludedPolygonIds: cellStructure.portalPolygonIds,
 		}),
 	}));
 
@@ -582,7 +581,6 @@ interface PolygonSetGeometrySource {
 	sourceId: number;
 	vertexArray: GfxObjPayloadDto["vertexArray"];
 	drawingPolygons: GfxObjPayloadDto["drawingPolygons"];
-	excludedPolygonIds?: readonly number[];
 }
 
 const STIPPLING_NO_POS = 0x04;
@@ -607,7 +605,6 @@ function buildPolygonSetRenderGeometry(
 	const uvs: number[] = [];
 	const triangles: PreparedPolygonSetRenderGeometry["triangles"] = [];
 	const surfaceIdSet = new Set<number>();
-	const excludedPolygonIds = new Set(source.excludedPolygonIds ?? []);
 	const invalidPolygons: NonNullable<
 		PreparedPolygonSetRenderGeometry["invalidPolygons"]
 	> = [];
@@ -620,10 +617,6 @@ function buildPolygonSetRenderGeometry(
 	let maxZ = Number.NEGATIVE_INFINITY;
 
 	for (const polygon of source.drawingPolygons) {
-		if (excludedPolygonIds.has(polygon.id)) {
-			skippedPolygonCount += 1;
-			continue;
-		}
 		if (polygon.numPts !== polygon.vertexIds.length) {
 			throw new Error(
 				`${source.sourceLabel} polygon ${polygon.id} declares ${polygon.numPts} points but provides ${polygon.vertexIds.length} vertices.`,
@@ -681,11 +674,7 @@ function buildPolygonSetRenderGeometry(
 
 					const renderPosition = convertAcVectorToRenderSpace(vertex.origin);
 					const renderNormal = convertAcVectorToRenderSpace(vertex.normal);
-					positions.push(
-						renderPosition.x,
-						renderPosition.y,
-						renderPosition.z,
-					);
+					positions.push(renderPosition.x, renderPosition.y, renderPosition.z);
 					normals.push(
 						scaleNormalComponent(renderNormal.x, renderSide.normalScale),
 						scaleNormalComponent(renderNormal.y, renderSide.normalScale),

@@ -6,9 +6,10 @@ pub mod static_outdoor_scene;
 
 pub use character_gen::CharacterGenCatalog;
 pub use landblock_pack::{
-    CellLandblockFact, LandblockClassification, LandblockInfoFact, LandblockPack,
+    CellLandblockFact, EnvCellFact, EnvCellPortalFact, EnvironmentFact, IndoorStaticObjectFact,
+    LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,
     LandblockPackAssembler, LandblockPackSourceDiagnostics, LandblockRestriction, SourceLoadError,
-    SourceRecordDiagnostic, SourceRecordStatus,
+    SourceRecordDiagnostic, SourceRecordStatus, format_static_object_source_asset_id,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

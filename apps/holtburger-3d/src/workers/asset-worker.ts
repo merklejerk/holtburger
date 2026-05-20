@@ -185,6 +185,7 @@ function prepareLandblockPack(
 				cellLandblock: payload.sourceFacts.cellLandblock,
 				landblockInfo: payload.sourceFacts.landblockInfo,
 				outdoor: payload.sourceFacts.outdoor,
+				interiors: payload.sourceFacts.interiors,
 			},
 			dependencies: {
 				cellDatIds: payload.dependencies.cellDatIds,

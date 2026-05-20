@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 1 implemented. Later phases remain planning.
+Status: Phase 2 implemented. Later phases remain planning.
 
 ## Context
 
@@ -63,9 +63,7 @@ The pack payload classifies the loaded landblock after reading `XXYYFFFF` and `X
 Classification should be diagnostic and advisory, not a separate loading path:
 
 ```ts
-type LandblockClassification =
-	| "outdoor"
-	| "dungeon";
+type LandblockClassification = "outdoor" | "dungeon";
 ```
 
 Suggested initial rules:
@@ -81,15 +79,15 @@ The payload should keep official decoded facts separate from renderer-prepared f
 
 ```ts
 interface LandblockPackPayload {
-	kind: "landblock-pack";
-	landblockId: number;
-	landblockInfoId: number;
-	classification: LandblockClassification;
-	sourceFacts: LandblockSourceFacts;
-	prepared: LandblockPreparedFacts;
-	dependencies: LandblockPackDependencies;
-	diagnostics: LandblockPackSourceDiagnostics;
-	provenance: AssetProvenance;
+  kind: "landblock-pack";
+  landblockId: number;
+  landblockInfoId: number;
+  classification: LandblockClassification;
+  sourceFacts: LandblockSourceFacts;
+  prepared: LandblockPreparedFacts;
+  dependencies: LandblockPackDependencies;
+  diagnostics: LandblockPackSourceDiagnostics;
+  provenance: AssetProvenance;
 }
 ```
 
@@ -119,8 +117,8 @@ Instead, landblock instances should reference shared renderable assets:
 
 ```ts
 interface LandblockRenderableReference {
-	sourceDid: number;
-	sourceAssetId: string; // "gfx-obj/01000001" or "setup-model/02000001"
+  sourceDid: number;
+  sourceAssetId: string; // "gfx-obj/01000001" or "setup-model/02000001"
 }
 ```
 
@@ -136,11 +134,11 @@ Frontend dependency handling must preserve this rule. When `PreparedLandblockPac
 
 ```ts
 interface LandblockSourceFacts {
-	cellLandblock: CellLandblockFact | null;
-	landblockInfo: LandblockInfoFact | null;
-	outdoor: OutdoorSourceFacts;
-	interiors: InteriorSourceFacts;
-	renderables: RenderableSourceFacts;
+  cellLandblock: CellLandblockFact | null;
+  landblockInfo: LandblockInfoFact | null;
+  outdoor: OutdoorSourceFacts;
+  interiors: InteriorSourceFacts;
+  renderables: RenderableSourceFacts;
 }
 ```
 
@@ -148,15 +146,15 @@ interface LandblockSourceFacts {
 
 ```ts
 interface CellLandblockFact {
-	id: number;
-	hasObjects: boolean;
-	gridSize: 9;
-	tileSize: 24;
-	terrainTypes: number[];
-	heights: number[];
-	minHeight: number;
-	maxHeight: number;
-	allHeightsZero: boolean;
+  id: number;
+  hasObjects: boolean;
+  gridSize: 9;
+  tileSize: 24;
+  terrainTypes: number[];
+  heights: number[];
+  minHeight: number;
+  maxHeight: number;
+  allHeightsZero: boolean;
 }
 ```
 
@@ -166,18 +164,18 @@ This is the official `XXYYFFFF` data. For dungeons it is still useful for classi
 
 ```ts
 interface LandblockInfoFact {
-	id: number;
-	firstEnvCellId: number | null;
-	numEnvCells: number;
-	objectCount: number;
-	buildingCount: number;
-	packMask: number;
-	restrictions: LandblockRestriction[];
+  id: number;
+  firstEnvCellId: number | null;
+  numEnvCells: number;
+  objectCount: number;
+  buildingCount: number;
+  packMask: number;
+  restrictions: LandblockRestriction[];
 }
 
 interface LandblockRestriction {
-	cellId: number;
-	restrictionObjectId: number;
+  cellId: number;
+  restrictionObjectId: number;
 }
 ```
 
@@ -194,9 +192,9 @@ Use a shared helper on both sides of the boundary for this derivation so orderin
 
 ```ts
 interface OutdoorSourceFacts {
-	explicitObjects: StaticInstanceFact[];
-	buildings: BuildingInstanceFact[];
-	generatedScenery: GeneratedSceneryFact[];
+  explicitObjects: StaticInstanceFact[];
+  buildings: BuildingInstanceFact[];
+  generatedScenery: GeneratedSceneryFact[];
 }
 ```
 
@@ -206,8 +204,8 @@ These facts can reuse the existing `StaticOutdoorSceneAssembler` logic, but they
 
 ```ts
 interface InteriorSourceFacts {
-	envCells: EnvCellFact[];
-	environments: EnvironmentFact[];
+  envCells: EnvCellFact[];
+  environments: EnvironmentFact[];
 }
 ```
 
@@ -222,27 +220,27 @@ If memory pressure appears later, the pack can support profiles such as `manifes
 
 ```ts
 interface EnvCellFact {
-	envCellId: number;
-	environmentId: number | null;
-	cellStructureId: number | null;
-	localPlacement: PlacementTransform;
-	surfaceIds: number[];
-	visibleCellIds: number[];
-	portals: EnvCellPortalFact[];
-	staticObjects: StaticInstanceFact[];
-	seenOutside: boolean | null;
-	restrictionObjectId: number | null;
+  envCellId: number;
+  environmentId: number | null;
+  cellStructureId: number | null;
+  localPlacement: PlacementTransform;
+  surfaceIds: number[];
+  visibleCellIds: number[];
+  portals: EnvCellPortalFact[];
+  staticObjects: StaticInstanceFact[];
+  seenOutside: boolean | null;
+  restrictionObjectId: number | null;
 }
 
 interface EnvCellPortalFact {
-	portalId: string;
-	sourceIndex: number;
-	flags: number;
-	polygonId: number;
-	otherCellId: number;
-	otherPortalId: number;
-	targetEnvCellId: number | null;
-	isOutsideTransition: boolean;
+  portalId: string;
+  sourceIndex: number;
+  flags: number;
+  polygonId: number;
+  otherCellId: number;
+  otherPortalId: number;
+  targetEnvCellId: number | null;
+  isOutsideTransition: boolean;
 }
 ```
 
@@ -252,9 +250,9 @@ interface EnvCellPortalFact {
 
 ```ts
 interface RenderableSourceFacts {
-	gfxObjs: GfxObjFact[];
-	setupModels: SetupModelFact[];
-	unsupportedDids: UnsupportedRenderableDid[];
+  gfxObjs: GfxObjFact[];
+  setupModels: SetupModelFact[];
+  unsupportedDids: UnsupportedRenderableDid[];
 }
 ```
 
@@ -274,12 +272,12 @@ The assembler should collect renderable DIDs referenced by:
 
 ```ts
 interface LandblockPreparedFacts {
-	terrainMesh: PreparedMesh | null;
-	outdoorStaticInstances: PreparedStaticInstance[];
-	interiorCells: PreparedInteriorCell[];
-	staticMeshes: PreparedStaticMesh[];
-	spatialItems: PreparedSpatialItem[];
-	staticInstanceBvh: PreparedBvh | null;
+  terrainMesh: PreparedMesh | null;
+  outdoorStaticInstances: PreparedStaticInstance[];
+  interiorCells: PreparedInteriorCell[];
+  staticMeshes: PreparedStaticMesh[];
+  spatialItems: PreparedSpatialItem[];
+  staticInstanceBvh: PreparedBvh | null;
 }
 ```
 
@@ -313,14 +311,14 @@ Rust should resolve static instance transforms and source renderables into prepa
 
 ```ts
 interface PreparedStaticInstance {
-	instanceId: string;
-	ownerKind: "outdoor" | "env-cell";
-	ownerId: number;
-	sourceDid: number;
-	sourceAssetId: string;
-	localPlacement: PlacementTransform;
-	worldOrLandblockPlacement: PlacementTransform;
-	bounds: Aabb | null;
+  instanceId: string;
+  ownerKind: "outdoor" | "env-cell";
+  ownerId: number;
+  sourceDid: number;
+  sourceAssetId: string;
+  localPlacement: PlacementTransform;
+  worldOrLandblockPlacement: PlacementTransform;
+  bounds: Aabb | null;
 }
 ```
 
@@ -349,24 +347,24 @@ Initial shape:
 
 ```ts
 interface PreparedBvh {
-	coordinateSpace: "landblock-local";
-	landblockId: number;
-	scope: "static-landblock";
-	nodes: PreparedBvhNode[];
+  coordinateSpace: "landblock-local";
+  landblockId: number;
+  scope: "static-landblock";
+  nodes: PreparedBvhNode[];
 }
 
 interface PreparedSpatialItem {
-	id: string;
-	kind:
-		| "terrain"
-		| "outdoor-static"
-		| "building"
-		| "env-cell"
-		| "indoor-static"
-		| "portal";
-	ownerId: number | null;
-	sourceAssetId: string | null;
-	bounds: Aabb;
+  id: string;
+  kind:
+    | "terrain"
+    | "outdoor-static"
+    | "building"
+    | "env-cell"
+    | "indoor-static"
+    | "portal";
+  ownerId: number | null;
+  sourceAssetId: string | null;
+  bounds: Aabb;
 }
 ```
 
@@ -402,11 +400,11 @@ The pack should report loaded and missing dependent resources:
 
 ```ts
 interface LandblockPackDependencies {
-	cellDatIds: number[];
-	portalDatIds: number[];
-	renderableAssetIds: string[];
-	missing: MissingDependency[];
-	unsupported: UnsupportedRenderableDid[];
+  cellDatIds: number[];
+  portalDatIds: number[];
+  renderableAssetIds: string[];
+  missing: MissingDependency[];
+  unsupported: UnsupportedRenderableDid[];
 }
 ```
 
@@ -418,9 +416,9 @@ Asset DTO diagnostics should be limited to facts the renderer cannot safely infe
 
 ```ts
 interface LandblockPackSourceDiagnostics {
-	sourceRecords: SourceRecordDiagnostic[];
-	omissions: SourceOmissionDiagnostic[];
-	errors: SourceLoadError[];
+  sourceRecords: SourceRecordDiagnostic[];
+  omissions: SourceOmissionDiagnostic[];
+  errors: SourceLoadError[];
 }
 ```
 
@@ -710,6 +708,8 @@ Validation performed:
 
 ### Phase 2: Load Env Cells And Environments From The Pack
 
+Status: completed.
+
 - Extend the assembler to load all env cells listed by `LandblockInfo.num_cells`.
 - Load referenced environments and selected cell structures.
 - Preserve env-cell portals, visible cells, static objects, surfaces, placements, and restriction objects.
@@ -719,6 +719,34 @@ Exit criteria:
 
 - Dungeon browser focus can request one `landblock-pack/*` and get the full env-cell inventory.
 - Outdoor landblock interior inspection no longer needs a building portal seed before it can know env-cell inventory.
+
+Implemented:
+
+- Added content-level `LandblockInteriorFacts`, `EnvCellFact`, `EnvCellPortalFact`, `IndoorStaticObjectFact`, and `EnvironmentFact`.
+- `LandblockPackAssembler` now enumerates `XXYY0100..XXYY0100 + num_cells - 1` from `LandblockInfo.num_cells` and attempts to load every listed env cell.
+- Env-cell source facts now preserve local placement, surface ids, visible cell ids, portal raw fields, outside-transition classification from portal flag `0x4`, static object references, `seenOutside`, and restriction object id.
+- The assembler now loads referenced portal DAT `Environment` records and includes only the selected cell structures referenced by loaded env cells.
+- The pack dependency inventory now includes loaded env-cell cell DAT ids and referenced environment portal DAT ids.
+- Pack renderable dependencies now include supported indoor static object renderable references, while shared `gfx-obj/*` and `setup-model/*` payloads remain separately keyed and graph-hydrated.
+- The Tauri adapter serializes the new interior facts as part of `sourceFacts.interiors`.
+- TypeScript contract and prepared payload shapes now preserve pack interior facts. The renderer still uses the old worker-prepared env-cell/environment routes until later phases consume pack geometry.
+
+Decisions and course corrections:
+
+- Environment facts are intentionally narrowed to selected cell structures instead of serializing every cell structure in each referenced environment. This keeps Phase 2 aligned with the current renderer need and avoids turning the pack into a broad portal-DAT export format.
+- Full cell-structure schemas were not duplicated into the early landblock-pack TypeScript contract. `cellStructures` remains opaque in the pack contract until Phase 3 decides whether pack-backed geometry is consumed as raw source structures or Rust-prepared meshes.
+- The pack uses `targetEnvCellId: null` for portal flag `0x4` outside transitions and preserves the raw `otherCellId`/`otherPortalId` fields for diagnostics.
+- Missing env cells or environments are reported through source diagnostics. They produce partial packs rather than silently masquerading as empty interior content.
+- The normal scene-loading route still uses legacy `indoor-env-cell/*` and `environment/*` requests. Phase 2 only makes the pack authoritative enough for the later frontend route switch.
+
+Validation performed:
+
+- `cargo test -p holtburger-content landblock_pack --lib`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml landblock_pack_lookup_returns_manifest_source_facts`
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/landblocks.test.ts`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `npm run check`
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 ### Phase 3: Move Current Asset Worker Geometry Preparation To Rust
 
@@ -807,6 +835,10 @@ Initial cleanup targets:
 - Remove obsolete worker geometry preparation paths after Rust-prepared terrain, environment, and gfx geometry are trusted.
 - Remove stale tests that encode legacy request sequencing instead of pack-backed behavior.
 - Revisit debug panel labels so old asset-family names are presented as source/debug routes, not primary scene-loading concepts.
+- Remove duplicated env-cell serialization paths after pack-backed interiors replace normal `indoor-env-cell/*` loading.
+- Replace the legacy indoor static object source-asset formatting path with the content-level helper everywhere it survives.
+- Decide whether pack `EnvironmentFact.cellStructures` should become a fully typed frontend contract or disappear behind Rust-prepared interior meshes in Phase 3.
+- Revisit source fact naming before route retirement: `interiors` currently means landblock env-cell facts, not a separate official indoor asset family.
 
 Exit criteria:
 

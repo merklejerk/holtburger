@@ -5,12 +5,13 @@ use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_content::{
-    CellLandblockFact, ContentRepository, GeneratedOutdoorSceneryDiagnostics,
-    LandblockClassification, LandblockInfoFact, LandblockPack, LandblockPackAssembler,
-    LandblockPackSourceDiagnostics, LandblockRestriction, SoulEmoteCatalog, SourceLoadError,
-    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
-    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
-    StaticRenderableSourceFamily, normalize_landblock_id,
+    CellLandblockFact, ContentRepository, EnvCellFact, EnvironmentFact,
+    GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
+    LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
+    LandblockRestriction, SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic,
+    SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics,
+    StaticOutdoorScene, StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
+    format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
@@ -1298,14 +1299,6 @@ fn serialize_indoor_static_object(
     })
 }
 
-fn format_static_object_source_asset_id(did: u32) -> String {
-    match did >> 24 {
-        0x01 => format!("gfx-obj/{did:08x}"),
-        0x02 => format!("setup-model/{did:08x}"),
-        _ => format!("unsupported-static/{did:08x}"),
-    }
-}
-
 fn parse_terrain_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("terrain/")
@@ -1381,10 +1374,7 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             "cellLandblock": pack.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
             "landblockInfo": pack.landblock_info.as_ref().map(serialize_landblock_info_fact),
             "outdoor": serialize_landblock_pack_outdoor_facts(pack.outdoor_scene.as_ref()),
-            "interiors": {
-                "envCells": [],
-                "environments": []
-            },
+            "interiors": serialize_landblock_pack_interior_facts(pack),
             "renderables": {
                 "gfxObjs": [],
                 "setupModels": [],
@@ -1400,8 +1390,8 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             "staticInstanceBvh": null
         },
         "dependencies": {
-            "cellDatIds": [pack.landblock_id, pack.landblock_info_id],
-            "portalDatIds": [],
+            "cellDatIds": derive_landblock_pack_cell_dat_ids(pack),
+            "portalDatIds": derive_landblock_pack_portal_dat_ids(pack),
             "renderableAssetIds": derive_landblock_pack_renderable_asset_ids(pack),
             "missing": [],
             "unsupported": []
@@ -1414,6 +1404,31 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
+}
+
+fn derive_landblock_pack_cell_dat_ids(pack: &LandblockPack) -> Vec<u32> {
+    let mut ids = vec![pack.landblock_id, pack.landblock_info_id];
+    ids.extend(
+        pack.interiors
+            .env_cells
+            .iter()
+            .map(|env_cell| env_cell.env_cell_id),
+    );
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn derive_landblock_pack_portal_dat_ids(pack: &LandblockPack) -> Vec<u32> {
+    let mut ids = pack
+        .interiors
+        .environments
+        .iter()
+        .map(|environment| environment.id)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }
 
 fn serialize_landblock_classification(classification: LandblockClassification) -> &'static str {
@@ -1496,28 +1511,95 @@ fn serialize_landblock_pack_outdoor_facts(scene: Option<&StaticOutdoorScene>) ->
     })
 }
 
-fn derive_landblock_pack_renderable_asset_ids(pack: &LandblockPack) -> Vec<String> {
-    let Some(scene) = pack.outdoor_scene.as_ref() else {
-        return Vec::new();
-    };
+fn serialize_landblock_pack_interior_facts(pack: &LandblockPack) -> serde_json::Value {
+    serde_json::json!({
+        "envCells": pack.interiors.env_cells.iter().map(serialize_landblock_pack_env_cell).collect::<Vec<_>>(),
+        "environments": pack.interiors.environments.iter().map(serialize_landblock_pack_environment).collect::<Vec<_>>(),
+    })
+}
 
-    let mut asset_ids = scene
-        .explicit_objects
-        .iter()
-        .chain(scene.buildings.iter().map(|building| &building.instance))
-        .chain(
+fn serialize_landblock_pack_env_cell(env_cell: &EnvCellFact) -> serde_json::Value {
+    serde_json::json!({
+        "envCellId": env_cell.env_cell_id,
+        "environmentId": env_cell.environment_id,
+        "cellStructureId": env_cell.cell_structure_id,
+        "localPlacement": serialize_frame(&env_cell.local_placement),
+        "surfaceIds": env_cell.surface_ids,
+        "visibleCellIds": env_cell.visible_cell_ids,
+        "portals": env_cell.portals.iter().map(|portal| {
+            serde_json::json!({
+                "portalId": portal.portal_id,
+                "sourceIndex": portal.source_index,
+                "flags": portal.flags,
+                "polygonId": portal.polygon_id,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "targetEnvCellId": portal.target_env_cell_id,
+                "isOutsideTransition": portal.is_outside_transition,
+            })
+        }).collect::<Vec<_>>(),
+        "staticObjects": env_cell.static_objects.iter().map(serialize_landblock_pack_indoor_static_object).collect::<Vec<_>>(),
+        "seenOutside": env_cell.seen_outside,
+        "restrictionObjectId": env_cell.restriction_object_id,
+    })
+}
+
+fn serialize_landblock_pack_indoor_static_object(
+    static_object: &IndoorStaticObjectFact,
+) -> serde_json::Value {
+    serde_json::json!({
+        "instanceId": static_object.instance_id,
+        "owningEnvCellId": static_object.owning_env_cell_id,
+        "sourceDid": static_object.source_did,
+        "sourceAssetId": static_object.source_asset_id,
+        "sourceIndex": static_object.source_index,
+        "localPlacement": serialize_frame(&static_object.local_placement),
+    })
+}
+
+fn serialize_landblock_pack_environment(environment: &EnvironmentFact) -> serde_json::Value {
+    serde_json::json!({
+        "id": environment.id,
+        "cellStructureIds": environment.cell_structure_ids,
+        "cellStructures": environment.cell_structures.iter().map(serialize_cell_structure).collect::<Vec<_>>(),
+    })
+}
+
+fn derive_landblock_pack_renderable_asset_ids(pack: &LandblockPack) -> Vec<String> {
+    let mut asset_ids = pack
+        .outdoor_scene
+        .as_ref()
+        .into_iter()
+        .flat_map(|scene| {
             scene
-                .generated_scenery
+                .explicit_objects
                 .iter()
-                .map(|generated| &generated.instance),
-        )
+                .chain(scene.buildings.iter().map(|building| &building.instance))
+                .chain(
+                    scene
+                        .generated_scenery
+                        .iter()
+                        .map(|generated| &generated.instance),
+                )
+        })
         .filter_map(|instance| {
             format_renderable_source_asset_id(instance.source.family, instance.source.did)
         })
+        .chain(pack.interiors.env_cells.iter().flat_map(|env_cell| {
+            env_cell
+                .static_objects
+                .iter()
+                .map(|static_object| static_object.source_asset_id.clone())
+        }))
+        .filter(|asset_id| is_static_renderable_asset_id(asset_id))
         .collect::<Vec<_>>();
     asset_ids.sort();
     asset_ids.dedup();
     asset_ids
+}
+
+fn is_static_renderable_asset_id(asset_id: &str) -> bool {
+    asset_id.starts_with("gfx-obj/") || asset_id.starts_with("setup-model/")
 }
 
 fn serialize_landblock_pack_diagnostics(
@@ -2279,15 +2361,44 @@ mod tests {
             asset.payload["sourceFacts"]["landblockInfo"]["firstEnvCellId"],
             0xda550100u32
         );
+        let num_env_cells = asset.payload["sourceFacts"]["landblockInfo"]["numEnvCells"]
+            .as_u64()
+            .expect("fixture landblock info should expose an env-cell count");
+        assert!(num_env_cells > 0);
+        assert_eq!(
+            asset.payload["sourceFacts"]["interiors"]["envCells"]
+                .as_array()
+                .expect("pack should expose loaded env-cell facts")
+                .len(),
+            num_env_cells as usize
+        );
         assert!(
-            asset.payload["sourceFacts"]["landblockInfo"]["numEnvCells"]
-                .as_u64()
-                .is_some_and(|count| count > 0)
+            asset.payload["sourceFacts"]["interiors"]["environments"]
+                .as_array()
+                .expect("pack should expose referenced environment facts")
+                .iter()
+                .all(|environment| environment["cellStructures"]
+                    .as_array()
+                    .is_some_and(|cell_structures| !cell_structures.is_empty()))
         );
         assert!(
             asset.payload["sourceFacts"]["outdoor"]["buildings"]
                 .as_array()
                 .is_some()
+        );
+        assert!(
+            asset.payload["dependencies"]["cellDatIds"]
+                .as_array()
+                .expect("pack should expose cell DAT dependencies")
+                .iter()
+                .any(|id| id == 0xda550100u32)
+        );
+        assert!(
+            asset.payload["dependencies"]["portalDatIds"]
+                .as_array()
+                .expect("pack should expose portal DAT dependencies")
+                .iter()
+                .any(|id| id.as_u64().is_some_and(|id| (id >> 24) == 0x0d))
         );
         assert!(
             asset.payload["dependencies"]["renderableAssetIds"]

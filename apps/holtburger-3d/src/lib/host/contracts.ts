@@ -262,13 +262,52 @@ const landblockPackOutdoorFactsDtoSchema = z.object({
 	),
 });
 
+const landblockPackIndoorStaticObjectDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	owningEnvCellId: z.number().int().nonnegative(),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+});
+
+const landblockPackEnvCellPortalDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	polygonId: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	targetEnvCellId: z.number().int().nonnegative().nullable(),
+	isOutsideTransition: z.boolean(),
+});
+
+const landblockPackEnvCellFactDtoSchema = z.object({
+	envCellId: z.number().int().nonnegative(),
+	environmentId: z.number().int().nonnegative().nullable(),
+	cellStructureId: z.number().int().nonnegative().nullable(),
+	localPlacement: placementTransformDtoSchema,
+	surfaceIds: z.array(z.number().int().nonnegative()),
+	visibleCellIds: z.array(z.number().int().nonnegative()),
+	portals: z.array(landblockPackEnvCellPortalDtoSchema),
+	staticObjects: z.array(landblockPackIndoorStaticObjectDtoSchema),
+	seenOutside: z.boolean().nullable(),
+	restrictionObjectId: z.number().int().nonnegative().nullable(),
+});
+
+const landblockPackEnvironmentFactDtoSchema = z.object({
+	id: z.number().int().nonnegative(),
+	cellStructureIds: z.array(z.number().int().nonnegative()),
+	cellStructures: z.array(z.unknown()),
+});
+
 const landblockPackSourceFactsDtoSchema = z.object({
 	cellLandblock: cellLandblockFactDtoSchema.nullable(),
 	landblockInfo: landblockInfoFactDtoSchema.nullable(),
 	outdoor: landblockPackOutdoorFactsDtoSchema,
 	interiors: z.object({
-		envCells: z.array(z.unknown()),
-		environments: z.array(z.unknown()),
+		envCells: z.array(landblockPackEnvCellFactDtoSchema),
+		environments: z.array(landblockPackEnvironmentFactDtoSchema),
 	}),
 	renderables: z.object({
 		gfxObjs: z.array(z.unknown()),

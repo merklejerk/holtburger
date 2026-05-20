@@ -178,6 +178,34 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 			buildings: PreparedOutdoorStaticSceneBuilding[];
 			generatedScenery: PreparedOutdoorStaticSceneGeneratedSceneryInstance[];
 		};
+		interiors: {
+			envCells: {
+				envCellId: number;
+				environmentId: number | null;
+				cellStructureId: number | null;
+				localPlacement: PlacementTransformDto;
+				surfaceIds: number[];
+				visibleCellIds: number[];
+				portals: {
+					portalId: string;
+					sourceIndex: number;
+					flags: number;
+					polygonId: number;
+					otherCellId: number;
+					otherPortalId: number;
+					targetEnvCellId: number | null;
+					isOutsideTransition: boolean;
+				}[];
+				staticObjects: PreparedIndoorStaticObject[];
+				seenOutside: boolean | null;
+				restrictionObjectId: number | null;
+			}[];
+			environments: {
+				id: number;
+				cellStructureIds: number[];
+				cellStructures: unknown[];
+			}[];
+		};
 	};
 	dependencies: {
 		cellDatIds: number[];

@@ -5,14 +5,12 @@ import {
 	type PreparedAssetRecord,
 	type PreparedLandblockPackPayload,
 	type PreparedLandblockStaticMesh,
-	type PreparedSetupModelPayload,
 } from "../assets/types";
 import type {
 	PlacementTransformDto,
 	RuntimeBatchDto,
 	Vec3Dto,
 } from "../host/contracts";
-import { formatOutdoorStaticSceneAssetId } from "../landblocks";
 import {
 	deriveStaticRenderableSceneModel,
 	formatStaticRenderableRenderGroupKey,
@@ -27,125 +25,6 @@ const IDENTITY_PLACEMENT: PlacementTransformDto = {
 const UNIT_SCALE: Vec3Dto = { x: 1, y: 1, z: 1 };
 
 describe("static renderable scene model", () => {
-	it("normalizes setup-model composites into gfx-backed renderable parts", () => {
-		const assetState = createInitialAssetChannelState();
-		assetState.preparedByAssetId = {
-			"setup-model/02000001": createPreparedSetupModelAsset(),
-			"gfx-obj/01000001": createPreparedGfxObjAsset(
-				"gfx-obj/01000001",
-				0x01000001,
-			),
-			"gfx-obj/01000002": createPreparedGfxObjAsset(
-				"gfx-obj/01000002",
-				0x01000002,
-			),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0102ffff,
-				["setup-model/02000001"],
-			),
-		};
-
-		const model = deriveStaticRenderableSceneModel(
-			createRuntimeBatch(),
-			assetState,
-		);
-
-		expect(model.parts.map((part) => part.gfxObjAssetId)).toEqual([
-			"gfx-obj/01000001",
-			"gfx-obj/01000002",
-		]);
-		expect(model.parts[0]?.partPlacements).toEqual([
-			createPlacement({ x: 1, y: 0, z: 0 }),
-		]);
-		expect(model.parts[1]?.partPlacements).toEqual([
-			createPlacement({ x: 0, y: 2, z: 0 }),
-		]);
-		expect(model.parts[1]?.scale).toEqual({ x: 2, y: 1, z: 1 });
-		expect(model.missingSourceAssetIds).toEqual([]);
-		expect(model.missingGfxAssetIds).toEqual([]);
-	});
-
-	it("prefers the retail default setup placement frame", () => {
-		const assetState = createInitialAssetChannelState();
-		assetState.preparedByAssetId = {
-			"setup-model/02000001": createPreparedSetupModelAsset([
-				{
-					key: 0,
-					localPlacements: [
-						createPlacement({ x: 1, y: 0, z: 0 }),
-						createPlacement({ x: 0, y: 2, z: 0 }),
-					],
-					hookCount: 0,
-				},
-				{
-					key: 0x65,
-					localPlacements: [
-						createPlacement({ x: 3, y: 0, z: 0 }),
-						createPlacement({ x: 0, y: 4, z: 0 }),
-					],
-					hookCount: 0,
-				},
-			]),
-			"gfx-obj/01000001": createPreparedGfxObjAsset(
-				"gfx-obj/01000001",
-				0x01000001,
-			),
-			"gfx-obj/01000002": createPreparedGfxObjAsset(
-				"gfx-obj/01000002",
-				0x01000002,
-			),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0102ffff,
-				["setup-model/02000001"],
-			),
-		};
-
-		const model = deriveStaticRenderableSceneModel(
-			createRuntimeBatch(),
-			assetState,
-		);
-
-		expect(model.parts[0]?.partPlacements).toEqual([
-			createPlacement({ x: 3, y: 0, z: 0 }),
-		]);
-		expect(model.parts[1]?.partPlacements).toEqual([
-			createPlacement({ x: 0, y: 4, z: 0 }),
-		]);
-	});
-
-	it("normalizes direct gfx-obj sources through an ephemeral one-part view", () => {
-		const assetState = createInitialAssetChannelState();
-		assetState.preparedByAssetId = {
-			"gfx-obj/01000001": createPreparedGfxObjAsset(
-				"gfx-obj/01000001",
-				0x01000001,
-			),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0102ffff,
-				["gfx-obj/01000001"],
-			),
-		};
-
-		const model = deriveStaticRenderableSceneModel(
-			createRuntimeBatch(),
-			assetState,
-		);
-
-		expect(model.parts).toHaveLength(1);
-		expect(model.parts[0]).toMatchObject({
-			sourceAssetId: "gfx-obj/01000001",
-			partIndex: 0,
-			gfxObjAssetId: "gfx-obj/01000001",
-			renderChunk: {
-				chunkKey: "landblock/0102ffff",
-				chunkLandblockId: 0x0102ffff,
-			},
-			chunkLocalInstancePlacement: createPlacement({ x: 24, y: 48, z: 6 }),
-			scale: UNIT_SCALE,
-			partPlacements: [],
-		});
-	});
-
 	it("uses pack-prepared static mesh parts without legacy setup-model walking", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
@@ -154,10 +33,6 @@ describe("static renderable scene model", () => {
 				0x01000001,
 			),
 			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0102ffff,
-				["setup-model/02000001"],
-			),
 		};
 
 		const model = deriveStaticRenderableSceneModel(
@@ -186,11 +61,14 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0102ffff,
-				["gfx-obj/01000001"],
-				["gfx-obj/01000001"],
-			),
+			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff, [
+				createPreparedLandblockStaticMesh({
+					kind: "scenery",
+					instanceId: "pack-static-1",
+					sourceAssetId: "gfx-obj/01000001",
+					gfxObjAssetId: "gfx-obj/01000001",
+				}),
+			]),
 		};
 		const runtimeBatch = createRuntimeBatch();
 
@@ -255,13 +133,32 @@ describe("static renderable scene model", () => {
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
+			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(
 				0x0102ffff,
-				["gfx-obj/01000001"],
+				[
+					createPreparedLandblockStaticMesh({
+						kind: "scenery",
+						instanceId: "pack-static-0102",
+						sourceAssetId: "gfx-obj/01000001",
+						gfxObjAssetId: "gfx-obj/01000001",
+						localPlacement: createPlacement({ x: 24, y: 48, z: 6 }),
+					}),
+				],
+				false,
 			),
-			"outdoor-static-scene/0203ffff": createPreparedOutdoorStaticSceneAsset(
+			"landblock-pack/0203ffff": createPreparedLandblockPackAsset(
 				0x0203ffff,
-				["gfx-obj/01000001"],
+				[
+					createPreparedLandblockStaticMesh({
+						kind: "scenery",
+						instanceId: "pack-static-0203",
+						owningLandblockId: 0x0203ffff,
+						sourceAssetId: "gfx-obj/01000001",
+						gfxObjAssetId: "gfx-obj/01000001",
+						localPlacement: createPlacement({ x: 24, y: 48, z: 6 }),
+					}),
+				],
+				false,
 			),
 		};
 
@@ -311,22 +208,30 @@ describe("static renderable scene model", () => {
 		).toHaveLength(1);
 	});
 
-	it("tracks missing prepared assets and filters instances outside active landblock coverage", () => {
+	it("tracks missing prepared gfx assets and filters pack meshes outside active landblock coverage", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"setup-model/02000001": createPreparedSetupModelAsset(),
 			"gfx-obj/01000001": createPreparedGfxObjAsset(
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0102ffff,
-				["setup-model/02000001", "setup-model/02000002"],
-			),
-			"outdoor-static-scene/0909ffff": createPreparedOutdoorStaticSceneAsset(
-				0x0909ffff,
-				["gfx-obj/01000001"],
-			),
+			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff, [
+				createPreparedLandblockStaticMesh({
+					kind: "scenery",
+					instanceId: "pack-static-missing-gfx",
+					sourceAssetId: "setup-model/02000002",
+					gfxObjAssetId: "gfx-obj/01000002",
+				}),
+			]),
+			"landblock-pack/0909ffff": createPreparedLandblockPackAsset(0x0909ffff, [
+				createPreparedLandblockStaticMesh({
+					kind: "scenery",
+					instanceId: "pack-static-outside-active-landblock",
+					owningLandblockId: 0x0909ffff,
+					sourceAssetId: "gfx-obj/01000001",
+					gfxObjAssetId: "gfx-obj/01000001",
+				}),
+			]),
 		};
 		const runtimeBatch = createRuntimeBatch();
 
@@ -335,43 +240,7 @@ describe("static renderable scene model", () => {
 		expect(model.parts.map((part) => part.gfxObjAssetId)).toEqual([
 			"gfx-obj/01000001",
 		]);
-		expect(model.missingSourceAssetIds).toEqual(["setup-model/02000002"]);
 		expect(model.missingGfxAssetIds).toEqual(["gfx-obj/01000002"]);
-	});
-
-	it("normalizes indoor env-cell static objects in chunk-local placement", () => {
-		const assetState = createInitialAssetChannelState();
-		assetState.preparedByAssetId = {
-			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
-				0x016c0155,
-				createPlacement({ x: 10, y: 20, z: 30 }),
-				["setup-model/02000001"],
-			),
-			"setup-model/02000001": createPreparedSetupModelAsset(),
-			"gfx-obj/01000001": createPreparedGfxObjAsset(
-				"gfx-obj/01000001",
-				0x01000001,
-			),
-			"gfx-obj/01000002": createPreparedGfxObjAsset(
-				"gfx-obj/01000002",
-				0x01000002,
-			),
-		};
-		const runtimeBatch = createRuntimeBatch();
-		runtimeBatch.residency.indoors = true;
-		runtimeBatch.residency.focusEnvCellId = 0x016c0155;
-
-		const model = deriveStaticRenderableSceneModel(runtimeBatch, assetState);
-
-		expect(model.parts).toHaveLength(2);
-		expect(model.parts[0]).toMatchObject({
-			kind: "indoor-static",
-			owningEnvCellId: 0x016c0155,
-			sourceAssetId: "setup-model/02000001",
-			chunkLocalInstancePlacement: createPlacement({ x: 2, y: 4, z: 6 }),
-		});
-		expect(model.missingSourceAssetIds).toEqual([]);
-		expect(model.missingGfxAssetIds).toEqual([]);
 	});
 
 	it("keeps pack-backed indoor and exterior statics in separate render-domain groups", () => {
@@ -459,144 +328,32 @@ function createRuntimeBatch(): RuntimeBatchDto {
 	};
 }
 
-function createPreparedOutdoorStaticSceneAsset(
-	landblockId: number,
-	scenerySourceAssetIds: string[],
-	buildingSourceAssetIds: string[] = [],
-): PreparedAssetRecord {
-	const assetId = formatOutdoorStaticSceneAssetId(landblockId);
-	return createPreparedAsset(assetId, {
-		kind: "outdoor-static-scene",
-		sourceAssetKind: "outdoor-static-scene",
-		residencyKind: "outdoor-landblock",
-		landblockId,
-		sceneryInstances: scenerySourceAssetIds.map((sourceAssetId, index) => ({
-			instanceId: `${assetId}/object/${index}`,
-			owningLandblockId: landblockId,
-			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-			sourceAssetId,
-			sourceIndex: index,
-			localPlacement: createPlacement({ x: 24 + index, y: 48, z: 6 }),
-		})),
-		buildingInstances: buildingSourceAssetIds.map((sourceAssetId, index) => ({
-			instanceId: `${assetId}/building/${index}`,
-			owningLandblockId: landblockId,
-			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-			sourceAssetId,
-			sourceIndex: index,
-			localPlacement: createPlacement({ x: 25 + index, y: 48, z: 6 }),
-			numLeaves: 1,
-			portals: [],
-		})),
-		generatedSceneryInstances: [],
-		diagnostics: createOutdoorStaticSceneDiagnostics(),
-		provenance: {
-			source: "repo-local-hba",
-			sourceAssetKind: "outdoor-static-scene",
-			errorCode: null,
-			detail: "test",
-		},
-	});
-}
-
-function createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
-	landblockId: number,
-	linkedEnvCellIds: number[],
-	scenerySourceAssetIds: string[] = [],
-): PreparedAssetRecord {
-	const assetId = formatOutdoorStaticSceneAssetId(landblockId);
-	return createPreparedAsset(assetId, {
-		kind: "outdoor-static-scene",
-		sourceAssetKind: "outdoor-static-scene",
-		residencyKind: "outdoor-landblock",
-		landblockId,
-		sceneryInstances: scenerySourceAssetIds.map((sourceAssetId, index) => ({
-			instanceId: `${assetId}/object/${index}`,
-			owningLandblockId: landblockId,
-			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-			sourceAssetId,
-			sourceIndex: index,
-			localPlacement: createPlacement({ x: 24 + index, y: 48, z: 6 }),
-		})),
-		buildingInstances: [
-			{
-				instanceId: `${assetId}/building/0`,
-				owningLandblockId: landblockId,
-				sourceDid: 0x02000001,
-				sourceAssetId: "setup-model/02000001",
-				sourceIndex: 0,
-				localPlacement: createPlacement({ x: 24, y: 48, z: 6 }),
-				numLeaves: linkedEnvCellIds.length,
-				portals: [
-					{
-						portalId: `${assetId}/building/0/portal/0000`,
-						sourceIndex: 0,
-						flags: 0,
-						otherCellId: 0,
-						otherPortalId: 0,
-						stabList: linkedEnvCellIds.map((id) => id & 0xffff),
-						linkedEnvCellIds,
-					},
-				],
-			},
-		],
-		generatedSceneryInstances: [],
-		diagnostics: createOutdoorStaticSceneDiagnostics(),
-		provenance: {
-			source: "repo-local-hba",
-			sourceAssetKind: "outdoor-static-scene",
-			errorCode: null,
-			detail: "test",
-		},
-	});
-}
-
-function createPreparedIndoorEnvCellAsset(
-	envCellId: number,
-	localPlacement: PlacementTransformDto,
-	staticSourceAssetIds: string[],
-): PreparedAssetRecord {
-	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
-	return createPreparedAsset(assetId, {
-		kind: "indoor-env-cell",
-		sourceAssetKind: "env-cell",
-		residencyKind: "indoor-env-cell",
-		provenance: {
-			source: "repo-local-hba",
-			sourceAssetKind: "env-cell",
-			errorCode: null,
-			detail: "test",
-		},
-		debugPresentation: {
-			primitive: "indoor-env-cell-metadata",
-			paletteKey: assetId,
-		},
-		envCellId,
-		environmentId: 0x0d000001,
-		cellStructureId: 1,
-		localPlacement,
-		visibleCellIds: [],
-		landblockEnvCellIds: [],
-		seenOutside: false,
-		surfaceIds: [],
-		portalCount: 0,
-		portals: [],
-		staticObjectCount: staticSourceAssetIds.length,
-		staticObjects: staticSourceAssetIds.map((sourceAssetId, index) => ({
-			instanceId: `${assetId}/static/${index}`,
-			owningEnvCellId: envCellId,
-			sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
-			sourceAssetId,
-			sourceIndex: index,
-			localPlacement: createPlacement({ x: 2 + index, y: 4, z: 6 }),
-		})),
-	});
-}
-
 function createPreparedLandblockPackAsset(
 	landblockId: number,
 	extraStaticMeshes: PreparedLandblockStaticMesh[] = [],
+	includeDefaultStatic = true,
 ): PreparedAssetRecord {
+	const defaultStaticInstance = {
+		instanceId: "pack-static-0",
+		kind: "scenery" as const,
+		owningLandblockId: landblockId,
+		owningEnvCellId: null,
+		sourceDid: 0x02000001,
+		sourceAssetId: "setup-model/02000001",
+		sourceIndex: 0,
+		localPlacement: createPlacement({ x: 33, y: 44, z: 5 }),
+		sourceScale: UNIT_SCALE,
+	};
+	const defaultStaticMesh: PreparedLandblockStaticMesh = {
+		...defaultStaticInstance,
+		partIndex: 2,
+		gfxObjId: 0x01000001,
+		gfxObjAssetId: "gfx-obj/01000001",
+		partPlacements: [createPlacement({ x: 3, y: 4, z: 5 })],
+		partScale: { x: 2, y: 1, z: 1 },
+		sourceBounds: null,
+		instanceBounds: null,
+	};
 	const payload: PreparedLandblockPackPayload = {
 		kind: "landblock-pack",
 		sourceAssetKind: "landblock-pack",
@@ -620,38 +377,22 @@ function createPreparedLandblockPackAsset(
 		prepared: {
 			terrainMesh: null,
 			outdoorStaticInstances: [
-				{
-					instanceId: "pack-static-0",
-					kind: "scenery",
-					owningLandblockId: landblockId,
-					owningEnvCellId: null,
-					sourceDid: 0x02000001,
-					sourceAssetId: "setup-model/02000001",
-					sourceIndex: 0,
-					localPlacement: createPlacement({ x: 33, y: 44, z: 5 }),
-					sourceScale: UNIT_SCALE,
-				},
+				...(includeDefaultStatic ? [defaultStaticInstance] : []),
+				...extraStaticMeshes.map((mesh) => ({
+					instanceId: mesh.instanceId,
+					kind: mesh.kind,
+					owningLandblockId: mesh.owningLandblockId,
+					owningEnvCellId: mesh.owningEnvCellId,
+					sourceDid: mesh.sourceDid,
+					sourceAssetId: mesh.sourceAssetId,
+					sourceIndex: mesh.sourceIndex,
+					localPlacement: mesh.localPlacement,
+					sourceScale: mesh.sourceScale,
+				})),
 			],
 			interiorCells: [],
 			staticMeshes: [
-				{
-					instanceId: "pack-static-0",
-					kind: "scenery",
-					owningLandblockId: landblockId,
-					owningEnvCellId: null,
-					sourceDid: 0x02000001,
-					sourceAssetId: "setup-model/02000001",
-					sourceIndex: 0,
-					localPlacement: createPlacement({ x: 33, y: 44, z: 5 }),
-					sourceScale: UNIT_SCALE,
-					partIndex: 2,
-					gfxObjId: 0x01000001,
-					gfxObjAssetId: "gfx-obj/01000001",
-					partPlacements: [createPlacement({ x: 3, y: 4, z: 5 })],
-					partScale: { x: 2, y: 1, z: 1 },
-					sourceBounds: null,
-					instanceBounds: null,
-				},
+				...(includeDefaultStatic ? [defaultStaticMesh] : []),
 				...extraStaticMeshes,
 			],
 			spatialItems: [],
@@ -684,17 +425,19 @@ function createPreparedLandblockStaticMesh(options: {
 	instanceId: string;
 	sourceAssetId: string;
 	gfxObjAssetId: string;
+	owningLandblockId?: number;
 	owningEnvCellId?: number | null;
+	localPlacement?: PlacementTransformDto;
 }): PreparedLandblockStaticMesh {
 	return {
 		instanceId: options.instanceId,
 		kind: options.kind,
-		owningLandblockId: 0x0102ffff,
+		owningLandblockId: options.owningLandblockId ?? 0x0102ffff,
 		owningEnvCellId: options.owningEnvCellId ?? null,
 		sourceDid: Number.parseInt(options.sourceAssetId.slice(-8), 16),
 		sourceAssetId: options.sourceAssetId,
 		sourceIndex: 0,
-		localPlacement: IDENTITY_PLACEMENT,
+		localPlacement: options.localPlacement ?? IDENTITY_PLACEMENT,
 		sourceScale: UNIT_SCALE,
 		partIndex: 0,
 		gfxObjId: Number.parseInt(options.gfxObjAssetId.slice(-8), 16),
@@ -704,95 +447,6 @@ function createPreparedLandblockStaticMesh(options: {
 		sourceBounds: null,
 		instanceBounds: null,
 	};
-}
-
-function createOutdoorStaticSceneDiagnostics() {
-	const emptyLayer = {
-		attempted: 0,
-		accepted: 0,
-		rejectedUnsupportedSource: 0,
-	};
-
-	return {
-		landblockInfoAvailable: true,
-		landblockInfoError: null,
-		explicit: emptyLayer,
-		buildings: emptyLayer,
-		generated: {
-			...emptyLayer,
-			skippedWeenieObj: 0,
-			rejectedFrequency: 0,
-			rejectedBounds: 0,
-			rejectedBuildingOccupancy: 0,
-			rejectedObjectBounds: 0,
-			objectBoundsUnavailable: 0,
-			rejectedRoad: 0,
-			rejectedSlope: 0,
-			rejectedOverlap: 0,
-		},
-	};
-}
-
-function createPreparedSetupModelAsset(
-	placementSets: PreparedSetupModelPayload["placementSets"] = [
-		{
-			key: 0,
-			localPlacements: [
-				createPlacement({ x: 1, y: 0, z: 0 }),
-				createPlacement({ x: 0, y: 2, z: 0 }),
-			],
-			hookCount: 0,
-		},
-	],
-): PreparedAssetRecord {
-	return createPreparedAsset("setup-model/02000001", {
-		kind: "setup-model",
-		sourceAssetKind: "setup-model",
-		residencyKind: "unknown",
-		setupModelId: 0x02000001,
-		flags: null,
-		parts: [
-			{
-				partIndex: 0,
-				gfxObjId: 0x01000001,
-				gfxObjAssetId: "gfx-obj/01000001",
-				parentIndex: null,
-				scale: UNIT_SCALE,
-			},
-			{
-				partIndex: 1,
-				gfxObjId: 0x01000002,
-				gfxObjAssetId: "gfx-obj/01000002",
-				parentIndex: 0,
-				scale: { x: 2, y: 1, z: 1 },
-			},
-		],
-		holdingLocations: [],
-		connectionPoints: [],
-		placementSets,
-		collisionWitness: {
-			cylSphereCount: 0,
-			sphereCount: 0,
-		},
-		height: null,
-		radius: null,
-		stepUp: null,
-		stepDown: null,
-		sortingSphere: null,
-		selectionSphere: null,
-		lights: [],
-		defaultAnimation: null,
-		defaultScript: null,
-		defaultMotionTable: null,
-		defaultSoundTable: null,
-		defaultScriptTable: null,
-		provenance: {
-			source: "repo-local-hba",
-			sourceAssetKind: "setup-model",
-			errorCode: null,
-			detail: "test",
-		},
-	});
 }
 
 function createPreparedGfxObjAsset(

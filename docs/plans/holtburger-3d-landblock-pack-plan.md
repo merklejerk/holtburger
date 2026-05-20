@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 7 implemented. Later cleanup remains planning.
+Status: Phase 8 cleanup slice implemented. Remaining cleanup and open questions are tracked below.
 
 ## Context
 
@@ -1101,11 +1101,13 @@ Exit criteria:
 
 ### Phase 8: Cleanup Legacy Smells And Migration Scaffolding
 
+Status: Phase 8 cleanup slice implemented.
+
 This is the running cleanup punch list. Add to it whenever a phase leaves behind a temporary adapter, legacy naming mismatch, duplicated helper, or migration-only abstraction.
 
 Initial cleanup targets:
 
-- Remove normal-path use of `terrain/*`, `outdoor-static-scene/*`, `indoor-env-cell/*`, and `environment/*` where `landblock-pack/*` has replaced them.
+- Remove normal-path use of `terrain/*`, `outdoor-static-scene/*`, `indoor-env-cell/*`, and `environment/*` where `landblock-pack/*` has replaced them. Phase 8 removed the normal static-renderable scene read-through from `outdoor-static-scene/*` and `indoor-env-cell/*`; remaining lower-level routes should stay explicit debug/source paths.
 - Rename remaining "outdoor" helper names that now mean generic landblock behavior, such as `normalizeOutdoorLandblockId` or `formatOutdoorStaticSceneAssetId`, where they survive beyond debug/source routes.
 - Remove env-cell-seed closure helpers once `LandblockInfo.firstEnvCellId` and `numEnvCells` are the normal source of env-cell inventory.
 - Remove `landblockEnvCellIds` from normal prepared env-cell payloads after pack-backed closure is consumed everywhere.
@@ -1113,10 +1115,10 @@ Initial cleanup targets:
 - Collapse duplicated Rust/TypeScript landblock id and env-cell enumeration helpers into one canonical helper per side.
 - Revisit `AssetResidencyKind` naming once `landblock` is the primary scene residency and `outdoor-landblock`/`indoor-env-cell` are no longer normal scene roots.
 - Remove obsolete worker geometry preparation paths after Rust-prepared terrain, environment, and gfx geometry are trusted.
-- Remove any remaining stale tests that encode legacy request sequencing instead of pack-backed behavior. Phase 7 updated the normal request-planning and scene-summary tests, but legacy source/debug tests still need clearer names.
-- Rename `createTerrainCoverageRequest` and `createTerrainCoverageRequests`; after Phase 6 they return landblock-pack requests, so the names are now migration leftovers.
-- Rename `deriveOutdoorInteriorSeedEnvCellIds`; after Phase 7 it reads pack interior inventory only, so "seed" and "outdoor interior" are now migration-era names.
-- Remove remaining compatibility reads from prepared `outdoor-static-scene/*` and `indoor-env-cell/*` inside normal static renderable scene derivation after legacy routes have isolated debug/source views. Phase 7 removed these reads from request planning.
+- Remove any remaining stale tests that encode legacy request sequencing instead of pack-backed behavior. Phase 8 removed static-renderable tests that still proved legacy setup/env-cell walking as normal scene behavior; legacy source/debug tests still need clearer names.
+- Rename `createTerrainCoverageRequest` and `createTerrainCoverageRequests`; after Phase 6 they return landblock-pack requests, so the names are now migration leftovers. Completed in Phase 8 as `createOutdoorLandblockPackCoverageRequest` and `createOutdoorLandblockPackCoverageRequests`.
+- Rename `deriveOutdoorInteriorSeedEnvCellIds`; after Phase 7 it reads pack interior inventory only, so "seed" and "outdoor interior" are now migration-era names. Completed in Phase 8 as `derivePackInteriorEnvCellIdsForLandblocks`.
+- Remove remaining compatibility reads from prepared `outdoor-static-scene/*` and `indoor-env-cell/*` inside normal static renderable scene derivation after legacy routes have isolated debug/source views. Phase 8 completed this for static renderable scene derivation.
 - Align `PreparedLandblockPackPayload.sourceFacts` with the DTO schema for `renderables`, or deliberately remove the unused DTO field before the contract hardens further.
 - Revisit debug panel labels so old asset-family names are presented as source/debug routes, not primary scene-loading concepts.
 - Remove duplicated env-cell serialization paths after pack-backed interiors replace normal `indoor-env-cell/*` loading.
@@ -1136,7 +1138,7 @@ Initial cleanup targets:
 - Add direct scene-model tests for pack-backed terrain and structured-interior read-through before Phase 6 makes packs the normal request path.
 - Tighten contracts and interfaces after each migration slice so fields that are required in practice are not left optional/nullish by DTO inertia. Audit `null`, `undefined`, optional properties, `unknown[]`, and broad unions in pack/prepared/render scene interfaces, and split types when only some variants genuinely allow absence.
 - Rename `prepared.outdoorStaticInstances` to a generic static-instance field now that Phase 4 includes indoor statics in the same prepared list.
-- Remove `StaticRenderableSourceInstance.preparedByPack` once scene derivation is pack-first by request planning rather than a read-through adapter layered over legacy source collection.
+- Remove `StaticRenderableSourceInstance.preparedByPack` once scene derivation is pack-first by request planning rather than a read-through adapter layered over legacy source collection. Completed in Phase 8 with pack-only static scene derivation.
 - Move or share prepared static DTO serialization if the Tauri adapter continues accumulating landblock pack serializer functions.
 - Add focused tests for pack-backed static renderable consumption in indoor and outdoor-linked-interior scenes beyond the initial outdoor duplicate-suppression coverage.
 - Add portal polygon spatial item derivation once prepared portal geometry has trustworthy bounds and target metadata.
@@ -1145,6 +1147,32 @@ Initial cleanup targets:
 - Audit `landblock-render-local` naming against any future non-render consumers. If physics/collision wants raw AC source-space bounds, split spatial products instead of overloading this coordinate space.
 - Revisit `PreparedSpatialItem.metadata.kind = "none"` during contract tightening. It is explicit and honest for the current mixed list, but a discriminated spatial-item union may become cleaner once more item kinds gain item-specific metadata.
 - Remove or rename legacy whole-terrain spatial item assumptions in frontend tests and helpers once pack-backed terrain replaces `terrain/*` as the normal scene source.
+
+Implemented in this slice:
+
+- Renamed the public outdoor coverage helpers from terrain-oriented names to landblock-pack names.
+- Renamed the pack interior env-cell inventory helper to describe its actual source and scope.
+- Removed normal static-renderable scene derivation from prepared `outdoor-static-scene/*` and `indoor-env-cell/*`; scene statics now come from pack-prepared static instances and static meshes.
+- Removed the `StaticRenderableSourceInstance.preparedByPack` migration flag because there is no longer a mixed legacy/pack static source path in normal scene derivation.
+- Updated static-renderable tests to assert pack-backed static parts, pack-backed indoor static selection, chunk-local placement, missing gfx dependency reporting, and render-domain grouping instead of legacy setup/env-cell walking.
+
+Decisions:
+
+- Legacy static source routes remain valid asset/debug surfaces, but they are no longer a normal renderer input for static renderable scene derivation.
+- Missing setup-model/source asset reporting is no longer a static scene responsibility on the pack-backed path. Rust prepares static mesh parts and the frontend only reports missing shared gfx payloads needed to render those parts.
+- The helper rename intentionally kept the `OutdoorLandblockPack` prefix for coverage expansion because the function still uses outdoor radius interest sets. Generic landblock pack loading for dungeon/browser focus is already handled by scene coverage and focused request code.
+
+Course corrections:
+
+- Phase 8 did not remove every lower-level route at once. The safer boundary is to keep source/debug routes loadable while removing them from the normal scene model path one renderer subsystem at a time.
+- Some frontend naming remains outdoor-oriented where the code is genuinely outdoor-grid math or explicit source/debug route formatting. Those should be renamed only when a generic landblock concept exists, not mechanically.
+
+Validation:
+
+- `npm run test:ts -- static-renderables asset-channel`
+- `npm run test:ts`
+- `npm run check`
+- `git diff --check`
 
 Exit criteria:
 

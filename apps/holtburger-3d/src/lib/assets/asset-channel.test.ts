@@ -5,8 +5,8 @@ import {
 	createSceneCoverageRequests,
 	createStaticRenderableAssetRequests,
 	deriveTerrainFocusLandblockId,
-	createTerrainCoverageRequest,
-	createTerrainCoverageRequests,
+	createOutdoorLandblockPackCoverageRequest,
+	createOutdoorLandblockPackCoverageRequests,
 	createFocusedAssetRequest,
 } from "./scene-asset-request-planner";
 import {
@@ -159,7 +159,7 @@ describe("asset channel controller", () => {
 	});
 
 	it("requests a neighboring landblock once the focus terrain is already cached", () => {
-		const request = createTerrainCoverageRequest(
+		const request = createOutdoorLandblockPackCoverageRequest(
 			createRuntimeBatch(),
 			null,
 			"streaming",
@@ -175,7 +175,7 @@ describe("asset channel controller", () => {
 	});
 
 	it("returns every missing landblock in the coverage ring immediately when nothing is in flight", () => {
-		const requests = createTerrainCoverageRequests(
+		const requests = createOutdoorLandblockPackCoverageRequests(
 			createRuntimeBatch(),
 			null,
 			"streaming",
@@ -194,7 +194,7 @@ describe("asset channel controller", () => {
 	});
 
 	it("expands streaming coverage from the requested browser landblock radius", () => {
-		const requests = createTerrainCoverageRequests(
+		const requests = createOutdoorLandblockPackCoverageRequests(
 			{
 				...createRuntimeBatch(),
 				residency: {
@@ -461,7 +461,7 @@ describe("asset channel controller", () => {
 	});
 
 	it("excludes already in-flight terrain assets from the immediate coverage enqueue set", () => {
-		const requests = createTerrainCoverageRequests(
+		const requests = createOutdoorLandblockPackCoverageRequests(
 			createRuntimeBatch(),
 			null,
 			"streaming",

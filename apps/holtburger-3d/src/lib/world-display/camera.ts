@@ -62,7 +62,7 @@ export interface BrowserFreeCameraConfig {
 	wheelDeltaClamp: number;
 	wheelLocalUpUnitsPerDelta: number;
 	panScalePerPixelAtFocusDistance: number;
-	fitHorizontalDistanceScale: number;
+	fitTargetScreenWidthOccupancy: number;
 	fitVerticalDistanceScale: number;
 	fitFrameMinDistanceScale: number;
 	fitFrameMaxDistanceScale: number;
@@ -75,7 +75,7 @@ export interface BrowserFreeCameraConfig {
 
 const DEFAULT_UP: Vec3Dto = { x: 0, y: 1, z: 0 };
 const DEFAULT_CAMERA_YAW_RADIANS = Math.PI * 0.74;
-const DEFAULT_CAMERA_PITCH_RADIANS = -0.72;
+const DEFAULT_CAMERA_PITCH_RADIANS = -Math.PI / 4;
 
 export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	defaultPosition: { x: 180, y: 220, z: 180 },
@@ -99,8 +99,8 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	wheelDeltaClamp: 900,
 	wheelLocalUpUnitsPerDelta: -0.025,
 	panScalePerPixelAtFocusDistance: 0.0005,
-	fitHorizontalDistanceScale: 1.65,
-	fitVerticalDistanceScale: 3.4,
+	fitTargetScreenWidthOccupancy: 1.5,
+	fitVerticalDistanceScale: 1.15,
 	fitFrameMinDistanceScale: 0.12,
 	fitFrameMaxDistanceScale: 8,
 	fitMinDistanceScale: 0.04,
@@ -131,7 +131,7 @@ export function fitSceneCameraFrameToBounds(
 	aspect: number,
 	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
 ): SceneCameraFrame {
-	const focusDistance = calculateSceneFocusDistance(bounds, config);
+	const focusDistance = calculateSceneFocusDistance(bounds, aspect, config);
 	const axes = getCameraAxes({
 		yawRadians: config.defaultYawRadians,
 		pitchRadians: config.defaultPitchRadians,
@@ -172,7 +172,7 @@ export function fitBrowserFreeCameraToBounds(
 	state: BrowserFreeCameraState,
 	bounds: SceneBoundsFrame,
 	fitKey: string,
-	options: { force: boolean },
+	options: { force: boolean; aspect?: number },
 	config = DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
 ): BrowserFreeCameraState {
 	if (!options.force && state.hasManualControl) {
@@ -180,7 +180,11 @@ export function fitBrowserFreeCameraToBounds(
 	}
 
 	const horizontalSpan = calculateSceneHorizontalSpan(bounds);
-	const focusDistance = calculateSceneFocusDistance(bounds, config);
+	const focusDistance = calculateSceneFocusDistance(
+		bounds,
+		options.aspect ?? 1,
+		config,
+	);
 	const nextState = {
 		...state,
 		focusDistance,
@@ -364,14 +368,22 @@ function calculateSceneHorizontalSpan(bounds: SceneBoundsFrame): number {
 
 function calculateSceneFocusDistance(
 	bounds: SceneBoundsFrame,
+	aspect: number,
 	config: BrowserFreeCameraConfig,
 ): number {
 	const horizontalSpan = calculateSceneHorizontalSpan(bounds);
 	const verticalSpan = Math.max(bounds.size.y, config.fitMinimumVerticalSpan);
+	const halfVerticalFovRadians = (config.fovDegrees * Math.PI) / 360;
+	const horizontalDistance =
+		horizontalSpan /
+		(2 *
+			Math.tan(halfVerticalFovRadians) *
+			Math.max(aspect, 0.1) *
+			config.fitTargetScreenWidthOccupancy);
 
 	return clamp(
 		Math.max(
-			horizontalSpan * config.fitHorizontalDistanceScale,
+			horizontalDistance,
 			verticalSpan * config.fitVerticalDistanceScale,
 		),
 		Math.max(

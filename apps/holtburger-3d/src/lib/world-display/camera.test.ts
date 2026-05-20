@@ -55,12 +55,21 @@ describe("world display camera helpers", () => {
 				minimumSpan: 180,
 			},
 			"scene-a",
-			{ force: false },
+			{ force: false, aspect: 16 / 9 },
 		);
 		const frame = buildBrowserFreeCameraFrame(state);
+		const expectedFitDistance =
+			576 /
+			(2 *
+				Math.tan(
+					(DEFAULT_BROWSER_FREE_CAMERA_CONFIG.fovDegrees * Math.PI) / 360,
+				) *
+				(16 / 9) *
+				DEFAULT_BROWSER_FREE_CAMERA_CONFIG.fitTargetScreenWidthOccupancy);
 
 		expect(state.hasManualControl).toBe(false);
 		expect(state.moveSpeed).toBe(45);
+		expect(state.focusDistance).toBeCloseTo(expectedFitDistance);
 		expect(frame.target).toEqual({ x: 96, y: 18, z: -96 });
 		expect(frame.position.x).not.toBeCloseTo(frame.target.x);
 		expect(frame.position.y).toBeGreaterThan(frame.target.y);
@@ -149,11 +158,10 @@ describe("world display camera helpers", () => {
 		);
 
 		expect(refit.hasManualControl).toBe(false);
-		expect(buildBrowserFreeCameraFrame(refit).target).toEqual({
-			x: 32,
-			y: 12,
-			z: -48,
-		});
+		const frame = buildBrowserFreeCameraFrame(refit);
+		expect(frame.target.x).toBeCloseTo(32);
+		expect(frame.target.y).toBeCloseTo(12);
+		expect(frame.target.z).toBeCloseTo(-48);
 	});
 
 	it("moves the browser free camera along its local forward axis", () => {

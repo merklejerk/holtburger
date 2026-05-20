@@ -34,12 +34,16 @@
 		sceneDetailSections,
 		debugSummaryRows,
 		debugDetailSections,
+		canResetCamera,
+		onResetCamera,
 	}: {
 		sceneStatusText: string;
 		sceneSummaryRows: BrowserPanelRow[];
 		sceneDetailSections: BrowserPanelSection[];
 		debugSummaryRows: BrowserPanelRow[];
 		debugDetailSections: BrowserPanelSection[];
+		canResetCamera: boolean;
+		onResetCamera: () => void;
 	} = $props();
 
 	let activeTab = $state<BrowserPanelTabId>("navigate");
@@ -297,6 +301,13 @@
 						disabled={!$frontendState.host.boundarySnapshot}
 					>
 						Use current
+					</button>
+					<button
+						type="button"
+						onclick={onResetCamera}
+						disabled={!canResetCamera}
+					>
+						Reset camera
 					</button>
 				</div>
 			</form>

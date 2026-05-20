@@ -6,6 +6,7 @@ import {
 	createBrowserFreeCameraState,
 	DEFAULT_BROWSER_FREE_CAMERA_CONFIG,
 	fitBrowserFreeCameraToBounds,
+	getBrowserFreeCameraKeyboardMoveSpeedMultiplier,
 	getBrowserFreeCameraSpeedMultiplier,
 	moveBrowserFreeCameraLocal,
 	moveBrowserFreeCameraLocalUpByWheel,
@@ -42,8 +43,12 @@ function createTestCameraConfig(): typeof DEFAULT_BROWSER_FREE_CAMERA_CONFIG {
 
 describe("world display camera helpers", () => {
 	it("fits a browser free camera to scene bounds without claiming manual control", () => {
+		const initialState = createBrowserFreeCameraState({
+			...createTestCameraConfig(),
+			defaultMoveSpeed: 45,
+		});
 		const state = fitBrowserFreeCameraToBounds(
-			createBrowserFreeCameraState(),
+			initialState,
 			{
 				center: { x: 96, y: 18, z: -96 },
 				size: { x: 576, y: 72, z: 576 },
@@ -55,6 +60,7 @@ describe("world display camera helpers", () => {
 		const frame = buildBrowserFreeCameraFrame(state);
 
 		expect(state.hasManualControl).toBe(false);
+		expect(state.moveSpeed).toBe(45);
 		expect(frame.target).toEqual({ x: 96, y: 18, z: -96 });
 		expect(frame.position.x).not.toBeCloseTo(frame.target.x);
 		expect(frame.position.y).toBeGreaterThan(frame.target.y);
@@ -249,6 +255,22 @@ describe("world display camera helpers", () => {
 			}),
 		).toBe(0.25);
 		expect(getBrowserFreeCameraSpeedMultiplier(false)).toBe(1);
+	});
+
+	it("ramps keyboard movement from the configured initial speed to full speed", () => {
+		const config = {
+			...createTestCameraConfig(),
+			keyboardMoveInitialSpeedMultiplier: 0.25,
+			keyboardMoveAccelerationSeconds: 4,
+		};
+
+		expect(getBrowserFreeCameraKeyboardMoveSpeedMultiplier(0, config)).toBe(
+			0.25,
+		);
+		expect(getBrowserFreeCameraKeyboardMoveSpeedMultiplier(2, config)).toBe(
+			0.625,
+		);
+		expect(getBrowserFreeCameraKeyboardMoveSpeedMultiplier(8, config)).toBe(1);
 	});
 
 	it("applies configured camera projection properties to browser frames", () => {

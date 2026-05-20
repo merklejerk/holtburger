@@ -20,6 +20,7 @@
 		buildBrowserFreeCameraFrame,
 		createBrowserFreeCameraState,
 		fitBrowserFreeCameraToBounds,
+		getBrowserFreeCameraKeyboardMoveSpeedMultiplier,
 		getBrowserFreeCameraSpeedMultiplier,
 		moveBrowserFreeCameraLocalUpByWheel,
 		moveBrowserFreeCameraLocal,
@@ -186,6 +187,7 @@
 	let cameraHintTimer: ReturnType<typeof setTimeout> | null = null;
 	let cameraMovementFrameId: number | null = null;
 	let lastCameraMovementFrameAt: number | null = null;
+	let keyboardLinearMovementStartedAt: number | null = null;
 	let isCameraSlowModifierActive = false;
 	const pressedCameraControlKeys = new Set<string>();
 
@@ -942,10 +944,20 @@
 			return;
 		}
 
-		if (event.key.toLowerCase() !== "f" || !renderMetrics?.bounds) {
+		if (event.key.toLowerCase() !== "f") {
 			return;
 		}
 
+		resetBrowserCamera();
+		event.preventDefault();
+	}
+
+	function resetBrowserCamera(): void {
+		if (!renderMetrics?.bounds) {
+			return;
+		}
+
+		stopCameraMovement();
 		browserCameraState = fitBrowserFreeCameraToBounds(
 			browserCameraState,
 			renderMetrics.bounds,
@@ -954,7 +966,6 @@
 		);
 		keyboardInputEventCount += 1;
 		applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, true);
-		event.preventDefault();
 	}
 
 	function handleBrowserKeyUpCapture(event: KeyboardEvent): void {
@@ -1265,6 +1276,7 @@
 			cameraMovementFrameId = null;
 		}
 		lastCameraMovementFrameAt = null;
+		keyboardLinearMovementStartedAt = null;
 		isCameraSlowModifierActive = false;
 		pressedCameraControlKeys.clear();
 	}
@@ -1294,12 +1306,19 @@
 			isCameraSlowModifierActive,
 		);
 		if (movement.right !== 0 || movement.up !== 0 || movement.forward !== 0) {
+			keyboardLinearMovementStartedAt ??= frameAt;
+			const keyboardMoveSpeedMultiplier =
+				getBrowserFreeCameraKeyboardMoveSpeedMultiplier(
+					(frameAt - keyboardLinearMovementStartedAt) / 1000,
+				);
 			browserCameraState = moveBrowserFreeCameraLocal(
 				browserCameraState,
 				movement,
 				deltaSeconds,
-				speedMultiplier,
+				speedMultiplier * keyboardMoveSpeedMultiplier,
 			);
+		} else {
+			keyboardLinearMovementStartedAt = null;
 		}
 		if (yawDirection !== 0) {
 			browserCameraState = rotateBrowserFreeCameraAroundLocalUp(
@@ -1320,9 +1339,13 @@
 	} {
 		return {
 			right:
-				(pressedCameraControlKeys.has("d") ? 1 : 0) -
-				(pressedCameraControlKeys.has("a") ? 1 : 0),
-			up: pressedCameraControlKeys.has("space") ? 1 : 0,
+				(pressedCameraControlKeys.has("c") ? 1 : 0) -
+				(pressedCameraControlKeys.has("z") ? 1 : 0),
+			up:
+				(pressedCameraControlKeys.has("space") ||
+				pressedCameraControlKeys.has("pageup")
+					? 1
+					: 0) - (pressedCameraControlKeys.has("pagedown") ? 1 : 0),
 			forward:
 				(pressedCameraControlKeys.has("w") ? 1 : 0) -
 				(pressedCameraControlKeys.has("s") ? 1 : 0),
@@ -1331,8 +1354,8 @@
 
 	function deriveCameraYawDirection(): -1 | 0 | 1 {
 		const direction =
-			(pressedCameraControlKeys.has("e") ? 1 : 0) -
-			(pressedCameraControlKeys.has("q") ? 1 : 0);
+			(pressedCameraControlKeys.has("d") ? 1 : 0) -
+			(pressedCameraControlKeys.has("a") ? 1 : 0);
 
 		return direction === 0 ? 0 : direction > 0 ? 1 : -1;
 	}
@@ -1344,8 +1367,10 @@
 			normalizedKey === "a" ||
 			normalizedKey === "s" ||
 			normalizedKey === "d" ||
-			normalizedKey === "q" ||
-			normalizedKey === "e"
+			normalizedKey === "z" ||
+			normalizedKey === "c" ||
+			normalizedKey === "pageup" ||
+			normalizedKey === "pagedown"
 		) {
 			return normalizedKey;
 		}
@@ -1779,6 +1804,8 @@
 			sceneDetailSections={browserPanelSceneDetailSections}
 			debugSummaryRows={browserPanelDebugRows}
 			debugDetailSections={browserPanelDebugDetailSections}
+			canResetCamera={Boolean(renderMetrics?.bounds)}
+			onResetCamera={resetBrowserCamera}
 		/>
 	</div>
 

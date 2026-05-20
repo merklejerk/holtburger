@@ -63,6 +63,23 @@ export interface WorldDebugOverlayModel {
 	};
 }
 
+export function createEmptyWorldDebugOverlayModel(): WorldDebugOverlayModel {
+	return {
+		showPortalPolygons: false,
+		showCellIndicators: false,
+		highlightPortalTargets: false,
+		cells: [],
+		portals: [],
+		diagnostics: {
+			cellCount: 0,
+			portalCount: 0,
+			missingPortalPolygonCount: 0,
+			knownTargetCount: 0,
+			loadedTargetCount: 0,
+		},
+	};
+}
+
 export function deriveWorldDebugOverlayModel(
 	structuredInteriorScene: StructuredInteriorSceneModel,
 	options: WorldDebugOverlayOptions,

@@ -54,9 +54,9 @@ export interface WorldRenderGraphSummary {
 }
 
 export const MIN_TRANSITION_PORTAL_MAX_DEPTH = 0;
-export const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 3;
+export const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
 export const MAX_TRANSITION_PORTAL_MAX_DEPTH = 8;
-export const DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO = 0.0001;
+export const DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO = 0.0002;
 
 export const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
 	minPortalScreenAreaRatio: DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO,

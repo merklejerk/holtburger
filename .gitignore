@@ -32,3 +32,5 @@ dist-manifest.json
 .vscode/
 
 /acclient-eor-source
+
+.antigravitycli/

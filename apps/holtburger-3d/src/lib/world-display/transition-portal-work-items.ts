@@ -74,6 +74,21 @@ export interface TransitionPortalCandidateInput {
 	source?: TransitionPortalSource;
 }
 
+export function createEmptyTransitionPortalCandidateModel(): TransitionPortalCandidateModel {
+	return {
+		candidates: [],
+		diagnostics: {
+			topologyPortalCount: 0,
+			linkedTopologyPortalCount: 0,
+			apertureCandidateCount: 0,
+			workItemCandidateCount: 0,
+			skippedMissingApertureCount: 0,
+			skippedMissingPolygonCount: 0,
+			truncatedInteriorGroupCount: 0,
+		},
+	};
+}
+
 export function deriveTransitionPortalCandidates({
 	assetState,
 	structuredInteriorScene,

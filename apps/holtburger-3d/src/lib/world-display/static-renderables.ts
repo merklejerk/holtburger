@@ -119,7 +119,7 @@ export function deriveStaticRenderableSceneModel(
 	outdoorSelection: OutdoorStaticRenderableSelection | null = null,
 ): StaticRenderableSceneModel {
 	if (!runtimeBatch) {
-		return emptyStaticRenderableSceneModel();
+		return createEmptyStaticRenderableSceneModel();
 	}
 
 	if (
@@ -328,7 +328,7 @@ function isPreparedSetupModelAsset(
 	return asset?.payload.kind === "setup-model";
 }
 
-function emptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
+export function createEmptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 	return {
 		focusLandblockId: null,
 		activeLandblockIds: [],

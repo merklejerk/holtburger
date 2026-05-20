@@ -1459,7 +1459,7 @@ describe("asset channel controller", () => {
 		]);
 	});
 
-	it("keeps renderable environment portal polygons in render geometry", () => {
+	it("keeps environment portal metadata while excluding drawing BSP portal apertures from render geometry", () => {
 		const environment = prepareAssetPayload(
 			{
 				requestId: "environment-with-portal",
@@ -1550,7 +1550,30 @@ describe("asset channel controller", () => {
 								hasBsp: true,
 								rootKind: "leaf",
 							},
-							drawingBsp: null,
+							drawingBsp: {
+								kind: "port",
+								plane: {
+									normal: { x: 0, y: 1, z: 0 },
+									d: 0,
+								},
+								pos: {
+									kind: "leaf",
+									index: 0,
+									solid: 0,
+									sphere: null,
+									polyIds: [],
+								},
+								neg: {
+									kind: "leaf",
+									index: 1,
+									solid: 0,
+									sphere: null,
+									polyIds: [],
+								},
+								sphere: null,
+								polyIds: [7],
+								portalPolys: [{ portalIndex: 0, polyId: 8 }],
+							},
 						},
 					],
 					provenance: {
@@ -1570,14 +1593,13 @@ describe("asset channel controller", () => {
 		const cellStructure = environment.payload.cellStructures[0];
 		expect(cellStructure?.portalPolygonIds).toEqual([8]);
 		expect(cellStructure?.renderGeometry).toMatchObject({
-			vertexCount: 6,
-			triangleCount: 2,
+			vertexCount: 3,
+			triangleCount: 1,
 			skippedPolygonCount: 0,
-			surfaceIds: [0x08000002, 0x08000003],
+			surfaceIds: [0x08000002],
 		});
 		expect(cellStructure?.renderGeometry.triangles).toEqual([
 			{ polygonId: 7, surfaceId: 0x08000002, firstVertex: 0 },
-			{ polygonId: 8, surfaceId: 0x08000003, firstVertex: 3 },
 		]);
 	});
 
@@ -1905,6 +1927,133 @@ describe("asset channel controller", () => {
 			polygonCount: 2,
 			hasBsp: true,
 		});
+	});
+
+	it("excludes GfxObj drawing BSP portal apertures from render geometry", () => {
+		const gfxObj = prepareAssetPayload(
+			{
+				requestId: "gfx-obj-with-portal-aperture",
+				assetId: "gfx-obj/01000003",
+				priority: "streaming",
+			},
+			{
+				requestId: "gfx-obj-with-portal-aperture",
+				assetId: "gfx-obj/01000003",
+				payloadKind: "json",
+				payload: {
+					kind: "gfx-obj",
+					residencyKind: "unknown",
+					sourceAssetKind: "gfx-obj",
+					gfxObjId: 0x01000003,
+					flags: 3,
+					surfaceIds: [0x08000001, 0x08000002],
+					vertexArray: {
+						vertexType: 1,
+						vertexCount: 4,
+						vertices: [
+							{
+								id: 0,
+								origin: { x: 0, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 0 }],
+							},
+							{
+								id: 1,
+								origin: { x: 2, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 1, v: 0 }],
+							},
+							{
+								id: 2,
+								origin: { x: 2, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 1, v: 1 }],
+							},
+							{
+								id: 3,
+								origin: { x: 0, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 1 }],
+							},
+						],
+					},
+					drawingPolygons: [
+						{
+							id: 1,
+							numPts: 3,
+							stippling: 0x08,
+							sidesType: 2,
+							posSurface: 0x08000001,
+							negSurface: 0,
+							vertexIds: [0, 1, 2],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [],
+						},
+						{
+							id: 2,
+							numPts: 3,
+							stippling: 0x08,
+							sidesType: 2,
+							posSurface: 0x08000002,
+							negSurface: 0,
+							vertexIds: [0, 2, 3],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [],
+						},
+					],
+					drawingBsp: {
+						kind: "port",
+						plane: {
+							normal: { x: 0, y: 1, z: 0 },
+							d: 0,
+						},
+						pos: {
+							kind: "leaf",
+							index: 0,
+							solid: 0,
+							sphere: null,
+							polyIds: [],
+						},
+						neg: {
+							kind: "leaf",
+							index: 1,
+							solid: 0,
+							sphere: null,
+							polyIds: [],
+						},
+						sphere: null,
+						polyIds: [1],
+						portalPolys: [{ portalIndex: 0, polyId: 2 }],
+					},
+					physicsWitness: {
+						polygonCount: 0,
+						hasBsp: false,
+					},
+					sortCenter: null,
+					didDegrade: null,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "gfx-obj",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		expect(gfxObj.payload.kind).toBe("gfx-obj");
+		if (gfxObj.payload.kind !== "gfx-obj") {
+			throw new Error("expected gfx-obj payload");
+		}
+		expect(gfxObj.payload.renderGeometry).toMatchObject({
+			vertexCount: 3,
+			triangleCount: 1,
+			skippedPolygonCount: 0,
+			surfaceIds: [0x08000001],
+		});
+		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 0 },
+		]);
 	});
 
 	it("prepares counter-clockwise culled gfx-obj polygons with reversed positive winding", () => {

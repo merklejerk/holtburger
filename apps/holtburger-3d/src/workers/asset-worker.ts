@@ -28,6 +28,7 @@ import type {
 	PreparedAssetRecord,
 	PreparedAssetProvenance,
 	PreparedAssetPayload,
+	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
 	PreparedTerrainMesh,
 	PreparedTerrainTriangle,
@@ -224,6 +225,9 @@ function prepareEnvironment(
 			sourceId: cellStructure.id,
 			vertexArray: cellStructure.vertexArray,
 			drawingPolygons: cellStructure.drawingPolygons,
+			renderPolygonIds: collectDrawingBspRenderablePolygonIds(
+				cellStructure.drawingBsp,
+			),
 		}),
 	}));
 
@@ -257,6 +261,7 @@ function prepareGfxObj(
 		sourceId: payload.gfxObjId,
 		vertexArray: payload.vertexArray,
 		drawingPolygons: payload.drawingPolygons,
+		renderPolygonIds: collectDrawingBspRenderablePolygonIds(payload.drawingBsp),
 		renderUvlessPositiveSides: true,
 		duplicateCullModeNoneBackfaces: true,
 	});
@@ -583,6 +588,7 @@ interface PolygonSetGeometrySource {
 	sourceId: number;
 	vertexArray: GfxObjPayloadDto["vertexArray"];
 	drawingPolygons: GfxObjPayloadDto["drawingPolygons"];
+	renderPolygonIds?: ReadonlySet<number>;
 	renderUvlessPositiveSides?: boolean;
 	duplicateCullModeNoneBackfaces?: boolean;
 }
@@ -623,6 +629,12 @@ function buildPolygonSetRenderGeometry(
 	let maxZ = Number.NEGATIVE_INFINITY;
 
 	for (const polygon of source.drawingPolygons) {
+		if (
+			source.renderPolygonIds !== undefined &&
+			!source.renderPolygonIds.has(polygon.id)
+		) {
+			continue;
+		}
 		if (polygon.numPts !== polygon.vertexIds.length) {
 			throw new Error(
 				`${source.sourceLabel} polygon ${polygon.id} declares ${polygon.numPts} points but provides ${polygon.vertexIds.length} vertices.`,
@@ -726,6 +738,42 @@ function buildPolygonSetRenderGeometry(
 						max: { x: maxX, y: maxY, z: maxZ },
 					},
 	};
+}
+
+function collectDrawingBspRenderablePolygonIds(
+	node: PreparedPolygonSetBspNode | null,
+): ReadonlySet<number> | undefined {
+	if (node === null) {
+		return undefined;
+	}
+
+	const polygonIds = new Set<number>();
+	collectDrawingBspNodePolygonIds(node, polygonIds);
+	return polygonIds;
+}
+
+function collectDrawingBspNodePolygonIds(
+	node: PreparedPolygonSetBspNode,
+	polygonIds: Set<number>,
+): void {
+	for (const polygonId of node.polyIds) {
+		polygonIds.add(polygonId);
+	}
+
+	if (node.kind === "port") {
+		collectDrawingBspNodePolygonIds(node.pos, polygonIds);
+		collectDrawingBspNodePolygonIds(node.neg, polygonIds);
+		return;
+	}
+
+	if (node.kind === "internal") {
+		if (node.pos !== null) {
+			collectDrawingBspNodePolygonIds(node.pos, polygonIds);
+		}
+		if (node.neg !== null) {
+			collectDrawingBspNodePolygonIds(node.neg, polygonIds);
+		}
+	}
 }
 
 function scaleNormalComponent(value: number, scale: 1 | -1): number {

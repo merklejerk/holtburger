@@ -183,14 +183,14 @@ export function deriveSceneCoverageAssetIds(
 	].sort();
 }
 
-export function createTerrainCoverageRequest(
+export function createOutdoorLandblockPackCoverageRequest(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetId: string | null,
 ): AssetLookupRequestDto | null {
-	const requests = createTerrainCoverageRequests(
+	const requests = createOutdoorLandblockPackCoverageRequests(
 		runtimeBatch,
 		browserDestination,
 		priority,
@@ -201,7 +201,7 @@ export function createTerrainCoverageRequest(
 	return requests[0] ?? null;
 }
 
-export function createTerrainCoverageRequests(
+export function createOutdoorLandblockPackCoverageRequests(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
@@ -315,7 +315,7 @@ export function createStaticRenderableAssetRequests(
 	const buildingLandblockIds = new Set(outdoorInterest.buildingLandblockIds);
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
 	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
-	const linkedIndoorEnvCellIds = deriveOutdoorInteriorSeedEnvCellIds(
+	const linkedIndoorEnvCellIds = derivePackInteriorEnvCellIdsForLandblocks(
 		preparedByAssetId,
 		envCellLandblockIds,
 	);
@@ -351,7 +351,7 @@ export function createStaticRenderableAssetRequests(
 		}));
 }
 
-export function deriveOutdoorInteriorSeedEnvCellIds(
+export function derivePackInteriorEnvCellIdsForLandblocks(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	activeLandblockIds: ReadonlySet<number>,
 ): Set<number> {

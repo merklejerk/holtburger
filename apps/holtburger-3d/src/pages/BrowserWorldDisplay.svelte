@@ -33,7 +33,7 @@
 	} from "../lib/world-display/camera";
 	import WorldDisplay from "../lib/world-display/WorldDisplay.svelte";
 	import {
-		deriveOutdoorInteriorSeedEnvCellIds,
+		derivePackInteriorEnvCellIdsForLandblocks,
 		deriveTerrainFocusLandblockId,
 	} from "../lib/assets/scene-asset-request-planner";
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
@@ -235,7 +235,7 @@
 		}
 
 		return [
-			...deriveOutdoorInteriorSeedEnvCellIds(
+			...derivePackInteriorEnvCellIdsForLandblocks(
 				assetState.preparedByAssetId,
 				new Set(outdoorSceneInterest.envCellLandblockIds),
 			),

@@ -109,6 +109,17 @@ export interface PreparedIndoorCellPortal {
 	targetEnvCellId: number;
 }
 
+export interface PreparedLandblockCellPortal {
+	portalId: string;
+	sourceIndex: number;
+	flags: number;
+	polygonId: number;
+	otherCellId: number;
+	otherPortalId: number;
+	targetEnvCellId: number | null;
+	isOutsideTransition: boolean;
+}
+
 interface PreparedOutdoorStaticLayerDiagnostics {
 	attempted: number;
 	accepted: number;
@@ -207,6 +218,14 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 			}[];
 		};
 	};
+	prepared: {
+		terrainMesh: PreparedTerrainMesh | null;
+		outdoorStaticInstances: unknown[];
+		interiorCells: PreparedLandblockInteriorCell[];
+		staticMeshes: unknown[];
+		spatialItems: unknown[];
+		staticInstanceBvh: null;
+	};
 	dependencies: {
 		cellDatIds: number[];
 		portalDatIds: number[];
@@ -227,6 +246,17 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 			detail: string;
 		}[];
 	};
+}
+
+export interface PreparedLandblockInteriorCell {
+	envCellId: number;
+	environmentId: number;
+	cellStructureId: number;
+	localPlacement: PlacementTransformDto;
+	surfaceIds: number[];
+	portals: PreparedLandblockCellPortal[];
+	staticObjectCount: number;
+	renderGeometry: PreparedPolygonSetRenderGeometry;
 }
 
 export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {

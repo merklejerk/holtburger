@@ -301,6 +301,61 @@ const landblockPackEnvironmentFactDtoSchema = z.object({
 	cellStructures: z.array(z.unknown()),
 });
 
+const preparedTerrainTriangleDtoSchema = z.object({
+	a: z.number().int().nonnegative(),
+	b: z.number().int().nonnegative(),
+	c: z.number().int().nonnegative(),
+	terrainType: z.number().int().nonnegative(),
+	averageHeight: z.number().finite(),
+});
+
+const preparedTerrainMeshDtoSchema = z.object({
+	landblockId: z.number().int().nonnegative(),
+	gridSize: z.number().int().positive(),
+	tileSize: z.number().finite().positive(),
+	vertices: z.array(vec3DtoSchema),
+	triangles: z.array(preparedTerrainTriangleDtoSchema),
+	minHeight: z.number().finite(),
+	maxHeight: z.number().finite(),
+});
+
+const preparedPolygonSetRenderTriangleDtoSchema = z.object({
+	polygonId: z.number().int().nonnegative(),
+	surfaceId: z.number().int().nullable(),
+	firstVertex: z.number().int().nonnegative(),
+});
+
+const preparedPolygonSetInvalidPolygonDtoSchema = z.object({
+	polygonId: z.number().int().nonnegative(),
+	vertexIds: z.array(z.number().int()),
+	missingVertexIds: z.array(z.number().int()),
+});
+
+const preparedPolygonSetRenderGeometryDtoSchema = z.object({
+	sourceId: z.number().int().nonnegative(),
+	vertexCount: z.number().int().nonnegative(),
+	triangleCount: z.number().int().nonnegative(),
+	positions: z.array(z.number().finite()),
+	normals: z.array(z.number().finite()),
+	uvs: z.array(z.number().finite()),
+	triangles: z.array(preparedPolygonSetRenderTriangleDtoSchema),
+	surfaceIds: z.array(z.number().int()),
+	invalidPolygons: z.array(preparedPolygonSetInvalidPolygonDtoSchema),
+	skippedPolygonCount: z.number().int().nonnegative(),
+	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }).nullable(),
+});
+
+const preparedLandblockInteriorCellDtoSchema = z.object({
+	envCellId: z.number().int().nonnegative(),
+	environmentId: z.number().int().nonnegative(),
+	cellStructureId: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	surfaceIds: z.array(z.number().int().nonnegative()),
+	portals: z.array(landblockPackEnvCellPortalDtoSchema),
+	staticObjectCount: z.number().int().nonnegative(),
+	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
+});
+
 const landblockPackSourceFactsDtoSchema = z.object({
 	cellLandblock: cellLandblockFactDtoSchema.nullable(),
 	landblockInfo: landblockInfoFactDtoSchema.nullable(),
@@ -354,9 +409,9 @@ export const landblockPackPayloadDtoSchema = z.object({
 	classification: landblockClassificationValueSchema,
 	sourceFacts: landblockPackSourceFactsDtoSchema,
 	prepared: z.object({
-		terrainMesh: z.null(),
+		terrainMesh: preparedTerrainMeshDtoSchema.nullable(),
 		outdoorStaticInstances: z.array(z.unknown()),
-		interiorCells: z.array(z.unknown()),
+		interiorCells: z.array(preparedLandblockInteriorCellDtoSchema),
 		staticMeshes: z.array(z.unknown()),
 		spatialItems: z.array(z.unknown()),
 		staticInstanceBvh: z.null(),

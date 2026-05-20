@@ -8,8 +8,11 @@ pub use character_gen::CharacterGenCatalog;
 pub use landblock_pack::{
     CellLandblockFact, EnvCellFact, EnvCellPortalFact, EnvironmentFact, IndoorStaticObjectFact,
     LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,
-    LandblockPackAssembler, LandblockPackSourceDiagnostics, LandblockRestriction, SourceLoadError,
-    SourceRecordDiagnostic, SourceRecordStatus, format_static_object_source_asset_id,
+    LandblockPackAssembler, LandblockPackSourceDiagnostics, LandblockPreparedFacts,
+    LandblockRestriction, PreparedAabb, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedTerrainMesh,
+    PreparedTerrainTriangle, PreparedVec3, SourceLoadError, SourceRecordDiagnostic,
+    SourceRecordStatus, format_static_object_source_asset_id,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

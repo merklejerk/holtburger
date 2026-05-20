@@ -3,6 +3,7 @@ import { isIndoorBrowserDestination } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
+	PreparedLandblockPackPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { isPreparedTerrainLandblock } from "../assets/types";
@@ -98,15 +99,12 @@ export function deriveTerrainSceneModel(
 	);
 	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
 	const tiles = Object.values(assetState.preparedByAssetId)
-		.filter(
-			(
-				asset,
-			): asset is PreparedAssetRecord & {
-				payload: { terrainMesh: PreparedTerrainMesh };
-			} => isPreparedTerrainLandblock(asset),
-		)
-		.map((asset) => {
-			const landblockId = asset.payload.terrainMesh.landblockId;
+		.flatMap((asset) => {
+			const terrainMesh = getTerrainMeshFromPreparedAsset(asset);
+			return terrainMesh ? [{ asset, terrainMesh }] : [];
+		})
+		.map(({ asset, terrainMesh }) => {
+			const landblockId = terrainMesh.landblockId;
 			const renderChunk = deriveTerrainTileRenderChunk(landblockId);
 
 			return {
@@ -116,7 +114,7 @@ export function deriveTerrainSceneModel(
 				label: formatLandblockLabel(landblockId),
 				isFocus: landblockId === focusLandblockId,
 				chunkLocalOffset: { x: 0, y: 0, z: 0 },
-				mesh: asset.payload.terrainMesh,
+				mesh: terrainMesh,
 				dataSource: inferTerrainDataSource(asset),
 			};
 		})
@@ -148,6 +146,20 @@ export function deriveTerrainSceneModel(
 	};
 }
 
+function getTerrainMeshFromPreparedAsset(
+	asset: PreparedAssetRecord,
+): PreparedTerrainMesh | null {
+	if (isPreparedTerrainLandblock(asset)) {
+		return asset.payload.terrainMesh;
+	}
+
+	if (isPreparedLandblockPackWithTerrain(asset)) {
+		return asset.payload.prepared.terrainMesh;
+	}
+
+	return null;
+}
+
 function compareLandblockGridPosition(
 	leftLandblockId: number,
 	rightLandblockId: number,
@@ -167,7 +179,7 @@ function countPreparedTerrainAssets(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 ): number {
 	return Object.values(preparedByAssetId).filter((asset) =>
-		isPreparedTerrainLandblock(asset),
+		getTerrainMeshFromPreparedAsset(asset),
 	).length;
 }
 
@@ -188,6 +200,12 @@ function describeTerrainDataSources(
 function inferTerrainDataSource(
 	asset: PreparedAssetRecord,
 ): TerrainSceneTile["dataSource"] {
+	if (isPreparedLandblockPackWithTerrain(asset)) {
+		return asset.payload.provenance.source === "repo-local-hba"
+			? "repo-local-cell-landblock"
+			: "unknown";
+	}
+
 	if (asset.payload.provenance.source === "repo-local-hba") {
 		return "repo-local-cell-landblock";
 	}
@@ -197,4 +215,13 @@ function inferTerrainDataSource(
 	}
 
 	return "unknown";
+}
+
+function isPreparedLandblockPackWithTerrain(
+	asset: PreparedAssetRecord,
+): asset is PreparedAssetRecord & { payload: PreparedLandblockPackPayload } {
+	return (
+		asset.payload.kind === "landblock-pack" &&
+		asset.payload.prepared.terrainMesh !== null
+	);
 }

@@ -8,10 +8,12 @@ use holtburger_content::{
     CellLandblockFact, ContentRepository, EnvCellFact, EnvironmentFact,
     GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
     LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
-    LandblockRestriction, SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic,
-    SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics,
-    StaticOutdoorScene, StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
-    format_static_object_source_asset_id, normalize_landblock_id,
+    LandblockRestriction, PreparedAabb, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedTerrainMesh,
+    PreparedTerrainTriangle, PreparedVec3, SoulEmoteCatalog, SourceLoadError,
+    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
+    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
+    StaticRenderableSourceFamily, format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
@@ -1382,9 +1384,9 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             }
         },
         "prepared": {
-            "terrainMesh": null,
+            "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(serialize_prepared_terrain_mesh),
             "outdoorStaticInstances": [],
-            "interiorCells": [],
+            "interiorCells": pack.prepared.interior_cells.iter().map(serialize_prepared_interior_cell).collect::<Vec<_>>(),
             "staticMeshes": [],
             "spatialItems": [],
             "staticInstanceBvh": null
@@ -1403,6 +1405,105 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
             "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
         }
+    })
+}
+
+fn serialize_prepared_terrain_mesh(mesh: &PreparedTerrainMesh) -> serde_json::Value {
+    serde_json::json!({
+        "landblockId": mesh.landblock_id,
+        "gridSize": mesh.grid_size,
+        "tileSize": mesh.tile_size,
+        "vertices": mesh.vertices.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
+        "triangles": mesh.triangles.iter().map(serialize_prepared_terrain_triangle).collect::<Vec<_>>(),
+        "minHeight": mesh.min_height,
+        "maxHeight": mesh.max_height,
+    })
+}
+
+fn serialize_prepared_terrain_triangle(triangle: &PreparedTerrainTriangle) -> serde_json::Value {
+    serde_json::json!({
+        "a": triangle.a,
+        "b": triangle.b,
+        "c": triangle.c,
+        "terrainType": triangle.terrain_type,
+        "averageHeight": triangle.average_height,
+    })
+}
+
+fn serialize_prepared_interior_cell(cell: &PreparedInteriorCell) -> serde_json::Value {
+    serde_json::json!({
+        "envCellId": cell.env_cell_id,
+        "environmentId": cell.environment_id,
+        "cellStructureId": cell.cell_structure_id,
+        "localPlacement": serialize_frame(&cell.local_placement),
+        "surfaceIds": cell.surface_ids,
+        "portals": cell.portals.iter().map(|portal| {
+            serde_json::json!({
+                "portalId": portal.portal_id,
+                "sourceIndex": portal.source_index,
+                "flags": portal.flags,
+                "polygonId": portal.polygon_id,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "targetEnvCellId": portal.target_env_cell_id,
+                "isOutsideTransition": portal.is_outside_transition,
+            })
+        }).collect::<Vec<_>>(),
+        "staticObjectCount": cell.static_object_count,
+        "renderGeometry": serialize_prepared_polygon_set_render_geometry(&cell.render_geometry),
+    })
+}
+
+fn serialize_prepared_polygon_set_render_geometry(
+    geometry: &PreparedPolygonSetRenderGeometry,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sourceId": geometry.source_id,
+        "vertexCount": geometry.vertex_count,
+        "triangleCount": geometry.triangle_count,
+        "positions": geometry.positions,
+        "normals": geometry.normals,
+        "uvs": geometry.uvs,
+        "triangles": geometry.triangles.iter().map(serialize_prepared_polygon_set_render_triangle).collect::<Vec<_>>(),
+        "surfaceIds": geometry.surface_ids,
+        "invalidPolygons": geometry.invalid_polygons.iter().map(serialize_prepared_polygon_set_invalid_polygon).collect::<Vec<_>>(),
+        "skippedPolygonCount": geometry.skipped_polygon_count,
+        "bounds": geometry.bounds.as_ref().map(serialize_prepared_aabb),
+    })
+}
+
+fn serialize_prepared_polygon_set_render_triangle(
+    triangle: &PreparedPolygonSetRenderTriangle,
+) -> serde_json::Value {
+    serde_json::json!({
+        "polygonId": triangle.polygon_id,
+        "surfaceId": triangle.surface_id,
+        "firstVertex": triangle.first_vertex,
+    })
+}
+
+fn serialize_prepared_polygon_set_invalid_polygon(
+    polygon: &PreparedPolygonSetInvalidPolygon,
+) -> serde_json::Value {
+    serde_json::json!({
+        "polygonId": polygon.polygon_id,
+        "vertexIds": polygon.vertex_ids,
+        "missingVertexIds": polygon.missing_vertex_ids,
+    })
+}
+
+fn serialize_prepared_aabb(bounds: &PreparedAabb) -> serde_json::Value {
+    serde_json::json!({
+        "min": serialize_prepared_vec3(&bounds.min),
+        "max": serialize_prepared_vec3(&bounds.max),
+    })
+}
+
+fn serialize_prepared_vec3(vector: &PreparedVec3) -> serde_json::Value {
+    serde_json::json!({
+        "x": vector.x,
+        "y": vector.y,
+        "z": vector.z,
     })
 }
 
@@ -2385,6 +2486,21 @@ mod tests {
             asset.payload["sourceFacts"]["outdoor"]["buildings"]
                 .as_array()
                 .is_some()
+        );
+        assert!(
+            !asset.payload["prepared"]["terrainMesh"]["triangles"]
+                .as_array()
+                .expect("pack should expose Rust-prepared terrain triangles")
+                .is_empty()
+        );
+        assert!(
+            asset.payload["prepared"]["interiorCells"]
+                .as_array()
+                .expect("pack should expose Rust-prepared interior cells")
+                .iter()
+                .all(|cell| cell["renderGeometry"]["vertexCount"]
+                    .as_u64()
+                    .is_some_and(|vertex_count| vertex_count > 0))
         );
         assert!(
             asset.payload["dependencies"]["cellDatIds"]

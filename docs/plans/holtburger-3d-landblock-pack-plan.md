@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 2 implemented. Later phases remain planning.
+Status: Phase 3 implemented. Later phases remain planning.
 
 ## Context
 
@@ -750,6 +750,8 @@ Validation performed:
 
 ### Phase 3: Move Current Asset Worker Geometry Preparation To Rust
 
+Status: completed.
+
 - Move terrain mesh preparation from the asset worker into Rust for landblock packs.
 - Move environment/cell-structure geometry preparation into Rust.
 - Keep old worker paths temporarily for parity tests and rollback.
@@ -759,6 +761,35 @@ Exit criteria:
 
 - The frontend can render terrain and structured interiors from pack-prepared geometry.
 - TypeScript no longer needs to decode or prepare normal landblock terrain/interior geometry for pack-backed scenes.
+
+Implemented:
+
+- Added content-level prepared geometry DTOs for terrain meshes, selected interior cells, polygon-set render geometry, render triangles, invalid polygon witnesses, render-space bounds, and simple vectors.
+- `LandblockPackAssembler` now builds Rust-prepared terrain mesh data from `CellLandblock` facts using the same row/column normalization and split-direction rule previously implemented in the asset worker.
+- `LandblockPackAssembler` now builds Rust-prepared structured interior render geometry for loaded env cells whose referenced environment and selected cell structure were available.
+- Interior render geometry now follows the existing renderer basis: render-space `x` is AC `x`, render-space `y` is AC `z`, and render-space `z` is negative AC `y`.
+- Environment cell-structure rendering uses drawing-BSP polygon membership when present, preserves skipped/invalid polygon witnesses, emits surface ids, and computes render-space bounds.
+- The Tauri adapter now serializes `prepared.terrainMesh` and `prepared.interiorCells` inside `landblock-pack/*`.
+- The TypeScript contract and prepared payload model now validate and preserve those Rust-prepared geometry products.
+- Terrain and structured-interior scene model derivation can read through cached landblock packs without fanning one pack into fake `terrain/*`, `indoor-env-cell/*`, or `environment/*` prepared records.
+- Legacy worker geometry paths remain for lower-level debug/source routes and parity fallback.
+
+Decisions and course corrections:
+
+- Pack-prepared interior geometry is emitted per env cell rather than as standalone prepared environment assets. This matches the landblock pack ownership model and avoids recreating the old `environment/*` asset root under a new name.
+- The pack still includes selected raw `EnvironmentFact.cellStructures` as source facts from Phase 2, but Phase 3 rendering consumes Rust-prepared `interiorCells`. Future work should avoid expanding the frontend raw cell-structure schema unless a debug/source view specifically needs it.
+- Pack-backed portal data has `targetEnvCellId: null` for outside-transition portals, but the current `StructuredInteriorCell` portal contract still expects a numeric target. The scene adapter preserves old renderer compatibility by deriving a numeric fallback target for that legacy field while retaining the authoritative outside-transition flag in the pack payload.
+- The worker-side terrain and polygon-set preparation code was not removed yet because legacy routes still depend on it and request planning has not switched to packs by default.
+- The Phase 3 renderer read-through is intentionally narrow. It proves pack-prepared terrain and interiors can render when packs are cached, but Phase 6 still owns switching normal scene request planning to pack roots.
+
+Validation performed:
+
+- `cargo test -p holtburger-content landblock_pack --lib`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml landblock_pack_lookup_returns_manifest_source_facts`
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/landblocks.test.ts src/lib/world-display/terrain-scene.test.ts src/lib/world-display/structured-interior-scene.test.ts`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `npm run check`
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 ### Phase 4: Move Static Renderable Resolution And Bounds To Rust
 
@@ -839,6 +870,12 @@ Initial cleanup targets:
 - Replace the legacy indoor static object source-asset formatting path with the content-level helper everywhere it survives.
 - Decide whether pack `EnvironmentFact.cellStructures` should become a fully typed frontend contract or disappear behind Rust-prepared interior meshes in Phase 3.
 - Revisit source fact naming before route retirement: `interiors` currently means landblock env-cell facts, not a separate official indoor asset family.
+- Remove worker terrain preparation once `terrain/*` is retired or reclassified as a debug/source route.
+- Remove worker environment polygon-set preparation once `environment/*` is retired or reclassified as a debug/source route.
+- Split `StructuredInteriorCell` portal typing so outside-transition portals do not need a legacy numeric `targetEnvCellId` fallback.
+- Consider moving prepared geometry serialization out of the Tauri adapter if more prepared pack products are added; the adapter is starting to accumulate DTO serialization weight again.
+- Add direct scene-model tests for pack-backed terrain and structured-interior read-through before Phase 6 makes packs the normal request path.
+- Tighten contracts and interfaces after each migration slice so fields that are required in practice are not left optional/nullish by DTO inertia. Audit `null`, `undefined`, optional properties, `unknown[]`, and broad unions in pack/prepared/render scene interfaces, and split types when only some variants genuinely allow absence.
 
 Exit criteria:
 

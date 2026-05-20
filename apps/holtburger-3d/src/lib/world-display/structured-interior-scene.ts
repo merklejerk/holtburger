@@ -8,6 +8,7 @@ import type {
 	PreparedAssetRecord,
 	PreparedEnvironmentPayload,
 	PreparedIndoorCellPortal,
+	PreparedLandblockInteriorCell,
 	PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
 import {
@@ -124,7 +125,10 @@ export function deriveStructuredInteriorSceneModel(
 	const activeEnvCellIds = deriveStructuredInteriorCoverage(
 		{
 			kind: "landblock-closure",
-			seedEnvCellIds: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
+			seedEnvCellIds: [
+				focusEnvCellId,
+				...runtimeBatch.residency.visibleCellIds,
+			],
 		},
 		assetState.preparedByAssetId,
 	).envCellIds;
@@ -142,6 +146,7 @@ function deriveBrowserFocusedStructuredInteriorSceneModel(
 ): StructuredInteriorSceneModel {
 	const activeEnvCellIds =
 		structuredInteriorCoverage?.envCellIds ??
+		deriveBrowserFocusedEnvCellIdsFromPacks(focusEnvCellId, assetState) ??
 		deriveStructuredInteriorCoverage(
 			deriveBrowserFocusedStructuredInteriorMembershipPolicy(focusEnvCellId),
 			assetState.preparedByAssetId,
@@ -165,6 +170,44 @@ function deriveStructuredInteriorSceneForEnvCells(
 	const cells: StructuredInteriorCell[] = [];
 
 	for (const envCellId of activeEnvCellIds) {
+		const packCell = findPreparedPackInteriorCell(
+			assetState.preparedByAssetId,
+			envCellId,
+		);
+		if (packCell) {
+			const renderChunk = deriveStructuredCellRenderChunk(envCellId);
+			cells.push({
+				renderKey: formatRenderDomainKey(
+					WORLD_RENDER_DOMAIN.interiorCellShell,
+					`landblock-pack/${formatHex32(envCellId & 0xffff0000)}/env-cell/${formatHex32(envCellId)}`,
+				),
+				envCellId,
+				renderChunk,
+				environmentId: packCell.environmentId,
+				cellStructureId: packCell.cellStructureId,
+				isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
+				chunkLocalPlacement: packCell.localPlacement,
+				surfaceIds: packCell.surfaceIds,
+				portalCount: packCell.portals.length,
+				portals: packCell.portals.map((portal) => ({
+					portalId: portal.portalId,
+					sourceIndex: portal.sourceIndex,
+					flags: portal.flags,
+					polygonId: portal.polygonId,
+					otherCellId: portal.otherCellId,
+					otherPortalId: portal.otherPortalId,
+					targetEnvCellId:
+						portal.targetEnvCellId ??
+						(envCellId & 0xffff0000) | portal.otherCellId,
+				})),
+				staticObjectCount: packCell.staticObjectCount,
+				cellStructure: null,
+				renderGeometry: packCell.renderGeometry,
+				debugColorKey: `landblock-pack:${envCellId}:${packCell.environmentId}:${formatHex32(packCell.cellStructureId)}`,
+			});
+			continue;
+		}
+
 		const envCellAssetId = formatIndoorEnvCellAssetId(envCellId);
 		const envCellAsset = assetState.preparedByAssetId[envCellAssetId];
 		if (!isPreparedIndoorEnvCellAsset(envCellAsset)) {
@@ -232,6 +275,45 @@ function deriveStructuredInteriorSceneForEnvCells(
 		statusText: describeStructuredInteriorStatus(cells, focusEnvCellId),
 		cacheText: describePreparedIndoorCache(assetState),
 	};
+}
+
+function deriveBrowserFocusedEnvCellIdsFromPacks(
+	focusEnvCellId: number,
+	assetState: AssetChannelState,
+): number[] | null {
+	const focusLandblockPrefix = focusEnvCellId & 0xffff0000;
+	const envCellIds = Object.values(assetState.preparedByAssetId)
+		.flatMap((asset) =>
+			asset.payload.kind === "landblock-pack"
+				? asset.payload.prepared.interiorCells
+				: [],
+		)
+		.filter((cell) => (cell.envCellId & 0xffff0000) === focusLandblockPrefix)
+		.map((cell) => cell.envCellId);
+
+	return envCellIds.length > 0
+		? [...new Set(envCellIds)].sort((left, right) => left - right)
+		: null;
+}
+
+function findPreparedPackInteriorCell(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	envCellId: number,
+): PreparedLandblockInteriorCell | null {
+	for (const asset of Object.values(preparedByAssetId)) {
+		if (asset.payload.kind !== "landblock-pack") {
+			continue;
+		}
+
+		const cell = asset.payload.prepared.interiorCells.find(
+			(candidate) => candidate.envCellId === envCellId,
+		);
+		if (cell) {
+			return cell;
+		}
+	}
+
+	return null;
 }
 
 function isPreparedEnvironmentAsset(

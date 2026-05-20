@@ -9,6 +9,9 @@ import type {
 	PreparedGfxObjPayload,
 	PreparedIndoorEnvCellPayload,
 	PreparedIndoorStaticObject,
+	PreparedLandblockPackPayload,
+	PreparedLandblockStaticInstance,
+	PreparedLandblockStaticMesh,
 	PreparedOutdoorStaticSceneBuilding,
 	PreparedOutdoorStaticSceneGeneratedSceneryInstance,
 	PreparedOutdoorStaticSceneInstance,
@@ -63,6 +66,7 @@ interface StaticRenderableSourceInstance {
 	chunkLocalInstancePlacement: PlacementTransformDto;
 	sourceScale: Vec3Dto;
 	numLeaves: number | null;
+	preparedByPack?: boolean;
 }
 
 export interface StaticRenderablePart {
@@ -154,37 +158,50 @@ export function deriveStaticRenderableSceneModel(
 	const activeLandblockIds = [...activeLandblockSet].sort(
 		(left, right) => left - right,
 	);
+	const activeInteriorEnvCellIds = new Set(
+		structuredInteriorCoverage?.envCellIds ??
+			deriveStructuredInteriorCoverage(
+				{
+					kind: "landblock-closure",
+					seedEnvCellIds: [
+						...deriveOutdoorInteriorSeedEnvCellIds(
+							assetState.preparedByAssetId,
+							envCellLandblockSet,
+						),
+					],
+				},
+				assetState.preparedByAssetId,
+			).envCellIds,
+	);
 	const sourceInstances = collectStaticRenderableSourceInstances(assetState, {
 		buildingLandblockIds: buildingLandblockSet,
 		detailLandblockIds: detailLandblockSet,
+		envCellIds: activeInteriorEnvCellIds,
 	})
 		.concat(
 			collectIndoorStaticRenderableSourceInstances(
 				assetState,
-				new Set(
-					structuredInteriorCoverage?.envCellIds ??
-						deriveStructuredInteriorCoverage(
-							{
-								kind: "landblock-closure",
-								seedEnvCellIds: [
-									...deriveOutdoorInteriorSeedEnvCellIds(
-										assetState.preparedByAssetId,
-										envCellLandblockSet,
-									),
-								],
-							},
-							assetState.preparedByAssetId,
-						).envCellIds,
-				),
+				activeInteriorEnvCellIds,
 			),
 		)
 		.filter((instance) => activeLandblockSet.has(instance.owningLandblockId))
 		.sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
-	const parts: StaticRenderablePart[] = [];
+	const parts: StaticRenderablePart[] = collectPackStaticRenderableParts(
+		assetState,
+		{
+			buildingLandblockIds: buildingLandblockSet,
+			detailLandblockIds: detailLandblockSet,
+			envCellIds: activeInteriorEnvCellIds,
+		},
+		missingGfxAssetIds,
+	);
 
 	for (const instance of sourceInstances) {
+		if (instance.preparedByPack) {
+			continue;
+		}
 		const sourceAsset = assetState.preparedByAssetId[instance.sourceAssetId];
 		if (!sourceAsset) {
 			missingSourceAssetIds.add(instance.sourceAssetId);
@@ -238,12 +255,30 @@ function deriveIndoorStaticRenderableSceneModel(
 	const sourceInstances = collectIndoorStaticRenderableSourceInstances(
 		assetState,
 		activeEnvCellIds,
-	).sort(compareSourceInstances);
+	)
+		.concat(
+			collectPackIndoorStaticRenderableSourceInstances(
+				assetState,
+				activeEnvCellIds,
+			),
+		)
+		.sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
-	const parts: StaticRenderablePart[] = [];
+	const parts: StaticRenderablePart[] = collectPackStaticRenderableParts(
+		assetState,
+		{
+			buildingLandblockIds: new Set(),
+			detailLandblockIds: new Set(),
+			envCellIds: activeEnvCellIds,
+		},
+		missingGfxAssetIds,
+	);
 
 	for (const instance of sourceInstances) {
+		if (instance.preparedByPack) {
+			continue;
+		}
 		const sourceAsset = assetState.preparedByAssetId[instance.sourceAssetId];
 		if (!sourceAsset) {
 			missingSourceAssetIds.add(instance.sourceAssetId);
@@ -343,14 +378,25 @@ function collectStaticRenderableSourceInstances(
 	selection: {
 		buildingLandblockIds: ReadonlySet<number>;
 		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
 	},
 ): StaticRenderableSourceInstance[] {
+	const packLandblockIds = packLandblockIdsWithStaticInstances(assetState);
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
+		if (asset.payload.kind === "landblock-pack") {
+			return collectPackStaticRenderableSourceInstances(
+				asset.payload,
+				selection,
+			);
+		}
 		if (asset.payload.kind !== "outdoor-static-scene") {
 			return [];
 		}
 
 		const landblockId = normalizeOutdoorLandblockId(asset.payload.landblockId);
+		if (packLandblockIds.has(landblockId)) {
+			return [];
+		}
 		return [
 			...(selection.detailLandblockIds.has(landblockId)
 				? asset.payload.sceneryInstances.map((instance) =>
@@ -418,6 +464,53 @@ function normalizeGeneratedScenerySourceInstance(
 			z: instance.scale,
 		},
 		numLeaves: null,
+	};
+}
+
+function collectPackStaticRenderableSourceInstances(
+	pack: PreparedLandblockPackPayload,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
+	},
+): StaticRenderableSourceInstance[] {
+	return pack.prepared.outdoorStaticInstances
+		.filter((instance) => isPackStaticInstanceSelected(instance, selection))
+		.map(normalizePackStaticSourceInstance);
+}
+
+function collectPackIndoorStaticRenderableSourceInstances(
+	assetState: AssetChannelState,
+	activeEnvCellIds: ReadonlySet<number>,
+): StaticRenderableSourceInstance[] {
+	return Object.values(assetState.preparedByAssetId).flatMap((asset) =>
+		asset.payload.kind === "landblock-pack"
+			? collectPackStaticRenderableSourceInstances(asset.payload, {
+					buildingLandblockIds: new Set(),
+					detailLandblockIds: new Set(),
+					envCellIds: activeEnvCellIds,
+				})
+			: [],
+	);
+}
+
+function normalizePackStaticSourceInstance(
+	instance: PreparedLandblockStaticInstance,
+): StaticRenderableSourceInstance {
+	return {
+		kind: instance.kind,
+		instanceId: instance.instanceId,
+		owningLandblockId: normalizeOutdoorLandblockId(instance.owningLandblockId),
+		owningEnvCellId: instance.owningEnvCellId,
+		sourceDid: instance.sourceDid,
+		sourceAssetId: instance.sourceAssetId,
+		sourceIndex: instance.sourceIndex,
+		parentPlacements: [],
+		chunkLocalInstancePlacement: instance.localPlacement,
+		sourceScale: instance.sourceScale,
+		numLeaves: null,
+		preparedByPack: true,
 	};
 }
 
@@ -563,7 +656,11 @@ function collectIndoorStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
 	activeEnvCellIds: Set<number>,
 ): StaticRenderableSourceInstance[] {
+	const packEnvCellIds = packEnvCellIdsWithStaticInstances(assetState);
 	return [...activeEnvCellIds].flatMap((envCellId) => {
+		if (packEnvCellIds.has(envCellId)) {
+			return [];
+		}
 		const envCell = getPreparedIndoorEnvCell(assetState, envCellId);
 		if (!envCell) {
 			return [];
@@ -573,6 +670,128 @@ function collectIndoorStaticRenderableSourceInstances(
 			normalizeIndoorStaticSourceInstance(staticObject),
 		);
 	});
+}
+
+function collectPackStaticRenderableParts(
+	assetState: AssetChannelState,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
+	},
+	missingGfxAssetIds: Set<string>,
+): StaticRenderablePart[] {
+	return Object.values(assetState.preparedByAssetId)
+		.flatMap((asset) =>
+			asset.payload.kind === "landblock-pack"
+				? asset.payload.prepared.staticMeshes
+				: [],
+		)
+		.filter((mesh) => isPackStaticMeshSelected(mesh, selection))
+		.flatMap((mesh) => {
+			if (
+				!isPreparedGfxObjAsset(assetState.preparedByAssetId[mesh.gfxObjAssetId])
+			) {
+				missingGfxAssetIds.add(mesh.gfxObjAssetId);
+				return [];
+			}
+			return [normalizePackStaticRenderablePart(mesh)];
+		});
+}
+
+function normalizePackStaticRenderablePart(
+	mesh: PreparedLandblockStaticMesh,
+): StaticRenderablePart {
+	const instance: StaticRenderableSourceInstance = {
+		kind: mesh.kind,
+		instanceId: mesh.instanceId,
+		owningLandblockId: normalizeOutdoorLandblockId(mesh.owningLandblockId),
+		owningEnvCellId: mesh.owningEnvCellId,
+		sourceDid: mesh.sourceDid,
+		sourceAssetId: mesh.sourceAssetId,
+		sourceIndex: mesh.sourceIndex,
+		parentPlacements: [],
+		chunkLocalInstancePlacement: mesh.localPlacement,
+		sourceScale: mesh.sourceScale,
+		numLeaves: null,
+	};
+	return createStaticRenderablePart(instance, {
+		partIndex: mesh.partIndex,
+		gfxObjId: mesh.gfxObjId,
+		gfxObjAssetId: mesh.gfxObjAssetId,
+		partPlacements: mesh.partPlacements,
+		scale: mesh.partScale,
+	});
+}
+
+function isPackStaticInstanceSelected(
+	instance: Pick<
+		PreparedLandblockStaticInstance,
+		"kind" | "owningEnvCellId" | "owningLandblockId"
+	>,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
+	},
+): boolean {
+	if (instance.kind === "indoor-static") {
+		return (
+			instance.owningEnvCellId !== null &&
+			selection.envCellIds.has(instance.owningEnvCellId)
+		);
+	}
+	const landblockId = normalizeOutdoorLandblockId(instance.owningLandblockId);
+	return instance.kind === "building"
+		? selection.buildingLandblockIds.has(landblockId)
+		: selection.detailLandblockIds.has(landblockId);
+}
+
+function isPackStaticMeshSelected(
+	mesh: PreparedLandblockStaticMesh,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
+	},
+): boolean {
+	return isPackStaticInstanceSelected(mesh, selection);
+}
+
+function packLandblockIdsWithStaticInstances(
+	assetState: AssetChannelState,
+): Set<number> {
+	return new Set(
+		Object.values(assetState.preparedByAssetId)
+			.filter(
+				(
+					asset,
+				): asset is PreparedAssetRecord & {
+					payload: PreparedLandblockPackPayload;
+				} => asset.payload.kind === "landblock-pack",
+			)
+			.filter(
+				(asset) => asset.payload.prepared.outdoorStaticInstances.length > 0,
+			)
+			.map((asset) => normalizeOutdoorLandblockId(asset.payload.landblockId)),
+	);
+}
+
+function packEnvCellIdsWithStaticInstances(
+	assetState: AssetChannelState,
+): Set<number> {
+	return new Set(
+		Object.values(assetState.preparedByAssetId).flatMap((asset) =>
+			asset.payload.kind === "landblock-pack"
+				? asset.payload.prepared.outdoorStaticInstances.flatMap((instance) =>
+						instance.kind === "indoor-static" &&
+						instance.owningEnvCellId !== null
+							? [instance.owningEnvCellId]
+							: [],
+					)
+				: [],
+		),
+	);
 }
 
 function normalizeIndoorStaticSourceInstance(

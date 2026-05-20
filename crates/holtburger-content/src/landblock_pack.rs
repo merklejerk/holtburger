@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::io::Cursor;
 
 use binrw::BinRead;
-use holtburger_dat::file_type::{CellStruct, EnvCell, Environment};
+use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::graphics::{Frame, Polygon};
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::physics::BspNode;
@@ -115,7 +115,9 @@ pub struct EnvironmentFact {
 #[derive(Debug, Default, Clone)]
 pub struct LandblockPreparedFacts {
     pub terrain_mesh: Option<PreparedTerrainMesh>,
+    pub outdoor_static_instances: Vec<PreparedStaticInstance>,
     pub interior_cells: Vec<PreparedInteriorCell>,
+    pub static_meshes: Vec<PreparedStaticMesh>,
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +150,58 @@ pub struct PreparedInteriorCell {
     pub portals: Vec<EnvCellPortalFact>,
     pub static_object_count: usize,
     pub render_geometry: PreparedPolygonSetRenderGeometry,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedStaticInstance {
+    pub instance_id: String,
+    pub kind: PreparedStaticInstanceKind,
+    pub owning_landblock_id: u32,
+    pub owning_env_cell_id: Option<u32>,
+    pub source_did: u32,
+    pub source_asset_id: String,
+    pub source_index: usize,
+    pub local_placement: Frame,
+    pub source_scale: PreparedVec3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedStaticInstanceKind {
+    Scenery,
+    Building,
+    GeneratedScenery,
+    IndoorStatic,
+}
+
+struct PreparedStaticInstanceSpec {
+    kind: PreparedStaticInstanceKind,
+    instance_id: String,
+    owning_landblock_id: u32,
+    owning_env_cell_id: Option<u32>,
+    source_did: u32,
+    source_index: usize,
+    local_placement: Frame,
+    source_scale: PreparedVec3,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedStaticMesh {
+    pub instance_id: String,
+    pub kind: PreparedStaticInstanceKind,
+    pub owning_landblock_id: u32,
+    pub owning_env_cell_id: Option<u32>,
+    pub source_did: u32,
+    pub source_asset_id: String,
+    pub source_index: usize,
+    pub local_placement: Frame,
+    pub source_scale: PreparedVec3,
+    pub part_index: usize,
+    pub gfx_obj_id: u32,
+    pub gfx_obj_asset_id: String,
+    pub part_placements: Vec<Frame>,
+    pub part_scale: PreparedVec3,
+    pub source_bounds: Option<PreparedAabb>,
+    pub instance_bounds: Option<PreparedAabb>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -244,7 +298,6 @@ impl LandblockPackAssembler {
             .as_ref()
             .map(|info| load_interior_facts(content, landblock_id, info, &mut diagnostics))
             .unwrap_or_default();
-        let prepared = prepare_landblock_facts(cell_landblock.as_ref(), &interiors);
         let outdoor_scene =
             match StaticOutdoorSceneAssembler::new().assemble_landblock(content, landblock_id) {
                 Ok(scene) => Some(scene),
@@ -261,6 +314,14 @@ impl LandblockPackAssembler {
                     None
                 }
             };
+        let prepared = prepare_landblock_facts(
+            content,
+            landblock_id,
+            cell_landblock.as_ref(),
+            &interiors,
+            outdoor_scene.as_ref(),
+            &mut diagnostics,
+        );
         let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
 
         LandblockPack {
@@ -712,12 +773,423 @@ impl EnvironmentFact {
 }
 
 fn prepare_landblock_facts(
+    content: &ContentRepository,
+    landblock_id: u32,
     cell_landblock: Option<&CellLandblockFact>,
     interiors: &LandblockInteriorFacts,
+    outdoor_scene: Option<&StaticOutdoorScene>,
+    diagnostics: &mut LandblockPackSourceDiagnostics,
 ) -> LandblockPreparedFacts {
+    let outdoor_static_instances =
+        build_prepared_outdoor_static_instances(outdoor_scene).collect::<Vec<_>>();
+    let indoor_static_instances =
+        build_prepared_indoor_static_instances(landblock_id, interiors).collect::<Vec<_>>();
+    let static_meshes = build_prepared_static_meshes(
+        content,
+        outdoor_static_instances
+            .iter()
+            .chain(indoor_static_instances.iter()),
+        diagnostics,
+    );
+
     LandblockPreparedFacts {
         terrain_mesh: cell_landblock.map(build_terrain_mesh),
+        outdoor_static_instances,
         interior_cells: build_prepared_interior_cells(interiors),
+        static_meshes,
+    }
+}
+
+fn build_prepared_outdoor_static_instances(
+    outdoor_scene: Option<&StaticOutdoorScene>,
+) -> impl Iterator<Item = PreparedStaticInstance> + '_ {
+    outdoor_scene.into_iter().flat_map(|scene| {
+        scene
+            .explicit_objects
+            .iter()
+            .filter_map(|instance| {
+                build_prepared_static_instance(PreparedStaticInstanceSpec {
+                    kind: PreparedStaticInstanceKind::Scenery,
+                    instance_id: instance.identity.stable_id(),
+                    owning_landblock_id: instance.owning_landblock_id,
+                    owning_env_cell_id: None,
+                    source_did: instance.source.did,
+                    source_index: instance.source_index,
+                    local_placement: convert_static_outdoor_frame(&instance.frame),
+                    source_scale: unit_prepared_vec3(),
+                })
+            })
+            .chain(scene.buildings.iter().filter_map(|building| {
+                let instance = &building.instance;
+                build_prepared_static_instance(PreparedStaticInstanceSpec {
+                    kind: PreparedStaticInstanceKind::Building,
+                    instance_id: instance.identity.stable_id(),
+                    owning_landblock_id: instance.owning_landblock_id,
+                    owning_env_cell_id: None,
+                    source_did: instance.source.did,
+                    source_index: instance.source_index,
+                    local_placement: convert_static_outdoor_frame(&instance.frame),
+                    source_scale: unit_prepared_vec3(),
+                })
+            }))
+            .chain(scene.generated_scenery.iter().filter_map(|generated| {
+                let instance = &generated.instance;
+                build_prepared_static_instance(PreparedStaticInstanceSpec {
+                    kind: PreparedStaticInstanceKind::GeneratedScenery,
+                    instance_id: instance.identity.stable_id(),
+                    owning_landblock_id: instance.owning_landblock_id,
+                    owning_env_cell_id: None,
+                    source_did: instance.source.did,
+                    source_index: instance.source_index,
+                    local_placement: convert_static_outdoor_frame(&instance.frame),
+                    source_scale: PreparedVec3 {
+                        x: generated.scale,
+                        y: generated.scale,
+                        z: generated.scale,
+                    },
+                })
+            }))
+    })
+}
+
+fn build_prepared_indoor_static_instances(
+    landblock_id: u32,
+    interiors: &LandblockInteriorFacts,
+) -> impl Iterator<Item = PreparedStaticInstance> + '_ {
+    interiors.env_cells.iter().flat_map(move |env_cell| {
+        env_cell
+            .static_objects
+            .iter()
+            .filter_map(move |static_object| {
+                build_prepared_static_instance(PreparedStaticInstanceSpec {
+                    kind: PreparedStaticInstanceKind::IndoorStatic,
+                    instance_id: static_object.instance_id.clone(),
+                    owning_landblock_id: landblock_id,
+                    owning_env_cell_id: Some(static_object.owning_env_cell_id),
+                    source_did: static_object.source_did,
+                    source_index: static_object.source_index,
+                    local_placement: static_object.local_placement.clone(),
+                    source_scale: unit_prepared_vec3(),
+                })
+            })
+    })
+}
+
+fn build_prepared_static_instance(
+    spec: PreparedStaticInstanceSpec,
+) -> Option<PreparedStaticInstance> {
+    let source_asset_id = renderable_source_asset_id(spec.source_did)?;
+    Some(PreparedStaticInstance {
+        instance_id: spec.instance_id,
+        kind: spec.kind,
+        owning_landblock_id: spec.owning_landblock_id,
+        owning_env_cell_id: spec.owning_env_cell_id,
+        source_did: spec.source_did,
+        source_asset_id,
+        source_index: spec.source_index,
+        local_placement: spec.local_placement,
+        source_scale: spec.source_scale,
+    })
+}
+
+fn build_prepared_static_meshes<'a>(
+    content: &ContentRepository,
+    instances: impl Iterator<Item = &'a PreparedStaticInstance>,
+    diagnostics: &mut LandblockPackSourceDiagnostics,
+) -> Vec<PreparedStaticMesh> {
+    let mut meshes = Vec::new();
+    let mut reported_missing = HashSet::new();
+    for instance in instances {
+        match instance.source_did >> 24 {
+            0x01 => {
+                let source_bounds = load_gfx_obj_render_bounds(
+                    content,
+                    instance.source_did,
+                    diagnostics,
+                    &mut reported_missing,
+                );
+                meshes.push(build_prepared_static_mesh(
+                    instance,
+                    0,
+                    instance.source_did,
+                    Vec::new(),
+                    unit_prepared_vec3(),
+                    source_bounds,
+                ));
+            }
+            0x02 => {
+                let Some(setup_model) = load_setup_model_for_pack(
+                    content,
+                    instance.source_did,
+                    diagnostics,
+                    &mut reported_missing,
+                ) else {
+                    continue;
+                };
+                for (part_index, gfx_obj_id) in setup_model.parts.iter().copied().enumerate() {
+                    let source_bounds = load_gfx_obj_render_bounds(
+                        content,
+                        gfx_obj_id,
+                        diagnostics,
+                        &mut reported_missing,
+                    );
+                    meshes.push(build_prepared_static_mesh(
+                        instance,
+                        part_index,
+                        gfx_obj_id,
+                        derive_setup_part_default_placements(&setup_model, part_index),
+                        setup_model
+                            .default_scale
+                            .get(part_index)
+                            .copied()
+                            .map(prepared_vec3_from_ac)
+                            .unwrap_or_else(unit_prepared_vec3),
+                        source_bounds,
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    meshes.sort_by(|left, right| {
+        left.instance_id
+            .cmp(&right.instance_id)
+            .then(left.part_index.cmp(&right.part_index))
+    });
+    meshes
+}
+
+fn build_prepared_static_mesh(
+    instance: &PreparedStaticInstance,
+    part_index: usize,
+    gfx_obj_id: u32,
+    part_placements: Vec<Frame>,
+    part_scale: PreparedVec3,
+    source_bounds: Option<PreparedAabb>,
+) -> PreparedStaticMesh {
+    let combined_scale = multiply_prepared_vec3(instance.source_scale, part_scale);
+    PreparedStaticMesh {
+        instance_id: instance.instance_id.clone(),
+        kind: instance.kind,
+        owning_landblock_id: instance.owning_landblock_id,
+        owning_env_cell_id: instance.owning_env_cell_id,
+        source_did: instance.source_did,
+        source_asset_id: instance.source_asset_id.clone(),
+        source_index: instance.source_index,
+        local_placement: instance.local_placement.clone(),
+        source_scale: instance.source_scale,
+        part_index,
+        gfx_obj_id,
+        gfx_obj_asset_id: format!("gfx-obj/{gfx_obj_id:08x}"),
+        part_placements,
+        part_scale,
+        source_bounds,
+        instance_bounds: source_bounds.map(|bounds| {
+            conservative_instance_bounds(&instance.local_placement, bounds, combined_scale)
+        }),
+    }
+}
+
+fn load_setup_model_for_pack(
+    content: &ContentRepository,
+    setup_model_id: u32,
+    diagnostics: &mut LandblockPackSourceDiagnostics,
+    reported_missing: &mut HashSet<u32>,
+) -> Option<SetupModel> {
+    let resource =
+        match content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id)) {
+            Ok(resource) => resource,
+            Err(error) => {
+                report_renderable_load_error(
+                    diagnostics,
+                    reported_missing,
+                    setup_model_id,
+                    "setup-model",
+                    "asset-read-failed",
+                    format!("Could not read SetupModel 0x{setup_model_id:08X}: {error}"),
+                );
+                return None;
+            }
+        };
+
+    match SetupModel::unpack(&mut Cursor::new(resource.bytes)) {
+        Ok(setup_model) => Some(setup_model),
+        Err(error) => {
+            report_renderable_load_error(
+                diagnostics,
+                reported_missing,
+                setup_model_id,
+                "setup-model",
+                "asset-decode-failed",
+                format!("Could not decode SetupModel 0x{setup_model_id:08X}: {error}"),
+            );
+            None
+        }
+    }
+}
+
+fn load_gfx_obj_render_bounds(
+    content: &ContentRepository,
+    gfx_obj_id: u32,
+    diagnostics: &mut LandblockPackSourceDiagnostics,
+    reported_missing: &mut HashSet<u32>,
+) -> Option<PreparedAabb> {
+    let resource = match content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id)) {
+        Ok(resource) => resource,
+        Err(error) => {
+            report_renderable_load_error(
+                diagnostics,
+                reported_missing,
+                gfx_obj_id,
+                "gfx-obj",
+                "asset-read-failed",
+                format!("Could not read GfxObj 0x{gfx_obj_id:08X}: {error}"),
+            );
+            return None;
+        }
+    };
+
+    match GfxObj::unpack(&mut Cursor::new(resource.bytes)) {
+        Ok(gfx_obj) => build_gfx_obj_render_geometry(&gfx_obj).bounds,
+        Err(error) => {
+            report_renderable_load_error(
+                diagnostics,
+                reported_missing,
+                gfx_obj_id,
+                "gfx-obj",
+                "asset-decode-failed",
+                format!("Could not decode GfxObj 0x{gfx_obj_id:08X}: {error}"),
+            );
+            None
+        }
+    }
+}
+
+fn report_renderable_load_error(
+    diagnostics: &mut LandblockPackSourceDiagnostics,
+    reported_missing: &mut HashSet<u32>,
+    file_id: u32,
+    role: &'static str,
+    error_code: &'static str,
+    detail: String,
+) {
+    if reported_missing.insert(file_id) {
+        diagnostics.errors.push(SourceLoadError {
+            namespace: EOR_PORTAL_NAMESPACE,
+            file_id,
+            role,
+            error_code,
+            detail,
+        });
+    }
+}
+
+fn derive_setup_part_default_placements(setup_model: &SetupModel, part_index: usize) -> Vec<Frame> {
+    select_default_placement_frames(setup_model)
+        .and_then(|placements| placements.get(part_index).cloned())
+        .into_iter()
+        .collect()
+}
+
+fn select_default_placement_frames(setup_model: &SetupModel) -> Option<&[Frame]> {
+    setup_model
+        .placement_frames
+        .get(&0x65)
+        .or_else(|| setup_model.placement_frames.get(&0))
+        .or_else(|| {
+            setup_model
+                .placement_frames
+                .iter()
+                .min_by_key(|(key, _)| **key)
+                .map(|(_, placement)| placement)
+        })
+        .map(|placement| placement.anim_frame.frames.as_slice())
+}
+
+fn build_gfx_obj_render_geometry(gfx_obj: &GfxObj) -> PreparedPolygonSetRenderGeometry {
+    build_polygon_set_render_geometry(
+        gfx_obj.id,
+        &gfx_obj.vertex_array,
+        &gfx_obj.polygons,
+        gfx_obj.drawing_bsp.as_ref(),
+    )
+}
+
+fn renderable_source_asset_id(did: u32) -> Option<String> {
+    match did >> 24 {
+        0x01 => Some(format!("gfx-obj/{did:08x}")),
+        0x02 => Some(format!("setup-model/{did:08x}")),
+        _ => None,
+    }
+}
+
+fn convert_static_outdoor_frame(frame: &crate::static_outdoor_scene::StaticOutdoorFrame) -> Frame {
+    Frame {
+        origin: frame.origin,
+        orientation: frame.orientation,
+    }
+}
+
+fn prepared_vec3_from_ac(vector: holtburger_common::Vector3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: vector.x,
+        y: vector.y,
+        z: vector.z,
+    }
+}
+
+fn unit_prepared_vec3() -> PreparedVec3 {
+    PreparedVec3 {
+        x: 1.0,
+        y: 1.0,
+        z: 1.0,
+    }
+}
+
+fn multiply_prepared_vec3(left: PreparedVec3, right: PreparedVec3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: left.x * right.x,
+        y: left.y * right.y,
+        z: left.z * right.z,
+    }
+}
+
+fn conservative_instance_bounds(
+    placement: &Frame,
+    source_bounds: PreparedAabb,
+    scale: PreparedVec3,
+) -> PreparedAabb {
+    let center = PreparedVec3 {
+        x: (source_bounds.min.x + source_bounds.max.x) * 0.5,
+        y: (source_bounds.min.y + source_bounds.max.y) * 0.5,
+        z: (source_bounds.min.z + source_bounds.max.z) * 0.5,
+    };
+    let half_extent = PreparedVec3 {
+        x: (source_bounds.max.x - source_bounds.min.x).abs() * 0.5 * scale.x.abs(),
+        y: (source_bounds.max.y - source_bounds.min.y).abs() * 0.5 * scale.y.abs(),
+        z: (source_bounds.max.z - source_bounds.min.z).abs() * 0.5 * scale.z.abs(),
+    };
+    let radius = (half_extent.x * half_extent.x
+        + half_extent.y * half_extent.y
+        + half_extent.z * half_extent.z)
+        .sqrt();
+    let world_center = PreparedVec3 {
+        x: placement.origin.x + center.x * scale.x,
+        y: placement.origin.y + center.y * scale.y,
+        z: placement.origin.z + center.z * scale.z,
+    };
+    PreparedAabb {
+        min: PreparedVec3 {
+            x: world_center.x - radius,
+            y: world_center.y - radius,
+            z: world_center.z - radius,
+        },
+        max: PreparedVec3 {
+            x: world_center.x + radius,
+            y: world_center.y + radius,
+            z: world_center.z + radius,
+        },
     }
 }
 

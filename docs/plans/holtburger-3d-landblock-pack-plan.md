@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 3 implemented. Later phases remain planning.
+Status: Phase 4 implemented. Later phases remain planning.
 
 ## Context
 
@@ -793,11 +793,43 @@ Validation performed:
 
 ### Phase 4: Move Static Renderable Resolution And Bounds To Rust
 
+Status: completed.
+
 - Resolve static source DIDs from outdoor and indoor static instances.
 - Load setup models and gfx objects needed by the landblock pack.
 - Flatten setup-model part dependencies.
 - Compute conservative bounds for static instances and renderable source geometry.
 - Emit unsupported/missing renderable source diagnostics.
+
+Implemented:
+
+- `LandblockPreparedFacts` now includes typed `outdoorStaticInstances` and `staticMeshes` products instead of empty placeholder arrays.
+- Rust collects renderable static instances from explicit outdoor objects, outdoor buildings, generated scenery, and landblock env-cell static objects.
+- Rust loads setup models and gfx objects needed by those static instances, flattens setup-model parts into per-gfx render mesh records, and emits `gfxObjAssetId` references instead of inlining heavy gfx geometry.
+- Rust selects setup-model default placement frames using the same precedence the frontend used: placement key `0x65`, then key `0`, then the lowest available key.
+- Rust computes gfx source render bounds from the existing polygon-set render geometry path and emits conservative per-instance bounds for flattened static mesh records.
+- The Tauri adapter serializes the new prepared static records through the `landblock-pack` payload.
+- The frontend DTO/schema/types now model prepared static instances and static meshes directly instead of accepting `unknown[]`.
+- Static renderable scene derivation consumes pack-prepared static meshes when a pack is cached, while still using shared `gfx-obj/*` assets for actual Three.js geometry.
+- Pack-backed static rendering bypasses TypeScript setup-model part walking for those landblock-scoped instances; legacy `outdoor-static-scene/*` and `indoor-env-cell/*` paths still use the old path until request planning switches to packs.
+
+Decisions and course corrections:
+
+- The pack still does not duplicate full `gfx-obj` vertex buffers or setup-model source payloads. Static mesh records carry placement, scale, flattened part identity, source asset ids, and bounds only.
+- `prepared.outdoorStaticInstances` currently contains all prepared static instances, including indoor static instances. The name came from the earlier placeholder and should be renamed before the contract hardens.
+- Bounds live on flattened static mesh records, not on the coarse static instance list, because mesh parts are the first records with a concrete source gfx object and trustworthy source render bounds.
+- Per-instance bounds are intentionally conservative and derived from source render bounds plus placement/scale. Phase 5 should decide whether static BVH items use these render bounds directly or a tighter source-space bounds path.
+- Missing setup-model/gfx records are reported as source diagnostics and the affected static mesh is omitted. Rendering can still proceed for other static instances.
+- The frontend skips legacy static source collection for landblocks/env cells that already have pack-prepared static instances, preventing duplicate static renderables while both paths coexist.
+
+Validation performed:
+
+- `cargo test -p holtburger-content landblock_pack --lib`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml landblock_pack_lookup_returns_manifest_source_facts`
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/world-display/static-renderables.test.ts`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `npm run check`
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 Exit criteria:
 
@@ -821,6 +853,13 @@ Exit criteria:
 - Env-cell/residency queries use the BVH only for candidate lookup; cell/BSP/portal semantics remain the final authority.
 - Terrain grid, cell BSP, and portal geometry remain available for domain-specific narrowphase checks after BVH candidate selection.
 - Missing bounds degrade to render-only, not broken rendering.
+
+Refinements from Phase 4:
+
+- Use Phase 4 `PreparedStaticMesh.instanceBounds` as the first static item bounds source, but treat it as a conservative render broadphase until tighter source-space transform parity is proven.
+- Keep static spatial items reference-based. `PreparedSpatialItem.sourceAssetId` should point at shared `gfx-obj/*` or `setup-model/*` ids, not inline geometry.
+- Decide whether the BVH should index static mesh parts individually or group them by static instance. Mixed queries likely need part-level candidates for picking and instance-level grouping for UI selection; the item id should make both recoverable without a second heavy structure.
+- Rename `outdoorStaticInstances` before Phase 5 consumes it for spatial item generation so the BVH path does not encode a misleading field name.
 
 ### Phase 6: Switch Scene Request Planning To Landblock Packs
 
@@ -876,6 +915,10 @@ Initial cleanup targets:
 - Consider moving prepared geometry serialization out of the Tauri adapter if more prepared pack products are added; the adapter is starting to accumulate DTO serialization weight again.
 - Add direct scene-model tests for pack-backed terrain and structured-interior read-through before Phase 6 makes packs the normal request path.
 - Tighten contracts and interfaces after each migration slice so fields that are required in practice are not left optional/nullish by DTO inertia. Audit `null`, `undefined`, optional properties, `unknown[]`, and broad unions in pack/prepared/render scene interfaces, and split types when only some variants genuinely allow absence.
+- Rename `prepared.outdoorStaticInstances` to a generic static-instance field now that Phase 4 includes indoor statics in the same prepared list.
+- Remove `StaticRenderableSourceInstance.preparedByPack` once scene derivation is pack-first by request planning rather than a read-through adapter layered over legacy source collection.
+- Move or share prepared static DTO serialization if the Tauri adapter continues accumulating landblock pack serializer functions.
+- Add focused tests for pack-backed static renderable consumption in indoor and outdoor-linked-interior scenes beyond the initial outdoor duplicate-suppression coverage.
 
 Exit criteria:
 

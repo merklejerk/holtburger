@@ -220,9 +220,9 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 	};
 	prepared: {
 		terrainMesh: PreparedTerrainMesh | null;
-		outdoorStaticInstances: unknown[];
+		outdoorStaticInstances: PreparedLandblockStaticInstance[];
 		interiorCells: PreparedLandblockInteriorCell[];
-		staticMeshes: unknown[];
+		staticMeshes: PreparedLandblockStaticMesh[];
 		spatialItems: unknown[];
 		staticInstanceBvh: null;
 	};
@@ -257,6 +257,48 @@ export interface PreparedLandblockInteriorCell {
 	portals: PreparedLandblockCellPortal[];
 	staticObjectCount: number;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
+}
+
+export type PreparedLandblockStaticInstanceKind =
+	| "scenery"
+	| "building"
+	| "generated-scenery"
+	| "indoor-static";
+
+export interface PreparedBounds {
+	min: Vec3Dto;
+	max: Vec3Dto;
+}
+
+export interface PreparedLandblockStaticInstance {
+	instanceId: string;
+	kind: PreparedLandblockStaticInstanceKind;
+	owningLandblockId: number;
+	owningEnvCellId: number | null;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
+}
+
+export interface PreparedLandblockStaticMesh {
+	instanceId: string;
+	kind: PreparedLandblockStaticInstanceKind;
+	owningLandblockId: number;
+	owningEnvCellId: number | null;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
+	partIndex: number;
+	gfxObjId: number;
+	gfxObjAssetId: string;
+	partPlacements: PlacementTransformDto[];
+	partScale: Vec3Dto;
+	sourceBounds: PreparedBounds | null;
+	instanceBounds: PreparedBounds | null;
 }
 
 export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {

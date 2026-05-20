@@ -356,6 +356,48 @@ const preparedLandblockInteriorCellDtoSchema = z.object({
 	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 });
 
+const preparedLandblockStaticInstanceKindDtoSchema = z.enum([
+	"scenery",
+	"building",
+	"generated-scenery",
+	"indoor-static",
+]);
+
+const preparedAabbDtoSchema = z
+	.object({ min: vec3DtoSchema, max: vec3DtoSchema })
+	.nullable();
+
+const preparedLandblockStaticInstanceDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	kind: preparedLandblockStaticInstanceKindDtoSchema,
+	owningLandblockId: z.number().int().nonnegative(),
+	owningEnvCellId: z.number().int().nonnegative().nullable(),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	sourceScale: vec3DtoSchema,
+});
+
+const preparedLandblockStaticMeshDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	kind: preparedLandblockStaticInstanceKindDtoSchema,
+	owningLandblockId: z.number().int().nonnegative(),
+	owningEnvCellId: z.number().int().nonnegative().nullable(),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	sourceScale: vec3DtoSchema,
+	partIndex: z.number().int().nonnegative(),
+	gfxObjId: z.number().int().nonnegative(),
+	gfxObjAssetId: z.string().min(1),
+	partPlacements: z.array(placementTransformDtoSchema),
+	partScale: vec3DtoSchema,
+	sourceBounds: preparedAabbDtoSchema,
+	instanceBounds: preparedAabbDtoSchema,
+});
+
 const landblockPackSourceFactsDtoSchema = z.object({
 	cellLandblock: cellLandblockFactDtoSchema.nullable(),
 	landblockInfo: landblockInfoFactDtoSchema.nullable(),
@@ -410,9 +452,9 @@ export const landblockPackPayloadDtoSchema = z.object({
 	sourceFacts: landblockPackSourceFactsDtoSchema,
 	prepared: z.object({
 		terrainMesh: preparedTerrainMeshDtoSchema.nullable(),
-		outdoorStaticInstances: z.array(z.unknown()),
+		outdoorStaticInstances: z.array(preparedLandblockStaticInstanceDtoSchema),
 		interiorCells: z.array(preparedLandblockInteriorCellDtoSchema),
-		staticMeshes: z.array(z.unknown()),
+		staticMeshes: z.array(preparedLandblockStaticMeshDtoSchema),
 		spatialItems: z.array(z.unknown()),
 		staticInstanceBvh: z.null(),
 	}),

@@ -1788,7 +1788,7 @@ describe("asset channel controller", () => {
 		expect(renderGeometry?.normals).toEqual([0, -1, 0, 0, -1, 0, 0, -1, 0]);
 	});
 
-	it("prepares gfx-obj payloads as first-class geometry leaves", () => {
+	it("prepares gfx-obj payloads and duplicates CullMode.None backfaces", () => {
 		const gfxObj = prepareAssetPayload(
 			{
 				requestId: "gfx-obj-1",
@@ -1875,8 +1875,8 @@ describe("asset channel controller", () => {
 		expect(gfxObj.payload.drawingPolygons).toHaveLength(1);
 		expect(gfxObj.payload.renderGeometry).toMatchObject({
 			sourceId: 0x01000001,
-			vertexCount: 6,
-			triangleCount: 2,
+			vertexCount: 12,
+			triangleCount: 4,
 			skippedPolygonCount: 0,
 			surfaceIds: [0x08000001],
 			bounds: {
@@ -1885,17 +1885,21 @@ describe("asset channel controller", () => {
 			},
 		});
 		expect(gfxObj.payload.renderGeometry.positions).toEqual([
-			0, 0, 0, 2, 0, 0, 2, 0, -2, 0, 0, 0, 2, 0, -2, 0, 0, -2,
+			0, 0, 0, 2, 0, 0, 2, 0, -2, 0, 0, 0, 2, 0, -2, 0, 0, -2, 0, 0, 0, 2, 0,
+			-2, 2, 0, 0, 0, 0, 0, 0, 0, -2, 2, 0, -2,
 		]);
 		expect(gfxObj.payload.renderGeometry.normals).toEqual([
-			0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0,
+			0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0,
+			0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0,
 		]);
 		expect(gfxObj.payload.renderGeometry.uvs).toEqual([
-			0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1,
+			0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1,
 		]);
 		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
 			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 0 },
 			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 3 },
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 6 },
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 9 },
 		]);
 		expect(gfxObj.payload.physicsWitness).toEqual({
 			polygonCount: 2,
@@ -1993,8 +1997,8 @@ describe("asset channel controller", () => {
 		}
 		expect(gfxObj.payload.drawingPolygons).toHaveLength(2);
 		expect(gfxObj.payload.renderGeometry).toMatchObject({
-			vertexCount: 3,
-			triangleCount: 1,
+			vertexCount: 6,
+			triangleCount: 2,
 			skippedPolygonCount: 1,
 			invalidPolygons: [
 				{
@@ -2006,6 +2010,7 @@ describe("asset channel controller", () => {
 		});
 		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
 			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 0 },
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 3 },
 		]);
 	});
 

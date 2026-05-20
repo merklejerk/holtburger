@@ -7,6 +7,7 @@ import type {
 	EnvironmentPayloadDto,
 	GfxObjPayloadDto,
 	IndoorEnvCellPayloadDto,
+	LandblockPackPayloadDto,
 	OutdoorStaticScenePayloadDto,
 	SetupModelPayloadDto,
 	TerrainLandblockPayloadDto,
@@ -19,6 +20,7 @@ import {
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
+	landblockPackPayloadDtoSchema,
 	outdoorStaticScenePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
@@ -67,6 +69,13 @@ export function prepareAssetPayload(
 	);
 	if (terrainPayload.success) {
 		return prepareTerrainLandblock(request, response, terrainPayload.data);
+	}
+
+	const landblockPackPayload = landblockPackPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockPackPayload.success) {
+		return prepareLandblockPack(request, response, landblockPackPayload.data);
 	}
 
 	const outdoorStaticScenePayload =
@@ -152,6 +161,41 @@ export function prepareAssetPayload(
 						paletteKey,
 						provenance,
 					}),
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareLandblockPack(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: LandblockPackPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "landblock-pack",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			landblockId: payload.landblockId,
+			landblockInfoId: payload.landblockInfoId,
+			classification: payload.classification,
+			sourceFacts: {
+				cellLandblock: payload.sourceFacts.cellLandblock,
+				landblockInfo: payload.sourceFacts.landblockInfo,
+				outdoor: payload.sourceFacts.outdoor,
+			},
+			dependencies: {
+				cellDatIds: payload.dependencies.cellDatIds,
+				portalDatIds: payload.dependencies.portalDatIds,
+				renderableAssetIds: payload.dependencies.renderableAssetIds,
+			},
+			diagnostics: {
+				sourceRecords: payload.diagnostics.sourceRecords,
+				errors: payload.diagnostics.errors,
+			},
+		},
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -879,6 +923,7 @@ function formatHexId(id: number): string {
 
 function parseResidencyKind(value: unknown): AssetResidencyKind {
 	if (
+		value === "landblock" ||
 		value === "outdoor-landblock" ||
 		value === "indoor-env-cell" ||
 		value === "unknown"

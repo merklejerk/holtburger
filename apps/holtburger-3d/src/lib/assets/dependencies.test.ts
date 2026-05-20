@@ -86,6 +86,65 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
+	it("extracts landblock pack shared renderable references", () => {
+		const response = createJsonResponse("landblock-pack/da55ffff", {
+			kind: "landblock-pack",
+			residencyKind: "landblock",
+			sourceAssetKind: "landblock-pack",
+			landblockId: 0xda55ffff,
+			landblockInfoId: 0xda55fffe,
+			classification: "outdoor",
+			sourceFacts: {
+				cellLandblock: null,
+				landblockInfo: null,
+				outdoor: {
+					explicitObjects: [],
+					buildings: [],
+					generatedScenery: [],
+				},
+				interiors: {
+					envCells: [],
+					environments: [],
+				},
+				renderables: {
+					gfxObjs: [],
+					setupModels: [],
+					unsupportedDids: [],
+				},
+			},
+			prepared: {
+				terrainMesh: null,
+				outdoorStaticInstances: [],
+				interiorCells: [],
+				staticMeshes: [],
+				spatialItems: [],
+				staticInstanceBvh: null,
+			},
+			dependencies: {
+				cellDatIds: [0xda55ffff, 0xda55fffe],
+				portalDatIds: [],
+				renderableAssetIds: [
+					"setup-model/02000001",
+					"gfx-obj/01000001",
+					"setup-model/02000001",
+				],
+				missing: [],
+				unsupported: [],
+			},
+			diagnostics: {
+				sourceRecords: [],
+				omissions: [],
+				errors: [],
+			},
+			provenance,
+		});
+
+		expect(getAssetResponseDependencies(response)).toEqual([
+			{ assetId: "gfx-obj/01000001" },
+			{ assetId: "setup-model/02000001" },
+		]);
+	});
+
 	it("extracts setup-model part gfx objects without worker preparation", () => {
 		const response = createJsonResponse("setup-model/02000010", {
 			kind: "setup-model",

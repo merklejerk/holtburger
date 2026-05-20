@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
 	buildOutdoorCoverageLandblockIds,
+	deriveFirstEnvCellId,
+	deriveLandblockEnvCellId,
+	deriveLandblockEnvCellIds,
+	formatLandblockPackAssetId,
 	formatLandblockLabel,
 	formatOutdoorStaticSceneAssetId,
 	formatTerrainAssetId,
@@ -21,6 +25,9 @@ describe("outdoor landblock helpers", () => {
 		expect(formatOutdoorStaticSceneAssetId(landblockId)).toBe(
 			"outdoor-static-scene/da55ffff",
 		);
+		expect(formatLandblockPackAssetId(landblockId)).toBe(
+			"landblock-pack/da55ffff",
+		);
 	});
 
 	it("normalizes raw landblock ids to outdoor xxyyffff ids", () => {
@@ -38,5 +45,14 @@ describe("outdoor landblock helpers", () => {
 		expect(landblockIds).toContain(0xdb56ffff);
 		expect(landblockIds.every((landblockId) => landblockId > 0)).toBe(true);
 		expect(landblockIds).toHaveLength(9);
+	});
+
+	it("derives contiguous env-cell ids from landblock start and count", () => {
+		expect(deriveFirstEnvCellId(0xda55ffff, 0)).toBeNull();
+		expect(deriveFirstEnvCellId(0xda55ffff, 3)).toBe(0xda550100);
+		expect(deriveLandblockEnvCellId(0xda55ffff, 2)).toBe(0xda550102);
+		expect(deriveLandblockEnvCellIds(0xda55012e, 3)).toEqual([
+			0xda550100, 0xda550101, 0xda550102,
+		]);
 	});
 });

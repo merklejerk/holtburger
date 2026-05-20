@@ -4,9 +4,11 @@ use std::sync::{Arc, Mutex};
 use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
-use holtburger_content::{ContentRepository, SoulEmoteCatalog};
-use holtburger_core::static_outdoor_scene::{
-    GeneratedOutdoorSceneryDiagnostics, StaticOutdoorFrame, StaticOutdoorInstance,
+use holtburger_content::{
+    CellLandblockFact, ContentRepository, GeneratedOutdoorSceneryDiagnostics,
+    LandblockClassification, LandblockInfoFact, LandblockPack, LandblockPackAssembler,
+    LandblockPackSourceDiagnostics, LandblockRestriction, SoulEmoteCatalog, SourceLoadError,
+    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
     StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
     StaticRenderableSourceFamily, normalize_landblock_id,
 };
@@ -221,10 +223,13 @@ impl HostBoundaryAdapter {
             );
         }
 
+        if let Some(landblock_id) = parse_landblock_pack_asset_id(&request.asset_id) {
+            return self.build_landblock_pack_lookup_response(request, landblock_id);
+        }
+
         if let Some(landblock_id) = parse_terrain_asset_id(&request.asset_id) {
             return self.build_terrain_lookup_response(request, landblock_id);
         }
-
         if let Some(landblock_id) = parse_outdoor_static_scene_asset_id(&request.asset_id) {
             return self.build_outdoor_static_scene_lookup_response(request, landblock_id);
         }
@@ -571,6 +576,38 @@ impl HostBoundaryAdapter {
 }
 
 impl HostBoundaryAdapter {
+    fn build_landblock_pack_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+    ) -> AssetLookupResponseDto {
+        let pack = LandblockPackAssembler::new().assemble_landblock(&self.content, landblock_id);
+        let payload = serialize_landblock_pack(&pack);
+
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] response asset_id={} kind=landblock-pack classification={} errors={}",
+                request.asset_id,
+                payload
+                    .get("classification")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown"),
+                payload
+                    .get("diagnostics")
+                    .and_then(|diagnostics| diagnostics.get("errors"))
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(0, Vec::len)
+            );
+        }
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
     fn build_terrain_lookup_response(
         &self,
         request: AssetLookupRequestDto,
@@ -1197,13 +1234,11 @@ impl HostBoundaryAdapter {
                     "asset-decode-failed",
                 )
             })?;
-        let landblock_env_cell_ids = self
-            .load_landblock_info(env_cell_id)
-            .map(|info| {
-                (0..info.num_cells)
-                    .map(|index| (env_cell_id & 0xFFFF_0000) | (0x0100 + index))
-                    .collect::<Vec<_>>()
-            })?;
+        let landblock_env_cell_ids = self.load_landblock_info(env_cell_id).map(|info| {
+            (0..info.num_cells)
+                .map(|index| (env_cell_id & 0xFFFF_0000) | (0x0100 + index))
+                .collect::<Vec<_>>()
+        })?;
 
         Ok(serde_json::json!({
             "kind": "indoor-env-cell",
@@ -1324,6 +1359,202 @@ fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
         .then(|| u32::from_str_radix(hex, 16).ok())
         .flatten()
         .filter(|id| (id >> 24) == 0x02)
+}
+
+fn parse_landblock_pack_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("landblock-pack/")
+        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        .map(normalize_landblock_id)
+}
+
+fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-pack",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-pack",
+        "landblockId": pack.landblock_id,
+        "landblockInfoId": pack.landblock_info_id,
+        "classification": serialize_landblock_classification(pack.classification),
+        "sourceFacts": {
+            "cellLandblock": pack.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
+            "landblockInfo": pack.landblock_info.as_ref().map(serialize_landblock_info_fact),
+            "outdoor": serialize_landblock_pack_outdoor_facts(pack.outdoor_scene.as_ref()),
+            "interiors": {
+                "envCells": [],
+                "environments": []
+            },
+            "renderables": {
+                "gfxObjs": [],
+                "setupModels": [],
+                "unsupportedDids": []
+            }
+        },
+        "prepared": {
+            "terrainMesh": null,
+            "outdoorStaticInstances": [],
+            "interiorCells": [],
+            "staticMeshes": [],
+            "spatialItems": [],
+            "staticInstanceBvh": null
+        },
+        "dependencies": {
+            "cellDatIds": [pack.landblock_id, pack.landblock_info_id],
+            "portalDatIds": [],
+            "renderableAssetIds": derive_landblock_pack_renderable_asset_ids(pack),
+            "missing": [],
+            "unsupported": []
+        },
+        "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-pack",
+            "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_landblock_classification(classification: LandblockClassification) -> &'static str {
+    match classification {
+        LandblockClassification::Outdoor => "outdoor",
+        LandblockClassification::Dungeon => "dungeon",
+    }
+}
+
+fn serialize_cell_landblock_fact(fact: &CellLandblockFact) -> serde_json::Value {
+    serde_json::json!({
+        "id": fact.id,
+        "hasObjects": fact.has_objects,
+        "gridSize": fact.grid_size,
+        "tileSize": fact.tile_size,
+        "terrainTypes": fact.terrain_types,
+        "heights": fact.heights,
+        "minHeight": fact.min_height,
+        "maxHeight": fact.max_height,
+        "allHeightsZero": fact.all_heights_zero,
+    })
+}
+
+fn serialize_landblock_info_fact(fact: &LandblockInfoFact) -> serde_json::Value {
+    serde_json::json!({
+        "id": fact.id,
+        "firstEnvCellId": fact.first_env_cell_id,
+        "numEnvCells": fact.num_env_cells,
+        "objectCount": fact.object_count,
+        "buildingCount": fact.building_count,
+        "packMask": fact.pack_mask,
+        "restrictions": fact.restrictions.iter().map(serialize_landblock_restriction).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_landblock_restriction(restriction: &LandblockRestriction) -> serde_json::Value {
+    serde_json::json!({
+        "cellId": restriction.cell_id,
+        "restrictionObjectId": restriction.restriction_object_id,
+    })
+}
+
+fn serialize_landblock_pack_outdoor_facts(scene: Option<&StaticOutdoorScene>) -> serde_json::Value {
+    serde_json::json!({
+        "explicitObjects": scene.map(|scene| {
+            scene.explicit_objects.iter().filter_map(serialize_static_outdoor_instance).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+        "buildings": scene.map(|scene| {
+            scene.buildings.iter().filter_map(|building| {
+                serialize_static_outdoor_instance(&building.instance).map(|mut value| {
+                    value["numLeaves"] = serde_json::json!(building.num_leaves);
+                    value["portals"] = serde_json::json!(
+                        building.portals.iter().map(|portal| {
+                            serde_json::json!({
+                                "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
+                                "sourceIndex": portal.source_index,
+                                "flags": portal.flags,
+                                "otherCellId": portal.other_cell_id,
+                                "otherPortalId": portal.other_portal_id,
+                                "stabList": portal.stab_list,
+                                "linkedEnvCellIds": portal.linked_env_cell_ids,
+                            })
+                        }).collect::<Vec<_>>()
+                    );
+                    value
+                })
+            }).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+        "generatedScenery": scene.map(|scene| {
+            scene.generated_scenery.iter().filter_map(|generated| {
+                serialize_static_outdoor_instance(&generated.instance).map(|mut value| {
+                    value["terrainIndex"] = serde_json::json!(generated.terrain_index);
+                    value["sceneId"] = serde_json::json!(generated.scene_id);
+                    value["sceneTemplateIndex"] = serde_json::json!(generated.scene_template_index);
+                    value["scale"] = serde_json::json!(generated.scale);
+                    value
+                })
+            }).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+    })
+}
+
+fn derive_landblock_pack_renderable_asset_ids(pack: &LandblockPack) -> Vec<String> {
+    let Some(scene) = pack.outdoor_scene.as_ref() else {
+        return Vec::new();
+    };
+
+    let mut asset_ids = scene
+        .explicit_objects
+        .iter()
+        .chain(scene.buildings.iter().map(|building| &building.instance))
+        .chain(
+            scene
+                .generated_scenery
+                .iter()
+                .map(|generated| &generated.instance),
+        )
+        .filter_map(|instance| {
+            format_renderable_source_asset_id(instance.source.family, instance.source.did)
+        })
+        .collect::<Vec<_>>();
+    asset_ids.sort();
+    asset_ids.dedup();
+    asset_ids
+}
+
+fn serialize_landblock_pack_diagnostics(
+    diagnostics: &LandblockPackSourceDiagnostics,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sourceRecords": diagnostics.source_records.iter().map(serialize_source_record_diagnostic).collect::<Vec<_>>(),
+        "omissions": [],
+        "errors": diagnostics.errors.iter().map(serialize_source_load_error).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_source_record_diagnostic(diagnostic: &SourceRecordDiagnostic) -> serde_json::Value {
+    serde_json::json!({
+        "namespace": diagnostic.namespace,
+        "fileId": diagnostic.file_id,
+        "role": diagnostic.role,
+        "status": serialize_source_record_status(diagnostic.status),
+    })
+}
+
+fn serialize_source_record_status(status: SourceRecordStatus) -> &'static str {
+    match status {
+        SourceRecordStatus::Loaded => "loaded",
+        SourceRecordStatus::Missing => "missing",
+        SourceRecordStatus::DecodeFailed => "decode-failed",
+    }
+}
+
+fn serialize_source_load_error(error: &SourceLoadError) -> serde_json::Value {
+    serde_json::json!({
+        "namespace": error.namespace,
+        "fileId": error.file_id,
+        "role": error.role,
+        "errorCode": error.error_code,
+        "detail": error.detail,
+    })
 }
 
 fn serialize_static_outdoor_instance(
@@ -2023,6 +2254,53 @@ mod tests {
         assert_eq!(asset.payload["kind"], "terrain-landblock");
         assert_eq!(asset.payload["residencyKind"], "outdoor-landblock");
         assert_eq!(asset.payload["landblockId"], 0x0102ffff);
+    }
+
+    #[test]
+    fn landblock_pack_lookup_returns_manifest_source_facts() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+            request_id: "test-landblock-pack".to_string(),
+            asset_id: "landblock-pack/da55012e".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+
+        assert_eq!(asset.request_id, "test-landblock-pack");
+        assert_eq!(asset.asset_id, "landblock-pack/da55012e");
+        assert_eq!(asset.payload["kind"], "landblock-pack");
+        assert_eq!(asset.payload["residencyKind"], "landblock");
+        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
+        assert_eq!(asset.payload["landblockInfoId"], 0xda55fffeu32);
+        assert!(matches!(
+            asset.payload["classification"].as_str(),
+            Some("outdoor" | "dungeon")
+        ));
+        assert_eq!(
+            asset.payload["sourceFacts"]["landblockInfo"]["firstEnvCellId"],
+            0xda550100u32
+        );
+        assert!(
+            asset.payload["sourceFacts"]["landblockInfo"]["numEnvCells"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
+        );
+        assert!(
+            asset.payload["sourceFacts"]["outdoor"]["buildings"]
+                .as_array()
+                .is_some()
+        );
+        assert!(
+            asset.payload["dependencies"]["renderableAssetIds"]
+                .as_array()
+                .is_some()
+        );
+        assert!(
+            asset.payload["diagnostics"]["sourceRecords"]
+                .as_array()
+                .expect("source records should be exposed")
+                .iter()
+                .any(|record| record["status"] == "loaded")
+        );
     }
 
     #[test]

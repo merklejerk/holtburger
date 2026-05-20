@@ -5,10 +5,7 @@ import {
 	applyPreparedAssets,
 	createAssetState,
 } from "../../app/asset-state";
-import {
-	createPreparedTerrainAsset,
-	createRuntimeBatch,
-} from "../../app/test-fixtures";
+import { createRuntimeBatch } from "../../app/test-fixtures";
 import type { AssetChannelState, PreparedAssetRecord } from "./types";
 import {
 	SceneAssetStreamingController,
@@ -20,7 +17,7 @@ describe("SceneAssetStreamingController cache pruning", () => {
 		let nowMs = 10_000;
 		let assetState = applyPreparedAssets(
 			createAssetState(),
-			[createPreparedTerrainAsset("cached-terrain", "terrain/0102ffff")],
+			[createPreparedLandblockPackAsset("landblock-pack/0102ffff")],
 			9_500,
 		);
 		const requestedAssetIds: string[] = [];
@@ -35,16 +32,22 @@ describe("SceneAssetStreamingController cache pruning", () => {
 
 		controller.syncSceneInterest(createStreamingInput(assetState, 0x01030003));
 		await vi.waitFor(() =>
-			expect(assetState.preparedByAssetId["terrain/0102ffff"]).toBeDefined(),
+			expect(
+				assetState.preparedByAssetId["landblock-pack/0102ffff"],
+			).toBeDefined(),
 		);
 
 		nowMs = 10_100;
 		controller.syncSceneInterest(createStreamingInput(assetState, 0x01020003));
 		await vi.waitFor(() =>
-			expect(requestedAssetIds).toContain("outdoor-static-scene/0102ffff"),
+			expect(requestedAssetIds).toContain("landblock-pack/0103ffff"),
 		);
 
-		expect(requestedAssetIds).not.toContain("terrain/0102ffff");
+		expect(
+			requestedAssetIds.filter(
+				(assetId) => assetId === "landblock-pack/0102ffff",
+			),
+		).toHaveLength(0);
 		controller.dispose();
 	});
 
@@ -52,7 +55,7 @@ describe("SceneAssetStreamingController cache pruning", () => {
 		let nowMs = 10_000;
 		let assetState = applyPreparedAssets(
 			createAssetState(),
-			[createPreparedTerrainAsset("cached-terrain", "terrain/0102ffff")],
+			[createPreparedLandblockPackAsset("landblock-pack/0102ffff")],
 			1_000,
 		);
 		const requestedAssetIds: string[] = [];
@@ -67,13 +70,15 @@ describe("SceneAssetStreamingController cache pruning", () => {
 
 		controller.syncSceneInterest(createStreamingInput(assetState, 0x01030003));
 		await vi.waitFor(() =>
-			expect(assetState.preparedByAssetId["terrain/0102ffff"]).toBeUndefined(),
+			expect(
+				assetState.preparedByAssetId["landblock-pack/0102ffff"],
+			).toBeUndefined(),
 		);
 
 		nowMs = 10_100;
 		controller.syncSceneInterest(createStreamingInput(assetState, 0x01020003));
 		await vi.waitFor(() =>
-			expect(requestedAssetIds).toContain("terrain/0102ffff"),
+			expect(requestedAssetIds).toContain("landblock-pack/0102ffff"),
 		);
 
 		controller.dispose();
@@ -164,10 +169,41 @@ function createStreamingInput(
 }
 
 function createPreparedAssetForRequest(assetId: string): PreparedAssetRecord {
-	if (assetId.startsWith("terrain/")) {
-		return createPreparedTerrainAsset(`request-${assetId}`, assetId);
+	if (assetId.startsWith("landblock-pack/")) {
+		return createPreparedLandblockPackAsset(assetId);
 	}
 
+	return {
+		request: {
+			requestId: `request-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		response: {
+			requestId: `request-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload: { kind: "dependency-manifest" },
+		},
+		payload: {
+			kind: "dependency-manifest",
+			sourceAssetKind: "dependency-manifest",
+			residencyKind: "unknown",
+			provenance: {
+				source: "unknown",
+				sourceAssetKind: "dependency-manifest",
+				errorCode: null,
+				detail: null,
+			},
+			dependencyAssetIds: [],
+		},
+		preparedAt: "2026-04-26T00:00:00.000Z",
+	};
+}
+
+function createPreparedLandblockPackAsset(
+	assetId: string,
+): PreparedAssetRecord {
 	return {
 		request: {
 			requestId: `request-${assetId}`,

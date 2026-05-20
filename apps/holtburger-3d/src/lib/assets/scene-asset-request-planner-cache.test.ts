@@ -26,7 +26,7 @@ const ENV_CELL_EXTENDED_OPTIONS: OutdoorSceneRequestOptions = {
 };
 
 describe("scene coverage asset ids", () => {
-	it("derives outdoor terrain and static-scene roots without filtering prepared assets", () => {
+	it("derives outdoor landblock-pack roots without filtering prepared assets", () => {
 		expect(
 			deriveSceneCoverageAssetIds(
 				createRuntimeBatch({
@@ -53,10 +53,10 @@ describe("scene coverage asset ids", () => {
 				},
 				SINGLE_LANDBLOCK_OPTIONS,
 			),
-		).toEqual(["outdoor-static-scene/0102ffff", "terrain/0102ffff"]);
+		).toEqual(["landblock-pack/0102ffff"]);
 	});
 
-	it("derives runtime indoor env-cell and environment roots", () => {
+	it("derives runtime indoor landblock-pack roots", () => {
 		expect(
 			deriveSceneCoverageAssetIds(
 				createRuntimeBatch({
@@ -78,14 +78,10 @@ describe("scene coverage asset ids", () => {
 				{},
 				SINGLE_LANDBLOCK_OPTIONS,
 			),
-		).toEqual([
-			"environment/0d000001",
-			"indoor-env-cell/016c0155",
-			"indoor-env-cell/016c0156",
-		]);
+		).toEqual(["landblock-pack/016cffff"]);
 	});
 
-	it("derives browser dungeon focus from the full parent landblock env-cell set", () => {
+	it("derives browser dungeon focus as the parent landblock pack", () => {
 		const browserDestination: BrowserLocationSelection = {
 			kind: "indoor-env-cell",
 			source: "manual",
@@ -108,16 +104,10 @@ describe("scene coverage asset ids", () => {
 				},
 				SINGLE_LANDBLOCK_OPTIONS,
 			),
-		).toEqual([
-			"environment/0d000001",
-			"indoor-env-cell/8a040100",
-			"indoor-env-cell/8a040101",
-			"indoor-env-cell/8a040102",
-			"indoor-env-cell/8a040103",
-		]);
+		).toEqual(["landblock-pack/8a04ffff"]);
 	});
 
-	it("includes outdoor portal stab-list env cells in structured interior coverage", () => {
+	it("uses one outdoor landblock-pack root instead of portal-derived interior roots", () => {
 		expect(
 			deriveSceneCoverageAssetIds(
 				createRuntimeBatch({
@@ -153,18 +143,10 @@ describe("scene coverage asset ids", () => {
 				},
 				SINGLE_LANDBLOCK_OPTIONS,
 			),
-		).toEqual([
-			"environment/0d000001",
-			"environment/0d000002",
-			"indoor-env-cell/016c0155",
-			"indoor-env-cell/016c0156",
-			"indoor-env-cell/016c0157",
-			"outdoor-static-scene/016cffff",
-			"terrain/016cffff",
-		]);
+		).toEqual(["landblock-pack/016cffff"]);
 	});
 
-	it("requests only missing outdoor portal interior coverage assets", () => {
+	it("requests missing outdoor pack roots and not legacy portal interior coverage assets", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch({
 				tick: 7,
@@ -202,18 +184,18 @@ describe("scene coverage asset ids", () => {
 			SINGLE_LANDBLOCK_OPTIONS,
 		);
 
-		expect(requests.map((request) => request.assetId)).toContain(
+		expect(requests.map((request) => request.assetId)).not.toContain(
 			"environment/0d000001",
 		);
-		expect(requests.map((request) => request.assetId)).toContain(
+		expect(requests.map((request) => request.assetId)).not.toContain(
 			"indoor-env-cell/016c0157",
 		);
-		expect(requests.map((request) => request.assetId)).not.toContain(
-			"indoor-env-cell/016c0156",
+		expect(requests.map((request) => request.assetId)).toContain(
+			"landblock-pack/016cffff",
 		);
 	});
 
-	it("uses prepared env cells to discover wider outdoor env-cell coverage", () => {
+	it("requests landblock packs directly for wider outdoor env-cell coverage", () => {
 		expect(
 			deriveSceneCoverageAssetIds(
 				createRuntimeBatch({
@@ -246,10 +228,10 @@ describe("scene coverage asset ids", () => {
 				},
 				ENV_CELL_EXTENDED_OPTIONS,
 			),
-		).toContain("indoor-env-cell/016d0101");
+		).toContain("landblock-pack/016dffff");
 	});
 
-	it("loads static scene facts for env-cell landblocks beyond detail range", () => {
+	it("loads landblock packs for env-cell landblocks beyond detail range", () => {
 		const assetIds = deriveSceneCoverageAssetIds(
 			createRuntimeBatch({
 				residency: {
@@ -271,7 +253,7 @@ describe("scene coverage asset ids", () => {
 			ENV_CELL_EXTENDED_OPTIONS,
 		);
 
-		expect(assetIds).toContain("outdoor-static-scene/016dffff");
+		expect(assetIds).toContain("landblock-pack/016dffff");
 	});
 });
 

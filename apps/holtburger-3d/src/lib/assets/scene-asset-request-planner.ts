@@ -10,15 +10,13 @@ import {
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
 import {
-	formatOutdoorStaticSceneAssetId,
-	formatTerrainAssetId,
+	formatLandblockPackAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
-import type { PreparedAssetRecord } from "./types";
+import type { PreparedAssetRecord, PreparedLandblockStaticMesh } from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
-	formatEnvironmentAssetId,
 	formatIndoorEnvCellAssetId,
 	isPreparedIndoorEnvCellAsset,
 	type StructuredInteriorMembershipPolicy,
@@ -62,7 +60,7 @@ export function createFocusedAssetRequest(
 		runtimeBatch,
 		browserDestination,
 	);
-	const assetId = formatTerrainAssetId(landblockId);
+	const assetId = formatLandblockPackAssetId(landblockId);
 	const requestScope = browserDestination ? "destination" : "runtime";
 
 	return {
@@ -85,17 +83,14 @@ export function createSceneCoverageRequests(
 	}
 
 	if (isIndoorBrowserDestination(browserDestination)) {
-		const focusEnvCellId = browserDestination.envCellId;
-		const membershipPolicy =
-			deriveBrowserFocusedStructuredInteriorMembershipPolicy(focusEnvCellId);
 		return [
-			...createStructuredInteriorCoverageRequests(
+			...createLandblockPackCoverageRequests(
 				runtimeBatch,
+				browserDestination,
 				priority,
 				preparedByAssetId,
 				pendingAssetIds,
-				membershipPolicy,
-				"destination",
+				[normalizeOutdoorLandblockId(browserDestination.envCellId)],
 			),
 			...createStaticRenderableAssetRequests(
 				runtimeBatch,
@@ -110,16 +105,13 @@ export function createSceneCoverageRequests(
 
 	if (runtimeBatch.residency.indoors) {
 		return [
-			...createStructuredInteriorCoverageRequests(
+			...createLandblockPackCoverageRequests(
 				runtimeBatch,
+				browserDestination,
 				priority,
 				preparedByAssetId,
 				pendingAssetIds,
-				createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch),
-				"runtime",
-				runtimeBatch.residency.environmentId === null
-					? []
-					: [runtimeBatch.residency.environmentId],
+				deriveRuntimeIndoorLandblockPackIds(runtimeBatch),
 			),
 			...createStaticRenderableAssetRequests(
 				runtimeBatch,
@@ -139,23 +131,7 @@ export function createSceneCoverageRequests(
 	);
 
 	return [
-		...createTerrainCoverageRequestsForInterest(
-			runtimeBatch,
-			browserDestination,
-			priority,
-			preparedByAssetId,
-			pendingAssetIds,
-			interest,
-		),
-		...createOutdoorStaticSceneCoverageRequestsForInterest(
-			runtimeBatch,
-			browserDestination,
-			priority,
-			preparedByAssetId,
-			pendingAssetIds,
-			interest,
-		),
-		...createOutdoorLinkedInteriorCoverageRequests(
+		...createLandblockPackCoverageRequestsForInterest(
 			runtimeBatch,
 			browserDestination,
 			priority,
@@ -178,7 +154,7 @@ export function createSceneCoverageRequests(
 export function deriveSceneCoverageAssetIds(
 	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	_preparedByAssetId: Record<string, PreparedAssetRecord>,
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 ): string[] {
 	if (!runtimeBatch) {
@@ -186,24 +162,13 @@ export function deriveSceneCoverageAssetIds(
 	}
 
 	if (isIndoorBrowserDestination(browserDestination)) {
-		const membershipPolicy =
-			deriveBrowserFocusedStructuredInteriorMembershipPolicy(
-				browserDestination.envCellId,
-			);
-		return deriveStructuredInteriorCoverageAssetIds(
-			preparedByAssetId,
-			membershipPolicy,
-		).sort();
+		return [formatLandblockPackAssetId(browserDestination.envCellId)];
 	}
 
 	if (runtimeBatch.residency.indoors) {
-		return deriveStructuredInteriorCoverageAssetIds(
-			preparedByAssetId,
-			createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch),
-			runtimeBatch.residency.environmentId === null
-				? []
-				: [runtimeBatch.residency.environmentId],
-		).sort();
+		return deriveRuntimeIndoorLandblockPackIds(runtimeBatch)
+			.map(formatLandblockPackAssetId)
+			.sort();
 	}
 
 	const interest = deriveOutdoorInterestForRuntime(
@@ -211,20 +176,11 @@ export function deriveSceneCoverageAssetIds(
 		browserDestination,
 		options,
 	);
-	const staticFactLandblockIds = deriveOutdoorStaticFactLandblockIds(interest);
 	return [
 		...new Set([
-			...interest.terrainLandblockIds.map(formatTerrainAssetId),
-			...staticFactLandblockIds.map(formatOutdoorStaticSceneAssetId),
-			...deriveStructuredInteriorCoverageAssetIds(preparedByAssetId, {
-				kind: "landblock-closure",
-				seedEnvCellIds: [
-					...deriveOutdoorInteriorSeedEnvCellIds(
-						preparedByAssetId,
-						new Set(interest.envCellLandblockIds),
-					),
-				],
-			}),
+			...deriveLandblockPackCoverageLandblockIds(interest).map(
+				formatLandblockPackAssetId,
+			),
 		]),
 	].sort();
 }
@@ -263,7 +219,7 @@ export function createTerrainCoverageRequests(
 		return [];
 	}
 
-	return createTerrainCoverageRequestsForInterest(
+	return createLandblockPackCoverageRequestsForInterest(
 		runtimeBatch,
 		browserDestination,
 		priority,
@@ -273,7 +229,7 @@ export function createTerrainCoverageRequests(
 	);
 }
 
-function createTerrainCoverageRequestsForInterest(
+function createLandblockPackCoverageRequestsForInterest(
 	runtimeBatch: RuntimeBatchDto,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
@@ -281,14 +237,31 @@ function createTerrainCoverageRequestsForInterest(
 	pendingAssetIds: string[],
 	interest: NormalizedOutdoorSceneInterest,
 ): AssetLookupRequestDto[] {
-	const requestScope = browserDestination ? "destination" : "runtime";
-	const coverageAssetIds = prioritizeOutdoorLandblockIds(
+	return createLandblockPackCoverageRequests(
+		runtimeBatch,
+		browserDestination,
 		priority,
-		interest.focusLandblockId,
-		interest.terrainLandblockIds,
-	).map(formatTerrainAssetId);
+		preparedByAssetId,
+		pendingAssetIds,
+		prioritizeOutdoorLandblockIds(
+			priority,
+			interest.focusLandblockId,
+			deriveLandblockPackCoverageLandblockIds(interest),
+		),
+	);
+}
+
+function createLandblockPackCoverageRequests(
+	runtimeBatch: RuntimeBatchDto,
+	browserDestination: BrowserLocationSelection | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+	landblockIds: readonly number[],
+): AssetLookupRequestDto[] {
+	const requestScope = browserDestination ? "destination" : "runtime";
 	return createUnpreparedRequests(
-		coverageAssetIds,
+		[...new Set(landblockIds.map(formatLandblockPackAssetId))],
 		runtimeBatch,
 		priority,
 		requestScope,
@@ -297,40 +270,18 @@ function createTerrainCoverageRequestsForInterest(
 	);
 }
 
-function createOutdoorStaticSceneCoverageRequestsForInterest(
-	runtimeBatch: RuntimeBatchDto,
-	browserDestination: BrowserLocationSelection | null,
-	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[],
-	interest: NormalizedOutdoorSceneInterest,
-): AssetLookupRequestDto[] {
-	const requestScope = browserDestination ? "destination" : "runtime";
-	const staticFactLandblockIds = deriveOutdoorStaticFactLandblockIds(interest);
-	const coverageAssetIds = prioritizeOutdoorLandblockIds(
-		priority,
-		interest.focusLandblockId,
-		staticFactLandblockIds,
-	).map(formatOutdoorStaticSceneAssetId);
-	return createUnpreparedRequests(
-		coverageAssetIds,
-		runtimeBatch,
-		priority,
-		requestScope,
-		preparedByAssetId,
-		pendingAssetIds,
-	);
-}
-
-function deriveOutdoorStaticFactLandblockIds(
+function deriveLandblockPackCoverageLandblockIds(
 	interest: NormalizedOutdoorSceneInterest,
 ): number[] {
 	return unionOutdoorSceneLandblockIds(
 		unionOutdoorSceneLandblockIds(
+			interest.terrainLandblockIds,
 			interest.buildingLandblockIds,
-			interest.detailLandblockIds,
 		),
-		interest.envCellLandblockIds,
+		unionOutdoorSceneLandblockIds(
+			interest.detailLandblockIds,
+			interest.envCellLandblockIds,
+		),
 	);
 }
 
@@ -378,30 +329,34 @@ export function createStaticRenderableAssetRequests(
 		preparedByAssetId,
 	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
-	const sourceAssetIds = Object.values(preparedByAssetId).flatMap((asset) => {
-		if (asset.payload.kind !== "outdoor-static-scene") {
-			return [];
-		}
+	const legacyOutdoorSourceAssetIds = Object.values(preparedByAssetId).flatMap(
+		(asset) => {
+			if (asset.payload.kind !== "outdoor-static-scene") {
+				return [];
+			}
 
-		const landblockId = normalizeOutdoorLandblockId(asset.payload.landblockId);
-		return [
-			...(detailLandblockIds.has(landblockId)
-				? asset.payload.sceneryInstances.map(
-						(instance) => instance.sourceAssetId,
-					)
-				: []),
-			...(buildingLandblockIds.has(landblockId)
-				? asset.payload.buildingInstances.map(
-						(instance) => instance.sourceAssetId,
-					)
-				: []),
-			...(detailLandblockIds.has(landblockId)
-				? asset.payload.generatedSceneryInstances.map(
-						(instance) => instance.sourceAssetId,
-					)
-				: []),
-		];
-	});
+			const landblockId = normalizeOutdoorLandblockId(
+				asset.payload.landblockId,
+			);
+			return [
+				...(detailLandblockIds.has(landblockId)
+					? asset.payload.sceneryInstances.map(
+							(instance) => instance.sourceAssetId,
+						)
+					: []),
+				...(buildingLandblockIds.has(landblockId)
+					? asset.payload.buildingInstances.map(
+							(instance) => instance.sourceAssetId,
+						)
+					: []),
+				...(detailLandblockIds.has(landblockId)
+					? asset.payload.generatedSceneryInstances.map(
+							(instance) => instance.sourceAssetId,
+						)
+					: []),
+			];
+		},
+	);
 	const linkedIndoorSourceAssetIds = linkedInteriorCoverage.envCellIds.flatMap(
 		(envCellId) => {
 			const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
@@ -412,8 +367,22 @@ export function createStaticRenderableAssetRequests(
 				: [];
 		},
 	);
+	const packGfxAssetIds = collectSelectedPackStaticGfxAssetIds(
+		preparedByAssetId,
+		{
+			buildingLandblockIds,
+			detailLandblockIds,
+			envCellIds: new Set(linkedInteriorCoverage.envCellIds),
+		},
+	);
 
-	return [...new Set([...sourceAssetIds, ...linkedIndoorSourceAssetIds])]
+	return [
+		...new Set([
+			...legacyOutdoorSourceAssetIds,
+			...linkedIndoorSourceAssetIds,
+			...packGfxAssetIds,
+		]),
+	]
 		.sort()
 		.filter(
 			(assetId) =>
@@ -428,37 +397,27 @@ export function createStaticRenderableAssetRequests(
 		}));
 }
 
-function createOutdoorLinkedInteriorCoverageRequests(
-	runtimeBatch: RuntimeBatchDto,
-	browserDestination: BrowserLocationSelection | null,
-	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[],
-	interest: NormalizedOutdoorSceneInterest,
-): AssetLookupRequestDto[] {
-	const linkedEnvCellIds = deriveOutdoorInteriorSeedEnvCellIds(
-		preparedByAssetId,
-		new Set(interest.envCellLandblockIds),
-	);
-	return createStructuredInteriorCoverageRequests(
-		runtimeBatch,
-		priority,
-		preparedByAssetId,
-		pendingAssetIds,
-		{
-			kind: "landblock-closure",
-			seedEnvCellIds: [...linkedEnvCellIds],
-		},
-		"outdoor-linked-interior",
-	);
-}
-
 export function deriveOutdoorInteriorSeedEnvCellIds(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	activeLandblockIds: ReadonlySet<number>,
 ): Set<number> {
 	const linkedEnvCellIds = new Set<number>();
 	for (const asset of Object.values(preparedByAssetId)) {
+		if (asset.payload.kind === "landblock-pack") {
+			if (
+				!activeLandblockIds.has(
+					normalizeOutdoorLandblockId(asset.payload.landblockId),
+				)
+			) {
+				continue;
+			}
+
+			for (const cell of asset.payload.prepared.interiorCells) {
+				linkedEnvCellIds.add(cell.envCellId);
+			}
+			continue;
+		}
+
 		if (asset.payload.kind === "outdoor-static-scene") {
 			if (
 				!activeLandblockIds.has(
@@ -535,6 +494,14 @@ function createIndoorStaticRenderableAssetRequests(
 		preparedByAssetId,
 	).envCellIds;
 	const pendingAssetIdSet = new Set(pendingAssetIds);
+	const packGfxAssetIds = collectSelectedPackStaticGfxAssetIds(
+		preparedByAssetId,
+		{
+			buildingLandblockIds: new Set(),
+			detailLandblockIds: new Set(),
+			envCellIds: new Set(activeEnvCellIds),
+		},
+	);
 	const sourceAssetIds = activeEnvCellIds.flatMap((envCellId) => {
 		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
 		return isPreparedIndoorEnvCellAsset(asset)
@@ -544,7 +511,7 @@ function createIndoorStaticRenderableAssetRequests(
 			: [];
 	});
 
-	return [...new Set(sourceAssetIds)]
+	return [...new Set([...sourceAssetIds, ...packGfxAssetIds])]
 		.sort()
 		.filter(
 			(assetId) =>
@@ -557,6 +524,45 @@ function createIndoorStaticRenderableAssetRequests(
 			assetId,
 			priority,
 		}));
+}
+
+function collectSelectedPackStaticGfxAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
+	},
+): string[] {
+	return Object.values(preparedByAssetId)
+		.flatMap((asset) =>
+			asset.payload.kind === "landblock-pack"
+				? asset.payload.prepared.staticMeshes
+				: [],
+		)
+		.filter((mesh) => isPackStaticMeshSelected(mesh, selection))
+		.map((mesh) => mesh.gfxObjAssetId);
+}
+
+function isPackStaticMeshSelected(
+	mesh: PreparedLandblockStaticMesh,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+		envCellIds: ReadonlySet<number>;
+	},
+): boolean {
+	if (mesh.kind === "indoor-static") {
+		return (
+			mesh.owningEnvCellId !== null &&
+			selection.envCellIds.has(mesh.owningEnvCellId)
+		);
+	}
+
+	const landblockId = normalizeOutdoorLandblockId(mesh.owningLandblockId);
+	return mesh.kind === "building"
+		? selection.buildingLandblockIds.has(landblockId)
+		: selection.detailLandblockIds.has(landblockId);
 }
 
 function createRuntimeStructuredInteriorMembershipPolicy(
@@ -572,63 +578,18 @@ function createRuntimeStructuredInteriorMembershipPolicy(
 	};
 }
 
-function createStructuredInteriorCoverageRequests(
+function deriveRuntimeIndoorLandblockPackIds(
 	runtimeBatch: RuntimeBatchDto,
-	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[],
-	membershipPolicy: StructuredInteriorMembershipPolicy,
-	requestScope: string,
-	extraEnvironmentIds: number[] = [],
-): AssetLookupRequestDto[] {
-	const coverageAssetIds = deriveStructuredInteriorCoverageAssetIds(
-		preparedByAssetId,
-		membershipPolicy,
-		extraEnvironmentIds,
-	);
-
-	return createUnpreparedRequests(
-		coverageAssetIds,
-		runtimeBatch,
-		priority,
-		requestScope,
-		preparedByAssetId,
-		pendingAssetIds,
-	);
-}
-
-function deriveStructuredInteriorCoverageAssetIds(
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	membershipPolicy: StructuredInteriorMembershipPolicy,
-	extraEnvironmentIds: number[] = [],
-): string[] {
-	const coverage = deriveStructuredInteriorCoverage(
-		membershipPolicy,
-		preparedByAssetId,
-	);
-	if (coverage.envCellIds.length === 0) {
-		return [];
-	}
-
-	const envCellAssetIds = coverage.envCellIds.map(formatIndoorEnvCellAssetId);
-	const preparedEnvironmentAssetIds = envCellAssetIds.flatMap((assetId) => {
-		const asset = preparedByAssetId[assetId];
-		return isPreparedIndoorEnvCellAsset(asset) &&
-			asset.payload.environmentId !== null
-			? [formatEnvironmentAssetId(asset.payload.environmentId)]
-			: [];
-	});
-	const extraEnvironmentAssetIds = extraEnvironmentIds.map(
-		formatEnvironmentAssetId,
-	);
-
+): number[] {
 	return [
-		...new Set([
-			...envCellAssetIds,
-			...preparedEnvironmentAssetIds,
-			...extraEnvironmentAssetIds,
-		]),
-	];
+		...new Set(
+			[
+				runtimeBatch.residency.focusEnvCellId ??
+					runtimeBatch.residency.focusLandblockId,
+				...runtimeBatch.residency.visibleCellIds,
+			].map(normalizeOutdoorLandblockId),
+		),
+	].sort((left, right) => left - right);
 }
 
 function deriveOutdoorInterestForRuntime(

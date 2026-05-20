@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 5.1 implemented. Later phases remain planning.
+Status: Phase 6 implemented. Later phases remain planning.
 
 ## Context
 
@@ -945,6 +945,8 @@ Refinements for later phases:
 
 ### Phase 6: Switch Scene Request Planning To Landblock Packs
 
+Status: completed.
+
 - Change outdoor and dungeon browser focused requests and scene coverage to request `landblock-pack/*` by landblock interest sets.
 - For dungeon focus, request the focused landblock pack and render its env-cell inventory.
 - For outdoor focus, request landblock packs in the terrain/building/detail interest sets, then apply frontend policy to decide which prepared facts render.
@@ -956,8 +958,66 @@ Exit criteria:
 - `LandblockInfo.num_cells` is the only normal source of landblock env-cell inventory.
 - Existing browser workflows still support outdoor focus, dungeon focus, and linked interiors.
 
+Implemented:
+
+- Focused outdoor bootstrap requests now request `landblock-pack/<XXYYFFFF>` instead of `terrain/<XXYYFFFF>`.
+- Normal outdoor scene coverage now requests landblock packs across the union of terrain, building, detail, and env-cell landblock interest sets.
+- Browser dungeon focus requests the focused landblock pack directly from the selected env-cell id.
+- Runtime indoor coverage requests landblock packs for the focused and currently visible env-cell landblocks instead of requesting `indoor-env-cell/*` and `environment/*` roots.
+- Active scene coverage ids used by cache retention now retain landblock-pack roots rather than the old renderer-slice roots.
+- Structured interior landblock closure now expands from prepared landblock-pack interior cells before falling back to legacy `indoor-env-cell` payload membership.
+- Static renderable request planning can hydrate selected pack-prepared `gfx-obj/*` dependencies for outdoor statics, buildings, and indoor statics. Legacy `outdoor-static-scene/*` and `indoor-env-cell/*` static dependency discovery remains available for debug/source routes while those assets still exist.
+- Request-planning and streaming-controller tests now assert pack-backed roots for normal scene loading.
+
+Decisions and course corrections:
+
+- `createTerrainCoverageRequest(s)` still exists as an exported helper name, but it now returns landblock-pack requests. This avoids a broad rename during the behavioral switch and is now an explicit cleanup target.
+- The normal request planner no longer asks for `outdoor-static-scene/*`, `indoor-env-cell/*`, or `environment/*` to discover landblock scene coverage. Those routes remain loadable and the planner still understands their prepared payloads only as compatibility/debug inputs.
+- For pack-backed static rendering, the immediate dependency request is the selected prepared mesh `gfxObjAssetId`, not every `dependencies.renderableAssetIds` entry in the pack. This matches the Phase 4 prepared-static path, which consumes flattened gfx parts rather than rewalking setup models in TypeScript.
+- The TypeScript `PreparedLandblockPackPayload.sourceFacts` type still differs from the DTO schema around `renderables`. That was not widened in Phase 6 because request planning does not consume it, but it should be fixed during contract tightening.
+
+Validation performed:
+
+- `npm run test:ts`
+- `npm run check`
+
+Refinements for later phases:
+
+- Rename the exported `createTerrainCoverageRequest(s)` helpers to landblock-pack coverage names once callers and tests no longer need the migration breadcrumb.
+- Remove legacy prepared `outdoor-static-scene` and `indoor-env-cell` dependency discovery from normal request planning once debug/source routes are separated from scene loading.
+- Add a small helper for deriving active pack interior env-cell ids so `deriveOutdoorInteriorSeedEnvCellIds` can stop carrying its old seed-oriented name.
+
+### Phase 6.1: Restore Pack-Backed Portal Rendering
+
+Status: planned.
+
+Phase 6 moved normal scene request planning to `landblock-pack/*`, which exposed a hidden legacy dependency in portal rendering. Pack-backed structured interiors surface env-cell portal facts to the frontend, but transition portal rendering still depends on:
+
+- outdoor building portal topology from `outdoor-static-scene/*`, and
+- portal aperture polygon points from legacy `environment/*` cell structures.
+
+Because normal scene loading no longer requests those legacy roots, the renderer can load many pack-backed interior cells while still reporting `0` topology portals, `0` aperture candidates, and `0` visible portal work items.
+
+Tasks:
+
+- Teach transition portal topology collection to read building portals from `landblock-pack.sourceFacts.outdoor.buildings` as the only runtime source for pack-backed scenes.
+- Preserve enough pack-backed portal aperture geometry for `derivePortalAperturesFromStructuredInteriorScene` to build points and planes without requiring `StructuredInteriorCell.cellStructure`.
+- Derive portal aperture polygons from Rust-prepared pack interior geometry/source metadata rather than reintroducing `environment/*` as a normal request dependency.
+- Add diagnostics that separately report loaded env-cell portal facts, loaded outdoor building portal topology records, derived aperture polygons, transition portal candidates, and visible portal work items.
+- Add tests for pack-backed outdoor-to-indoor transition candidates with no `outdoor-static-scene/*` or `environment/*` assets cached.
+- Keep legacy scene assets out of the pack-backed runtime path. They may be used only by explicit debug/parity tooling or fixtures that compare old and new derivation results.
+
+Exit criteria:
+
+- Pack-backed outdoor building/interior scenes produce transition portal candidates without legacy scene roots.
+- Portal debug overlays can render pack-backed aperture polygons when `showPortalPolygons` is enabled.
+- Stencil portal metrics no longer read as `0 topology portals` solely because Phase 6 removed `outdoor-static-scene/*` from normal scene loading.
+- Pack-backed portal rendering has no runtime fallback to `outdoor-static-scene/*` or `environment/*`. If required pack portal data is missing, diagnostics should expose the missing pack field/stage rather than masking it with cached legacy assets.
+- Legacy `outdoor-static-scene/*` and `environment/*` routes remain optional debug/source inputs or parity fixtures only, not portal rendering dependencies.
+
 ### Phase 7: Retire Or Reclassify Legacy Scene Assets
 
+- Do not retire or fully reclassify `outdoor-static-scene/*` and `environment/*` until Phase 6.1 proves pack-backed portal topology and aperture derivation without runtime fallback.
 - Decide which old routes remain as debug/source views:
   - `terrain/*`
   - `outdoor-static-scene/*`
@@ -986,6 +1046,10 @@ Initial cleanup targets:
 - Revisit `AssetResidencyKind` naming once `landblock` is the primary scene residency and `outdoor-landblock`/`indoor-env-cell` are no longer normal scene roots.
 - Remove obsolete worker geometry preparation paths after Rust-prepared terrain, environment, and gfx geometry are trusted.
 - Remove stale tests that encode legacy request sequencing instead of pack-backed behavior.
+- Rename `createTerrainCoverageRequest` and `createTerrainCoverageRequests`; after Phase 6 they return landblock-pack requests, so the names are now migration leftovers.
+- Rename `deriveOutdoorInteriorSeedEnvCellIds`; after Phase 6 it prefers pack interior inventory and only falls back to legacy seed discovery.
+- Remove compatibility reads from prepared `outdoor-static-scene/*` and `indoor-env-cell/*` inside normal static renderable request planning after legacy routes are debug/source-only.
+- Align `PreparedLandblockPackPayload.sourceFacts` with the DTO schema for `renderables`, or deliberately remove the unused DTO field before the contract hardens further.
 - Revisit debug panel labels so old asset-family names are presented as source/debug routes, not primary scene-loading concepts.
 - Remove duplicated env-cell serialization paths after pack-backed interiors replace normal `indoor-env-cell/*` loading.
 - Replace the legacy indoor static object source-asset formatting path with the content-level helper everywhere it survives.
@@ -994,6 +1058,9 @@ Initial cleanup targets:
 - Remove worker terrain preparation once `terrain/*` is retired or reclassified as a debug/source route.
 - Remove worker environment polygon-set preparation once `environment/*` is retired or reclassified as a debug/source route.
 - Split `StructuredInteriorCell` portal typing so outside-transition portals do not need a legacy numeric `targetEnvCellId` fallback.
+- Remove transition portal topology dependence on `outdoor-static-scene/*` during Phase 6.1; do not add a runtime fallback while migrating.
+- Remove portal aperture derivation dependence on legacy `environment/*` cell structures during Phase 6.1; do not add a runtime fallback while migrating.
+- Split portal diagnostics into loaded portal facts, topology records, aperture records, candidates, and visible work items so a missing stage is obvious in the UI.
 - Consider moving prepared geometry serialization out of the Tauri adapter if more prepared pack products are added; the adapter is starting to accumulate DTO serialization weight again.
 - Add direct scene-model tests for pack-backed terrain and structured-interior read-through before Phase 6 makes packs the normal request path.
 - Tighten contracts and interfaces after each migration slice so fields that are required in practice are not left optional/nullish by DTO inertia. Audit `null`, `undefined`, optional properties, `unknown[]`, and broad unions in pack/prepared/render scene interfaces, and split types when only some variants genuinely allow absence.

@@ -258,6 +258,7 @@ function prepareGfxObj(
 		vertexArray: payload.vertexArray,
 		drawingPolygons: payload.drawingPolygons,
 		renderUvlessPositiveSides: true,
+		duplicateCullModeNoneBackfaces: true,
 	});
 
 	return {
@@ -583,10 +584,12 @@ interface PolygonSetGeometrySource {
 	vertexArray: GfxObjPayloadDto["vertexArray"];
 	drawingPolygons: GfxObjPayloadDto["drawingPolygons"];
 	renderUvlessPositiveSides?: boolean;
+	duplicateCullModeNoneBackfaces?: boolean;
 }
 
 const STIPPLING_NO_POS = 0x04;
 const STIPPLING_NO_NEG = 0x08;
+const CULL_MODE_NONE = 1;
 const CULL_MODE_CLOCKWISE = 2;
 
 interface PolygonRenderSide {
@@ -734,6 +737,7 @@ function derivePolygonRenderSides(
 	polygon: GfxObjPayloadDto["drawingPolygons"][number],
 ): PolygonRenderSide[] {
 	const sides: PolygonRenderSide[] = [];
+	let positiveSide: PolygonRenderSide | null = null;
 	if (
 		(polygon.stippling & STIPPLING_NO_POS) === 0 ||
 		source.renderUvlessPositiveSides
@@ -742,11 +746,25 @@ function derivePolygonRenderSides(
 			(polygon.stippling & STIPPLING_NO_POS) === 0
 				? requireUvIndicesAvailable(source.sourceLabel, polygon, "positive")
 				: null;
-		sides.push({
+		positiveSide = {
 			surfaceId: normalizeSurfaceId(polygon.posSurface),
 			uvIndices,
 			vertexOffsets: (vertexIndex) => [0, vertexIndex, vertexIndex + 1],
 			normalScale: 1,
+		};
+		sides.push(positiveSide);
+	}
+
+	if (
+		source.duplicateCullModeNoneBackfaces &&
+		polygon.sidesType === CULL_MODE_NONE &&
+		positiveSide !== null
+	) {
+		sides.push({
+			surfaceId: positiveSide.surfaceId,
+			uvIndices: positiveSide.uvIndices,
+			vertexOffsets: (vertexIndex) => [0, vertexIndex + 1, vertexIndex],
+			normalScale: -1,
 		});
 	}
 

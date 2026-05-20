@@ -150,6 +150,7 @@ function createPreparedLandblockPackAsset(
 					},
 					surfaceIds: [],
 					portals: [],
+					portalApertures: [],
 					staticObjectCount: 0,
 					renderGeometry: {
 						sourceId: index + 1,

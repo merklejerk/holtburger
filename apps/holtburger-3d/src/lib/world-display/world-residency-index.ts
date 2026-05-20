@@ -76,7 +76,7 @@ interface ResidencyCellItem {
 	bounds: Box3;
 	center: Vector3;
 	inverseCellRenderMatrix: Matrix4;
-	cellBsp: PreparedPolygonSetBspNode;
+	cellBsp: PreparedPolygonSetBspNode | null;
 }
 
 interface RenderAnchorInference {
@@ -290,36 +290,60 @@ function queryWorldResidencyIndex(
 		aabbCandidates,
 		landblockResidency.landblockRelativePosition,
 	);
+	const aabbFallbacks = filterAabbFallbackCandidates(aabbCandidates);
 	const nearest = selectNearestResidencyCell(
 		cellBspMatches,
 		landblockResidency.landblockRelativePosition,
 	);
-	if (!nearest) {
+	if (nearest) {
 		return {
 			context: {
-				kind: "outdoor-landblock",
-				landblockId: landblock.landblockId,
+				kind: "env-cell",
+				landblockId: nearest.landblockId,
+				envCellId: nearest.envCellId,
 			},
 			diagnostics: createResidencyQueryDiagnostics({
-				landblockId: landblock.landblockId,
+				landblockId: nearest.landblockId,
 				aabbCandidateCount: aabbCandidates.length,
 				cellBspMatchCount: cellBspMatches.length,
-				source: "outdoor",
+				aabbFallbackCount: aabbFallbacks.length,
+				source: "cell-bsp",
+			}),
+		};
+	}
+
+	const nearestFallback = selectNearestResidencyCell(
+		aabbFallbacks,
+		landblockResidency.landblockRelativePosition,
+	);
+	if (nearestFallback) {
+		return {
+			context: {
+				kind: "env-cell",
+				landblockId: nearestFallback.landblockId,
+				envCellId: nearestFallback.envCellId,
+			},
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: nearestFallback.landblockId,
+				aabbCandidateCount: aabbCandidates.length,
+				cellBspMatchCount: cellBspMatches.length,
+				aabbFallbackCount: aabbFallbacks.length,
+				source: "aabb-fallback",
 			}),
 		};
 	}
 
 	return {
 		context: {
-			kind: "env-cell",
-			landblockId: nearest.landblockId,
-			envCellId: nearest.envCellId,
+			kind: "outdoor-landblock",
+			landblockId: landblock.landblockId,
 		},
 		diagnostics: createResidencyQueryDiagnostics({
-			landblockId: nearest.landblockId,
+			landblockId: landblock.landblockId,
 			aabbCandidateCount: aabbCandidates.length,
 			cellBspMatchCount: cellBspMatches.length,
-			source: "cell-bsp",
+			aabbFallbackCount: aabbFallbacks.length,
+			source: "outdoor",
 		}),
 	};
 }
@@ -365,33 +389,57 @@ function queryDungeonResidencyIndex(
 		aabbCandidates,
 		landblockRelativePosition,
 	);
+	const aabbFallbacks = filterAabbFallbackCandidates(aabbCandidates);
 	const nearest = selectNearestResidencyCell(
 		cellBspMatches,
 		landblockRelativePosition,
 	);
-	if (!nearest) {
+	if (nearest) {
 		return {
-			context: { kind: "unknown", landblockId: landblock.landblockId },
+			context: {
+				kind: "env-cell",
+				landblockId: nearest.landblockId,
+				envCellId: nearest.envCellId,
+			},
 			diagnostics: createResidencyQueryDiagnostics({
-				landblockId: landblock.landblockId,
+				landblockId: nearest.landblockId,
 				aabbCandidateCount: aabbCandidates.length,
 				cellBspMatchCount: cellBspMatches.length,
-				source: "unknown",
+				aabbFallbackCount: aabbFallbacks.length,
+				source: "cell-bsp",
+			}),
+		};
+	}
+
+	const nearestFallback = selectNearestResidencyCell(
+		aabbFallbacks,
+		landblockRelativePosition,
+	);
+	if (nearestFallback) {
+		return {
+			context: {
+				kind: "env-cell",
+				landblockId: nearestFallback.landblockId,
+				envCellId: nearestFallback.envCellId,
+			},
+			diagnostics: createResidencyQueryDiagnostics({
+				landblockId: nearestFallback.landblockId,
+				aabbCandidateCount: aabbCandidates.length,
+				cellBspMatchCount: cellBspMatches.length,
+				aabbFallbackCount: aabbFallbacks.length,
+				source: "aabb-fallback",
 			}),
 		};
 	}
 
 	return {
-		context: {
-			kind: "env-cell",
-			landblockId: nearest.landblockId,
-			envCellId: nearest.envCellId,
-		},
+		context: { kind: "unknown", landblockId: landblock.landblockId },
 		diagnostics: createResidencyQueryDiagnostics({
-			landblockId: nearest.landblockId,
+			landblockId: landblock.landblockId,
 			aabbCandidateCount: aabbCandidates.length,
 			cellBspMatchCount: cellBspMatches.length,
-			source: "cell-bsp",
+			aabbFallbackCount: aabbFallbacks.length,
+			source: "unknown",
 		}),
 	};
 }
@@ -399,20 +447,18 @@ function queryDungeonResidencyIndex(
 function deriveResidencyCellItem(
 	cell: StructuredInteriorCell,
 ): ResidencyCellItem | null {
-	if (!cell.cellStructure) {
-		return null;
-	}
-
 	const cellRenderMatrix = buildAcPlacementMatrix(
 		cell.chunkLocalPlacement,
 		{ x: 0, y: 0, z: 0 },
 		{ x: 1, y: 1, z: 1 },
 	);
 	const bounds =
-		deriveConservativeResidencyCellBounds(
-			cell.cellStructure.vertexArray,
-			cellRenderMatrix,
-		) ?? deriveResidencyCellBounds(cell);
+		(cell.cellStructure
+			? deriveConservativeResidencyCellBounds(
+					cell.cellStructure.vertexArray,
+					cellRenderMatrix,
+				)
+			: null) ?? deriveResidencyCellBounds(cell);
 	if (!bounds) {
 		return null;
 	}
@@ -425,7 +471,7 @@ function deriveResidencyCellItem(
 		bounds,
 		center,
 		inverseCellRenderMatrix: cellRenderMatrix.clone().invert(),
-		cellBsp: cell.cellStructure.cellBsp,
+		cellBsp: cell.cellStructure?.cellBsp ?? null,
 	};
 }
 
@@ -452,12 +498,21 @@ function filterCellBspMatches(
 	landblockRelativePosition: Vector3,
 ): ResidencyCellItem[] {
 	return items.filter((item) => {
+		if (!item.cellBsp) {
+			return false;
+		}
 		const cellLocalPoint = landblockRenderPointToCellAcLocalPoint(
 			landblockRelativePosition,
 			item.inverseCellRenderMatrix,
 		);
 		return pointInsideCellBsp(item.cellBsp, cellLocalPoint);
 	});
+}
+
+function filterAabbFallbackCandidates(
+	items: readonly ResidencyCellItem[],
+): ResidencyCellItem[] {
+	return items.filter((item) => !item.cellBsp);
 }
 
 function transformRenderGeometryBounds(
@@ -580,11 +635,7 @@ function deriveChunkOffsetByLandblockId(
 	return new Map(
 		transforms.map((transform) => [
 			transform.chunkLandblockId,
-			new Vector3(
-				transform.offset.x,
-				transform.offset.y,
-				transform.offset.z,
-			),
+			new Vector3(transform.offset.x, transform.offset.y, transform.offset.z),
 		]),
 	);
 }

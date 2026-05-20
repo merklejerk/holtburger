@@ -10,7 +10,8 @@ use holtburger_content::{
     LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
     LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
     PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
-    PreparedPolygonSetRenderTriangle, PreparedSpatialItem, PreparedSpatialItemKind,
+    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
+    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
     PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
     PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
     SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
@@ -1452,9 +1453,39 @@ fn serialize_prepared_interior_cell(cell: &PreparedInteriorCell) -> serde_json::
                 "isOutsideTransition": portal.is_outside_transition,
             })
         }).collect::<Vec<_>>(),
+        "portalApertures": cell.portal_apertures.iter().map(serialize_prepared_portal_aperture).collect::<Vec<_>>(),
         "staticObjectCount": cell.static_object_count,
         "renderGeometry": serialize_prepared_polygon_set_render_geometry(&cell.render_geometry),
     })
+}
+
+fn serialize_prepared_portal_aperture(aperture: &PreparedPortalAperture) -> serde_json::Value {
+    serde_json::json!({
+        "portalId": aperture.portal_id,
+        "sourceIndex": aperture.source_index,
+        "polygonId": aperture.polygon_id,
+        "points": aperture.points.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
+        "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
+    })
+}
+
+fn serialize_prepared_portal_aperture_plane(
+    plane: &PreparedPortalAperturePlane,
+) -> serde_json::Value {
+    serde_json::json!({
+        "normal": serialize_prepared_vec3(&plane.normal),
+        "constant": plane.constant,
+        "source": serialize_prepared_portal_aperture_plane_source(plane.source),
+    })
+}
+
+fn serialize_prepared_portal_aperture_plane_source(
+    source: PreparedPortalAperturePlaneSource,
+) -> &'static str {
+    match source {
+        PreparedPortalAperturePlaneSource::DrawingBspPortal => "drawing-bsp-portal",
+        PreparedPortalAperturePlaneSource::DerivedFromRenderPoints => "derived-from-render-points",
+    }
 }
 
 fn serialize_prepared_static_instance(instance: &PreparedStaticInstance) -> serde_json::Value {

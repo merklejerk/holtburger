@@ -255,8 +255,23 @@ export interface PreparedLandblockInteriorCell {
 	localPlacement: PlacementTransformDto;
 	surfaceIds: number[];
 	portals: PreparedLandblockCellPortal[];
+	portalApertures: PreparedPortalAperture[];
 	staticObjectCount: number;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
+}
+
+export interface PreparedPortalAperture {
+	portalId: string;
+	sourceIndex: number;
+	polygonId: number;
+	points: Vec3Dto[];
+	plane: PreparedPortalAperturePlane | null;
+}
+
+export interface PreparedPortalAperturePlane {
+	normal: Vec3Dto;
+	constant: number;
+	source: "drawing-bsp-portal" | "derived-from-render-points";
 }
 
 export type PreparedLandblockStaticInstanceKind =

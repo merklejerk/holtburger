@@ -91,6 +91,48 @@ describe("portal apertures", () => {
 		});
 	});
 
+	it("uses pack-prepared aperture geometry without legacy cell structures", () => {
+		const cell = {
+			...createStructuredInteriorCell(0x016c0155, 0x016cffff),
+			cellStructure: null,
+			portalApertures: [
+				{
+					portalId: "portal-16c0155",
+					sourceIndex: 0,
+					polygonId: 7,
+					points: [
+						{ x: 0, y: 2, z: -1 },
+						{ x: 3, y: 2, z: -1 },
+						{ x: 3, y: 5, z: -1 },
+					],
+					plane: {
+						normal: { x: 0, y: 0, z: 1 },
+						constant: -1,
+						source: "derived-from-render-points" as const,
+					},
+				},
+			],
+		};
+
+		const apertures = derivePortalAperturesFromStructuredInteriorScene(
+			createStructuredInteriorSceneModel([cell]),
+		);
+
+		expect(apertures[0]).toMatchObject({
+			id: "portal-16c0155",
+			points: [
+				{ x: 0, y: 2, z: -1 },
+				{ x: 3, y: 2, z: -1 },
+				{ x: 3, y: 5, z: -1 },
+			],
+			plane: {
+				normal: { x: 0, y: 0, z: 1 },
+				constant: -1,
+				source: "derived-from-render-points",
+			},
+		});
+	});
+
 	it("matches source drawing-BSP portal planes by polygon id when portal index differs", () => {
 		const cell = createStructuredInteriorCell(0x016c0155, 0x016c0156);
 		if (!cell.cellStructure) {
@@ -219,6 +261,7 @@ function createStructuredInteriorCell(
 					targetSuffix === 0 ? 0 : (envCellId & 0xffff0000) | targetSuffix,
 			},
 		],
+		portalApertures: [],
 		staticObjectCount: 0,
 		cellStructure: {
 			id: 1,

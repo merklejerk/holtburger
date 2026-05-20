@@ -10,6 +10,7 @@ import type {
 	PreparedIndoorCellPortal,
 	PreparedLandblockInteriorCell,
 	PreparedPolygonSetRenderGeometry,
+	PreparedPortalAperture,
 } from "../assets/types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
@@ -42,6 +43,7 @@ export interface StructuredInteriorCell {
 	surfaceIds: number[];
 	portalCount: number;
 	portals: PreparedIndoorCellPortal[];
+	portalApertures: PreparedPortalAperture[];
 	staticObjectCount: number;
 	cellStructure: PreparedEnvironmentCellStruct | null;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
@@ -200,6 +202,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 						portal.targetEnvCellId ??
 						(envCellId & 0xffff0000) | portal.otherCellId,
 				})),
+				portalApertures: packCell.portalApertures,
 				staticObjectCount: packCell.staticObjectCount,
 				cellStructure: null,
 				renderGeometry: packCell.renderGeometry,
@@ -258,6 +261,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 			surfaceIds: envCellAsset.payload.surfaceIds,
 			portalCount: envCellAsset.payload.portalCount,
 			portals: envCellAsset.payload.portals,
+			portalApertures: [],
 			staticObjectCount: envCellAsset.payload.staticObjectCount,
 			cellStructure,
 			renderGeometry: cellStructure.renderGeometry,

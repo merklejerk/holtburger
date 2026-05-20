@@ -345,6 +345,20 @@ const preparedPolygonSetRenderGeometryDtoSchema = z.object({
 	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }).nullable(),
 });
 
+const preparedPortalAperturePlaneDtoSchema = z.object({
+	normal: vec3DtoSchema,
+	constant: z.number().finite(),
+	source: z.enum(["drawing-bsp-portal", "derived-from-render-points"]),
+});
+
+const preparedPortalApertureDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	polygonId: z.number().int().nonnegative(),
+	points: z.array(vec3DtoSchema),
+	plane: preparedPortalAperturePlaneDtoSchema.nullable(),
+});
+
 const preparedLandblockInteriorCellDtoSchema = z.object({
 	envCellId: z.number().int().nonnegative(),
 	environmentId: z.number().int().nonnegative(),
@@ -352,6 +366,7 @@ const preparedLandblockInteriorCellDtoSchema = z.object({
 	localPlacement: placementTransformDtoSchema,
 	surfaceIds: z.array(z.number().int().nonnegative()),
 	portals: z.array(landblockPackEnvCellPortalDtoSchema),
+	portalApertures: z.array(preparedPortalApertureDtoSchema),
 	staticObjectCount: z.number().int().nonnegative(),
 	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 });

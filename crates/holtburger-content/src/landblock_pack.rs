@@ -150,8 +150,31 @@ pub struct PreparedInteriorCell {
     pub local_placement: Frame,
     pub surface_ids: Vec<u32>,
     pub portals: Vec<EnvCellPortalFact>,
+    pub portal_apertures: Vec<PreparedPortalAperture>,
     pub static_object_count: usize,
     pub render_geometry: PreparedPolygonSetRenderGeometry,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedPortalAperture {
+    pub portal_id: String,
+    pub source_index: usize,
+    pub polygon_id: u16,
+    pub points: Vec<PreparedVec3>,
+    pub plane: Option<PreparedPortalAperturePlane>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreparedPortalAperturePlane {
+    pub normal: PreparedVec3,
+    pub constant: f32,
+    pub source: PreparedPortalAperturePlaneSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedPortalAperturePlaneSource {
+    DrawingBspPortal,
+    DerivedFromRenderPoints,
 }
 
 #[derive(Debug, Clone)]
@@ -1491,6 +1514,35 @@ fn multiply_prepared_vec3(left: PreparedVec3, right: PreparedVec3) -> PreparedVe
     }
 }
 
+fn subtract_prepared_vec3(left: PreparedVec3, right: PreparedVec3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: left.x - right.x,
+        y: left.y - right.y,
+        z: left.z - right.z,
+    }
+}
+
+fn cross_prepared_vec3(left: PreparedVec3, right: PreparedVec3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: left.y * right.z - left.z * right.y,
+        y: left.z * right.x - left.x * right.z,
+        z: left.x * right.y - left.y * right.x,
+    }
+}
+
+fn normalize_prepared_vec3(vector: PreparedVec3) -> Option<PreparedVec3> {
+    let length = (vector.x * vector.x + vector.y * vector.y + vector.z * vector.z).sqrt();
+    (length != 0.0).then_some(PreparedVec3 {
+        x: vector.x / length,
+        y: vector.y / length,
+        z: vector.z / length,
+    })
+}
+
+fn dot_prepared_vec3(left: PreparedVec3, right: PreparedVec3) -> f32 {
+    left.x * right.x + left.y * right.y + left.z * right.z
+}
+
 fn conservative_instance_bounds(
     placement: &Frame,
     source_bounds: PreparedAabb,
@@ -1654,6 +1706,7 @@ fn build_prepared_interior_cells(interiors: &LandblockInteriorFacts) -> Vec<Prep
             continue;
         }
 
+        let portal_apertures = build_prepared_portal_apertures(cell_structure, &env_cell.portals);
         cells.push(PreparedInteriorCell {
             env_cell_id: env_cell.env_cell_id,
             environment_id,
@@ -1661,11 +1714,111 @@ fn build_prepared_interior_cells(interiors: &LandblockInteriorFacts) -> Vec<Prep
             local_placement: env_cell.local_placement.clone(),
             surface_ids: env_cell.surface_ids.clone(),
             portals: env_cell.portals.clone(),
+            portal_apertures,
             static_object_count: env_cell.static_objects.len(),
             render_geometry,
         });
     }
     cells
+}
+
+fn build_prepared_portal_apertures(
+    cell_structure: &CellStruct,
+    portals: &[EnvCellPortalFact],
+) -> Vec<PreparedPortalAperture> {
+    portals
+        .iter()
+        .map(|portal| {
+            let points = cell_structure
+                .polygons
+                .get(&portal.polygon_id)
+                .map(|polygon| build_portal_polygon_points(&cell_structure.vertex_array, polygon))
+                .unwrap_or_default();
+            let plane =
+                derive_portal_aperture_source_plane(cell_structure.drawing_bsp.as_ref(), portal)
+                    .or_else(|| derive_portal_aperture_plane_from_points(&points));
+
+            PreparedPortalAperture {
+                portal_id: portal.portal_id.clone(),
+                source_index: portal.source_index,
+                polygon_id: portal.polygon_id,
+                points,
+                plane,
+            }
+        })
+        .collect()
+}
+
+fn build_portal_polygon_points(
+    vertex_array: &holtburger_dat::graphics::CVertexArray,
+    polygon: &Polygon,
+) -> Vec<PreparedVec3> {
+    polygon
+        .vertex_ids
+        .iter()
+        .filter_map(|vertex_id| vertex_array.vertices.get(vertex_id))
+        .map(|vertex| convert_ac_vector_to_render_space(vertex.origin))
+        .collect()
+}
+
+fn derive_portal_aperture_source_plane(
+    drawing_bsp: Option<&BspNode>,
+    portal: &EnvCellPortalFact,
+) -> Option<PreparedPortalAperturePlane> {
+    let source_plane = find_portal_plane_by_portal_reference(drawing_bsp?, portal)?;
+    Some(PreparedPortalAperturePlane {
+        normal: convert_ac_vector_to_render_space(source_plane.normal),
+        constant: -source_plane.d,
+        source: PreparedPortalAperturePlaneSource::DrawingBspPortal,
+    })
+}
+
+fn find_portal_plane_by_portal_reference<'a>(
+    node: &'a BspNode,
+    portal: &EnvCellPortalFact,
+) -> Option<&'a holtburger_common::Plane> {
+    match node {
+        BspNode::Port(bsp_portal) => {
+            let has_portal_poly = bsp_portal.portal_polys.iter().any(|portal_poly| {
+                portal_poly.portal_index as usize == portal.source_index
+                    || (portal_poly.poly_id >= 0 && portal_poly.poly_id as u16 == portal.polygon_id)
+            });
+            if has_portal_poly {
+                return Some(&bsp_portal.plane);
+            }
+
+            find_portal_plane_by_portal_reference(&bsp_portal.pos, portal)
+                .or_else(|| find_portal_plane_by_portal_reference(&bsp_portal.neg, portal))
+        }
+        BspNode::Internal(internal) => internal
+            .pos
+            .as_deref()
+            .and_then(|pos| find_portal_plane_by_portal_reference(pos, portal))
+            .or_else(|| {
+                internal
+                    .neg
+                    .as_deref()
+                    .and_then(|neg| find_portal_plane_by_portal_reference(neg, portal))
+            }),
+        BspNode::Leaf(_) => None,
+    }
+}
+
+fn derive_portal_aperture_plane_from_points(
+    points: &[PreparedVec3],
+) -> Option<PreparedPortalAperturePlane> {
+    let first = *points.first()?;
+    let second = *points.get(1)?;
+    let third = *points.get(2)?;
+    let edge_a = subtract_prepared_vec3(second, first);
+    let edge_b = subtract_prepared_vec3(third, first);
+    let normal = normalize_prepared_vec3(cross_prepared_vec3(edge_a, edge_b))?;
+
+    Some(PreparedPortalAperturePlane {
+        normal,
+        constant: dot_prepared_vec3(normal, first),
+        source: PreparedPortalAperturePlaneSource::DerivedFromRenderPoints,
+    })
 }
 
 fn build_cell_structure_render_geometry(

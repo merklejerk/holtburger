@@ -8,12 +8,14 @@ export interface OutdoorSceneInterest {
 	terrainRadius: number;
 	buildingRadius: number;
 	detailRadius: number;
+	envCellRadius: number;
 }
 
 interface OutdoorSceneInterestLandblocks {
 	terrainLandblockIds: readonly number[];
 	buildingLandblockIds: readonly number[];
 	detailLandblockIds: readonly number[];
+	envCellLandblockIds: readonly number[];
 }
 
 export interface NormalizedOutdoorSceneInterest
@@ -24,6 +26,7 @@ export const MAX_OUTDOOR_SCENE_LOD_RADIUS = 8;
 export const DEFAULT_TERRAIN_LOD_RADIUS = 2;
 export const DEFAULT_BUILDING_LOD_RADIUS = 1;
 export const DEFAULT_DETAIL_LOD_RADIUS = 1;
+export const DEFAULT_ENV_CELL_LOD_RADIUS = 1;
 
 export function createDefaultOutdoorSceneInterest(
 	focusLandblockId: number,
@@ -33,6 +36,7 @@ export function createDefaultOutdoorSceneInterest(
 		terrainRadius: DEFAULT_TERRAIN_LOD_RADIUS,
 		buildingRadius: DEFAULT_BUILDING_LOD_RADIUS,
 		detailRadius: DEFAULT_DETAIL_LOD_RADIUS,
+		envCellRadius: DEFAULT_ENV_CELL_LOD_RADIUS,
 	});
 }
 
@@ -48,6 +52,10 @@ export function deriveOutdoorSceneInterest(
 		clampOutdoorSceneLodRadius(interest.detailRadius),
 		buildingRadius,
 	);
+	const envCellRadius = Math.min(
+		clampOutdoorSceneLodRadius(interest.envCellRadius),
+		terrainRadius,
+	);
 	const focusLandblockId = normalizeOutdoorLandblockId(
 		interest.focusLandblockId,
 	);
@@ -57,6 +65,7 @@ export function deriveOutdoorSceneInterest(
 		terrainRadius,
 		buildingRadius,
 		detailRadius,
+		envCellRadius,
 		terrainLandblockIds: buildOutdoorCoverageLandblockIds(
 			focusLandblockId,
 			terrainRadius,
@@ -68,6 +77,10 @@ export function deriveOutdoorSceneInterest(
 		detailLandblockIds: buildOutdoorCoverageLandblockIds(
 			focusLandblockId,
 			detailRadius,
+		),
+		envCellLandblockIds: buildOutdoorCoverageLandblockIds(
+			focusLandblockId,
+			envCellRadius,
 		),
 	};
 }

@@ -607,7 +607,7 @@ describe("asset channel controller", () => {
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
 					},
 					visibleCellIds: [0x016c0156],
-					landblockEnvCellIds: [],
+					landblockEnvCellIds: [0x016c0155, 0x016c0156],
 					seenOutside: false,
 					surfaceIds: [],
 					portalCount: 0,
@@ -646,7 +646,7 @@ describe("asset channel controller", () => {
 		]);
 	});
 
-	it("recursively expands browser-selected indoor coverage as visible cells are prepared", () => {
+	it("expands browser-selected indoor coverage from landblock cell membership", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch(),
 			{
@@ -664,6 +664,7 @@ describe("asset channel controller", () => {
 					1,
 					[],
 					[0x016c0156],
+					[0x016c0155, 0x016c0156, 0x016c0157],
 				),
 				"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
 					0x016c0156,
@@ -2407,6 +2408,7 @@ function createPreparedIndoorEnvCellAsset(
 	cellStructureId: number,
 	staticSourceAssetIds: string[] = [],
 	visibleCellIds: number[] = [],
+	landblockEnvCellIds: number[] = [],
 ): PreparedAssetRecord {
 	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
 	return prepareAssetPayload(
@@ -2431,7 +2433,7 @@ function createPreparedIndoorEnvCellAsset(
 					orientation: { w: 1, x: 0, y: 0, z: 0 },
 				},
 				visibleCellIds,
-				landblockEnvCellIds: [],
+				landblockEnvCellIds,
 				seenOutside: true,
 				surfaceIds: [],
 				portalCount: 0,

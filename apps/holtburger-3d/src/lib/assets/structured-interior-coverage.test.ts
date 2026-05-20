@@ -2,25 +2,28 @@ import { describe, expect, it } from "vitest";
 
 import type { PreparedAssetRecord } from "./types";
 import {
-	createDefaultStructuredInteriorCoverageOptions,
+	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
 	formatIndoorEnvCellAssetId,
 } from "./structured-interior-coverage";
 
-const DEFAULT_COVERAGE_OPTIONS =
-	createDefaultStructuredInteriorCoverageOptions();
-
 describe("structured interior coverage", () => {
-	it("keeps direct membership from expanding through prepared visible cells", () => {
-		const preparedByAssetId = {
-			[formatIndoorEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(0x016c0155, [0x016c0156]),
-		};
-
+	it("keeps direct membership exact and sorted", () => {
 		const coverage = deriveStructuredInteriorCoverage(
-			{ kind: "direct", envCellIds: [0x016c0155] },
-			preparedByAssetId,
-			DEFAULT_COVERAGE_OPTIONS,
+			{ kind: "direct", envCellIds: [0x016c0157, 0x016c0155, 0x016c0155] },
+			{},
+		);
+
+		expect(coverage).toEqual({
+			envCellIds: [0x016c0155, 0x016c0157],
+			truncated: false,
+		});
+	});
+
+	it("starts landblock closure with only the seed when metadata is missing", () => {
+		const coverage = deriveStructuredInteriorCoverage(
+			{ kind: "landblock-closure", seedEnvCellIds: [0x016c0155] },
+			{},
 		);
 
 		expect(coverage).toEqual({
@@ -29,76 +32,65 @@ describe("structured interior coverage", () => {
 		});
 	});
 
-	it("starts visible-cell closure with only the seed when metadata is missing", () => {
+	it("expands prepared seeds to their full landblock env-cell sets", () => {
+		const preparedByAssetId = {
+			[formatIndoorEnvCellAssetId(0x016c0155)]:
+				createPreparedIndoorEnvCellAsset(0x016c0155, [
+					0x016c0155,
+					0x016c0156,
+					0x016c0157,
+				]),
+			[formatIndoorEnvCellAssetId(0x02010100)]:
+				createPreparedIndoorEnvCellAsset(0x02010100, [
+					0x02010100,
+					0x02010101,
+				]),
+		};
+
 		const coverage = deriveStructuredInteriorCoverage(
-			{ kind: "visible-cell-closure", seedEnvCellIds: [0x016c0155] },
-			{},
-			DEFAULT_COVERAGE_OPTIONS,
+			{
+				kind: "landblock-closure",
+				seedEnvCellIds: [0x02010100, 0x016c0155],
+			},
+			preparedByAssetId,
+		);
+
+		expect(coverage).toEqual({
+			envCellIds: [
+				0x016c0155, 0x016c0156, 0x016c0157, 0x02010100, 0x02010101,
+			],
+			truncated: false,
+		});
+	});
+
+	it("does not walk visible-cell lists as a fallback", () => {
+		const preparedByAssetId = {
+			[formatIndoorEnvCellAssetId(0x016c0155)]:
+				createPreparedIndoorEnvCellAsset(0x016c0155, [], [0x016c0156]),
+		};
+
+		const coverage = deriveStructuredInteriorCoverage(
+			{ kind: "landblock-closure", seedEnvCellIds: [0x016c0155] },
+			preparedByAssetId,
 		);
 
 		expect(coverage.envCellIds).toEqual([0x016c0155]);
-		expect(coverage.truncated).toBe(false);
 	});
 
-	it("recursively expands visible-cell closure as prepared metadata arrives", () => {
-		const preparedByAssetId = {
-			[formatIndoorEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(0x016c0155, [0x016c0156]),
-			[formatIndoorEnvCellAssetId(0x016c0156)]:
-				createPreparedIndoorEnvCellAsset(0x016c0156, [0x016c0157]),
-		};
-
-		const coverage = deriveStructuredInteriorCoverage(
-			{ kind: "visible-cell-closure", seedEnvCellIds: [0x016c0155] },
-			preparedByAssetId,
-			DEFAULT_COVERAGE_OPTIONS,
-		);
-
-		expect(coverage.envCellIds).toEqual([0x016c0155, 0x016c0156, 0x016c0157]);
-		expect(coverage.truncated).toBe(false);
-	});
-
-	it("truncates visible-cell closure when traversal reaches the configured depth", () => {
-		const preparedByAssetId = {
-			[formatIndoorEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(0x016c0155, [0x016c0156]),
-			[formatIndoorEnvCellAssetId(0x016c0156)]:
-				createPreparedIndoorEnvCellAsset(0x016c0156, [0x016c0157]),
-		};
-
-		const coverage = deriveStructuredInteriorCoverage(
-			{ kind: "visible-cell-closure", seedEnvCellIds: [0x016c0155] },
-			preparedByAssetId,
-			{ maxEnvCells: 10, maxVisibleCellDepth: 1 },
-		);
-
-		expect(coverage.envCellIds).toEqual([0x016c0155, 0x016c0156]);
-		expect(coverage.truncated).toBe(true);
-	});
-
-	it("truncates visible-cell closure deterministically at the configured max", () => {
-		const preparedByAssetId = {
-			[formatIndoorEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(
-					0x016c0155,
-					[0x016c0158, 0x016c0156, 0x016c0157],
-				),
-		};
-
-		const coverage = deriveStructuredInteriorCoverage(
-			{ kind: "visible-cell-closure", seedEnvCellIds: [0x016c0155] },
-			preparedByAssetId,
-			{ maxEnvCells: 3, maxVisibleCellDepth: 16 },
-		);
-
-		expect(coverage.envCellIds).toEqual([0x016c0155, 0x016c0156, 0x016c0157]);
-		expect(coverage.truncated).toBe(true);
+	it("uses landblock closure for browser-focused env cells", () => {
+		expect(
+			deriveBrowserFocusedStructuredInteriorMembershipPolicy(0x8a040100),
+		).toEqual({
+			kind: "landblock-closure",
+			seedEnvCellIds: [0x8a040100],
+		});
 	});
 });
 
 function createPreparedIndoorEnvCellAsset(
 	envCellId: number,
-	visibleCellIds: number[],
+	landblockEnvCellIds: number[],
+	visibleCellIds: number[] = [],
 ): PreparedAssetRecord {
 	const assetId = formatIndoorEnvCellAssetId(envCellId);
 	return {
@@ -109,6 +101,7 @@ function createPreparedIndoorEnvCellAsset(
 			payloadKind: "json",
 			payload: {},
 		},
+		preparedAt: "2026-05-19T00:00:00.000Z",
 		payload: {
 			kind: "indoor-env-cell",
 			sourceAssetKind: "env-cell",
@@ -131,7 +124,7 @@ function createPreparedIndoorEnvCellAsset(
 				orientation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			visibleCellIds,
-			landblockEnvCellIds: [],
+			landblockEnvCellIds,
 			seenOutside: false,
 			surfaceIds: [],
 			portalCount: 0,
@@ -139,6 +132,5 @@ function createPreparedIndoorEnvCellAsset(
 			staticObjectCount: 0,
 			staticObjects: [],
 		},
-		preparedAt: "2026-05-15T00:00:00.000Z",
 	};
 }

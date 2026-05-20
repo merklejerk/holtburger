@@ -10,6 +10,7 @@ import {
 	clampOutdoorSceneLodRadius,
 	DEFAULT_BUILDING_LOD_RADIUS,
 	DEFAULT_DETAIL_LOD_RADIUS,
+	DEFAULT_ENV_CELL_LOD_RADIUS,
 	DEFAULT_TERRAIN_LOD_RADIUS,
 	MAX_OUTDOOR_SCENE_LOD_RADIUS,
 	MIN_OUTDOOR_SCENE_LOD_RADIUS,
@@ -63,8 +64,7 @@ export interface BrowserModeState {
 	terrainLodRadius: number;
 	buildingLodRadius: number;
 	detailLodRadius: number;
-	structuredInteriorMaxEnvCells: number;
-	structuredInteriorMaxVisibleCellDepth: number;
+	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
 	landblockInputMode: BrowserLandblockInputMode;
 	showPortalPolygons: boolean;
@@ -81,18 +81,9 @@ const LANDBLOCK_PREFIX_INPUT_PATTERN = /^\s*(?:0x)?([0-9a-f]{4})\s*$/i;
 const DEFAULT_BROWSER_DESTINATION = parseBrowserLocationInput(
 	"33.50S, 72.80E, 0.0Z",
 );
-const DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1024;
-const DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 16;
 export const MIN_BROWSER_LOD_RADIUS = MIN_OUTDOOR_SCENE_LOD_RADIUS;
 export const MAX_BROWSER_LOD_RADIUS = MAX_OUTDOOR_SCENE_LOD_RADIUS;
-export const MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 1;
-export const MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS = 8192;
-export const MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 0;
-export const MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH = 128;
-export {
-	MIN_TRANSITION_PORTAL_MAX_DEPTH,
-	MAX_TRANSITION_PORTAL_MAX_DEPTH,
-};
+export { MIN_TRANSITION_PORTAL_MAX_DEPTH, MAX_TRANSITION_PORTAL_MAX_DEPTH };
 
 export function createBrowserModeState(): BrowserModeState {
 	return {
@@ -103,9 +94,7 @@ export function createBrowserModeState(): BrowserModeState {
 		terrainLodRadius: DEFAULT_TERRAIN_LOD_RADIUS,
 		buildingLodRadius: DEFAULT_BUILDING_LOD_RADIUS,
 		detailLodRadius: DEFAULT_DETAIL_LOD_RADIUS,
-		structuredInteriorMaxEnvCells: DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
-		structuredInteriorMaxVisibleCellDepth:
-			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		envCellLodRadius: DEFAULT_ENV_CELL_LOD_RADIUS,
 		transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
 		landblockInputMode: "dungeon",
 		showPortalPolygons: false,
@@ -218,6 +207,10 @@ export function updateTerrainLodRadius(
 			browserMode.detailLodRadius,
 			nextBuildingLodRadius,
 		),
+		envCellLodRadius: Math.min(
+			browserMode.envCellLodRadius,
+			nextTerrainLodRadius,
+		),
 	};
 }
 
@@ -253,32 +246,15 @@ export function updateDetailLodRadius(
 	};
 }
 
-export function updateStructuredInteriorMaxEnvCells(
+export function updateEnvCellLodRadius(
 	browserMode: BrowserModeState,
-	maxEnvCells: number,
+	envCellLodRadius: number,
 ): BrowserModeState {
 	return {
 		...browserMode,
-		structuredInteriorMaxEnvCells: clampCoverageSetting(
-			maxEnvCells,
-			MIN_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
-			MAX_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
-			DEFAULT_STRUCTURED_INTERIOR_MAX_ENV_CELLS,
-		),
-	};
-}
-
-export function updateStructuredInteriorMaxVisibleCellDepth(
-	browserMode: BrowserModeState,
-	maxVisibleCellDepth: number,
-): BrowserModeState {
-	return {
-		...browserMode,
-		structuredInteriorMaxVisibleCellDepth: clampCoverageSetting(
-			maxVisibleCellDepth,
-			MIN_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
-			MAX_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
-			DEFAULT_STRUCTURED_INTERIOR_MAX_VISIBLE_CELL_DEPTH,
+		envCellLodRadius: Math.min(
+			clampOutdoorSceneLodRadius(envCellLodRadius),
+			browserMode.terrainLodRadius,
 		),
 	};
 }
@@ -346,8 +322,7 @@ export function previewBrowserLocation(
 	if (!parsedLocation) {
 		return {
 			...browserMode,
-			validationMessage:
-				"Use the AC-style location format: 100.40S, 101.55W.",
+			validationMessage: "Use the AC-style location format: 100.40S, 101.55W.",
 			destination: null,
 			page: "location-entry",
 		};
@@ -361,9 +336,7 @@ export function previewBrowserLocation(
 		terrainLodRadius: browserMode.terrainLodRadius,
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
-		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
-		structuredInteriorMaxVisibleCellDepth:
-			browserMode.structuredInteriorMaxVisibleCellDepth,
+		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
@@ -402,9 +375,7 @@ export function selectRuntimeResidencyDestination(
 		terrainLodRadius: browserMode.terrainLodRadius,
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
-		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
-		structuredInteriorMaxVisibleCellDepth:
-			browserMode.structuredInteriorMaxVisibleCellDepth,
+		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
@@ -436,9 +407,7 @@ export function selectBrowserLandblockDestination(
 		terrainLodRadius: browserMode.terrainLodRadius,
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
-		structuredInteriorMaxEnvCells: browserMode.structuredInteriorMaxEnvCells,
-		structuredInteriorMaxVisibleCellDepth:
-			browserMode.structuredInteriorMaxVisibleCellDepth,
+		envCellLodRadius: browserMode.envCellLodRadius,
 		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
 		landblockInputMode: browserMode.landblockInputMode,
 		showPortalPolygons: browserMode.showPortalPolygons,
@@ -603,17 +572,4 @@ function formatBrowserLocationLabel(
 
 function clampLandblockAxis(value: number): number {
 	return Math.min(Math.max(value, 0), 0xfe);
-}
-
-function clampCoverageSetting(
-	value: number,
-	min: number,
-	max: number,
-	defaultValue: number,
-): number {
-	if (!Number.isFinite(value)) {
-		return defaultValue;
-	}
-
-	return Math.min(Math.max(Math.trunc(value), min), max);
 }

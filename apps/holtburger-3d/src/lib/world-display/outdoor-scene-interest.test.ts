@@ -13,12 +13,14 @@ describe("deriveOutdoorSceneInterest", () => {
 			terrainRadius: 2,
 			buildingRadius: 1,
 			detailRadius: 0,
+			envCellRadius: 1,
 		});
 
 		expect(interest.focusLandblockId).toBe(0x0505ffff);
 		expect(interest.terrainLandblockIds).toHaveLength(25);
 		expect(interest.buildingLandblockIds).toHaveLength(9);
 		expect(interest.detailLandblockIds).toEqual([0x0505ffff]);
+		expect(interest.envCellLandblockIds).toHaveLength(9);
 		expect(interest.terrainLandblockIds[0]).toBe(0x0505ffff);
 		expect(interest.buildingLandblockIds[0]).toBe(0x0505ffff);
 	});
@@ -29,14 +31,32 @@ describe("deriveOutdoorSceneInterest", () => {
 			terrainRadius: 1.9,
 			buildingRadius: 4,
 			detailRadius: 3,
+			envCellRadius: 5,
 		});
 
 		expect(interest.terrainRadius).toBe(1);
 		expect(interest.buildingRadius).toBe(1);
 		expect(interest.detailRadius).toBe(1);
+		expect(interest.envCellRadius).toBe(1);
 		expect(interest.terrainLandblockIds).toHaveLength(9);
 		expect(interest.buildingLandblockIds).toHaveLength(9);
 		expect(interest.detailLandblockIds).toHaveLength(9);
+		expect(interest.envCellLandblockIds).toHaveLength(9);
+	});
+
+	it("allows env-cell interest to extend beyond building interest", () => {
+		const interest = deriveOutdoorSceneInterest({
+			focusLandblockId: 0x0505ffff,
+			terrainRadius: 2,
+			buildingRadius: 0,
+			detailRadius: 0,
+			envCellRadius: 2,
+		});
+
+		expect(interest.buildingRadius).toBe(0);
+		expect(interest.envCellRadius).toBe(2);
+		expect(interest.buildingLandblockIds).toHaveLength(1);
+		expect(interest.envCellLandblockIds).toHaveLength(25);
 	});
 
 	it("omits map-edge landblocks outside valid outdoor coordinates", () => {
@@ -45,6 +65,7 @@ describe("deriveOutdoorSceneInterest", () => {
 			terrainRadius: 1,
 			buildingRadius: 1,
 			detailRadius: 1,
+			envCellRadius: 1,
 		});
 
 		expect(interest.terrainLandblockIds).toEqual([

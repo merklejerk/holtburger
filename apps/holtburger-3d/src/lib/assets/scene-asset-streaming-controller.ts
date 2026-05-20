@@ -34,8 +34,7 @@ export interface SceneAssetStreamingInput {
 	terrainLodRadius: number;
 	buildingLodRadius: number;
 	detailLodRadius: number;
-	structuredInteriorMaxEnvCells: number;
-	structuredInteriorMaxVisibleCellDepth: number;
+	envCellLodRadius: number;
 	preparedByAssetId: Record<string, PreparedAssetRecord>;
 }
 
@@ -97,9 +96,7 @@ export class SceneAssetStreamingController {
 					terrainLodRadius: input.terrainLodRadius,
 					buildingLodRadius: input.buildingLodRadius,
 					detailLodRadius: input.detailLodRadius,
-					structuredInteriorMaxEnvCells: input.structuredInteriorMaxEnvCells,
-					structuredInteriorMaxVisibleCellDepth:
-						input.structuredInteriorMaxVisibleCellDepth,
+					envCellLodRadius: input.envCellLodRadius,
 					runtimeTick: input.runtimeBatch.tick,
 				});
 
@@ -142,10 +139,7 @@ export class SceneAssetStreamingController {
 				terrainRadius: input.terrainLodRadius,
 				buildingRadius: input.buildingLodRadius,
 				detailRadius: input.detailLodRadius,
-				structuredInterior: {
-					maxEnvCells: input.structuredInteriorMaxEnvCells,
-					maxVisibleCellDepth: input.structuredInteriorMaxVisibleCellDepth,
-				},
+				envCellRadius: input.envCellLodRadius,
 			},
 		);
 
@@ -156,9 +150,7 @@ export class SceneAssetStreamingController {
 			terrainLodRadius: input.terrainLodRadius,
 			buildingLodRadius: input.buildingLodRadius,
 			detailLodRadius: input.detailLodRadius,
-			structuredInteriorMaxEnvCells: input.structuredInteriorMaxEnvCells,
-			structuredInteriorMaxVisibleCellDepth:
-				input.structuredInteriorMaxVisibleCellDepth,
+			envCellLodRadius: input.envCellLodRadius,
 			preparedCount: Object.keys(preparedByAssetId).length,
 			inFlightAssetIds: [...this.inFlightAssetIds],
 			requestAssetIds: requests.map((request) => request.assetId),
@@ -198,10 +190,7 @@ export class SceneAssetStreamingController {
 					terrainRadius: input.terrainLodRadius,
 					buildingRadius: input.buildingLodRadius,
 					detailRadius: input.detailLodRadius,
-					structuredInterior: {
-						maxEnvCells: input.structuredInteriorMaxEnvCells,
-						maxVisibleCellDepth: input.structuredInteriorMaxVisibleCellDepth,
-					},
+					envCellRadius: input.envCellLodRadius,
 				},
 			),
 			inFlightAssetIds: [...this.inFlightAssetIds],
@@ -274,8 +263,7 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`terrain-${input.terrainLodRadius}`,
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
-		`interior-cells-${input.structuredInteriorMaxEnvCells}`,
-		`interior-depth-${input.structuredInteriorMaxVisibleCellDepth}`,
+		`env-cells-${input.envCellLodRadius}`,
 		`prepared-${preparedSceneAssetKey}`,
 	].join(":");
 

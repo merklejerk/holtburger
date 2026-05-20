@@ -118,7 +118,7 @@ describe("asset response dependencies", () => {
 				interiorCells: [],
 				staticMeshes: [],
 				spatialItems: [],
-				staticInstanceBvh: null,
+				staticLandblockBvh: null,
 			},
 			dependencies: {
 				cellDatIds: [0xda55ffff, 0xda55fffe],

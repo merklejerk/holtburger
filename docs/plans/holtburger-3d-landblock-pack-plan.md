@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 4 implemented. Later phases remain planning.
+Status: Phase 5 implemented. Later phases remain planning.
 
 ## Context
 
@@ -838,6 +838,8 @@ Exit criteria:
 
 ### Phase 5: Add Pack Spatial Items And Full Landblock BVH
 
+Status: completed.
+
 - Emit a flat spatial item list first if needed.
 - Include terrain, env cells, portals, outdoor statics, buildings, and indoor statics as separate item kinds where bounds are available.
 - Build one Rust primary static landblock BVH over all immutable spatial items with valid bounds.
@@ -854,12 +856,60 @@ Exit criteria:
 - Terrain grid, cell BSP, and portal geometry remain available for domain-specific narrowphase checks after BVH candidate selection.
 - Missing bounds degrade to render-only, not broken rendering.
 
+Implemented:
+
+- `LandblockPreparedFacts` now emits typed `spatialItems` and `staticLandblockBvh` products.
+- Rust creates spatial items for terrain, prepared env cells, outdoor statics, buildings, and indoor statics where bounds are available.
+- Rust builds one mixed static-landblock BVH over all valid spatial items. BVH nodes carry bounds, child indices, leaf item indices, and a kind mask for future masked broadphase queries.
+- Static BVH items are part-level for renderable statics so picking can resolve a concrete gfx part while UI selection can still recover the owning static instance from the item id and owner/source fields.
+- The Tauri adapter serializes spatial items and BVH nodes through the `landblock-pack` payload.
+- The frontend contract now models spatial items and the static landblock BVH directly instead of carrying `unknown[]`/`null` placeholders.
+- `BrowserWorldDisplay` registers a landblock-pack spatial owner so pack spatial items participate in the render spatial index alongside terrain, structured interiors, and debug overlays.
+- The render spatial adapter consumes the pack BVH for item ordering and pack item coverage, then adapts items into the current renderer chunk-local spatial index.
+
+Decisions and course corrections:
+
+- The emitted coordinate space is named `landblock-render-local`, not plain AC source space. This reflects the renderer-ready axis basis already used by prepared terrain, interior geometry, and static mesh bounds: x is AC x, y is vertical, and z is negative AC y. This avoids hiding an axis conversion inside the frontend spatial adapter.
+- Portal spatial items are not emitted yet. Phase 5 only includes item kinds with available bounds; portal polygon bounds need a dedicated derivation from prepared cell portal polygons before they can join the BVH honestly.
+- The current frontend query object is still the existing render spatial index. It now receives pack spatial items and traverses the pack BVH to adapt item coverage, but the low-level ray/frustum query implementation remains the existing renderer index until Phase 6/7 removes duplicate legacy owners and can switch broadphase authority cleanly.
+- `staticLandblockBvh` replaces the older `staticInstanceBvh` placeholder name because the tree is intentionally mixed landblock content, not a static-instance-only tree.
+
+Validation performed:
+
+- `cargo test -p holtburger-content landblock_pack --lib`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml landblock_pack_lookup_returns_manifest_source_facts`
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/world-display/render-spatial-scene.test.ts src/lib/world-display/static-renderables.test.ts`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `npm run check`
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
+
 Refinements from Phase 4:
 
 - Use Phase 4 `PreparedStaticMesh.instanceBounds` as the first static item bounds source, but treat it as a conservative render broadphase until tighter source-space transform parity is proven.
 - Keep static spatial items reference-based. `PreparedSpatialItem.sourceAssetId` should point at shared `gfx-obj/*` or `setup-model/*` ids, not inline geometry.
 - Decide whether the BVH should index static mesh parts individually or group them by static instance. Mixed queries likely need part-level candidates for picking and instance-level grouping for UI selection; the item id should make both recoverable without a second heavy structure.
-- Rename `outdoorStaticInstances` before Phase 5 consumes it for spatial item generation so the BVH path does not encode a misleading field name.
+- Rename `outdoorStaticInstances` before the pack contract hardens further; Phase 5 spatial generation now consumes all static meshes without relying on that misleading field name.
+
+### Phase 5.1: Subdivide Terrain Spatial Items
+
+Status: planned.
+
+Phase 5 currently emits one `terrain` spatial item for the whole landblock terrain mesh. That is enough to include terrain in the mixed landblock BVH, but it is coarse for ray picking, frustum broadphase, occluder discovery, and terrain-candidate lookup.
+
+Refine terrain spatial metadata to emit `8 x 8` terrain-quad spatial items:
+
+- Keep terrain rendering as one mesh per landblock. Spatial subdivision must not imply rendering the terrain as 64 separate meshes.
+- Emit one terrain spatial item per rendered terrain quad, using the four corner heights from the `9 x 9` terrain sample grid.
+- Give terrain-quad item ids a stable shape that encodes landblock id plus row/col or quad index.
+- Store enough metadata to recover the two terrain triangle indices for narrowphase checks.
+- Add the terrain-quad items to the same mixed static-landblock BVH with kind `terrain`.
+- Keep the landblock-level terrain mesh and GPU upload path unchanged unless profiling proves render subdivision is needed.
+
+Exit criteria:
+
+- BVH terrain candidates are terrain quads, not whole landblocks.
+- Terrain ray-pick/frustum broadphase can use quad-level candidates before running terrain triangle/grid narrowphase.
+- Terrain render batching remains one mesh per landblock.
 
 ### Phase 6: Switch Scene Request Planning To Landblock Packs
 
@@ -919,6 +969,10 @@ Initial cleanup targets:
 - Remove `StaticRenderableSourceInstance.preparedByPack` once scene derivation is pack-first by request planning rather than a read-through adapter layered over legacy source collection.
 - Move or share prepared static DTO serialization if the Tauri adapter continues accumulating landblock pack serializer functions.
 - Add focused tests for pack-backed static renderable consumption in indoor and outdoor-linked-interior scenes beyond the initial outdoor duplicate-suppression coverage.
+- Add portal polygon spatial item derivation once prepared portal geometry has trustworthy bounds and target metadata.
+- Collapse duplicate terrain/env-cell spatial owners once landblock-pack request planning is the normal path; today pack-backed terrain/env-cell spatial items can coexist with legacy-derived owner items during migration.
+- Replace the current render spatial adapter's BVH-to-item expansion with direct Rust-BVH masked query traversal after duplicate legacy owners are retired.
+- Audit `landblock-render-local` naming against any future non-render consumers. If physics/collision wants raw AC source-space bounds, split spatial products instead of overloading this coordinate space.
 
 Exit criteria:
 

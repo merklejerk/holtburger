@@ -649,7 +649,7 @@ function createPreparedLandblockPackAsset(
 				},
 			],
 			spatialItems: [],
-			staticInstanceBvh: null,
+			staticLandblockBvh: null,
 		},
 		dependencies: {
 			cellDatIds: [],

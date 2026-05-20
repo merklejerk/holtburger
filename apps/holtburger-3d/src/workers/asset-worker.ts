@@ -257,6 +257,7 @@ function prepareGfxObj(
 		sourceId: payload.gfxObjId,
 		vertexArray: payload.vertexArray,
 		drawingPolygons: payload.drawingPolygons,
+		renderUvlessPositiveSides: true,
 	});
 
 	return {
@@ -581,6 +582,7 @@ interface PolygonSetGeometrySource {
 	sourceId: number;
 	vertexArray: GfxObjPayloadDto["vertexArray"];
 	drawingPolygons: GfxObjPayloadDto["drawingPolygons"];
+	renderUvlessPositiveSides?: boolean;
 }
 
 const STIPPLING_NO_POS = 0x04;
@@ -589,7 +591,7 @@ const CULL_MODE_CLOCKWISE = 2;
 
 interface PolygonRenderSide {
 	surfaceId: number | null;
-	uvIndices: readonly number[];
+	uvIndices: readonly number[] | null;
 	vertexOffsets: (vertexIndex: number) => [number, number, number];
 	normalScale: 1 | -1;
 }
@@ -625,7 +627,7 @@ function buildPolygonSetRenderGeometry(
 		if (polygon.vertexIds.length < 3) {
 			continue;
 		}
-		const renderSides = derivePolygonRenderSides(source.sourceLabel, polygon);
+		const renderSides = derivePolygonRenderSides(source, polygon);
 		if (renderSides.length === 0) {
 			skippedPolygonCount += 1;
 			continue;
@@ -680,14 +682,14 @@ function buildPolygonSetRenderGeometry(
 						scaleNormalComponent(renderNormal.y, renderSide.normalScale),
 						scaleNormalComponent(renderNormal.z, renderSide.normalScale),
 					);
-					const uvIndex = renderSide.uvIndices[polygonVertexOffset];
-					const uv = vertex.uvs[uvIndex];
-					if (!uv) {
+					const uvIndex = renderSide.uvIndices?.[polygonVertexOffset] ?? null;
+					const uv = uvIndex === null ? null : vertex.uvs[uvIndex];
+					if (uvIndex !== null && !uv) {
 						throw new Error(
 							`${source.sourceLabel} polygon ${polygon.id} references missing UV ${uvIndex} on vertex ${vertex.id}.`,
 						);
 					}
-					uvs.push(uv.u, uv.v);
+					uvs.push(uv?.u ?? 0, uv?.v ?? 0);
 
 					minX = Math.min(minX, renderPosition.x);
 					minY = Math.min(minY, renderPosition.y);
@@ -728,15 +730,21 @@ function scaleNormalComponent(value: number, scale: 1 | -1): number {
 }
 
 function derivePolygonRenderSides(
-	sourceLabel: string,
+	source: PolygonSetGeometrySource,
 	polygon: GfxObjPayloadDto["drawingPolygons"][number],
 ): PolygonRenderSide[] {
 	const sides: PolygonRenderSide[] = [];
-	if ((polygon.stippling & STIPPLING_NO_POS) === 0) {
-		assertUvIndicesAvailable(sourceLabel, polygon, "positive");
+	if (
+		(polygon.stippling & STIPPLING_NO_POS) === 0 ||
+		source.renderUvlessPositiveSides
+	) {
+		const uvIndices =
+			(polygon.stippling & STIPPLING_NO_POS) === 0
+				? requireUvIndicesAvailable(source.sourceLabel, polygon, "positive")
+				: null;
 		sides.push({
 			surfaceId: normalizeSurfaceId(polygon.posSurface),
-			uvIndices: polygon.posUvIndices,
+			uvIndices,
 			vertexOffsets: (vertexIndex) => [0, vertexIndex, vertexIndex + 1],
 			normalScale: 1,
 		});
@@ -746,10 +754,14 @@ function derivePolygonRenderSides(
 		polygon.sidesType === CULL_MODE_CLOCKWISE &&
 		(polygon.stippling & STIPPLING_NO_NEG) === 0
 	) {
-		assertUvIndicesAvailable(sourceLabel, polygon, "negative");
+		const uvIndices = requireUvIndicesAvailable(
+			source.sourceLabel,
+			polygon,
+			"negative",
+		);
 		sides.push({
 			surfaceId: normalizeSurfaceId(polygon.negSurface),
-			uvIndices: polygon.negUvIndices,
+			uvIndices,
 			vertexOffsets: (vertexIndex) => [0, vertexIndex + 1, vertexIndex],
 			normalScale: -1,
 		});
@@ -758,11 +770,11 @@ function derivePolygonRenderSides(
 	return sides;
 }
 
-function assertUvIndicesAvailable(
+function requireUvIndicesAvailable(
 	sourceLabel: string,
 	polygon: GfxObjPayloadDto["drawingPolygons"][number],
 	side: "positive" | "negative",
-): void {
+): readonly number[] {
 	const uvIndices =
 		side === "positive" ? polygon.posUvIndices : polygon.negUvIndices;
 	if (uvIndices.length !== polygon.vertexIds.length) {
@@ -770,6 +782,8 @@ function assertUvIndicesAvailable(
 			`${sourceLabel} polygon ${polygon.id} has a renderable ${side} side but provides ${uvIndices.length} UV indices for ${polygon.vertexIds.length} vertices.`,
 		);
 	}
+
+	return uvIndices;
 }
 
 function convertAcVectorToRenderSpace(vector: {

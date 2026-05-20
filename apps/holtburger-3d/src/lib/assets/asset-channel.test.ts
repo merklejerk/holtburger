@@ -2009,6 +2009,103 @@ describe("asset channel controller", () => {
 		]);
 	});
 
+	it("renders gfx-obj polygons that omit positive UV indices", () => {
+		const gfxObj = prepareAssetPayload(
+			{
+				requestId: "gfx-obj-uvless-positive",
+				assetId: "gfx-obj/010010ce",
+				priority: "streaming",
+			},
+			{
+				requestId: "gfx-obj-uvless-positive",
+				assetId: "gfx-obj/010010ce",
+				payloadKind: "json",
+				payload: {
+					kind: "gfx-obj",
+					residencyKind: "unknown",
+					sourceAssetKind: "gfx-obj",
+					gfxObjId: 0x010010ce,
+					flags: 3,
+					surfaceIds: [0x08000001],
+					vertexArray: {
+						vertexType: 1,
+						vertexCount: 4,
+						vertices: [
+							{
+								id: 0,
+								origin: { x: 0, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [],
+							},
+							{
+								id: 1,
+								origin: { x: 2, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [],
+							},
+							{
+								id: 2,
+								origin: { x: 2, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [],
+							},
+							{
+								id: 3,
+								origin: { x: 0, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [],
+							},
+						],
+					},
+					drawingPolygons: [
+						{
+							id: 1,
+							numPts: 4,
+							stippling: 0x04,
+							sidesType: 0,
+							posSurface: 0,
+							negSurface: -1,
+							vertexIds: [0, 1, 2, 3],
+							posUvIndices: [],
+							negUvIndices: [],
+						},
+					],
+					drawingBsp: null,
+					physicsWitness: {
+						polygonCount: 0,
+						hasBsp: false,
+					},
+					sortCenter: null,
+					didDegrade: null,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "gfx-obj",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		expect(gfxObj.payload.kind).toBe("gfx-obj");
+		if (gfxObj.payload.kind !== "gfx-obj") {
+			throw new Error("expected gfx-obj payload");
+		}
+		expect(gfxObj.payload.renderGeometry).toMatchObject({
+			vertexCount: 6,
+			triangleCount: 2,
+			skippedPolygonCount: 0,
+			surfaceIds: [],
+		});
+		expect(gfxObj.payload.renderGeometry.uvs).toEqual([
+			0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		]);
+		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
+			{ polygonId: 1, surfaceId: null, firstVertex: 0 },
+			{ polygonId: 1, surfaceId: null, firstVertex: 3 },
+		]);
+	});
+
 	it("reuses cached gfx-obj preparation when a duplicate graph request arrives", async () => {
 		const cachedAsset = createPreparedGfxObjAsset("gfx-obj/01000001");
 		let lookupCount = 0;

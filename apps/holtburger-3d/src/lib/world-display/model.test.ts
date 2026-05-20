@@ -8,7 +8,10 @@ import {
 	normalizeViewportPoint,
 	shouldSendThrottledCameraHint,
 } from "./model";
-import { createInitialAssetChannelState } from "../assets/types";
+import {
+	createInitialAssetChannelState,
+	type PreparedLandblockStaticInstance,
+} from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
 
 function createRuntimeBatch(): RuntimeBatchDto {
@@ -137,64 +140,73 @@ describe("world display model helpers", () => {
 		expect(model.assetText).toMatch(/Prepared terrain\/0102ffff/);
 	});
 
-	it("tracks outdoor scenery membership separately from terrain chunks", () => {
+	it("tracks pack-backed outdoor scenery membership separately from terrain chunks", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"outdoor-static-scene/0102ffff": {
+			"landblock-pack/0102ffff": {
 				request: {
 					requestId: "statics",
-					assetId: "outdoor-static-scene/0102ffff",
+					assetId: "landblock-pack/0102ffff",
 					priority: "streaming",
 				},
 				response: {
 					requestId: "statics",
-					assetId: "outdoor-static-scene/0102ffff",
+					assetId: "landblock-pack/0102ffff",
 					payloadKind: "json",
 					payload: {},
 				},
 				payload: {
-					kind: "outdoor-static-scene",
-					sourceAssetKind: "outdoor-static-scene",
-					residencyKind: "outdoor-landblock",
+					kind: "landblock-pack",
+					sourceAssetKind: "landblock-pack",
+					residencyKind: "landblock",
+					landblockId: 0x0102ffff,
+					landblockInfoId: 0x0102fffe,
+					classification: "outdoor",
+					sourceFacts: {
+						cellLandblock: null,
+						landblockInfo: null,
+						outdoor: {
+							explicitObjects: [],
+							buildings: [],
+							generatedScenery: [],
+						},
+						interiors: { envCells: [], environments: [] },
+					},
+					prepared: {
+						terrainMesh: null,
+						outdoorStaticInstances: [
+							createPackStaticInstance(
+								"pack/object/0",
+								"scenery",
+								"setup-model/02000001",
+							),
+							createPackStaticInstance(
+								"pack/building/0",
+								"building",
+								"setup-model/02000002",
+							),
+						],
+						interiorCells: [],
+						staticMeshes: [],
+						spatialItems: [],
+						staticLandblockBvh: null,
+					},
+					dependencies: {
+						cellDatIds: [],
+						portalDatIds: [],
+						renderableAssetIds: [
+							"setup-model/02000001",
+							"setup-model/02000002",
+						],
+					},
+					diagnostics: { sourceRecords: [], errors: [] },
 					provenance: {
 						source: "repo-local-hba",
-						sourceAssetKind: "outdoor-static-scene",
+						sourceAssetKind: "landblock-pack",
 						errorCode: null,
 						detail: "test",
 					},
-					landblockId: 0x0102ffff,
-					sceneryInstances: [
-						{
-							instanceId: "outdoor-static-scene/0102ffff/object/0000/02000001",
-							owningLandblockId: 0x0102ffff,
-							sourceDid: 0x02000001,
-							sourceAssetId: "setup-model/02000001",
-							sourceIndex: 0,
-							localPlacement: {
-								origin: { x: 1, y: 2, z: 3 },
-								orientation: { w: 1, x: 0, y: 0, z: 0 },
-							},
-						},
-					],
-					buildingInstances: [
-						{
-							instanceId:
-								"outdoor-static-scene/0102ffff/building/0000/02000002",
-							owningLandblockId: 0x0102ffff,
-							sourceDid: 0x02000002,
-							sourceAssetId: "setup-model/02000002",
-							sourceIndex: 0,
-							localPlacement: {
-								origin: { x: 4, y: 5, z: 6 },
-								orientation: { w: 1, x: 0, y: 0, z: 0 },
-							},
-							numLeaves: 2,
-							portals: [],
-						},
-					],
-					generatedSceneryInstances: [],
-					diagnostics: createOutdoorStaticSceneDiagnostics(),
 				},
 				preparedAt: "2026-05-12T00:00:00.000Z",
 			},
@@ -385,29 +397,23 @@ describe("world display model helpers", () => {
 	});
 });
 
-function createOutdoorStaticSceneDiagnostics() {
-	const emptyLayer = {
-		attempted: 0,
-		accepted: 0,
-		rejectedUnsupportedSource: 0,
-	};
-
+function createPackStaticInstance(
+	instanceId: string,
+	kind: "scenery" | "building",
+	sourceAssetId: string,
+): PreparedLandblockStaticInstance {
 	return {
-		landblockInfoAvailable: true,
-		landblockInfoError: null,
-		explicit: emptyLayer,
-		buildings: emptyLayer,
-		generated: {
-			...emptyLayer,
-			skippedWeenieObj: 0,
-			rejectedFrequency: 0,
-			rejectedBounds: 0,
-			rejectedBuildingOccupancy: 0,
-			rejectedObjectBounds: 0,
-			objectBoundsUnavailable: 0,
-			rejectedRoad: 0,
-			rejectedSlope: 0,
-			rejectedOverlap: 0,
+		instanceId,
+		kind,
+		owningLandblockId: 0x0102ffff,
+		owningEnvCellId: null,
+		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+		sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: {
+			origin: { x: 0, y: 0, z: 0 },
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
 		},
+		sourceScale: { x: 1, y: 1, z: 1 },
 	};
 }

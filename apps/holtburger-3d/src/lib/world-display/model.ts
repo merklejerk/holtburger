@@ -13,8 +13,8 @@ import {
 } from "../landblocks";
 import type {
 	AssetChannelState,
-	PreparedOutdoorStaticScenePayload,
 	PreparedAssetRecord,
+	PreparedLandblockPackPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import {
@@ -267,39 +267,43 @@ function deriveSceneContext(
 			(landblock) => landblock.landblockId,
 		),
 	);
-	const preparedStaticScenePayloads = Object.values(
-		assetState.preparedByAssetId,
-	)
+	const preparedLandblockPacks = Object.values(assetState.preparedByAssetId)
 		.map((asset) => asset.payload)
 		.filter(
-			(payload): payload is PreparedOutdoorStaticScenePayload =>
-				payload.kind === "outdoor-static-scene" &&
+			(payload): payload is PreparedLandblockPackPayload =>
+				payload.kind === "landblock-pack" &&
 				(buildingLandblockIds.has(payload.landblockId) ||
 					detailLandblockIds.has(payload.landblockId)),
 		);
-	const staticInstanceCount = preparedStaticScenePayloads.reduce(
+	const staticInstanceCount = preparedLandblockPacks.reduce(
 		(total, payload) =>
 			total +
-			(detailLandblockIds.has(payload.landblockId)
-				? payload.sceneryInstances.length
-				: 0),
+			payload.prepared.outdoorStaticInstances.filter(
+				(instance) =>
+					instance.kind !== "building" &&
+					detailLandblockIds.has(instance.owningLandblockId),
+			).length,
 		0,
 	);
-	const staticBuildingCount = preparedStaticScenePayloads.reduce(
+	const staticBuildingCount = preparedLandblockPacks.reduce(
 		(total, payload) =>
 			total +
-			(buildingLandblockIds.has(payload.landblockId)
-				? payload.buildingInstances.length
-				: 0),
+			payload.prepared.outdoorStaticInstances.filter(
+				(instance) =>
+					instance.kind === "building" &&
+					buildingLandblockIds.has(instance.owningLandblockId),
+			).length,
 		0,
 	);
-	const generatedSceneryCount = preparedStaticScenePayloads.reduce(
-		(total, payload) =>
-			total +
-			(detailLandblockIds.has(payload.landblockId)
-				? payload.generatedSceneryInstances.length
-				: 0),
-		0,
+	const staticRenderableSourceAssetIds = preparedLandblockPacks.flatMap(
+		(payload) =>
+			payload.prepared.outdoorStaticInstances
+				.filter((instance) =>
+					instance.kind === "building"
+						? buildingLandblockIds.has(instance.owningLandblockId)
+						: detailLandblockIds.has(instance.owningLandblockId),
+				)
+				.map((instance) => instance.sourceAssetId),
 	);
 
 	return {
@@ -308,26 +312,14 @@ function deriveSceneContext(
 			"Browser mode is using explicit outdoor LoD sets for terrain, buildings, and smaller detail objects.",
 		focusAnchorLabel: focusLandblockLabel,
 		destinationText,
-		coverageText: `Outdoor LoD selects ${chunks.length} terrain tile${chunks.length === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} inside distance ${buildingLodRadius}, and ${staticInstanceCount + generatedSceneryCount} detail object${staticInstanceCount + generatedSceneryCount === 1 ? "" : "s"} inside distance ${detailLodRadius} around ${focusLandblockLabel}.`,
+		coverageText: `Outdoor LoD selects ${chunks.length} terrain tile${chunks.length === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} inside distance ${buildingLodRadius}, and ${staticInstanceCount} detail object${staticInstanceCount === 1 ? "" : "s"} inside distance ${detailLodRadius} around ${focusLandblockLabel}.`,
 		gapText:
 			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
 		chunks,
 		staticRenderableInstanceCount: staticInstanceCount,
 		staticRenderableBuildingCount: staticBuildingCount,
 		staticRenderableSourceAssetIds: [
-			...new Set([
-				...preparedStaticScenePayloads.flatMap((payload) =>
-					payload.sceneryInstances.map((instance) => instance.sourceAssetId),
-				),
-				...preparedStaticScenePayloads.flatMap((payload) =>
-					payload.buildingInstances.map((instance) => instance.sourceAssetId),
-				),
-				...preparedStaticScenePayloads.flatMap((payload) =>
-					payload.generatedSceneryInstances.map(
-						(instance) => instance.sourceAssetId,
-					),
-				),
-			]),
+			...new Set(staticRenderableSourceAssetIds),
 		].sort(),
 	};
 }
@@ -342,10 +334,14 @@ function deriveIndoorSceneContext(
 		? formatEnvCellLabel(focusEnvCellId)
 		: "Unknown env cell";
 	const visibleCount = runtimeBatch?.residency.visibleCellIds.length ?? 0;
-	const preparedIndoorAssets = Object.keys(assetState.preparedByAssetId).filter(
-		(assetId) =>
-			assetId.startsWith("indoor-env-cell/") ||
-			assetId.startsWith("environment/"),
+	const preparedIndoorCellCount = Object.values(
+		assetState.preparedByAssetId,
+	).reduce(
+		(total, asset) =>
+			asset.payload.kind === "landblock-pack"
+				? total + asset.payload.prepared.interiorCells.length
+				: total,
+		0,
 	);
 	const seenOutsideText =
 		runtimeBatch?.residency.seenOutside === null ||
@@ -363,7 +359,7 @@ function deriveIndoorSceneContext(
 		destinationText: destinationLabel
 			? `Manual destination focus is ${destinationLabel}.`
 			: `Indoor focus is ${focusEnvCellLabel}.`,
-		coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorAssets.length} prepared indoor asset${preparedIndoorAssets.length === 1 ? "" : "s"}, and ${seenOutsideText}`,
+		coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorCellCount} pack-prepared cell${preparedIndoorCellCount === 1 ? "" : "s"}, and ${seenOutsideText}`,
 		gapText: null,
 		chunks: [],
 		staticRenderableInstanceCount: 0,

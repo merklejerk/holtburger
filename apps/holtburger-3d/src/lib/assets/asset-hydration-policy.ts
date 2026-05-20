@@ -5,11 +5,5 @@ export function classifyAssetHydration(assetId: string): AssetHydrationMode {
 }
 
 export function isSceneCoverageAssetId(assetId: string): boolean {
-	return (
-		assetId.startsWith("landblock-pack/") ||
-		assetId.startsWith("terrain/") ||
-		assetId.startsWith("outdoor-static-scene/") ||
-		assetId.startsWith("indoor-env-cell/") ||
-		assetId.startsWith("environment/")
-	);
+	return assetId.startsWith("landblock-pack/");
 }

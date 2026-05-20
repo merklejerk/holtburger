@@ -4,6 +4,7 @@ import {
 	createInitialAssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedLandblockPackPayload,
+	type PreparedLandblockStaticMesh,
 	type PreparedSetupModelPayload,
 } from "../assets/types";
 import type {
@@ -208,28 +209,30 @@ describe("static renderable scene model", () => {
 		).toHaveLength(2);
 	});
 
-	it("includes outdoor-linked indoor static objects in outdoor scenes", () => {
+	it("includes pack-backed outdoor-linked indoor static objects in outdoor scenes", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
 			"gfx-obj/01000001": createPreparedGfxObjAsset(
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
-				0x01020155,
-				IDENTITY_PLACEMENT,
-				["gfx-obj/01000001"],
-			),
-			"outdoor-static-scene/0102ffff":
-				createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
-					0x0102ffff,
-					[0x01020155],
-				),
+			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff, [
+				createPreparedLandblockStaticMesh({
+					kind: "indoor-static",
+					instanceId: "pack-indoor-static-0",
+					owningEnvCellId: 0x01020155,
+					sourceAssetId: "gfx-obj/01000001",
+					gfxObjAssetId: "gfx-obj/01000001",
+				}),
+			]),
 		};
 
 		const model = deriveStaticRenderableSceneModel(
 			createRuntimeBatch(),
 			assetState,
+			null,
+			1,
+			{ envCellIds: [0x01020155], truncated: false },
 		);
 
 		expect(model.parts).toContainEqual(
@@ -371,29 +374,30 @@ describe("static renderable scene model", () => {
 		expect(model.missingGfxAssetIds).toEqual([]);
 	});
 
-	it("keeps indoor and exterior statics in separate render-domain groups", () => {
+	it("keeps pack-backed indoor and exterior statics in separate render-domain groups", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
 			"gfx-obj/01000001": createPreparedGfxObjAsset(
 				"gfx-obj/01000001",
 				0x01000001,
 			),
-			"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
-				0x01020155,
-				IDENTITY_PLACEMENT,
-				["gfx-obj/01000001"],
-			),
-			"outdoor-static-scene/0102ffff":
-				createPreparedOutdoorStaticSceneAssetWithBuildingPortal(
-					0x0102ffff,
-					[0x01020155],
-					["gfx-obj/01000001"],
-				),
+			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff, [
+				createPreparedLandblockStaticMesh({
+					kind: "indoor-static",
+					instanceId: "pack-indoor-static-0",
+					owningEnvCellId: 0x01020155,
+					sourceAssetId: "gfx-obj/01000001",
+					gfxObjAssetId: "gfx-obj/01000001",
+				}),
+			]),
 		};
 
 		const model = deriveStaticRenderableSceneModel(
 			createRuntimeBatch(),
 			assetState,
+			null,
+			1,
+			{ envCellIds: [0x01020155], truncated: false },
 		);
 
 		expect(
@@ -591,6 +595,7 @@ function createPreparedIndoorEnvCellAsset(
 
 function createPreparedLandblockPackAsset(
 	landblockId: number,
+	extraStaticMeshes: PreparedLandblockStaticMesh[] = [],
 ): PreparedAssetRecord {
 	const payload: PreparedLandblockPackPayload = {
 		kind: "landblock-pack",
@@ -647,6 +652,7 @@ function createPreparedLandblockPackAsset(
 					sourceBounds: null,
 					instanceBounds: null,
 				},
+				...extraStaticMeshes,
 			],
 			spatialItems: [],
 			staticLandblockBvh: null,
@@ -671,6 +677,33 @@ function createPreparedLandblockPackAsset(
 		`landblock-pack/${landblockId.toString(16).padStart(8, "0")}`,
 		payload,
 	);
+}
+
+function createPreparedLandblockStaticMesh(options: {
+	kind: "indoor-static" | "scenery" | "building" | "generated-scenery";
+	instanceId: string;
+	sourceAssetId: string;
+	gfxObjAssetId: string;
+	owningEnvCellId?: number | null;
+}): PreparedLandblockStaticMesh {
+	return {
+		instanceId: options.instanceId,
+		kind: options.kind,
+		owningLandblockId: 0x0102ffff,
+		owningEnvCellId: options.owningEnvCellId ?? null,
+		sourceDid: Number.parseInt(options.sourceAssetId.slice(-8), 16),
+		sourceAssetId: options.sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: IDENTITY_PLACEMENT,
+		sourceScale: UNIT_SCALE,
+		partIndex: 0,
+		gfxObjId: Number.parseInt(options.gfxObjAssetId.slice(-8), 16),
+		gfxObjAssetId: options.gfxObjAssetId,
+		partPlacements: [],
+		partScale: UNIT_SCALE,
+		sourceBounds: null,
+		instanceBounds: null,
+	};
 }
 
 function createOutdoorStaticSceneDiagnostics() {

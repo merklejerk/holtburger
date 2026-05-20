@@ -23,7 +23,9 @@ import {
 } from "./render-spatial-ids";
 import { buildAcPlacementMatrix } from "./static-renderable-geometry";
 import {
+	deriveTerrainTileRenderChunk,
 	deriveRenderChunkKeyFromLandblockId,
+	type RenderChunkPlacement,
 	type RenderChunkKey,
 } from "./render-chunks";
 import type {
@@ -73,6 +75,24 @@ export function deriveLandblockPackSpatialItems(
 		asset.payload.kind === "landblock-pack"
 			? derivePreparedPackSpatialItems(asset.payload)
 			: [],
+	);
+}
+
+export function deriveLandblockPackRenderChunkPlacements(
+	assetState: AssetChannelState,
+): RenderChunkPlacement[] {
+	const chunksByKey = new Map<RenderChunkKey, RenderChunkPlacement>();
+	for (const asset of Object.values(assetState.preparedByAssetId)) {
+		if (asset.payload.kind !== "landblock-pack") {
+			continue;
+		}
+
+		const chunk = deriveTerrainTileRenderChunk(asset.payload.landblockId);
+		chunksByKey.set(chunk.chunkKey, chunk);
+	}
+
+	return [...chunksByKey.values()].sort((left, right) =>
+		left.chunkKey.localeCompare(right.chunkKey),
 	);
 }
 

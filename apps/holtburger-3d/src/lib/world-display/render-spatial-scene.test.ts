@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createInitialAssetChannelState } from "../assets/types";
+import {
+	createInitialAssetChannelState,
+	type PreparedAssetRecord,
+} from "../assets/types";
 import type { WorldDebugOverlayModel } from "./debug-overlays";
 import {
 	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
@@ -8,6 +11,7 @@ import {
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 	TERRAIN_SPATIAL_OWNER_KEY,
 	deriveDebugOverlaySpatialItems,
+	deriveLandblockPackRenderChunkPlacements,
 	deriveLandblockPackSpatialItems,
 	deriveStructuredInteriorSpatialItems,
 	deriveTerrainSpatialItems,
@@ -348,7 +352,110 @@ describe("deriveLandblockPackSpatialItems", () => {
 			},
 		});
 	});
+
+	it("derives chunk placements for prepared pack spatial items before rendered tiles exist", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"landblock-pack/d853ffff": createPreparedLandblockPackAsset(0xd853ffff),
+		};
+		const spatialItems = deriveLandblockPackSpatialItems(assetState);
+		const chunkPlacements =
+			deriveLandblockPackRenderChunkPlacements(assetState);
+		const index = createLinearRenderSpatialIndex();
+
+		index.replaceChunkTransforms(
+			chunkPlacements.map((chunk) => ({
+				...chunk,
+				offset: { x: 0, y: 0, z: 0 },
+			})),
+		);
+
+		expect(() =>
+			index.replaceOwnerItems(LANDBLOCK_PACK_SPATIAL_OWNER_KEY, spatialItems),
+		).not.toThrow();
+		expect(chunkPlacements).toEqual([
+			{
+				chunkKey: "landblock/d853ffff",
+				chunkLandblockId: 0xd853ffff,
+			},
+		]);
+	});
 });
+
+function createPreparedLandblockPackAsset(
+	landblockId: number,
+): PreparedAssetRecord {
+	return {
+		request: {
+			requestId: "pack",
+			assetId: `landblock-pack/${landblockId.toString(16).padStart(8, "0")}`,
+			priority: "streaming",
+		},
+		response: {
+			requestId: "pack",
+			assetId: `landblock-pack/${landblockId.toString(16).padStart(8, "0")}`,
+			payloadKind: "json",
+			payload: {},
+		},
+		payload: {
+			kind: "landblock-pack",
+			sourceAssetKind: "landblock-pack",
+			residencyKind: "landblock",
+			landblockId,
+			landblockInfoId: (landblockId & 0xffff0000) | 0xfffe,
+			classification: "outdoor",
+			sourceFacts: {
+				cellLandblock: null,
+				landblockInfo: null,
+				outdoor: {
+					explicitObjects: [],
+					buildings: [],
+					generatedScenery: [],
+				},
+				interiors: { envCells: [], environments: [] },
+			},
+			prepared: {
+				terrainMesh: null,
+				outdoorStaticInstances: [],
+				interiorCells: [],
+				staticMeshes: [],
+				spatialItems: [
+					{
+						id: `landblock-pack/${landblockId.toString(16).padStart(8, "0")}/spatial/terrain/quad/07/00`,
+						kind: "terrain",
+						ownerId: landblockId,
+						sourceAssetId: null,
+						bounds: {
+							min: { x: 0, y: 0, z: -192 },
+							max: { x: 24, y: 8, z: -168 },
+						},
+						metadata: {
+							kind: "terrain-quad",
+							row: 7,
+							col: 0,
+							quadIndex: 56,
+							triangleIndices: [112, 113],
+						},
+					},
+				],
+				staticLandblockBvh: null,
+			},
+			dependencies: {
+				cellDatIds: [],
+				portalDatIds: [],
+				renderableAssetIds: [],
+			},
+			diagnostics: { sourceRecords: [], errors: [] },
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "landblock-pack",
+				errorCode: null,
+				detail: "test",
+			},
+		},
+		preparedAt: "2026-05-20T00:00:00.000Z",
+	};
+}
 
 function createTerrainScene(): TerrainSceneModel {
 	return {

@@ -223,8 +223,8 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 		outdoorStaticInstances: PreparedLandblockStaticInstance[];
 		interiorCells: PreparedLandblockInteriorCell[];
 		staticMeshes: PreparedLandblockStaticMesh[];
-		spatialItems: unknown[];
-		staticInstanceBvh: null;
+		spatialItems: PreparedLandblockSpatialItem[];
+		staticLandblockBvh: PreparedLandblockBvh | null;
 	};
 	dependencies: {
 		cellDatIds: number[];
@@ -299,6 +299,37 @@ export interface PreparedLandblockStaticMesh {
 	partScale: Vec3Dto;
 	sourceBounds: PreparedBounds | null;
 	instanceBounds: PreparedBounds | null;
+}
+
+export type PreparedLandblockSpatialItemKind =
+	| "terrain"
+	| "outdoor-static"
+	| "building"
+	| "env-cell"
+	| "indoor-static"
+	| "portal";
+
+export interface PreparedLandblockSpatialItem {
+	id: string;
+	kind: PreparedLandblockSpatialItemKind;
+	ownerId: number | null;
+	sourceAssetId: string | null;
+	bounds: PreparedBounds;
+}
+
+export interface PreparedLandblockBvh {
+	coordinateSpace: "landblock-render-local";
+	landblockId: number;
+	scope: "static-landblock";
+	nodes: PreparedLandblockBvhNode[];
+}
+
+export interface PreparedLandblockBvhNode {
+	bounds: PreparedBounds;
+	left: number | null;
+	right: number | null;
+	itemIndices: number[];
+	kindMask: number;
 }
 
 export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {

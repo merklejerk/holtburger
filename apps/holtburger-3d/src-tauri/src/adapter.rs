@@ -8,13 +8,14 @@ use holtburger_content::{
     CellLandblockFact, ContentRepository, EnvCellFact, EnvironmentFact,
     GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
     LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
-    LandblockRestriction, PreparedAabb, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
-    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedStaticInstance,
-    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
-    PreparedVec3, SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
-    StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics, StaticOutdoorScene,
-    StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
-    format_static_object_source_asset_id, normalize_landblock_id,
+    LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
+    PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
+    PreparedPolygonSetRenderTriangle, PreparedSpatialItem, PreparedSpatialItemKind,
+    PreparedStaticInstance, PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh,
+    PreparedTerrainTriangle, PreparedVec3, SoulEmoteCatalog, SourceLoadError,
+    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
+    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
+    StaticRenderableSourceFamily, format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
@@ -1389,8 +1390,8 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             "outdoorStaticInstances": pack.prepared.outdoor_static_instances.iter().map(serialize_prepared_static_instance).collect::<Vec<_>>(),
             "interiorCells": pack.prepared.interior_cells.iter().map(serialize_prepared_interior_cell).collect::<Vec<_>>(),
             "staticMeshes": pack.prepared.static_meshes.iter().map(serialize_prepared_static_mesh).collect::<Vec<_>>(),
-            "spatialItems": [],
-            "staticInstanceBvh": null
+            "spatialItems": pack.prepared.spatial_items.iter().map(serialize_prepared_spatial_item).collect::<Vec<_>>(),
+            "staticLandblockBvh": pack.prepared.static_landblock_bvh.as_ref().map(serialize_prepared_bvh)
         },
         "dependencies": {
             "cellDatIds": derive_landblock_pack_cell_dat_ids(pack),
@@ -1497,6 +1498,46 @@ fn serialize_prepared_static_instance_kind(kind: PreparedStaticInstanceKind) -> 
         PreparedStaticInstanceKind::GeneratedScenery => "generated-scenery",
         PreparedStaticInstanceKind::IndoorStatic => "indoor-static",
     }
+}
+
+fn serialize_prepared_spatial_item(item: &PreparedSpatialItem) -> serde_json::Value {
+    serde_json::json!({
+        "id": item.id,
+        "kind": serialize_prepared_spatial_item_kind(item.kind),
+        "ownerId": item.owner_id,
+        "sourceAssetId": item.source_asset_id,
+        "bounds": serialize_prepared_aabb(&item.bounds),
+    })
+}
+
+fn serialize_prepared_spatial_item_kind(kind: PreparedSpatialItemKind) -> &'static str {
+    match kind {
+        PreparedSpatialItemKind::Terrain => "terrain",
+        PreparedSpatialItemKind::OutdoorStatic => "outdoor-static",
+        PreparedSpatialItemKind::Building => "building",
+        PreparedSpatialItemKind::EnvCell => "env-cell",
+        PreparedSpatialItemKind::IndoorStatic => "indoor-static",
+        PreparedSpatialItemKind::Portal => "portal",
+    }
+}
+
+fn serialize_prepared_bvh(bvh: &PreparedBvh) -> serde_json::Value {
+    serde_json::json!({
+        "coordinateSpace": bvh.coordinate_space,
+        "landblockId": bvh.landblock_id,
+        "scope": bvh.scope,
+        "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value {
+    serde_json::json!({
+        "bounds": serialize_prepared_aabb(&node.bounds),
+        "left": node.left,
+        "right": node.right,
+        "itemIndices": node.item_indices,
+        "kindMask": node.kind_mask,
+    })
 }
 
 fn serialize_prepared_polygon_set_render_geometry(
@@ -2546,6 +2587,24 @@ mod tests {
                 .all(|cell| cell["renderGeometry"]["vertexCount"]
                     .as_u64()
                     .is_some_and(|vertex_count| vertex_count > 0))
+        );
+        assert!(
+            asset.payload["prepared"]["spatialItems"]
+                .as_array()
+                .expect("pack should expose Rust-prepared spatial items")
+                .iter()
+                .any(|item| item["kind"] == "terrain")
+        );
+        assert_eq!(
+            asset.payload["prepared"]["staticLandblockBvh"]["scope"],
+            "static-landblock"
+        );
+        assert!(
+            asset.payload["prepared"]["staticLandblockBvh"]["nodes"]
+                .as_array()
+                .expect("pack should expose Rust-built BVH nodes")
+                .iter()
+                .any(|node| node["kindMask"].as_u64().is_some_and(|mask| mask != 0))
         );
         assert!(
             asset.payload["dependencies"]["cellDatIds"]

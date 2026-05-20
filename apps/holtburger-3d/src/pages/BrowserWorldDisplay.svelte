@@ -92,9 +92,11 @@
 	} from "../lib/world-display/render-scene-context";
 	import {
 		DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+		LANDBLOCK_PACK_SPATIAL_OWNER_KEY,
 		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 		TERRAIN_SPATIAL_OWNER_KEY,
 		deriveDebugOverlaySpatialItems,
+		deriveLandblockPackSpatialItems,
 		deriveStructuredInteriorSpatialItems,
 		deriveTerrainSpatialItems,
 	} from "../lib/world-display/render-spatial-scene";
@@ -326,6 +328,9 @@
 	);
 	const debugOverlaySpatialItems = $derived(
 		deriveDebugOverlaySpatialItems(debugOverlayScene),
+	);
+	const landblockPackSpatialItems = $derived(
+		deriveLandblockPackSpatialItems(assetState),
 	);
 	const activeRenderChunkPlacements = $derived(
 		collectActiveRenderChunkPlacements(
@@ -601,6 +606,12 @@
 		renderSpatialIndex.replaceOwnerItems(
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 			debugOverlaySpatialItems,
+		);
+	});
+	$effect(() => {
+		renderSpatialIndex.replaceOwnerItems(
+			LANDBLOCK_PACK_SPATIAL_OWNER_KEY,
+			landblockPackSpatialItems,
 		);
 	});
 	$effect(() => {
@@ -1101,6 +1112,25 @@
 						value: formatOtherPortalId(metadata.otherPortalId),
 					},
 					{ label: "Flags", value: formatPortalFlags(metadata.flags) },
+					...commonRows,
+				],
+			};
+		}
+		if (metadata.kind === "landblock-pack-spatial") {
+			return {
+				title: formatHex32(metadata.landblockId),
+				kicker: "Landblock spatial item",
+				rows: [
+					{ label: "Kind", value: metadata.spatialKind },
+					{ label: "Item", value: metadata.itemId },
+					{
+						label: "Owner",
+						value:
+							metadata.ownerId === null
+								? "None"
+								: formatHex32(metadata.ownerId),
+					},
+					{ label: "Source asset", value: metadata.sourceAssetId ?? "None" },
 					...commonRows,
 				],
 			};

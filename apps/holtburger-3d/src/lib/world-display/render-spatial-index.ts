@@ -3,7 +3,13 @@ import type { PortalOverlayTargetStatus } from "./debug-overlays";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { RenderChunkKey } from "./render-chunks";
 
-export type RenderSpatialItemKind = "terrain" | "structured-cell" | "portal";
+export type RenderSpatialItemKind =
+	| "terrain"
+	| "structured-cell"
+	| "portal"
+	| "outdoor-static"
+	| "building"
+	| "indoor-static";
 
 export interface RenderVec3 {
 	x: number;
@@ -56,6 +62,17 @@ export type RenderSpatialMetadata =
 			polygonId: number;
 			otherPortalId: number;
 			flags: number;
+	  }
+	| {
+			kind: "landblock-pack-spatial";
+			spatialKind: Exclude<
+				RenderSpatialItemKind,
+				"terrain" | "structured-cell" | "portal"
+			>;
+			itemId: string;
+			landblockId: number;
+			ownerId: number | null;
+			sourceAssetId: string | null;
 	  };
 
 export interface RenderSpatialItem {

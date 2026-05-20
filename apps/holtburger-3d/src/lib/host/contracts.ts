@@ -398,6 +398,38 @@ const preparedLandblockStaticMeshDtoSchema = z.object({
 	instanceBounds: preparedAabbDtoSchema,
 });
 
+const preparedLandblockSpatialItemKindDtoSchema = z.enum([
+	"terrain",
+	"outdoor-static",
+	"building",
+	"env-cell",
+	"indoor-static",
+	"portal",
+]);
+
+const preparedLandblockSpatialItemDtoSchema = z.object({
+	id: z.string().min(1),
+	kind: preparedLandblockSpatialItemKindDtoSchema,
+	ownerId: z.number().int().nonnegative().nullable(),
+	sourceAssetId: z.string().min(1).nullable(),
+	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
+});
+
+const preparedLandblockBvhNodeDtoSchema = z.object({
+	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
+	left: z.number().int().nonnegative().nullable(),
+	right: z.number().int().nonnegative().nullable(),
+	itemIndices: z.array(z.number().int().nonnegative()),
+	kindMask: z.number().int().nonnegative(),
+});
+
+const preparedLandblockBvhDtoSchema = z.object({
+	coordinateSpace: z.literal("landblock-render-local"),
+	landblockId: z.number().int().nonnegative(),
+	scope: z.literal("static-landblock"),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+});
+
 const landblockPackSourceFactsDtoSchema = z.object({
 	cellLandblock: cellLandblockFactDtoSchema.nullable(),
 	landblockInfo: landblockInfoFactDtoSchema.nullable(),
@@ -455,8 +487,8 @@ export const landblockPackPayloadDtoSchema = z.object({
 		outdoorStaticInstances: z.array(preparedLandblockStaticInstanceDtoSchema),
 		interiorCells: z.array(preparedLandblockInteriorCellDtoSchema),
 		staticMeshes: z.array(preparedLandblockStaticMeshDtoSchema),
-		spatialItems: z.array(z.unknown()),
-		staticInstanceBvh: z.null(),
+		spatialItems: z.array(preparedLandblockSpatialItemDtoSchema),
+		staticLandblockBvh: preparedLandblockBvhDtoSchema.nullable(),
 	}),
 	dependencies: landblockPackDependenciesDtoSchema,
 	diagnostics: landblockPackDiagnosticsDtoSchema,

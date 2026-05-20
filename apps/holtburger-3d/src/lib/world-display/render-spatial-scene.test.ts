@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
+import { createInitialAssetChannelState } from "../assets/types";
 import type { WorldDebugOverlayModel } from "./debug-overlays";
 import {
 	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+	LANDBLOCK_PACK_SPATIAL_OWNER_KEY,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 	TERRAIN_SPATIAL_OWNER_KEY,
 	deriveDebugOverlaySpatialItems,
+	deriveLandblockPackSpatialItems,
 	deriveStructuredInteriorSpatialItems,
 	deriveTerrainSpatialItems,
 } from "./render-spatial-scene";
@@ -126,6 +129,116 @@ describe("deriveDebugOverlaySpatialItems", () => {
 		});
 
 		expect(items).toEqual([]);
+	});
+});
+
+describe("deriveLandblockPackSpatialItems", () => {
+	it("adapts pack spatial items into render spatial index items", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"landblock-pack/0102ffff": {
+				request: {
+					requestId: "pack",
+					assetId: "landblock-pack/0102ffff",
+					priority: "streaming",
+				},
+				response: {
+					requestId: "pack",
+					assetId: "landblock-pack/0102ffff",
+					payloadKind: "json",
+					payload: {},
+				},
+				payload: {
+					kind: "landblock-pack",
+					sourceAssetKind: "landblock-pack",
+					residencyKind: "landblock",
+					landblockId: 0x0102ffff,
+					landblockInfoId: 0x0102fffe,
+					classification: "outdoor",
+					sourceFacts: {
+						cellLandblock: null,
+						landblockInfo: null,
+						outdoor: {
+							explicitObjects: [],
+							buildings: [],
+							generatedScenery: [],
+						},
+						interiors: { envCells: [], environments: [] },
+					},
+					prepared: {
+						terrainMesh: null,
+						outdoorStaticInstances: [],
+						interiorCells: [],
+						staticMeshes: [],
+						spatialItems: [
+							{
+								id: "pack/static/0",
+								kind: "outdoor-static",
+								ownerId: 0x0102ffff,
+								sourceAssetId: "gfx-obj/01000001",
+								bounds: {
+									min: { x: 1, y: 2, z: 3 },
+									max: { x: 4, y: 5, z: 6 },
+								},
+							},
+						],
+						staticLandblockBvh: {
+							coordinateSpace: "landblock-render-local",
+							landblockId: 0x0102ffff,
+							scope: "static-landblock",
+							nodes: [
+								{
+									bounds: {
+										min: { x: 1, y: 2, z: 3 },
+										max: { x: 4, y: 5, z: 6 },
+									},
+									left: null,
+									right: null,
+									itemIndices: [0],
+									kindMask: 2,
+								},
+							],
+						},
+					},
+					dependencies: {
+						cellDatIds: [],
+						portalDatIds: [],
+						renderableAssetIds: [],
+					},
+					diagnostics: { sourceRecords: [], errors: [] },
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "landblock-pack",
+						errorCode: null,
+						detail: "test",
+					},
+				},
+				preparedAt: "2026-05-20T00:00:00.000Z",
+			},
+		};
+
+		const items = deriveLandblockPackSpatialItems(assetState);
+
+		expect(items).toEqual([
+			expect.objectContaining({
+				id: "landblock-pack:pack/static/0",
+				kind: "outdoor-static",
+				ownerKey: LANDBLOCK_PACK_SPATIAL_OWNER_KEY,
+				chunkKey: "landblock/0102ffff",
+				broadphaseBounds: {
+					min: { x: 1, y: 2, z: 3 },
+					max: { x: 4, y: 5, z: 6 },
+				},
+				metadata: {
+					kind: "landblock-pack-spatial",
+					spatialKind: "outdoor-static",
+					itemId: "pack/static/0",
+					landblockId: 0x0102ffff,
+					ownerId: 0x0102ffff,
+					sourceAssetId: "gfx-obj/01000001",
+				},
+			}),
+		]);
 	});
 });
 

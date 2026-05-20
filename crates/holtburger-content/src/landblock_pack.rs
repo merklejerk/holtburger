@@ -118,6 +118,8 @@ pub struct LandblockPreparedFacts {
     pub outdoor_static_instances: Vec<PreparedStaticInstance>,
     pub interior_cells: Vec<PreparedInteriorCell>,
     pub static_meshes: Vec<PreparedStaticMesh>,
+    pub spatial_items: Vec<PreparedSpatialItem>,
+    pub static_landblock_bvh: Option<PreparedBvh>,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +204,42 @@ pub struct PreparedStaticMesh {
     pub part_scale: PreparedVec3,
     pub source_bounds: Option<PreparedAabb>,
     pub instance_bounds: Option<PreparedAabb>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedSpatialItem {
+    pub id: String,
+    pub kind: PreparedSpatialItemKind,
+    pub owner_id: Option<u32>,
+    pub source_asset_id: Option<String>,
+    pub bounds: PreparedAabb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedSpatialItemKind {
+    Terrain,
+    OutdoorStatic,
+    Building,
+    EnvCell,
+    IndoorStatic,
+    Portal,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedBvh {
+    pub coordinate_space: &'static str,
+    pub landblock_id: u32,
+    pub scope: &'static str,
+    pub nodes: Vec<PreparedBvhNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedBvhNode {
+    pub bounds: PreparedAabb,
+    pub left: Option<usize>,
+    pub right: Option<usize>,
+    pub item_indices: Vec<usize>,
+    pub kind_mask: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -791,12 +829,23 @@ fn prepare_landblock_facts(
             .chain(indoor_static_instances.iter()),
         diagnostics,
     );
+    let terrain_mesh = cell_landblock.map(build_terrain_mesh);
+    let interior_cells = build_prepared_interior_cells(interiors);
+    let spatial_items = build_prepared_spatial_items(
+        landblock_id,
+        terrain_mesh.as_ref(),
+        &interior_cells,
+        &static_meshes,
+    );
+    let static_landblock_bvh = build_prepared_bvh(landblock_id, &spatial_items);
 
     LandblockPreparedFacts {
-        terrain_mesh: cell_landblock.map(build_terrain_mesh),
+        terrain_mesh,
         outdoor_static_instances,
-        interior_cells: build_prepared_interior_cells(interiors),
+        interior_cells,
         static_meshes,
+        spatial_items,
+        static_landblock_bvh,
     }
 }
 
@@ -991,6 +1040,235 @@ fn build_prepared_static_mesh(
     }
 }
 
+const BVH_LEAF_ITEM_LIMIT: usize = 4;
+
+fn build_prepared_spatial_items(
+    landblock_id: u32,
+    terrain_mesh: Option<&PreparedTerrainMesh>,
+    interior_cells: &[PreparedInteriorCell],
+    static_meshes: &[PreparedStaticMesh],
+) -> Vec<PreparedSpatialItem> {
+    let mut items = Vec::new();
+
+    if let Some(terrain_mesh) = terrain_mesh
+        && let Some(bounds) = terrain_mesh_bounds(terrain_mesh)
+    {
+        items.push(PreparedSpatialItem {
+            id: format!("landblock-pack/{landblock_id:08x}/spatial/terrain"),
+            kind: PreparedSpatialItemKind::Terrain,
+            owner_id: Some(landblock_id),
+            source_asset_id: None,
+            bounds,
+        });
+    }
+
+    items.extend(interior_cells.iter().filter_map(|cell| {
+        let bounds = transform_render_bounds_by_ac_placement(
+            cell.render_geometry.bounds?,
+            &cell.local_placement,
+            unit_prepared_vec3(),
+        );
+        Some(PreparedSpatialItem {
+            id: format!(
+                "landblock-pack/{landblock_id:08x}/spatial/env-cell/{:08x}",
+                cell.env_cell_id
+            ),
+            kind: PreparedSpatialItemKind::EnvCell,
+            owner_id: Some(cell.env_cell_id),
+            source_asset_id: None,
+            bounds,
+        })
+    }));
+
+    items.extend(static_meshes.iter().filter_map(|mesh| {
+        let bounds = mesh.instance_bounds?;
+        Some(PreparedSpatialItem {
+            id: format!(
+                "landblock-pack/{landblock_id:08x}/spatial/static/{}/part/{:04x}/{:08x}",
+                mesh.instance_id, mesh.part_index, mesh.gfx_obj_id
+            ),
+            kind: match mesh.kind {
+                PreparedStaticInstanceKind::Building => PreparedSpatialItemKind::Building,
+                PreparedStaticInstanceKind::IndoorStatic => PreparedSpatialItemKind::IndoorStatic,
+                PreparedStaticInstanceKind::Scenery
+                | PreparedStaticInstanceKind::GeneratedScenery => {
+                    PreparedSpatialItemKind::OutdoorStatic
+                }
+            },
+            owner_id: mesh.owning_env_cell_id.or(Some(mesh.owning_landblock_id)),
+            source_asset_id: Some(mesh.gfx_obj_asset_id.clone()),
+            bounds,
+        })
+    }));
+
+    items.sort_by(|left, right| left.id.cmp(&right.id));
+    items
+}
+
+fn terrain_mesh_bounds(mesh: &PreparedTerrainMesh) -> Option<PreparedAabb> {
+    mesh.vertices
+        .iter()
+        .map(|vertex| PreparedVec3 {
+            x: vertex.x,
+            y: vertex.z,
+            z: if vertex.y == 0.0 { 0.0 } else { -vertex.y },
+        })
+        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
+}
+
+fn transform_render_bounds_by_ac_placement(
+    bounds: PreparedAabb,
+    placement: &Frame,
+    scale: PreparedVec3,
+) -> PreparedAabb {
+    let center = PreparedVec3 {
+        x: (bounds.min.x + bounds.max.x) * 0.5,
+        y: (bounds.min.y + bounds.max.y) * 0.5,
+        z: (bounds.min.z + bounds.max.z) * 0.5,
+    };
+    let half_extent = PreparedVec3 {
+        x: (bounds.max.x - bounds.min.x).abs() * 0.5 * scale.x.abs(),
+        y: (bounds.max.y - bounds.min.y).abs() * 0.5 * scale.y.abs(),
+        z: (bounds.max.z - bounds.min.z).abs() * 0.5 * scale.z.abs(),
+    };
+    let radius = (half_extent.x * half_extent.x
+        + half_extent.y * half_extent.y
+        + half_extent.z * half_extent.z)
+        .sqrt();
+    let origin = convert_ac_vector_to_render_space(placement.origin);
+    let center = PreparedVec3 {
+        x: origin.x + center.x * scale.x,
+        y: origin.y + center.y * scale.y,
+        z: origin.z + center.z * scale.z,
+    };
+    PreparedAabb {
+        min: PreparedVec3 {
+            x: center.x - radius,
+            y: center.y - radius,
+            z: center.z - radius,
+        },
+        max: PreparedVec3 {
+            x: center.x + radius,
+            y: center.y + radius,
+            z: center.z + radius,
+        },
+    }
+}
+
+fn build_prepared_bvh(landblock_id: u32, items: &[PreparedSpatialItem]) -> Option<PreparedBvh> {
+    if items.is_empty() {
+        return None;
+    }
+
+    let mut nodes = Vec::new();
+    let item_indices = (0..items.len()).collect::<Vec<_>>();
+    build_prepared_bvh_node(items, item_indices, &mut nodes);
+    Some(PreparedBvh {
+        coordinate_space: "landblock-render-local",
+        landblock_id,
+        scope: "static-landblock",
+        nodes,
+    })
+}
+
+fn build_prepared_bvh_node(
+    items: &[PreparedSpatialItem],
+    mut item_indices: Vec<usize>,
+    nodes: &mut Vec<PreparedBvhNode>,
+) -> usize {
+    let bounds = item_indices
+        .iter()
+        .map(|index| items[*index].bounds)
+        .reduce(union_bounds)
+        .expect("BVH nodes require at least one spatial item");
+    let kind_mask = item_indices.iter().fold(0, |mask, index| {
+        mask | spatial_item_kind_mask(items[*index].kind)
+    });
+    let node_index = nodes.len();
+    nodes.push(PreparedBvhNode {
+        bounds,
+        left: None,
+        right: None,
+        item_indices: Vec::new(),
+        kind_mask,
+    });
+
+    if item_indices.len() <= BVH_LEAF_ITEM_LIMIT {
+        nodes[node_index].item_indices = item_indices;
+        return node_index;
+    }
+
+    let axis = longest_bounds_axis(bounds);
+    item_indices.sort_by(|left, right| {
+        let left_center = bounds_center_component(items[*left].bounds, axis);
+        let right_center = bounds_center_component(items[*right].bounds, axis);
+        left_center
+            .partial_cmp(&right_center)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(left.cmp(right))
+    });
+    let right_indices = item_indices.split_off(item_indices.len() / 2);
+    let left = build_prepared_bvh_node(items, item_indices, nodes);
+    let right = build_prepared_bvh_node(items, right_indices, nodes);
+    nodes[node_index].left = Some(left);
+    nodes[node_index].right = Some(right);
+    node_index
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BvhSplitAxis {
+    X,
+    Y,
+    Z,
+}
+
+fn longest_bounds_axis(bounds: PreparedAabb) -> BvhSplitAxis {
+    let x = bounds.max.x - bounds.min.x;
+    let y = bounds.max.y - bounds.min.y;
+    let z = bounds.max.z - bounds.min.z;
+    if x >= y && x >= z {
+        BvhSplitAxis::X
+    } else if y >= z {
+        BvhSplitAxis::Y
+    } else {
+        BvhSplitAxis::Z
+    }
+}
+
+fn bounds_center_component(bounds: PreparedAabb, axis: BvhSplitAxis) -> f32 {
+    match axis {
+        BvhSplitAxis::X => (bounds.min.x + bounds.max.x) * 0.5,
+        BvhSplitAxis::Y => (bounds.min.y + bounds.max.y) * 0.5,
+        BvhSplitAxis::Z => (bounds.min.z + bounds.max.z) * 0.5,
+    }
+}
+
+fn union_bounds(left: PreparedAabb, right: PreparedAabb) -> PreparedAabb {
+    PreparedAabb {
+        min: PreparedVec3 {
+            x: left.min.x.min(right.min.x),
+            y: left.min.y.min(right.min.y),
+            z: left.min.z.min(right.min.z),
+        },
+        max: PreparedVec3 {
+            x: left.max.x.max(right.max.x),
+            y: left.max.y.max(right.max.y),
+            z: left.max.z.max(right.max.z),
+        },
+    }
+}
+
+fn spatial_item_kind_mask(kind: PreparedSpatialItemKind) -> u32 {
+    match kind {
+        PreparedSpatialItemKind::Terrain => 1 << 0,
+        PreparedSpatialItemKind::OutdoorStatic => 1 << 1,
+        PreparedSpatialItemKind::Building => 1 << 2,
+        PreparedSpatialItemKind::EnvCell => 1 << 3,
+        PreparedSpatialItemKind::IndoorStatic => 1 << 4,
+        PreparedSpatialItemKind::Portal => 1 << 5,
+    }
+}
+
 fn load_setup_model_for_pack(
     content: &ContentRepository,
     setup_model_id: u32,
@@ -1160,37 +1438,7 @@ fn conservative_instance_bounds(
     source_bounds: PreparedAabb,
     scale: PreparedVec3,
 ) -> PreparedAabb {
-    let center = PreparedVec3 {
-        x: (source_bounds.min.x + source_bounds.max.x) * 0.5,
-        y: (source_bounds.min.y + source_bounds.max.y) * 0.5,
-        z: (source_bounds.min.z + source_bounds.max.z) * 0.5,
-    };
-    let half_extent = PreparedVec3 {
-        x: (source_bounds.max.x - source_bounds.min.x).abs() * 0.5 * scale.x.abs(),
-        y: (source_bounds.max.y - source_bounds.min.y).abs() * 0.5 * scale.y.abs(),
-        z: (source_bounds.max.z - source_bounds.min.z).abs() * 0.5 * scale.z.abs(),
-    };
-    let radius = (half_extent.x * half_extent.x
-        + half_extent.y * half_extent.y
-        + half_extent.z * half_extent.z)
-        .sqrt();
-    let world_center = PreparedVec3 {
-        x: placement.origin.x + center.x * scale.x,
-        y: placement.origin.y + center.y * scale.y,
-        z: placement.origin.z + center.z * scale.z,
-    };
-    PreparedAabb {
-        min: PreparedVec3 {
-            x: world_center.x - radius,
-            y: world_center.y - radius,
-            z: world_center.z - radius,
-        },
-        max: PreparedVec3 {
-            x: world_center.x + radius,
-            y: world_center.y + radius,
-            z: world_center.z + radius,
-        },
-    }
+    transform_render_bounds_by_ac_placement(source_bounds, placement, scale)
 }
 
 fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh {

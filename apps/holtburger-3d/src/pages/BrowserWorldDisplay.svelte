@@ -788,7 +788,7 @@
 				browserCameraState,
 				metrics.bounds,
 				fitKey,
-				{ force: false },
+				{ force: false, aspect: metrics.cameraFrame?.aspect },
 			);
 			applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, false);
 			return;
@@ -962,7 +962,7 @@
 			browserCameraState,
 			renderMetrics.bounds,
 			`forced:${Date.now()}`,
-			{ force: true },
+			{ force: true, aspect: renderMetrics.cameraFrame?.aspect },
 		);
 		keyboardInputEventCount += 1;
 		applyBrowserCameraFrame({ normalizedX: 0.5, normalizedY: 0.5 }, true);

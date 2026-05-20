@@ -591,6 +591,7 @@ const STIPPLING_NO_POS = 0x04;
 const STIPPLING_NO_NEG = 0x08;
 const CULL_MODE_NONE = 1;
 const CULL_MODE_CLOCKWISE = 2;
+const CULL_MODE_COUNTER_CLOCKWISE = 3;
 
 interface PolygonRenderSide {
 	surfaceId: number | null;
@@ -746,11 +747,15 @@ function derivePolygonRenderSides(
 			(polygon.stippling & STIPPLING_NO_POS) === 0
 				? requireUvIndicesAvailable(source.sourceLabel, polygon, "positive")
 				: null;
+		const isCounterClockwiseCulled =
+			polygon.sidesType === CULL_MODE_COUNTER_CLOCKWISE;
 		positiveSide = {
 			surfaceId: normalizeSurfaceId(polygon.posSurface),
 			uvIndices,
-			vertexOffsets: (vertexIndex) => [0, vertexIndex, vertexIndex + 1],
-			normalScale: 1,
+			vertexOffsets: isCounterClockwiseCulled
+				? (vertexIndex) => [0, vertexIndex + 1, vertexIndex]
+				: (vertexIndex) => [0, vertexIndex, vertexIndex + 1],
+			normalScale: isCounterClockwiseCulled ? -1 : 1,
 		};
 		sides.push(positiveSide);
 	}

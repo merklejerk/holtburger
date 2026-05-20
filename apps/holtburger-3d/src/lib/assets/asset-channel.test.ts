@@ -1907,6 +1907,100 @@ describe("asset channel controller", () => {
 		});
 	});
 
+	it("prepares counter-clockwise culled gfx-obj polygons with reversed positive winding", () => {
+		const gfxObj = prepareAssetPayload(
+			{
+				requestId: "gfx-obj-ccw-cull",
+				assetId: "gfx-obj/01000002",
+				priority: "streaming",
+			},
+			{
+				requestId: "gfx-obj-ccw-cull",
+				assetId: "gfx-obj/01000002",
+				payloadKind: "json",
+				payload: {
+					kind: "gfx-obj",
+					residencyKind: "unknown",
+					sourceAssetKind: "gfx-obj",
+					gfxObjId: 0x01000002,
+					flags: 3,
+					surfaceIds: [0x08000001],
+					vertexArray: {
+						vertexType: 1,
+						vertexCount: 3,
+						vertices: [
+							{
+								id: 0,
+								origin: { x: 0, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 0 }],
+							},
+							{
+								id: 1,
+								origin: { x: 2, y: 0, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 1, v: 0 }],
+							},
+							{
+								id: 2,
+								origin: { x: 0, y: 2, z: 0 },
+								normal: { x: 0, y: 0, z: 1 },
+								uvs: [{ u: 0, v: 1 }],
+							},
+						],
+					},
+					drawingPolygons: [
+						{
+							id: 1,
+							numPts: 3,
+							stippling: 0,
+							sidesType: 3,
+							posSurface: 0x08000001,
+							negSurface: 0,
+							vertexIds: [0, 1, 2],
+							posUvIndices: [0, 0, 0],
+							negUvIndices: [],
+						},
+					],
+					drawingBsp: null,
+					physicsWitness: {
+						polygonCount: 1,
+						hasBsp: false,
+					},
+					sortCenter: null,
+					didDegrade: null,
+					provenance: {
+						source: "repo-local-hba",
+						sourceAssetKind: "gfx-obj",
+						errorCode: null,
+						detail: "dats/assets.hba",
+					},
+				},
+			},
+		);
+
+		expect(gfxObj.payload.kind).toBe("gfx-obj");
+		if (gfxObj.payload.kind !== "gfx-obj") {
+			throw new Error("expected gfx-obj payload");
+		}
+		expect(gfxObj.payload.renderGeometry).toMatchObject({
+			vertexCount: 3,
+			triangleCount: 1,
+			skippedPolygonCount: 0,
+			surfaceIds: [0x08000001],
+		});
+		expect(gfxObj.payload.renderGeometry.positions).toEqual([
+			0, 0, 0, 0, 0, -2, 2, 0, 0,
+		]);
+		expect(gfxObj.payload.renderGeometry.normals).toEqual([
+			0, -1, 0, 0, -1, 0, 0, -1, 0,
+		]);
+		expect(gfxObj.payload.renderGeometry.uvs).toEqual([0, 0, 0, 1, 1, 0]);
+		expect(gfxObj.payload.renderGeometry.triangles).toEqual([
+			{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 0 },
+		]);
+	});
+
 	it("skips gfx-obj drawing polygons that reference invalid vertices", async () => {
 		const controller = new AssetChannelController(
 			async (request) => ({

@@ -17,8 +17,6 @@ import type { PreparedAssetRecord, PreparedLandblockStaticMesh } from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
-	formatIndoorEnvCellAssetId,
-	isPreparedIndoorEnvCellAsset,
 	type StructuredInteriorMembershipPolicy,
 } from "./structured-interior-coverage";
 import {
@@ -329,44 +327,6 @@ export function createStaticRenderableAssetRequests(
 		preparedByAssetId,
 	);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
-	const legacyOutdoorSourceAssetIds = Object.values(preparedByAssetId).flatMap(
-		(asset) => {
-			if (asset.payload.kind !== "outdoor-static-scene") {
-				return [];
-			}
-
-			const landblockId = normalizeOutdoorLandblockId(
-				asset.payload.landblockId,
-			);
-			return [
-				...(detailLandblockIds.has(landblockId)
-					? asset.payload.sceneryInstances.map(
-							(instance) => instance.sourceAssetId,
-						)
-					: []),
-				...(buildingLandblockIds.has(landblockId)
-					? asset.payload.buildingInstances.map(
-							(instance) => instance.sourceAssetId,
-						)
-					: []),
-				...(detailLandblockIds.has(landblockId)
-					? asset.payload.generatedSceneryInstances.map(
-							(instance) => instance.sourceAssetId,
-						)
-					: []),
-			];
-		},
-	);
-	const linkedIndoorSourceAssetIds = linkedInteriorCoverage.envCellIds.flatMap(
-		(envCellId) => {
-			const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
-			return isPreparedIndoorEnvCellAsset(asset)
-				? asset.payload.staticObjects.map(
-						(staticObject) => staticObject.sourceAssetId,
-					)
-				: [];
-		},
-	);
 	const packGfxAssetIds = collectSelectedPackStaticGfxAssetIds(
 		preparedByAssetId,
 		{
@@ -376,13 +336,7 @@ export function createStaticRenderableAssetRequests(
 		},
 	);
 
-	return [
-		...new Set([
-			...legacyOutdoorSourceAssetIds,
-			...linkedIndoorSourceAssetIds,
-			...packGfxAssetIds,
-		]),
-	]
+	return [...new Set(packGfxAssetIds)]
 		.sort()
 		.filter(
 			(assetId) =>
@@ -415,56 +369,10 @@ export function deriveOutdoorInteriorSeedEnvCellIds(
 			for (const cell of asset.payload.prepared.interiorCells) {
 				linkedEnvCellIds.add(cell.envCellId);
 			}
-			continue;
-		}
-
-		if (asset.payload.kind === "outdoor-static-scene") {
-			if (
-				!activeLandblockIds.has(
-					normalizeOutdoorLandblockId(asset.payload.landblockId),
-				)
-			) {
-				continue;
-			}
-
-			for (const building of asset.payload.buildingInstances) {
-				for (const portal of building.portals) {
-					for (const envCellId of portal.linkedEnvCellIds) {
-						linkedEnvCellIds.add(envCellId);
-					}
-					for (const cellId of portal.stabList) {
-						if (isEnvCellId(cellId)) {
-							linkedEnvCellIds.add(cellId);
-						}
-					}
-				}
-			}
-			continue;
-		}
-
-		if (
-			isPreparedIndoorEnvCellAsset(asset) &&
-			activeLandblockIds.has(
-				normalizeOutdoorLandblockId(asset.payload.envCellId),
-			)
-		) {
-			linkedEnvCellIds.add(asset.payload.envCellId);
-			for (const envCellId of asset.payload.landblockEnvCellIds) {
-				if (
-					isEnvCellId(envCellId) &&
-					activeLandblockIds.has(normalizeOutdoorLandblockId(envCellId))
-				) {
-					linkedEnvCellIds.add(envCellId);
-				}
-			}
 		}
 	}
 
 	return linkedEnvCellIds;
-}
-
-function isEnvCellId(cellId: number): boolean {
-	return (cellId & 0xffff) !== 0xffff;
 }
 
 export function deriveTerrainFocusLandblockId(
@@ -502,16 +410,8 @@ function createIndoorStaticRenderableAssetRequests(
 			envCellIds: new Set(activeEnvCellIds),
 		},
 	);
-	const sourceAssetIds = activeEnvCellIds.flatMap((envCellId) => {
-		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(envCellId)];
-		return isPreparedIndoorEnvCellAsset(asset)
-			? asset.payload.staticObjects.map(
-					(staticObject) => staticObject.sourceAssetId,
-				)
-			: [];
-	});
 
-	return [...new Set([...sourceAssetIds, ...packGfxAssetIds])]
+	return [...new Set(packGfxAssetIds)]
 		.sort()
 		.filter(
 			(assetId) =>

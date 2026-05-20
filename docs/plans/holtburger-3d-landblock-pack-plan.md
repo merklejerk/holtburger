@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 6.1 implemented. Later phases remain planning.
+Status: Phase 7 implemented. Later cleanup remains planning.
 
 ## Context
 
@@ -1051,6 +1051,8 @@ Refinements for later phases:
 
 ### Phase 7: Retire Or Reclassify Legacy Scene Assets
 
+Status: Completed.
+
 - Phase 6.1 proved pack-backed portal topology and aperture derivation without runtime fallback, so `outdoor-static-scene/*` and `environment/*` can now be evaluated strictly as debug/source routes or removal candidates.
 - Decide which old routes remain as debug/source views:
   - `terrain/*`
@@ -1059,6 +1061,38 @@ Refinements for later phases:
   - `environment/*`
 - Remove frontend dependency graph code that only exists for landblock-scoped scene discovery.
 - Keep reusable low-level renderable asset loading if needed for non-landblock objects, avatars, dynamic entities, or future equipment rendering.
+
+Implemented:
+
+- Normal scene coverage classification now treats only `landblock-pack/*` as a direct scene coverage root. Legacy `terrain/*`, `outdoor-static-scene/*`, `indoor-env-cell/*`, and `environment/*` are no longer direct scene-coverage roots for the streaming controller.
+- Normal static-renderable request planning no longer mines cached `outdoor-static-scene/*` or `indoor-env-cell/*` payloads for setup/gfx dependencies. It requests only pack-selected prepared static mesh `gfx-obj/*` dependencies for landblock-scoped rendering.
+- Outdoor-linked interior seed discovery now reads pack-prepared interior cell inventory only. Legacy building portal and env-cell metadata are no longer used to expand normal outdoor-linked interior coverage.
+- Browser/world scene context summaries now count pack-prepared static instances and pack-prepared interior cells instead of presenting legacy scene payload counts as primary scene state.
+- Tests that encoded legacy request sequencing were updated to assert pack-backed request planning and pack-backed indoor/exterior static grouping.
+
+Decisions:
+
+- Legacy route payload schemas and worker preparation remain available as explicit source/debug/parity assets. They are not deleted in this phase because lower-level decode diagnostics and old parity fixtures still use them.
+- Reusable `setup-model/*` and `gfx-obj/*` graph hydration remains intact. Landblock packs now point at prepared gfx parts directly for renderer use, but standalone renderables are still needed for non-landblock entities and future equipment/avatar work.
+- Explicitly requested legacy source routes classify as graph hydration rather than direct scene coverage. That keeps their dependencies available for diagnostics without letting them participate in normal scene-interest keys.
+
+Course corrections:
+
+- Phase 7 was smaller and cleaner than removing every legacy renderer path at once. The high-value break was removing legacy routes from normal streaming authority; deletion of leftover debug/source derivation is better handled in the cleanup phase with targeted tests.
+- Pack-prepared static meshes request `gfx-obj/*` assets, not old setup roots. Tests were updated to reflect the post-Phase 4 contract where Rust already flattened setup-model placement and part references.
+- The scene context model needed to switch its counters to packs too; otherwise the debug UI would still imply `outdoor-static-scene/*` was the primary static scene source.
+
+Validation:
+
+- `npm exec prettier -- --write ...` from `apps/holtburger-3d`
+- `npm run test:ts`
+- `npm run check`
+
+Refinements for later phases:
+
+- Add explicit debug/source route labeling in the asset inspector so `terrain/*`, `outdoor-static-scene/*`, `indoor-env-cell/*`, and `environment/*` are visibly separate from normal scene loading.
+- Decide whether explicit legacy source route requests should keep graph hydration indefinitely or move behind a separate diagnostics-only command surface.
+- Remove remaining normal renderer read-through of legacy prepared assets after debug/source views have their own isolated model path.
 
 Exit criteria:
 
@@ -1079,10 +1113,10 @@ Initial cleanup targets:
 - Collapse duplicated Rust/TypeScript landblock id and env-cell enumeration helpers into one canonical helper per side.
 - Revisit `AssetResidencyKind` naming once `landblock` is the primary scene residency and `outdoor-landblock`/`indoor-env-cell` are no longer normal scene roots.
 - Remove obsolete worker geometry preparation paths after Rust-prepared terrain, environment, and gfx geometry are trusted.
-- Remove stale tests that encode legacy request sequencing instead of pack-backed behavior.
+- Remove any remaining stale tests that encode legacy request sequencing instead of pack-backed behavior. Phase 7 updated the normal request-planning and scene-summary tests, but legacy source/debug tests still need clearer names.
 - Rename `createTerrainCoverageRequest` and `createTerrainCoverageRequests`; after Phase 6 they return landblock-pack requests, so the names are now migration leftovers.
-- Rename `deriveOutdoorInteriorSeedEnvCellIds`; after Phase 6 it prefers pack interior inventory and only falls back to legacy seed discovery.
-- Remove compatibility reads from prepared `outdoor-static-scene/*` and `indoor-env-cell/*` inside normal static renderable request planning after legacy routes are debug/source-only.
+- Rename `deriveOutdoorInteriorSeedEnvCellIds`; after Phase 7 it reads pack interior inventory only, so "seed" and "outdoor interior" are now migration-era names.
+- Remove remaining compatibility reads from prepared `outdoor-static-scene/*` and `indoor-env-cell/*` inside normal static renderable scene derivation after legacy routes have isolated debug/source views. Phase 7 removed these reads from request planning.
 - Align `PreparedLandblockPackPayload.sourceFacts` with the DTO schema for `renderables`, or deliberately remove the unused DTO field before the contract hardens further.
 - Revisit debug panel labels so old asset-family names are presented as source/debug routes, not primary scene-loading concepts.
 - Remove duplicated env-cell serialization paths after pack-backed interiors replace normal `indoor-env-cell/*` loading.

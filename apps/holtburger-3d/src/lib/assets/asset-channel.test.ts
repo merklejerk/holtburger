@@ -22,6 +22,7 @@ import {
 	derivePreparedAssetDependencyStatus,
 	getPreparedAssetDependencies,
 	type PreparedAssetRecord,
+	type PreparedLandblockStaticMesh,
 } from "./types";
 
 function createRuntimeBatch(): RuntimeBatchDto {
@@ -283,7 +284,7 @@ describe("asset channel controller", () => {
 		expect(requests).toContain("landblock-pack/0202ffff");
 	});
 
-	it("derives demand-driven static renderable requests from prepared outdoor static scene facts", () => {
+	it("derives demand-driven static renderable requests from prepared landblock pack facts", () => {
 		const runtimeBatch = createRuntimeBatch();
 
 		const requests = createStaticRenderableAssetRequests(
@@ -292,22 +293,31 @@ describe("asset channel controller", () => {
 			"streaming",
 			{
 				"gfx-obj/01000001": createPreparedGfxObjAsset("gfx-obj/01000001"),
-				"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-					"outdoor-static-scene/0102ffff",
+				"landblock-pack/0102ffff": createPreparedLandblockPackAsset(
 					0x0102ffff,
-					["setup-model/02000002", "gfx-obj/01000001"],
-					[],
+					[
+						createPreparedLandblockStaticMesh(
+							0x0102ffff,
+							"setup-model/02000002",
+							"gfx-obj/01000002",
+						),
+						createPreparedLandblockStaticMesh(
+							0x0102ffff,
+							"gfx-obj/01000001",
+							"gfx-obj/01000001",
+						),
+					],
 				),
 			},
 			[],
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"setup-model/02000002",
+			"gfx-obj/01000002",
 		]);
 	});
 
-	it("derives demand-driven static renderable requests from generated outdoor scenery in the aggregate scene", () => {
+	it("does not mine legacy outdoor static scenes for normal renderable requests", () => {
 		const runtimeBatch = createRuntimeBatch();
 
 		const requests = createStaticRenderableAssetRequests(
@@ -325,44 +335,51 @@ describe("asset channel controller", () => {
 			[],
 		);
 
-		expect(requests.map((request) => request.assetId)).toEqual([
-			"setup-model/02000003",
-		]);
+		expect(requests).toEqual([]);
 	});
 
-	it("hydrates building sources farther out than detail scenery sources", () => {
+	it("hydrates pack-prepared building meshes farther out than detail scenery meshes", () => {
 		const requests = createStaticRenderableAssetRequests(
 			createRuntimeBatch(),
 			null,
 			"streaming",
 			{
-				"outdoor-static-scene/0202ffff":
-					createPreparedOutdoorStaticSceneWithBuildingPortal(
-						"outdoor-static-scene/0202ffff",
-						0x0202ffff,
-						[],
-					),
-				"outdoor-static-scene/0102ffff": createPreparedOutdoorStaticSceneAsset(
-					"outdoor-static-scene/0102ffff",
+				"landblock-pack/0102ffff": createPreparedLandblockPackAsset(
 					0x0102ffff,
-					["setup-model/02000002"],
-					["setup-model/02000003"],
+					[
+						createPreparedLandblockStaticMesh(
+							0x0102ffff,
+							"setup-model/02000002",
+							"gfx-obj/01000002",
+							"scenery",
+						),
+						createPreparedLandblockStaticMesh(
+							0x0102ffff,
+							"setup-model/02000003",
+							"gfx-obj/01000003",
+							"building",
+						),
+					],
 				),
-				"outdoor-static-scene/0203ffff": createPreparedOutdoorStaticSceneAsset(
-					"outdoor-static-scene/0203ffff",
+				"landblock-pack/0203ffff": createPreparedLandblockPackAsset(
 					0x0203ffff,
-					["setup-model/02000004"],
-					[],
+					[
+						createPreparedLandblockStaticMesh(
+							0x0203ffff,
+							"setup-model/02000004",
+							"gfx-obj/01000004",
+							"scenery",
+						),
+					],
 				),
 			},
 			[],
 			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
 		).map((request) => request.assetId);
 
-		expect(requests).toContain("setup-model/02000001");
-		expect(requests).toContain("setup-model/02000002");
-		expect(requests).toContain("setup-model/02000003");
-		expect(requests).not.toContain("setup-model/02000004");
+		expect(requests).toContain("gfx-obj/01000002");
+		expect(requests).toContain("gfx-obj/01000003");
+		expect(requests).not.toContain("gfx-obj/01000004");
 	});
 
 	it("does not request legacy outdoor-linked interior env cells from building portal links", () => {
@@ -417,7 +434,7 @@ describe("asset channel controller", () => {
 		);
 	});
 
-	it("requests static assets for outdoor-linked interior static objects", () => {
+	it("does not mine legacy outdoor-linked env cells for normal static assets", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createStaticRenderableAssetRequests(
 			runtimeBatch,
@@ -440,9 +457,7 @@ describe("asset channel controller", () => {
 			[],
 		);
 
-		expect(requests.map((request) => request.assetId)).toContain(
-			"setup-model/0200abcd",
-		);
+		expect(requests).toEqual([]);
 	});
 
 	it("excludes already in-flight terrain assets from the immediate coverage enqueue set", () => {
@@ -640,7 +655,7 @@ describe("asset channel controller", () => {
 		);
 	});
 
-	it("requests indoor static visual assets from prepared env-cell metadata", () => {
+	it("requests indoor landblock packs instead of mining prepared env-cell metadata", () => {
 		const preparedFocusEnvCell = prepareAssetPayload(
 			{
 				requestId: "indoor-1",
@@ -710,7 +725,6 @@ describe("asset channel controller", () => {
 
 		expect(requests.map((request) => request.assetId)).toEqual([
 			"landblock-pack/016cffff",
-			"setup-model/02000001",
 		]);
 	});
 
@@ -2551,6 +2565,7 @@ function createPreparedGfxObjAsset(assetId: string): PreparedAssetRecord {
 
 function createPreparedLandblockPackAsset(
 	landblockId: number,
+	staticMeshes: PreparedLandblockStaticMesh[] = [],
 ): PreparedAssetRecord {
 	const normalizedLandblockId = ((landblockId & 0xffff0000) | 0xffff) >>> 0;
 	const assetId = `landblock-pack/${normalizedLandblockId.toString(16).padStart(8, "0")}`;
@@ -2575,7 +2590,7 @@ function createPreparedLandblockPackAsset(
 			terrainMesh: null,
 			outdoorStaticInstances: [],
 			interiorCells: [],
-			staticMeshes: [],
+			staticMeshes,
 			spatialItems: [],
 			staticLandblockBvh: null,
 		},
@@ -2606,6 +2621,37 @@ function createPreparedLandblockPackAsset(
 		},
 		payload,
 		preparedAt: "2026-05-20T00:00:00.000Z",
+	};
+}
+
+function createPreparedLandblockStaticMesh(
+	owningLandblockId: number,
+	sourceAssetId: string,
+	gfxObjAssetId: string,
+	kind: "scenery" | "building" | "generated-scenery" = "scenery",
+): PreparedLandblockStaticMesh {
+	const sourceDid = Number.parseInt(sourceAssetId.slice(-8), 16);
+	const gfxObjId = Number.parseInt(gfxObjAssetId.slice(-8), 16);
+	return {
+		instanceId: `pack-static/${kind}/${sourceAssetId}`,
+		kind,
+		owningLandblockId,
+		owningEnvCellId: null,
+		sourceDid,
+		sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: {
+			origin: { x: 0, y: 0, z: 0 },
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+		},
+		sourceScale: { x: 1, y: 1, z: 1 },
+		partIndex: 0,
+		gfxObjId,
+		gfxObjAssetId,
+		partPlacements: [],
+		partScale: { x: 1, y: 1, z: 1 },
+		sourceBounds: null,
+		instanceBounds: null,
 	};
 }
 

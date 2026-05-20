@@ -96,6 +96,7 @@
 		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 		TERRAIN_SPATIAL_OWNER_KEY,
 		deriveDebugOverlaySpatialItems,
+		deriveLandblockPackRenderChunkPlacements,
 		deriveLandblockPackSpatialItems,
 		deriveStructuredInteriorSpatialItems,
 		deriveTerrainSpatialItems,
@@ -332,12 +333,16 @@
 	const landblockPackSpatialItems = $derived(
 		deriveLandblockPackSpatialItems(assetState),
 	);
+	const landblockPackRenderChunkPlacements = $derived(
+		deriveLandblockPackRenderChunkPlacements(assetState),
+	);
 	const activeRenderChunkPlacements = $derived(
 		collectActiveRenderChunkPlacements(
 			terrainScene,
 			structuredInteriorScene,
 			debugOverlayScene,
 			staticRenderableScene,
+			landblockPackRenderChunkPlacements,
 		),
 	);
 	const activeRenderChunkTransforms = $derived<RenderChunkTransform[]>(
@@ -1193,6 +1198,7 @@
 		structuredInterior: StructuredInteriorSceneModel,
 		debugOverlay: WorldDebugOverlayModel,
 		staticRenderables: StaticRenderableSceneModel,
+		landblockPacks: RenderChunkPlacement[],
 	): RenderChunkPlacement[] {
 		const chunksByKey = new Map<string, RenderChunkPlacement>();
 		for (const chunk of [
@@ -1201,6 +1207,7 @@
 			...debugOverlay.cells.map((cell) => cell.renderChunk),
 			...debugOverlay.portals.map((portal) => portal.renderChunk),
 			...staticRenderables.parts.map((part) => part.renderChunk),
+			...landblockPacks,
 		]) {
 			chunksByKey.set(chunk.chunkKey, chunk);
 		}

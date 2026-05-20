@@ -31,5 +31,7 @@ dist-manifest.json
 
 .vscode/
 
+.antigravitycli/
+
 # Machine-local references and working notes
 /local/

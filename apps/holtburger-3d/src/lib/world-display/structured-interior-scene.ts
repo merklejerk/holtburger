@@ -60,6 +60,15 @@ export interface StructuredInteriorSceneModel {
 	cacheText: string;
 }
 
+export function createEmptyStructuredInteriorSceneModel(): StructuredInteriorSceneModel {
+	return emptyStructuredInteriorSceneModel(
+		null,
+		[],
+		"Structured interior rendering is waiting for scene input.",
+		"Structured interior cache is idle.",
+	);
+}
+
 export function deriveStructuredInteriorSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,

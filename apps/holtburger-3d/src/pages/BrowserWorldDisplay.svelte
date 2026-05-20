@@ -66,7 +66,10 @@
 	} from "../lib/world-display/structured-interior-scene";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
-	import { deriveTransitionPortalCandidates } from "../lib/world-display/transition-portal-work-items";
+	import {
+		deriveTransitionPortalCandidates,
+		type TransitionPortalCandidateModel,
+	} from "../lib/world-display/transition-portal-work-items";
 	import {
 		countPreparedAssetsByKind,
 		formatPreparedAssetKindCounts,
@@ -82,7 +85,10 @@
 		type RenderAnchorSource,
 		type RenderChunkTransform,
 	} from "../lib/world-display/render-anchor";
-	import { deriveWorldRenderSceneContext } from "../lib/world-display/render-scene-context";
+	import {
+		deriveWorldRenderSceneContext,
+		type WorldRenderSceneContext,
+	} from "../lib/world-display/render-scene-context";
 	import {
 		DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 		STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
@@ -349,6 +355,33 @@
 			structuredInteriorScene,
 		}),
 	);
+	const assetStateResourceRevision = $derived(
+		describeAssetStateResourceRevision(assetState),
+	);
+	const terrainSceneResourceRevision = $derived(
+		describeTerrainSceneResourceRevision(terrainScene),
+	);
+	const staticRenderableSceneResourceRevision = $derived(
+		describeStaticRenderableSceneResourceRevision(staticRenderableScene),
+	);
+	const structuredInteriorSceneResourceRevision = $derived(
+		describeStructuredInteriorSceneResourceRevision(structuredInteriorScene),
+	);
+	const transitionPortalModelResourceRevision = $derived(
+		describeTransitionPortalModelResourceRevision(transitionPortalModel),
+	);
+	const debugOverlaySceneResourceRevision = $derived(
+		describeDebugOverlaySceneResourceRevision(debugOverlayScene),
+	);
+	const renderSceneContextResourceRevision = $derived(
+		describeRenderSceneContextResourceRevision(renderSceneContext),
+	);
+	const renderChunkTransformsResourceRevision = $derived(
+		describeRenderChunkTransformsResourceRevision(activeRenderChunkTransforms),
+	);
+	const browserCameraFrameResourceRevision = $derived(
+		describeSceneCameraFrameResourceRevision(browserCameraFrame),
+	);
 	const terrainVertexCount = $derived(
 		terrainScene.tiles.reduce(
 			(total, tile) => total + tile.mesh.vertices.length,
@@ -575,6 +608,69 @@
 		renderSpatialIndex.replaceOwnerItems(
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 			debugOverlaySpatialItems,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setAssetState(assetStateResourceRevision, assetState);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setRenderSceneContext(
+			renderSceneContextResourceRevision,
+			renderSceneContext,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setRenderChunkTransforms(
+			renderChunkTransformsResourceRevision,
+			activeRenderChunkTransforms,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setTerrainScene(
+			terrainSceneResourceRevision,
+			terrainScene,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setStaticRenderableScene(
+			staticRenderableSceneResourceRevision,
+			staticRenderableScene,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setStructuredInteriorScene(
+			structuredInteriorSceneResourceRevision,
+			structuredInteriorScene,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setTransitionPortalModel(
+			transitionPortalModelResourceRevision,
+			transitionPortalModel,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setDebugOverlayScene(
+			debugOverlaySceneResourceRevision,
+			debugOverlayScene,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setRenderSpatialQuery(
+			"browser-render-spatial-index",
+			renderSpatialIndex,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setControlledCameraFrame(
+			browserCameraFrameResourceRevision,
+			browserCameraFrame,
+		);
+	});
+	$effect(() => {
+		worldDisplaySurface?.setTransitionPortalMaxDepth(
+			`transition-depth=${transitionPortalMaxDepth}`,
+			transitionPortalMaxDepth,
 		);
 	});
 	const sceneStatusText = $derived(
@@ -1512,6 +1608,146 @@
 		return "Structured interior source facts are active, but no drawable cell geometry is ready.";
 	}
 
+	function describeAssetStateResourceRevision(state: AssetChannelState): string {
+		return [
+			state.channel,
+			state.status,
+			Object.keys(state.preparedByAssetId).sort().join(","),
+			Object.keys(state.cacheMetadataByAssetId).sort().join(","),
+		].join(";");
+	}
+
+	function describeTerrainSceneResourceRevision(
+		scene: TerrainSceneModel,
+	): string {
+		return [
+			`focus=${scene.focusLandblockId ?? "none"}`,
+			...scene.tiles.map(
+				(tile) =>
+					`${tile.assetId}:${tile.landblockId}:${tile.renderChunk.chunkKey}:${tile.dataSource}`,
+			),
+		].join("|");
+	}
+
+	function describeStaticRenderableSceneResourceRevision(
+		scene: StaticRenderableSceneModel,
+	): string {
+		const groupSignature = [
+			...scene.partsByRenderDomainChunkAndGfxAssetId.entries(),
+		]
+			.map(
+				([groupKey, parts]) =>
+					`${groupKey}:${parts.map((part) => part.renderKey).join(",")}`,
+			)
+			.sort()
+			.join("|");
+		return [
+			`focus=${scene.focusLandblockId ?? "none"}`,
+			`landblocks=${scene.activeLandblockIds.join(",")}`,
+			`sources=${scene.sourceInstances.length}`,
+			`parts=${scene.parts.length}`,
+			`groups=${scene.partsByRenderDomainChunkAndGfxAssetId.size}`,
+			`missingSources=${scene.missingSourceAssetIds.join(",")}`,
+			`missingGfx=${scene.missingGfxAssetIds.join(",")}`,
+			`groupHash=${hashDiagnosticString(groupSignature)}`,
+		].join(";");
+	}
+
+	function describeStructuredInteriorSceneResourceRevision(
+		scene: StructuredInteriorSceneModel,
+	): string {
+		return [
+			`focus=${scene.focusEnvCellId ?? "none"}`,
+			`active=${scene.activeEnvCellIds.join(",")}`,
+			`cells=${scene.cells
+				.map(
+					(cell) =>
+						`${cell.envCellId}:${cell.renderKey}:${cell.renderChunk.chunkKey}:${cell.portalCount}:${cell.staticObjectCount}:${cell.renderGeometry.vertexCount}:${cell.renderGeometry.triangleCount}`,
+				)
+				.sort()
+				.join(",")}`,
+			`missingEnv=${scene.missingEnvCellAssetIds.join(",")}`,
+			`missingEnvironment=${scene.missingEnvironmentAssetIds.join(",")}`,
+			`missingStructure=${scene.missingCellStructureKeys.join(",")}`,
+		].join(";");
+	}
+
+	function describeTransitionPortalModelResourceRevision(
+		model: TransitionPortalCandidateModel,
+	): string {
+		return [
+			...model.candidates.map(
+				(candidate) =>
+					`${candidate.id}:${candidate.stencilRef}:${candidate.targetStatus}:${candidate.entryEnvCellId}:${candidate.requestedInteriorEnvCellIds.join(",")}`,
+			),
+			`diagnostics=${Object.values(model.diagnostics).join(",")}`,
+		]
+			.sort()
+			.join("|");
+	}
+
+	function describeDebugOverlaySceneResourceRevision(
+		scene: WorldDebugOverlayModel,
+	): string {
+		return [
+			`portals=${scene.showPortalPolygons}`,
+			`cells=${scene.showCellIndicators}`,
+			`targets=${scene.highlightPortalTargets}`,
+			`cellIds=${scene.cells.map((cell) => `${cell.envCellId}:${cell.colorKey}:${cell.isSelected}`).join(",")}`,
+			`portalIds=${scene.portals.map((portal) => `${portal.portalId}:${portal.colorKey}:${portal.isSelected}:${portal.targetStatus}`).join(",")}`,
+		].join(";");
+	}
+
+	function describeRenderSceneContextResourceRevision(
+		context: WorldRenderSceneContext,
+	): string {
+		return `${context.kind}:${context.anchorLandblockId ?? "none"}`;
+	}
+
+	function describeRenderChunkTransformsResourceRevision(
+		transforms: readonly RenderChunkTransform[],
+	): string {
+		return transforms
+			.map(
+				(transform) =>
+					`${transform.chunkKey}:${transform.chunkLandblockId}:${transform.offset.x.toFixed(5)},${transform.offset.y.toFixed(5)},${transform.offset.z.toFixed(5)}`,
+			)
+			.join("|");
+	}
+
+	function describeSceneCameraFrameResourceRevision(
+		frame: SceneCameraFrame | null,
+	): string {
+		if (!frame) {
+			return "none";
+		}
+		return [
+			frame.position.x,
+			frame.position.y,
+			frame.position.z,
+			frame.target.x,
+			frame.target.y,
+			frame.target.z,
+			frame.up.x,
+			frame.up.y,
+			frame.up.z,
+			frame.fovDegrees,
+			frame.near,
+			frame.far,
+			frame.aspect,
+		]
+			.map((entry) => entry.toFixed(5))
+			.join(",");
+	}
+
+	function hashDiagnosticString(value: string): string {
+		let hash = 0;
+		for (let index = 0; index < value.length; index += 1) {
+			hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+		}
+		return (hash >>> 0).toString(16);
+	}
+
 	onDestroy(() => {
 		if (cameraHintTimer) {
 			clearTimeout(cameraHintTimer);
@@ -1537,18 +1773,6 @@
 >
 	<WorldDisplay
 		bind:this={worldDisplaySurface}
-		{assetState}
-		{terrainScene}
-		{staticRenderableScene}
-		{structuredInteriorScene}
-		{transitionPortalModel}
-		{transitionPortalMaxDepth}
-		{debugOverlayScene}
-		{renderSceneContext}
-		{activeRenderAnchor}
-		renderChunkTransforms={activeRenderChunkTransforms}
-		renderSpatialQuery={renderSpatialIndex}
-		controlledCameraFrame={browserCameraFrame}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
 	/>

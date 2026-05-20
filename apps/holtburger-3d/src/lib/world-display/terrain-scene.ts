@@ -37,6 +37,17 @@ export interface TerrainSceneModel {
 	tiles: TerrainSceneTile[];
 }
 
+export function createEmptyTerrainSceneModel(): TerrainSceneModel {
+	return {
+		focusLandblockId: null,
+		statusText:
+			"Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
+		cacheText: "Terrain cache is idle.",
+		dataSourceText: "No terrain provenance available yet.",
+		tiles: [],
+	};
+}
+
 export function deriveTerrainSceneModel(
 	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,

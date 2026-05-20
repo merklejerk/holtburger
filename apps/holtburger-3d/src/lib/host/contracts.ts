@@ -407,12 +407,30 @@ const preparedLandblockSpatialItemKindDtoSchema = z.enum([
 	"portal",
 ]);
 
+const preparedLandblockSpatialItemMetadataDtoSchema = z.discriminatedUnion(
+	"kind",
+	[
+		z.object({ kind: z.literal("none") }),
+		z.object({
+			kind: z.literal("terrain-quad"),
+			row: z.number().int().nonnegative(),
+			col: z.number().int().nonnegative(),
+			quadIndex: z.number().int().nonnegative(),
+			triangleIndices: z.tuple([
+				z.number().int().nonnegative(),
+				z.number().int().nonnegative(),
+			]),
+		}),
+	],
+);
+
 const preparedLandblockSpatialItemDtoSchema = z.object({
 	id: z.string().min(1),
 	kind: preparedLandblockSpatialItemKindDtoSchema,
 	ownerId: z.number().int().nonnegative().nullable(),
 	sourceAssetId: z.string().min(1).nullable(),
 	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
+	metadata: preparedLandblockSpatialItemMetadataDtoSchema,
 });
 
 const preparedLandblockBvhNodeDtoSchema = z.object({

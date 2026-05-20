@@ -12,7 +12,8 @@ pub use landblock_pack::{
     LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
     PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
     PreparedPolygonSetRenderTriangle, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedStaticInstance, PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh,
+    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
+    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainQuadSpatialMetadata,
     PreparedTerrainTriangle, PreparedVec3, SourceLoadError, SourceRecordDiagnostic,
     SourceRecordStatus, format_static_object_source_asset_id,
 };

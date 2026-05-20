@@ -11,11 +11,12 @@ use holtburger_content::{
     LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
     PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
     PreparedPolygonSetRenderTriangle, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedStaticInstance, PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh,
-    PreparedTerrainTriangle, PreparedVec3, SoulEmoteCatalog, SourceLoadError,
-    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
-    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
-    StaticRenderableSourceFamily, format_static_object_source_asset_id, normalize_landblock_id,
+    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
+    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+    SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
+    StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics, StaticOutdoorScene,
+    StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
+    format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
@@ -1507,7 +1508,23 @@ fn serialize_prepared_spatial_item(item: &PreparedSpatialItem) -> serde_json::Va
         "ownerId": item.owner_id,
         "sourceAssetId": item.source_asset_id,
         "bounds": serialize_prepared_aabb(&item.bounds),
+        "metadata": serialize_prepared_spatial_item_metadata(&item.metadata),
     })
+}
+
+fn serialize_prepared_spatial_item_metadata(
+    metadata: &PreparedSpatialItemMetadata,
+) -> serde_json::Value {
+    match metadata {
+        PreparedSpatialItemMetadata::None => serde_json::json!({ "kind": "none" }),
+        PreparedSpatialItemMetadata::TerrainQuad(terrain) => serde_json::json!({
+            "kind": "terrain-quad",
+            "row": terrain.row,
+            "col": terrain.col,
+            "quadIndex": terrain.quad_index,
+            "triangleIndices": terrain.triangle_indices,
+        }),
+    }
 }
 
 fn serialize_prepared_spatial_item_kind(kind: PreparedSpatialItemKind) -> &'static str {

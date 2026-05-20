@@ -213,6 +213,7 @@ pub struct PreparedSpatialItem {
     pub owner_id: Option<u32>,
     pub source_asset_id: Option<String>,
     pub bounds: PreparedAabb,
+    pub metadata: PreparedSpatialItemMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,6 +224,20 @@ pub enum PreparedSpatialItemKind {
     EnvCell,
     IndoorStatic,
     Portal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PreparedSpatialItemMetadata {
+    None,
+    TerrainQuad(PreparedTerrainQuadSpatialMetadata),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedTerrainQuadSpatialMetadata {
+    pub row: usize,
+    pub col: usize,
+    pub quad_index: usize,
+    pub triangle_indices: [usize; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -1050,16 +1065,8 @@ fn build_prepared_spatial_items(
 ) -> Vec<PreparedSpatialItem> {
     let mut items = Vec::new();
 
-    if let Some(terrain_mesh) = terrain_mesh
-        && let Some(bounds) = terrain_mesh_bounds(terrain_mesh)
-    {
-        items.push(PreparedSpatialItem {
-            id: format!("landblock-pack/{landblock_id:08x}/spatial/terrain"),
-            kind: PreparedSpatialItemKind::Terrain,
-            owner_id: Some(landblock_id),
-            source_asset_id: None,
-            bounds,
-        });
+    if let Some(terrain_mesh) = terrain_mesh {
+        items.extend(build_terrain_quad_spatial_items(landblock_id, terrain_mesh));
     }
 
     items.extend(interior_cells.iter().filter_map(|cell| {
@@ -1077,6 +1084,7 @@ fn build_prepared_spatial_items(
             owner_id: Some(cell.env_cell_id),
             source_asset_id: None,
             bounds,
+            metadata: PreparedSpatialItemMetadata::None,
         })
     }));
 
@@ -1098,6 +1106,7 @@ fn build_prepared_spatial_items(
             owner_id: mesh.owning_env_cell_id.or(Some(mesh.owning_landblock_id)),
             source_asset_id: Some(mesh.gfx_obj_asset_id.clone()),
             bounds,
+            metadata: PreparedSpatialItemMetadata::None,
         })
     }));
 
@@ -1105,9 +1114,58 @@ fn build_prepared_spatial_items(
     items
 }
 
-fn terrain_mesh_bounds(mesh: &PreparedTerrainMesh) -> Option<PreparedAabb> {
-    mesh.vertices
-        .iter()
+fn build_terrain_quad_spatial_items(
+    landblock_id: u32,
+    mesh: &PreparedTerrainMesh,
+) -> Vec<PreparedSpatialItem> {
+    if mesh.grid_size < 2 {
+        return Vec::new();
+    }
+
+    let quad_width = mesh.grid_size - 1;
+    let mut items = Vec::with_capacity(quad_width * quad_width);
+    for row in 0..quad_width {
+        for col in 0..quad_width {
+            let southwest = row * mesh.grid_size + col;
+            let southeast = southwest + 1;
+            let northwest = southwest + mesh.grid_size;
+            let northeast = northwest + 1;
+            let Some(bounds) =
+                terrain_vertex_bounds(mesh, [southwest, southeast, northwest, northeast])
+            else {
+                continue;
+            };
+            let quad_index = row * quad_width + col;
+            let first_triangle_index = quad_index * 2;
+            items.push(PreparedSpatialItem {
+                id: format!(
+                    "landblock-pack/{landblock_id:08x}/spatial/terrain/quad/{row:02x}/{col:02x}"
+                ),
+                kind: PreparedSpatialItemKind::Terrain,
+                owner_id: Some(landblock_id),
+                source_asset_id: None,
+                bounds,
+                metadata: PreparedSpatialItemMetadata::TerrainQuad(
+                    PreparedTerrainQuadSpatialMetadata {
+                        row,
+                        col,
+                        quad_index,
+                        triangle_indices: [first_triangle_index, first_triangle_index + 1],
+                    },
+                ),
+            });
+        }
+    }
+    items
+}
+
+fn terrain_vertex_bounds<const N: usize>(
+    mesh: &PreparedTerrainMesh,
+    vertex_indices: [usize; N],
+) -> Option<PreparedAabb> {
+    vertex_indices
+        .into_iter()
+        .filter_map(|index| mesh.vertices.get(index))
         .map(|vertex| PreparedVec3 {
             x: vertex.x,
             y: vertex.z,
@@ -1925,5 +1983,64 @@ mod tests {
         );
         assert_eq!(mesh.triangles[0].terrain_type, 0);
         assert_eq!(mesh.triangles[2].terrain_type, 9);
+    }
+
+    #[test]
+    fn terrain_spatial_items_are_quad_level_with_triangle_metadata() {
+        let cell = CellLandblockFact {
+            id: 0x0102ffff,
+            has_objects: false,
+            grid_size: LANDBLOCK_GRID_SIZE,
+            tile_size: LANDBLOCK_TILE_SIZE,
+            terrain_types: (0..81).collect(),
+            heights: (0..81).map(|height| height as f32).collect(),
+            min_height: 0.0,
+            max_height: 80.0,
+            all_heights_zero: false,
+        };
+
+        let mesh = build_terrain_mesh(&cell);
+        let items = build_terrain_quad_spatial_items(cell.id, &mesh);
+
+        assert_eq!(items.len(), 64);
+        assert_eq!(
+            items[0].id,
+            "landblock-pack/0102ffff/spatial/terrain/quad/00/00"
+        );
+        assert_eq!(items[0].kind, PreparedSpatialItemKind::Terrain);
+        assert_eq!(
+            items[0].bounds,
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: -24.0,
+                },
+                max: PreparedVec3 {
+                    x: 24.0,
+                    y: 10.0,
+                    z: 0.0,
+                },
+            }
+        );
+        assert_eq!(
+            items[0].metadata,
+            PreparedSpatialItemMetadata::TerrainQuad(PreparedTerrainQuadSpatialMetadata {
+                row: 0,
+                col: 0,
+                quad_index: 0,
+                triangle_indices: [0, 1],
+            })
+        );
+
+        assert_eq!(
+            items[63].metadata,
+            PreparedSpatialItemMetadata::TerrainQuad(PreparedTerrainQuadSpatialMetadata {
+                row: 7,
+                col: 7,
+                quad_index: 63,
+                triangle_indices: [126, 127],
+            })
+        );
     }
 }

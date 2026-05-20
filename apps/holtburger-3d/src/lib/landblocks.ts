@@ -81,6 +81,38 @@ export function formatOutdoorStaticSceneAssetId(landblockId: number): string {
 	return `outdoor-static-scene/${formatHex32(landblockId)}`;
 }
 
+export function formatLandblockPackAssetId(landblockId: number): string {
+	return `landblock-pack/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
+}
+
+export function deriveFirstEnvCellId(
+	landblockId: number,
+	numEnvCells: number,
+): number | null {
+	return numEnvCells > 0
+		? ((normalizeOutdoorLandblockId(landblockId) & 0xffff0000) | 0x0100) >>> 0
+		: null;
+}
+
+export function deriveLandblockEnvCellId(
+	landblockId: number,
+	index: number,
+): number {
+	const firstEnvCellId =
+		((normalizeOutdoorLandblockId(landblockId) & 0xffff0000) | 0x0100) >>> 0;
+	return (firstEnvCellId + Math.max(0, Math.trunc(index))) >>> 0;
+}
+
+export function deriveLandblockEnvCellIds(
+	landblockId: number,
+	numEnvCells: number,
+): number[] {
+	return Array.from(
+		{ length: Math.max(0, Math.trunc(numEnvCells)) },
+		(_, index) => deriveLandblockEnvCellId(landblockId, index),
+	);
+}
+
 export function formatHex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
 }

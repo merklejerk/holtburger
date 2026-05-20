@@ -2,6 +2,7 @@ import type { AssetLookupResponseDto } from "../host/contracts";
 import {
 	dependencyManifestPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
+	landblockPackPayloadDtoSchema,
 	outdoorStaticScenePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 } from "../host/contracts";
@@ -32,6 +33,15 @@ export function getAssetResponseDependencies(
 				(instance) => instance.sourceAssetId,
 			),
 		]);
+	}
+
+	const landblockPack = landblockPackPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockPack.success) {
+		return uniqueSortedAssetIds(
+			landblockPack.data.dependencies.renderableAssetIds,
+		);
 	}
 
 	const indoorEnvCell = indoorEnvCellPayloadDtoSchema.safeParse(

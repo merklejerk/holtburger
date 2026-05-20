@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use holtburger_common::math::{Quaternion, Vector3};
-use holtburger_content::ContentRepository;
 use holtburger_dat::file_type::{
     GfxObj, REGION_DESC_FILE_ID, RegionDesc, Scene, SceneObjectTemplate, SetupModel,
 };
@@ -8,6 +7,8 @@ use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::collections::HashSet;
 use std::io::Cursor;
+
+use crate::ContentRepository;
 
 const GENERATED_SCENERY_CELL_SIZE: f32 = 24.0;
 const GENERATED_SCENERY_BLOCK_SIZE: f32 = 192.0;

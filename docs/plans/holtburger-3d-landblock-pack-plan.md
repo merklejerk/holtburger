@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: planning. No implementation has started from this plan.
+Status: Phase 1 implemented. Later phases remain planning.
 
 ## Context
 
@@ -645,8 +645,11 @@ The original phase list is still directionally useful, but the safer schedule is
 7. **Static transform and renderable dependency port**: move setup/gfx dependency flattening, static placement, and source bounds into Rust.
 8. **Spatial item and BVH port**: emit source-space spatial items, build a Rust full landblock BVH over all valid-bounds items, and consume it for pack-backed broadphase once TypeScript consumption of bounds and identities is stable.
 9. **Legacy route retirement**: remove or reclassify old routes only after pack-backed rendering covers outdoor terrain, dungeons, linked interiors, and static renderables.
+10. **Cleanup and naming pass**: remove migration-only shims, legacy smells, obsolete abstractions, misleading names, and duplicated helper paths after pack-backed rendering is the normal path.
 
 ### Phase 1: Add Rust Landblock Pack Assembly Behind Existing UI
+
+Status: completed.
 
 - Add `LandblockPackAssembler` with tests against repo-local HBA fixtures.
 - Load `XXYYFFFF` and optional `XXYYFFFE`.
@@ -660,6 +663,50 @@ Exit criteria:
 - Requesting a known outdoor landblock returns terrain and outdoor source facts.
 - Requesting a known dungeon landblock returns env-cell start/count metadata from `LandblockInfo.num_cells`.
 - Missing `XXYYFFFE` is represented as partial source diagnostics, not a silent empty pack.
+
+Implemented:
+
+- Added `holtburger-content::LandblockPackAssembler`.
+- Moved `StaticOutdoorSceneAssembler` from `holtburger-core` into `holtburger-content` so pack assembly can reuse outdoor static assembly without a dependency cycle.
+- Added `landblock-pack/<XXYYFFFF>` Tauri asset lookup.
+- Added first-class TypeScript contract and prepared payload support for `landblock-pack`.
+- Added TypeScript helpers for `formatLandblockPackAssetId`, `deriveFirstEnvCellId`, `deriveLandblockEnvCellId`, and `deriveLandblockEnvCellIds`.
+- Added `landblock-pack/` as a direct scene coverage asset family.
+- Added dependency extraction so pack renderable references flow through the existing shared renderable graph hydration path.
+
+Payload now includes:
+
+- normalized `landblockId` and `landblockInfoId`,
+- `"outdoor" | "dungeon"` classification,
+- `CellLandblock` source facts,
+- `LandblockInfo` source facts with `firstEnvCellId` and `numEnvCells`,
+- outdoor explicit object, building, and generated scenery facts,
+- source record diagnostics and source load errors,
+- renderable dependency asset ids by reference.
+
+Intentionally still empty or unprepared:
+
+- env-cell and environment facts,
+- prepared terrain/interior geometry,
+- static transform/bounds products,
+- spatial items and BVH.
+
+Decisions and course corrections:
+
+- The assembler home is now settled for this slice: `holtburger-content` owns static content assembly, while `apps/holtburger-3d/src-tauri` remains the serializer/asset-route boundary.
+- `holtburger-core` no longer owns `StaticOutdoorSceneAssembler`; this better matches the crate-boundary rule that content discovery belongs in `holtburger-content`.
+- The first DTO includes the top-level `prepared` object, but all prepared fields remain empty/null until later phases. This keeps the envelope stable without pretending geometry has moved.
+- `landblock-pack` dependencies are exposed through `dependencies.renderableAssetIds`; heavy `gfx-obj` and `setup-model` payloads are still loaded once through their existing asset ids.
+- Current tests validate source manifest shape and dependency plumbing, not render behavior. Normal scene loading still uses legacy routes.
+
+Validation performed:
+
+- `cargo test -p holtburger-content landblock_pack --lib`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml landblock_pack_lookup_returns_manifest_source_facts`
+- `npm run test:ts -- src/lib/landblocks.test.ts src/lib/assets/dependencies.test.ts`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `npm run check`
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 ### Phase 2: Load Env Cells And Environments From The Pack
 
@@ -744,6 +791,30 @@ Exit criteria:
 - Landblock-scoped rendering uses packs by default.
 - Legacy routes are documented as debug/source endpoints or removed.
 
+### Phase 8: Cleanup Legacy Smells And Migration Scaffolding
+
+This is the running cleanup punch list. Add to it whenever a phase leaves behind a temporary adapter, legacy naming mismatch, duplicated helper, or migration-only abstraction.
+
+Initial cleanup targets:
+
+- Remove normal-path use of `terrain/*`, `outdoor-static-scene/*`, `indoor-env-cell/*`, and `environment/*` where `landblock-pack/*` has replaced them.
+- Rename remaining "outdoor" helper names that now mean generic landblock behavior, such as `normalizeOutdoorLandblockId` or `formatOutdoorStaticSceneAssetId`, where they survive beyond debug/source routes.
+- Remove env-cell-seed closure helpers once `LandblockInfo.firstEnvCellId` and `numEnvCells` are the normal source of env-cell inventory.
+- Remove `landblockEnvCellIds` from normal prepared env-cell payloads after pack-backed closure is consumed everywhere.
+- Remove fake or compatibility `PreparedAssetRecord` fan-out if any was introduced during scene-model migration.
+- Collapse duplicated Rust/TypeScript landblock id and env-cell enumeration helpers into one canonical helper per side.
+- Revisit `AssetResidencyKind` naming once `landblock` is the primary scene residency and `outdoor-landblock`/`indoor-env-cell` are no longer normal scene roots.
+- Remove obsolete worker geometry preparation paths after Rust-prepared terrain, environment, and gfx geometry are trusted.
+- Remove stale tests that encode legacy request sequencing instead of pack-backed behavior.
+- Revisit debug panel labels so old asset-family names are presented as source/debug routes, not primary scene-loading concepts.
+
+Exit criteria:
+
+- Normal scene loading has one clear landblock-pack path.
+- Legacy source/debug routes are either intentionally documented or deleted.
+- No migration-only shims remain in request planning, cache policy, prepared payload conversion, or scene derivation.
+- Naming reflects official landblock semantics instead of the old outdoor-vs-env-cell discovery model.
+
 ## Testing Strategy
 
 Rust tests:
@@ -791,9 +862,13 @@ Integration/manual validation:
 
 - What is the exact shared renderable cache boundary for Rust-prepared `gfx-obj` and `setup-model` data?
 - Should pack loading have explicit profiles such as `manifest`, `geometry`, and `debug-full`, or is one complete profile acceptable for the current browser/debug client?
-- Where should the pack assembler live after crate-boundary cleanup: `holtburger-content`, `holtburger-core`, or a new content-render bridge crate?
 - Which lower-level routes should remain user-visible diagnostics after the pack migration?
 - How much portal visibility preprocessing belongs in the pack versus in renderer/runtime policy?
+
+Answered decisions:
+
+- The pack assembler lives in `holtburger-content` for the current architecture.
+- Outdoor static content assembly also lives in `holtburger-content`; `holtburger-core` should not own repository-backed static content discovery.
 
 ## Recommended First Slice
 

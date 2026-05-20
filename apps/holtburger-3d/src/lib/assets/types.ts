@@ -11,6 +11,7 @@ import type {
 type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
 
 export type AssetResidencyKind =
+	| "landblock"
 	| "outdoor-landblock"
 	| "indoor-env-cell"
 	| "unknown";
@@ -142,6 +143,62 @@ export interface PreparedOutdoorStaticScenePayload extends PreparedAssetPayloadB
 	buildingInstances: PreparedOutdoorStaticSceneBuilding[];
 	generatedSceneryInstances: PreparedOutdoorStaticSceneGeneratedSceneryInstance[];
 	diagnostics: PreparedOutdoorStaticSceneDiagnostics;
+}
+
+export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-pack";
+	sourceAssetKind: "landblock-pack";
+	residencyKind: "landblock";
+	landblockId: number;
+	landblockInfoId: number;
+	classification: "outdoor" | "dungeon";
+	sourceFacts: {
+		cellLandblock: {
+			id: number;
+			hasObjects: boolean;
+			gridSize: 9;
+			tileSize: number;
+			terrainTypes: number[];
+			heights: number[];
+			minHeight: number;
+			maxHeight: number;
+			allHeightsZero: boolean;
+		} | null;
+		landblockInfo: {
+			id: number;
+			firstEnvCellId: number | null;
+			numEnvCells: number;
+			objectCount: number;
+			buildingCount: number;
+			packMask: number;
+			restrictions: { cellId: number; restrictionObjectId: number }[];
+		} | null;
+		outdoor: {
+			explicitObjects: PreparedOutdoorStaticSceneInstance[];
+			buildings: PreparedOutdoorStaticSceneBuilding[];
+			generatedScenery: PreparedOutdoorStaticSceneGeneratedSceneryInstance[];
+		};
+	};
+	dependencies: {
+		cellDatIds: number[];
+		portalDatIds: number[];
+		renderableAssetIds: string[];
+	};
+	diagnostics: {
+		sourceRecords: {
+			namespace: string;
+			fileId: number;
+			role: string;
+			status: "loaded" | "missing" | "decode-failed";
+		}[];
+		errors: {
+			namespace: string;
+			fileId: number;
+			role: string;
+			errorCode: AssetErrorCode;
+			detail: string;
+		}[];
+	};
 }
 
 export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
@@ -386,6 +443,7 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 
 export type PreparedAssetPayload =
 	| PreparedTerrainLandblockPayload
+	| PreparedLandblockPackPayload
 	| PreparedOutdoorStaticScenePayload
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
@@ -475,6 +533,12 @@ export function getPreparedAssetDependencies(
 		]
 			.sort()
 			.map((assetId) => ({ assetId }));
+	}
+
+	if (asset.payload.kind === "landblock-pack") {
+		return asset.payload.dependencies.renderableAssetIds.map((assetId) => ({
+			assetId,
+		}));
 	}
 
 	if (asset.payload.kind === "indoor-env-cell") {

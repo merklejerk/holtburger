@@ -222,6 +222,114 @@ export type TerrainLandblockPayloadDto = z.infer<
 	typeof terrainLandblockPayloadDtoSchema
 >;
 
+const landblockClassificationValueSchema = z.enum(["outdoor", "dungeon"]);
+export type LandblockClassificationDto = z.infer<
+	typeof landblockClassificationValueSchema
+>;
+
+const cellLandblockFactDtoSchema = z.object({
+	id: z.number().int().nonnegative(),
+	hasObjects: z.boolean(),
+	gridSize: z.literal(9),
+	tileSize: z.number().finite().positive(),
+	terrainTypes: z.array(z.number().int().nonnegative()),
+	heights: z.array(z.number().finite()),
+	minHeight: z.number().finite(),
+	maxHeight: z.number().finite(),
+	allHeightsZero: z.boolean(),
+});
+
+const landblockRestrictionDtoSchema = z.object({
+	cellId: z.number().int().nonnegative(),
+	restrictionObjectId: z.number().int().nonnegative(),
+});
+
+const landblockInfoFactDtoSchema = z.object({
+	id: z.number().int().nonnegative(),
+	firstEnvCellId: z.number().int().nonnegative().nullable(),
+	numEnvCells: z.number().int().nonnegative(),
+	objectCount: z.number().int().nonnegative(),
+	buildingCount: z.number().int().nonnegative(),
+	packMask: z.number().int().nonnegative(),
+	restrictions: z.array(landblockRestrictionDtoSchema),
+});
+
+const landblockPackOutdoorFactsDtoSchema = z.object({
+	explicitObjects: z.array(outdoorStaticSceneInstanceDtoSchema),
+	buildings: z.array(outdoorStaticSceneBuildingDtoSchema),
+	generatedScenery: z.array(
+		outdoorStaticSceneGeneratedSceneryInstanceDtoSchema,
+	),
+});
+
+const landblockPackSourceFactsDtoSchema = z.object({
+	cellLandblock: cellLandblockFactDtoSchema.nullable(),
+	landblockInfo: landblockInfoFactDtoSchema.nullable(),
+	outdoor: landblockPackOutdoorFactsDtoSchema,
+	interiors: z.object({
+		envCells: z.array(z.unknown()),
+		environments: z.array(z.unknown()),
+	}),
+	renderables: z.object({
+		gfxObjs: z.array(z.unknown()),
+		setupModels: z.array(z.unknown()),
+		unsupportedDids: z.array(z.unknown()),
+	}),
+});
+
+const landblockPackDependenciesDtoSchema = z.object({
+	cellDatIds: z.array(z.number().int().nonnegative()),
+	portalDatIds: z.array(z.number().int().nonnegative()),
+	renderableAssetIds: z.array(z.string().min(1)),
+	missing: z.array(z.unknown()),
+	unsupported: z.array(z.unknown()),
+});
+
+const sourceRecordDiagnosticDtoSchema = z.object({
+	namespace: z.string().min(1),
+	fileId: z.number().int().nonnegative(),
+	role: z.string().min(1),
+	status: z.enum(["loaded", "missing", "decode-failed"]),
+});
+
+const sourceLoadErrorDtoSchema = z.object({
+	namespace: z.string().min(1),
+	fileId: z.number().int().nonnegative(),
+	role: z.string().min(1),
+	errorCode: assetErrorCodeValueSchema,
+	detail: z.string(),
+});
+
+const landblockPackDiagnosticsDtoSchema = z.object({
+	sourceRecords: z.array(sourceRecordDiagnosticDtoSchema),
+	omissions: z.array(z.unknown()),
+	errors: z.array(sourceLoadErrorDtoSchema),
+});
+
+export const landblockPackPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-pack"),
+	residencyKind: z.literal("landblock"),
+	sourceAssetKind: z.literal("landblock-pack"),
+	landblockId: z.number().int().nonnegative(),
+	landblockInfoId: z.number().int().nonnegative(),
+	classification: landblockClassificationValueSchema,
+	sourceFacts: landblockPackSourceFactsDtoSchema,
+	prepared: z.object({
+		terrainMesh: z.null(),
+		outdoorStaticInstances: z.array(z.unknown()),
+		interiorCells: z.array(z.unknown()),
+		staticMeshes: z.array(z.unknown()),
+		spatialItems: z.array(z.unknown()),
+		staticInstanceBvh: z.null(),
+	}),
+	dependencies: landblockPackDependenciesDtoSchema,
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockPackPayloadDto = z.infer<
+	typeof landblockPackPayloadDtoSchema
+>;
+
 export const outdoorStaticScenePayloadDtoSchema = z.object({
 	kind: z.literal("outdoor-static-scene"),
 	residencyKind: z.literal("outdoor-landblock"),

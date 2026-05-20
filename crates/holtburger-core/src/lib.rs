@@ -2,7 +2,6 @@ pub mod character_gen;
 pub mod client;
 pub mod errors;
 pub mod soul_emote_motion;
-pub mod static_outdoor_scene;
 
 pub use character_gen::{
     CharacterGenBuild, CharacterGenBuilder, CharacterGenPolicy, CharacterGenValidationError,

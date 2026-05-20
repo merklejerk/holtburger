@@ -109,6 +109,35 @@ describe("world residency index", () => {
 		});
 	});
 
+	it("uses AABB fallback for pack-backed cells without legacy cell structures", () => {
+		const landblockId = makeOutdoorLandblockId(1, 2);
+		const index = buildWorldResidencyIndex({
+			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
+			cells: [
+				createCell({
+					envCellId: 0x01020001,
+					origin: { x: 10, y: 20, z: 30 },
+					boundsMin: { x: 0, y: 0, z: 0 },
+					boundsMax: { x: 10, y: 10, z: 10 },
+					includeCellStructure: false,
+				}),
+			],
+		});
+
+		const result = index.queryDetailed({ x: 15, y: 35, z: -15 });
+		expect(result.context).toEqual({
+			kind: "env-cell",
+			landblockId,
+			envCellId: 0x01020001,
+		});
+		expect(result.diagnostics).toMatchObject({
+			aabbCandidateCount: 1,
+			cellBspMatchCount: 0,
+			aabbFallbackCount: 1,
+			source: "aabb-fallback",
+		});
+	});
+
 	it("returns outdoor landblock residency when no loaded cell contains the point", () => {
 		const landblockId = makeOutdoorLandblockId(1, 2);
 		const index = buildWorldResidencyIndex({
@@ -257,7 +286,12 @@ function createCell(options: {
 	boundsMin: { x: number; y: number; z: number };
 	boundsMax: { x: number; y: number; z: number };
 	cellBspMinX?: number;
+	includeCellStructure?: boolean;
 }): StructuredInteriorCell {
+	const renderGeometry = createRenderGeometry(
+		options.boundsMin,
+		options.boundsMax,
+	);
 	return {
 		renderKey: `interior-cell-shell/test/${options.envCellId}`,
 		envCellId: options.envCellId,
@@ -272,19 +306,30 @@ function createCell(options: {
 		surfaceIds: [],
 		portalCount: 0,
 		portals: [],
+		portalApertures: [],
 		staticObjectCount: 0,
-		cellStructure: {
-			id: 1,
-			vertexArray: createVertexArray(options.boundsMin, options.boundsMax),
-			drawingPolygons: [],
-			portalPolygonIds: [],
-			cellBspWitness: { hasBsp: true, rootKind: "internal" },
-			cellBsp: createCellBsp(options.cellBspMinX ?? options.boundsMin.x),
-			physicsWitness: { polygonCount: 0, hasBsp: false, rootKind: null },
-			drawingBsp: null,
-			renderGeometry: createRenderGeometry(options.boundsMin, options.boundsMax),
-		},
-		renderGeometry: createRenderGeometry(options.boundsMin, options.boundsMax),
+		cellStructure:
+			options.includeCellStructure === false
+				? null
+				: {
+						id: 1,
+						vertexArray: createVertexArray(
+							options.boundsMin,
+							options.boundsMax,
+						),
+						drawingPolygons: [],
+						portalPolygonIds: [],
+						cellBspWitness: { hasBsp: true, rootKind: "internal" },
+						cellBsp: createCellBsp(options.cellBspMinX ?? options.boundsMin.x),
+						physicsWitness: {
+							polygonCount: 0,
+							hasBsp: false,
+							rootKind: null,
+						},
+						drawingBsp: null,
+						renderGeometry,
+					},
+		renderGeometry,
 		debugColorKey: "test",
 	};
 }

@@ -49,6 +49,7 @@ export interface TransitionPortalWorkItem extends TransitionPortalCandidate {
 }
 
 export interface TransitionPortalCandidateDiagnostics {
+	loadedEnvCellPortalFactCount: number;
 	topologyPortalCount: number;
 	linkedTopologyPortalCount: number;
 	apertureCandidateCount: number;
@@ -74,6 +75,7 @@ export function createEmptyTransitionPortalCandidateModel(): TransitionPortalCan
 	return {
 		candidates: [],
 		diagnostics: {
+			loadedEnvCellPortalFactCount: 0,
 			topologyPortalCount: 0,
 			linkedTopologyPortalCount: 0,
 			apertureCandidateCount: 0,
@@ -98,6 +100,10 @@ export function deriveTransitionPortalCandidates({
 		derivePortalAperturesFromStructuredInteriorScene(structuredInteriorScene),
 	);
 	const diagnostics: TransitionPortalCandidateDiagnostics = {
+		loadedEnvCellPortalFactCount: structuredInteriorScene.cells.reduce(
+			(count, cell) => count + cell.portals.length,
+			0,
+		),
 		topologyPortalCount: 0,
 		linkedTopologyPortalCount: 0,
 		apertureCandidateCount: 0,
@@ -161,7 +167,7 @@ function collectActiveOutdoorBuildingPortals(
 ): PreparedOutdoorStaticSceneBuildingPortal[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (
-			asset.payload.kind !== "outdoor-static-scene" ||
+			asset.payload.kind !== "landblock-pack" ||
 			!activeLandblockIds.has(
 				normalizeOutdoorLandblockId(asset.payload.landblockId),
 			)
@@ -169,7 +175,7 @@ function collectActiveOutdoorBuildingPortals(
 			return [];
 		}
 
-		return asset.payload.buildingInstances.flatMap(
+		return asset.payload.sourceFacts.outdoor.buildings.flatMap(
 			(building) => building.portals,
 		);
 	});

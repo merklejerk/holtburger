@@ -398,6 +398,7 @@ function createStructuredInteriorScene(): StructuredInteriorSceneModel {
 				surfaceIds: [],
 				portalCount: 0,
 				portals: [],
+				portalApertures: [],
 				staticObjectCount: 0,
 				cellStructure: null,
 				renderGeometry: {

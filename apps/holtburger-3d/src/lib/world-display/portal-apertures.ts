@@ -1,6 +1,7 @@
 import type { Vec3Dto } from "../host/contracts";
 import type {
 	PreparedIndoorCellPortal,
+	PreparedPortalAperture as PreparedPortalApertureGeometry,
 	PreparedPolygonSetBspNode,
 	PreparedPolygonSetPortalPoly,
 	PreparedPolygonSetPolygon,
@@ -70,6 +71,10 @@ function createCellPortalApertures(
 	cell: StructuredInteriorCell,
 	activeEnvCellIds: ReadonlySet<number>,
 ): PortalAperture[] {
+	if (cell.portalApertures.length > 0) {
+		return createPreparedCellPortalApertures(cell, activeEnvCellIds);
+	}
+
 	const cellStructure = cell.cellStructure;
 	if (!cellStructure) {
 		return [];
@@ -114,6 +119,56 @@ function createCellPortalApertures(
 			outsideTransition: isOutsideTransitionPortal(portal),
 		};
 	});
+}
+
+function createPreparedCellPortalApertures(
+	cell: StructuredInteriorCell,
+	activeEnvCellIds: ReadonlySet<number>,
+): PortalAperture[] {
+	const preparedAperturesByPortalId = new Map(
+		cell.portalApertures.map((aperture) => [aperture.portalId, aperture]),
+	);
+
+	return cell.portals.map((portal) => {
+		const preparedAperture = preparedAperturesByPortalId.get(portal.portalId);
+		const points = preparedAperture?.points ?? [];
+		const targetEnvCellId = normalizePortalTargetEnvCellId(cell, portal);
+		const targetStatus = resolveTargetStatus(
+			targetEnvCellId,
+			activeEnvCellIds,
+			points,
+		);
+
+		return {
+			id: portal.portalId,
+			source: {
+				kind: "env-cell",
+				envCellId: cell.envCellId,
+				portalId: portal.portalId,
+				sourceIndex: portal.sourceIndex,
+				polygonId: portal.polygonId,
+				flags: portal.flags,
+				otherPortalId: portal.otherPortalId,
+			},
+			renderChunk: cell.renderChunk,
+			chunkLocalPlacement: cell.chunkLocalPlacement,
+			points,
+			plane: normalizePreparedPortalAperturePlane(preparedAperture),
+			visibleSide: decodePortalVisibleSide(portal.flags),
+			targetEnvCellId,
+			targetStatus,
+			outsideTransition: isOutsideTransitionPortal(portal),
+		};
+	});
+}
+
+function normalizePreparedPortalAperturePlane(
+	aperture: PreparedPortalApertureGeometry | undefined,
+): PortalAperturePlane | null {
+	return (
+		aperture?.plane ??
+		derivePortalAperturePlaneFromPoints(aperture?.points ?? [])
+	);
 }
 
 export function decodePortalVisibleSide(
@@ -241,7 +296,11 @@ function readBspChild(value: unknown): PreparedPolygonSetBspNode | null {
 }
 
 function readBspPlane(value: unknown): PreparedPolygonSetPlane | null {
-	if (!isRecord(value) || !isVec3Dto(value.normal) || typeof value.d !== "number") {
+	if (
+		!isRecord(value) ||
+		!isVec3Dto(value.normal) ||
+		typeof value.d !== "number"
+	) {
 		return null;
 	}
 

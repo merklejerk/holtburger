@@ -164,6 +164,7 @@ function createStructuredInteriorCell(
 					targetSuffix === 0 ? 0 : (envCellId & 0xffff0000) | targetSuffix,
 			},
 		],
+		portalApertures: [],
 		staticObjectCount: 0,
 		cellStructure: {
 			id: 1,

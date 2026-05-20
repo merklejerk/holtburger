@@ -178,6 +178,7 @@ function createStructuredInteriorCell(
 		surfaceIds: [],
 		portalCount: 0,
 		portals: [],
+		portalApertures: [],
 		staticObjectCount: 0,
 		cellStructure: null,
 		renderGeometry: {

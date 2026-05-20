@@ -1,6 +1,6 @@
 # Holtburger 3D Landblock Pack Asset Plan
 
-Status: Phase 6 implemented. Later phases remain planning.
+Status: Phase 6.1 implemented. Later phases remain planning.
 
 ## Context
 
@@ -989,7 +989,7 @@ Refinements for later phases:
 
 ### Phase 6.1: Restore Pack-Backed Portal Rendering
 
-Status: planned.
+Status: completed.
 
 Phase 6 moved normal scene request planning to `landblock-pack/*`, which exposed a hidden legacy dependency in portal rendering. Pack-backed structured interiors surface env-cell portal facts to the frontend, but transition portal rendering still depends on:
 
@@ -1015,9 +1015,43 @@ Exit criteria:
 - Pack-backed portal rendering has no runtime fallback to `outdoor-static-scene/*` or `environment/*`. If required pack portal data is missing, diagnostics should expose the missing pack field/stage rather than masking it with cached legacy assets.
 - Legacy `outdoor-static-scene/*` and `environment/*` routes remain optional debug/source inputs or parity fixtures only, not portal rendering dependencies.
 
+Implemented:
+
+- Rust landblock-pack preparation now emits `prepared.interiorCells[].portalApertures` with render-space polygon points and a plane derived from the drawing BSP portal node when available, otherwise from the prepared aperture points.
+- The Tauri adapter and TypeScript contracts serialize and validate the new prepared portal aperture DTO as part of each prepared pack interior cell.
+- Pack-backed `StructuredInteriorCell` records carry prepared portal apertures while keeping `cellStructure: null`, so aperture derivation no longer needs legacy `environment/*` cell structures for pack-backed cells.
+- `derivePortalAperturesFromStructuredInteriorScene` now consumes prepared pack aperture geometry directly and keeps the older cell-structure path only for explicit legacy/debug environment payloads.
+- Transition portal topology collection now reads building portal topology from `landblock-pack.sourceFacts.outdoor.buildings` only. It no longer scans `outdoor-static-scene/*` at runtime.
+- Transition portal diagnostics now include a loaded env-cell portal fact count in addition to topology, aperture, candidate, and visible work-item metrics.
+- Tests now cover pack topology joined to pack-prepared aperture geometry with no `outdoor-static-scene/*` or `environment/*` assets cached.
+
+Decisions and course corrections:
+
+- Runtime fallback to legacy scene roots was deliberately avoided. Missing pack portal data should be visible as missing topology/aperture diagnostics instead of being hidden by old cached assets.
+- Portal aperture preparation belongs in the Rust landblock-pack assembler because it depends on DAT polygon, vertex, and drawing-BSP semantics; the frontend should consume the prepared points/planes rather than reconstructing them from legacy environment payloads.
+- The drawing-BSP portal-poly id is signed while env-cell portal facts store polygon ids unsigned. The Rust matcher now checks that the BSP polygon id is nonnegative before comparing it to the portal polygon id.
+- The existing legacy `StructuredInteriorCell` portal contract still requires a numeric `targetEnvCellId`, so pack-backed outside-transition portals continue to receive the compatibility target in the scene adapter. This remains a cleanup target.
+
+Validation performed:
+
+- `cargo fmt`
+- `cargo check -p holtburger-content`
+- `cargo check -p holtburger-3d`
+- `cargo test -p holtburger-content`
+- `npm exec prettier -- --write ...` from `apps/holtburger-3d`
+- `npm run test:ts`
+- `npm run check`
+- `git diff --check`
+
+Refinements for later phases:
+
+- Surface the new loaded portal fact/aperture/topology diagnostic split more explicitly in the scene/debug panel so screenshots make the missing stage obvious.
+- Consider moving prepared portal aperture geometry into a more specific nested contract if prepared interior cells accumulate more portal-rendering-only fields.
+- Add direct scene-model tests that derive pack-backed structured interiors from actual prepared landblock-pack records and verify portal overlays from the resulting model.
+
 ### Phase 7: Retire Or Reclassify Legacy Scene Assets
 
-- Do not retire or fully reclassify `outdoor-static-scene/*` and `environment/*` until Phase 6.1 proves pack-backed portal topology and aperture derivation without runtime fallback.
+- Phase 6.1 proved pack-backed portal topology and aperture derivation without runtime fallback, so `outdoor-static-scene/*` and `environment/*` can now be evaluated strictly as debug/source routes or removal candidates.
 - Decide which old routes remain as debug/source views:
   - `terrain/*`
   - `outdoor-static-scene/*`
@@ -1061,6 +1095,9 @@ Initial cleanup targets:
 - Remove transition portal topology dependence on `outdoor-static-scene/*` during Phase 6.1; do not add a runtime fallback while migrating.
 - Remove portal aperture derivation dependence on legacy `environment/*` cell structures during Phase 6.1; do not add a runtime fallback while migrating.
 - Split portal diagnostics into loaded portal facts, topology records, aperture records, candidates, and visible work items so a missing stage is obvious in the UI.
+- Rename `PreparedOutdoorStaticSceneBuildingPortal` now that transition portal topology also uses the same shape from `landblock-pack.sourceFacts.outdoor.buildings`.
+- Revisit `StructuredInteriorCell.portalApertures`; it is required for pack-backed cells and empty for legacy environment-backed cells, so a split cell type may be cleaner during contract tightening.
+- Consider exposing prepared portal aperture bounds once portal polygon spatial items graduate from debug overlay derivation to normal spatial products.
 - Consider moving prepared geometry serialization out of the Tauri adapter if more prepared pack products are added; the adapter is starting to accumulate DTO serialization weight again.
 - Add direct scene-model tests for pack-backed terrain and structured-interior read-through before Phase 6 makes packs the normal request path.
 - Tighten contracts and interfaces after each migration slice so fields that are required in practice are not left optional/nullish by DTO inertia. Audit `null`, `undefined`, optional properties, `unknown[]`, and broad unions in pack/prepared/render scene interfaces, and split types when only some variants genuinely allow absence.

@@ -84,7 +84,7 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	defaultFocusDistance: 360,
 	defaultMinFocusDistance: 18,
 	defaultMaxFocusDistance: 4000,
-	defaultMoveSpeed: 120,
+	defaultMoveSpeed: 150,
 	fovDegrees: 52,
 	near: 0.1,
 	far: 5000,
@@ -94,11 +94,11 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	pointerPitchRadiansPerPixel: 0.005,
 	keyboardYawRadiansPerSecond: 1.8,
 	keyboardMoveInitialSpeedMultiplier: 0.125,
-	keyboardMoveAccelerationSeconds: 3,
+	keyboardMoveAccelerationSeconds: 2,
 	shiftSlowMultiplier: 0.05,
 	wheelDeltaClamp: 900,
 	wheelLocalUpUnitsPerDelta: -0.025,
-	panScalePerPixelAtFocusDistance: 0.0018,
+	panScalePerPixelAtFocusDistance: 0.0005,
 	fitHorizontalDistanceScale: 1.65,
 	fitVerticalDistanceScale: 3.4,
 	fitFrameMinDistanceScale: 0.12,
@@ -107,7 +107,7 @@ export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	fitMaxDistanceScale: 10,
 	fitMinimumVerticalSpan: 24,
 	fitAbsoluteMinFocusDistance: 6,
-	fitAbsoluteMaxFocusDistance: 1200,
+	fitAbsoluteMaxFocusDistance: 800,
 };
 
 export function createBrowserFreeCameraState(

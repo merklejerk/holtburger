@@ -1459,7 +1459,7 @@ describe("asset channel controller", () => {
 		]);
 	});
 
-	it("omits environment portal polygons from render geometry", () => {
+	it("keeps renderable environment portal polygons in render geometry", () => {
 		const environment = prepareAssetPayload(
 			{
 				requestId: "environment-with-portal",
@@ -1557,7 +1557,7 @@ describe("asset channel controller", () => {
 						source: "app-local-stub",
 						sourceAssetKind: "environment",
 						errorCode: null,
-						detail: "portal-polygon-filter",
+						detail: "portal-polygon-rendering",
 					},
 				},
 			},
@@ -1570,17 +1570,18 @@ describe("asset channel controller", () => {
 		const cellStructure = environment.payload.cellStructures[0];
 		expect(cellStructure?.portalPolygonIds).toEqual([8]);
 		expect(cellStructure?.renderGeometry).toMatchObject({
-			vertexCount: 3,
-			triangleCount: 1,
-			skippedPolygonCount: 1,
-			surfaceIds: [0x08000002],
+			vertexCount: 6,
+			triangleCount: 2,
+			skippedPolygonCount: 0,
+			surfaceIds: [0x08000002, 0x08000003],
 		});
 		expect(cellStructure?.renderGeometry.triangles).toEqual([
 			{ polygonId: 7, surfaceId: 0x08000002, firstVertex: 0 },
+			{ polygonId: 8, surfaceId: 0x08000003, firstVertex: 3 },
 		]);
 	});
 
-	it("does not synthesize missing positive sides for NoPos polygons", () => {
+	it("does not synthesize missing positive sides for NoPos portal polygons", () => {
 		const environment = prepareAssetPayload(
 			{
 				requestId: "environment-with-no-pos",
@@ -1637,7 +1638,7 @@ describe("asset channel controller", () => {
 									negUvIndices: [],
 								},
 							],
-							portalPolygonIds: [],
+							portalPolygonIds: [11],
 							cellBspWitness: {
 								hasBsp: true,
 								rootKind: "leaf",

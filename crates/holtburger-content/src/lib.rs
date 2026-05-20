@@ -10,9 +10,10 @@ pub use landblock_pack::{
     LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,
     LandblockPackAssembler, LandblockPackSourceDiagnostics, LandblockPreparedFacts,
     LandblockRestriction, PreparedAabb, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
-    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedTerrainMesh,
-    PreparedTerrainTriangle, PreparedVec3, SourceLoadError, SourceRecordDiagnostic,
-    SourceRecordStatus, format_static_object_source_asset_id,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedStaticInstance,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
+    PreparedVec3, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
+    format_static_object_source_asset_id,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

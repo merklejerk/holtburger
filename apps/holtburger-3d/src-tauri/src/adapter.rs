@@ -9,11 +9,12 @@ use holtburger_content::{
     GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
     LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
     LandblockRestriction, PreparedAabb, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
-    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedTerrainMesh,
-    PreparedTerrainTriangle, PreparedVec3, SoulEmoteCatalog, SourceLoadError,
-    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
-    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticOutdoorSceneAssembler,
-    StaticRenderableSourceFamily, format_static_object_source_asset_id, normalize_landblock_id,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedStaticInstance,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
+    PreparedVec3, SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
+    StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics, StaticOutdoorScene,
+    StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
+    format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
@@ -1385,9 +1386,9 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
         },
         "prepared": {
             "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(serialize_prepared_terrain_mesh),
-            "outdoorStaticInstances": [],
+            "outdoorStaticInstances": pack.prepared.outdoor_static_instances.iter().map(serialize_prepared_static_instance).collect::<Vec<_>>(),
             "interiorCells": pack.prepared.interior_cells.iter().map(serialize_prepared_interior_cell).collect::<Vec<_>>(),
-            "staticMeshes": [],
+            "staticMeshes": pack.prepared.static_meshes.iter().map(serialize_prepared_static_mesh).collect::<Vec<_>>(),
             "spatialItems": [],
             "staticInstanceBvh": null
         },
@@ -1452,6 +1453,50 @@ fn serialize_prepared_interior_cell(cell: &PreparedInteriorCell) -> serde_json::
         "staticObjectCount": cell.static_object_count,
         "renderGeometry": serialize_prepared_polygon_set_render_geometry(&cell.render_geometry),
     })
+}
+
+fn serialize_prepared_static_instance(instance: &PreparedStaticInstance) -> serde_json::Value {
+    serde_json::json!({
+        "instanceId": instance.instance_id,
+        "kind": serialize_prepared_static_instance_kind(instance.kind),
+        "owningLandblockId": instance.owning_landblock_id,
+        "owningEnvCellId": instance.owning_env_cell_id,
+        "sourceDid": instance.source_did,
+        "sourceAssetId": instance.source_asset_id,
+        "sourceIndex": instance.source_index,
+        "localPlacement": serialize_frame(&instance.local_placement),
+        "sourceScale": serialize_prepared_vec3(&instance.source_scale),
+    })
+}
+
+fn serialize_prepared_static_mesh(mesh: &PreparedStaticMesh) -> serde_json::Value {
+    serde_json::json!({
+        "instanceId": mesh.instance_id,
+        "kind": serialize_prepared_static_instance_kind(mesh.kind),
+        "owningLandblockId": mesh.owning_landblock_id,
+        "owningEnvCellId": mesh.owning_env_cell_id,
+        "sourceDid": mesh.source_did,
+        "sourceAssetId": mesh.source_asset_id,
+        "sourceIndex": mesh.source_index,
+        "localPlacement": serialize_frame(&mesh.local_placement),
+        "sourceScale": serialize_prepared_vec3(&mesh.source_scale),
+        "partIndex": mesh.part_index,
+        "gfxObjId": mesh.gfx_obj_id,
+        "gfxObjAssetId": mesh.gfx_obj_asset_id,
+        "partPlacements": mesh.part_placements.iter().map(serialize_frame).collect::<Vec<_>>(),
+        "partScale": serialize_prepared_vec3(&mesh.part_scale),
+        "sourceBounds": mesh.source_bounds.as_ref().map(serialize_prepared_aabb),
+        "instanceBounds": mesh.instance_bounds.as_ref().map(serialize_prepared_aabb),
+    })
+}
+
+fn serialize_prepared_static_instance_kind(kind: PreparedStaticInstanceKind) -> &'static str {
+    match kind {
+        PreparedStaticInstanceKind::Scenery => "scenery",
+        PreparedStaticInstanceKind::Building => "building",
+        PreparedStaticInstanceKind::GeneratedScenery => "generated-scenery",
+        PreparedStaticInstanceKind::IndoorStatic => "indoor-static",
+    }
 }
 
 fn serialize_prepared_polygon_set_render_geometry(

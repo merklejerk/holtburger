@@ -35,16 +35,12 @@ describe("structured interior coverage", () => {
 	it("expands prepared seeds to their full landblock env-cell sets", () => {
 		const preparedByAssetId = {
 			[formatIndoorEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(0x016c0155, [
+				createPreparedIndoorEnvCellAsset(
 					0x016c0155,
-					0x016c0156,
-					0x016c0157,
-				]),
+					[0x016c0155, 0x016c0156, 0x016c0157],
+				),
 			[formatIndoorEnvCellAssetId(0x02010100)]:
-				createPreparedIndoorEnvCellAsset(0x02010100, [
-					0x02010100,
-					0x02010101,
-				]),
+				createPreparedIndoorEnvCellAsset(0x02010100, [0x02010100, 0x02010101]),
 		};
 
 		const coverage = deriveStructuredInteriorCoverage(
@@ -56,9 +52,26 @@ describe("structured interior coverage", () => {
 		);
 
 		expect(coverage).toEqual({
-			envCellIds: [
-				0x016c0155, 0x016c0156, 0x016c0157, 0x02010100, 0x02010101,
-			],
+			envCellIds: [0x016c0155, 0x016c0156, 0x016c0157, 0x02010100, 0x02010101],
+			truncated: false,
+		});
+	});
+
+	it("expands prepared landblock packs to their full env-cell inventory", () => {
+		const preparedByAssetId = {
+			"landblock-pack/016cffff": createPreparedLandblockPackAsset(
+				0x016cffff,
+				[0x016c0155, 0x016c0156, 0x016c0157],
+			),
+		};
+
+		const coverage = deriveStructuredInteriorCoverage(
+			{ kind: "landblock-closure", seedEnvCellIds: [0x016c0155] },
+			preparedByAssetId,
+		);
+
+		expect(coverage).toEqual({
+			envCellIds: [0x016c0155, 0x016c0156, 0x016c0157],
 			truncated: false,
 		});
 	});
@@ -86,6 +99,85 @@ describe("structured interior coverage", () => {
 		});
 	});
 });
+
+function createPreparedLandblockPackAsset(
+	landblockId: number,
+	envCellIds: number[],
+): PreparedAssetRecord {
+	const assetId = `landblock-pack/${landblockId.toString(16).padStart(8, "0")}`;
+	return {
+		request: { requestId: assetId, assetId, priority: "streaming" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: {},
+		},
+		preparedAt: "2026-05-20T00:00:00.000Z",
+		payload: {
+			kind: "landblock-pack",
+			sourceAssetKind: "landblock-pack",
+			residencyKind: "landblock",
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "landblock-pack",
+				errorCode: null,
+				detail: "test",
+			},
+			landblockId,
+			landblockInfoId: (landblockId & 0xffff0000) | 0xfffe,
+			classification: "dungeon",
+			sourceFacts: {
+				cellLandblock: null,
+				landblockInfo: null,
+				outdoor: {
+					explicitObjects: [],
+					buildings: [],
+					generatedScenery: [],
+				},
+				interiors: { envCells: [], environments: [] },
+			},
+			prepared: {
+				terrainMesh: null,
+				outdoorStaticInstances: [],
+				interiorCells: envCellIds.map((envCellId, index) => ({
+					envCellId,
+					environmentId: 0x0d000001,
+					cellStructureId: index + 1,
+					localPlacement: {
+						origin: { x: 0, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					surfaceIds: [],
+					portals: [],
+					staticObjectCount: 0,
+					renderGeometry: {
+						sourceId: index + 1,
+						vertexCount: 0,
+						triangleCount: 0,
+						positions: [],
+						normals: [],
+						uvs: [],
+						triangles: [],
+						surfaceIds: [],
+						invalidPolygons: [],
+						skippedPolygonCount: 0,
+						bounds: null,
+					},
+				})),
+				staticMeshes: [],
+				spatialItems: [],
+				staticLandblockBvh: null,
+			},
+			dependencies: {
+				cellDatIds: [],
+				portalDatIds: [],
+				renderableAssetIds: [],
+			},
+			diagnostics: { sourceRecords: [], errors: [] },
+		},
+	};
+}
 
 function createPreparedIndoorEnvCellAsset(
 	envCellId: number,

@@ -99,7 +99,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(request).not.toBeNull();
-		expect(request?.assetId).toBe("terrain/0102ffff");
+		expect(request?.assetId).toBe("landblock-pack/0102ffff");
 		expect(request?.priority).toBe("bootstrap");
 	});
 
@@ -137,7 +137,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(request).not.toBeNull();
-		expect(request?.assetId).toBe("terrain/2d5affff");
+		expect(request?.assetId).toBe("landblock-pack/2d5affff");
 		expect(request?.priority).toBe("streaming");
 	});
 
@@ -163,51 +163,14 @@ describe("asset channel controller", () => {
 			null,
 			"streaming",
 			{
-				"terrain/0102ffff": {
-					request: {
-						requestId: "bootstrap-1",
-						assetId: "terrain/0102ffff",
-						priority: "bootstrap",
-					},
-					response: {
-						requestId: "bootstrap-1",
-						assetId: "terrain/0102ffff",
-						payloadKind: "json",
-						payload: {},
-					},
-					payload: {
-						kind: "terrain-landblock",
-						sourceAssetKind: "cell-landblock",
-						residencyKind: "outdoor-landblock",
-						provenance: {
-							source: "unknown",
-							sourceAssetKind: "cell-landblock",
-							errorCode: null,
-							detail: null,
-						},
-						debugPresentation: {
-							primitive: "terrain-landblock-mesh",
-							paletteKey: "terrain-0102ffff",
-						},
-						terrainMesh: {
-							landblockId: 0x0102ffff,
-							gridSize: 9,
-							tileSize: 24,
-							vertices: [],
-							triangles: [],
-							minHeight: 0,
-							maxHeight: 12,
-						},
-					},
-					preparedAt: "2026-04-26T00:00:00.000Z",
-				},
+				"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff),
 			},
 			null,
 		);
 
 		expect(request).not.toBeNull();
-		expect(request?.assetId).not.toBe("terrain/0102ffff");
-		expect(request?.assetId).toMatch(/^terrain\//);
+		expect(request?.assetId).not.toBe("landblock-pack/0102ffff");
+		expect(request?.assetId).toMatch(/^landblock-pack\//);
 	});
 
 	it("returns every missing landblock in the coverage ring immediately when nothing is in flight", () => {
@@ -216,51 +179,16 @@ describe("asset channel controller", () => {
 			null,
 			"streaming",
 			{
-				"terrain/0102ffff": {
-					request: {
-						requestId: "bootstrap-1",
-						assetId: "terrain/0102ffff",
-						priority: "bootstrap",
-					},
-					response: {
-						requestId: "bootstrap-1",
-						assetId: "terrain/0102ffff",
-						payloadKind: "json",
-						payload: {},
-					},
-					payload: {
-						kind: "terrain-landblock",
-						sourceAssetKind: "cell-landblock",
-						residencyKind: "outdoor-landblock",
-						provenance: {
-							source: "unknown",
-							sourceAssetKind: "cell-landblock",
-							errorCode: null,
-							detail: null,
-						},
-						debugPresentation: {
-							primitive: "terrain-landblock-mesh",
-							paletteKey: "terrain-0102ffff",
-						},
-						terrainMesh: {
-							landblockId: 0x0102ffff,
-							gridSize: 9,
-							tileSize: 24,
-							vertices: [],
-							triangles: [],
-							minHeight: 0,
-							maxHeight: 12,
-						},
-					},
-					preparedAt: "2026-04-26T00:00:00.000Z",
-				},
+				"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff),
 			},
 			[],
 		);
 
 		expect(requests).toHaveLength(8);
 		expect(
-			requests.every((request) => request.assetId !== "terrain/0102ffff"),
+			requests.every(
+				(request) => request.assetId !== "landblock-pack/0102ffff",
+			),
 		).toBe(true);
 	});
 
@@ -281,9 +209,11 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests).toHaveLength(25);
-		expect(requests[0]?.assetId).toBe("terrain/4040ffff");
 		expect(requests.map((request) => request.assetId)).toContain(
-			"terrain/4242ffff",
+			"landblock-pack/4040ffff",
+		);
+		expect(requests.map((request) => request.assetId)).toContain(
+			"landblock-pack/4242ffff",
 		);
 	});
 
@@ -310,14 +240,11 @@ describe("asset channel controller", () => {
 			true,
 		);
 		expect(requests.map((request) => request.assetId)).toContain(
-			"terrain/da55ffff",
-		);
-		expect(requests.map((request) => request.assetId)).toContain(
-			"outdoor-static-scene/db56ffff",
+			"landblock-pack/da55ffff",
 		);
 	});
 
-	it("requests outdoor static scene facts for the same destination coverage as terrain", () => {
+	it("requests one landblock pack for destination bootstrap coverage", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createSceneCoverageRequests(
 			runtimeBatch,
@@ -338,12 +265,11 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId).sort()).toEqual([
-			"outdoor-static-scene/2d5affff",
-			"terrain/2d5affff",
+			"landblock-pack/2d5affff",
 		]);
 	});
 
-	it("requests terrain beyond the static-scene LoD ring", () => {
+	it("requests landblock packs across the union of terrain and static LoD rings", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch(),
 			null,
@@ -353,9 +279,8 @@ describe("asset channel controller", () => {
 			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
 		).map((request) => request.assetId);
 
-		expect(requests).toContain("terrain/0302ffff");
-		expect(requests).not.toContain("outdoor-static-scene/0302ffff");
-		expect(requests).toContain("outdoor-static-scene/0202ffff");
+		expect(requests).toContain("landblock-pack/0302ffff");
+		expect(requests).toContain("landblock-pack/0202ffff");
 	});
 
 	it("derives demand-driven static renderable requests from prepared outdoor static scene facts", () => {
@@ -440,7 +365,7 @@ describe("asset channel controller", () => {
 		expect(requests).not.toContain("setup-model/02000004");
 	});
 
-	it("requests outdoor-linked interior env cells from building portal links", () => {
+	it("does not request legacy outdoor-linked interior env cells from building portal links", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createSceneCoverageRequests(
 			runtimeBatch,
@@ -457,15 +382,15 @@ describe("asset channel controller", () => {
 			[],
 		);
 
-		expect(requests.map((request) => request.assetId)).toContain(
+		expect(requests.map((request) => request.assetId)).not.toContain(
 			"indoor-env-cell/01020155",
 		);
 		expect(requests.map((request) => request.assetId)).toContain(
-			"indoor-env-cell/01020156",
+			"landblock-pack/0102ffff",
 		);
 	});
 
-	it("requests outdoor-linked interior environments once env-cell metadata is prepared", () => {
+	it("does not request legacy outdoor-linked interior environments once env-cell metadata is prepared", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createSceneCoverageRequests(
 			runtimeBatch,
@@ -487,7 +412,7 @@ describe("asset channel controller", () => {
 			[],
 		);
 
-		expect(requests.map((request) => request.assetId)).toContain(
+		expect(requests.map((request) => request.assetId)).not.toContain(
 			"environment/0d000123",
 		);
 	});
@@ -526,19 +451,19 @@ describe("asset channel controller", () => {
 			null,
 			"streaming",
 			{},
-			["terrain/0102ffff", "terrain/0101ffff"],
+			["landblock-pack/0102ffff", "landblock-pack/0101ffff"],
 		);
 
 		expect(
-			requests.some((request) => request.assetId === "terrain/0102ffff"),
+			requests.some((request) => request.assetId === "landblock-pack/0102ffff"),
 		).toBe(false);
 		expect(
-			requests.some((request) => request.assetId === "terrain/0101ffff"),
+			requests.some((request) => request.assetId === "landblock-pack/0101ffff"),
 		).toBe(false);
 		expect(requests).toHaveLength(7);
 	});
 
-	it("requests indoor env-cell metadata plus first-class indoor family assets when runtime residency is indoors", () => {
+	it("requests the focused landblock pack when runtime residency is indoors", () => {
 		const runtimeBatch = createRuntimeBatch();
 		runtimeBatch.residency.indoors = true;
 		runtimeBatch.residency.focusCellId = null;
@@ -557,14 +482,11 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"indoor-env-cell/016c0155",
-			"indoor-env-cell/016c0156",
-			"indoor-env-cell/016c0157",
-			"environment/0d000001",
+			"landblock-pack/016cffff",
 		]);
 	});
 
-	it("requests browser-selected indoor env-cell metadata while runtime residency remains outdoors", () => {
+	it("requests browser-selected indoor landblock pack while runtime residency remains outdoors", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch(),
 			{
@@ -580,7 +502,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"indoor-env-cell/016c0155",
+			"landblock-pack/016cffff",
 		]);
 	});
 
@@ -641,8 +563,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"indoor-env-cell/016c0156",
-			"environment/0d000001",
+			"landblock-pack/016cffff",
 		]);
 	});
 
@@ -679,7 +600,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"indoor-env-cell/016c0157",
+			"landblock-pack/016cffff",
 		]);
 	});
 
@@ -788,6 +709,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
+			"landblock-pack/016cffff",
 			"setup-model/02000001",
 		]);
 	});
@@ -2625,6 +2547,66 @@ function createPreparedGfxObjAsset(assetId: string): PreparedAssetRecord {
 			},
 		},
 	);
+}
+
+function createPreparedLandblockPackAsset(
+	landblockId: number,
+): PreparedAssetRecord {
+	const normalizedLandblockId = ((landblockId & 0xffff0000) | 0xffff) >>> 0;
+	const assetId = `landblock-pack/${normalizedLandblockId.toString(16).padStart(8, "0")}`;
+	const payload: PreparedAssetRecord["payload"] = {
+		kind: "landblock-pack",
+		sourceAssetKind: "landblock-pack",
+		residencyKind: "landblock",
+		landblockId: normalizedLandblockId,
+		landblockInfoId: (normalizedLandblockId & 0xffff0000) | 0xfffe,
+		classification: "outdoor",
+		sourceFacts: {
+			cellLandblock: null,
+			landblockInfo: null,
+			outdoor: {
+				explicitObjects: [],
+				buildings: [],
+				generatedScenery: [],
+			},
+			interiors: { envCells: [], environments: [] },
+		},
+		prepared: {
+			terrainMesh: null,
+			outdoorStaticInstances: [],
+			interiorCells: [],
+			staticMeshes: [],
+			spatialItems: [],
+			staticLandblockBvh: null,
+		},
+		dependencies: {
+			cellDatIds: [],
+			portalDatIds: [],
+			renderableAssetIds: [],
+		},
+		diagnostics: { sourceRecords: [], errors: [] },
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "landblock-pack",
+			errorCode: null,
+			detail: "test-cache",
+		},
+	};
+	return {
+		request: {
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		response: {
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-20T00:00:00.000Z",
+	};
 }
 
 function createPreparedOutdoorStaticSceneAsset(

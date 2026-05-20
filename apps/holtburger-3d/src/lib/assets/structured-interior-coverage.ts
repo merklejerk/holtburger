@@ -1,4 +1,4 @@
-import { formatHex32 } from "../landblocks";
+import { formatHex32, formatLandblockPackAssetId } from "../landblocks";
 import type {
 	PreparedAssetRecord,
 	PreparedIndoorEnvCellPayload,
@@ -24,7 +24,10 @@ export function deriveStructuredInteriorCoverage(
 		};
 	}
 
-	return deriveLandblockClosureCoverage(policy.seedEnvCellIds, preparedByAssetId);
+	return deriveLandblockClosureCoverage(
+		policy.seedEnvCellIds,
+		preparedByAssetId,
+	);
 }
 
 export function formatIndoorEnvCellAssetId(envCellId: number): string {
@@ -57,6 +60,15 @@ function deriveLandblockClosureCoverage(
 	const envCellIds = new Set<number>();
 	for (const seedEnvCellId of uniqueSorted(seedEnvCellIds)) {
 		envCellIds.add(seedEnvCellId);
+
+		const packAsset =
+			preparedByAssetId[formatLandblockPackAssetId(seedEnvCellId)];
+		if (packAsset?.payload.kind === "landblock-pack") {
+			for (const cell of packAsset.payload.prepared.interiorCells) {
+				envCellIds.add(cell.envCellId);
+			}
+			continue;
+		}
 
 		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(seedEnvCellId)];
 		if (!isPreparedIndoorEnvCellAsset(asset)) {

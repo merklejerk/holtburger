@@ -1501,10 +1501,14 @@ Refinements to future steps:
 - If worker clone overhead remains visible, evaluate transferring binary section buffers directly
   to the worker or decoding binary envelopes inside the worker so typed arrays are not cloned
   across the main-thread/worker boundary.
+- Phase 9 should audit source facts carried by landblock packs, summaries, transition portal work
+  items, and prepared renderer models. If a source-fact field is not consumed by production runtime,
+  renderer, diagnostics, or asset dependency logic, remove it from the active contract. Tests alone
+  do not count as consumers.
 
 ## Phase 9: Reprofile and Decide Deferred Tracks
 
-Status: not started.
+Status: complete for code-auditable contract cleanup; manual profiler capture still required.
 
 Purpose: decide whether matrix lifecycle changes, dirty rendering, or lower-level render-list work
 are still needed after the structural fixes.
@@ -1524,12 +1528,85 @@ Tasks:
   needed.
 - Decide whether static matrix lifecycle work is still high priority.
 - Decide whether dirty/active rendering should be scheduled next.
+- Audit source facts in active frontend contracts and remove fields that are not consumed outside
+  tests.
 - Record decisions in the scoping doc or a follow-up plan.
 
 Exit criteria:
 
 - The next optimization target is selected from measurements, not guesswork.
 - Any Three.js replacement/escalation has fresh evidence after the batched pipeline exists.
+- Source facts that remain in active DTOs have an explicit non-test consumer or a documented pending
+  production use.
+
+Phase 9 progress:
+
+- Audited active `sourceFacts` consumers across the frontend app, Tauri adapter, and tests. Tests
+  were excluded as consumers.
+- Removed unconsumed landblock pack source facts from the active Tauri/frontend DTO contract:
+  - `cellLandblock`;
+  - `landblockInfo`;
+  - `outdoor.explicitObjects`;
+  - `outdoor.generatedScenery`;
+  - `interiors.envCells`;
+  - `interiors.environments`;
+  - placeholder `renderables` arrays.
+- Removed unconsumed landblock summary source facts from the active Tauri/frontend DTO contract:
+  - `cellLandblock`;
+  - `landblockInfo`;
+  - `objects`.
+- Kept only the source facts with production consumers:
+  - `landblock-pack.sourceFacts.buildings`, consumed by transition portal work-item derivation;
+  - `landblock-summary.sourceFacts.buildings`, consumed by distance building asset planning and
+    static renderable source derivation.
+- Removed Rust serializer helpers and frontend Zod schemas that only existed to carry the deleted
+  fact fields.
+- Updated tests and fixtures so they no longer assert or provide source facts that production code
+  does not consume.
+
+Decisions and course corrections:
+
+- The source-fact cleanup happened before profiler capture because it directly reduces asset
+  payload shape and removes contract noise. This was not a rendering-behavior change.
+- Full landblock packs already carry prepared terrain, prepared interior cells, prepared static
+  meshes, spatial items, BVH, dependencies, diagnostics, and provenance. Those active fields cover
+  the renderer/runtime consumers that previously made broad source facts look tempting.
+- Landblock summaries keep building source facts for now because summary-based distance building
+  hydration uses them without loading full landblock packs.
+- No Three.js replacement, pass-local scene rewrite, static matrix lifecycle rewrite, or dirty
+  render scheduling was selected in this phase. The plan still needs a real browser/WebView profiler
+  capture before choosing those targets.
+- Manual profiling was not performed in this code pass because the required scenarios need an
+  interactive app run and visual camera positioning.
+
+Phase 9 validation:
+
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passed.
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings` passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- Prettier check for touched frontend/doc files passed.
+- `git diff --check` passed.
+
+Refinements to future steps:
+
+- Add a short interactive profiling runbook before selecting the next renderer optimization target.
+  It should capture at least:
+  - transition depth `1`;
+  - one higher transition depth;
+  - close outdoor-to-indoor aperture;
+  - indoor-to-outdoor aperture;
+  - zoomed-out outdoor overview.
+- The profiling run should record existing renderer diagnostics beside browser profiler data:
+  - render calls;
+  - visible portal work items;
+  - transition portal candidates;
+  - portal aperture meshes;
+  - terrain/static/interior visibility counts;
+  - active frame time and idle frame time.
+- If source facts expand again, require the field's consuming module to be named in the contract or
+  plan note at the time it is introduced.
 
 ## Validation Matrix
 

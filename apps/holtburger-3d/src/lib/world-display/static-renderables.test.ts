@@ -443,17 +443,7 @@ function createPreparedLandblockPackAsset(
 		landblockInfoId: landblockId & 0xfffffffe,
 		classification: "outdoor",
 		sourceFacts: {
-			cellLandblock: null,
-			landblockInfo: null,
-			outdoor: {
-				explicitObjects: [],
-				buildings: [],
-				generatedScenery: [],
-			},
-			interiors: {
-				envCells: [],
-				environments: [],
-			},
+			buildings: [],
 		},
 		prepared: {
 			terrainMesh: null,
@@ -638,9 +628,6 @@ function createPreparedLandblockSummaryAsset(
 			landblockInfoId: landblockId & 0xfffffffe,
 			classification: "outdoor",
 			sourceFacts: {
-				cellLandblock: null,
-				landblockInfo: null,
-				objects: [],
 				buildings: [
 					{
 						instanceId: "summary-building-0",

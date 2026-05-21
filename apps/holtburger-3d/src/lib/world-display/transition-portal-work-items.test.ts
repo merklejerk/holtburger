@@ -286,57 +286,28 @@ function createLandblockPackAsset(options: {
 		landblockInfoId: 0x016cfffe,
 		classification: "outdoor",
 		sourceFacts: {
-			cellLandblock: null,
-			landblockInfo: {
-				id: 0x016cfffe,
-				firstEnvCellId: 0x016c0100,
-				numEnvCells: 3,
-				objectCount: 0,
-				buildingCount: 1,
-				packMask: 0,
-				restrictions: [],
-			},
-			outdoor: {
-				explicitObjects: [],
-				buildings: [
-					{
-						instanceId: "building/0",
-						owningLandblockId: 0x016cffff,
-						sourceDid: 0x02000001,
-						sourceAssetId: "setup-model/02000001",
-						sourceIndex: 0,
-						localPlacement: IDENTITY_PLACEMENT,
-						numLeaves: 1,
-						portals: [
-							{
-								portalId: options.portalId,
-								sourceIndex: 0,
-								flags: 0,
-								otherCellId: options.linkedEnvCellIds[0] ?? 0,
-								otherPortalId: 0,
-								stabList: options.stabList,
-								linkedEnvCellIds: options.linkedEnvCellIds,
-							},
-						],
-					},
-				],
-				generatedScenery: [],
-			},
-			interiors: {
-				envCells: (options.interiorEnvCellIds ?? []).map((envCellId) => ({
-					envCellId,
-					environmentId: 0x0d000001,
-					cellStructureId: 1,
+			buildings: [
+				{
+					instanceId: "building/0",
+					owningLandblockId: 0x016cffff,
+					sourceDid: 0x02000001,
+					sourceAssetId: "setup-model/02000001",
+					sourceIndex: 0,
 					localPlacement: IDENTITY_PLACEMENT,
-					surfaceIds: [],
-					visibleCellIds: [],
-					portals: [],
-					staticObjects: [],
-					seenOutside: true,
-					restrictionObjectId: null,
-				})),
-				environments: [],
-			},
+					numLeaves: 1,
+					portals: [
+						{
+							portalId: options.portalId,
+							sourceIndex: 0,
+							flags: 0,
+							otherCellId: options.linkedEnvCellIds[0] ?? 0,
+							otherPortalId: 0,
+							stabList: options.stabList,
+							linkedEnvCellIds: options.linkedEnvCellIds,
+						},
+					],
+				},
+			],
 		},
 		prepared: {
 			terrainMesh: null,

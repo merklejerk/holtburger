@@ -227,80 +227,6 @@ export type LandblockClassificationDto = z.infer<
 	typeof landblockClassificationValueSchema
 >;
 
-const cellLandblockFactDtoSchema = z.object({
-	id: z.number().int().nonnegative(),
-	hasObjects: z.boolean(),
-	gridSize: z.literal(9),
-	tileSize: z.number().finite().positive(),
-	terrainTypes: z.array(z.number().int().nonnegative()),
-	heights: z.array(z.number().finite()),
-	minHeight: z.number().finite(),
-	maxHeight: z.number().finite(),
-	allHeightsZero: z.boolean(),
-});
-
-const landblockRestrictionDtoSchema = z.object({
-	cellId: z.number().int().nonnegative(),
-	restrictionObjectId: z.number().int().nonnegative(),
-});
-
-const landblockInfoFactDtoSchema = z.object({
-	id: z.number().int().nonnegative(),
-	firstEnvCellId: z.number().int().nonnegative().nullable(),
-	numEnvCells: z.number().int().nonnegative(),
-	objectCount: z.number().int().nonnegative(),
-	buildingCount: z.number().int().nonnegative(),
-	packMask: z.number().int().nonnegative(),
-	restrictions: z.array(landblockRestrictionDtoSchema),
-});
-
-const landblockPackOutdoorFactsDtoSchema = z.object({
-	explicitObjects: z.array(outdoorStaticSceneInstanceDtoSchema),
-	buildings: z.array(outdoorStaticSceneBuildingDtoSchema),
-	generatedScenery: z.array(
-		outdoorStaticSceneGeneratedSceneryInstanceDtoSchema,
-	),
-});
-
-const landblockPackIndoorStaticObjectDtoSchema = z.object({
-	instanceId: z.string().min(1),
-	owningEnvCellId: z.number().int().nonnegative(),
-	sourceDid: z.number().int().nonnegative(),
-	sourceAssetId: z.string().min(1),
-	sourceIndex: z.number().int().nonnegative(),
-	localPlacement: placementTransformDtoSchema,
-});
-
-const landblockPackEnvCellPortalDtoSchema = z.object({
-	portalId: z.string().min(1),
-	sourceIndex: z.number().int().nonnegative(),
-	flags: z.number().int().nonnegative(),
-	polygonId: z.number().int().nonnegative(),
-	otherCellId: z.number().int().nonnegative(),
-	otherPortalId: z.number().int().nonnegative(),
-	targetEnvCellId: z.number().int().nonnegative().nullable(),
-	isOutsideTransition: z.boolean(),
-});
-
-const landblockPackEnvCellFactDtoSchema = z.object({
-	envCellId: z.number().int().nonnegative(),
-	environmentId: z.number().int().nonnegative().nullable(),
-	cellStructureId: z.number().int().nonnegative().nullable(),
-	localPlacement: placementTransformDtoSchema,
-	surfaceIds: z.array(z.number().int().nonnegative()),
-	visibleCellIds: z.array(z.number().int().nonnegative()),
-	portals: z.array(landblockPackEnvCellPortalDtoSchema),
-	staticObjects: z.array(landblockPackIndoorStaticObjectDtoSchema),
-	seenOutside: z.boolean().nullable(),
-	restrictionObjectId: z.number().int().nonnegative().nullable(),
-});
-
-const landblockPackEnvironmentFactDtoSchema = z.object({
-	id: z.number().int().nonnegative(),
-	cellStructureIds: z.array(z.number().int().nonnegative()),
-	cellStructures: z.array(z.unknown()),
-});
-
 const preparedTerrainTriangleDtoSchema = z.object({
 	a: z.number().int().nonnegative(),
 	b: z.number().int().nonnegative(),
@@ -364,13 +290,24 @@ const preparedPortalApertureDtoSchema = z.object({
 	plane: preparedPortalAperturePlaneDtoSchema.nullable(),
 });
 
+const preparedLandblockCellPortalDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	polygonId: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	targetEnvCellId: z.number().int().nonnegative().nullable(),
+	isOutsideTransition: z.boolean(),
+});
+
 const preparedLandblockInteriorCellDtoSchema = z.object({
 	envCellId: z.number().int().nonnegative(),
 	environmentId: z.number().int().nonnegative(),
 	cellStructureId: z.number().int().nonnegative(),
 	localPlacement: placementTransformDtoSchema,
 	surfaceIds: z.array(z.number().int().nonnegative()),
-	portals: z.array(landblockPackEnvCellPortalDtoSchema),
+	portals: z.array(preparedLandblockCellPortalDtoSchema),
 	portalApertures: z.array(preparedPortalApertureDtoSchema),
 	staticObjectCount: z.number().int().nonnegative(),
 	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
@@ -469,18 +406,7 @@ const preparedLandblockBvhDtoSchema = z.object({
 });
 
 const landblockPackSourceFactsDtoSchema = z.object({
-	cellLandblock: cellLandblockFactDtoSchema.nullable(),
-	landblockInfo: landblockInfoFactDtoSchema.nullable(),
-	outdoor: landblockPackOutdoorFactsDtoSchema,
-	interiors: z.object({
-		envCells: z.array(landblockPackEnvCellFactDtoSchema),
-		environments: z.array(landblockPackEnvironmentFactDtoSchema),
-	}),
-	renderables: z.object({
-		gfxObjs: z.array(z.unknown()),
-		setupModels: z.array(z.unknown()),
-		unsupportedDids: z.array(z.unknown()),
-	}),
+	buildings: z.array(outdoorStaticSceneBuildingDtoSchema),
 });
 
 const landblockPackDependenciesDtoSchema = z.object({
@@ -574,9 +500,6 @@ export const landblockSummaryPayloadDtoSchema = z.object({
 	landblockInfoId: z.number().int().nonnegative(),
 	classification: landblockClassificationValueSchema,
 	sourceFacts: z.object({
-		cellLandblock: cellLandblockFactDtoSchema.nullable(),
-		landblockInfo: landblockInfoFactDtoSchema.nullable(),
-		objects: z.array(landblockSummaryObjectDtoSchema),
 		buildings: z.array(landblockSummaryBuildingDtoSchema),
 	}),
 	prepared: z.object({

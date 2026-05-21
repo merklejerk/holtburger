@@ -15,9 +15,10 @@ use holtburger_content::{
     PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
     PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
     PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
-    SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
-    StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics, StaticOutdoorScene,
-    StaticRenderableSourceFamily, format_static_object_source_asset_id, normalize_landblock_id,
+    SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
+    SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics,
+    StaticOutdoorScene, StaticRenderableSourceFamily, format_static_object_source_asset_id,
+    normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -2087,7 +2088,7 @@ fn serialize_landblock_pack_diagnostics(
 ) -> serde_json::Value {
     serde_json::json!({
         "sourceRecords": diagnostics.source_records.iter().map(serialize_source_record_diagnostic).collect::<Vec<_>>(),
-        "omissions": [],
+        "omissions": diagnostics.omissions.iter().map(serialize_source_omission_diagnostic).collect::<Vec<_>>(),
         "errors": diagnostics.errors.iter().map(serialize_source_load_error).collect::<Vec<_>>(),
     })
 }
@@ -2098,6 +2099,18 @@ fn serialize_source_record_diagnostic(diagnostic: &SourceRecordDiagnostic) -> se
         "fileId": diagnostic.file_id,
         "role": diagnostic.role,
         "status": serialize_source_record_status(diagnostic.status),
+    })
+}
+
+fn serialize_source_omission_diagnostic(
+    diagnostic: &SourceOmissionDiagnostic,
+) -> serde_json::Value {
+    serde_json::json!({
+        "namespace": diagnostic.namespace,
+        "fileId": diagnostic.file_id,
+        "role": diagnostic.role,
+        "reason": diagnostic.reason,
+        "detail": diagnostic.detail,
     })
 }
 

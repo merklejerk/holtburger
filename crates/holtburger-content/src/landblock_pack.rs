@@ -370,6 +370,7 @@ pub struct PreparedAabb {
 #[derive(Debug, Default, Clone)]
 pub struct LandblockPackSourceDiagnostics {
     pub source_records: Vec<SourceRecordDiagnostic>,
+    pub omissions: Vec<SourceOmissionDiagnostic>,
     pub errors: Vec<SourceLoadError>,
 }
 
@@ -386,6 +387,15 @@ pub enum SourceRecordStatus {
     Loaded,
     Missing,
     DecodeFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceOmissionDiagnostic {
+    pub namespace: &'static str,
+    pub file_id: u32,
+    pub role: &'static str,
+    pub reason: &'static str,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -581,6 +591,23 @@ impl<'a> LandblockPackAssemblyContext<'a> {
         });
     }
 
+    fn report_source_omission(
+        &mut self,
+        namespace: &'static str,
+        file_id: u32,
+        role: &'static str,
+        reason: &'static str,
+        detail: String,
+    ) {
+        self.diagnostics.omissions.push(SourceOmissionDiagnostic {
+            namespace,
+            file_id,
+            role,
+            reason,
+            detail,
+        });
+    }
+
     fn into_diagnostics(self) -> LandblockPackSourceDiagnostics {
         self.diagnostics
     }
@@ -629,26 +656,41 @@ impl LandblockPackAssembler {
         let landblock_info = landblock_info_source
             .as_ref()
             .map(|info| LandblockInfoFact::from_info(info, landblock_id));
+        let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
         let interiors = landblock_info
             .as_ref()
             .map(|info| load_interior_facts(&mut context, landblock_id, info))
             .unwrap_or_default();
-        let outdoor_scene = match StaticOutdoorSceneAssembler::new()
-            .assemble_landblock_with_source(&mut context.source, landblock_id)
-        {
-            Ok(scene) => Some(scene),
-            Err(error) => {
-                context.report_source_error(
+        let outdoor_scene = match classification {
+            LandblockClassification::Dungeon => {
+                context.report_source_omission(
                     EOR_CELL_NAMESPACE,
                     landblock_id,
                     "outdoor-static-scene",
-                    "asset-decode-failed",
+                    "proven-dungeon-landblock",
                     format!(
-                        "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
+                        "Skipped outdoor static scene assembly for proven dungeon landblock 0x{landblock_id:08X}."
                     ),
                 );
                 None
             }
+            LandblockClassification::Outdoor => match StaticOutdoorSceneAssembler::new()
+                .assemble_landblock_with_source(&mut context.source, landblock_id)
+            {
+                Ok(scene) => Some(scene),
+                Err(error) => {
+                    context.report_source_error(
+                        EOR_CELL_NAMESPACE,
+                        landblock_id,
+                        "outdoor-static-scene",
+                        "asset-decode-failed",
+                        format!(
+                            "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
+                        ),
+                    );
+                    None
+                }
+            },
         };
         let prepared = prepare_landblock_facts(
             &mut context,
@@ -657,7 +699,6 @@ impl LandblockPackAssembler {
             &interiors,
             outdoor_scene.as_ref(),
         );
-        let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
         let diagnostics = context.into_diagnostics();
 
         LandblockPack {
@@ -2276,21 +2317,32 @@ mod tests {
     }
 
     fn minimal_cell_landblock_bytes(landblock_id: u32) -> Vec<u8> {
+        minimal_cell_landblock_bytes_with_height(landblock_id, 0)
+    }
+
+    fn minimal_cell_landblock_bytes_with_height(landblock_id: u32, height: u8) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&landblock_id.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         for _ in 0..81 {
             bytes.extend_from_slice(&0u16.to_le_bytes());
         }
-        bytes.extend(std::iter::repeat_n(0u8, 81));
+        bytes.extend(std::iter::repeat_n(height, 81));
         bytes.push(0);
         bytes
     }
 
     fn minimal_landblock_info_bytes(landblock_info_id: u32) -> Vec<u8> {
+        minimal_landblock_info_bytes_with_env_cells(landblock_info_id, 0)
+    }
+
+    fn minimal_landblock_info_bytes_with_env_cells(
+        landblock_info_id: u32,
+        num_cells: u32,
+    ) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&landblock_info_id.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&num_cells.to_le_bytes());
         bytes.extend_from_slice(&0u32.to_le_bytes());
         bytes.extend_from_slice(&0u16.to_le_bytes());
         bytes.extend_from_slice(&0u16.to_le_bytes());
@@ -2357,6 +2409,65 @@ mod tests {
             classify_landblock(Some(&cell), Some(&info)),
             LandblockClassification::Dungeon
         );
+    }
+
+    #[test]
+    fn dungeon_pack_skips_outdoor_static_scene_assembly() {
+        let landblock_id = 0x0102ffff;
+        let landblock_info_id = 0x0102fffe;
+        let source = Arc::new(CountingSource::new(HashMap::from([
+            (
+                (EOR_CELL_NAMESPACE.to_string(), landblock_id),
+                minimal_cell_landblock_bytes(landblock_id),
+            ),
+            (
+                (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
+                minimal_landblock_info_bytes_with_env_cells(landblock_info_id, 2),
+            ),
+        ])));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+
+        let pack = LandblockPackAssembler::new().assemble_landblock(&repository, landblock_id);
+
+        assert_eq!(pack.classification, LandblockClassification::Dungeon);
+        assert!(pack.outdoor_scene.is_none());
+        assert!(pack.prepared.outdoor_static_instances.is_empty());
+        assert!(
+            pack.diagnostics
+                .omissions
+                .iter()
+                .any(|omission| omission.role == "outdoor-static-scene"
+                    && omission.reason == "proven-dungeon-landblock")
+        );
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
+    }
+
+    #[test]
+    fn nonzero_height_landblock_does_not_skip_outdoor_static_scene_assembly() {
+        let landblock_id = 0x0102ffff;
+        let landblock_info_id = 0x0102fffe;
+        let source = Arc::new(CountingSource::new(HashMap::from([
+            (
+                (EOR_CELL_NAMESPACE.to_string(), landblock_id),
+                minimal_cell_landblock_bytes_with_height(landblock_id, 1),
+            ),
+            (
+                (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
+                minimal_landblock_info_bytes_with_env_cells(landblock_info_id, 2),
+            ),
+        ])));
+        let repository = ContentRepository::from_mounts(vec![source]);
+
+        let pack = LandblockPackAssembler::new().assemble_landblock(&repository, landblock_id);
+
+        assert_eq!(pack.classification, LandblockClassification::Outdoor);
+        assert!(pack.diagnostics.omissions.iter().all(|omission| {
+            omission.role != "outdoor-static-scene" || omission.reason != "proven-dungeon-landblock"
+        }));
+        assert!(pack.diagnostics.errors.iter().any(|error| {
+            error.role == "outdoor-static-scene" && error.error_code == "asset-decode-failed"
+        }));
     }
 
     #[test]

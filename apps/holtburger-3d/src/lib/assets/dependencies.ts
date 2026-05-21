@@ -15,10 +15,6 @@ export interface AssetDependencyRef {
 export function getAssetResponseDependencies(
 	response: AssetLookupResponseDto,
 ): AssetDependencyRef[] {
-	if (response.payloadKind !== "json") {
-		return [];
-	}
-
 	const outdoorStaticScene = outdoorStaticScenePayloadDtoSchema.safeParse(
 		response.payload,
 	);

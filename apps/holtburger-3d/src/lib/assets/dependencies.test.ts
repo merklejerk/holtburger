@@ -57,7 +57,7 @@ describe("asset response dependencies", () => {
 	});
 
 	it("extracts indoor env cell static object source assets", () => {
-		const response = createJsonResponse("indoor-env-cell/da55012e", {
+		const response = createJsonResponse("env-cell/da55012e", {
 			kind: "indoor-env-cell",
 			residencyKind: "indoor-env-cell",
 			sourceAssetKind: "env-cell",
@@ -188,7 +188,7 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
-	it("returns no dependencies for unknown and non-json payloads", () => {
+	it("returns no dependencies for unknown payloads", () => {
 		expect(
 			getAssetResponseDependencies(
 				createJsonResponse("unknown/synthetic", {
@@ -197,14 +197,6 @@ describe("asset response dependencies", () => {
 					provenance,
 				}),
 			),
-		).toEqual([]);
-		expect(
-			getAssetResponseDependencies({
-				requestId: "request-1",
-				assetId: "bytes/synthetic",
-				payloadKind: "bytes",
-				payload: new Uint8Array(),
-			}),
 		).toEqual([]);
 	});
 });

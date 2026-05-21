@@ -53,7 +53,7 @@ describe("asset cache policy", () => {
 	it("retains indoor coverage roots, static dependencies, and in-flight ids", () => {
 		const preparedByAssetId = indexPreparedAssets([
 			createPreparedIndoorEnvCellAsset(
-				"indoor-env-cell/016c0155",
+				"env-cell/016c0155",
 				0x0d000001,
 				"setup-model/02000001",
 			),
@@ -68,19 +68,16 @@ describe("asset cache policy", () => {
 		const plan = planPreparedAssetCachePrune({
 			preparedByAssetId,
 			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: [
-				"indoor-env-cell/016c0155",
-				"environment/0d000001",
-			],
+			activeCoverageAssetIds: ["env-cell/016c0155", "environment/0d000001"],
 			inFlightAssetIds: ["terrain/0102ffff"],
 			nowMs: 10_000,
 			warmRetainMs: 1_000,
 		});
 
 		expect(plan.retainedAssetIds).toEqual([
+			"env-cell/016c0155",
 			"environment/0d000001",
 			"gfx-obj/01000001",
-			"indoor-env-cell/016c0155",
 			"setup-model/02000001",
 			"terrain/0102ffff",
 		]);

@@ -17,7 +17,7 @@ const busyStateValueSchema = z.enum(["idle", "loading"]);
 const assetPriorityValueSchema = z.enum(["bootstrap", "streaming", "prefetch"]);
 export type AssetPriority = z.infer<typeof assetPriorityValueSchema>;
 
-const assetPayloadKindValueSchema = z.enum(["bytes", "json"]);
+const assetPayloadKindValueSchema = z.literal("json");
 
 const assetProvenanceSourceValueSchema = z.enum([
 	"repo-local-hba",
@@ -462,9 +462,17 @@ const sourceLoadErrorDtoSchema = z.object({
 	detail: z.string(),
 });
 
+const sourceOmissionDiagnosticDtoSchema = z.object({
+	namespace: z.string().min(1),
+	fileId: z.number().int().nonnegative(),
+	role: z.string().min(1),
+	reason: z.string().min(1),
+	detail: z.string(),
+});
+
 const landblockPackDiagnosticsDtoSchema = z.object({
 	sourceRecords: z.array(sourceRecordDiagnosticDtoSchema),
-	omissions: z.array(z.unknown()),
+	omissions: z.array(sourceOmissionDiagnosticDtoSchema),
 	errors: z.array(sourceLoadErrorDtoSchema),
 });
 

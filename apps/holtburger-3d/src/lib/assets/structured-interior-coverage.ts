@@ -30,8 +30,8 @@ export function deriveStructuredInteriorCoverage(
 	);
 }
 
-export function formatIndoorEnvCellAssetId(envCellId: number): string {
-	return `indoor-env-cell/${formatHex32(envCellId)}`;
+export function formatEnvCellAssetId(envCellId: number): string {
+	return `env-cell/${formatHex32(envCellId)}`;
 }
 
 export function formatEnvironmentAssetId(environmentId: number): string {
@@ -70,7 +70,7 @@ function deriveLandblockClosureCoverage(
 			continue;
 		}
 
-		const asset = preparedByAssetId[formatIndoorEnvCellAssetId(seedEnvCellId)];
+		const asset = preparedByAssetId[formatEnvCellAssetId(seedEnvCellId)];
 		if (!isPreparedIndoorEnvCellAsset(asset)) {
 			continue;
 		}

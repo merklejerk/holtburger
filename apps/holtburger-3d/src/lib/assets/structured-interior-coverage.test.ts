@@ -4,7 +4,7 @@ import type { PreparedAssetRecord } from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
-	formatIndoorEnvCellAssetId,
+	formatEnvCellAssetId,
 } from "./structured-interior-coverage";
 
 describe("structured interior coverage", () => {
@@ -34,12 +34,12 @@ describe("structured interior coverage", () => {
 
 	it("expands prepared seeds to their full landblock env-cell sets", () => {
 		const preparedByAssetId = {
-			[formatIndoorEnvCellAssetId(0x016c0155)]:
+			[formatEnvCellAssetId(0x016c0155)]:
 				createPreparedIndoorEnvCellAsset(
 					0x016c0155,
 					[0x016c0155, 0x016c0156, 0x016c0157],
 				),
-			[formatIndoorEnvCellAssetId(0x02010100)]:
+			[formatEnvCellAssetId(0x02010100)]:
 				createPreparedIndoorEnvCellAsset(0x02010100, [0x02010100, 0x02010101]),
 		};
 
@@ -78,7 +78,7 @@ describe("structured interior coverage", () => {
 
 	it("does not walk visible-cell lists as a fallback", () => {
 		const preparedByAssetId = {
-			[formatIndoorEnvCellAssetId(0x016c0155)]:
+			[formatEnvCellAssetId(0x016c0155)]:
 				createPreparedIndoorEnvCellAsset(0x016c0155, [], [0x016c0156]),
 		};
 
@@ -178,7 +178,7 @@ function createPreparedIndoorEnvCellAsset(
 	landblockEnvCellIds: number[],
 	visibleCellIds: number[] = [],
 ): PreparedAssetRecord {
-	const assetId = formatIndoorEnvCellAssetId(envCellId);
+	const assetId = formatEnvCellAssetId(envCellId);
 	return {
 		request: { requestId: assetId, assetId, priority: "streaming" },
 		response: {

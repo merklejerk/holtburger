@@ -102,7 +102,7 @@ describe("scene coverage asset ids", () => {
 				createRuntimeBatch(),
 				browserDestination,
 				{
-					"indoor-env-cell/8a040100": createPreparedIndoorEnvCellAsset(
+					"env-cell/8a040100": createPreparedIndoorEnvCellAsset(
 						0x8a040100,
 						0x0d000001,
 						[0x8a040101],
@@ -136,13 +136,13 @@ describe("scene coverage asset ids", () => {
 				{
 					"outdoor-static-scene/016cffff":
 						createPreparedOutdoorStaticSceneAsset(),
-					"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+					"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 						0x016c0155,
 						0x0d000001,
 						[0x016c0156],
 						[0x016c0155, 0x016c0156],
 					),
-					"indoor-env-cell/016c0157": createPreparedIndoorEnvCellAsset(
+					"env-cell/016c0157": createPreparedIndoorEnvCellAsset(
 						0x016c0157,
 						0x0d000002,
 						[],
@@ -180,14 +180,14 @@ describe("scene coverage asset ids", () => {
 				),
 				"outdoor-static-scene/016cffff":
 					createPreparedOutdoorStaticSceneAsset(),
-				"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+				"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 					0x016c0155,
 					0x0d000001,
 					[0x016c0156],
 					[0x016c0155, 0x016c0156, 0x016c0157],
 				),
 			},
-			["indoor-env-cell/016c0156"],
+			["env-cell/016c0156"],
 			SINGLE_LANDBLOCK_OPTIONS,
 		);
 
@@ -195,7 +195,7 @@ describe("scene coverage asset ids", () => {
 			"environment/0d000001",
 		);
 		expect(requests.map((request) => request.assetId)).not.toContain(
-			"indoor-env-cell/016c0157",
+			"env-cell/016c0157",
 		);
 		expect(requests.map((request) => request.assetId)).toContain(
 			"landblock-pack/016cffff",
@@ -258,7 +258,7 @@ describe("scene coverage asset ids", () => {
 						"terrain",
 						"terrain/016cffff",
 					),
-					"indoor-env-cell/016d0100": createPreparedIndoorEnvCellAsset(
+					"env-cell/016d0100": createPreparedIndoorEnvCellAsset(
 						0x016d0100,
 						0x0d000001,
 						[],
@@ -358,7 +358,7 @@ function createPreparedIndoorEnvCellAsset(
 	landblockEnvCellIds: number[] = [],
 ): PreparedAssetRecord {
 	return createPreparedAssetRecord(
-		`indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`,
+		`env-cell/${envCellId.toString(16).padStart(8, "0")}`,
 		{
 			kind: "indoor-env-cell",
 			sourceAssetKind: "env-cell",

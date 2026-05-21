@@ -1359,9 +1359,9 @@ fn parse_outdoor_static_scene_asset_id(asset_id: &str) -> Option<u32> {
         .map(normalize_landblock_id)
 }
 
-fn parse_indoor_env_cell_asset_id(asset_id: &str) -> Option<u32> {
+fn parse_env_cell_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
-        .strip_prefix("indoor-env-cell/")
+        .strip_prefix("env-cell/")
         .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
 }
@@ -1426,7 +1426,7 @@ fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetReq
             parse_outdoor_static_scene_asset_id(asset_id)
                 .map(ContentAssetRequest::OutdoorStaticScene)
         })
-        .or_else(|| parse_indoor_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
+        .or_else(|| parse_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
         .or_else(|| parse_environment_asset_id(asset_id).map(ContentAssetRequest::Environment))
         .or_else(|| parse_gfx_obj_asset_id(asset_id).map(ContentAssetRequest::GfxObj))
         .or_else(|| parse_setup_model_asset_id(asset_id).map(ContentAssetRequest::SetupModel))
@@ -3608,7 +3608,7 @@ mod tests {
         let runtime = HostRuntimeService::new(false);
         let env_cell_asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-indoor-env-cell".to_string(),
-            asset_id: "indoor-env-cell/016c0155".to_string(),
+            asset_id: "env-cell/016c0155".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
         });
         let environment_id = env_cell_asset.payload["environmentId"]
@@ -3667,7 +3667,7 @@ mod tests {
         let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-indoor-env-cell-statics".to_string(),
-            asset_id: "indoor-env-cell/da55012e".to_string(),
+            asset_id: "env-cell/da55012e".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
         });
 

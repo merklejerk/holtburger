@@ -300,15 +300,15 @@ describe("world display model helpers", () => {
 			assetState: {
 				...createInitialAssetChannelState(),
 				preparedByAssetId: {
-					"indoor-env-cell/016c0155": {
+					"env-cell/016c0155": {
 						request: {
 							requestId: "fixture-indoor",
-							assetId: "indoor-env-cell/016c0155",
+							assetId: "env-cell/016c0155",
 							priority: "bootstrap",
 						},
 						response: {
 							requestId: "fixture-indoor",
-							assetId: "indoor-env-cell/016c0155",
+							assetId: "env-cell/016c0155",
 							payloadKind: "json",
 							payload: { kind: "indoor-env-cell", envCellId: 0x016c0155 },
 						},

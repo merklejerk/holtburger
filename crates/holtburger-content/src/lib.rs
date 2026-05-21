@@ -2,6 +2,7 @@ pub mod character_gen;
 pub mod landblock_pack;
 pub mod repository;
 pub mod soul_emote;
+mod source_reader;
 pub mod static_outdoor_scene;
 
 pub use character_gen::CharacterGenCatalog;

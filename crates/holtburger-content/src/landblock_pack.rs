@@ -1,13 +1,12 @@
 use std::collections::HashSet;
-use std::io::Cursor;
 
-use binrw::BinRead;
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::graphics::{Frame, Polygon};
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::physics::BspNode;
-use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
+use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
+use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
 use crate::{ContentRepository, normalize_landblock_id};
 
@@ -355,6 +354,179 @@ pub struct SourceLoadError {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockPackAssembler;
 
+struct LandblockPackAssemblyContext<'a> {
+    source: ContentSourceReader<'a>,
+    diagnostics: LandblockPackSourceDiagnostics,
+}
+
+impl<'a> LandblockPackAssemblyContext<'a> {
+    fn new(content: &'a ContentRepository) -> Self {
+        Self {
+            source: ContentSourceReader::new(content),
+            diagnostics: LandblockPackSourceDiagnostics::default(),
+        }
+    }
+
+    fn load_cell_landblock(&mut self, landblock_id: u32) -> Option<CellLandblock> {
+        match self.source.cell_landblock(landblock_id) {
+            Ok(landblock) => {
+                self.report_source_record(
+                    EOR_CELL_NAMESPACE,
+                    landblock_id,
+                    "cell-landblock",
+                    SourceRecordStatus::Loaded,
+                );
+                Some(landblock)
+            }
+            Err(error) => {
+                self.report_source_record(
+                    EOR_CELL_NAMESPACE,
+                    landblock_id,
+                    "cell-landblock",
+                    source_status_from_error(&error),
+                );
+                self.report_source_error(
+                    EOR_CELL_NAMESPACE,
+                    landblock_id,
+                    "cell-landblock",
+                    source_error_code_from_error(&error),
+                    format!("Could not load CellLandblock 0x{landblock_id:08X}: {error:#}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn load_landblock_info(&mut self, landblock_id: u32) -> Option<LandblockInfo> {
+        let landblock_info_id = derive_landblock_info_id(landblock_id);
+        match self.source.landblock_info(landblock_info_id) {
+            Ok(info) => {
+                self.report_source_record(
+                    EOR_CELL_NAMESPACE,
+                    landblock_info_id,
+                    "landblock-info",
+                    SourceRecordStatus::Loaded,
+                );
+                Some(info)
+            }
+            Err(error) => {
+                self.report_source_record(
+                    EOR_CELL_NAMESPACE,
+                    landblock_info_id,
+                    "landblock-info",
+                    source_status_from_error(&error),
+                );
+                self.report_source_error(
+                    EOR_CELL_NAMESPACE,
+                    landblock_info_id,
+                    "landblock-info",
+                    source_error_code_from_error(&error),
+                    format!("Could not load LandblockInfo 0x{landblock_info_id:08X}: {error:#}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn load_env_cell(&mut self, env_cell_id: u32) -> Option<EnvCell> {
+        match self.source.env_cell(env_cell_id) {
+            Ok(env_cell) => {
+                self.report_source_record(
+                    EOR_CELL_NAMESPACE,
+                    env_cell_id,
+                    "env-cell",
+                    SourceRecordStatus::Loaded,
+                );
+                Some(env_cell)
+            }
+            Err(error) => {
+                self.report_source_record(
+                    EOR_CELL_NAMESPACE,
+                    env_cell_id,
+                    "env-cell",
+                    source_status_from_error(&error),
+                );
+                self.report_source_error(
+                    EOR_CELL_NAMESPACE,
+                    env_cell_id,
+                    "env-cell",
+                    source_error_code_from_error(&error),
+                    format!("Could not load EnvCell 0x{env_cell_id:08X}: {error:#}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn load_environment(&mut self, environment_id: u32) -> Option<Environment> {
+        match self.source.environment(environment_id) {
+            Ok(environment) => {
+                self.report_source_record(
+                    EOR_PORTAL_NAMESPACE,
+                    environment_id,
+                    "environment",
+                    SourceRecordStatus::Loaded,
+                );
+                Some(environment)
+            }
+            Err(error) => {
+                self.report_source_record(
+                    EOR_PORTAL_NAMESPACE,
+                    environment_id,
+                    "environment",
+                    source_status_from_error(&error),
+                );
+                self.report_source_error(
+                    EOR_PORTAL_NAMESPACE,
+                    environment_id,
+                    "environment",
+                    source_error_code_from_error(&error),
+                    format!("Could not load Environment 0x{environment_id:08X}: {error:#}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn report_source_record(
+        &mut self,
+        namespace: &'static str,
+        file_id: u32,
+        role: &'static str,
+        status: SourceRecordStatus,
+    ) {
+        self.diagnostics
+            .source_records
+            .push(SourceRecordDiagnostic {
+                namespace,
+                file_id,
+                role,
+                status,
+            });
+    }
+
+    fn report_source_error(
+        &mut self,
+        namespace: &'static str,
+        file_id: u32,
+        role: &'static str,
+        error_code: &'static str,
+        detail: String,
+    ) {
+        self.diagnostics.errors.push(SourceLoadError {
+            namespace,
+            file_id,
+            role,
+            error_code,
+            detail,
+        });
+    }
+
+    fn into_diagnostics(self) -> LandblockPackSourceDiagnostics {
+        self.diagnostics
+    }
+}
+
 impl LandblockPackAssembler {
     pub fn new() -> Self {
         Self
@@ -367,38 +539,45 @@ impl LandblockPackAssembler {
     ) -> LandblockPack {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
         let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let mut diagnostics = LandblockPackSourceDiagnostics::default();
-        let cell_landblock = load_cell_landblock_fact(content, landblock_id, &mut diagnostics);
-        let landblock_info = load_landblock_info_fact(content, landblock_id, &mut diagnostics);
+        let mut context = LandblockPackAssemblyContext::new(content);
+        let cell_landblock_source = context.load_cell_landblock(landblock_id);
+        let landblock_info_source = context.load_landblock_info(landblock_id);
+        let cell_landblock = cell_landblock_source
+            .as_ref()
+            .map(CellLandblockFact::from_landblock);
+        let landblock_info = landblock_info_source
+            .as_ref()
+            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
         let interiors = landblock_info
             .as_ref()
-            .map(|info| load_interior_facts(content, landblock_id, info, &mut diagnostics))
+            .map(|info| load_interior_facts(&mut context, landblock_id, info))
             .unwrap_or_default();
-        let outdoor_scene =
-            match StaticOutdoorSceneAssembler::new().assemble_landblock(content, landblock_id) {
-                Ok(scene) => Some(scene),
-                Err(error) => {
-                    diagnostics.errors.push(SourceLoadError {
-                        namespace: EOR_CELL_NAMESPACE,
-                        file_id: landblock_id,
-                        role: "outdoor-static-scene",
-                        error_code: "asset-decode-failed",
-                        detail: format!(
-                            "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
-                        ),
-                    });
-                    None
-                }
-            };
+        let outdoor_scene = match StaticOutdoorSceneAssembler::new()
+            .assemble_landblock_with_source(&mut context.source, landblock_id)
+        {
+            Ok(scene) => Some(scene),
+            Err(error) => {
+                context.report_source_error(
+                    EOR_CELL_NAMESPACE,
+                    landblock_id,
+                    "outdoor-static-scene",
+                    "asset-decode-failed",
+                    format!(
+                        "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
+                    ),
+                );
+                None
+            }
+        };
         let prepared = prepare_landblock_facts(
-            content,
+            &mut context,
             landblock_id,
             cell_landblock.as_ref(),
             &interiors,
             outdoor_scene.as_ref(),
-            &mut diagnostics,
         );
         let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
+        let diagnostics = context.into_diagnostics();
 
         LandblockPack {
             landblock_id,
@@ -426,130 +605,32 @@ pub fn derive_landblock_env_cell_id(raw_landblock_id: u32, index: u32) -> u32 {
     ((normalize_landblock_id(raw_landblock_id) & 0xffff_0000) | 0x0100) + index
 }
 
-fn load_cell_landblock_fact(
-    content: &ContentRepository,
-    landblock_id: u32,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
-) -> Option<CellLandblockFact> {
-    let resource = match content.read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id)) {
-        Ok(resource) => resource,
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_id,
-                role: "cell-landblock",
-                status: SourceRecordStatus::Missing,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_id,
-                role: "cell-landblock",
-                error_code: "asset-read-failed",
-                detail: format!("Could not read CellLandblock 0x{landblock_id:08X}: {error}"),
-            });
-            return None;
-        }
-    };
-
-    match CellLandblock::unpack(&resource.bytes) {
-        Ok(landblock) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_id,
-                role: "cell-landblock",
-                status: SourceRecordStatus::Loaded,
-            });
-            Some(CellLandblockFact::from_landblock(&landblock))
-        }
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_id,
-                role: "cell-landblock",
-                status: SourceRecordStatus::DecodeFailed,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_id,
-                role: "cell-landblock",
-                error_code: "asset-decode-failed",
-                detail: format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"),
-            });
-            None
-        }
+fn source_status_from_error(error: &anyhow::Error) -> SourceRecordStatus {
+    if error.to_string().starts_with("Could not read ") {
+        SourceRecordStatus::Missing
+    } else {
+        SourceRecordStatus::DecodeFailed
     }
 }
 
-fn load_landblock_info_fact(
-    content: &ContentRepository,
-    landblock_id: u32,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
-) -> Option<LandblockInfoFact> {
-    let landblock_info_id = derive_landblock_info_id(landblock_id);
-    let resource = match content
-        .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
-    {
-        Ok(resource) => resource,
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_info_id,
-                role: "landblock-info",
-                status: SourceRecordStatus::Missing,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_info_id,
-                role: "landblock-info",
-                error_code: "asset-read-failed",
-                detail: format!("Could not read LandblockInfo 0x{landblock_info_id:08X}: {error}"),
-            });
-            return None;
-        }
-    };
-
-    match LandblockInfo::read(&mut Cursor::new(resource.bytes)) {
-        Ok(info) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_info_id,
-                role: "landblock-info",
-                status: SourceRecordStatus::Loaded,
-            });
-            Some(LandblockInfoFact::from_info(&info, landblock_id))
-        }
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_info_id,
-                role: "landblock-info",
-                status: SourceRecordStatus::DecodeFailed,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: landblock_info_id,
-                role: "landblock-info",
-                error_code: "asset-decode-failed",
-                detail: format!(
-                    "Could not decode LandblockInfo 0x{landblock_info_id:08X}: {error}"
-                ),
-            });
-            None
-        }
+fn source_error_code_from_error(error: &anyhow::Error) -> &'static str {
+    if source_status_from_error(error) == SourceRecordStatus::Missing {
+        "asset-read-failed"
+    } else {
+        "asset-decode-failed"
     }
 }
 
 fn load_interior_facts(
-    content: &ContentRepository,
+    context: &mut LandblockPackAssemblyContext<'_>,
     landblock_id: u32,
     landblock_info: &LandblockInfoFact,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
 ) -> LandblockInteriorFacts {
     let mut env_cells = Vec::new();
     for index in 0..landblock_info.num_env_cells {
         let env_cell_id = derive_landblock_env_cell_id(landblock_id, index);
-        if let Some(env_cell) = load_env_cell_fact(content, env_cell_id, diagnostics) {
-            env_cells.push(env_cell);
+        if let Some(env_cell) = context.load_env_cell(env_cell_id) {
+            env_cells.push(EnvCellFact::from_env_cell(env_cell_id, &env_cell));
         }
     }
 
@@ -576,7 +657,7 @@ fn load_interior_facts(
                     (*selected_environment_id == environment_id).then_some(*cell_structure_id)
                 })
                 .collect::<Vec<_>>();
-            load_environment_fact(content, environment_id, &selected_ids, diagnostics)
+            load_environment_fact(context, environment_id, &selected_ids)
         })
         .collect();
 
@@ -586,118 +667,17 @@ fn load_interior_facts(
     }
 }
 
-fn load_env_cell_fact(
-    content: &ContentRepository,
-    env_cell_id: u32,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
-) -> Option<EnvCellFact> {
-    let resource = match content.read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id)) {
-        Ok(resource) => resource,
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: env_cell_id,
-                role: "env-cell",
-                status: SourceRecordStatus::Missing,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: env_cell_id,
-                role: "env-cell",
-                error_code: "asset-read-failed",
-                detail: format!("Could not read EnvCell 0x{env_cell_id:08X}: {error}"),
-            });
-            return None;
-        }
-    };
-
-    match EnvCell::unpack(&mut Cursor::new(resource.bytes)) {
-        Ok(env_cell) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: env_cell_id,
-                role: "env-cell",
-                status: SourceRecordStatus::Loaded,
-            });
-            Some(EnvCellFact::from_env_cell(env_cell_id, &env_cell))
-        }
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: env_cell_id,
-                role: "env-cell",
-                status: SourceRecordStatus::DecodeFailed,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_CELL_NAMESPACE,
-                file_id: env_cell_id,
-                role: "env-cell",
-                error_code: "asset-decode-failed",
-                detail: format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
-            });
-            None
-        }
-    }
-}
-
 fn load_environment_fact(
-    content: &ContentRepository,
+    context: &mut LandblockPackAssemblyContext<'_>,
     environment_id: u32,
     selected_cell_structure_ids: &[u32],
-    diagnostics: &mut LandblockPackSourceDiagnostics,
 ) -> Option<EnvironmentFact> {
-    let resource =
-        match content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id)) {
-            Ok(resource) => resource,
-            Err(error) => {
-                diagnostics.source_records.push(SourceRecordDiagnostic {
-                    namespace: EOR_PORTAL_NAMESPACE,
-                    file_id: environment_id,
-                    role: "environment",
-                    status: SourceRecordStatus::Missing,
-                });
-                diagnostics.errors.push(SourceLoadError {
-                    namespace: EOR_PORTAL_NAMESPACE,
-                    file_id: environment_id,
-                    role: "environment",
-                    error_code: "asset-read-failed",
-                    detail: format!("Could not read Environment 0x{environment_id:08X}: {error}"),
-                });
-                return None;
-            }
-        };
-
-    match Environment::unpack(&mut Cursor::new(resource.bytes)) {
-        Ok(environment) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_PORTAL_NAMESPACE,
-                file_id: environment_id,
-                role: "environment",
-                status: SourceRecordStatus::Loaded,
-            });
-            Some(EnvironmentFact::from_environment(
-                &environment,
-                selected_cell_structure_ids,
-                diagnostics,
-            ))
-        }
-        Err(error) => {
-            diagnostics.source_records.push(SourceRecordDiagnostic {
-                namespace: EOR_PORTAL_NAMESPACE,
-                file_id: environment_id,
-                role: "environment",
-                status: SourceRecordStatus::DecodeFailed,
-            });
-            diagnostics.errors.push(SourceLoadError {
-                namespace: EOR_PORTAL_NAMESPACE,
-                file_id: environment_id,
-                role: "environment",
-                error_code: "asset-decode-failed",
-                detail: format!("Could not decode Environment 0x{environment_id:08X}: {error}"),
-            });
-            None
-        }
-    }
+    let environment = context.load_environment(environment_id)?;
+    Some(EnvironmentFact::from_environment(
+        &environment,
+        selected_cell_structure_ids,
+        &mut context.diagnostics,
+    ))
 }
 
 impl CellLandblockFact {
@@ -849,23 +829,21 @@ impl EnvironmentFact {
 }
 
 fn prepare_landblock_facts(
-    content: &ContentRepository,
+    context: &mut LandblockPackAssemblyContext<'_>,
     landblock_id: u32,
     cell_landblock: Option<&CellLandblockFact>,
     interiors: &LandblockInteriorFacts,
     outdoor_scene: Option<&StaticOutdoorScene>,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
 ) -> LandblockPreparedFacts {
     let outdoor_static_instances =
         build_prepared_outdoor_static_instances(outdoor_scene).collect::<Vec<_>>();
     let indoor_static_instances =
         build_prepared_indoor_static_instances(landblock_id, interiors).collect::<Vec<_>>();
     let static_meshes = build_prepared_static_meshes(
-        content,
+        context,
         outdoor_static_instances
             .iter()
             .chain(indoor_static_instances.iter()),
-        diagnostics,
     );
     let terrain_mesh = cell_landblock.map(build_terrain_mesh);
     let interior_cells = build_prepared_interior_cells(interiors);
@@ -980,21 +958,16 @@ fn build_prepared_static_instance(
 }
 
 fn build_prepared_static_meshes<'a>(
-    content: &ContentRepository,
+    context: &mut LandblockPackAssemblyContext<'_>,
     instances: impl Iterator<Item = &'a PreparedStaticInstance>,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
 ) -> Vec<PreparedStaticMesh> {
     let mut meshes = Vec::new();
     let mut reported_missing = HashSet::new();
     for instance in instances {
         match instance.source_did >> 24 {
             0x01 => {
-                let source_bounds = load_gfx_obj_render_bounds(
-                    content,
-                    instance.source_did,
-                    diagnostics,
-                    &mut reported_missing,
-                );
+                let source_bounds =
+                    load_gfx_obj_render_bounds(context, instance.source_did, &mut reported_missing);
                 meshes.push(build_prepared_static_mesh(
                     instance,
                     0,
@@ -1005,21 +978,14 @@ fn build_prepared_static_meshes<'a>(
                 ));
             }
             0x02 => {
-                let Some(setup_model) = load_setup_model_for_pack(
-                    content,
-                    instance.source_did,
-                    diagnostics,
-                    &mut reported_missing,
-                ) else {
+                let Some(setup_model) =
+                    load_setup_model_for_pack(context, instance.source_did, &mut reported_missing)
+                else {
                     continue;
                 };
                 for (part_index, gfx_obj_id) in setup_model.parts.iter().copied().enumerate() {
-                    let source_bounds = load_gfx_obj_render_bounds(
-                        content,
-                        gfx_obj_id,
-                        diagnostics,
-                        &mut reported_missing,
-                    );
+                    let source_bounds =
+                        load_gfx_obj_render_bounds(context, gfx_obj_id, &mut reported_missing);
                     meshes.push(build_prepared_static_mesh(
                         instance,
                         part_index,
@@ -1351,37 +1317,20 @@ fn spatial_item_kind_mask(kind: PreparedSpatialItemKind) -> u32 {
 }
 
 fn load_setup_model_for_pack(
-    content: &ContentRepository,
+    context: &mut LandblockPackAssemblyContext<'_>,
     setup_model_id: u32,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
     reported_missing: &mut HashSet<u32>,
 ) -> Option<SetupModel> {
-    let resource =
-        match content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id)) {
-            Ok(resource) => resource,
-            Err(error) => {
-                report_renderable_load_error(
-                    diagnostics,
-                    reported_missing,
-                    setup_model_id,
-                    "setup-model",
-                    "asset-read-failed",
-                    format!("Could not read SetupModel 0x{setup_model_id:08X}: {error}"),
-                );
-                return None;
-            }
-        };
-
-    match SetupModel::unpack(&mut Cursor::new(resource.bytes)) {
+    match context.source.setup_model(setup_model_id) {
         Ok(setup_model) => Some(setup_model),
         Err(error) => {
             report_renderable_load_error(
-                diagnostics,
+                &mut context.diagnostics,
                 reported_missing,
                 setup_model_id,
                 "setup-model",
-                "asset-decode-failed",
-                format!("Could not decode SetupModel 0x{setup_model_id:08X}: {error}"),
+                source_error_code_from_error(&error),
+                format!("Could not load SetupModel 0x{setup_model_id:08X}: {error:#}"),
             );
             None
         }
@@ -1389,36 +1338,20 @@ fn load_setup_model_for_pack(
 }
 
 fn load_gfx_obj_render_bounds(
-    content: &ContentRepository,
+    context: &mut LandblockPackAssemblyContext<'_>,
     gfx_obj_id: u32,
-    diagnostics: &mut LandblockPackSourceDiagnostics,
     reported_missing: &mut HashSet<u32>,
 ) -> Option<PreparedAabb> {
-    let resource = match content.read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id)) {
-        Ok(resource) => resource,
-        Err(error) => {
-            report_renderable_load_error(
-                diagnostics,
-                reported_missing,
-                gfx_obj_id,
-                "gfx-obj",
-                "asset-read-failed",
-                format!("Could not read GfxObj 0x{gfx_obj_id:08X}: {error}"),
-            );
-            return None;
-        }
-    };
-
-    match GfxObj::unpack(&mut Cursor::new(resource.bytes)) {
+    match context.source.gfx_obj(gfx_obj_id) {
         Ok(gfx_obj) => build_gfx_obj_render_geometry(&gfx_obj).bounds,
         Err(error) => {
             report_renderable_load_error(
-                diagnostics,
+                &mut context.diagnostics,
                 reported_missing,
                 gfx_obj_id,
                 "gfx-obj",
-                "asset-decode-failed",
-                format!("Could not decode GfxObj 0x{gfx_obj_id:08X}: {error}"),
+                source_error_code_from_error(&error),
+                format!("Could not load GfxObj 0x{gfx_obj_id:08X}: {error:#}"),
             );
             None
         }

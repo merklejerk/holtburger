@@ -1,14 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use holtburger_common::math::{Quaternion, Vector3};
-use holtburger_dat::file_type::{
-    GfxObj, REGION_DESC_FILE_ID, RegionDesc, Scene, SceneObjectTemplate, SetupModel,
-};
+use holtburger_dat::file_type::{GfxObj, RegionDesc, SceneObjectTemplate, SetupModel};
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
-use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::collections::HashSet;
-use std::io::Cursor;
 
 use crate::ContentRepository;
+use crate::source_reader::ContentSourceReader;
 
 const GENERATED_SCENERY_CELL_SIZE: f32 = 24.0;
 const GENERATED_SCENERY_BLOCK_SIZE: f32 = 192.0;
@@ -189,14 +186,24 @@ impl StaticOutdoorSceneAssembler {
         content: &ContentRepository,
         raw_landblock_id: u32,
     ) -> Result<StaticOutdoorScene> {
+        let mut source = ContentSourceReader::new(content);
+        self.assemble_landblock_with_source(&mut source, raw_landblock_id)
+    }
+
+    pub(crate) fn assemble_landblock_with_source(
+        &self,
+        source: &mut ContentSourceReader<'_>,
+        raw_landblock_id: u32,
+    ) -> Result<StaticOutdoorScene> {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock = load_cell_landblock(content, landblock_id)?;
-        let landblock_info = match load_landblock_info(content, landblock_id) {
+        let landblock = source.cell_landblock(landblock_id)?;
+        let landblock_info_id = normalize_landblock_id(landblock_id) & 0xffff_fffe;
+        let landblock_info = match source.landblock_info(landblock_info_id) {
             Ok(info) => Some(info),
             Err(error) => {
-                let region = load_region_desc(content)?;
+                let region = source.region_desc()?;
                 return self.assemble_from_loaded(
-                    content,
+                    source,
                     landblock_id,
                     &landblock,
                     None,
@@ -205,10 +212,10 @@ impl StaticOutdoorSceneAssembler {
                 );
             }
         };
-        let region = load_region_desc(content)?;
+        let region = source.region_desc()?;
 
         self.assemble_from_loaded(
-            content,
+            source,
             landblock_id,
             &landblock,
             landblock_info.as_ref(),
@@ -219,7 +226,7 @@ impl StaticOutdoorSceneAssembler {
 
     fn assemble_from_loaded(
         &self,
-        content: &ContentRepository,
+        source: &mut ContentSourceReader<'_>,
         landblock_id: u32,
         landblock: &CellLandblock,
         landblock_info: Option<&LandblockInfo>,
@@ -236,7 +243,7 @@ impl StaticOutdoorSceneAssembler {
             derive_explicit_objects(landblock_id, landblock_info, &mut diagnostics.explicit);
         let buildings = derive_buildings(landblock_id, landblock_info, &mut diagnostics.buildings);
         let generated_scenery = derive_generated_scenery(
-            content,
+            source,
             landblock_id,
             landblock,
             landblock_info,
@@ -357,7 +364,7 @@ fn derive_buildings(
 }
 
 fn derive_generated_scenery(
-    content: &ContentRepository,
+    source_reader: &mut ContentSourceReader<'_>,
     landblock_id: u32,
     landblock: &CellLandblock,
     landblock_info: Option<&LandblockInfo>,
@@ -403,7 +410,7 @@ fn derive_generated_scenery(
         let global_cell_x = block_x + cell_x;
         let global_cell_y = block_y + cell_y;
         let scene_id = select_generated_scene_id(&scene_type.scenes, global_cell_x, global_cell_y);
-        let scene = load_scene(content, scene_id)?;
+        let scene = source_reader.scene(scene_id)?;
 
         for (template_index, template) in scene.object_templates.iter().enumerate() {
             diagnostics.attempted += 1;
@@ -475,7 +482,7 @@ fn derive_generated_scenery(
                 Vector3::new(local_x, local_y, terrain_sample.height + local_position.z),
                 terrain_sample.normal,
             );
-            match object_bounds_within_landblock(content, source, &frame, scale) {
+            match object_bounds_within_landblock(source_reader, source, &frame, scale) {
                 Ok(Some(false)) => {
                     diagnostics.rejected_object_bounds += 1;
                     continue;
@@ -523,63 +530,6 @@ pub fn normalize_landblock_id(raw_landblock_id: u32) -> u32 {
 
 pub fn normalize_landblock_env_cell_id(raw_landblock_id: u32, local_cell_id: u16) -> u32 {
     (normalize_landblock_id(raw_landblock_id) & 0xffff_0000) | u32::from(local_cell_id)
-}
-
-fn load_landblock_info(content: &ContentRepository, landblock_id: u32) -> Result<LandblockInfo> {
-    let landblock_info_id = normalize_landblock_id(landblock_id) & 0xffff_fffe;
-    let resource = content
-        .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
-        .with_context(|| {
-            format!(
-                "Could not read {}:0x{landblock_info_id:08X} from content repository",
-                EOR_CELL_NAMESPACE
-            )
-        })?;
-
-    LandblockInfo::unpack(&resource.bytes)
-        .with_context(|| format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}"))
-}
-
-fn load_cell_landblock(content: &ContentRepository, landblock_id: u32) -> Result<CellLandblock> {
-    let resource = content
-        .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
-        .with_context(|| {
-            format!(
-                "Could not read {}:0x{landblock_id:08X} from content repository",
-                EOR_CELL_NAMESPACE
-            )
-        })?;
-
-    CellLandblock::unpack(&resource.bytes)
-        .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))
-}
-
-fn load_region_desc(content: &ContentRepository) -> Result<RegionDesc> {
-    let resource = content
-        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
-        .with_context(|| {
-            format!(
-                "Could not read {}:0x{REGION_DESC_FILE_ID:08X} from content repository",
-                EOR_PORTAL_NAMESPACE
-            )
-        })?;
-
-    RegionDesc::unpack(&resource.bytes)
-        .with_context(|| format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))
-}
-
-fn load_scene(content: &ContentRepository, scene_id: u32) -> Result<Scene> {
-    let resource = content
-        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
-        .with_context(|| {
-            format!(
-                "Could not read {}:0x{scene_id:08X} from content repository",
-                EOR_PORTAL_NAMESPACE
-            )
-        })?;
-
-    Scene::unpack(&resource.bytes)
-        .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))
 }
 
 struct TerrainSample {
@@ -731,50 +681,22 @@ fn terrain_normal_alignment(terrain_normal: Vector3) -> Quaternion {
 }
 
 fn object_bounds_within_landblock(
-    content: &ContentRepository,
+    source_reader: &mut ContentSourceReader<'_>,
     source: StaticRenderableSourceRef,
     frame: &StaticOutdoorFrame,
     scale: f32,
 ) -> Result<Option<bool>> {
     match source.family {
         StaticRenderableSourceFamily::SetupModel => {
-            let setup_model = load_setup_model(content, source.did)?;
+            let setup_model = source_reader.setup_model(source.did)?;
             Ok(setup_model_within_landblock(&setup_model, frame, scale))
         }
         StaticRenderableSourceFamily::GfxObj => {
-            let gfx_obj = load_gfx_obj(content, source.did)?;
+            let gfx_obj = source_reader.gfx_obj(source.did)?;
             Ok(gfx_obj_within_landblock(&gfx_obj, frame, scale))
         }
         StaticRenderableSourceFamily::Unsupported => Ok(None),
     }
-}
-
-fn load_setup_model(content: &ContentRepository, setup_model_id: u32) -> Result<SetupModel> {
-    let resource = content
-        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
-        .with_context(|| {
-            format!(
-                "Could not read {}:0x{setup_model_id:08X} from content repository",
-                EOR_PORTAL_NAMESPACE
-            )
-        })?;
-
-    SetupModel::unpack(&mut Cursor::new(resource.bytes))
-        .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))
-}
-
-fn load_gfx_obj(content: &ContentRepository, gfx_obj_id: u32) -> Result<GfxObj> {
-    let resource = content
-        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
-        .with_context(|| {
-            format!(
-                "Could not read {}:0x{gfx_obj_id:08X} from content repository",
-                EOR_PORTAL_NAMESPACE
-            )
-        })?;
-
-    GfxObj::unpack(&mut Cursor::new(resource.bytes))
-        .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))
 }
 
 fn setup_model_within_landblock(

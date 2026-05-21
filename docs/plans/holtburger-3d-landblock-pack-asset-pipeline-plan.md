@@ -469,22 +469,30 @@ Goal: move heavy content jobs behind a reusable runtime with bounded concurrency
 Scope:
 
 - Introduce a reusable content asset service/runtime facade.
+- Make Tauri `lookup_asset` asynchronous and route every asset lookup through the runtime boundary.
+- Keep reusable content operations synchronous internally:
+  - load/decode source records;
+  - assemble `landblock-pack/*`;
+  - load/project `gfx-obj/*`;
+  - load/project `setup-model/*`;
+  - future `landblock-summary/*`;
+  - existing direct source routes.
+- Run asset lookup jobs on a bounded background blocking executor instead of the Tauri command path.
+- Have reusable runtime jobs return Rust-native content results, not Tauri/browser DTOs.
 - Own/share:
   - `Arc<ContentRepository>`;
   - `Arc<ContentDecodeCache>`;
+  - bounded worker/job execution;
   - in-flight job map keyed by typed content request, where the chosen execution model supports it.
-- Route heavy routes through it:
-  - `landblock-pack/*`;
-  - `gfx-obj/*`;
-  - `setup-model/*`;
-  - future `landblock-summary/*`.
 - Coalesce duplicate in-flight requests by typed content key, not frontend request id.
 
 Implementation notes:
 
-- Split this phase if needed:
-  - first add a synchronous reusable content asset service with shared cache and typed request keys;
-  - then add a bounded executor/in-flight coalescing layer once crate placement is settled.
+- Background execution is mandatory for this phase. Do not ship a runtime facade that is still called inline on the Tauri command path.
+- The runtime may call synchronous content functions inside worker jobs. Do not make source decoding/assembly async or Tauri-shaped just because the browser app needs non-blocking execution.
+- Keep the reusable runtime DTO-agnostic. Browser/Tauri projection remains an app adapter concern.
+- Move expensive app-local DTO construction into background jobs where clean, but recognize that final Tauri IPC response serialization still happens at the command boundary. Phase 8 binary transport is still needed to reduce final JSON serialization/materialization costs.
+- Use one simple bounded queue/pool first. Do not add priority classes unless real workloads show starvation or responsiveness problems.
 - Do not make Tauri own the core content runtime. The Tauri adapter may instantiate and call it, but reusable loading semantics must serve future client mode and diagnostics.
 - Do not force async/Tokio into `holtburger-content` just to satisfy the current app. If an async executor is needed, place it deliberately in `holtburger-core`, a dedicated runtime module, or another boundary that matches future client-mode ownership.
 - Start with conservative concurrency, likely `2`.
@@ -495,6 +503,8 @@ Implementation notes:
 
 Validation:
 
+- Tauri `lookup_asset` returns through an async command path and does not run decode/assembly inline.
+- Runtime jobs return typed Rust-native asset results; app-local projection remains separate from reusable content loading.
 - Concurrent identical asset requests share one producer.
 - App still returns per-request frontend wrappers/ids correctly.
 - Startup/navigation load no longer duplicates identical heavy jobs under bursty request patterns.
@@ -502,7 +512,9 @@ Validation:
 
 Exit criteria:
 
-- Heavy content loading is available through reusable runtime APIs.
+- Every asset lookup route enters the runtime/background execution boundary.
+- Heavy content loading happens off the Tauri command path.
+- Any expensive browser DTO construction that remains before Phase 8 is isolated as app-local projection work, not part of the reusable content runtime contract.
 - Tauri command boundary is narrower and adapter-like.
 
 ## Phase 6: Landblock Summary Asset

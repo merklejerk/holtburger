@@ -735,6 +735,39 @@ Exit criteria:
 
 - Building-distance coverage can show exterior authored buildings without full pack assembly for those landblocks.
 
+Progress:
+
+- Implemented in `apps/holtburger-3d`:
+  - building-radius landblocks are now satisfied by `landblock-summary/*` unless focus/detail/env-cell coverage requires a full `landblock-pack/*`;
+  - selected prepared summaries produce demand-driven renderable source requests for building `sourceAssetId` values;
+  - summary building render work reuses the existing static renderable scene model and instanced mesh path;
+  - full packs supersede summary building render work for the same landblock to prevent duplicate exterior buildings.
+- Added focused TypeScript coverage for planner behavior, summary building hydration, and full-pack superseding.
+
+Decisions:
+
+- Kept summary dependency extraction out of default asset graph hydration. Summary building renderables are requested only when the current outdoor building-distance policy selects that landblock.
+- Reused the existing static renderable render-domain/chunk grouping path rather than adding a second summary-specific renderer.
+- Treated summary building instances as exterior-only renderables with no interior residency, portal traversal, picking, or BVH parity.
+
+Course corrections:
+
+- Building interest no longer contributes to full-pack coverage. Full-pack coverage is now focus/detail/env-cell driven; building interest contributes to summary coverage unless the same landblock is already covered by a full pack.
+- Summary setup-model expansion currently uses the setup model part list and part scale available in prepared frontend assets. It does not reconstruct Rust-prepared full-pack static mesh bounds or richer setup placement transforms for summary buildings.
+
+Refinements for later phases:
+
+- Consider moving summary building expansion into Rust if we need exact parity with full-pack prepared static meshes, source bounds, or future summary spatial/BVH work.
+- Add cache retention behavior that drops redundant summary assets when a full pack for the same landblock is prepared.
+- Revisit the browser building-distance slider once summary building hydration has been exercised in real scenes; it may remain useful as an exterior-building radius rather than a full-pack radius.
+
+Potential cleanup targets:
+
+- Rename mixed scene-coverage request planner APIs that still say `LandblockPackCoverage`.
+- Consolidate duplicated summary building test fixtures and static renderable asset fixtures.
+- Tighten `PreparedLandblockSummaryBuilding.sourceAssetId`; renderable buildings should not expose nullable source asset ids if unsupported sources are filtered before the DTO.
+- Revisit summary setup-model expansion naming so it does not imply full full-pack static mesh parity.
+
 ## Phase 7: Dungeon Outdoor-Work Skip
 
 Goal: avoid outdoor generated-scene/static work for root facts that prove a landblock is a dungeon.
@@ -944,6 +977,8 @@ Initial cleanup targets:
 - Add cache-retention rules that can drop redundant summaries when a full pack for the same landblock is prepared.
 - Revisit summary authored object/building facts after distant building placeholder rendering lands; keep them cheap or remove fields the renderer never uses.
 - After Phase 6.1, revisit whether the browser building-distance slider should remain user-facing or become a derived internal full-pack/summary-building policy.
+- Tighten summary building DTO contracts so renderable building records do not carry nullable `sourceAssetId` values after unsupported sources have already been filtered or represented as a distinct variant.
+- Revisit summary setup-model expansion after real-scene validation; if placement or bounds parity matters, move that transformation into the Rust loader beside full-pack static mesh preparation.
 - Retire stale profiling/timing scaffolding that was useful for this optimization campaign but is too noisy for day-to-day development.
 - Re-check crate boundaries after runtime work lands: content should own static content discovery/decoding, core/runtime should own reusable client execution policy if that split proves cleaner, and the Tauri adapter should remain projection/glue.
 

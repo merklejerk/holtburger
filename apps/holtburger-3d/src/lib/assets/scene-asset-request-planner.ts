@@ -239,8 +239,10 @@ function createLandblockPackCoverageRequestsForInterest(
 	pendingAssetIds: string[],
 	interest: NormalizedOutdoorSceneInterest,
 ): AssetLookupRequestDto[] {
-	const fullPackLandblockIds = deriveFullLandblockPackCoverageLandblockIds(interest);
-	const summaryLandblockIds = deriveLandblockSummaryCoverageLandblockIds(interest);
+	const fullPackLandblockIds =
+		deriveFullLandblockPackCoverageLandblockIds(interest);
+	const summaryLandblockIds =
+		deriveLandblockSummaryCoverageLandblockIds(interest);
 	return [
 		...createLandblockPackCoverageRequests(
 			runtimeBatch,
@@ -294,7 +296,9 @@ function createLandblockSummaryCoverageRequests(
 	pendingAssetIds: string[],
 	landblockIds: readonly number[],
 ): AssetLookupRequestDto[] {
-	const requestScope = browserDestination ? "destination-summary" : "runtime-summary";
+	const requestScope = browserDestination
+		? "destination-summary"
+		: "runtime-summary";
 	const preparedOrPendingPackIds = new Set([
 		...Object.keys(preparedByAssetId),
 		...pendingAssetIds,
@@ -319,10 +323,7 @@ function deriveFullLandblockPackCoverageLandblockIds(
 	interest: NormalizedOutdoorSceneInterest,
 ): number[] {
 	return unionOutdoorSceneLandblockIds(
-		unionOutdoorSceneLandblockIds(
-			[interest.focusLandblockId],
-			interest.buildingLandblockIds,
-		),
+		[interest.focusLandblockId],
 		unionOutdoorSceneLandblockIds(
 			interest.detailLandblockIds,
 			interest.envCellLandblockIds,
@@ -336,7 +337,10 @@ function deriveLandblockSummaryCoverageLandblockIds(
 	const fullPackIds = new Set(
 		deriveFullLandblockPackCoverageLandblockIds(interest),
 	);
-	return interest.terrainLandblockIds
+	return unionOutdoorSceneLandblockIds(
+		interest.terrainLandblockIds,
+		interest.buildingLandblockIds,
+	)
 		.filter((landblockId) => !fullPackIds.has(landblockId))
 		.sort((left, right) => left - right);
 }
@@ -393,8 +397,12 @@ export function createStaticRenderableAssetRequests(
 			envCellIds: new Set(linkedInteriorCoverage.envCellIds),
 		},
 	);
+	const summaryBuildingSourceAssetIds =
+		collectSelectedSummaryBuildingSourceAssetIds(preparedByAssetId, {
+			buildingLandblockIds,
+		});
 
-	return [...new Set(packGfxAssetIds)]
+	return [...new Set([...packGfxAssetIds, ...summaryBuildingSourceAssetIds])]
 		.sort()
 		.filter(
 			(assetId) =>
@@ -500,6 +508,46 @@ function collectSelectedPackStaticGfxAssetIds(
 		)
 		.filter((mesh) => isPackStaticMeshSelected(mesh, selection))
 		.map((mesh) => mesh.gfxObjAssetId);
+}
+
+function collectSelectedSummaryBuildingSourceAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+	},
+): string[] {
+	const preparedPackLandblockIds =
+		collectPreparedLandblockPackIds(preparedByAssetId);
+	return Object.values(preparedByAssetId)
+		.flatMap((asset) =>
+			asset.payload.kind === "landblock-summary"
+				? asset.payload.sourceFacts.buildings
+				: [],
+		)
+		.filter((building) => {
+			const landblockId = normalizeOutdoorLandblockId(
+				building.owningLandblockId,
+			);
+			return (
+				selection.buildingLandblockIds.has(landblockId) &&
+				!preparedPackLandblockIds.has(landblockId) &&
+				isStaticRenderableAssetId(building.sourceAssetId ?? "")
+			);
+		})
+		.map((building) => building.sourceAssetId)
+		.filter((assetId): assetId is string => assetId !== null);
+}
+
+function collectPreparedLandblockPackIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): Set<number> {
+	const landblockIds = new Set<number>();
+	for (const asset of Object.values(preparedByAssetId)) {
+		if (asset.payload.kind === "landblock-pack") {
+			landblockIds.add(normalizeOutdoorLandblockId(asset.payload.landblockId));
+		}
+	}
+	return landblockIds;
 }
 
 function isPackStaticMeshSelected(

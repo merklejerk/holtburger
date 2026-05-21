@@ -314,9 +314,37 @@ Exit criteria:
 
 ## Phase 3: Static Outdoor Assembly Root Reuse
 
-Status: partially implemented by Phase 2 groundwork.
+Status: implemented.
 
 Goal: remove duplicate landblock root loads between full pack assembly and outdoor static scene assembly.
+
+Implemented:
+
+- Kept full pack assembly on the shared `ContentSourceReader` path introduced in Phase 2.
+- Added a focused regression test proving pack-triggered static outdoor assembly does not re-fetch `CellLandblock` or `LandblockInfo` from the repository when those roots were already loaded by pack assembly.
+- Preserved the standalone static outdoor route by having it instantiate its own operation-scoped source reader.
+
+Decisions:
+
+- Keep `StaticOutdoorSceneAssembler::assemble_landblock_with_source` `pub(crate)` for now. It is the correct internal seam for pack assembly, but it should not become a public content API until Phase 4 decides the shared cache/runtime contract.
+- Do not add a separate loaded-root DTO for Phase 3. The shared reader already provides the ownership/lifetime boundary we need, and an extra DTO would mostly duplicate cache state.
+- Treat `RegionDesc`, `Scene`, `SetupModel`, and `GfxObj` reuse as part of the same static outdoor path, not a separate generated-scenery optimization. Generated scenery is where static outdoor tends to fan out into those records.
+
+Course corrections:
+
+- Phase 2 already did the structural work for root reuse, so Phase 3 became a proof/hardening slice instead of another refactor.
+- The regression test uses minimal valid official root bytes and intentionally omits `RegionDesc`; this isolates the root reuse behavior without requiring full generated-scenery fixture data.
+
+Refinements for later phases:
+
+- Phase 4 should keep the same source-reader entry points and replace the operation-local-only storage with shared typed LRU buckets where appropriate.
+- Add source read/decode counters or timing spans if future profiling needs wall-clock confirmation beyond the unit-level read-count proof.
+- Consider `Arc`-backed decoded records when shared cache storage lands, but avoid that churn until clone cost is measured.
+
+Potential cleanup targets:
+
+- Revisit the `assemble_landblock_with_source` name after Phase 4; `assemble_landblock_from_source` or a named source-input struct may read cleaner once the cache/runtime shape is final.
+- Keep the in-memory counting source local to tests unless more cache behavior needs reusable test fixtures.
 
 Scope:
 
@@ -332,21 +360,23 @@ Implementation notes:
 - The current private loaded-input implementation should become the single implementation behind both standalone and pack assembly.
 - Keep generated scenery setup/gfx access on the shared reader path so Phase 4 can cache it.
 
-Phase 2 progress:
+Progress:
 
 - Full pack assembly now calls `StaticOutdoorSceneAssembler` through a shared `ContentSourceReader`, so pack-loaded `CellLandblock`, `LandblockInfo`, `RegionDesc`, `Scene`, `SetupModel`, and `GfxObj` records are reused inside the same pack operation.
 - The standalone static outdoor route still instantiates its own reader, preserving the debug/source route without a compatibility shim.
-
-Remaining work:
-
-- Add focused tests or source counters proving pack assembly does not re-read/re-decode roots during static outdoor assembly.
-- Decide whether `assemble_landblock_with_source` is the final explicit contract or whether a more named loaded-input struct would make ownership clearer before Phase 4.
+- `pack_static_outdoor_assembly_reuses_loaded_landblock_roots` proves pack assembly reads `XXYYFFFF` and `XXYYFFFE` once even though static outdoor assembly also asks for those roots.
 
 Validation:
 
 - Timing/source counters show root records are not decoded twice for one full pack.
 - Existing static outdoor scene behavior remains intact.
 - Static outdoor route and full pack route produce equivalent outdoor facts for the same landblock roots.
+- Completed validation:
+  - `cargo test --manifest-path crates/holtburger-content/Cargo.toml landblock_pack::tests::pack_static_outdoor_assembly_reuses_loaded_landblock_roots`
+  - `cargo fmt --all`
+  - `cargo test --manifest-path crates/holtburger-content/Cargo.toml`
+  - `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 Exit criteria:
 
@@ -667,8 +697,10 @@ Initial cleanup targets:
 - Retire legacy `payloadKind: "bytes"` dead-end assumptions after the real binary command contract exists.
 - Replace Phase 2's contextual/string-based source error classification with typed read/decode errors before the source reader becomes a shared runtime contract.
 - Audit `ContentSourceReader` clone-returning APIs after Phase 4; keep them if they remain cheap enough, or move cached decoded records to `Arc` when shared LRU storage lands.
+- Revisit `StaticOutdoorSceneAssembler::assemble_landblock_with_source` naming/API shape after Phase 4 decides whether the shared cache is source-reader-owned or injected from a higher runtime.
 - Remove or rename cache/runtime helper names that are pack-specific after they become shared by summaries, gfx/setup routes, diagnostics, or future client mode.
 - Revisit `ContentAssetRuntime` and `LandblockPackAssemblyContext` public surface area after Phase 5 so implementation-only cache/executor details do not leak.
+- Audit and reduce excessive visibility after each phase. Downgrade `pub`/`pub(crate)` items that only exist for migration wiring or tests once the final ownership boundary is clear.
 - Consolidate Rust and TypeScript landblock id/env-cell enumeration helpers into one canonical helper per side.
 - Remove redundant prepared terrain/interior/static JSON serializers once binary normalization becomes the primary pack path, or move shared projection helpers out of the Tauri adapter if the adapter keeps accumulating serializer weight.
 - Remove binary/JSON dual-path test scaffolding once the normalized frontend asset shape is stable.

@@ -51,6 +51,9 @@ pub const RUNTIME_NOTIFICATION_EVENT: &str = "runtime:notification";
 const LOCAL_PLAYER_GUID: Guid = Guid(0x5000_0001);
 const REMOTE_SCOUT_GUID: Guid = Guid(0x5000_0002);
 const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
+const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
+const ASSET_BINARY_VERSION: u32 = 1;
+const ASSET_BINARY_HEADER_LEN: usize = 16;
 
 pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
@@ -121,6 +124,13 @@ impl HostRuntimeService {
 
     pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
         self.adapter.asset_lookup(request).await
+    }
+
+    pub async fn asset_lookup_binary(
+        &self,
+        request: AssetLookupRequestDto,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.adapter.asset_lookup_binary(request).await
     }
 
     #[cfg(test)]
@@ -256,6 +266,45 @@ impl HostBoundaryAdapter {
         }
 
         self.build_app_local_asset_lookup_response(request)
+    }
+
+    pub async fn asset_lookup_binary(
+        &self,
+        request: AssetLookupRequestDto,
+    ) -> anyhow::Result<Vec<u8>> {
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup_binary] request_id={} asset_id={} priority={:?}",
+                request.request_id, request.asset_id, request.priority
+            );
+        }
+
+        let Some(ContentAssetRequest::LandblockPack(landblock_id)) =
+            content_asset_request_from_asset_id(&request.asset_id)
+        else {
+            anyhow::bail!(
+                "binary asset lookup only supports landblock-pack assets, got {}",
+                request.asset_id
+            );
+        };
+
+        let asset = self
+            .content_asset_runtime
+            .load(ContentAssetRequest::LandblockPack(landblock_id))
+            .await;
+        let response = match asset {
+            Ok(ContentAsset::LandblockPack(pack)) => {
+                return serialize_landblock_pack_binary_response(request, &pack);
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
+            Err(error) => self.build_failed_landblock_pack_lookup_response(
+                request,
+                normalize_landblock_id(landblock_id),
+                error,
+            ),
+        };
+
+        serialize_asset_binary_response(response, BinaryAssetSectionWriter::default())
     }
 
     #[cfg(test)]
@@ -1518,6 +1567,425 @@ fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value 
             "errorCode": null,
             "detail": null
         }
+    })
+}
+
+struct BinaryAssetSection {
+    role: &'static str,
+    path: String,
+    scalar_type: &'static str,
+    component_count: u32,
+    element_count: u32,
+    byte_offset: usize,
+    byte_length: usize,
+}
+
+#[derive(Default)]
+struct BinaryAssetSectionWriter {
+    data: Vec<u8>,
+    sections: Vec<BinaryAssetSection>,
+}
+
+impl BinaryAssetSectionWriter {
+    fn push_f32_section(
+        &mut self,
+        role: &'static str,
+        path: impl Into<String>,
+        component_count: u32,
+        values: impl IntoIterator<Item = f32>,
+    ) {
+        let offset = self.data.len();
+        let mut scalar_count = 0usize;
+        for value in values {
+            self.data.extend(value.to_le_bytes());
+            scalar_count += 1;
+        }
+        self.push_section(role, path, "f32", component_count, offset, scalar_count);
+    }
+
+    fn push_i32_section(
+        &mut self,
+        role: &'static str,
+        path: impl Into<String>,
+        component_count: u32,
+        values: impl IntoIterator<Item = i32>,
+    ) {
+        let offset = self.data.len();
+        let mut scalar_count = 0usize;
+        for value in values {
+            self.data.extend(value.to_le_bytes());
+            scalar_count += 1;
+        }
+        self.push_section(role, path, "i32", component_count, offset, scalar_count);
+    }
+
+    fn push_section(
+        &mut self,
+        role: &'static str,
+        path: impl Into<String>,
+        scalar_type: &'static str,
+        component_count: u32,
+        offset: usize,
+        scalar_count: usize,
+    ) {
+        if scalar_count == 0 {
+            return;
+        }
+        let component_count_usize =
+            usize::try_from(component_count).expect("binary component count fits usize");
+        assert!(
+            scalar_count.is_multiple_of(component_count_usize),
+            "binary section scalar count must divide evenly by component count"
+        );
+        self.sections.push(BinaryAssetSection {
+            role,
+            path: path.into(),
+            scalar_type,
+            component_count,
+            element_count: u32::try_from(scalar_count / component_count_usize)
+                .expect("binary section element count fits u32"),
+            byte_offset: offset,
+            byte_length: self.data.len() - offset,
+        });
+    }
+
+    fn serialize_sections(&self) -> Vec<serde_json::Value> {
+        self.sections
+            .iter()
+            .map(|section| {
+                serde_json::json!({
+                    "role": section.role,
+                    "path": section.path,
+                    "scalarType": section.scalar_type,
+                    "componentCount": section.component_count,
+                    "elementCount": section.element_count,
+                    "byteOffset": section.byte_offset,
+                    "byteLength": section.byte_length,
+                })
+            })
+            .collect()
+    }
+}
+
+fn serialize_landblock_pack_binary_response(
+    request: AssetLookupRequestDto,
+    pack: &LandblockPack,
+) -> anyhow::Result<Vec<u8>> {
+    let mut writer = BinaryAssetSectionWriter::default();
+    let payload = serialize_landblock_pack_binary_payload(pack, &mut writer);
+    let response = AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload,
+    };
+    serialize_asset_binary_response(response, writer)
+}
+
+fn serialize_asset_binary_response(
+    response: AssetLookupResponseDto,
+    writer: BinaryAssetSectionWriter,
+) -> anyhow::Result<Vec<u8>> {
+    let manifest = serde_json::json!({
+        "transport": "holtburger-asset-binary",
+        "version": ASSET_BINARY_VERSION,
+        "byteOrder": "little-endian",
+        "sectionByteOffsetBase": "section-data",
+        "response": response,
+        "sections": writer.serialize_sections(),
+    });
+    let mut manifest_bytes = serde_json::to_vec(&manifest)?;
+    while !(ASSET_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
+        manifest_bytes.push(b' ');
+    }
+    let total_len = ASSET_BINARY_HEADER_LEN + manifest_bytes.len() + writer.data.len();
+    let mut bytes = Vec::with_capacity(total_len);
+    bytes.extend(ASSET_BINARY_MAGIC);
+    bytes.extend(ASSET_BINARY_VERSION.to_le_bytes());
+    bytes.extend(
+        u32::try_from(manifest_bytes.len())
+            .expect("binary asset manifest length fits u32")
+            .to_le_bytes(),
+    );
+    bytes.extend(
+        u32::try_from(total_len)
+            .expect("binary asset total length fits u32")
+            .to_le_bytes(),
+    );
+    bytes.extend(manifest_bytes);
+    bytes.extend(writer.data);
+    Ok(bytes)
+}
+
+fn serialize_landblock_pack_binary_payload(
+    pack: &LandblockPack,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-pack",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-pack",
+        "landblockId": pack.landblock_id,
+        "landblockInfoId": pack.landblock_info_id,
+        "classification": serialize_landblock_classification(pack.classification),
+        "sourceFacts": {
+            "cellLandblock": pack.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
+            "landblockInfo": pack.landblock_info.as_ref().map(serialize_landblock_info_fact),
+            "outdoor": serialize_landblock_pack_outdoor_facts(pack.outdoor_scene.as_ref()),
+            "interiors": serialize_landblock_pack_interior_facts(pack),
+            "renderables": {
+                "gfxObjs": [],
+                "setupModels": [],
+                "unsupportedDids": []
+            }
+        },
+        "prepared": {
+            "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(|mesh| {
+                serialize_prepared_terrain_mesh_binary(mesh, writer)
+            }),
+            "outdoorStaticInstances": pack.prepared.outdoor_static_instances.iter().map(serialize_prepared_static_instance).collect::<Vec<_>>(),
+            "interiorCells": pack.prepared.interior_cells.iter().enumerate().map(|(index, cell)| {
+                serialize_prepared_interior_cell_binary(cell, index, writer)
+            }).collect::<Vec<_>>(),
+            "staticMeshes": pack.prepared.static_meshes.iter().map(serialize_prepared_static_mesh).collect::<Vec<_>>(),
+            "spatialItems": pack.prepared.spatial_items.iter().enumerate().map(|(index, item)| {
+                serialize_prepared_spatial_item_binary(item, index, writer)
+            }).collect::<Vec<_>>(),
+            "staticLandblockBvh": pack.prepared.static_landblock_bvh.as_ref().map(|bvh| {
+                serialize_prepared_bvh_binary(bvh, writer)
+            })
+        },
+        "dependencies": {
+            "cellDatIds": derive_landblock_pack_cell_dat_ids(pack),
+            "portalDatIds": derive_landblock_pack_portal_dat_ids(pack),
+            "renderableAssetIds": derive_landblock_pack_renderable_asset_ids(pack),
+            "missing": [],
+            "unsupported": []
+        },
+        "diagnostics": serialize_landblock_pack_diagnostics(&pack.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-pack",
+            "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_prepared_terrain_mesh_binary(
+    mesh: &PreparedTerrainMesh,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    writer.push_f32_section(
+        "prepared.terrainMesh.vertices",
+        "payload.prepared.terrainMesh.vertices",
+        3,
+        mesh.vertices
+            .iter()
+            .flat_map(|vertex| [vertex.x, vertex.y, vertex.z]),
+    );
+    writer.push_f32_section(
+        "prepared.terrainMesh.triangles",
+        "payload.prepared.terrainMesh.triangles",
+        5,
+        mesh.triangles.iter().flat_map(|triangle| {
+            [
+                triangle.a as f32,
+                triangle.b as f32,
+                triangle.c as f32,
+                triangle.terrain_type as f32,
+                triangle.average_height,
+            ]
+        }),
+    );
+    serde_json::json!({
+        "landblockId": mesh.landblock_id,
+        "gridSize": mesh.grid_size,
+        "tileSize": mesh.tile_size,
+        "vertices": [],
+        "triangles": [],
+        "minHeight": mesh.min_height,
+        "maxHeight": mesh.max_height,
+    })
+}
+
+fn serialize_prepared_interior_cell_binary(
+    cell: &PreparedInteriorCell,
+    cell_index: usize,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    serde_json::json!({
+        "envCellId": cell.env_cell_id,
+        "environmentId": cell.environment_id,
+        "cellStructureId": cell.cell_structure_id,
+        "localPlacement": serialize_frame(&cell.local_placement),
+        "surfaceIds": cell.surface_ids,
+        "portals": cell.portals.iter().map(|portal| {
+            serde_json::json!({
+                "portalId": portal.portal_id,
+                "sourceIndex": portal.source_index,
+                "flags": portal.flags,
+                "polygonId": portal.polygon_id,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "targetEnvCellId": portal.target_env_cell_id,
+                "isOutsideTransition": portal.is_outside_transition,
+            })
+        }).collect::<Vec<_>>(),
+        "portalApertures": cell.portal_apertures.iter().enumerate().map(|(aperture_index, aperture)| {
+            serialize_prepared_portal_aperture_binary(aperture, cell_index, aperture_index, writer)
+        }).collect::<Vec<_>>(),
+        "staticObjectCount": cell.static_object_count,
+        "renderGeometry": serialize_prepared_polygon_set_render_geometry_binary(
+            &cell.render_geometry,
+            format!("payload.prepared.interiorCells.{cell_index}.renderGeometry"),
+            writer,
+        ),
+    })
+}
+
+fn serialize_prepared_portal_aperture_binary(
+    aperture: &PreparedPortalAperture,
+    cell_index: usize,
+    aperture_index: usize,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    writer.push_f32_section(
+        "prepared.interiorCells.portalApertures.points",
+        format!(
+            "payload.prepared.interiorCells.{cell_index}.portalApertures.{aperture_index}.points"
+        ),
+        3,
+        aperture
+            .points
+            .iter()
+            .flat_map(|point| [point.x, point.y, point.z]),
+    );
+    serde_json::json!({
+        "portalId": aperture.portal_id,
+        "sourceIndex": aperture.source_index,
+        "polygonId": aperture.polygon_id,
+        "points": [],
+        "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
+    })
+}
+
+fn serialize_prepared_polygon_set_render_geometry_binary(
+    geometry: &PreparedPolygonSetRenderGeometry,
+    path: String,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    writer.push_f32_section(
+        "prepared.interiorCells.renderGeometry.positions",
+        format!("{path}.positions"),
+        3,
+        geometry.positions.iter().copied(),
+    );
+    writer.push_f32_section(
+        "prepared.interiorCells.renderGeometry.normals",
+        format!("{path}.normals"),
+        3,
+        geometry.normals.iter().copied(),
+    );
+    writer.push_f32_section(
+        "prepared.interiorCells.renderGeometry.uvs",
+        format!("{path}.uvs"),
+        2,
+        geometry.uvs.iter().copied(),
+    );
+    writer.push_i32_section(
+        "prepared.interiorCells.renderGeometry.triangles",
+        format!("{path}.triangles"),
+        3,
+        geometry.triangles.iter().flat_map(|triangle| {
+            [
+                i32::from(triangle.polygon_id),
+                triangle.surface_id.map(i32::from).unwrap_or(-1),
+                i32::try_from(triangle.first_vertex).expect("first vertex fits i32"),
+            ]
+        }),
+    );
+    serde_json::json!({
+        "sourceId": geometry.source_id,
+        "vertexCount": geometry.vertex_count,
+        "triangleCount": geometry.triangle_count,
+        "positions": [],
+        "normals": [],
+        "uvs": [],
+        "triangles": [],
+        "surfaceIds": geometry.surface_ids,
+        "invalidPolygons": geometry.invalid_polygons.iter().map(serialize_prepared_polygon_set_invalid_polygon).collect::<Vec<_>>(),
+        "skippedPolygonCount": geometry.skipped_polygon_count,
+        "bounds": geometry.bounds.as_ref().map(serialize_prepared_aabb),
+    })
+}
+
+fn serialize_prepared_spatial_item_binary(
+    item: &PreparedSpatialItem,
+    item_index: usize,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    writer.push_f32_section(
+        "prepared.spatialItems.bounds",
+        format!("payload.prepared.spatialItems.{item_index}.bounds"),
+        6,
+        [
+            item.bounds.min.x,
+            item.bounds.min.y,
+            item.bounds.min.z,
+            item.bounds.max.x,
+            item.bounds.max.y,
+            item.bounds.max.z,
+        ],
+    );
+    serde_json::json!({
+        "id": item.id,
+        "kind": serialize_prepared_spatial_item_kind(item.kind),
+        "ownerId": item.owner_id,
+        "sourceAssetId": item.source_asset_id,
+        "bounds": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 0, "y": 0, "z": 0 } },
+        "metadata": serialize_prepared_spatial_item_metadata(&item.metadata),
+    })
+}
+
+fn serialize_prepared_bvh_binary(
+    bvh: &PreparedBvh,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    serde_json::json!({
+        "coordinateSpace": bvh.coordinate_space,
+        "landblockId": bvh.landblock_id,
+        "scope": bvh.scope,
+        "nodes": bvh.nodes.iter().enumerate().map(|(index, node)| {
+            serialize_prepared_bvh_node_binary(node, index, writer)
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_prepared_bvh_node_binary(
+    node: &PreparedBvhNode,
+    node_index: usize,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    writer.push_f32_section(
+        "prepared.staticLandblockBvh.nodes.bounds",
+        format!("payload.prepared.staticLandblockBvh.nodes.{node_index}.bounds"),
+        6,
+        [
+            node.bounds.min.x,
+            node.bounds.min.y,
+            node.bounds.min.z,
+            node.bounds.max.x,
+            node.bounds.max.y,
+            node.bounds.max.z,
+        ],
+    );
+    serde_json::json!({
+        "bounds": { "min": { "x": 0, "y": 0, "z": 0 }, "max": { "x": 0, "y": 0, "z": 0 } },
+        "left": node.left,
+        "right": node.right,
+        "itemIndices": node.item_indices,
+        "kindMask": node.kind_mask,
     })
 }
 
@@ -2937,6 +3405,56 @@ mod tests {
                 .expect("source records should be exposed")
                 .iter()
                 .any(|record| record["status"] == "loaded")
+        );
+    }
+
+    #[test]
+    fn landblock_pack_binary_lookup_moves_bulk_arrays_into_sections() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes =
+            tauri::async_runtime::block_on(adapter.asset_lookup_binary(AssetLookupRequestDto {
+                request_id: "test-landblock-pack-binary".to_string(),
+                asset_id: "landblock-pack/da55012e".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Bootstrap,
+            }))
+            .expect("binary landblock-pack lookup should succeed");
+
+        assert_eq!(&bytes[0..4], ASSET_BINARY_MAGIC);
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 1);
+        let manifest_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        assert_eq!(
+            u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize,
+            bytes.len()
+        );
+        assert!((ASSET_BINARY_HEADER_LEN + manifest_len).is_multiple_of(4));
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &bytes[ASSET_BINARY_HEADER_LEN..ASSET_BINARY_HEADER_LEN + manifest_len],
+        )
+        .expect("binary manifest should be JSON");
+
+        assert_eq!(manifest["transport"], "holtburger-asset-binary");
+        assert_eq!(
+            manifest["response"]["payload"]["prepared"]["terrainMesh"]["vertices"]
+                .as_array()
+                .expect("bulk terrain vertices should be manifest placeholders")
+                .len(),
+            0
+        );
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        assert!(
+            sections
+                .iter()
+                .any(|section| section["role"] == "prepared.terrainMesh.vertices")
+        );
+        assert!(
+            sections.iter().any(|section| section["role"]
+                == "prepared.interiorCells.renderGeometry.positions")
+        );
+        assert!(
+            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
+            "binary envelope should contain section data"
         );
     }
 

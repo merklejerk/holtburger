@@ -905,6 +905,106 @@ Exit criteria:
 - Full landblock packs can carry bulk prepared numeric arrays through binary sections.
 - Profiling shows reduced Rust JSON work and reduced WebKit/JSC materialization work.
 
+Progress:
+
+- Added `lookup_asset_binary` as a Tauri command for `landblock-pack/*`.
+- Added a self-contained binary asset envelope with:
+  - `HBAB` magic;
+  - version `1`;
+  - manifest byte length;
+  - total byte length;
+  - padded manifest bytes so the section data begins on a 4-byte boundary.
+- Kept the manifest JSON inspectable and Zod-validatable on the frontend.
+- Added binary sections for:
+  - `prepared.terrainMesh.vertices`;
+  - `prepared.terrainMesh.triangles`;
+  - `prepared.interiorCells[].renderGeometry.positions`;
+  - `prepared.interiorCells[].renderGeometry.normals`;
+  - `prepared.interiorCells[].renderGeometry.uvs`;
+  - `prepared.interiorCells[].renderGeometry.triangles`;
+  - `prepared.interiorCells[].portalApertures[].points`;
+  - `prepared.spatialItems[].bounds`;
+  - `prepared.staticLandblockBvh.nodes[].bounds`.
+- Routed frontend `lookupAsset(...)` through the binary command for `landblock-pack/*`, then decoded and hydrated the envelope behind the existing host abstraction.
+- Preserved the existing normalized asset-worker and renderer payload shape for this phase, so renderer code does not branch on transport details.
+- Added focused frontend decoder coverage and Rust adapter coverage proving that full pack bulk arrays move into binary sections.
+
+Decisions:
+
+- Binary transport remains an app-local Tauri projection over typed Rust content products. No binary DTO shape was promoted into `holtburger-content` or `holtburger-core`.
+- The frontend receives a normal `AssetLookupResponseDto` after decoding. That keeps dependency scheduling, asset-worker prep, and renderer inputs on the existing path while the transport changes underneath.
+- Section `byteOffset` values are relative to the start of the binary section-data block, not the start of the whole envelope. The fixed header carries the manifest length, so absolute offsets are still trivial to validate.
+- Terrain triangles are encoded as fixed-width `f32` tuples for the first pass because the current frontend payload represents them as object records containing both integer indices/types and a float average height.
+- Interior render triangles are encoded as fixed-width `i32` tuples, using `-1` as the binary sentinel for `surfaceId: null`.
+- BVH node identity and variable `itemIndices` remain JSON for now; only node bounds moved to binary sections in Phase 8.
+
+Course corrections:
+
+- The first implementation hydrates binary sections back into plain JavaScript object/array payloads before Zod validation and worker preparation. This proves the transport and removes IPC JSON materialization for the heaviest arrays, but it does not yet remove all frontend array/object allocation.
+- The manifest uses role strings plus explicit paths rather than a deeply nested binary schema. That kept the first pass small and inspectable, but later contract tightening should replace ad hoc role branching with a more formal section codec table if more asset families move to binary.
+- `lookup_asset_binary` is intentionally landblock-pack-only. Other routes stay on `lookup_asset` until profiling shows their JSON payloads matter.
+
+Refinements for later phases:
+
+- Re-profile startup/navigation after Phase 8 to separate wins from binary IPC transport versus remaining frontend hydration and Zod parsing costs.
+- Consider letting prepared render geometry hold typed-array views directly instead of converting all decoded sections back to plain arrays.
+- If typed-array prepared payloads land, update renderer helpers to avoid constructing a new `Float32Array` from an existing `Float32Array`.
+- Expand binary sections only when measurements justify it. Good candidates are static mesh placement matrices/scale batches and setup/gfx render geometry if those routes become hot.
+- Decide whether `lookup_asset_binary` should become a generic binary-capable lookup route or stay pack-specific after Phase 9 trims DTOs.
+
+Potential cleanup targets:
+
+- Remove the old `AssetPayloadKindDto::Bytes` dead-end or make it describe the real envelope path; the command-level binary response is now the actual binary transport.
+- Collapse duplicated JSON and binary landblock-pack serializers once Phase 9 decides which prepared fields remain in browser DTOs.
+- Replace binary decoder role-string branching with a typed section codec table if a second asset family adopts binary sections.
+- Tighten binary manifest path handling so paths are validated against known payload schemas instead of generic dot-path assignment.
+- Revisit `prepared.terrainMesh.triangles` encoding if terrain DTOs move away from object-per-triangle records.
+- Remove binary hydration back to plain arrays if renderer/prepared payload contracts move to typed arrays.
+
+## Phase 8.1: Typed-Array Prepared Geometry
+
+Goal: preserve Phase 8's binary sections as typed-array views in prepared frontend assets instead of expanding them back into large object/array graphs when the renderer can consume the raw numeric layout directly.
+
+Scope:
+
+- Change decoded binary landblock-pack sections for renderer-hot geometry into typed-array-backed prepared payload fields.
+- Start with arrays that already map cleanly to Three.js `BufferAttribute` inputs:
+  - interior render geometry positions;
+  - interior render geometry normals;
+  - interior render geometry uvs;
+  - terrain render positions/colors or the minimum intermediate typed arrays needed to build terrain geometry without object-per-vertex expansion.
+- Keep semantic metadata and sparse/variant-heavy structures as objects:
+  - ids;
+  - portals;
+  - source facts;
+  - diagnostics;
+  - dependency lists;
+  - static mesh placement objects unless a measured hotspot appears.
+- Update renderer helpers so they can consume `Float32Array`/`Int32Array` without wrapping an existing typed array in another typed array.
+- Keep JSON-land small/debug assets on the current object/array DTOs unless they become measured hotspots.
+
+Implementation notes:
+
+- Do not make every frontend DTO binary-aware. Normalize at the host/asset-worker boundary into a prepared asset shape that explicitly allows typed-array geometry fields.
+- Keep Zod validation for manifest metadata and section bounds/alignment. Do not try to Zod-validate every numeric element of a typed array.
+- Prefer union/split prepared geometry types over making every geometry field `number[] | Float32Array` everywhere. Renderer-hot paths should know when they have packed geometry.
+- Terrain may deserve a renderer-ready packed mesh shape rather than preserving the current `{ vertices: Vec3[], triangles: object[] }` terrain DTO. The current shape is convenient for debug/model views but expensive for render geometry.
+- Preserve dependency scheduling from manifest/JSON metadata before typed arrays enter the worker.
+
+Validation:
+
+- Existing scene rendering remains equivalent.
+- Interior cell meshes render with typed-array-backed positions/normals/uvs.
+- Terrain still renders and diagnostics remain meaningful.
+- Frontend tests cover binary section decode into typed-array prepared payloads.
+- Re-profile startup/navigation to measure reduced WebKit/JSC allocation and GC beyond Phase 8's transport win.
+
+Exit criteria:
+
+- Renderer-hot landblock-pack geometry no longer expands into large plain JavaScript arrays/objects when loaded through binary transport.
+- Three.js geometry construction avoids redundant typed-array copies for binary-loaded geometry.
+- Object/array hydration remains only where the frontend actually needs semantic objects.
+
 ## Phase 9: DTO Trimming And Contract Tightening
 
 Goal: remove large or legacy browser DTO fields and optional-field ambiguity after binary and summary paths clarify real contracts.
@@ -975,6 +1075,7 @@ Initial cleanup targets:
 
 - Remove legacy landblock/env-cell discovery paths that are no longer needed after root-based pack/summary loading.
 - Keep lower-level direct source routes explicit if they remain useful, but stop presenting them as normal scene-loading concepts.
+- Audit and cull legacy direct scene asset routes that normal scene coverage no longer schedules: `terrain/*`, `outdoor-static-scene/*`, `environment/*`, and `indoor-env-cell/*`. Keep a route only if it has a current debug/tooling purpose that is clearer than the migration-era asset path.
 - Rename the direct `indoor-env-cell/*` source route to `env-cell/*` once normal scene loading no longer depends on the migration-era name. Dungeon env cells and outdoor-linked interior env cells are the same official env-cell record family; `indoor` is app-era terminology, not an official asset distinction.
 - Remove compatibility shims or duplicate route helpers introduced only for transition.
 - Consolidate naming around `landblock`, `landblock-pack`, and `landblock-summary`; avoid indoor/outdoor assumptions in asset ids unless the payload is actually classification-specific.
@@ -1002,6 +1103,12 @@ Initial cleanup targets:
 - Remove redundant prepared terrain/interior/static JSON serializers once binary normalization becomes the primary pack path, or move shared projection helpers out of the Tauri adapter if the adapter keeps accumulating serializer weight.
 - Remove binary/JSON dual-path test scaffolding once the normalized frontend asset shape is stable.
 - Revisit frontend asset dependency derivation after binary manifests land so dependency extraction is not split between incompatible JSON and binary conventions.
+- Remove the `AssetPayloadKindDto::Bytes` placeholder or align it with the real command-level binary envelope path.
+- Collapse duplicated JSON and binary landblock-pack serializer code after DTO trimming decides the final browser payload shape.
+- Replace binary decoder role-string branching with a typed section codec table if binary transport expands beyond landblock packs.
+- Move prepared geometry payloads toward typed-array views so binary hydration does not rebuild large plain JavaScript arrays.
+- Split debug-friendly object geometry DTOs from renderer-ready packed geometry contracts after Phase 8.1, so neither path carries the other's compromises.
+- Tighten binary manifest path validation so section paths are known contract fields rather than generic dot-path assignment.
 - Remove summary/full-pack upgrade shims once distance-ring request policy has a single normal path.
 - Rename mixed scene-coverage request planner APIs that still say `LandblockPackCoverage` after Phase 6 introduced `landblock-summary/*` coverage.
 - Consolidate terrain-bearing frontend payload handling across `terrain-landblock`, `landblock-pack`, and `landblock-summary`.

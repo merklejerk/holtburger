@@ -14,6 +14,7 @@ holtburger-protocol.workspace = true
 holtburger-session.workspace = true
 holtburger-world.workspace = true
 tokio.workspace = true
+futures.workspace = true
 byteorder.workspace = true
 anyhow.workspace = true
 rand.workspace = true

@@ -51,8 +51,7 @@ pub enum IndoorRuntimeFieldIdDto {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum IndoorAssetFamilyIdDto {
-    IndoorEnvCell,
-    Environment,
+    LandblockPack,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

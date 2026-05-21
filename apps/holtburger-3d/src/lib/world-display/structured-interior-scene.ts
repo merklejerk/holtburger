@@ -1,12 +1,11 @@
 import {
-	browserDestinationToIndoorEnvCellId,
+	browserDestinationToInteriorCellId,
 	type BrowserLocationSelection,
 } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
-	PreparedEnvironmentCellStruct,
+	PreparedInteriorCellStructure,
 	PreparedAssetRecord,
-	PreparedEnvironmentPayload,
 	PreparedIndoorCellPortal,
 	PreparedLandblockInteriorCell,
 	PreparedPolygonSetBspNode,
@@ -16,9 +15,6 @@ import type {
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
-	formatEnvironmentAssetId,
-	formatEnvCellAssetId,
-	isPreparedIndoorEnvCellAsset,
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
@@ -46,7 +42,7 @@ export interface StructuredInteriorCell {
 	portals: PreparedIndoorCellPortal[];
 	portalApertures: PreparedPortalAperture[];
 	staticObjectCount: number;
-	cellStructure: PreparedEnvironmentCellStruct | null;
+	cellStructure: PreparedInteriorCellStructure | null;
 	cellBsp: PreparedPolygonSetBspNode | null;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	debugColorKey: string;
@@ -57,7 +53,7 @@ export interface StructuredInteriorSceneModel {
 	activeEnvCellIds: number[];
 	cells: StructuredInteriorCell[];
 	missingEnvCellAssetIds: string[];
-	missingEnvironmentAssetIds: string[];
+	missingInteriorGeometryAssetIds: string[];
 	missingCellStructureKeys: string[];
 	statusText: string;
 	cacheText: string;
@@ -80,7 +76,7 @@ export function deriveStructuredInteriorSceneModel(
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
 ): StructuredInteriorSceneModel {
 	const browserFocusEnvCellId =
-		browserDestinationToIndoorEnvCellId(browserDestination);
+		browserDestinationToInteriorCellId(browserDestination);
 	if (browserFocusEnvCellId !== null) {
 		return deriveBrowserFocusedStructuredInteriorSceneModel(
 			browserFocusEnvCellId,
@@ -168,9 +164,6 @@ function deriveStructuredInteriorSceneForEnvCells(
 	activeEnvCellIds: number[],
 	assetState: AssetChannelState,
 ): StructuredInteriorSceneModel {
-	const missingEnvCellAssetIds = new Set<string>();
-	const missingEnvironmentAssetIds = new Set<string>();
-	const missingCellStructureKeys = new Set<string>();
 	const cells: StructuredInteriorCell[] = [];
 
 	for (const envCellId of activeEnvCellIds) {
@@ -183,7 +176,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 			cells.push({
 				renderKey: formatRenderDomainKey(
 					WORLD_RENDER_DOMAIN.interiorCellShell,
-					`landblock-pack/${formatHex32(envCellId & 0xffff0000)}/env-cell/${formatHex32(envCellId)}`,
+					`landblock-pack/${formatHex32(envCellId & 0xffff0000)}/interior-cell/${formatHex32(envCellId)}`,
 				),
 				envCellId,
 				renderChunk,
@@ -213,73 +206,15 @@ function deriveStructuredInteriorSceneForEnvCells(
 			});
 			continue;
 		}
-
-		const envCellAssetId = formatEnvCellAssetId(envCellId);
-		const envCellAsset = assetState.preparedByAssetId[envCellAssetId];
-		if (!isPreparedIndoorEnvCellAsset(envCellAsset)) {
-			missingEnvCellAssetIds.add(envCellAssetId);
-			continue;
-		}
-
-		const { environmentId, cellStructureId } = envCellAsset.payload;
-		if (environmentId === null || cellStructureId === null) {
-			missingCellStructureKeys.add(`${envCellAssetId}:unselected`);
-			continue;
-		}
-
-		const environmentAssetId = formatEnvironmentAssetId(environmentId);
-		const environmentAsset = assetState.preparedByAssetId[environmentAssetId];
-		if (!isPreparedEnvironmentAsset(environmentAsset)) {
-			missingEnvironmentAssetIds.add(environmentAssetId);
-			continue;
-		}
-
-		const cellStructure = environmentAsset.payload.cellStructures.find(
-			(entry) => entry.id === cellStructureId,
-		);
-		if (!cellStructure) {
-			missingCellStructureKeys.add(
-				`${environmentAssetId}:cell-structure/${formatHex32(cellStructureId)}`,
-			);
-			continue;
-		}
-
-		if (cellStructure.renderGeometry.vertexCount === 0) {
-			continue;
-		}
-
-		const renderChunk = deriveStructuredCellRenderChunk(envCellId);
-		const localRenderKey = `${envCellAssetId}/${environmentAssetId}/cell-structure/${formatHex32(cellStructureId)}`;
-		cells.push({
-			renderKey: formatRenderDomainKey(
-				WORLD_RENDER_DOMAIN.interiorCellShell,
-				localRenderKey,
-			),
-			envCellId,
-			renderChunk,
-			environmentId,
-			cellStructureId,
-			isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
-			chunkLocalPlacement: envCellAsset.payload.localPlacement,
-			surfaceIds: envCellAsset.payload.surfaceIds,
-			portalCount: envCellAsset.payload.portalCount,
-			portals: envCellAsset.payload.portals,
-			portalApertures: [],
-			staticObjectCount: envCellAsset.payload.staticObjectCount,
-			cellStructure,
-			cellBsp: cellStructure.cellBsp,
-			renderGeometry: cellStructure.renderGeometry,
-			debugColorKey: `${envCellAssetId}:${environmentAssetId}:${formatHex32(cellStructureId)}`,
-		});
 	}
 
 	return {
 		focusEnvCellId,
 		activeEnvCellIds,
 		cells: cells.sort(compareStructuredInteriorCells),
-		missingEnvCellAssetIds: [...missingEnvCellAssetIds].sort(),
-		missingEnvironmentAssetIds: [...missingEnvironmentAssetIds].sort(),
-		missingCellStructureKeys: [...missingCellStructureKeys].sort(),
+		missingEnvCellAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
+		missingCellStructureKeys: [],
 		statusText: describeStructuredInteriorStatus(cells, focusEnvCellId),
 		cacheText: describePreparedIndoorCache(assetState),
 	};
@@ -324,12 +259,6 @@ function findPreparedPackInteriorCell(
 	return null;
 }
 
-function isPreparedEnvironmentAsset(
-	asset: PreparedAssetRecord | undefined,
-): asset is PreparedAssetRecord & { payload: PreparedEnvironmentPayload } {
-	return asset?.payload.kind === "environment";
-}
-
 function compareStructuredInteriorCells(
 	left: StructuredInteriorCell,
 	right: StructuredInteriorCell,
@@ -362,14 +291,11 @@ function describeStructuredInteriorStatus(
 }
 
 function describePreparedIndoorCache(assetState: AssetChannelState): string {
-	const preparedIndoorEnvCellCount = Object.values(
+	const preparedLandblockPackCount = Object.values(
 		assetState.preparedByAssetId,
-	).filter(isPreparedIndoorEnvCellAsset).length;
-	const preparedEnvironmentCount = Object.values(
-		assetState.preparedByAssetId,
-	).filter(isPreparedEnvironmentAsset).length;
+	).filter((asset) => asset.payload.kind === "landblock-pack").length;
 
-	return `Structured interior cache contains ${preparedIndoorEnvCellCount} prepared env-cell metadata payload${preparedIndoorEnvCellCount === 1 ? "" : "s"} and ${preparedEnvironmentCount} prepared environment payload${preparedEnvironmentCount === 1 ? "" : "s"}.`;
+	return `Structured interior cache contains ${preparedLandblockPackCount} prepared landblock pack${preparedLandblockPackCount === 1 ? "" : "s"}.`;
 }
 
 function emptyStructuredInteriorSceneModel(
@@ -383,7 +309,7 @@ function emptyStructuredInteriorSceneModel(
 		activeEnvCellIds,
 		cells: [],
 		missingEnvCellAssetIds: [],
-		missingEnvironmentAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText,
 		cacheText,

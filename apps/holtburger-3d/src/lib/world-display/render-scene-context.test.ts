@@ -39,7 +39,7 @@ function createTerrainScene(tileCount: number): TerrainSceneModel {
 		cacheText: "test",
 		dataSourceText: "test",
 		tiles: Array.from({ length: tileCount }, (_, index) => ({
-			assetId: `terrain/${index}`,
+			assetId: `landblock-pack/0102000`,
 		})) as TerrainSceneModel["tiles"],
 	};
 }
@@ -54,7 +54,7 @@ function createStructuredInteriorScene(
 			renderKey: `cell/${index}`,
 		})) as StructuredInteriorSceneModel["cells"],
 		missingEnvCellAssetIds: [],
-		missingEnvironmentAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText: "test",
 		cacheText: "test",

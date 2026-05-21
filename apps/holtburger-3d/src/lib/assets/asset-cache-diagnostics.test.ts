@@ -9,20 +9,20 @@ import {
 describe("asset cache diagnostics", () => {
 	it("counts prepared assets by payload kind", () => {
 		const counts = countPreparedAssetsByKind({
-			"terrain/0102ffff": createPreparedTerrainAsset(
+			"landblock-pack/0102ffff": createPreparedTerrainAsset(
 				"terrain-a",
-				"terrain/0102ffff",
+				"landblock-pack/0102ffff",
 			),
-			"terrain/0103ffff": createPreparedTerrainAsset(
+			"landblock-pack/0103ffff": createPreparedTerrainAsset(
 				"terrain-b",
-				"terrain/0103ffff",
+				"landblock-pack/0103ffff",
 			),
 		});
 
 		expect(counts).toEqual({
 			total: 2,
 			byKind: {
-				"terrain-landblock": 2,
+				"landblock-pack": 2,
 			},
 		});
 	});
@@ -39,10 +39,10 @@ describe("asset cache diagnostics", () => {
 			formatPreparedAssetKindCounts({
 				total: 3,
 				byKind: {
-					"terrain-landblock": 2,
+					"landblock-pack": 2,
 					"gfx-obj": 1,
 				},
 			}),
-		).toBe("gfx-obj 1, terrain-landblock 2");
+		).toBe("gfx-obj 1, landblock-pack 2");
 	});
 });

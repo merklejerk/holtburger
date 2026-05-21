@@ -6,7 +6,6 @@ import {
 	type PreparedAssetRecord,
 	type PreparedPolygonSetBspNode,
 } from "../assets/types";
-import { formatEnvCellAssetId } from "../assets/structured-interior-coverage";
 import {
 	classifyTransitionPortalDirection,
 	createTransitionPortalWorkItem,
@@ -94,7 +93,6 @@ describe("transition portal work items", () => {
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [],
 			}),
-			createIndoorEnvCellAsset(0x016c0155, []),
 		]);
 		const model = deriveTransitionPortalCandidates({
 			assetState,
@@ -164,7 +162,6 @@ describe("transition portal work items", () => {
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [],
 			}),
-			createIndoorEnvCellAsset(0x016c0155, []),
 		]);
 		const model = deriveModel(assetState, [
 			createStructuredInteriorCell(0x016c0155, {
@@ -218,7 +215,6 @@ describe("transition portal work items", () => {
 					linkedEnvCellIds: [0x016c0155],
 					stabList: [],
 				}),
-				createIndoorEnvCellAsset(0x016c0155, []),
 			]),
 			[
 				createStructuredInteriorCell(0x016c0155, {
@@ -340,35 +336,6 @@ function createLandblockPackAsset(options: {
 	});
 }
 
-function createIndoorEnvCellAsset(
-	envCellId: number,
-	visibleCellIds: number[],
-	landblockEnvCellIds: number[] = [],
-): PreparedAssetRecord {
-	return createPreparedAssetRecord(formatEnvCellAssetId(envCellId), {
-		kind: "indoor-env-cell",
-		residencyKind: "indoor-env-cell",
-		sourceAssetKind: "env-cell",
-		provenance: createProvenance(),
-		debugPresentation: {
-			primitive: "env-cell",
-			paletteKey: "test",
-		},
-		envCellId,
-		environmentId: 0x0d000001,
-		cellStructureId: 1,
-		localPlacement: IDENTITY_PLACEMENT,
-		visibleCellIds,
-		landblockEnvCellIds,
-		seenOutside: true,
-		surfaceIds: [],
-		portalCount: 0,
-		portals: [],
-		staticObjectCount: 0,
-		staticObjects: [],
-	});
-}
-
 function createStructuredInteriorSceneModel(
 	cells: StructuredInteriorCell[],
 ): StructuredInteriorSceneModel {
@@ -377,7 +344,7 @@ function createStructuredInteriorSceneModel(
 		activeEnvCellIds: cells.map((cell) => cell.envCellId),
 		cells,
 		missingEnvCellAssetIds: [],
-		missingEnvironmentAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText: "test",
 		cacheText: "test",

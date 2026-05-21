@@ -667,7 +667,7 @@ impl LandblockPackAssembler {
                 context.report_source_omission(
                     EOR_CELL_NAMESPACE,
                     landblock_id,
-                    "outdoor-static-scene",
+                    "landblock-static",
                     "proven-dungeon-landblock",
                     format!(
                         "Skipped outdoor static scene assembly for proven dungeon landblock 0x{landblock_id:08X}."
@@ -683,7 +683,7 @@ impl LandblockPackAssembler {
                     context.report_source_error(
                         EOR_CELL_NAMESPACE,
                         landblock_id,
-                        "outdoor-static-scene",
+                        "landblock-static",
                         "asset-decode-failed",
                         format!(
                             "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
@@ -950,7 +950,7 @@ impl EnvCellFact {
                 .map(|(source_index, portal)| {
                     let is_outside_transition = (portal.flags & 0x4) != 0;
                     EnvCellPortalFact {
-                        portal_id: format!("env-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
+                        portal_id: format!("interior-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
                         source_index,
                         flags: portal.flags,
                         polygon_id: portal.polygon_id,
@@ -1328,7 +1328,7 @@ fn build_prepared_spatial_items(
         );
         Some(PreparedSpatialItem {
             id: format!(
-                "landblock-pack/{landblock_id:08x}/spatial/env-cell/{:08x}",
+                "landblock-pack/{landblock_id:08x}/spatial/interior-cell/{:08x}",
                 cell.env_cell_id
             ),
             kind: PreparedSpatialItemKind::EnvCell,
@@ -1390,7 +1390,7 @@ fn build_terrain_quad_spatial_items(
             let first_triangle_index = quad_index * 2;
             items.push(PreparedSpatialItem {
                 id: format!(
-                    "landblock-pack/{landblock_id:08x}/spatial/terrain/quad/{row:02x}/{col:02x}"
+                    "landblock-pack/{landblock_id:08x}/spatial/terrain-quad/{row:02x}/{col:02x}"
                 ),
                 kind: PreparedSpatialItemKind::Terrain,
                 owner_id: Some(landblock_id),
@@ -2438,7 +2438,7 @@ mod tests {
             pack.diagnostics
                 .omissions
                 .iter()
-                .any(|omission| omission.role == "outdoor-static-scene"
+                .any(|omission| omission.role == "landblock-static"
                     && omission.reason == "proven-dungeon-landblock")
         );
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
@@ -2465,10 +2465,10 @@ mod tests {
 
         assert_eq!(pack.classification, LandblockClassification::Outdoor);
         assert!(pack.diagnostics.omissions.iter().all(|omission| {
-            omission.role != "outdoor-static-scene" || omission.reason != "proven-dungeon-landblock"
+            omission.role != "landblock-static" || omission.reason != "proven-dungeon-landblock"
         }));
         assert!(pack.diagnostics.errors.iter().any(|error| {
-            error.role == "outdoor-static-scene" && error.error_code == "asset-decode-failed"
+            error.role == "landblock-static" && error.error_code == "asset-decode-failed"
         }));
     }
 
@@ -2530,7 +2530,7 @@ mod tests {
         assert_eq!(items.len(), 64);
         assert_eq!(
             items[0].id,
-            "landblock-pack/0102ffff/spatial/terrain/quad/00/00"
+            "landblock-pack/0102ffff/spatial/terrain-quad/00/00"
         );
         assert_eq!(items[0].kind, PreparedSpatialItemKind::Terrain);
         assert_eq!(

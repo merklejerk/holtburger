@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	MAX_TRANSITION_PORTAL_MAX_DEPTH,
 	MIN_TRANSITION_PORTAL_MAX_DEPTH,
-	browserDestinationToIndoorEnvCellId,
+	browserDestinationToInteriorCellId,
 	browserLocationToLandblockId,
 	createBrowserModeState,
 	isIndoorBrowserDestination,
@@ -181,7 +181,7 @@ describe("browser-mode location policy", () => {
 		expect(isIndoorBrowserDestination(state.destination)).toBe(true);
 		expect(state.destination?.landblockId).toBe(0xda55ffff);
 		expect(state.draftInput).toBe("0xda55ffff");
-		expect(browserDestinationToIndoorEnvCellId(state.destination)).toBe(
+		expect(browserDestinationToInteriorCellId(state.destination)).toBe(
 			0xda550100,
 		);
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
@@ -224,7 +224,7 @@ describe("browser-mode location policy", () => {
 
 		expect(state.draftInput).toBe("da55");
 		expect(isIndoorBrowserDestination(state.destination)).toBe(true);
-		expect(browserDestinationToIndoorEnvCellId(state.destination)).toBe(
+		expect(browserDestinationToInteriorCellId(state.destination)).toBe(
 			0xda550100,
 		);
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0xda55ffff);
@@ -252,7 +252,7 @@ describe("browser-mode location policy", () => {
 
 		expect(isIndoorBrowserDestination(state.destination)).toBe(true);
 		expect(state.destination?.label).toContain("0x016c0155");
-		expect(browserDestinationToIndoorEnvCellId(state.destination)).toBe(
+		expect(browserDestinationToInteriorCellId(state.destination)).toBe(
 			0x016c0155,
 		);
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0x016cffff);

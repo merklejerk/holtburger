@@ -44,8 +44,8 @@ interface BrowserOutdoorLocationSelection {
 	landblockId: number | null;
 }
 
-export interface BrowserIndoorEnvCellSelection {
-	kind: "indoor-env-cell";
+export interface BrowserInteriorCellSelection {
+	kind: "interior-cell";
 	label: string;
 	source: BrowserDestinationSource;
 	envCellId: number;
@@ -54,7 +54,7 @@ export interface BrowserIndoorEnvCellSelection {
 
 export type BrowserLocationSelection =
 	| BrowserOutdoorLocationSelection
-	| BrowserIndoorEnvCellSelection;
+	| BrowserInteriorCellSelection;
 
 export interface BrowserModeState {
 	draftInput: string;
@@ -420,7 +420,7 @@ export function selectBrowserLandblockDestination(
 export function browserLocationToLandblockId(
 	location: BrowserLocationSelection,
 ): number {
-	if (location.kind === "indoor-env-cell") {
+	if (location.kind === "interior-cell") {
 		return normalizeOutdoorLandblockId(location.landblockId);
 	}
 
@@ -446,16 +446,16 @@ export function browserLocationToLandblockId(
 	return makeOutdoorLandblockId(landblockX, landblockY);
 }
 
-export function browserDestinationToIndoorEnvCellId(
+export function browserDestinationToInteriorCellId(
 	location: BrowserLocationSelection | null,
 ): number | null {
-	return location?.kind === "indoor-env-cell" ? location.envCellId : null;
+	return location?.kind === "interior-cell" ? location.envCellId : null;
 }
 
 export function isIndoorBrowserDestination(
 	location: BrowserLocationSelection | null,
-): location is BrowserIndoorEnvCellSelection {
-	return location?.kind === "indoor-env-cell";
+): location is BrowserInteriorCellSelection {
+	return location?.kind === "interior-cell";
 }
 
 function parseBrowserCellIdInput(
@@ -471,7 +471,7 @@ function parseBrowserCellIdInput(
 			const envCellId = ((landblockPrefix << 16) | 0x0100) >>> 0;
 
 			return {
-				kind: "indoor-env-cell",
+				kind: "interior-cell",
 				label: `Env cell 0x${formatHex32(envCellId)} (${formatLandblockLabel(landblockId)})`,
 				source,
 				envCellId,
@@ -501,7 +501,7 @@ function parseBrowserCellIdInput(
 		if (landblockInputMode === "dungeon") {
 			const envCellId = ((landblockId & 0xffff0000) | 0x0100) >>> 0;
 			return {
-				kind: "indoor-env-cell",
+				kind: "interior-cell",
 				label: `Env cell 0x${formatHex32(envCellId)} (${formatLandblockLabel(landblockId)})`,
 				source,
 				envCellId,
@@ -521,7 +521,7 @@ function parseBrowserCellIdInput(
 	}
 
 	return {
-		kind: "indoor-env-cell",
+		kind: "interior-cell",
 		label: `Env cell 0x${formatHex32(cellId)} (${formatLandblockLabel(landblockId)})`,
 		source,
 		envCellId: cellId,

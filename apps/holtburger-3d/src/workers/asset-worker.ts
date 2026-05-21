@@ -4,28 +4,20 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	DependencyManifestPayloadDto,
-	EnvironmentPayloadDto,
 	GfxObjPayloadDto,
-	IndoorEnvCellPayloadDto,
 	LandblockPackPayloadDto,
 	LandblockSummaryPayloadDto,
-	OutdoorStaticScenePayloadDto,
 	SetupModelPayloadDto,
-	TerrainLandblockPayloadDto,
 } from "../lib/host/contracts";
 import {
 	appearanceManifestPayloadDtoSchema,
 	assetProvenanceDtoSchema,
 	dependencyManifestPayloadDtoSchema,
-	environmentPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
-	indoorEnvCellPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
-	outdoorStaticScenePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
-	terrainLandblockPayloadDtoSchema,
 } from "../lib/host/contracts";
 import type {
 	AssetResidencyKind,
@@ -34,10 +26,7 @@ import type {
 	PreparedAssetPayload,
 	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
-	PreparedTerrainMesh,
-	PreparedTerrainTriangle,
 } from "../lib/assets/types";
-import { formatHex32 } from "../lib/landblocks";
 
 export interface AssetWorkerPrepareRequest {
 	type: "prepare-asset";
@@ -66,13 +55,6 @@ export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
 ): PreparedAssetRecord {
-	const terrainPayload = terrainLandblockPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (terrainPayload.success) {
-		return prepareTerrainLandblock(request, response, terrainPayload.data);
-	}
-
 	const landblockPackPayload = landblockPackPayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -89,30 +71,6 @@ export function prepareAssetPayload(
 			response,
 			landblockSummaryPayload.data,
 		);
-	}
-
-	const outdoorStaticScenePayload =
-		outdoorStaticScenePayloadDtoSchema.safeParse(response.payload);
-	if (outdoorStaticScenePayload.success) {
-		return prepareOutdoorStaticScene(
-			request,
-			response,
-			outdoorStaticScenePayload.data,
-		);
-	}
-
-	const indoorEnvCellPayload = indoorEnvCellPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (indoorEnvCellPayload.success) {
-		return prepareIndoorEnvCell(request, response, indoorEnvCellPayload.data);
-	}
-
-	const environmentPayload = environmentPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (environmentPayload.success) {
-		return prepareEnvironment(request, response, environmentPayload.data);
 	}
 
 	const gfxObjPayload = gfxObjPayloadDtoSchema.safeParse(response.payload);
@@ -238,101 +196,6 @@ function prepareLandblockSummary(
 	};
 }
 
-function prepareOutdoorStaticScene(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: OutdoorStaticScenePayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: {
-			kind: "outdoor-static-scene",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: payload.residencyKind,
-			provenance: parseProvenance(payload.provenance),
-			landblockId: payload.landblockId,
-			sceneryInstances: payload.sceneryInstances,
-			buildingInstances: payload.buildingInstances,
-			generatedSceneryInstances: payload.generatedSceneryInstances,
-			diagnostics: payload.diagnostics,
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
-function prepareIndoorEnvCell(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: IndoorEnvCellPayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: {
-			kind: "indoor-env-cell",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: payload.residencyKind,
-			provenance: parseProvenance(payload.provenance),
-			debugPresentation: {
-				primitive: "indoor-env-cell-metadata",
-				paletteKey: `env-cell-${payload.envCellId.toString(16).padStart(8, "0")}`,
-			},
-			envCellId: payload.envCellId,
-			environmentId: payload.environmentId,
-			cellStructureId: payload.cellStructureId,
-			localPlacement: payload.localPlacement,
-			visibleCellIds: payload.visibleCellIds,
-			landblockEnvCellIds: payload.landblockEnvCellIds,
-			seenOutside: payload.seenOutside,
-			surfaceIds: payload.surfaceIds,
-			portalCount: payload.portalCount,
-			portals: payload.portals,
-			staticObjectCount: payload.staticObjectCount,
-			staticObjects: payload.staticObjects,
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
-function prepareEnvironment(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: EnvironmentPayloadDto,
-): PreparedAssetRecord {
-	const cellStructures = payload.cellStructures.map((cellStructure) => ({
-		...cellStructure,
-		renderGeometry: buildPolygonSetRenderGeometry({
-			sourceLabel: `Environment ${formatHexId(payload.environmentId)} cell structure ${cellStructure.id}`,
-			sourceId: cellStructure.id,
-			vertexArray: cellStructure.vertexArray,
-			drawingPolygons: cellStructure.drawingPolygons,
-			renderPolygonIds: collectDrawingBspRenderablePolygonIds(
-				cellStructure.drawingBsp,
-			),
-		}),
-	}));
-
-	return {
-		request,
-		response,
-		payload: {
-			kind: "environment",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: payload.residencyKind,
-			provenance: parseProvenance(payload.provenance),
-			debugPresentation: {
-				primitive: "environment",
-				paletteKey: `environment-${payload.environmentId.toString(16).padStart(8, "0")}`,
-			},
-			environmentId: payload.environmentId,
-			cellStructureIds: payload.cellStructureIds,
-			cellStructures,
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
 function prepareGfxObj(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
@@ -451,58 +314,6 @@ function prepareDependencyManifest(
 	};
 }
 
-function prepareTerrainLandblock(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: TerrainLandblockPayloadDto,
-): PreparedAssetRecord {
-	const landblockId = payload.landblockId;
-	const gridSize = payload.gridSize;
-	if (gridSize !== 9) {
-		throw new Error(`Terrain payload gridSize ${gridSize} is unsupported.`);
-	}
-
-	const tileSize = payload.tileSize;
-	const heights = payload.heights;
-	const terrainTypes = payload.terrainTypes;
-	if (heights.length !== gridSize * gridSize) {
-		throw new Error(
-			"Terrain payload must provide 81 height samples for a landblock.",
-		);
-	}
-	if (terrainTypes.length !== gridSize * gridSize) {
-		throw new Error(
-			"Terrain payload must provide 81 terrain-type samples for a landblock.",
-		);
-	}
-
-	const terrainMesh = buildTerrainMesh(
-		landblockId,
-		gridSize,
-		tileSize,
-		heights,
-		terrainTypes,
-	);
-	const provenance = parseProvenance(payload.provenance);
-
-	return {
-		request,
-		response,
-		payload: {
-			kind: "terrain-landblock",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: parseResidencyKind(payload.residencyKind),
-			provenance,
-			debugPresentation: {
-				primitive: "terrain-landblock-mesh",
-				paletteKey: `terrain-${formatHex32(landblockId)}`,
-			},
-			terrainMesh,
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
 function createUnknownAssetPayload({
 	rawKind,
 	sourceAssetKind,
@@ -563,110 +374,6 @@ function parseDependencies(value: unknown): string[] {
 			),
 		),
 	].sort();
-}
-
-function buildTerrainMesh(
-	landblockId: number,
-	gridSize: number,
-	tileSize: number,
-	heights: number[],
-	terrainTypes: number[],
-): PreparedTerrainMesh {
-	const normalizedHeights: number[] = [];
-	const normalizedTerrainTypes: number[] = [];
-	for (let row = 0; row < gridSize; row += 1) {
-		for (let col = 0; col < gridSize; col += 1) {
-			const sourceIndex = col * gridSize + row;
-			normalizedHeights.push(heights[sourceIndex] ?? 0);
-			normalizedTerrainTypes.push(terrainTypes[sourceIndex] ?? 0);
-		}
-	}
-
-	const vertices = normalizedHeights.map((height, index) => {
-		const row = Math.floor(index / gridSize);
-		const col = index % gridSize;
-		return {
-			x: col * tileSize,
-			y: row * tileSize,
-			z: height,
-		};
-	});
-
-	const triangles: PreparedTerrainTriangle[] = [];
-	for (let row = 0; row < gridSize - 1; row += 1) {
-		for (let col = 0; col < gridSize - 1; col += 1) {
-			const southwest = row * gridSize + col;
-			const southeast = southwest + 1;
-			const northwest = southwest + gridSize;
-			const northeast = northwest + 1;
-			const terrainType = normalizedTerrainTypes[southwest] ?? 0;
-			const averageHeight =
-				(normalizedHeights[southwest] +
-					normalizedHeights[southeast] +
-					normalizedHeights[northwest] +
-					normalizedHeights[northeast]) /
-				4;
-
-			if (usesSouthwestToNortheastCut(landblockId, col, row)) {
-				triangles.push({
-					a: southwest,
-					b: southeast,
-					c: northeast,
-					terrainType,
-					averageHeight,
-				});
-				triangles.push({
-					a: southwest,
-					b: northeast,
-					c: northwest,
-					terrainType,
-					averageHeight,
-				});
-			} else {
-				triangles.push({
-					a: southwest,
-					b: southeast,
-					c: northwest,
-					terrainType,
-					averageHeight,
-				});
-				triangles.push({
-					a: northeast,
-					b: northwest,
-					c: southeast,
-					terrainType,
-					averageHeight,
-				});
-			}
-		}
-	}
-
-	return {
-		landblockId,
-		gridSize,
-		tileSize,
-		vertices,
-		triangles,
-		minHeight: Math.min(...normalizedHeights),
-		maxHeight: Math.max(...normalizedHeights),
-	};
-}
-
-function usesSouthwestToNortheastCut(
-	landblockId: number,
-	cellX: number,
-	cellY: number,
-): boolean {
-	const landblockX = (landblockId >>> 24) & 0xff;
-	const landblockY = (landblockId >>> 16) & 0xff;
-	const globalCellX = landblockX * 8 + cellX;
-	const globalCellY = landblockY * 8 + cellY;
-	const magicA = Math.imul(globalCellX, 214614067) + 1813693831;
-	const magicB = Math.imul(globalCellX, 1109124029);
-	const splitDirection =
-		(Math.imul(globalCellY, magicA) - magicB - 1369149221) >>> 0;
-
-	return splitDirection >= 0x80000000;
 }
 
 interface PolygonSetGeometrySource {
@@ -960,14 +667,14 @@ function normalizeSurfaceId(surfaceId: number): number | null {
 }
 
 function formatHexId(id: number): string {
-	return `0x${formatHex32(id)}`;
+	return `0x${id.toString(16).padStart(8, "0")}`;
 }
 
 function parseResidencyKind(value: unknown): AssetResidencyKind {
 	if (
 		value === "landblock" ||
 		value === "outdoor-landblock" ||
-		value === "indoor-env-cell" ||
+		value === "interior-cell" ||
 		value === "unknown"
 	) {
 		return value;

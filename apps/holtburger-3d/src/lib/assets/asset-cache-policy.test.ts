@@ -6,19 +6,15 @@ import type {
 	PreparedAssetPayload,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
-	PreparedIndoorEnvCellPayload,
-	PreparedOutdoorStaticScenePayload,
 	PreparedSetupModelPayload,
 } from "./types";
 
 describe("asset cache policy", () => {
 	it("retains outdoor active roots and recursively prepared setup/gfx dependencies", () => {
 		const preparedByAssetId = indexPreparedAssets([
-			createPreparedTerrainAsset("terrain-root", "terrain/0102ffff"),
-			createPreparedOutdoorStaticSceneAsset(
-				"outdoor-static-scene/0102ffff",
+			createPreparedLandblockPackAsset("landblock-pack/0102ffff", [
 				"setup-model/02000001",
-			),
+			]),
 			createPreparedSetupModelAsset("setup-model/02000001", [
 				"gfx-obj/01000001",
 			]),
@@ -29,10 +25,7 @@ describe("asset cache policy", () => {
 		const plan = planPreparedAssetCachePrune({
 			preparedByAssetId,
 			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: [
-				"terrain/0102ffff",
-				"outdoor-static-scene/0102ffff",
-			],
+			activeCoverageAssetIds: ["landblock-pack/0102ffff"],
 			inFlightAssetIds: [],
 			nowMs: 10_000,
 			warmRetainMs: 1_000,
@@ -40,9 +33,8 @@ describe("asset cache policy", () => {
 
 		expect(plan.retainedAssetIds).toEqual([
 			"gfx-obj/01000001",
-			"outdoor-static-scene/0102ffff",
+			"landblock-pack/0102ffff",
 			"setup-model/02000001",
-			"terrain/0102ffff",
 		]);
 		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
 		expect(
@@ -52,12 +44,9 @@ describe("asset cache policy", () => {
 
 	it("retains indoor coverage roots, static dependencies, and in-flight ids", () => {
 		const preparedByAssetId = indexPreparedAssets([
-			createPreparedIndoorEnvCellAsset(
-				"env-cell/016c0155",
-				0x0d000001,
+			createPreparedLandblockPackAsset("landblock-pack/016cffff", [
 				"setup-model/02000001",
-			),
-			createPreparedEnvironmentAsset("environment/0d000001"),
+			]),
 			createPreparedSetupModelAsset("setup-model/02000001", [
 				"gfx-obj/01000001",
 			]),
@@ -68,18 +57,17 @@ describe("asset cache policy", () => {
 		const plan = planPreparedAssetCachePrune({
 			preparedByAssetId,
 			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: ["env-cell/016c0155", "environment/0d000001"],
-			inFlightAssetIds: ["terrain/0102ffff"],
+			activeCoverageAssetIds: ["landblock-pack/016cffff"],
+			inFlightAssetIds: ["landblock-pack/0102ffff"],
 			nowMs: 10_000,
 			warmRetainMs: 1_000,
 		});
 
 		expect(plan.retainedAssetIds).toEqual([
-			"env-cell/016c0155",
-			"environment/0d000001",
 			"gfx-obj/01000001",
+			"landblock-pack/0102ffff",
+			"landblock-pack/016cffff",
 			"setup-model/02000001",
-			"terrain/0102ffff",
 		]);
 		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
 	});
@@ -140,102 +128,37 @@ function createMetadata(
 	);
 }
 
-function createPreparedOutdoorStaticSceneAsset(
+function createPreparedLandblockPackAsset(
 	assetId: string,
-	sourceAssetId: string,
+	renderableAssetIds: readonly string[],
 ): PreparedAssetRecord {
+	const landblockId = Number.parseInt(assetId.slice("landblock-pack/".length), 16);
 	return createPreparedAsset(assetId, {
-		kind: "outdoor-static-scene",
-		sourceAssetKind: "outdoor-static-scene",
-		residencyKind: "outdoor-landblock",
-		provenance: createProvenance("outdoor-static-scene"),
-		landblockId: 0x0102ffff,
-		sceneryInstances: [],
-		buildingInstances: [
-			{
-				instanceId: "building-1",
-				owningLandblockId: 0x0102ffff,
-				sourceDid: 0x02000001,
-				sourceAssetId,
-				sourceIndex: 0,
-				localPlacement: createPlacement(),
-				numLeaves: 0,
-				portals: [],
-			},
-		],
-		generatedSceneryInstances: [],
+		kind: "landblock-pack",
+		sourceAssetKind: "landblock-pack",
+		residencyKind: "landblock",
+		provenance: createProvenance("landblock-pack"),
+		landblockId,
+		landblockInfoId: landblockId & 0xffff_fffe,
+		classification: "outdoor",
+		sourceFacts: { buildings: [] },
+		prepared: {
+			terrainMesh: null,
+			outdoorStaticInstances: [],
+			interiorCells: [],
+			staticMeshes: [],
+			spatialItems: [],
+			staticLandblockBvh: null,
+		},
+		dependencies: {
+			cellDatIds: [],
+			portalDatIds: [],
+			renderableAssetIds: [...renderableAssetIds],
+		},
 		diagnostics: {
-			landblockInfoAvailable: true,
-			landblockInfoError: null,
-			explicit: createLayerDiagnostics(),
-			buildings: createLayerDiagnostics(),
-			generated: {
-				...createLayerDiagnostics(),
-				skippedWeenieObj: 0,
-				rejectedFrequency: 0,
-				rejectedBounds: 0,
-				rejectedBuildingOccupancy: 0,
-				rejectedObjectBounds: 0,
-				objectBoundsUnavailable: 0,
-				rejectedRoad: 0,
-				rejectedSlope: 0,
-				rejectedOverlap: 0,
-			},
+			sourceRecords: [],
+			errors: [],
 		},
-	} satisfies PreparedOutdoorStaticScenePayload);
-}
-
-function createPreparedIndoorEnvCellAsset(
-	assetId: string,
-	environmentId: number,
-	sourceAssetId: string,
-): PreparedAssetRecord {
-	return createPreparedAsset(assetId, {
-		kind: "indoor-env-cell",
-		sourceAssetKind: "env-cell",
-		residencyKind: "indoor-env-cell",
-		provenance: createProvenance("env-cell"),
-		debugPresentation: {
-			primitive: "indoor-env-cell",
-			paletteKey: "indoor",
-		},
-		envCellId: 0x016c0155,
-		environmentId,
-		cellStructureId: 1,
-		localPlacement: createPlacement(),
-		visibleCellIds: [],
-		landblockEnvCellIds: [],
-		seenOutside: false,
-		surfaceIds: [],
-		portalCount: 0,
-		portals: [],
-		staticObjectCount: 1,
-		staticObjects: [
-			{
-				instanceId: "indoor-object-1",
-				owningEnvCellId: 0x016c0155,
-				sourceDid: 0x02000001,
-				sourceAssetId,
-				sourceIndex: 0,
-				localPlacement: createPlacement(),
-			},
-		],
-	} satisfies PreparedIndoorEnvCellPayload);
-}
-
-function createPreparedEnvironmentAsset(assetId: string): PreparedAssetRecord {
-	return createPreparedAsset(assetId, {
-		kind: "environment",
-		sourceAssetKind: "environment",
-		residencyKind: "indoor-env-cell",
-		provenance: createProvenance("environment"),
-		debugPresentation: {
-			primitive: "environment",
-			paletteKey: "environment",
-		},
-		environmentId: 0x0d000001,
-		cellStructureIds: [],
-		cellStructures: [],
 	});
 }
 

@@ -13,7 +13,7 @@ type AssetPreparationStatus = "idle" | "pending" | "ready" | "error";
 export type AssetResidencyKind =
 	| "landblock"
 	| "outdoor-landblock"
-	| "indoor-env-cell"
+	| "interior-cell"
 	| "unknown";
 
 export interface PreparedAssetProvenance {
@@ -52,14 +52,7 @@ interface PreparedDebugPresentation {
 	paletteKey: string;
 }
 
-export interface PreparedTerrainLandblockPayload extends PreparedAssetPayloadBase {
-	kind: "terrain-landblock";
-	sourceAssetKind: "cell-landblock";
-	debugPresentation: PreparedDebugPresentation;
-	terrainMesh: PreparedTerrainMesh;
-}
-
-export interface PreparedOutdoorStaticSceneInstance {
+export interface PreparedLandblockStaticSourceInstance {
 	instanceId: string;
 	owningLandblockId: number;
 	sourceDid: number;
@@ -68,7 +61,7 @@ export interface PreparedOutdoorStaticSceneInstance {
 	localPlacement: PlacementTransformDto;
 }
 
-export interface PreparedOutdoorStaticSceneBuildingPortal {
+export interface PreparedLandblockStaticBuildingPortal {
 	portalId: string;
 	sourceIndex: number;
 	flags: number;
@@ -78,12 +71,12 @@ export interface PreparedOutdoorStaticSceneBuildingPortal {
 	linkedEnvCellIds: number[];
 }
 
-export interface PreparedOutdoorStaticSceneBuilding extends PreparedOutdoorStaticSceneInstance {
+export interface PreparedLandblockStaticBuilding extends PreparedLandblockStaticSourceInstance {
 	numLeaves: number;
-	portals: PreparedOutdoorStaticSceneBuildingPortal[];
+	portals: PreparedLandblockStaticBuildingPortal[];
 }
 
-export interface PreparedOutdoorStaticSceneGeneratedSceneryInstance extends PreparedOutdoorStaticSceneInstance {
+export interface PreparedLandblockGeneratedSceneryInstance extends PreparedLandblockStaticSourceInstance {
 	terrainIndex: number;
 	sceneId: number;
 	sceneTemplateIndex: number;
@@ -120,42 +113,6 @@ export interface PreparedLandblockCellPortal {
 	isOutsideTransition: boolean;
 }
 
-interface PreparedOutdoorStaticLayerDiagnostics {
-	attempted: number;
-	accepted: number;
-	rejectedUnsupportedSource: number;
-}
-
-interface PreparedGeneratedOutdoorSceneryDiagnostics extends PreparedOutdoorStaticLayerDiagnostics {
-	skippedWeenieObj: number;
-	rejectedFrequency: number;
-	rejectedBounds: number;
-	rejectedBuildingOccupancy: number;
-	rejectedObjectBounds: number;
-	objectBoundsUnavailable: number;
-	rejectedRoad: number;
-	rejectedSlope: number;
-	rejectedOverlap: number;
-}
-
-interface PreparedOutdoorStaticSceneDiagnostics {
-	landblockInfoAvailable: boolean;
-	landblockInfoError: string | null;
-	explicit: PreparedOutdoorStaticLayerDiagnostics;
-	buildings: PreparedOutdoorStaticLayerDiagnostics;
-	generated: PreparedGeneratedOutdoorSceneryDiagnostics;
-}
-
-export interface PreparedOutdoorStaticScenePayload extends PreparedAssetPayloadBase {
-	kind: "outdoor-static-scene";
-	sourceAssetKind: "outdoor-static-scene";
-	landblockId: number;
-	sceneryInstances: PreparedOutdoorStaticSceneInstance[];
-	buildingInstances: PreparedOutdoorStaticSceneBuilding[];
-	generatedSceneryInstances: PreparedOutdoorStaticSceneGeneratedSceneryInstance[];
-	diagnostics: PreparedOutdoorStaticSceneDiagnostics;
-}
-
 export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-pack";
 	sourceAssetKind: "landblock-pack";
@@ -164,7 +121,7 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 	landblockInfoId: number;
 	classification: "outdoor" | "dungeon";
 	sourceFacts: {
-		buildings: PreparedOutdoorStaticSceneBuilding[];
+		buildings: PreparedLandblockStaticBuilding[];
 	};
 	prepared: {
 		terrainMesh: PreparedTerrainMesh | null;
@@ -351,33 +308,6 @@ export interface PreparedLandblockBvhNode {
 	kindMask: number;
 }
 
-export interface PreparedIndoorEnvCellPayload extends PreparedAssetPayloadBase {
-	kind: "indoor-env-cell";
-	sourceAssetKind: "env-cell";
-	debugPresentation: PreparedDebugPresentation;
-	envCellId: number;
-	environmentId: number | null;
-	cellStructureId: number | null;
-	localPlacement: PlacementTransformDto;
-	visibleCellIds: number[];
-	landblockEnvCellIds: number[];
-	seenOutside: boolean | null;
-	surfaceIds: number[];
-	portalCount: number;
-	portals: PreparedIndoorCellPortal[];
-	staticObjectCount: number;
-	staticObjects: PreparedIndoorStaticObject[];
-}
-
-export interface PreparedEnvironmentPayload extends PreparedAssetPayloadBase {
-	kind: "environment";
-	sourceAssetKind: "environment";
-	debugPresentation: PreparedDebugPresentation;
-	environmentId: number;
-	cellStructureIds: number[];
-	cellStructures: PreparedEnvironmentCellStruct[];
-}
-
 export interface PreparedPolygonSetUv {
 	u: number;
 	v: number;
@@ -456,7 +386,7 @@ interface PreparedCellStructBspWitness {
 	rootKind: "port" | "leaf" | "internal" | null;
 }
 
-export interface PreparedEnvironmentCellStruct {
+export interface PreparedInteriorCellStructure {
 	id: number;
 	vertexArray: PreparedPolygonSetVertexArray;
 	drawingPolygons: PreparedPolygonSetPolygon[];
@@ -594,12 +524,8 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 }
 
 export type PreparedAssetPayload =
-	| PreparedTerrainLandblockPayload
 	| PreparedLandblockPackPayload
 	| PreparedLandblockSummaryPayload
-	| PreparedOutdoorStaticScenePayload
-	| PreparedIndoorEnvCellPayload
-	| PreparedEnvironmentPayload
 	| PreparedGfxObjPayload
 	| PreparedSetupModelPayload
 	| PreparedVisualAssetStubPayload
@@ -643,12 +569,6 @@ export interface PreparedAssetDependencyStatus {
 	pendingAssetIds: string[];
 }
 
-export function isPreparedTerrainLandblock(
-	asset: PreparedAssetRecord,
-): asset is PreparedAssetRecord & { payload: PreparedTerrainLandblockPayload } {
-	return asset.payload.kind === "terrain-landblock";
-}
-
 export function describePreparedAssetPayload(
 	payload: PreparedAssetPayload,
 ): string {
@@ -670,24 +590,6 @@ export function getPreparedAssetDependencies(
 			.map((assetId) => ({ assetId }));
 	}
 
-	if (asset.payload.kind === "outdoor-static-scene") {
-		return [
-			...new Set([
-				...asset.payload.sceneryInstances.map(
-					(instance) => instance.sourceAssetId,
-				),
-				...asset.payload.buildingInstances.map(
-					(instance) => instance.sourceAssetId,
-				),
-				...asset.payload.generatedSceneryInstances.map(
-					(instance) => instance.sourceAssetId,
-				),
-			]),
-		]
-			.sort()
-			.map((assetId) => ({ assetId }));
-	}
-
 	if (asset.payload.kind === "landblock-pack") {
 		return asset.payload.dependencies.renderableAssetIds.map((assetId) => ({
 			assetId,
@@ -696,18 +598,6 @@ export function getPreparedAssetDependencies(
 
 	if (asset.payload.kind === "landblock-summary") {
 		return [];
-	}
-
-	if (asset.payload.kind === "indoor-env-cell") {
-		return [
-			...new Set(
-				asset.payload.staticObjects.map(
-					(staticObject) => staticObject.sourceAssetId,
-				),
-			),
-		]
-			.sort()
-			.map((assetId) => ({ assetId }));
 	}
 
 	return [];

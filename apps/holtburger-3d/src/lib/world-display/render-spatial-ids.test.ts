@@ -9,8 +9,8 @@ import {
 
 describe("render spatial ids", () => {
 	it("derives deterministic item ids from scene identities", () => {
-		expect(terrainSpatialItemId("terrain/01020304")).toBe(
-			"terrain:terrain/01020304",
+		expect(terrainSpatialItemId("landblock-pack/0102ffff")).toBe(
+			"terrain:landblock-pack/0102ffff",
 		);
 		expect(structuredCellSpatialItemId("016c0155:00000001")).toBe(
 			"structured-cell:016c0155:00000001",

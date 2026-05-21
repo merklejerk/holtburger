@@ -4,7 +4,6 @@ import type { PreparedAssetRecord, PreparedPolygonSetBspNode } from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
-	formatEnvCellAssetId,
 } from "./structured-interior-coverage";
 
 describe("structured interior coverage", () => {
@@ -32,31 +31,6 @@ describe("structured interior coverage", () => {
 		});
 	});
 
-	it("expands prepared seeds to their full landblock env-cell sets", () => {
-		const preparedByAssetId = {
-			[formatEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(
-					0x016c0155,
-					[0x016c0155, 0x016c0156, 0x016c0157],
-				),
-			[formatEnvCellAssetId(0x02010100)]:
-				createPreparedIndoorEnvCellAsset(0x02010100, [0x02010100, 0x02010101]),
-		};
-
-		const coverage = deriveStructuredInteriorCoverage(
-			{
-				kind: "landblock-closure",
-				seedEnvCellIds: [0x02010100, 0x016c0155],
-			},
-			preparedByAssetId,
-		);
-
-		expect(coverage).toEqual({
-			envCellIds: [0x016c0155, 0x016c0156, 0x016c0157, 0x02010100, 0x02010101],
-			truncated: false,
-		});
-	});
-
 	it("expands prepared landblock packs to their full env-cell inventory", () => {
 		const preparedByAssetId = {
 			"landblock-pack/016cffff": createPreparedLandblockPackAsset(
@@ -74,20 +48,6 @@ describe("structured interior coverage", () => {
 			envCellIds: [0x016c0155, 0x016c0156, 0x016c0157],
 			truncated: false,
 		});
-	});
-
-	it("does not walk visible-cell lists as a fallback", () => {
-		const preparedByAssetId = {
-			[formatEnvCellAssetId(0x016c0155)]:
-				createPreparedIndoorEnvCellAsset(0x016c0155, [], [0x016c0156]),
-		};
-
-		const coverage = deriveStructuredInteriorCoverage(
-			{ kind: "landblock-closure", seedEnvCellIds: [0x016c0155] },
-			preparedByAssetId,
-		);
-
-		expect(coverage.envCellIds).toEqual([0x016c0155]);
 	});
 
 	it("uses landblock closure for browser-focused env cells", () => {
@@ -181,53 +141,5 @@ function createLeafBspNode(): PreparedPolygonSetBspNode {
 		solid: 0,
 		sphere: null,
 		polyIds: [],
-	};
-}
-
-function createPreparedIndoorEnvCellAsset(
-	envCellId: number,
-	landblockEnvCellIds: number[],
-	visibleCellIds: number[] = [],
-): PreparedAssetRecord {
-	const assetId = formatEnvCellAssetId(envCellId);
-	return {
-		request: { requestId: assetId, assetId, priority: "streaming" },
-		response: {
-			requestId: assetId,
-			assetId,
-			payloadKind: "json",
-			payload: {},
-		},
-		preparedAt: "2026-05-19T00:00:00.000Z",
-		payload: {
-			kind: "indoor-env-cell",
-			sourceAssetKind: "env-cell",
-			residencyKind: "indoor-env-cell",
-			provenance: {
-				source: "repo-local-hba",
-				sourceAssetKind: "env-cell",
-				errorCode: null,
-				detail: "test",
-			},
-			debugPresentation: {
-				primitive: "indoor-env-cell-metadata",
-				paletteKey: assetId,
-			},
-			envCellId,
-			environmentId: null,
-			cellStructureId: null,
-			localPlacement: {
-				origin: { x: 0, y: 0, z: 0 },
-				orientation: { w: 1, x: 0, y: 0, z: 0 },
-			},
-			visibleCellIds,
-			landblockEnvCellIds,
-			seenOutside: false,
-			surfaceIds: [],
-			portalCount: 0,
-			portals: [],
-			staticObjectCount: 0,
-			staticObjects: [],
-		},
 	};
 }

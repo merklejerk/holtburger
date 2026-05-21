@@ -49,7 +49,7 @@ describe("readHostBoundarySnapshot", () => {
 		await expect(
 			lookupAsset({
 				requestId: "bootstrap-asset",
-				assetId: "terrain/0102ffff",
+				assetId: "landblock-pack/0102ffff",
 				priority: "bootstrap",
 			}),
 		).rejects.toThrow(/requires the Tauri runtime/i);

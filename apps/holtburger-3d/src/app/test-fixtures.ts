@@ -64,7 +64,7 @@ export function createHostSnapshot(): HostBoundarySnapshot {
 					"environment-id",
 					"cell-structure-id",
 				],
-				assetFamilyIds: ["indoor-env-cell", "environment"],
+				assetFamilyIds: ["landblock-pack"],
 			},
 		},
 	};
@@ -74,6 +74,8 @@ export function createPreparedTerrainAsset(
 	requestId: string,
 	assetId: string,
 ): PreparedAssetRecord {
+	const landblockId = parseLandblockPackAssetId(assetId) ?? 0x0102ffff;
+
 	return {
 		request: {
 			requestId,
@@ -84,32 +86,58 @@ export function createPreparedTerrainAsset(
 			requestId,
 			assetId,
 			payloadKind: "json",
-			payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
+			payload: { kind: "landblock-pack", landblockId },
 		},
 		payload: {
-			kind: "terrain-landblock",
-			sourceAssetKind: "cell-landblock",
-			residencyKind: "outdoor-landblock",
+			kind: "landblock-pack",
+			sourceAssetKind: "landblock-pack",
+			residencyKind: "landblock",
 			provenance: {
 				source: "unknown",
-				sourceAssetKind: "cell-landblock",
+				sourceAssetKind: "landblock-pack",
 				errorCode: null,
 				detail: null,
 			},
-			debugPresentation: {
-				primitive: "terrain-landblock-mesh",
-				paletteKey: "terrain-0102ffff",
+			landblockId,
+			landblockInfoId: landblockId & 0xffff_fffe,
+			classification: "outdoor",
+			sourceFacts: {
+				buildings: [],
 			},
-			terrainMesh: {
-				landblockId: 0x0102ffff,
-				gridSize: 9,
-				tileSize: 24,
-				vertices: [],
-				triangles: [],
-				minHeight: 0,
-				maxHeight: 24,
+			prepared: {
+				terrainMesh: {
+					landblockId,
+					gridSize: 9,
+					tileSize: 24,
+					vertices: [],
+					triangles: [],
+					minHeight: 0,
+					maxHeight: 24,
+				},
+				outdoorStaticInstances: [],
+				interiorCells: [],
+				staticMeshes: [],
+				spatialItems: [],
+				staticLandblockBvh: null,
+			},
+			dependencies: {
+				cellDatIds: [],
+				portalDatIds: [],
+				renderableAssetIds: [],
+			},
+			diagnostics: {
+				sourceRecords: [],
+				errors: [],
 			},
 		},
 		preparedAt: "2026-04-26T00:00:00.000Z",
 	};
+}
+
+function parseLandblockPackAssetId(assetId: string): number | null {
+	const match = /^landblock-pack\/([0-9a-fA-F]{8})$/.exec(assetId);
+	if (!match) {
+		return null;
+	}
+	return Number.parseInt(match[1], 16);
 }

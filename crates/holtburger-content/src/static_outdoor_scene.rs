@@ -88,14 +88,14 @@ impl StaticOutdoorInstanceIdentity {
                 source_index,
                 source_did,
             } => format!(
-                "outdoor-static-scene/{landblock_id:08x}/object/{source_index:04x}/{source_did:08x}"
+                "landblock-static/{landblock_id:08x}/object/{source_index:04x}/{source_did:08x}"
             ),
             Self::Building {
                 landblock_id,
                 source_index,
                 source_did,
             } => format!(
-                "outdoor-static-scene/{landblock_id:08x}/building/{source_index:04x}/{source_did:08x}"
+                "landblock-static/{landblock_id:08x}/building/{source_index:04x}/{source_did:08x}"
             ),
             Self::GeneratedScenery {
                 landblock_id,
@@ -104,7 +104,7 @@ impl StaticOutdoorInstanceIdentity {
                 template_index,
                 source_did,
             } => format!(
-                "outdoor-static-scene/{landblock_id:08x}/generated/scene/{scene_id:08x}/cell/{terrain_index:02x}/template/{template_index:04x}/{source_did:08x}"
+                "landblock-static/{landblock_id:08x}/generated/scene/{scene_id:08x}/cell/{terrain_index:02x}/template/{template_index:04x}/{source_did:08x}"
             ),
         }
     }
@@ -904,7 +904,7 @@ mod tests {
 
         assert_eq!(
             id.stable_id(),
-            "outdoor-static-scene/da55ffff/generated/scene/12000001/cell/04/template/0009/02000001"
+            "landblock-static/da55ffff/generated/scene/12000001/cell/04/template/0009/02000001"
         );
     }
 

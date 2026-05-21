@@ -15,12 +15,12 @@ describe("asset state reducer", () => {
 			[
 				{
 					requestId: "bootstrap-terrain-a",
-					assetId: "terrain/0102ffff",
+					assetId: "landblock-pack/0102ffff",
 					priority: "bootstrap",
 				},
 				{
 					requestId: "streaming-terrain-b",
-					assetId: "terrain/0103ffff",
+					assetId: "landblock-pack/0103ffff",
 					priority: "streaming",
 				},
 			],
@@ -28,7 +28,7 @@ describe("asset state reducer", () => {
 		);
 
 		expect(state.status).toBe("pending");
-		expect(state.activeRequest?.assetId).toBe("terrain/0103ffff");
+		expect(state.activeRequest?.assetId).toBe("landblock-pack/0103ffff");
 		expect(state.history.map((entry) => entry.status)).toEqual([
 			"requested",
 			"requested",
@@ -39,25 +39,25 @@ describe("asset state reducer", () => {
 		const state = applyPreparedAssets(
 			createAssetState(),
 			[
-				createPreparedTerrainAsset("bootstrap-terrain-a", "terrain/0102ffff"),
-				createPreparedTerrainAsset("bootstrap-terrain-b", "terrain/0103ffff"),
+				createPreparedTerrainAsset("bootstrap-terrain-a", "landblock-pack/0102ffff"),
+				createPreparedTerrainAsset("bootstrap-terrain-b", "landblock-pack/0103ffff"),
 			],
 			1_777,
 		);
 
 		expect(state.status).toBe("ready");
-		expect(state.activeRequest?.assetId).toBe("terrain/0103ffff");
+		expect(state.activeRequest?.assetId).toBe("landblock-pack/0103ffff");
 		expect(state.preparedByPriority.bootstrap?.request.assetId).toBe(
-			"terrain/0103ffff",
+			"landblock-pack/0103ffff",
 		);
-		expect(state.preparedByAssetId["terrain/0102ffff"]).toBeDefined();
-		expect(state.preparedByAssetId["terrain/0103ffff"]).toBeDefined();
+		expect(state.preparedByAssetId["landblock-pack/0102ffff"]).toBeDefined();
+		expect(state.preparedByAssetId["landblock-pack/0103ffff"]).toBeDefined();
 		expect(state.cacheMetadataByAssetId).toEqual({
-			"terrain/0102ffff": {
+			"landblock-pack/0102ffff": {
 				lastPreparedAtMs: 1_777,
 				lastRetainedAtMs: 1_777,
 			},
-			"terrain/0103ffff": {
+			"landblock-pack/0103ffff": {
 				lastPreparedAtMs: 1_777,
 				lastRetainedAtMs: 1_777,
 			},
@@ -68,17 +68,17 @@ describe("asset state reducer", () => {
 		const state = applyPreparedAssets(
 			createAssetState(),
 			[
-				createPreparedTerrainAsset("bootstrap-terrain-a", "terrain/0102ffff"),
-				createPreparedTerrainAsset("bootstrap-terrain-b", "terrain/0103ffff"),
+				createPreparedTerrainAsset("bootstrap-terrain-a", "landblock-pack/0102ffff"),
+				createPreparedTerrainAsset("bootstrap-terrain-b", "landblock-pack/0103ffff"),
 			],
 			1_000,
 		);
 
 		const prunedState = applyAssetCachePrune(state, {
-			retainedAssetIds: ["terrain/0102ffff"],
-			evictedAssetIds: ["terrain/0103ffff"],
+			retainedAssetIds: ["landblock-pack/0102ffff"],
+			evictedAssetIds: ["landblock-pack/0103ffff"],
 			cacheMetadataByAssetId: {
-				"terrain/0102ffff": {
+				"landblock-pack/0102ffff": {
 					lastPreparedAtMs: 1_000,
 					lastRetainedAtMs: 2_000,
 				},
@@ -87,29 +87,29 @@ describe("asset state reducer", () => {
 				prepared: {
 					total: 2,
 					byKind: {
-						"terrain-landblock": 2,
+						"landblock-pack": 2,
 					},
 				},
 				retained: {
 					total: 1,
 					byKind: {
-						"terrain-landblock": 1,
+						"landblock-pack": 1,
 					},
 				},
 				evicted: {
 					total: 1,
 					byKind: {
-						"terrain-landblock": 1,
+						"landblock-pack": 1,
 					},
 				},
 			},
 		});
 
 		expect(Object.keys(prunedState.preparedByAssetId)).toEqual([
-			"terrain/0102ffff",
+			"landblock-pack/0102ffff",
 		]);
 		expect(prunedState.cacheMetadataByAssetId).toEqual({
-			"terrain/0102ffff": {
+			"landblock-pack/0102ffff": {
 				lastPreparedAtMs: 1_000,
 				lastRetainedAtMs: 2_000,
 			},
@@ -119,8 +119,8 @@ describe("asset state reducer", () => {
 		expect(prunedState.lastResponse).toBeNull();
 		expect(prunedState.cacheDiagnostics?.evicted.total).toBe(1);
 		expect(prunedState.history.map((entry) => entry.assetId)).toEqual([
-			"terrain/0102ffff",
-			"terrain/0103ffff",
+			"landblock-pack/0102ffff",
+			"landblock-pack/0103ffff",
 		]);
 	});
 });

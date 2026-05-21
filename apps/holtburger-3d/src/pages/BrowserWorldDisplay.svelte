@@ -3,7 +3,7 @@
 
 	import { frontendState } from "../app/frontend-state";
 	import {
-		browserDestinationToIndoorEnvCellId,
+		browserDestinationToInteriorCellId,
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AppModeId } from "../app/modes";
@@ -205,7 +205,7 @@
 	const outdoorFocusLandblockId = $derived(
 		runtimeBatch &&
 			!runtimeBatch.residency.indoors &&
-			browserDestination?.kind !== "indoor-env-cell"
+			browserDestination?.kind !== "interior-cell"
 			? deriveTerrainFocusLandblockId(runtimeBatch, browserDestination)
 			: null,
 	);
@@ -243,7 +243,7 @@
 	});
 	const structuredInteriorCoverage = $derived.by(() => {
 		const browserFocusEnvCellId =
-			browserDestinationToIndoorEnvCellId(browserDestination);
+			browserDestinationToInteriorCellId(browserDestination);
 		if (browserFocusEnvCellId !== null) {
 			return deriveStructuredInteriorCoverage(
 				{
@@ -449,17 +449,17 @@
 		).length;
 		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}, indoor ${indoorCount}; groups exterior ${exteriorGroupCount}, interior ${interiorGroupCount}.`;
 	});
-	const structuredInteriorEnvironmentCount = $derived(
-		new Set(structuredInteriorScene.cells.map((cell) => cell.environmentId))
+	const structuredInteriorPackSourceCount = $derived(
+		new Set(structuredInteriorScene.cells.map((cell) => cell.renderChunk.chunkKey))
 			.size,
 	);
 	const structuredInteriorText = $derived(
 		structuredInteriorScene.cells.length > 0
 			? linkedOutdoorEnvCellIds.length > 0 &&
-				browserDestination?.kind !== "indoor-env-cell" &&
+				browserDestination?.kind !== "interior-cell" &&
 				!runtimeBatch?.residency.indoors
-				? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked, ${structuredInteriorCoverage?.envCellIds.length ?? linkedOutdoorEnvCellIds.length} covered${structuredInteriorCoverage?.truncated ? " (truncated)" : ""}.`
-				: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorEnvironmentCount} environment payload${structuredInteriorEnvironmentCount === 1 ? "" : "s"}.`
+				? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorPackSourceCount} landblock pack${structuredInteriorPackSourceCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked, ${structuredInteriorCoverage?.envCellIds.length ?? linkedOutdoorEnvCellIds.length} covered${structuredInteriorCoverage?.truncated ? " (truncated)" : ""}.`
+				: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorPackSourceCount} landblock pack${structuredInteriorPackSourceCount === 1 ? "" : "s"}.`
 			: describeStructuredInteriorIdleState(),
 	);
 	const cellIndicatorText = $derived(
@@ -829,7 +829,7 @@
 		destination: BrowserLocationSelection | null,
 		runtime: RuntimeBatchDto | null,
 	): string {
-		if (destination?.kind === "indoor-env-cell") {
+		if (destination?.kind === "interior-cell") {
 			return `browser:indoor:${destination.envCellId.toString(16).padStart(8, "0")}`;
 		}
 
@@ -1570,13 +1570,13 @@
 	}
 
 	function describeAssetPipelineDebugState(): string {
-		const preparedOutdoorSceneIds = Object.keys(assetState.preparedByAssetId)
-			.filter((assetId) => assetId.startsWith("outdoor-static-scene/"))
+		const preparedLandblockPackIds = Object.keys(assetState.preparedByAssetId)
+			.filter((assetId) => assetId.startsWith("landblock-pack/"))
 			.sort();
 		const recentHistory = assetState.history
 			.map((entry) => `${entry.status}:${entry.assetId}`)
 			.join(" | ");
-		return `outdoor scenes ${preparedOutdoorSceneIds.length}: ${preparedOutdoorSceneIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
+		return `landblock packs ${preparedLandblockPackIds.length}: ${preparedLandblockPackIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
 	}
 
 	function describeAssetCacheDebugState(): string {
@@ -1620,7 +1620,7 @@
 
 	function describeStaticRenderableIdleState(): string {
 		if (staticRenderableScene.sourceInstances.length === 0) {
-			return browserDestination?.kind === "indoor-env-cell" ||
+			return browserDestination?.kind === "interior-cell" ||
 				runtimeBatch?.residency.indoors
 				? "No indoor static object source facts are active for the current visible env cells."
 				: "No static renderable source facts are active for the current outdoor coverage.";
@@ -1640,22 +1640,14 @@
 	function describeStructuredInteriorIdleState(): string {
 		if (
 			!runtimeBatch?.residency.indoors &&
-			browserDestination?.kind !== "indoor-env-cell" &&
+			browserDestination?.kind !== "interior-cell" &&
 			linkedOutdoorEnvCellIds.length === 0
 		) {
 			return "Structured interior rendering is dormant while outdoor residency is active.";
 		}
 
 		if (structuredInteriorScene.missingEnvCellAssetIds.length > 0) {
-			return `Waiting for ${structuredInteriorScene.missingEnvCellAssetIds.length} visible env-cell metadata payload${structuredInteriorScene.missingEnvCellAssetIds.length === 1 ? "" : "s"}.`;
-		}
-
-		if (structuredInteriorScene.missingEnvironmentAssetIds.length > 0) {
-			return `Waiting for ${structuredInteriorScene.missingEnvironmentAssetIds.length} environment geometry payload${structuredInteriorScene.missingEnvironmentAssetIds.length === 1 ? "" : "s"}.`;
-		}
-
-		if (structuredInteriorScene.missingCellStructureKeys.length > 0) {
-			return `Waiting for ${structuredInteriorScene.missingCellStructureKeys.length} selected cell-structure match${structuredInteriorScene.missingCellStructureKeys.length === 1 ? "" : "es"}.`;
+			return `Waiting for ${structuredInteriorScene.missingEnvCellAssetIds.length} visible interior metadata payload${structuredInteriorScene.missingEnvCellAssetIds.length === 1 ? "" : "s"}.`;
 		}
 
 		return "Structured interior source facts are active, but no drawable cell geometry is ready.";
@@ -1722,8 +1714,6 @@
 				.sort()
 				.join(",")}`,
 			`missingEnv=${scene.missingEnvCellAssetIds.join(",")}`,
-			`missingEnvironment=${scene.missingEnvironmentAssetIds.join(",")}`,
-			`missingStructure=${scene.missingCellStructureKeys.join(",")}`,
 		].join(";");
 	}
 

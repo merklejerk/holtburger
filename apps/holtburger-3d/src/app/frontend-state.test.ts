@@ -107,22 +107,22 @@ describe("frontend state store", () => {
 		store.loadSnapshot(createHostSnapshot());
 		store.markAssetPending({
 			requestId: "bootstrap-asset",
-			assetId: "terrain/0102ffff",
+			assetId: "landblock-pack/0102ffff",
 			priority: "bootstrap",
 		});
 		store.applyPreparedAsset(
-			createPreparedTerrainAsset("bootstrap-asset", "terrain/0102ffff"),
+			createPreparedTerrainAsset("bootstrap-asset", "landblock-pack/0102ffff"),
 		);
 
 		expect(get(store).asset.status).toBe("ready");
 		expect(get(store).asset.preparedAsset?.request.assetId).toBe(
-			"terrain/0102ffff",
+			"landblock-pack/0102ffff",
 		);
 		expect(
-			get(store).asset.preparedByAssetId["terrain/0102ffff"]?.request.assetId,
-		).toBe("terrain/0102ffff");
+			get(store).asset.preparedByAssetId["landblock-pack/0102ffff"]?.request.assetId,
+		).toBe("landblock-pack/0102ffff");
 		expect(get(store).asset.preparedByPriority.bootstrap?.request.assetId).toBe(
-			"terrain/0102ffff",
+			"landblock-pack/0102ffff",
 		);
 		expect(get(store).asset.history.map((entry) => entry.status)).toEqual([
 			"requested",
@@ -137,27 +137,27 @@ describe("frontend state store", () => {
 		store.markAssetsPending([
 			{
 				requestId: "bootstrap-terrain-a",
-				assetId: "terrain/0102ffff",
+				assetId: "landblock-pack/0102ffff",
 				priority: "bootstrap",
 			},
 			{
 				requestId: "bootstrap-terrain-b",
-				assetId: "terrain/0103ffff",
+				assetId: "landblock-pack/0103ffff",
 				priority: "bootstrap",
 			},
 		]);
 		store.applyPreparedAssets([
-			createPreparedTerrainAsset("bootstrap-terrain-a", "terrain/0102ffff"),
-			createPreparedTerrainAsset("bootstrap-terrain-b", "terrain/0103ffff"),
+			createPreparedTerrainAsset("bootstrap-terrain-a", "landblock-pack/0102ffff"),
+			createPreparedTerrainAsset("bootstrap-terrain-b", "landblock-pack/0103ffff"),
 		]);
 
 		expect(get(store).asset.status).toBe("ready");
-		expect(get(store).asset.activeRequest?.assetId).toBe("terrain/0103ffff");
+		expect(get(store).asset.activeRequest?.assetId).toBe("landblock-pack/0103ffff");
 		expect(
-			get(store).asset.preparedByAssetId["terrain/0102ffff"],
+			get(store).asset.preparedByAssetId["landblock-pack/0102ffff"],
 		).toBeDefined();
 		expect(
-			get(store).asset.preparedByAssetId["terrain/0103ffff"],
+			get(store).asset.preparedByAssetId["landblock-pack/0103ffff"],
 		).toBeDefined();
 		expect(get(store).asset.history.map((entry) => entry.status)).toEqual([
 			"requested",

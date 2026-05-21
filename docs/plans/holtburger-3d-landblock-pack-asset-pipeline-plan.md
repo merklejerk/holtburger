@@ -433,7 +433,7 @@ Scope:
   - `landblock-summary/*`;
   - `gfx-obj/*`;
   - `setup-model/*`;
-  - direct source routes such as `env-cell/*` and `environment/*` where clean.
+  - obsolete direct source routes where clean.
 - Add pinned `RegionDesc`.
 - Add bounded LRU buckets for `Scene`, `SetupModel`, `GfxObj`, `CellLandblock`, `LandblockInfo`, `EnvCell`, and `Environment`.
 
@@ -481,10 +481,7 @@ Implemented:
 - Made the Tauri `lookup_asset` command asynchronous.
 - Routed content-backed asset ids through the runtime:
   - `landblock-pack/*`;
-  - `terrain/*`;
-  - `outdoor-static-scene/*`;
-  - `env-cell/*`;
-  - `environment/*`;
+  - obsolete standalone scene route families.
   - `gfx-obj/*`;
   - `setup-model/*`.
 - Kept app-local debug appearance manifests outside the shared runtime because they are not static content assets.
@@ -504,7 +501,7 @@ Course corrections:
 - Async Tauri commands that borrow state must return `Result`, so `lookup_asset` now clones `HostRuntimeService` before awaiting and returns `Result<AssetLookupResponseDto, String>`.
 - Clippy flagged `ContentAsset` as too large; large native products are boxed inside the enum while preserving typed runtime semantics.
 - Phase 5 did not move expensive JSON projection into background jobs. That would either push DTO concerns into `holtburger-core` or require a separate app-local projection executor. Keep this as a measured follow-up after Phase 8 binary transport work clarifies how much JSON projection remains.
-- The direct source route name `indoor-env-cell/*` was left temporarily for compatibility with existing frontend ids. Phase 11 later renamed the route to `env-cell/*`.
+- A temporary direct interior-cell source route existed during migration and was later removed.
 
 Refinements for later phases:
 
@@ -619,7 +616,7 @@ Implemented:
 
 Decisions:
 
-- Kept summaries rooted in official landblock records, not renderer-only terrain DTOs. The summary is cheap because it avoids child env-cell/environment/static mesh expansion, not because it is terrain-only.
+- Kept summaries rooted in official landblock records, not renderer-only terrain DTOs. The summary is cheap because it avoids child pack child expansion, not because it is terrain-only.
 - Included authored object/building references even though the renderer currently only consumes terrain from summaries. This preserves cheap metadata for future distant building placeholders or full-pack upgrade decisions.
 - Did not request renderable dependencies from summaries. Loading setup/gfx assets for terrain-only LoD would erase most of the win.
 - Kept bootstrap focused on one full pack to avoid starting the app by fanning out a larger terrain summary ring.
@@ -642,7 +639,7 @@ Potential cleanup targets:
 
 - Rename request-planner functions that still say `LandblockPackCoverage` even though they now return mixed full-pack and summary coverage requests.
 - Reduce duplicated landblock root serialization between pack and summary payloads before Phase 8 binary manifests add another projection path.
-- Revisit whether `landblock-summary` should share a normalized frontend terrain mesh adapter with `terrain-landblock` and `landblock-pack` to avoid three terrain-bearing payload shapes.
+- Revisit whether `landblock-summary` should share a normalized frontend terrain mesh adapter with legacy terrain payload and `landblock-pack` to avoid three terrain-bearing payload shapes.
 - Add a single helper for "full pack covers summary needs" so cache retention/eviction policy can avoid retaining redundant summaries beside full packs.
 
 Scope:
@@ -671,7 +668,7 @@ Implementation notes:
 
 - A full pack can satisfy summary needs via shared terrain/building-fact extraction helpers.
 - A cached summary can upgrade to a full pack when the landblock moves into an interactive ring.
-- Do not call it `terrain-landblock/*`; the asset is a cheap official-root summary, not a renderer slice.
+- Do not call it legacy terrain payload route; the asset is a cheap official-root summary, not a renderer slice.
 - This phase includes frontend scheduler/cache/render-policy integration. The Rust route alone will not reduce default scene-load pressure until the planner requests summaries for distant landblocks.
 
 Validation:
@@ -697,7 +694,7 @@ Goal: render exterior building visuals from `landblock-summary/*` plus independe
 
 Scope:
 
-- Keep `landblock-pack/*` for focus/detail/env-cell/full spatial coverage.
+- Keep `landblock-pack/*` for focus/detail/interior-cell/full spatial coverage.
 - Change building-distance coverage so building-radius landblocks can be satisfied by `landblock-summary/*` instead of full packs when no other full-pack interest applies.
 - Derive building renderable dependency requests from prepared summaries:
   - `sourceAssetId` from summary buildings;
@@ -1151,7 +1148,7 @@ Initial cleanup targets:
 
 - Remove legacy landblock/env-cell discovery paths that are no longer needed after root-based pack/summary loading.
 - Keep lower-level direct source routes explicit if they remain useful, but stop presenting them as normal scene-loading concepts.
-- Audit and cull legacy direct scene asset routes that normal scene coverage no longer schedules: `terrain/*`, `outdoor-static-scene/*`, `environment/*`, and direct `env-cell/*`. Keep a route only if it has a current debug/tooling purpose that is clearer than the migration-era asset path.
+- Audit and cull legacy direct scene asset routes that normal scene coverage no longer schedules: obsolete standalone scene routes. Keep a route only if it has a current debug/tooling purpose that is clearer than the migration-era asset path.
 - Remove compatibility shims or duplicate route helpers introduced only for transition.
 - Consolidate naming around `landblock`, `landblock-pack`, and `landblock-summary`; avoid indoor/outdoor assumptions in asset ids unless the payload is actually classification-specific.
 - Tighten contracts/interfaces where optional fields are not optional in practice.
@@ -1185,13 +1182,13 @@ Initial cleanup targets:
 - Tighten binary manifest path validation so section paths are known contract fields rather than generic dot-path assignment.
 - Remove summary/full-pack upgrade shims once distance-ring request policy has a single normal path.
 - Rename mixed scene-coverage request planner APIs that still say `LandblockPackCoverage` after Phase 6 introduced `landblock-summary/*` coverage.
-- Consolidate terrain-bearing frontend payload handling across `terrain-landblock`, `landblock-pack`, and `landblock-summary`.
+- Consolidate terrain-bearing frontend payload handling across legacy terrain payload, `landblock-pack`, and `landblock-summary`.
 - Add cache-retention rules that can drop redundant summaries when a full pack for the same landblock is prepared.
 - Revisit summary authored object/building facts after distant building placeholder rendering lands; keep them cheap or remove fields the renderer never uses.
 - After Phase 6.1, revisit whether the browser building-distance slider should remain user-facing or become a derived internal full-pack/summary-building policy.
 - Tighten summary building DTO contracts so renderable building records do not carry nullable `sourceAssetId` values after unsupported sources have already been filtered or represented as a distinct variant.
 - Revisit summary setup-model expansion after real-scene validation; if placement or bounds parity matters, move that transformation into the Rust loader beside full-pack static mesh preparation.
-- Revisit whether `outdoor-static-scene` omission diagnostics should be retained in normal frontend prepared assets or only surfaced in low-level loader/debug views.
+- Revisit whether `landblock-static` omission diagnostics should be retained in normal frontend prepared assets or only surfaced in low-level loader/debug views.
 - Retire stale profiling/timing scaffolding that was useful for this optimization campaign but is too noisy for day-to-day development.
 - Re-check crate boundaries after runtime work lands: content should own static content discovery/decoding, core/runtime should own reusable client execution policy if that split proves cleaner, and the Tauri adapter should remain projection/glue.
 
@@ -1199,22 +1196,22 @@ Implemented cleanup slices:
 
 - Phase 5 removed dead synchronous adapter payload loaders that were superseded by the typed runtime path.
 - Phase 5 removed the redundant adapter-owned decode-cache field; cache ownership now flows through the shared content asset runtime/service.
-- Phase 11 renamed the direct env-cell source route from `indoor-env-cell/*` to `env-cell/*` across the Tauri adapter, structured-interior request helpers, and affected tests. The payload kind remains `indoor-env-cell` where it describes current browser residency/presentation semantics rather than the official source route.
-- Phase 11 removed the dead `AssetPayloadKindDto::Bytes` / `payloadKind: "bytes"` response variant. Binary assets now travel only through `lookup_asset_binary` and are normalized back into a JSON-shaped `AssetLookupResponseDto` after envelope decode.
+- - Phase 11 removed the dead `AssetPayloadKindDto::Bytes` / `payloadKind: "bytes"` response variant. Binary assets now travel only through `lookup_asset_binary` and are normalized back into a JSON-shaped `AssetLookupResponseDto` after envelope decode.
 - Phase 11 tightened landblock pack/summary diagnostics so `omissions` are a typed frontend DTO matching Rust `SourceOmissionDiagnostic` instead of `unknown[]`.
+- Phase 11 follow-up removed the migration-era prepared asset routes and frontend payload fallbacks for obsolete standalone scene routes. Scene coverage now uses `landblock-pack/*` and `landblock-summary/*`; renderable model hydration remains graph-based through `setup-model/*` and `gfx-obj/*`.
 
 Decisions:
 
 - Cleanup is an explicit final phase, not an invitation to leave known debt untracked. If a phase creates a temporary shim or misleading name, add it to this punch list immediately.
 - Compatibility with migration-era tests is not a reason to keep stale abstractions. Update tests to describe the intended pack/cache/runtime behavior.
-- Direct `env-cell/*` remains a useful lower-level source/debug route, so Phase 11 renamed it instead of deleting it. Normal scene loading still flows through `landblock-pack/*` and `landblock-summary/*`.
+- Debug lookups are not hard consumers for migration-era scene asset families. Keep official pack/summary routes authoritative and avoid retaining compatibility routes just for inspector convenience.
 - The binary command stays separate from `payloadKind`. Reusing `AssetLookupResponseDto.payloadKind` for binary envelopes would reintroduce the dead-end shape Phase 8 intentionally avoided.
 
 Course corrections:
 
 - The initial dry run found this plan needs a running cleanup punch list like the original landblock pack plan. Phase 11 now owns that list.
 - Skipping Phase 10 was intentional for this pass. The cleanup work did not touch Rust-side assembly hotspot optimization.
-- The direct route rename exposed one stale sorted-order test expectation because `env-cell/*` sorts before `environment/*`; the assertion was updated to describe the new canonical route name.
+- The direct route removal exposed stale tests and UI copy that still described standalone interior payload loading; those were updated to assert pack-backed behavior instead.
 
 Validation:
 

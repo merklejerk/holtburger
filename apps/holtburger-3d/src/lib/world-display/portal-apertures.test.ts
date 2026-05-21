@@ -227,7 +227,7 @@ function createStructuredInteriorSceneModel(
 		activeEnvCellIds: cells.map((cell) => cell.envCellId),
 		cells,
 		missingEnvCellAssetIds: [],
-		missingEnvironmentAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText: "test",
 		cacheText: "test",

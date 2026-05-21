@@ -8,8 +8,6 @@ import {
 	formatLandblockPackAssetId,
 	formatLandblockSummaryAssetId,
 	formatLandblockLabel,
-	formatOutdoorStaticSceneAssetId,
-	formatTerrainAssetId,
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
@@ -22,10 +20,6 @@ describe("outdoor landblock helpers", () => {
 		expect(landblockId).toBe(0xda55ffff);
 		expect(landblockId).toBeGreaterThan(0);
 		expect(formatLandblockLabel(landblockId)).toBe("0xda55ffff");
-		expect(formatTerrainAssetId(landblockId)).toBe("terrain/da55ffff");
-		expect(formatOutdoorStaticSceneAssetId(landblockId)).toBe(
-			"outdoor-static-scene/da55ffff",
-		);
 		expect(formatLandblockPackAssetId(landblockId)).toBe(
 			"landblock-pack/da55ffff",
 		);

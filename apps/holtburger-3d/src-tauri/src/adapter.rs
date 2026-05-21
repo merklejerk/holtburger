@@ -7,8 +7,8 @@ use holtburger_common::position::WorldPosition;
 use holtburger_content::{
     CellLandblockFact, ContentDecodeCache, ContentRepository, EnvCellFact, EnvironmentFact,
     GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
-    LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
-    LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
+    LandblockInfoFact, LandblockPack, LandblockPackSourceDiagnostics, LandblockRestriction,
+    PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
     PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
     PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
     PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
@@ -16,15 +16,17 @@ use holtburger_content::{
     PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
     SoulEmoteCatalog, SourceLoadError, SourceRecordDiagnostic, SourceRecordStatus,
     StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics, StaticOutdoorScene,
-    StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
-    format_static_object_source_asset_id, normalize_landblock_id,
+    StaticRenderableSourceFamily, format_static_object_source_asset_id, normalize_landblock_id,
+};
+use holtburger_core::{
+    ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
 };
 use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::landblock::CellLandblock;
 use holtburger_dat::physics::BspNode;
-use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
+use holtburger_dat::{EOR_CELL_NAMESPACE, ResourceKey};
 use holtburger_world::entity::Entity;
 use holtburger_world::{WorldBootstrap, WorldState};
 
@@ -50,7 +52,7 @@ const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
 
 pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
-    decode_cache: Arc<ContentDecodeCache>,
+    content_asset_runtime: ContentAssetRuntime,
     verbose: bool,
 }
 
@@ -115,8 +117,13 @@ impl HostRuntimeService {
         self.adapter.resolve_ray_pick(&state, request)
     }
 
-    pub fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
-        self.adapter.asset_lookup(request)
+    pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        self.adapter.asset_lookup(request).await
+    }
+
+    #[cfg(test)]
+    fn asset_lookup_blocking(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        self.adapter.asset_lookup_blocking(request)
     }
 
     pub fn boundary_overview(&self) -> HostBoundaryOverviewDto {
@@ -169,9 +176,15 @@ impl HostBoundaryAdapter {
     pub fn new(verbose: bool) -> Self {
         let content = ContentRepository::from_hba_path(repo_assets_hba_path())
             .expect("failed to open repo-local 3D app content repository");
+        let content = Arc::new(content);
+        let decode_cache = Arc::new(ContentDecodeCache::new());
+        let content_asset_runtime = ContentAssetRuntime::new(ContentAssetService::new(
+            Arc::clone(&content),
+            Arc::clone(&decode_cache),
+        ));
         Self {
-            content: Arc::new(content),
-            decode_cache: Arc::new(ContentDecodeCache::new()),
+            content,
+            content_asset_runtime,
             verbose,
         }
     }
@@ -224,7 +237,7 @@ impl HostBoundaryAdapter {
         }
     }
 
-    pub fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+    pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
         if self.verbose {
             eprintln!(
                 "[holtburger-3d][asset.lookup] request_id={} asset_id={} priority={:?}",
@@ -232,33 +245,79 @@ impl HostBoundaryAdapter {
             );
         }
 
-        if let Some(landblock_id) = parse_landblock_pack_asset_id(&request.asset_id) {
-            return self.build_landblock_pack_lookup_response(request, landblock_id);
+        if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
+            let asset = self
+                .content_asset_runtime
+                .load(content_request.clone())
+                .await;
+            return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
-        if let Some(landblock_id) = parse_terrain_asset_id(&request.asset_id) {
-            return self.build_terrain_lookup_response(request, landblock_id);
-        }
-        if let Some(landblock_id) = parse_outdoor_static_scene_asset_id(&request.asset_id) {
-            return self.build_outdoor_static_scene_lookup_response(request, landblock_id);
+        self.build_app_local_asset_lookup_response(request)
+    }
+
+    #[cfg(test)]
+    fn asset_lookup_blocking(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+        if self.verbose {
+            eprintln!(
+                "[holtburger-3d][asset.lookup] request_id={} asset_id={} priority={:?}",
+                request.request_id, request.asset_id, request.priority
+            );
         }
 
-        if let Some(env_cell_id) = parse_indoor_env_cell_asset_id(&request.asset_id) {
-            return self.build_indoor_env_cell_lookup_response(request, env_cell_id);
+        if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
+            let asset = self
+                .content_asset_runtime
+                .load_blocking(content_request.clone());
+            return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
-        if let Some(environment_id) = parse_environment_asset_id(&request.asset_id) {
-            return self.build_environment_lookup_response(request, environment_id);
-        }
+        self.build_app_local_asset_lookup_response(request)
+    }
 
-        if let Some(gfx_obj_id) = parse_gfx_obj_asset_id(&request.asset_id) {
-            return self.build_gfx_obj_lookup_response(request, gfx_obj_id);
+    fn build_content_asset_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        content_request: ContentAssetRequest,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        match content_request {
+            ContentAssetRequest::LandblockPack(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockPack(pack)) => {
+                    self.build_landblock_pack_lookup_response(request, *pack)
+                }
+                Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
+                Err(error) => self.build_failed_landblock_pack_lookup_response(
+                    request,
+                    normalize_landblock_id(landblock_id),
+                    error,
+                ),
+            },
+            ContentAssetRequest::Terrain(landblock_id) => {
+                self.build_terrain_lookup_response(request, landblock_id, asset)
+            }
+            ContentAssetRequest::OutdoorStaticScene(landblock_id) => {
+                self.build_outdoor_static_scene_lookup_response(request, landblock_id, asset)
+            }
+            ContentAssetRequest::EnvCell(env_cell_id) => {
+                self.build_indoor_env_cell_lookup_response(request, env_cell_id, asset)
+            }
+            ContentAssetRequest::Environment(environment_id) => {
+                self.build_environment_lookup_response(request, environment_id, asset)
+            }
+            ContentAssetRequest::GfxObj(gfx_obj_id) => {
+                self.build_gfx_obj_lookup_response(request, gfx_obj_id, asset)
+            }
+            ContentAssetRequest::SetupModel(setup_model_id) => {
+                self.build_setup_model_lookup_response(request, setup_model_id, asset)
+            }
         }
+    }
 
-        if let Some(setup_model_id) = parse_setup_model_asset_id(&request.asset_id) {
-            return self.build_setup_model_lookup_response(request, setup_model_id);
-        }
-
+    fn build_app_local_asset_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+    ) -> AssetLookupResponseDto {
         let (residency_kind, debug_primitive, palette_key, provenance) = match request
             .asset_id
             .as_str()
@@ -462,72 +521,6 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn load_outdoor_static_scene_payload(
-        &self,
-        raw_landblock_id: u32,
-    ) -> Result<serde_json::Value, (String, &'static str)> {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let scene = StaticOutdoorSceneAssembler::new()
-            .assemble_landblock(&self.content, landblock_id)
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
-                    ),
-                    "asset-decode-failed",
-                )
-            })?;
-
-        Ok(serde_json::json!({
-            "kind": "outdoor-static-scene",
-            "residencyKind": "outdoor-landblock",
-            "sourceAssetKind": "outdoor-static-scene",
-            "landblockId": landblock_id,
-            "sceneryInstances": scene.explicit_objects.iter().filter_map(serialize_static_outdoor_instance).collect::<Vec<_>>(),
-            "buildingInstances": scene.buildings.iter().filter_map(|building| {
-                serialize_static_outdoor_instance(&building.instance).map(|mut value| {
-                    value["numLeaves"] = serde_json::json!(building.num_leaves);
-                    value["portals"] = serde_json::json!(
-                        building.portals.iter().map(|portal| {
-                            serde_json::json!({
-                                "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
-                                "sourceIndex": portal.source_index,
-                                "flags": portal.flags,
-                                "otherCellId": portal.other_cell_id,
-                                "otherPortalId": portal.other_portal_id,
-                                "stabList": portal.stab_list,
-                                "linkedEnvCellIds": portal.linked_env_cell_ids,
-                            })
-                        }).collect::<Vec<_>>()
-                    );
-                    value
-                })
-            }).collect::<Vec<_>>(),
-            "generatedSceneryInstances": scene.generated_scenery.iter().filter_map(|generated| {
-                serialize_static_outdoor_instance(&generated.instance).map(|mut value| {
-                    value["terrainIndex"] = serde_json::json!(generated.terrain_index);
-                    value["sceneId"] = serde_json::json!(generated.scene_id);
-                    value["sceneTemplateIndex"] = serde_json::json!(generated.scene_template_index);
-                    value["scale"] = serde_json::json!(generated.scale);
-                    value
-                })
-            }).collect::<Vec<_>>(),
-            "diagnostics": serialize_static_outdoor_scene_diagnostics(&scene),
-            "provenance": {
-                "source": "repo-local-hba",
-                "sourceAssetKind": "outdoor-static-scene",
-                "errorCode": null,
-                "detail": format!(
-                    "{}:0x{:08X} + {}:0x{:08X}",
-                    EOR_CELL_NAMESPACE,
-                    landblock_id,
-                    EOR_CELL_NAMESPACE,
-                    landblock_id & 0xffff_fffe
-                )
-            }
-        }))
-    }
-
     fn runtime_entities(state: &HostRuntimeState) -> Vec<RuntimeEntitySnapshotDto> {
         let focus_position = state.world.player_position().unwrap_or_default();
         let tick_offset = (state.tick.saturating_sub(1)) as f32;
@@ -588,13 +581,8 @@ impl HostBoundaryAdapter {
     fn build_landblock_pack_lookup_response(
         &self,
         request: AssetLookupRequestDto,
-        landblock_id: u32,
+        pack: LandblockPack,
     ) -> AssetLookupResponseDto {
-        let pack = LandblockPackAssembler::new().assemble_landblock_with_cache(
-            &self.content,
-            &self.decode_cache,
-            landblock_id,
-        );
         let payload = serialize_landblock_pack(&pack);
 
         if self.verbose {
@@ -621,14 +609,87 @@ impl HostBoundaryAdapter {
         }
     }
 
+    fn build_failed_landblock_pack_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+        error: anyhow::Error,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serde_json::json!({
+                "kind": "landblock-pack",
+                "residencyKind": "landblock",
+                "sourceAssetKind": "landblock-pack",
+                "landblockId": landblock_id,
+                "landblockInfoId": landblock_id & 0xffff_fffe,
+                "classification": "outdoor",
+                "sourceFacts": {
+                    "cellLandblock": null,
+                    "landblockInfo": null,
+                    "outdoor": serialize_landblock_pack_outdoor_facts(None),
+                    "interiors": {
+                        "envCells": [],
+                        "environments": [],
+                        "staticObjects": []
+                    },
+                    "renderables": {
+                        "gfxObjs": [],
+                        "setupModels": [],
+                        "unsupportedDids": []
+                    }
+                },
+                "prepared": {
+                    "terrainMesh": null,
+                    "outdoorStaticInstances": [],
+                    "interiorCells": [],
+                    "staticMeshes": [],
+                    "spatialItems": [],
+                    "staticLandblockBvh": null
+                },
+                "dependencies": {
+                    "cellDatIds": [landblock_id, landblock_id & 0xffff_fffe],
+                    "portalDatIds": [],
+                    "renderableAssetIds": [],
+                    "missing": [],
+                    "unsupported": []
+                },
+                "diagnostics": {
+                    "sourceRecords": [],
+                    "errors": [{
+                        "namespace": EOR_CELL_NAMESPACE,
+                        "fileId": landblock_id,
+                        "role": "landblock-pack",
+                        "errorCode": asset_cache_error_code(&error),
+                        "detail": format!("{error:#}")
+                    }]
+                },
+                "provenance": {
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "landblock-pack",
+                    "errorCode": asset_cache_error_code(&error),
+                    "detail": format!("{error:#}")
+                }
+            }),
+        }
+    }
+
     fn build_terrain_lookup_response(
         &self,
         request: AssetLookupRequestDto,
         landblock_id: u32,
+        asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
-        let payload = self
-            .load_cell_landblock_payload(landblock_id)
-            .unwrap_or_else(|error| generated_fallback_terrain_payload(landblock_id, error));
+        let payload = match asset {
+            Ok(ContentAsset::Terrain(landblock)) => serialize_cell_landblock_payload(&landblock),
+            Ok(_) => unreachable!("content asset runtime returned mismatched terrain"),
+            Err(error) => generated_fallback_terrain_payload(
+                normalize_landblock_id(landblock_id),
+                (format!("{error:#}"), asset_cache_error_code(&error)),
+            ),
+        };
         if self.verbose {
             eprintln!(
                 "[holtburger-3d][asset.lookup] response asset_id={} kind={} provenance={}",
@@ -657,10 +718,16 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
         landblock_id: u32,
+        asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
-        let payload = self
-            .load_outdoor_static_scene_payload(landblock_id)
-            .unwrap_or_else(|(detail, error_code)| {
+        let payload = match asset {
+            Ok(ContentAsset::OutdoorStaticScene(scene)) => {
+                serialize_outdoor_static_scene_payload(normalize_landblock_id(landblock_id), &scene)
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched outdoor static scene"),
+            Err(error) => {
+                let detail = format!("{error:#}");
+                let error_code = asset_cache_error_code(&error);
                 serde_json::json!({
                     "kind": "outdoor-static-scene",
                     "residencyKind": "outdoor-landblock",
@@ -683,7 +750,8 @@ impl HostBoundaryAdapter {
                         "detail": detail
                     }
                 })
-            });
+            }
+        };
         if self.verbose {
             let provenance = payload.get("provenance");
             eprintln!(
@@ -732,10 +800,19 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
         env_cell_id: u32,
+        asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
-        let payload = self
-            .load_indoor_env_cell_payload(env_cell_id)
-            .unwrap_or_else(|(detail, error_code)| {
+        let payload = match asset {
+            Ok(ContentAsset::EnvCell {
+                env_cell,
+                landblock_env_cell_ids,
+            }) => {
+                serialize_indoor_env_cell_payload(env_cell_id, &env_cell, &landblock_env_cell_ids)
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched env cell"),
+            Err(error) => {
+                let detail = format!("{error:#}");
+                let error_code = asset_cache_error_code(&error);
                 serde_json::json!({
                     "kind": "indoor-env-cell",
                     "residencyKind": "indoor-env-cell",
@@ -760,7 +837,8 @@ impl HostBoundaryAdapter {
                         "detail": detail
                     }
                 })
-            });
+            }
+        };
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -774,38 +852,43 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
         gfx_obj_id: u32,
+        asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
-        let payload =
-            self.load_gfx_obj_payload(gfx_obj_id)
-                .unwrap_or_else(|(detail, error_code)| {
-                    serde_json::json!({
-                        "kind": "gfx-obj",
-                        "residencyKind": "unknown",
+        let payload = match asset {
+            Ok(ContentAsset::GfxObj(gfx_obj)) => serialize_gfx_obj_payload(&gfx_obj),
+            Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
+            Err(error) => {
+                let detail = format!("{error:#}");
+                let error_code = asset_cache_error_code(&error);
+                serde_json::json!({
+                    "kind": "gfx-obj",
+                    "residencyKind": "unknown",
+                    "sourceAssetKind": "gfx-obj",
+                    "gfxObjId": gfx_obj_id,
+                    "flags": null,
+                    "surfaceIds": [],
+                    "vertexArray": {
+                        "vertexType": null,
+                        "vertexCount": 0,
+                        "vertices": []
+                    },
+                    "drawingPolygons": [],
+                    "drawingBsp": null,
+                    "physicsWitness": {
+                        "polygonCount": 0,
+                        "hasBsp": false
+                    },
+                    "sortCenter": null,
+                    "didDegrade": null,
+                    "provenance": {
+                        "source": "app-local-stub",
                         "sourceAssetKind": "gfx-obj",
-                        "gfxObjId": gfx_obj_id,
-                        "flags": null,
-                        "surfaceIds": [],
-                        "vertexArray": {
-                            "vertexType": null,
-                            "vertexCount": 0,
-                            "vertices": []
-                        },
-                        "drawingPolygons": [],
-                        "drawingBsp": null,
-                        "physicsWitness": {
-                            "polygonCount": 0,
-                            "hasBsp": false
-                        },
-                        "sortCenter": null,
-                        "didDegrade": null,
-                        "provenance": {
-                            "source": "app-local-stub",
-                            "sourceAssetKind": "gfx-obj",
-                            "errorCode": error_code,
-                            "detail": detail
-                        }
-                    })
-                });
+                        "errorCode": error_code,
+                        "detail": detail
+                    }
+                })
+            }
+        };
         if self.verbose {
             eprintln!(
                 "[holtburger-3d][asset.lookup] response asset_id={} kind={} vertices={} polygons={} render_source={}",
@@ -843,10 +926,16 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
         setup_model_id: u32,
+        asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
-        let payload = self
-            .load_setup_model_payload(setup_model_id)
-            .unwrap_or_else(|(detail, error_code)| {
+        let payload = match asset {
+            Ok(ContentAsset::SetupModel(setup_model)) => {
+                serialize_setup_model_payload(&setup_model)
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched setup model"),
+            Err(error) => {
+                let detail = format!("{error:#}");
+                let error_code = asset_cache_error_code(&error);
                 serde_json::json!({
                 "kind": "setup-model",
                 "residencyKind": "unknown",
@@ -880,7 +969,8 @@ impl HostBoundaryAdapter {
                     "detail": detail
                     }
                 })
-            });
+            }
+        };
         if self.verbose {
             eprintln!(
                 "[holtburger-3d][asset.lookup] response asset_id={} kind={} parts={} provenance={}",
@@ -923,44 +1013,13 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
         environment_id: u32,
+        asset: anyhow::Result<ContentAsset>,
     ) -> AssetLookupResponseDto {
-        let payload = match self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
-        {
-            Ok(resource) => {
-                let source_detail = resource.source_description.clone();
-                match Environment::unpack(&mut std::io::Cursor::new(resource.bytes)) {
-                    Ok(environment) => serde_json::json!({
-                        "kind": "environment",
-                        "residencyKind": "indoor-env-cell",
-                        "sourceAssetKind": "environment",
-                        "environmentId": environment.id,
-                        "cellStructureIds": environment.cells.keys().copied().collect::<Vec<_>>(),
-                        "cellStructures": environment.cells.values().map(serialize_cell_structure).collect::<Vec<_>>(),
-                        "provenance": {
-                            "source": "repo-local-hba",
-                            "sourceAssetKind": "environment",
-                            "errorCode": null,
-                            "detail": source_detail
-                        }
-                    }),
-                    Err(error) => serde_json::json!({
-                        "kind": "environment",
-                        "residencyKind": "indoor-env-cell",
-                        "sourceAssetKind": "environment",
-                        "environmentId": environment_id,
-                        "cellStructureIds": [],
-                        "cellStructures": [],
-                        "provenance": {
-                            "source": "app-local-stub",
-                            "sourceAssetKind": "environment",
-                            "errorCode": "asset-decode-failed",
-                            "detail": format!("Could not decode Environment 0x{environment_id:08X}: {error}")
-                        }
-                    }),
-                }
+        let payload = match asset {
+            Ok(ContentAsset::Environment(environment)) => {
+                serialize_environment_payload(&environment)
             }
+            Ok(_) => unreachable!("content asset runtime returned mismatched environment"),
             Err(error) => serde_json::json!({
                 "kind": "environment",
                 "residencyKind": "indoor-env-cell",
@@ -971,8 +1030,8 @@ impl HostBoundaryAdapter {
                 "provenance": {
                     "source": "app-local-stub",
                     "sourceAssetKind": "environment",
-                    "errorCode": "asset-read-failed",
-                    "detail": format!("Could not read Environment 0x{environment_id:08X}: {error}")
+                    "errorCode": asset_cache_error_code(&error),
+                    "detail": format!("{error:#}")
                 }
             }),
         };
@@ -1021,162 +1080,34 @@ impl HostBoundaryAdapter {
         })
     }
 
+    #[cfg(test)]
     fn load_landblock_info(
         &self,
         landblock_id: u32,
-    ) -> Result<holtburger_dat::landblock::LandblockInfo, (String, &'static str)> {
+    ) -> Result<holtburger_dat::landblock::LandblockInfo, anyhow::Error> {
         let landblock_info_id = normalize_landblock_id(landblock_id) & 0xffff_fffe;
         let resource = self
             .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{landblock_info_id:08X} from content repository: {error}",
-                        EOR_CELL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-
-        holtburger_dat::landblock::LandblockInfo::unpack(&resource.bytes).map_err(|error| {
-            (
-                format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}: {error}"),
-                "asset-decode-failed",
-            )
-        })
+            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))?;
+        holtburger_dat::landblock::LandblockInfo::unpack(&resource.bytes)
+            .map_err(anyhow::Error::from)
     }
 
-    fn load_cell_landblock_payload(
+    #[cfg(test)]
+    fn load_outdoor_static_scene_payload(
         &self,
         landblock_id: u32,
-    ) -> Result<serde_json::Value, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{landblock_id:08X} from content repository: {error}",
-                        EOR_CELL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-        let source_detail = resource.source_description.clone();
-        let landblock = CellLandblock::unpack(&resource.bytes).map_err(|error| {
-            (
-                format!("Could not decode CellLandblock 0x{landblock_id:08X}: {error}"),
-                "asset-decode-failed",
-            )
-        })?;
-
-        Ok(serde_json::json!({
-            "kind": "terrain-landblock",
-            "residencyKind": "outdoor-landblock",
-            "sourceAssetKind": "cell-landblock",
-            "landblockId": landblock_id,
-            "gridSize": 9,
-            "tileSize": 24,
-            "heights": landblock.height.iter().map(|height| f32::from(*height) * 2.0).collect::<Vec<_>>(),
-            "terrainTypes": landblock.terrain,
-            "provenance": {
-                "source": "repo-local-hba",
-                "sourceAssetKind": "cell-landblock",
-                "errorCode": null,
-                "detail": source_detail
-            }
-        }))
-    }
-
-    fn load_gfx_obj_payload(
-        &self,
-        gfx_obj_id: u32,
-    ) -> Result<serde_json::Value, (String, &'static str)> {
-        let source_detail = self.content.source_description().map(str::to_owned);
-        let gfx_obj = self
-            .decode_cache
-            .gfx_obj(&self.content, gfx_obj_id)
-            .map_err(|error| {
-                (
-                    format!("Could not load GfxObj 0x{gfx_obj_id:08X}: {error:#}"),
-                    asset_cache_error_code(&error),
-                )
-            })?;
-
-        Ok(serde_json::json!({
-            "kind": "gfx-obj",
-            "residencyKind": "unknown",
-            "sourceAssetKind": "gfx-obj",
-            "gfxObjId": gfx_obj.id,
-            "flags": gfx_obj.flags.bits(),
-            "surfaceIds": gfx_obj.surfaces,
-            "vertexArray": serialize_vertex_array(&gfx_obj.vertex_array),
-            "drawingPolygons": serialize_polygons(&gfx_obj.polygons),
-            "drawingBsp": gfx_obj.drawing_bsp.as_ref().map(serialize_bsp_node),
-            "physicsWitness": {
-                "polygonCount": gfx_obj.physics_polygons.len(),
-                "hasBsp": gfx_obj.physics_bsp.is_some()
-            },
-            "sortCenter": serialize_vector3(&gfx_obj.sort_center),
-            "didDegrade": gfx_obj.did_degrade,
-            "provenance": {
-                "source": "repo-local-hba",
-                "sourceAssetKind": "gfx-obj",
-                "errorCode": null,
-                "detail": source_detail
-            }
-        }))
-    }
-
-    fn load_setup_model_payload(
-        &self,
-        setup_model_id: u32,
-    ) -> Result<serde_json::Value, (String, &'static str)> {
-        let source_detail = self.content.source_description().map(str::to_owned);
-        let setup_model = self
-            .decode_cache
-            .setup_model(&self.content, setup_model_id)
-            .map_err(|error| {
-                (
-                    format!("Could not load SetupModel 0x{setup_model_id:08X}: {error:#}"),
-                    asset_cache_error_code(&error),
-                )
-            })?;
-
-        Ok(serde_json::json!({
-            "kind": "setup-model",
-            "residencyKind": "unknown",
-            "sourceAssetKind": "setup-model",
-            "setupModelId": setup_model.id,
-            "flags": setup_model.flags,
-            "parts": serialize_setup_model_parts(&setup_model),
-            "holdingLocations": serialize_location_map(&setup_model.holding_locations),
-            "connectionPoints": serialize_location_map(&setup_model.connection_points),
-            "placementSets": serialize_placement_sets(&setup_model),
-            "collisionWitness": {
-                "cylSphereCount": setup_model.cyl_spheres.len(),
-                "sphereCount": setup_model.spheres.len(),
-            },
-            "height": setup_model.height,
-            "radius": setup_model.radius,
-            "stepUp": setup_model.step_up,
-            "stepDown": setup_model.step_down,
-            "sortingSphere": serialize_sphere(&setup_model.sorting_sphere),
-            "selectionSphere": serialize_sphere(&setup_model.selection_sphere),
-            "lights": serialize_lights(&setup_model.lights),
-            "defaultAnimation": setup_model.default_animation,
-            "defaultScript": setup_model.default_script,
-            "defaultMotionTable": setup_model.default_motion_table,
-            "defaultSoundTable": setup_model.default_sound_table,
-            "defaultScriptTable": setup_model.default_script_table,
-            "provenance": {
-                "source": "repo-local-hba",
-                "sourceAssetKind": "setup-model",
-                "errorCode": null,
-                "detail": source_detail
-            }
-        }))
+    ) -> Result<serde_json::Value, anyhow::Error> {
+        match self
+            .content_asset_runtime
+            .load_blocking(ContentAssetRequest::OutdoorStaticScene(landblock_id))?
+        {
+            ContentAsset::OutdoorStaticScene(scene) => Ok(serialize_outdoor_static_scene_payload(
+                normalize_landblock_id(landblock_id),
+                &scene,
+            )),
+            _ => unreachable!("content asset runtime returned mismatched outdoor static scene"),
+        }
     }
 }
 
@@ -1210,80 +1141,6 @@ fn asset_cache_error_code(error: &anyhow::Error) -> &'static str {
     }
 }
 
-impl HostBoundaryAdapter {
-    fn load_indoor_env_cell_payload(
-        &self,
-        env_cell_id: u32,
-    ) -> Result<serde_json::Value, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{env_cell_id:08X} from content repository: {error}",
-                        EOR_CELL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-        let source_detail = resource.source_description.clone();
-        let env_cell =
-            EnvCell::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
-                (
-                    format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
-                    "asset-decode-failed",
-                )
-            })?;
-        let landblock_env_cell_ids = self.load_landblock_info(env_cell_id).map(|info| {
-            (0..info.num_cells)
-                .map(|index| (env_cell_id & 0xFFFF_0000) | (0x0100 + index))
-                .collect::<Vec<_>>()
-        })?;
-
-        Ok(serde_json::json!({
-            "kind": "indoor-env-cell",
-            "residencyKind": "indoor-env-cell",
-            "sourceAssetKind": "env-cell",
-            "envCellId": env_cell_id,
-            "environmentId": 0x0D00_0000 | u32::from(env_cell.environment_id),
-            "cellStructureId": u32::from(env_cell.cell_structure),
-            "localPlacement": serialize_frame(&env_cell.position),
-            "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
-            "landblockEnvCellIds": landblock_env_cell_ids,
-            "seenOutside": (env_cell.flags & 0x01) != 0,
-            "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
-            "portalCount": env_cell.portals.len(),
-            "portals": env_cell.portals.iter().enumerate().map(|(source_index, portal)| {
-                // Retail CCellPortal::UnPack treats portal flag 0x4 as an outside transition:
-                // it sets other_cell_id to -1 instead of using the serialized otherCellId suffix,
-                // and later transit asks the landcell to add outside cells. Preserve the raw
-                // fields here for diagnostics, but future authoritative runtime transition logic
-                // should interpret flag 0x4 instead of blindly trusting targetEnvCellId.
-                serde_json::json!({
-                    "portalId": format!("env-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
-                    "sourceIndex": source_index,
-                    "flags": portal.flags,
-                    "polygonId": portal.polygon_id,
-                    "otherCellId": portal.other_cell_id,
-                    "otherPortalId": portal.other_portal_id,
-                    "targetEnvCellId": (env_cell_id & 0xFFFF_0000) | u32::from(portal.other_cell_id),
-                })
-            }).collect::<Vec<_>>(),
-            "staticObjectCount": env_cell.static_objects.len(),
-            "staticObjects": env_cell.static_objects.iter().enumerate().map(|(source_index, static_object)| {
-                serialize_indoor_static_object(env_cell_id, source_index, static_object)
-            }).collect::<Vec<_>>(),
-            "provenance": {
-                "source": "repo-local-hba",
-                "sourceAssetKind": "env-cell",
-                "errorCode": null,
-                "detail": source_detail
-            }
-        }))
-    }
-}
-
 fn serialize_indoor_static_object(
     env_cell_id: u32,
     source_index: usize,
@@ -1296,6 +1153,53 @@ fn serialize_indoor_static_object(
         "sourceAssetId": format_static_object_source_asset_id(static_object.stab_id),
         "sourceIndex": source_index,
         "localPlacement": serialize_frame(&static_object.position),
+    })
+}
+
+fn serialize_indoor_env_cell_payload(
+    env_cell_id: u32,
+    env_cell: &EnvCell,
+    landblock_env_cell_ids: &[u32],
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "indoor-env-cell",
+        "residencyKind": "indoor-env-cell",
+        "sourceAssetKind": "env-cell",
+        "envCellId": env_cell_id,
+        "environmentId": 0x0D00_0000 | u32::from(env_cell.environment_id),
+        "cellStructureId": u32::from(env_cell.cell_structure),
+        "localPlacement": serialize_frame(&env_cell.position),
+        "visibleCellIds": env_cell.visible_cells.iter().map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(*cell_id)).collect::<Vec<_>>(),
+        "landblockEnvCellIds": landblock_env_cell_ids,
+        "seenOutside": (env_cell.flags & 0x01) != 0,
+        "surfaceIds": env_cell.surfaces.iter().map(|surface_id| 0x0800_0000 | u32::from(*surface_id)).collect::<Vec<_>>(),
+        "portalCount": env_cell.portals.len(),
+        "portals": env_cell.portals.iter().enumerate().map(|(source_index, portal)| {
+            // Retail CCellPortal::UnPack treats portal flag 0x4 as an outside transition:
+            // it sets other_cell_id to -1 instead of using the serialized otherCellId suffix,
+            // and later transit asks the landcell to add outside cells. Preserve the raw
+            // fields here for diagnostics, but future authoritative runtime transition logic
+            // should interpret flag 0x4 instead of blindly trusting targetEnvCellId.
+            serde_json::json!({
+                "portalId": format!("env-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
+                "sourceIndex": source_index,
+                "flags": portal.flags,
+                "polygonId": portal.polygon_id,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "targetEnvCellId": (env_cell_id & 0xFFFF_0000) | u32::from(portal.other_cell_id),
+            })
+        }).collect::<Vec<_>>(),
+        "staticObjectCount": env_cell.static_objects.len(),
+        "staticObjects": env_cell.static_objects.iter().enumerate().map(|(source_index, static_object)| {
+            serialize_indoor_static_object(env_cell_id, source_index, static_object)
+        }).collect::<Vec<_>>(),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "env-cell",
+            "errorCode": null,
+            "detail": null
+        }
     })
 }
 
@@ -1360,6 +1264,172 @@ fn parse_landblock_pack_asset_id(asset_id: &str) -> Option<u32> {
         .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
         .and_then(|hex| u32::from_str_radix(hex, 16).ok())
         .map(normalize_landblock_id)
+}
+
+fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetRequest> {
+    parse_landblock_pack_asset_id(asset_id)
+        .map(ContentAssetRequest::LandblockPack)
+        .or_else(|| parse_terrain_asset_id(asset_id).map(ContentAssetRequest::Terrain))
+        .or_else(|| {
+            parse_outdoor_static_scene_asset_id(asset_id)
+                .map(ContentAssetRequest::OutdoorStaticScene)
+        })
+        .or_else(|| parse_indoor_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
+        .or_else(|| parse_environment_asset_id(asset_id).map(ContentAssetRequest::Environment))
+        .or_else(|| parse_gfx_obj_asset_id(asset_id).map(ContentAssetRequest::GfxObj))
+        .or_else(|| parse_setup_model_asset_id(asset_id).map(ContentAssetRequest::SetupModel))
+}
+
+fn serialize_cell_landblock_payload(landblock: &CellLandblock) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "terrain-landblock",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "cell-landblock",
+        "landblockId": landblock.id,
+        "gridSize": 9,
+        "tileSize": 24,
+        "heights": landblock.height.iter().map(|height| f32::from(*height) * 2.0).collect::<Vec<_>>(),
+        "terrainTypes": landblock.terrain,
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "cell-landblock",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_outdoor_static_scene_payload(
+    landblock_id: u32,
+    scene: &StaticOutdoorScene,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "outdoor-static-scene",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "outdoor-static-scene",
+        "landblockId": landblock_id,
+        "sceneryInstances": scene.explicit_objects.iter().filter_map(serialize_static_outdoor_instance).collect::<Vec<_>>(),
+        "buildingInstances": scene.buildings.iter().filter_map(|building| {
+            serialize_static_outdoor_instance(&building.instance).map(|mut value| {
+                value["numLeaves"] = serde_json::json!(building.num_leaves);
+                value["portals"] = serde_json::json!(
+                    building.portals.iter().map(|portal| {
+                        serde_json::json!({
+                            "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
+                            "sourceIndex": portal.source_index,
+                            "flags": portal.flags,
+                            "otherCellId": portal.other_cell_id,
+                            "otherPortalId": portal.other_portal_id,
+                            "stabList": portal.stab_list,
+                            "linkedEnvCellIds": portal.linked_env_cell_ids,
+                        })
+                    }).collect::<Vec<_>>()
+                );
+                value
+            })
+        }).collect::<Vec<_>>(),
+        "generatedSceneryInstances": scene.generated_scenery.iter().filter_map(|generated| {
+            serialize_static_outdoor_instance(&generated.instance).map(|mut value| {
+                value["terrainIndex"] = serde_json::json!(generated.terrain_index);
+                value["sceneId"] = serde_json::json!(generated.scene_id);
+                value["sceneTemplateIndex"] = serde_json::json!(generated.scene_template_index);
+                value["scale"] = serde_json::json!(generated.scale);
+                value
+            })
+        }).collect::<Vec<_>>(),
+        "diagnostics": serialize_static_outdoor_scene_diagnostics(scene),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "outdoor-static-scene",
+            "errorCode": null,
+            "detail": format!(
+                "{}:0x{:08X} + {}:0x{:08X}",
+                EOR_CELL_NAMESPACE,
+                landblock_id,
+                EOR_CELL_NAMESPACE,
+                landblock_id & 0xffff_fffe
+            )
+        }
+    })
+}
+
+fn serialize_environment_payload(environment: &Environment) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "environment",
+        "residencyKind": "indoor-env-cell",
+        "sourceAssetKind": "environment",
+        "environmentId": environment.id,
+        "cellStructureIds": environment.cells.keys().copied().collect::<Vec<_>>(),
+        "cellStructures": environment.cells.values().map(serialize_cell_structure).collect::<Vec<_>>(),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "environment",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_gfx_obj_payload(gfx_obj: &holtburger_dat::file_type::GfxObj) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "gfx-obj",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "gfx-obj",
+        "gfxObjId": gfx_obj.id,
+        "flags": gfx_obj.flags.bits(),
+        "surfaceIds": gfx_obj.surfaces,
+        "vertexArray": serialize_vertex_array(&gfx_obj.vertex_array),
+        "drawingPolygons": serialize_polygons(&gfx_obj.polygons),
+        "drawingBsp": gfx_obj.drawing_bsp.as_ref().map(serialize_bsp_node),
+        "physicsWitness": {
+            "polygonCount": gfx_obj.physics_polygons.len(),
+            "hasBsp": gfx_obj.physics_bsp.is_some()
+        },
+        "sortCenter": serialize_vector3(&gfx_obj.sort_center),
+        "didDegrade": gfx_obj.did_degrade,
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "gfx-obj",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "setup-model",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "setup-model",
+        "setupModelId": setup_model.id,
+        "flags": setup_model.flags,
+        "parts": serialize_setup_model_parts(setup_model),
+        "holdingLocations": serialize_location_map(&setup_model.holding_locations),
+        "connectionPoints": serialize_location_map(&setup_model.connection_points),
+        "placementSets": serialize_placement_sets(setup_model),
+        "collisionWitness": {
+            "cylSphereCount": setup_model.cyl_spheres.len(),
+            "sphereCount": setup_model.spheres.len(),
+        },
+        "height": setup_model.height,
+        "radius": setup_model.radius,
+        "stepUp": setup_model.step_up,
+        "stepDown": setup_model.step_down,
+        "sortingSphere": serialize_sphere(&setup_model.sorting_sphere),
+        "selectionSphere": serialize_sphere(&setup_model.selection_sphere),
+        "lights": serialize_lights(&setup_model.lights),
+        "defaultAnimation": setup_model.default_animation,
+        "defaultScript": setup_model.default_script,
+        "defaultMotionTable": setup_model.default_motion_table,
+        "defaultSoundTable": setup_model.default_sound_table,
+        "defaultScriptTable": setup_model.default_script_table,
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "setup-model",
+            "errorCode": null,
+            "detail": null
+        }
+    })
 }
 
 fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
@@ -2532,7 +2602,7 @@ mod tests {
     fn boundary_overview_and_asset_lookup_remain_runtime_asset_split() {
         let runtime = HostRuntimeService::new(false);
         let overview = runtime.boundary_overview();
-        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-request".to_string(),
             asset_id: "terrain/0102ffff".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
@@ -2570,7 +2640,7 @@ mod tests {
     #[test]
     fn landblock_pack_lookup_returns_manifest_source_facts() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-landblock-pack".to_string(),
             asset_id: "landblock-pack/da55012e".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
@@ -2679,7 +2749,7 @@ mod tests {
     #[test]
     fn gfx_obj_lookup_returns_first_class_payload() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-gfx-obj".to_string(),
             asset_id: "gfx-obj/01000001".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
@@ -2710,7 +2780,7 @@ mod tests {
     #[test]
     fn gfx_obj_lookup_decodes_retail_polygon_stippling_without_vertex_sentinel() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-gfx-obj-stippling".to_string(),
             asset_id: "gfx-obj/01000f69".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
@@ -2738,7 +2808,7 @@ mod tests {
     #[test]
     fn environment_lookup_returns_decoded_environment_scoped_cell_structures() {
         let runtime = HostRuntimeService::new(false);
-        let env_cell_asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let env_cell_asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-indoor-env-cell".to_string(),
             asset_id: "indoor-env-cell/016c0155".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
@@ -2751,7 +2821,7 @@ mod tests {
             .as_u64()
             .expect("fixture EnvCell should expose a selected CellStruct id");
 
-        let environment_asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let environment_asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-environment".to_string(),
             asset_id: format!("environment/{environment_id:08x}"),
             priority: crate::contracts::AssetPriorityDto::Streaming,
@@ -2797,7 +2867,7 @@ mod tests {
     #[test]
     fn indoor_env_cell_lookup_exposes_static_object_sources() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-indoor-env-cell-statics".to_string(),
             asset_id: "indoor-env-cell/da55012e".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,
@@ -2831,7 +2901,7 @@ mod tests {
     #[test]
     fn setup_model_lookup_returns_composite_payload() {
         let runtime = HostRuntimeService::new(false);
-        let asset = runtime.asset_lookup(AssetLookupRequestDto {
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-setup-model".to_string(),
             asset_id: "setup-model/02000001".to_string(),
             priority: crate::contracts::AssetPriorityDto::Streaming,

@@ -27,11 +27,12 @@ fn get_view_model_feed(runtime: tauri::State<'_, HostRuntimeService>) -> Fronten
 }
 
 #[tauri::command]
-fn lookup_asset(
+async fn lookup_asset(
     runtime: tauri::State<'_, HostRuntimeService>,
     request: AssetLookupRequestDto,
-) -> AssetLookupResponseDto {
-    runtime.asset_lookup(request)
+) -> Result<AssetLookupResponseDto, String> {
+    let runtime = runtime.inner().clone();
+    Ok(runtime.asset_lookup(request).await)
 }
 
 #[tauri::command]

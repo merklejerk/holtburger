@@ -464,7 +464,61 @@ Exit criteria:
 
 ## Phase 5: Reusable Content Asset Runtime
 
+Status: implemented.
+
 Goal: move heavy content jobs behind a reusable runtime with bounded concurrency and in-flight coalescing, without making Tauri own content architecture.
+
+Implemented:
+
+- Added `holtburger_core::content_assets` as the reusable typed runtime boundary.
+- Added `ContentAssetRequest` and `ContentAsset` so runtime jobs return Rust-native content products rather than Tauri/browser DTOs.
+- Added `ContentAssetService` to own reusable synchronous content loading over shared `Arc<ContentRepository>` and `Arc<ContentDecodeCache>`.
+- Added `ContentAssetRuntime` with:
+  - bounded background execution using `spawn_blocking`;
+  - conservative default concurrency of `2`;
+  - in-flight request coalescing keyed by typed `ContentAssetRequest`;
+  - boxed large asset variants to avoid large enum value churn.
+- Made the Tauri `lookup_asset` command asynchronous.
+- Routed content-backed asset ids through the runtime:
+  - `landblock-pack/*`;
+  - `terrain/*`;
+  - `outdoor-static-scene/*`;
+  - `indoor-env-cell/*`;
+  - `environment/*`;
+  - `gfx-obj/*`;
+  - `setup-model/*`.
+- Kept app-local debug appearance manifests outside the shared runtime because they are not static content assets.
+- Moved browser/Tauri JSON projection back into the 3D adapter, so `holtburger-core` stays DTO-agnostic.
+- Removed now-dead synchronous adapter payload-loading paths for terrain, outdoor static scene, env cell, environment, gfx object, and setup model. Test-only helpers remain where tests intentionally inspect lower-level fixture discovery.
+
+Decisions:
+
+- Placed the executor/runtime in `holtburger-core`, not `holtburger-content` and not the Tauri adapter. `holtburger-content` remains synchronous static content discovery/decoding; `holtburger-core` owns reusable client execution policy that future client mode can reuse.
+- Used one bounded worker pool with no priority classes. The current workload needs non-blocking/coalesced execution more than scheduling policy.
+- Kept final IPC serialization at the Tauri command boundary. The runtime returns native Rust products, then the app adapter projects them into the current JSON DTO shape.
+- Kept `lookup_asset` fallbacks for app-local debug manifests as adapter-owned behavior. They do not enter the content runtime because they are not DAT/content records.
+- Added a blocking helper only for local tests/synchronous callers. Production Tauri lookup uses the async runtime path.
+
+Course corrections:
+
+- Async Tauri commands that borrow state must return `Result`, so `lookup_asset` now clones `HostRuntimeService` before awaiting and returns `Result<AssetLookupResponseDto, String>`.
+- Clippy flagged `ContentAsset` as too large; large native products are boxed inside the enum while preserving typed runtime semantics.
+- Phase 5 did not move expensive JSON projection into background jobs. That would either push DTO concerns into `holtburger-core` or require a separate app-local projection executor. Keep this as a measured follow-up after Phase 8 binary transport work clarifies how much JSON projection remains.
+- The direct source route name `indoor-env-cell/*` remains for compatibility with existing frontend ids. Cleanup should rename this to `env-cell/*` once the frontend route migration is scheduled.
+
+Refinements for later phases:
+
+- Add runtime counters for queue wait time, coalesced waiters, worker duration, and per-request result size before tuning concurrency above `2`.
+- Consider a separate app-local projection worker only if profiling shows JSON DTO projection itself still causes a user-visible stall after binary transport.
+- Phase 6 `landblock-summary/*` should be added as a native `ContentAssetRequest` variant first, then projected by the 3D adapter.
+- Phase 8 binary transport should consume the same native runtime results rather than creating a parallel lookup path.
+
+Potential cleanup targets:
+
+- Revisit whether `ContentAssetRuntime::load_blocking` should remain public after tests and non-Tauri diagnostics move to async/native runtime use.
+- Convert the test-only outdoor static scene fixture helpers to typed runtime assertions where possible.
+- Add focused coalescing tests with instrumentation rather than relying only on implementation review.
+- Retire remaining direct `ContentRepository` reads in the Tauri adapter, including runtime residency metadata, once authoritative runtime/world residency uses shared content services.
 
 Scope:
 
@@ -509,6 +563,13 @@ Validation:
 - App still returns per-request frontend wrappers/ids correctly.
 - Startup/navigation load no longer duplicates identical heavy jobs under bursty request patterns.
 - Existing frontend asset-channel coalescing tests remain valid.
+- Completed validation:
+  - `cargo fmt --all`
+  - `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo test --manifest-path crates/holtburger-core/Cargo.toml content_assets`
+  - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml boundary_overview_and_asset_lookup_remain_runtime_asset_split`
+  - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 Exit criteria:
 
@@ -760,6 +821,10 @@ Initial cleanup targets:
 - Revisit `StaticOutdoorSceneAssembler::assemble_landblock_with_source` naming/API shape after Phase 4 decides whether the shared cache is source-reader-owned or injected from a higher runtime.
 - Remove or rename cache/runtime helper names that are pack-specific after they become shared by summaries, gfx/setup routes, diagnostics, or future client mode.
 - Revisit `ContentAssetRuntime` and `LandblockPackAssemblyContext` public surface area after Phase 5 so implementation-only cache/executor details do not leak.
+- Revisit Phase 5's boxed `ContentAsset` variants once binary transport and summary assets clarify whether native products should move as `Arc` handles instead of cloned boxed values.
+- Decide whether app-local JSON projection needs its own bounded background worker after Phase 8; do not move DTO projection into `holtburger-core`.
+- Replace remaining Tauri adapter direct content reads used for residency metadata with a typed shared content/runtime path once world/client-mode residency owns that data.
+- Add runtime instrumentation for coalesced request count, queue wait, worker time, and projection time before tuning worker concurrency.
 - Audit and reduce excessive visibility after each phase. Downgrade `pub`/`pub(crate)` items that only exist for migration wiring or tests once the final ownership boundary is clear.
 - Consolidate Rust and TypeScript landblock id/env-cell enumeration helpers into one canonical helper per side.
 - Remove redundant prepared terrain/interior/static JSON serializers once binary normalization becomes the primary pack path, or move shared projection helpers out of the Tauri adapter if the adapter keeps accumulating serializer weight.
@@ -771,7 +836,8 @@ Initial cleanup targets:
 
 Implemented cleanup slices:
 
-- None yet for this plan. Future implementation phases should append completed cleanup work here rather than burying it in phase notes.
+- Phase 5 removed dead synchronous adapter payload loaders that were superseded by the typed runtime path.
+- Phase 5 removed the redundant adapter-owned decode-cache field; cache ownership now flows through the shared content asset runtime/service.
 
 Decisions:
 
@@ -836,10 +902,6 @@ Run targeted validation after each phase:
 
 ## Open Questions
 
-- Exact initial LRU capacities for each decoded record bucket.
-- Whether Phase 4 should use a new vetted LRU crate or a small internal typed LRU implementation.
-- Where the bounded executor/in-flight coalescing layer should live: `holtburger-content`, `holtburger-core`, or a dedicated runtime module.
-- Whether Phase 5 should initially ship as a synchronous reusable content service before adding async execution.
 - Whether summary terrain should initially reuse full prepared terrain shape or introduce a smaller terrain chunk DTO immediately.
 - Exact frontend policy for requesting `landblock-summary/*` versus `landblock-pack/*` in distance rings.
 - Exact binary command shape and whether dependencies live in the manifest or normalized response metadata.

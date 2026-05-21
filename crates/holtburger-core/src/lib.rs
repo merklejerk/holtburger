@@ -1,5 +1,6 @@
 pub mod character_gen;
 pub mod client;
+pub mod content_assets;
 pub mod errors;
 pub mod soul_emote_motion;
 
@@ -13,4 +14,7 @@ pub use client::types::{
     RetryState,
 };
 pub use client::{ClientRuntime, ClientRuntimeBuilder};
+pub use content_assets::{
+    ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
+};
 pub use soul_emote_motion::motion_command_for_soul_emote_pose;

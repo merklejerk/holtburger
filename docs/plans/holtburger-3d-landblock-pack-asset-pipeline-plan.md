@@ -224,7 +224,42 @@ Exit criteria:
 
 ## Phase 2: Typed Pack Assembly Context
 
+Status: implemented.
+
 Goal: centralize landblock pack assembly source access and remove duplicate work inside one pack build without committing all cache policy up front.
+
+Implemented:
+
+- Added `ContentSourceReader` in `holtburger-content` as the shared typed source access layer.
+- Added pack-local decoded caches for `CellLandblock`, `LandblockInfo`, `EnvCell`, `Environment`, `RegionDesc`, `Scene`, `SetupModel`, and `GfxObj`.
+- Added `LandblockPackAssemblyContext` to own the source reader and pack diagnostics for one full pack build.
+- Changed landblock pack assembly to preserve decoded official roots, then derive facts from those decoded records.
+- Routed env-cell, environment, setup-model, gfx-object, static outdoor, scene, and region-desc reads through the shared reader during pack assembly.
+- Updated `StaticOutdoorSceneAssembler` to accept the shared source reader for pack assembly while keeping the standalone route intact.
+
+Decisions:
+
+- The shared reader returns cloned typed records from pack-local caches. That keeps borrow lifetimes simple for Phase 2 and avoids exposing mutable cache internals to assemblers.
+- Phase 2 deliberately does not add cross-pack LRU policy. The reader is operation-scoped only; Phase 4 can reuse its typed loading methods as the integration point for shared decoded caching.
+- Static outdoor assembly now depends on the shared reader instead of a pack-specific API. That keeps static outdoor usable as an independent debug/source route and avoids making pack assembly the owner of outdoor semantics.
+- Diagnostics remain owned by `LandblockPackAssemblyContext`; the shared reader reports typed `Result`s and does not know pack diagnostic DTOs.
+
+Course corrections:
+
+- Some Phase 3 groundwork landed in Phase 2 because static outdoor generated scenery reads `RegionDesc`, `Scene`, `SetupModel`, and `GfxObj`. Sharing roots without also sharing those generated-scenery reads would have left the most useful source-reader seam split.
+- The implementation currently classifies pack source failures from the contextual load error. This preserves the existing diagnostic shape but should become a cleaner typed source error before shared LRU/runtime work hardens the interface.
+
+Refinements for later phases:
+
+- Phase 3 should now focus on making the static outdoor loaded-input/source-reader contract explicit and tested, rather than inventing another loaded-root path.
+- Phase 4 should plug shared LRU buckets into `ContentSourceReader` instead of adding another parallel cache surface.
+- Phase 10 can revisit cloning cost in `ContentSourceReader` if profiles show large decoded records being cloned enough to matter. `Arc`-backed cached records may be cleaner once cross-pack caching exists.
+
+Potential cleanup targets:
+
+- Replace string/context-based source error classification with a typed source-read/decode error.
+- Remove any remaining direct decode helper duplication once source/debug routes are migrated to `ContentSourceReader`.
+- Revisit whether `LandblockPackAssemblyContext` should remain private or expose a narrow test seam after Phase 4.
 
 Scope:
 
@@ -265,6 +300,11 @@ Validation:
 - Timing spans show fewer repeated source/decode events inside one pack.
 - Unit coverage confirms fact derivation and prepared assembly use the same decoded root records.
 - Landblock pack payloads remain behaviorally equivalent.
+- Completed validation:
+  - `cargo check --manifest-path crates/holtburger-content/Cargo.toml`
+  - `cargo fmt --all`
+  - `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 Exit criteria:
 
@@ -273,6 +313,8 @@ Exit criteria:
 - Decoded official roots remain available to later pack phases without re-reading DAT resources.
 
 ## Phase 3: Static Outdoor Assembly Root Reuse
+
+Status: partially implemented by Phase 2 groundwork.
 
 Goal: remove duplicate landblock root loads between full pack assembly and outdoor static scene assembly.
 
@@ -289,6 +331,16 @@ Implementation notes:
 - Make source ownership explicit: the loaded-input path should receive typed decoded records or references with clear lifetimes.
 - The current private loaded-input implementation should become the single implementation behind both standalone and pack assembly.
 - Keep generated scenery setup/gfx access on the shared reader path so Phase 4 can cache it.
+
+Phase 2 progress:
+
+- Full pack assembly now calls `StaticOutdoorSceneAssembler` through a shared `ContentSourceReader`, so pack-loaded `CellLandblock`, `LandblockInfo`, `RegionDesc`, `Scene`, `SetupModel`, and `GfxObj` records are reused inside the same pack operation.
+- The standalone static outdoor route still instantiates its own reader, preserving the debug/source route without a compatibility shim.
+
+Remaining work:
+
+- Add focused tests or source counters proving pack assembly does not re-read/re-decode roots during static outdoor assembly.
+- Decide whether `assemble_landblock_with_source` is the final explicit contract or whether a more named loaded-input struct would make ownership clearer before Phase 4.
 
 Validation:
 
@@ -613,6 +665,8 @@ Initial cleanup targets:
 - Remove duplicated source helper functions once the shared typed source reader is established.
 - Fix minor code smells found during dry run, including duplicate portal id deduplication and missing-source diagnostic suppression that can collide across setup-model and gfx-object roles.
 - Retire legacy `payloadKind: "bytes"` dead-end assumptions after the real binary command contract exists.
+- Replace Phase 2's contextual/string-based source error classification with typed read/decode errors before the source reader becomes a shared runtime contract.
+- Audit `ContentSourceReader` clone-returning APIs after Phase 4; keep them if they remain cheap enough, or move cached decoded records to `Arc` when shared LRU storage lands.
 - Remove or rename cache/runtime helper names that are pack-specific after they become shared by summaries, gfx/setup routes, diagnostics, or future client mode.
 - Revisit `ContentAssetRuntime` and `LandblockPackAssemblyContext` public surface area after Phase 5 so implementation-only cache/executor details do not leak.
 - Consolidate Rust and TypeScript landblock id/env-cell enumeration helpers into one canonical helper per side.

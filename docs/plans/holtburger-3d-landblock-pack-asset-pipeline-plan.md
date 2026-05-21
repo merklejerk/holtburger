@@ -1,0 +1,676 @@
+# Holtburger 3D Landblock Pack Asset Pipeline Plan
+
+Status: phased implementation plan.
+
+This plan coalesces the landblock-pack optimization investigation into an implementable sequence. It replaces the earlier WIP note shape while preserving the important goals, decisions, profiling findings, and constraints.
+
+## Goals
+
+- Reduce startup and navigation stalls caused by loading landblock-scoped content.
+- Keep reusable static-content loading below `apps/holtburger-3d/src-tauri` so the work serves the current Tauri/browser renderer, future full client mode, Rust-side world/physics simulation, diagnostics, and harnesses.
+- Preserve typed Rust runtime products as the source of truth, then project browser/Tauri DTOs from those products.
+- Avoid duplicating heavy decoded source assets or prepared data across landblocks unless a measured use case justifies it.
+- Reduce JSON payload pressure for full landblock packs, especially large homogeneous numeric arrays.
+- Add cache/runtime infrastructure without letting current browser DTOs define long-term content architecture.
+
+## Non-Goals
+
+- Do not redesign frontend LoD scheduling, Three.js object creation, renderer cache policy, or browser-mode UX except where those surfaces consume new Rust payloads.
+- Do not move browser-specific control or presentation policy into shared Rust crates.
+- Do not binary-pack object-heavy semantic graphs in the first binary phase.
+- Do not treat DAT archive byte caching as the first fix unless new measurements contradict the current profile.
+
+## Current Shape
+
+`landblock-pack/<XXYYFFFF>` is produced by `LandblockPackAssembler` in `holtburger-content` and serialized by the 3D Tauri adapter.
+
+For one pack, Rust may currently:
+
+- read and decode `CellLandblock` from `XXYYFFFF`;
+- read and decode `LandblockInfo` from `XXYYFFFE`;
+- enumerate `LandblockInfo.num_cells` and read/decode every env cell `XXYY0100..`;
+- read/decode unique `Environment` records referenced by env cells;
+- build prepared terrain, interiors, static instances/meshes, spatial items, and a landblock-scoped static BVH;
+- read/decode setup models and gfx objects for static expansion and bounds;
+- invoke `StaticOutdoorSceneAssembler`, which independently loads some of the same roots and generated scenery inputs;
+- serialize source facts plus prepared facts into one large JSON payload.
+
+The repository/archive layer has mounted archive metadata and file handles, but it does not provide a decoded source asset cache. Repeated source access can still pay lookup, byte read, decompression, allocation, and decode costs. OS page cache may reduce physical IO, but application work remains.
+
+## Profiling Findings
+
+Startup scene-load profiling was captured through `apps/holtburger-3d`'s `npm run profile` helper after prebuilding the Rust `profiling` profile. The useful capture avoided earlier `rustc`/LLVM rebuild noise and produced:
+
+- `target/profiles/holtburger-3d-profile.perf.data`: about 63 MiB.
+- `target/profiles/holtburger-3d-profile.perf.script`: about 2.2 MiB.
+
+Whole-process sampled CPU ranking:
+
+1. `WebKitWebProcess`: about 78%.
+   Dominant visible families were JavaScriptCore/WebKit string, allocation, and GC paths such as `WTF::StringImpl::hashSlowCase`, `JSC::JSRopeString::resolveRope`, `JSC::LocalAllocator::allocateSlowCase`, `WTF::String::number`, and heap/deallocation helpers.
+2. WebKit/JSC worker and helper threads:
+   `JITWorker` about 4.6%, `WebCore: Worker` about 3.7%, `MainThread` about 2.6%, and `HeapHelper` about 2.3%.
+3. Rust host JSON projection/serialization cluster:
+   `serde_json::Value` object insertion, `serde_json::Value::serialize`, string formatting, and `serde_json::Value` drop/free paths.
+4. Rust static mesh grouping/sorting:
+   `build_prepared_static_meshes`, `sort_by`, and quicksort over `PreparedStaticMesh`.
+5. Rust polygon render geometry construction:
+   `build_polygon_set_render_geometry` and vertex/polygon lookup/filtering paths.
+6. Rust source decode/decompression:
+   `ZSTD_decompress*` is visible but not dominant.
+7. Rust archive reads:
+   `read_entry_at` / `pread` is visible but small in this capture.
+
+Interpretation:
+
+- The first-order startup scene-load stall appears to be payload shape and JSON materialization across Rust and WebKit/JSC, not raw DAT disk IO.
+- Decode caching remains valuable because it removes repeated source work, supports follow-up asset routes, and is required for future runtime/client mode.
+- Binary transport for large homogeneous arrays is high priority because it attacks Rust `serde_json::Value` churn and browser-side JS object/string/GC churn together.
+- Coarse Rust timing spans are still required because sampled CPU does not fully answer wall-clock phase ordering or command-thread residency.
+
+## Architectural Decisions
+
+- Put reusable content loading, decode caching, worker execution, and landblock assembly below `apps/holtburger-3d/src-tauri`.
+- Treat the Tauri adapter as an adapter: parse frontend asset ids, call reusable content APIs, and serialize/provide browser-facing projections.
+- Keep typed Rust source/static products as the reusable runtime contract. Browser/Tauri DTOs are projections.
+- Keep `landblock-render-local` spatial items/BVH renderer-facing. Do not overload them as physics/collision contracts.
+- Add source/static-world spatial products later when runtime physics, collision, or source-space queries need them.
+- Use a distinct `landblock-summary/*` browser asset for cheap distant landblocks instead of making `landblock-pack/*` conditionally partial.
+- Keep building source facts in summaries, but omit building renderable expansion, setup/gfx expansion, bounds, and BVH from the first summary shape.
+- Use decoded source caching first. Do not add raw-byte caching until measurements show repeated decompression/archive reads remain material after decoded caching.
+- Use pinned caches for singleton/global records and bounded LRU caches for repeatable decoded records. Do not use TTL; DAT content is immutable for the mounted content set.
+- Use a self-contained binary envelope for large prepared arrays. Avoid manifest-plus-buffer-sidecar commands because they create buffer lifetime, cleanup, and abandoned-request coordination problems.
+- Make the first binary transport implementation a `landblock-pack/*` bulk-array phase, not a BVH-only or single-array proof.
+
+## Target Runtime Shape
+
+Longer-term reusable content runtime:
+
+```rust
+ContentAssetRuntime {
+    repository: Arc<ContentRepository>,
+    decode_cache: Arc<ContentDecodeCache>,
+    executor: AssetJobExecutor,
+}
+```
+
+Target APIs:
+
+```rust
+impl ContentAssetRuntime {
+    async fn load_landblock_pack(&self, landblock_id: u32) -> Result<LandblockPack>;
+    async fn load_landblock_summary(&self, landblock_id: u32) -> Result<LandblockSummary>;
+    async fn load_gfx_obj(&self, gfx_obj_id: u32) -> Result<GfxObjAsset>;
+    async fn load_setup_model(&self, setup_model_id: u32) -> Result<SetupModelAsset>;
+}
+```
+
+Operation-scoped pack coordination remains useful:
+
+```rust
+LandblockPackAssemblyContext<'a> {
+    content: &'a ContentRepository,
+    decode_cache: &'a ContentDecodeCache,
+    per_pack: PerPackDerivedCache,
+}
+```
+
+Cache split:
+
+```rust
+ContentDecodeCache {
+    pinned: PinnedContentCache,
+    lru: LruDecodedRecordCache,
+}
+```
+
+Pinned records:
+
+- `RegionDesc`.
+- Future small singleton/global tables.
+
+LRU records:
+
+- `Scene`.
+- `SetupModel`.
+- `GfxObj`.
+- `CellLandblock`.
+- `LandblockInfo`.
+- `EnvCell`.
+- `Environment`.
+
+## Codebase Dry-Run Findings
+
+The current codebase shape changes the implementation sequence in a few important ways:
+
+- `LandblockPackAssembler` currently loads decoded roots, immediately derives facts, and discards the decoded `CellLandblock`, `LandblockInfo`, `EnvCell`, and `Environment` records. Phase 2 must preserve decoded roots in the assembly context, not only cache derived facts.
+- `StaticOutdoorSceneAssembler` already has a private loaded-input implementation seam. Phase 3 should expose that seam cleanly instead of inventing a parallel static outdoor assembly path.
+- Static outdoor assembly and pack assembly both read setup models, gfx objects, region data, scenes, and root landblock records through direct `ContentRepository` helper functions. The cleaner approach is a shared typed source reader/context used by both modules, not pack-only helper methods that static outdoor cannot consume.
+- `AssetLookupGateway` already coalesces duplicate frontend asset requests by `assetId` inside one gateway instance. Runtime coalescing is still useful for future client mode, cross-route reuse, and non-frontend callers, but it is not the first duplicate-request fix.
+- The existing Tauri contract cannot carry binary payloads despite having a `bytes` payload-kind enum value: `AssetLookupResponseDto.payload` is still `serde_json::Value`, and frontend dependency derivation ignores non-JSON payloads. Phase 8 requires a real binary command/normalization path plus dependency metadata that remains inspectable.
+- `landblock-summary/*` is not Rust-only. It needs Rust product/projection work and frontend planner/cache/render policy work before it reduces far-ring full-pack pressure.
+- Proven dungeon outdoor-work skipping becomes easy after Phase 2/3 root loading is clean. It should move earlier than the broader summary/binary contract work.
+
+Hard blockers identified by the dry run:
+
+- Choose the `ContentDecodeCache` implementation strategy before Phase 4: add a vetted LRU dependency through the package tool, or implement small typed LRU buckets with standard-library synchronization. Avoid a generic type-erased `Any` cache unless a concrete need appears.
+- Decide where the async/bounded executor lives before Phase 5. Do not force `tokio` into `holtburger-content` as an accident of the current Tauri app; a synchronous reusable content service plus an executor wrapper in `holtburger-core` or a dedicated runtime layer may be cleaner.
+- Define the binary response contract before Phase 8 implementation. The current `lookup_asset` JSON DTO is not a viable container for binary landblock packs.
+- Preserve frontend dependency scheduling when binary packs arrive. Dependencies currently come from JSON payload inspection, so the binary envelope must expose dependency metadata in the manifest or normalized response.
+
+## Phase 0: Profiling Harness And Baseline
+
+Status: partially complete.
+
+Goal: make startup/load profiling repeatable and record the baseline that motivated the plan.
+
+Completed:
+
+- Added `apps/holtburger-3d` script `npm run profile`.
+- Added `apps/holtburger-3d/scripts/profile.sh`.
+- The script prebuilds `src-tauri` with Cargo profile `profiling`, records with `perf` at default `49 Hz`, and emits both `.perf.data` and `.perf.script`.
+- Captured an initial useful profile showing WebKit/JSC payload materialization and Rust JSON projection as the dominant bottleneck family.
+
+Remaining work:
+
+- Add a short README or inline comment in the script if future users need common `perf_event_paranoid` troubleshooting.
+- Consider adding optional script knobs for output name, duration, and whether to skip `.perf.script` generation for very large captures.
+
+Validation:
+
+- `bash -n apps/holtburger-3d/scripts/profile.sh`.
+- `npm run --prefix apps/holtburger-3d profile` produces `target/profiles/holtburger-3d-profile.perf.data` and `.perf.script`.
+
+## Phase 1: Coarse Rust Timing Spans
+
+Status: optional support phase. Do not block implementation on this phase.
+
+Goal: establish wall-clock phase timings before making deeper scheduling and micro-optimization decisions.
+
+Scope:
+
+- Add low-overhead timing spans around the synchronous Rust asset lookup path.
+- Capture at least:
+  - `asset_lookup` total;
+  - request parse / route dispatch;
+  - landblock pack assembly total;
+  - root record load/decode;
+  - env cell and environment load/decode;
+  - prepared terrain;
+  - prepared interiors;
+  - prepared static instances and meshes;
+  - spatial items and BVH;
+  - browser DTO projection;
+  - JSON serialization / response construction;
+  - Tauri response handoff boundary where observable.
+- Keep diagnostics opt-in or low-noise. Do not write tests for debug-only logging.
+
+Implementation notes:
+
+- Prefer scoped timing helpers in `holtburger-content` or the Tauri adapter depending on the phase being measured.
+- Reusable content timing should not depend on frontend DTO types.
+- Report aggregate timing in verbose diagnostics or a debug-only host overview field if that already fits local patterns.
+
+Validation:
+
+- Capture startup scene load with timing enabled.
+- Confirm timings explain where wall-clock stall is spent.
+- Compare timing shape with the existing `perf` profile.
+
+Exit criteria:
+
+- We can rank wall-clock phases for a representative startup scene load.
+- The next phases can be prioritized with data, not only sampled CPU.
+
+## Phase 2: Typed Pack Assembly Context
+
+Goal: centralize landblock pack assembly source access and remove duplicate work inside one pack build without committing all cache policy up front.
+
+Scope:
+
+- Introduce `LandblockPackAssemblyContext` in `holtburger-content`.
+- Introduce or extract a shared typed source reader used by both pack assembly and static outdoor assembly.
+- Route pack source reads through the context/source reader.
+- Preserve loaded decoded roots before deriving facts:
+  - `CellLandblock`;
+  - `LandblockInfo`;
+  - `EnvCell`;
+  - `Environment`.
+- Cache decoded source records within a single pack build:
+  - `CellLandblock`;
+  - `LandblockInfo`;
+  - `EnvCell`;
+  - `Environment`;
+  - `RegionDesc`;
+  - `Scene`;
+  - `SetupModel`;
+  - `GfxObj`.
+- Add pack-local derived caches where useful:
+  - selected setup placements;
+  - gfx render bounds;
+  - repeated generated-scenery inputs.
+- Keep browser DTO projection out of the context.
+
+Implementation notes:
+
+- Cache decoded source records and reusable derived facts, not serialized DTO fragments.
+- Facts should be derived from context-held decoded records so later phases can reuse official roots without reloading them.
+- Preserve diagnostics that distinguish missing/corrupt source records from intentionally skipped products.
+- Keep public API narrow; avoid exposing cache internals just because tests are convenient.
+- Do not make static outdoor call pack-specific APIs. Shared source access should sit below both assemblers.
+
+Validation:
+
+- Existing Rust checks/tests for `holtburger-content` and `apps/holtburger-3d/src-tauri`.
+- Timing spans show fewer repeated source/decode events inside one pack.
+- Unit coverage confirms fact derivation and prepared assembly use the same decoded root records.
+- Landblock pack payloads remain behaviorally equivalent.
+
+Exit criteria:
+
+- Pack assembly uses one source access path.
+- Obvious repeated reads/decodes inside a single pack are gone or measured.
+- Decoded official roots remain available to later pack phases without re-reading DAT resources.
+
+## Phase 3: Static Outdoor Assembly Root Reuse
+
+Goal: remove duplicate landblock root loads between full pack assembly and outdoor static scene assembly.
+
+Scope:
+
+- Add a loaded-input path to `StaticOutdoorSceneAssembler`.
+- Let `LandblockPackAssembler` pass already-decoded `CellLandblock` and `LandblockInfo`.
+- Reuse loaded or cached `RegionDesc` through the shared source reader.
+- Keep the standalone static outdoor scene/debug route available through the same lower-level implementation.
+
+Implementation notes:
+
+- Avoid compatibility shims that leave two competing assembly paths.
+- Make source ownership explicit: the loaded-input path should receive typed decoded records or references with clear lifetimes.
+- The current private loaded-input implementation should become the single implementation behind both standalone and pack assembly.
+- Keep generated scenery setup/gfx access on the shared reader path so Phase 4 can cache it.
+
+Validation:
+
+- Timing/source counters show root records are not decoded twice for one full pack.
+- Existing static outdoor scene behavior remains intact.
+- Static outdoor route and full pack route produce equivalent outdoor facts for the same landblock roots.
+
+Exit criteria:
+
+- `CellLandblock`/`LandblockInfo` root decode duplication is removed for pack builds.
+
+## Phase 4: Shared Content Decode Cache
+
+Goal: preserve hot decoded source records across pack builds and follow-up asset lookups.
+
+Scope:
+
+- Introduce `ContentDecodeCache` below the Tauri adapter, likely in `holtburger-content`.
+- Share it between landblock pack assembly and source/asset routes that decode DAT records:
+  - `landblock-pack/*`;
+  - future `landblock-summary/*`;
+  - `gfx-obj/*`;
+  - `setup-model/*`;
+  - source/debug routes such as `indoor-env-cell/*` and `environment/*` where clean.
+- Add pinned `RegionDesc`.
+- Add bounded LRU buckets for `Scene`, `SetupModel`, `GfxObj`, `CellLandblock`, `LandblockInfo`, `EnvCell`, and `Environment`.
+
+Implementation notes:
+
+- Use size/count-bounded LRU. Do not use TTL.
+- Pick conservative initial capacities and adjust from measurements.
+- The cache returns decoded records, not DTOs.
+- Prefer typed cache buckets for each decoded record family. Avoid a type-erased generic cache unless typed buckets become demonstrably awkward.
+- If adding an LRU dependency, add it through the package tool rather than inventing a version number. If dependency churn is not worth it, implement a small typed `Mutex<HashMap + VecDeque>` cache with explicit capacity limits.
+- Avoid raw-byte caching in this phase unless timing proves repeated decompression remains dominant.
+
+Validation:
+
+- Decode counters show follow-up `gfx-obj/*` and `setup-model/*` lookups can reuse records decoded during landblock pack construction.
+- Startup/navigation timings improve or at least duplicate decode counts fall.
+- No unbounded growth under movement across many landblocks.
+
+Exit criteria:
+
+- Shared decoded source cache exists and is used by at least full pack, gfx object, and setup model paths.
+
+## Phase 5: Reusable Content Asset Runtime
+
+Goal: move heavy content jobs behind a reusable runtime with bounded concurrency and in-flight coalescing, without making Tauri own content architecture.
+
+Scope:
+
+- Introduce a reusable content asset service/runtime facade.
+- Own/share:
+  - `Arc<ContentRepository>`;
+  - `Arc<ContentDecodeCache>`;
+  - in-flight job map keyed by typed content request, where the chosen execution model supports it.
+- Route heavy routes through it:
+  - `landblock-pack/*`;
+  - `gfx-obj/*`;
+  - `setup-model/*`;
+  - future `landblock-summary/*`.
+- Coalesce duplicate in-flight requests by typed content key, not frontend request id.
+
+Implementation notes:
+
+- Split this phase if needed:
+  - first add a synchronous reusable content asset service with shared cache and typed request keys;
+  - then add a bounded executor/in-flight coalescing layer once crate placement is settled.
+- Do not make Tauri own the core content runtime. The Tauri adapter may instantiate and call it, but reusable loading semantics must serve future client mode and diagnostics.
+- Do not force async/Tokio into `holtburger-content` just to satisfy the current app. If an async executor is needed, place it deliberately in `holtburger-core`, a dedicated runtime module, or another boundary that matches future client-mode ownership.
+- Start with conservative concurrency, likely `2`.
+- Tune to `4` only if measurements show scaling without hurting responsiveness.
+- Leave cancellation/stale-work preemption as follow-up unless measurements show stale work dominates.
+- Tauri adapter should instantiate/use the runtime but not define cache/executor semantics.
+- Frontend `AssetLookupGateway` already coalesces duplicate requests by `assetId` within one gateway instance. Treat runtime coalescing as cross-route/future-client infrastructure, not as the only duplicate frontend request fix.
+
+Validation:
+
+- Concurrent identical asset requests share one producer.
+- App still returns per-request frontend wrappers/ids correctly.
+- Startup/navigation load no longer duplicates identical heavy jobs under bursty request patterns.
+- Existing frontend asset-channel coalescing tests remain valid.
+
+Exit criteria:
+
+- Heavy content loading is available through reusable runtime APIs.
+- Tauri command boundary is narrower and adapter-like.
+
+## Phase 6: Landblock Summary Asset
+
+Goal: avoid full pack assembly for distant outdoor LoD landblocks.
+
+Browser asset id:
+
+```text
+landblock-summary/<XXYYFFFF>
+```
+
+Scope:
+
+- Add a typed Rust static landblock summary product.
+- Add browser/Tauri projection for `landblock-summary/*`.
+- Include cheap root-record facts:
+  - `CellLandblockFact`;
+  - prepared terrain mesh or terrain chunk payload;
+  - `LandblockInfoFact`;
+  - outdoor/dungeon classification;
+  - explicit object references/placements from `LandblockInfo.objects`;
+  - building references, placements, `num_leaves`, and portal/link metadata from `LandblockInfo.buildings`;
+  - cheap root diagnostics.
+- Exclude:
+  - env cell enumeration/decode;
+  - `Environment` records;
+  - prepared structured interiors;
+  - indoor static objects;
+  - generated scenery initially;
+  - static mesh part expansion;
+  - gfx/setup bounds;
+  - full spatial items and BVH.
+
+Implementation notes:
+
+- A full pack can satisfy summary needs via shared terrain/building-fact extraction helpers.
+- A cached summary can upgrade to a full pack when the landblock moves into an interactive ring.
+- Do not call it `terrain-landblock/*`; the asset is a cheap official-root summary, not a renderer slice.
+- This phase includes frontend scheduler/cache/render-policy integration. The Rust route alone will not reduce default scene-load pressure until the planner requests summaries for distant landblocks.
+
+Validation:
+
+- Far terrain ring can request summaries without requiring full packs.
+- Full pack and summary agree on root facts and terrain output.
+- Timing shows fewer full pack builds during default outdoor scene load once frontend policy uses summaries.
+
+Exit criteria:
+
+- Summary route exists and can be consumed by the frontend for distant outdoor terrain/building facts.
+
+## Phase 7: Dungeon Outdoor-Work Skip
+
+Goal: avoid outdoor generated-scene/static work for root facts that prove a landblock is a dungeon.
+
+Scope:
+
+- Classify from loaded root facts.
+- Skip outdoor static scene assembly only when classification is proven dungeon.
+- Preserve conservative behavior for missing, corrupt, or ambiguous roots.
+- Implement after Phase 2/3 have made decoded roots and static outdoor dispatch explicit. This phase does not need to wait for summary or binary transport work.
+
+Current safe dungeon rule:
+
+- `CellLandblockFact.all_heights_zero`.
+- `LandblockInfo.numEnvCells > 0`.
+- `LandblockInfo.buildingCount == 0`.
+
+Implementation notes:
+
+- Record the decision in diagnostics so absent outdoor facts are intentional.
+- Do not infer dungeon from asset name or request path.
+
+Validation:
+
+- Dungeon packs no longer spend time in outdoor generated-scenery assembly.
+- Outdoor packs remain unchanged.
+- Ambiguous or corrupt roots do not silently skip outdoor work.
+
+Exit criteria:
+
+- Proven dungeon packs avoid outdoor-only work.
+
+## Phase 8: Binary Landblock Pack Bulk Arrays
+
+Goal: remove the dominant JSON materialization cost for large prepared numeric arrays in full landblock packs.
+
+Scope:
+
+- Add a self-contained binary envelope for high-volume `landblock-pack/*` prepared arrays:
+
+```text
+[fixed header]
+[manifest JSON bytes]
+[binary sections]
+```
+
+- Fixed header includes:
+  - magic/version;
+  - manifest byte length;
+  - total byte length or equivalent validation data;
+  - alignment/padding convention for typed-array views.
+- Manifest JSON is Zod-validatable after UTF-8 decode and describes each section by:
+  - semantic role;
+  - scalar type;
+  - component count;
+  - byte offset;
+  - element count;
+  - byte length;
+  - ordering/identity linkage where needed.
+- Add a binary response command, likely `lookup_asset_binary`, returning `tauri::ipc::Response`.
+- Normalize JSON and binary transports behind one frontend `lookupAsset(...)` abstraction.
+- Keep dependency metadata available to the frontend scheduler. Either include dependencies in the manifest or normalize them into the same app-level response shape before dependency derivation runs.
+
+First binary sections:
+
+- `prepared.terrainMesh.vertices`.
+- `prepared.terrainMesh.triangles`.
+- `prepared.interiorCells[].renderGeometry.positions`.
+- `prepared.interiorCells[].renderGeometry.normals`.
+- `prepared.interiorCells[].renderGeometry.uvs`.
+- `prepared.interiorCells[].renderGeometry.triangles`, if the fixed fields encode cleanly.
+- `prepared.interiorCells[].portalApertures[].points`.
+- `prepared.spatialItems[].bounds`, if identity/order remains clear.
+- `prepared.staticLandblockBvh.nodes`.
+
+Remain JSON in the first pass:
+
+- static instances and static mesh object graphs;
+- source facts;
+- diagnostics;
+- dependency lists;
+- ids and strings;
+- nullable owner/source fields;
+- placement objects;
+- variant-heavy metadata.
+
+Implementation notes:
+
+- Binary transport is an adapter projection over typed Rust products, not the native runtime representation.
+- Keep normal JSON `lookup_asset` for small/debug/control assets.
+- Avoid broad BSON-like replacement; the problem is dense numeric arrays, not every object graph.
+- Do not rely on `AssetPayloadKindDto::Bytes` alone. The current response DTO still stores `payload` as JSON, so the binary path needs an explicit command/contract and frontend decoder.
+- The asset worker should receive a normalized prepared payload shape so renderer code does not branch on transport details.
+
+Validation:
+
+- Compare payload byte size, Rust projection/serialization timing, WebKit/JSC CPU profile, and startup/navigation stall before/after.
+- Frontend validates manifest ranges/alignment before constructing typed views.
+- Existing renderer behavior remains equivalent.
+- Asset dependency scheduling remains correct for binary landblock packs.
+
+Exit criteria:
+
+- Full landblock packs can carry bulk prepared numeric arrays through binary sections.
+- Profiling shows reduced Rust JSON work and reduced WebKit/JSC materialization work.
+
+## Phase 9: DTO Trimming And Contract Tightening
+
+Goal: remove large or legacy browser DTO fields and optional-field ambiguity after binary and summary paths clarify real contracts.
+
+Scope:
+
+- Inventory frontend consumption of `sourceFacts`.
+- Current known runtime direct use: `sourceFacts.outdoor.buildings`.
+- Terrain, interiors, static rendering, and spatial work consume `prepared.*`.
+- Trim or split browser DTO fields that are not runtime-consumed and are not needed for active diagnostics.
+- Tighten DTO optionality where fields are required in practice.
+
+Implementation notes:
+
+- Do not remove useful typed Rust source facts just because the current frontend does not serialize/consume them.
+- Distinguish runtime content model from browser DTO projection.
+- Keep debug/source routes explicit instead of carrying raw-ish fields in every full pack.
+
+Validation:
+
+- TypeScript contracts get simpler, not more nullable.
+- Renderer and debug panels continue to receive required data.
+- Payload size drops or remains stable after binary migration.
+
+Exit criteria:
+
+- Browser DTOs represent actual browser needs instead of historical migration shape.
+
+## Phase 10: Rust-Side Assembly Hotspot Follow-Up
+
+Goal: optimize secondary Rust hotspots only after payload and cache/runtime phases settle.
+
+Candidate hotspots:
+
+- `build_prepared_static_meshes` grouping/sorting.
+- `build_polygon_set_render_geometry`.
+- Residual `ZSTD_decompress*` or `read_entry_at` if decoded cache does not remove enough repeated source work.
+
+Scope:
+
+- Use Phase 1 timing spans plus updated `perf` captures.
+- Optimize only hotspots that remain consequential after binary transport and decode caching.
+
+Possible directions:
+
+- Reduce repeated sorting or sort large values by lighter keys/indices.
+- Avoid copying large `PreparedStaticMesh` values during ordering.
+- Precompute or cache polygon vertex lookup facts inside the assembly context.
+- Revisit raw-byte caching only if decompression/archive reads still matter.
+
+Validation:
+
+- Before/after timings for the specific hotspot.
+- Existing pack payload equivalence.
+- No broad refactor without measured payoff.
+
+Exit criteria:
+
+- Secondary Rust hotspots are either improved or explicitly deprioritized with measurements.
+
+## Phase 11: Cleanup And Consolidation
+
+Goal: remove legacy smells created during migration and leave one coherent content-loading path.
+
+Targets to collect as phases land:
+
+- Remove legacy landblock/env-cell discovery paths that are no longer needed after root-based pack/summary loading.
+- Remove compatibility shims or duplicate route helpers introduced only for transition.
+- Consolidate naming around `landblock`, `landblock-pack`, and `landblock-summary`; avoid indoor/outdoor assumptions in asset ids unless the payload is actually classification-specific.
+- Tighten contracts/interfaces where optional fields are not optional in practice.
+- Remove stale diagnostics that the renderer can compute locally.
+- Collapse duplicated fixture/build helper logic once binary and JSON paths share normalized frontend assets.
+- Delete dead code after frontend uses summary/binary/runtime paths.
+- Remove duplicated source helper functions once the shared typed source reader is established.
+- Fix minor code smells found during dry run, including duplicate portal id deduplication and missing-source diagnostic suppression that can collide across setup-model and gfx-object roles.
+- Retire legacy `payloadKind: "bytes"` dead-end assumptions after the real binary command contract exists.
+
+Validation:
+
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`.
+- Relevant `holtburger-content` tests/checks.
+- `npm run --prefix apps/holtburger-3d check`.
+- Targeted frontend tests for asset channel, landblock pack preparation, and static renderables.
+
+## Suggested Phase Order
+
+1. Phase 2: Typed pack assembly context.
+2. Phase 3: Static outdoor root reuse.
+3. Phase 7: Dungeon outdoor-work skip.
+4. Phase 4: Shared content decode cache.
+5. Phase 5: Reusable content asset runtime with coalescing.
+6. Phase 8: Binary landblock pack bulk arrays.
+7. Phase 6: Landblock summary asset.
+8. Phase 9: DTO trimming and contract tightening.
+9. Phase 10: Rust-side assembly hotspot follow-up.
+10. Phase 11: Cleanup and consolidation.
+
+Phase 1 can be added opportunistically whenever a phase needs wall-clock clarity, but it is not the starting point.
+
+Rationale for this order:
+
+- Assembly context and root reuse reduce local waste and make shared cache integration cleaner.
+- Dungeon skipping is small and becomes clean immediately after root/classification flow is explicit.
+- Shared cache and runtime/coalescing prevent multithreading from multiplying duplicate decode work.
+- Binary transport is high priority from profiling, but it benefits from typed runtime/projection boundaries being clearer first.
+- Summary assets reduce far-ring full-pack pressure after the full-pack path is better structured.
+- Summary assets are scheduled after binary/cache/runtime because they require frontend planner policy, not just a Rust route.
+- Existing `perf` data is strong enough to justify starting with assembly/cache structure. Add Phase 1 timing only when a later decision needs wall-clock evidence.
+
+## Validation Matrix
+
+Run targeted validation after each phase:
+
+- Rust compile/check:
+  - `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
+- Frontend:
+  - `npm run --prefix apps/holtburger-3d check`
+  - targeted `vitest` suites for asset channel and renderer preparation.
+- Profiling:
+  - `npm run --prefix apps/holtburger-3d profile`
+  - compare `.perf.script` whole-process and Rust-host-only reports.
+- Runtime smoke:
+  - startup outdoor scene load;
+  - navigation far enough to load new landblocks;
+  - dense outdoor town;
+  - dungeon with many env cells;
+  - outdoor building/interior transition.
+
+## Open Questions
+
+- Exact initial LRU capacities for each decoded record bucket.
+- Whether Phase 4 should use a new vetted LRU crate or a small internal typed LRU implementation.
+- Where the bounded executor/in-flight coalescing layer should live: `holtburger-content`, `holtburger-core`, or a dedicated runtime module.
+- Whether Phase 5 should initially ship as a synchronous reusable content service before adding async execution.
+- Whether summary terrain should initially reuse full prepared terrain shape or introduce a smaller terrain chunk DTO immediately.
+- Exact frontend policy for requesting `landblock-summary/*` versus `landblock-pack/*` in distance rings.
+- Exact binary command shape and whether dependencies live in the manifest or normalized response metadata.
+- Whether spatial item bounds belong in the first binary phase if preserving item identity/order makes the manifest too awkward.
+- Whether static mesh object graphs become large enough to justify a later binary or table-oriented representation.
+- Whether cancellation/stale-work preemption is needed once runtime coalescing and summaries are in place.

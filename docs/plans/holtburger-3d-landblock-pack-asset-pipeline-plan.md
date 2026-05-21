@@ -153,7 +153,7 @@ The current codebase shape changes the implementation sequence in a few importan
 
 Hard blockers identified by the dry run:
 
-- Choose the `ContentDecodeCache` implementation strategy before Phase 4: add a vetted LRU dependency through the package tool, or implement small typed LRU buckets with standard-library synchronization. Avoid a generic type-erased `Any` cache unless a concrete need appears.
+- Phase 4 resolved the `ContentDecodeCache` implementation strategy as small typed LRU buckets with standard-library synchronization. Avoid a generic type-erased `Any` cache unless a concrete need appears.
 - Decide where the async/bounded executor lives before Phase 5. Do not force `tokio` into `holtburger-content` as an accident of the current Tauri app; a synchronous reusable content service plus an executor wrapper in `holtburger-core` or a dedicated runtime layer may be cleaner.
 - Define the binary response contract before Phase 8 implementation. The current `lookup_asset` JSON DTO is not a viable container for binary landblock packs.
 - Preserve frontend dependency scheduling when binary packs arrive. Dependencies currently come from JSON payload inspection, so the binary envelope must expose dependency metadata in the manifest or normalized response.
@@ -241,7 +241,7 @@ Decisions:
 
 - The shared reader returns cloned typed records from pack-local caches. That keeps borrow lifetimes simple for Phase 2 and avoids exposing mutable cache internals to assemblers.
 - Phase 2 deliberately does not add cross-pack LRU policy. The reader is operation-scoped only; Phase 4 can reuse its typed loading methods as the integration point for shared decoded caching.
-- Static outdoor assembly now depends on the shared reader instead of a pack-specific API. That keeps static outdoor usable as an independent debug/source route and avoids making pack assembly the owner of outdoor semantics.
+- Static outdoor assembly now depends on the shared reader instead of a pack-specific API. That keeps static outdoor usable as an independent direct source route and avoids making pack assembly the owner of outdoor semantics.
 - Diagnostics remain owned by `LandblockPackAssemblyContext`; the shared reader reports typed `Result`s and does not know pack diagnostic DTOs.
 
 Course corrections:
@@ -258,7 +258,7 @@ Refinements for later phases:
 Potential cleanup targets:
 
 - Replace string/context-based source error classification with a typed source-read/decode error.
-- Remove any remaining direct decode helper duplication once source/debug routes are migrated to `ContentSourceReader`.
+- Remove any remaining direct decode helper duplication once direct source routes are migrated to `ContentSourceReader`.
 - Revisit whether `LandblockPackAssemblyContext` should remain private or expose a narrow test seam after Phase 4.
 
 Scope:
@@ -363,7 +363,7 @@ Implementation notes:
 Progress:
 
 - Full pack assembly now calls `StaticOutdoorSceneAssembler` through a shared `ContentSourceReader`, so pack-loaded `CellLandblock`, `LandblockInfo`, `RegionDesc`, `Scene`, `SetupModel`, and `GfxObj` records are reused inside the same pack operation.
-- The standalone static outdoor route still instantiates its own reader, preserving the debug/source route without a compatibility shim.
+- The standalone static outdoor route still instantiates its own reader, preserving the direct source route without a compatibility shim.
 - `pack_static_outdoor_assembly_reuses_loaded_landblock_roots` proves pack assembly reads `XXYYFFFF` and `XXYYFFFE` once even though static outdoor assembly also asks for those roots.
 
 Validation:
@@ -384,7 +384,46 @@ Exit criteria:
 
 ## Phase 4: Shared Content Decode Cache
 
+Status: implemented.
+
 Goal: preserve hot decoded source records across pack builds and follow-up asset lookups.
+
+Implemented:
+
+- Added `ContentDecodeCache` in `holtburger-content`.
+- Added a pinned cache for `RegionDesc`.
+- Added bounded typed LRU buckets for `CellLandblock`, `LandblockInfo`, `EnvCell`, `Environment`, `Scene`, `SetupModel`, and `GfxObj`.
+- Wired `ContentSourceReader` to use an optional shared decode cache while keeping its operation-local cache as the first read path.
+- Added `LandblockPackAssembler::assemble_landblock_with_cache` so callers can opt into shared decoded caching without breaking existing direct callers.
+- Added one shared `Arc<ContentDecodeCache>` to the Tauri host adapter.
+- Routed Tauri `landblock-pack/*`, `gfx-obj/*`, and `setup-model/*` lookups through the shared cache.
+- Added cache tests for decoded-record reuse and LRU eviction.
+
+Decisions:
+
+- Used an internal typed `Mutex<HashMap + VecDeque>` LRU instead of adding a dependency. The implementation is small, explicit, and avoids inventing dependency versions during this phase.
+- Kept buckets typed instead of using a type-erased `Any` cache. This keeps call sites straightforward and avoids downcast failure modes.
+- Kept `ContentSourceReader` operation-local caching even when a shared cache is present. The operation-local map prevents repeated cloning/locking inside a single pack build, while the shared cache preserves decoded records across requests.
+- Kept cache values clone-returning for now. This preserves simple lifetimes at the cost of possible clone overhead that should be measured before switching to `Arc` records.
+- Did not add raw byte caching. Current profiling still points at JSON/materialization and repeated decoded products before raw archive reads.
+
+Course corrections:
+
+- The cache integration required a narrow `ContentRepository::source_description()` accessor so Tauri cached `gfx-obj/*` and `setup-model/*` projections can keep provenance details without re-reading the raw resource.
+- The first shared-cache integration covers full packs, gfx objects, and setup models. Other direct source routes still decode directly and should be migrated only where useful instead of forcing every route through the cache in one slice.
+
+Refinements for later phases:
+
+- Phase 5 should reuse the same `Arc<ContentRepository>` plus `Arc<ContentDecodeCache>` pair instead of creating another cache/runtime ownership model.
+- Cache capacity tuning should be based on movement/startup profiles. Initial capacities are intentionally conservative but not evidence-backed.
+- Add lightweight cache hit/miss counters if Phase 5 or Phase 10 needs proof of reuse under real navigation workloads.
+- Revisit whether `ContentSourceReader::with_decode_cache` should remain `pub(crate)` once reusable runtime APIs are introduced.
+
+Potential cleanup targets:
+
+- Deduplicate in-memory counting-source test fixtures if more cache/runtime tests need them.
+- Replace string/context-based read-vs-decode error classification with typed source errors before cache/runtime APIs harden.
+- Consider extracting the simple LRU into a narrower utility module if more caches use it; keep it private while only `ContentDecodeCache` needs it.
 
 Scope:
 
@@ -394,7 +433,7 @@ Scope:
   - future `landblock-summary/*`;
   - `gfx-obj/*`;
   - `setup-model/*`;
-  - source/debug routes such as `indoor-env-cell/*` and `environment/*` where clean.
+  - direct source routes such as `indoor-env-cell/*` and `environment/*` where clean.
 - Add pinned `RegionDesc`.
 - Add bounded LRU buckets for `Scene`, `SetupModel`, `GfxObj`, `CellLandblock`, `LandblockInfo`, `EnvCell`, and `Environment`.
 
@@ -412,6 +451,12 @@ Validation:
 - Decode counters show follow-up `gfx-obj/*` and `setup-model/*` lookups can reuse records decoded during landblock pack construction.
 - Startup/navigation timings improve or at least duplicate decode counts fall.
 - No unbounded growth under movement across many landblocks.
+- Completed validation:
+  - `cargo fmt --all`
+  - `cargo test --manifest-path crates/holtburger-content/Cargo.toml decode_cache`
+  - `cargo test --manifest-path crates/holtburger-content/Cargo.toml`
+  - `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
 
 Exit criteria:
 
@@ -631,7 +676,7 @@ Implementation notes:
 
 - Do not remove useful typed Rust source facts just because the current frontend does not serialize/consume them.
 - Distinguish runtime content model from browser DTO projection.
-- Keep debug/source routes explicit instead of carrying raw-ish fields in every full pack.
+- Keep direct source routes explicit instead of carrying raw-ish fields in every full pack.
 
 Validation:
 
@@ -684,7 +729,8 @@ Goal: remove legacy smells created during migration and leave one coherent conte
 Initial cleanup targets:
 
 - Remove legacy landblock/env-cell discovery paths that are no longer needed after root-based pack/summary loading.
-- Keep lower-level source/debug routes explicit if they remain useful, but stop presenting them as normal scene-loading concepts.
+- Keep lower-level direct source routes explicit if they remain useful, but stop presenting them as normal scene-loading concepts.
+- Rename the direct `indoor-env-cell/*` source route to `env-cell/*` once normal scene loading no longer depends on the migration-era name. Dungeon env cells and outdoor-linked interior env cells are the same official env-cell record family; `indoor` is app-era terminology, not an official asset distinction.
 - Remove compatibility shims or duplicate route helpers introduced only for transition.
 - Consolidate naming around `landblock`, `landblock-pack`, and `landblock-summary`; avoid indoor/outdoor assumptions in asset ids unless the payload is actually classification-specific.
 - Tighten contracts/interfaces where optional fields are not optional in practice.
@@ -697,6 +743,8 @@ Initial cleanup targets:
 - Retire legacy `payloadKind: "bytes"` dead-end assumptions after the real binary command contract exists.
 - Replace Phase 2's contextual/string-based source error classification with typed read/decode errors before the source reader becomes a shared runtime contract.
 - Audit `ContentSourceReader` clone-returning APIs after Phase 4; keep them if they remain cheap enough, or move cached decoded records to `Arc` when shared LRU storage lands.
+- Tune `ContentDecodeCache` bucket capacities from measured navigation/startup workloads instead of keeping Phase 4's conservative guesses forever.
+- Add cache hit/miss counters if profiling cannot otherwise prove that shared decoded caching is paying for itself.
 - Revisit `StaticOutdoorSceneAssembler::assemble_landblock_with_source` naming/API shape after Phase 4 decides whether the shared cache is source-reader-owned or injected from a higher runtime.
 - Remove or rename cache/runtime helper names that are pack-specific after they become shared by summaries, gfx/setup routes, diagnostics, or future client mode.
 - Revisit `ContentAssetRuntime` and `LandblockPackAssemblyContext` public surface area after Phase 5 so implementation-only cache/executor details do not leak.

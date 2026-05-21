@@ -8,7 +8,7 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
 use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
-use crate::{ContentRepository, normalize_landblock_id};
+use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
 
 pub const LANDBLOCK_GRID_SIZE: usize = 9;
 pub const LANDBLOCK_TILE_SIZE: f32 = 24.0;
@@ -367,6 +367,16 @@ impl<'a> LandblockPackAssemblyContext<'a> {
         }
     }
 
+    fn with_decode_cache(
+        content: &'a ContentRepository,
+        decode_cache: &'a ContentDecodeCache,
+    ) -> Self {
+        Self {
+            source: ContentSourceReader::with_decode_cache(content, decode_cache),
+            diagnostics: LandblockPackSourceDiagnostics::default(),
+        }
+    }
+
     fn load_cell_landblock(&mut self, landblock_id: u32) -> Option<CellLandblock> {
         match self.source.cell_landblock(landblock_id) {
             Ok(landblock) => {
@@ -537,9 +547,31 @@ impl LandblockPackAssembler {
         content: &ContentRepository,
         raw_landblock_id: u32,
     ) -> LandblockPack {
+        self.assemble_landblock_with_context(
+            LandblockPackAssemblyContext::new(content),
+            raw_landblock_id,
+        )
+    }
+
+    pub fn assemble_landblock_with_cache(
+        &self,
+        content: &ContentRepository,
+        decode_cache: &ContentDecodeCache,
+        raw_landblock_id: u32,
+    ) -> LandblockPack {
+        self.assemble_landblock_with_context(
+            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
+            raw_landblock_id,
+        )
+    }
+
+    fn assemble_landblock_with_context(
+        &self,
+        mut context: LandblockPackAssemblyContext<'_>,
+        raw_landblock_id: u32,
+    ) -> LandblockPack {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
         let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let mut context = LandblockPackAssemblyContext::new(content);
         let cell_landblock_source = context.load_cell_landblock(landblock_id);
         let landblock_info_source = context.load_landblock_info(landblock_id);
         let cell_landblock = cell_landblock_source

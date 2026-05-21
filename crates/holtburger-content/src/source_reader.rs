@@ -8,11 +8,13 @@ use holtburger_dat::file_type::{
 use holtburger_dat::landblock::{CellLandblock, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
+use crate::ContentDecodeCache;
 use crate::ContentRepository;
 
 #[derive(Debug)]
 pub(crate) struct ContentSourceReader<'a> {
     content: &'a ContentRepository,
+    decode_cache: Option<&'a ContentDecodeCache>,
     cell_landblocks: HashMap<u32, CellLandblock>,
     landblock_infos: HashMap<u32, LandblockInfo>,
     env_cells: HashMap<u32, EnvCell>,
@@ -27,6 +29,7 @@ impl<'a> ContentSourceReader<'a> {
     pub(crate) fn new(content: &'a ContentRepository) -> Self {
         Self {
             content,
+            decode_cache: None,
             cell_landblocks: HashMap::new(),
             landblock_infos: HashMap::new(),
             env_cells: HashMap::new(),
@@ -38,22 +41,38 @@ impl<'a> ContentSourceReader<'a> {
         }
     }
 
+    pub(crate) fn with_decode_cache(
+        content: &'a ContentRepository,
+        decode_cache: &'a ContentDecodeCache,
+    ) -> Self {
+        Self {
+            decode_cache: Some(decode_cache),
+            ..Self::new(content)
+        }
+    }
+
     pub(crate) fn cell_landblock(&mut self, landblock_id: u32) -> Result<CellLandblock> {
         if let Some(landblock) = self.cell_landblocks.get(&landblock_id) {
             return Ok(landblock.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{landblock_id:08X} from content repository",
-                    EOR_CELL_NAMESPACE
-                )
-            })?;
-        let landblock = CellLandblock::unpack(&resource.bytes)
-            .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))?;
+        let landblock = match self.decode_cache {
+            Some(cache) => cache.cell_landblock(self.content, landblock_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{landblock_id:08X} from content repository",
+                            EOR_CELL_NAMESPACE
+                        )
+                    })?;
+                CellLandblock::unpack(&resource.bytes).with_context(|| {
+                    format!("Could not decode CellLandblock 0x{landblock_id:08X}")
+                })?
+            }
+        };
         self.cell_landblocks.insert(landblock_id, landblock.clone());
         Ok(landblock)
     }
@@ -63,17 +82,23 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(info.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{landblock_info_id:08X} from content repository",
-                    EOR_CELL_NAMESPACE
-                )
-            })?;
-        let info = LandblockInfo::unpack(&resource.bytes)
-            .with_context(|| format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}"))?;
+        let info = match self.decode_cache {
+            Some(cache) => cache.landblock_info(self.content, landblock_info_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{landblock_info_id:08X} from content repository",
+                            EOR_CELL_NAMESPACE
+                        )
+                    })?;
+                LandblockInfo::unpack(&resource.bytes).with_context(|| {
+                    format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
+                })?
+            }
+        };
         self.landblock_infos.insert(landblock_info_id, info.clone());
         Ok(info)
     }
@@ -83,17 +108,22 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(env_cell.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{env_cell_id:08X} from content repository",
-                    EOR_CELL_NAMESPACE
-                )
-            })?;
-        let env_cell = EnvCell::unpack(&mut Cursor::new(resource.bytes))
-            .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))?;
+        let env_cell = match self.decode_cache {
+            Some(cache) => cache.env_cell(self.content, env_cell_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{env_cell_id:08X} from content repository",
+                            EOR_CELL_NAMESPACE
+                        )
+                    })?;
+                EnvCell::unpack(&mut Cursor::new(resource.bytes))
+                    .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))?
+            }
+        };
         self.env_cells.insert(env_cell_id, env_cell.clone());
         Ok(env_cell)
     }
@@ -103,17 +133,23 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(environment.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{environment_id:08X} from content repository",
-                    EOR_PORTAL_NAMESPACE
-                )
-            })?;
-        let environment = Environment::unpack(&mut Cursor::new(resource.bytes))
-            .with_context(|| format!("Could not decode Environment 0x{environment_id:08X}"))?;
+        let environment = match self.decode_cache {
+            Some(cache) => cache.environment(self.content, environment_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{environment_id:08X} from content repository",
+                            EOR_PORTAL_NAMESPACE
+                        )
+                    })?;
+                Environment::unpack(&mut Cursor::new(resource.bytes)).with_context(|| {
+                    format!("Could not decode Environment 0x{environment_id:08X}")
+                })?
+            }
+        };
         self.environments
             .insert(environment_id, environment.clone());
         Ok(environment)
@@ -124,17 +160,23 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(region.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{REGION_DESC_FILE_ID:08X} from content repository",
-                    EOR_PORTAL_NAMESPACE
-                )
-            })?;
-        let region = RegionDesc::unpack(&resource.bytes)
-            .with_context(|| format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
+        let region = match self.decode_cache {
+            Some(cache) => cache.region_desc(self.content)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{REGION_DESC_FILE_ID:08X} from content repository",
+                            EOR_PORTAL_NAMESPACE
+                        )
+                    })?;
+                RegionDesc::unpack(&resource.bytes).with_context(|| {
+                    format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}")
+                })?
+            }
+        };
         self.region_desc = Some(region.clone());
         Ok(region)
     }
@@ -144,17 +186,22 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(scene.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{scene_id:08X} from content repository",
-                    EOR_PORTAL_NAMESPACE
-                )
-            })?;
-        let scene = Scene::unpack(&resource.bytes)
-            .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))?;
+        let scene = match self.decode_cache {
+            Some(cache) => cache.scene(self.content, scene_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{scene_id:08X} from content repository",
+                            EOR_PORTAL_NAMESPACE
+                        )
+                    })?;
+                Scene::unpack(&resource.bytes)
+                    .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))?
+            }
+        };
         self.scenes.insert(scene_id, scene.clone());
         Ok(scene)
     }
@@ -164,17 +211,23 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(setup_model.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{setup_model_id:08X} from content repository",
-                    EOR_PORTAL_NAMESPACE
-                )
-            })?;
-        let setup_model = SetupModel::unpack(&mut Cursor::new(resource.bytes))
-            .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))?;
+        let setup_model = match self.decode_cache {
+            Some(cache) => cache.setup_model(self.content, setup_model_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{setup_model_id:08X} from content repository",
+                            EOR_PORTAL_NAMESPACE
+                        )
+                    })?;
+                SetupModel::unpack(&mut Cursor::new(resource.bytes)).with_context(|| {
+                    format!("Could not decode SetupModel 0x{setup_model_id:08X}")
+                })?
+            }
+        };
         self.setup_models
             .insert(setup_model_id, setup_model.clone());
         Ok(setup_model)
@@ -185,17 +238,22 @@ impl<'a> ContentSourceReader<'a> {
             return Ok(gfx_obj.clone());
         }
 
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
-            .with_context(|| {
-                format!(
-                    "Could not read {}:0x{gfx_obj_id:08X} from content repository",
-                    EOR_PORTAL_NAMESPACE
-                )
-            })?;
-        let gfx_obj = GfxObj::unpack(&mut Cursor::new(resource.bytes))
-            .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))?;
+        let gfx_obj = match self.decode_cache {
+            Some(cache) => cache.gfx_obj(self.content, gfx_obj_id)?,
+            None => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
+                    .with_context(|| {
+                        format!(
+                            "Could not read {}:0x{gfx_obj_id:08X} from content repository",
+                            EOR_PORTAL_NAMESPACE
+                        )
+                    })?;
+                GfxObj::unpack(&mut Cursor::new(resource.bytes))
+                    .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))?
+            }
+        };
         self.gfx_objs.insert(gfx_obj_id, gfx_obj.clone());
         Ok(gfx_obj)
     }

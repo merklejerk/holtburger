@@ -1,4 +1,5 @@
 pub mod character_gen;
+pub mod decode_cache;
 pub mod landblock_pack;
 pub mod repository;
 pub mod soul_emote;
@@ -6,6 +7,7 @@ mod source_reader;
 pub mod static_outdoor_scene;
 
 pub use character_gen::CharacterGenCatalog;
+pub use decode_cache::ContentDecodeCache;
 pub use landblock_pack::{
     CellLandblockFact, EnvCellFact, EnvCellPortalFact, EnvironmentFact, IndoorStaticObjectFact,
     LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,

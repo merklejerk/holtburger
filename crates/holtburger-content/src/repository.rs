@@ -138,6 +138,10 @@ impl ContentRepository {
         Err(missing_asset_error(key, self.source_description.as_deref()))
     }
 
+    pub fn source_description(&self) -> Option<&str> {
+        self.source_description.as_deref()
+    }
+
     pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
         let chat_pose_table = self
             .read_asset::<ChatPoseTable>("chat pose table")

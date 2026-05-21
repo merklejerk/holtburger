@@ -174,8 +174,8 @@ describe("asset channel controller", () => {
 		expect(request?.assetId).toMatch(/^landblock-pack\//);
 	});
 
-		it("returns every missing landblock coverage asset immediately when nothing is in flight", () => {
-			const requests = createOutdoorLandblockPackCoverageRequests(
+	it("returns every missing landblock coverage asset immediately when nothing is in flight", () => {
+		const requests = createOutdoorLandblockPackCoverageRequests(
 			createRuntimeBatch(),
 			null,
 			"streaming",
@@ -185,18 +185,18 @@ describe("asset channel controller", () => {
 			[],
 		);
 
-			const assetIds = requests.map((request) => request.assetId);
-			const packAssetIds = assetIds.filter((assetId) =>
-				assetId.startsWith("landblock-pack/"),
-			);
-			const summaryAssetIds = assetIds.filter((assetId) =>
-				assetId.startsWith("landblock-summary/"),
-			);
+		const assetIds = requests.map((request) => request.assetId);
+		const packAssetIds = assetIds.filter((assetId) =>
+			assetId.startsWith("landblock-pack/"),
+		);
+		const summaryAssetIds = assetIds.filter((assetId) =>
+			assetId.startsWith("landblock-summary/"),
+		);
 
-			expect(packAssetIds).toHaveLength(8);
-			expect(summaryAssetIds.length).toBeGreaterThan(0);
-			expect(
-				requests.every(
+		expect(packAssetIds).toHaveLength(8);
+		expect(summaryAssetIds.length).toBeGreaterThan(0);
+		expect(
+			requests.every(
 				(request) => request.assetId !== "landblock-pack/0102ffff",
 			),
 		).toBe(true);
@@ -279,7 +279,7 @@ describe("asset channel controller", () => {
 		]);
 	});
 
-		it("requests landblock packs for static LoD and summaries for terrain-only LoD", () => {
+	it("requests summaries for building LoD without promoting those landblocks to full packs", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch(),
 			null,
@@ -289,9 +289,11 @@ describe("asset channel controller", () => {
 			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
 		).map((request) => request.assetId);
 
-			expect(requests).toContain("landblock-summary/0302ffff");
-			expect(requests).toContain("landblock-pack/0202ffff");
-		});
+		expect(requests).toContain("landblock-pack/0102ffff");
+		expect(requests).toContain("landblock-summary/0202ffff");
+		expect(requests).toContain("landblock-summary/0302ffff");
+		expect(requests).not.toContain("landblock-pack/0202ffff");
+	});
 
 	it("derives demand-driven static renderable requests from prepared landblock pack facts", () => {
 		const runtimeBatch = createRuntimeBatch();
@@ -391,6 +393,30 @@ describe("asset channel controller", () => {
 		expect(requests).not.toContain("gfx-obj/01000004");
 	});
 
+	it("hydrates selected summary building source assets without full pack promotion", () => {
+		const requests = createStaticRenderableAssetRequests(
+			createRuntimeBatch(),
+			null,
+			"streaming",
+			{
+				"landblock-summary/0202ffff": createPreparedLandblockSummaryAsset(
+					0x0202ffff,
+					"setup-model/02000002",
+				),
+				"landblock-summary/0303ffff": createPreparedLandblockSummaryAsset(
+					0x0303ffff,
+					"setup-model/02000003",
+				),
+				"landblock-pack/0000ffff": createPreparedLandblockPackAsset(0x0000ffff),
+			},
+			[],
+			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
+		).map((request) => request.assetId);
+
+		expect(requests).toContain("setup-model/02000002");
+		expect(requests).not.toContain("setup-model/02000003");
+	});
+
 	it("does not request legacy outdoor-linked interior env cells from building portal links", () => {
 		const runtimeBatch = createRuntimeBatch();
 		const requests = createSceneCoverageRequests(
@@ -469,7 +495,7 @@ describe("asset channel controller", () => {
 		expect(requests).toEqual([]);
 	});
 
-		it("excludes already in-flight coverage assets from the immediate coverage enqueue set", () => {
+	it("excludes already in-flight coverage assets from the immediate coverage enqueue set", () => {
 		const requests = createOutdoorLandblockPackCoverageRequests(
 			createRuntimeBatch(),
 			null,
@@ -484,12 +510,12 @@ describe("asset channel controller", () => {
 		expect(
 			requests.some((request) => request.assetId === "landblock-pack/0101ffff"),
 		).toBe(false);
-			expect(
-				requests.filter((request) =>
-					request.assetId.startsWith("landblock-pack/"),
-				),
-			).toHaveLength(7);
-		});
+		expect(
+			requests.filter((request) =>
+				request.assetId.startsWith("landblock-pack/"),
+			),
+		).toHaveLength(7);
+	});
 
 	it("requests the focused landblock pack when runtime residency is indoors", () => {
 		const runtimeBatch = createRuntimeBatch();
@@ -2616,6 +2642,70 @@ function createPreparedLandblockPackAsset(
 		provenance: {
 			source: "repo-local-hba",
 			sourceAssetKind: "landblock-pack",
+			errorCode: null,
+			detail: "test-cache",
+		},
+	};
+	return {
+		request: {
+			requestId: `cached-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		response: {
+			requestId: `cached-${assetId}`,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-20T00:00:00.000Z",
+	};
+}
+
+function createPreparedLandblockSummaryAsset(
+	landblockId: number,
+	sourceAssetId: string,
+): PreparedAssetRecord {
+	const normalizedLandblockId = ((landblockId & 0xffff0000) | 0xffff) >>> 0;
+	const assetId = `landblock-summary/${normalizedLandblockId.toString(16).padStart(8, "0")}`;
+	const sourceDid = Number.parseInt(sourceAssetId.slice(-8), 16);
+	const payload: PreparedAssetRecord["payload"] = {
+		kind: "landblock-summary",
+		sourceAssetKind: "landblock-summary",
+		residencyKind: "landblock",
+		landblockId: normalizedLandblockId,
+		landblockInfoId: (normalizedLandblockId & 0xffff0000) | 0xfffe,
+		classification: "outdoor",
+		sourceFacts: {
+			cellLandblock: null,
+			landblockInfo: null,
+			objects: [],
+			buildings: [
+				{
+					instanceId: `summary-building/${sourceAssetId}`,
+					owningLandblockId: normalizedLandblockId,
+					sourceDid,
+					sourceAssetId,
+					sourceIndex: 0,
+					localPlacement: {
+						origin: { x: 0, y: 0, z: 0 },
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+					},
+					numLeaves: 0,
+					portals: [],
+				},
+			],
+		},
+		prepared: { terrainMesh: null },
+		dependencies: {
+			cellDatIds: [],
+			renderableAssetIds: [sourceAssetId],
+		},
+		diagnostics: { sourceRecords: [], errors: [] },
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "landblock-summary",
 			errorCode: null,
 			detail: "test-cache",
 		},

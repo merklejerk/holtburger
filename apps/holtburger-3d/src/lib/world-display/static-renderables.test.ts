@@ -4,7 +4,9 @@ import {
 	createInitialAssetChannelState,
 	type PreparedAssetRecord,
 	type PreparedLandblockPackPayload,
+	type PreparedLandblockSummaryPayload,
 	type PreparedLandblockStaticMesh,
+	type PreparedSetupModelPayload,
 } from "../assets/types";
 import type {
 	PlacementTransformDto,
@@ -306,6 +308,85 @@ describe("static renderable scene model", () => {
 			),
 		).toHaveLength(1);
 	});
+
+	it("renders building parts from landblock summaries when no full pack supersedes them", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"gfx-obj/01000002": createPreparedGfxObjAsset(
+				"gfx-obj/01000002",
+				0x01000002,
+			),
+			"setup-model/02000002": createPreparedSetupModelAsset(
+				"setup-model/02000002",
+				0x02000002,
+				[{ partIndex: 4, gfxObjId: 0x01000002 }],
+			),
+			"landblock-summary/0102ffff": createPreparedLandblockSummaryAsset(
+				0x0102ffff,
+				"setup-model/02000002",
+			),
+		};
+
+		const model = deriveStaticRenderableSceneModel(
+			createRuntimeBatch(),
+			assetState,
+		);
+
+		expect(model.sourceInstances).toContainEqual(
+			expect.objectContaining({
+				instanceId: "summary-building-0",
+				kind: "building",
+				sourceAssetId: "setup-model/02000002",
+			}),
+		);
+		expect(model.parts).toContainEqual(
+			expect.objectContaining({
+				instanceId: "summary-building-0",
+				kind: "building",
+				sourceAssetId: "setup-model/02000002",
+				gfxObjAssetId: "gfx-obj/01000002",
+				partIndex: 4,
+			}),
+		);
+		expect(model.missingSourceAssetIds).toEqual([]);
+		expect(model.missingGfxAssetIds).toEqual([]);
+	});
+
+	it("lets a full pack supersede summary building render work for the same landblock", () => {
+		const assetState = createInitialAssetChannelState();
+		assetState.preparedByAssetId = {
+			"gfx-obj/01000001": createPreparedGfxObjAsset(
+				"gfx-obj/01000001",
+				0x01000001,
+			),
+			"gfx-obj/01000002": createPreparedGfxObjAsset(
+				"gfx-obj/01000002",
+				0x01000002,
+			),
+			"setup-model/02000002": createPreparedSetupModelAsset(
+				"setup-model/02000002",
+				0x02000002,
+				[{ partIndex: 4, gfxObjId: 0x01000002 }],
+			),
+			"landblock-summary/0102ffff": createPreparedLandblockSummaryAsset(
+				0x0102ffff,
+				"setup-model/02000002",
+			),
+			"landblock-pack/0102ffff": createPreparedLandblockPackAsset(0x0102ffff),
+		};
+
+		const model = deriveStaticRenderableSceneModel(
+			createRuntimeBatch(),
+			assetState,
+		);
+
+		expect(model.parts.map((part) => part.instanceId)).toEqual([
+			"pack-static-0",
+		]);
+		expect(
+			model.sourceInstances.map((instance) => instance.instanceId),
+		).toEqual(["pack-static-0"]);
+	});
 });
 
 function createRuntimeBatch(): RuntimeBatchDto {
@@ -496,6 +577,104 @@ function createPreparedGfxObjAsset(
 	});
 }
 
+function createPreparedSetupModelAsset(
+	assetId: string,
+	setupModelId: number,
+	parts: Array<{ partIndex: number; gfxObjId: number }>,
+): PreparedAssetRecord {
+	return createPreparedAsset(assetId, {
+		kind: "setup-model",
+		sourceAssetKind: "setup-model",
+		residencyKind: "unknown",
+		setupModelId,
+		flags: null,
+		parts: parts.map((part) => ({
+			partIndex: part.partIndex,
+			gfxObjId: part.gfxObjId,
+			gfxObjAssetId: `gfx-obj/${formatAssetId(part.gfxObjId)}`,
+			parentIndex: null,
+			scale: UNIT_SCALE,
+		})),
+		holdingLocations: [],
+		connectionPoints: [],
+		placementSets: [],
+		collisionWitness: {
+			cylSphereCount: 0,
+			sphereCount: 0,
+		},
+		height: null,
+		radius: null,
+		stepUp: null,
+		stepDown: null,
+		sortingSphere: null,
+		selectionSphere: null,
+		lights: [],
+		defaultAnimation: null,
+		defaultScript: null,
+		defaultMotionTable: null,
+		defaultSoundTable: null,
+		defaultScriptTable: null,
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "setup-model",
+			errorCode: null,
+			detail: "test",
+		},
+	} satisfies PreparedSetupModelPayload);
+}
+
+function createPreparedLandblockSummaryAsset(
+	landblockId: number,
+	sourceAssetId: string,
+): PreparedAssetRecord {
+	const sourceDid = Number.parseInt(sourceAssetId.slice(-8), 16);
+	return createPreparedAsset(
+		`landblock-summary/${formatAssetId(landblockId)}`,
+		{
+			kind: "landblock-summary",
+			sourceAssetKind: "landblock-summary",
+			residencyKind: "landblock",
+			landblockId,
+			landblockInfoId: landblockId & 0xfffffffe,
+			classification: "outdoor",
+			sourceFacts: {
+				cellLandblock: null,
+				landblockInfo: null,
+				objects: [],
+				buildings: [
+					{
+						instanceId: "summary-building-0",
+						owningLandblockId: landblockId,
+						sourceDid,
+						sourceAssetId,
+						sourceIndex: 0,
+						localPlacement: createPlacement({ x: 10, y: 20, z: 3 }),
+						numLeaves: 0,
+						portals: [],
+					},
+				],
+			},
+			prepared: {
+				terrainMesh: null,
+			},
+			dependencies: {
+				cellDatIds: [],
+				renderableAssetIds: [sourceAssetId],
+			},
+			diagnostics: {
+				sourceRecords: [],
+				errors: [],
+			},
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "landblock-summary",
+				errorCode: null,
+				detail: "test",
+			},
+		} satisfies PreparedLandblockSummaryPayload,
+	);
+}
+
 function createPreparedAsset(
 	assetId: string,
 	payload: PreparedAssetRecord["payload"],
@@ -522,4 +701,8 @@ function createPlacement(origin: Vec3Dto): PlacementTransformDto {
 		origin,
 		orientation: IDENTITY_PLACEMENT.orientation,
 	};
+}
+
+function formatAssetId(value: number): string {
+	return value.toString(16).padStart(8, "0");
 }

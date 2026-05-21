@@ -928,6 +928,10 @@ Progress:
 - Routed frontend `lookupAsset(...)` through the binary command for `landblock-pack/*`, then decoded and hydrated the envelope behind the existing host abstraction.
 - Preserved the existing normalized asset-worker and renderer payload shape for this phase, so renderer code does not branch on transport details.
 - Added focused frontend decoder coverage and Rust adapter coverage proving that full pack bulk arrays move into binary sections.
+- Expanded binary transport to active non-pack asset kinds:
+  - `landblock-summary/*` now carries prepared terrain mesh vertices/triangles through binary sections;
+  - `gfx-obj/*` now carries Rust-prepared render geometry positions/normals/uvs/triangles through binary sections.
+- Kept `setup-model/*` on JSON for now because the active payload is mostly structured dependency/placement metadata rather than a large dense renderer array.
 
 Decisions:
 
@@ -937,19 +941,20 @@ Decisions:
 - Terrain triangles are encoded as fixed-width `f32` tuples for the first pass because the current frontend payload represents them as object records containing both integer indices/types and a float average height.
 - Interior render triangles are encoded as fixed-width `i32` tuples, using `-1` as the binary sentinel for `surfaceId: null`.
 - BVH node identity and variable `itemIndices` remain JSON for now; only node bounds moved to binary sections in Phase 8.
+- Direct `gfx-obj/*` binary payloads omit source vertex/polygon arrays and instead include Rust-prepared `renderGeometry`. JSON `gfx-obj/*` remains available through the old serializer path for direct/debug compatibility until cleanup decides its fate.
 
 Course corrections:
 
 - The first implementation hydrates binary sections back into plain JavaScript object/array payloads before Zod validation and worker preparation. This proves the transport and removes IPC JSON materialization for the heaviest arrays, but it does not yet remove all frontend array/object allocation.
 - The manifest uses role strings plus explicit paths rather than a deeply nested binary schema. That kept the first pass small and inspectable, but later contract tightening should replace ad hoc role branching with a more formal section codec table if more asset families move to binary.
-- `lookup_asset_binary` is intentionally landblock-pack-only. Other routes stay on `lookup_asset` until profiling shows their JSON payloads matter.
+- `lookup_asset_binary` is intentionally limited to active high-value renderer assets: `landblock-pack/*`, `landblock-summary/*`, and `gfx-obj/*`. Legacy/direct scene routes stay JSON and are tracked for cleanup instead of binary migration.
 
 Refinements for later phases:
 
 - Re-profile startup/navigation after Phase 8 to separate wins from binary IPC transport versus remaining frontend hydration and Zod parsing costs.
 - Consider letting prepared render geometry hold typed-array views directly instead of converting all decoded sections back to plain arrays.
 - If typed-array prepared payloads land, update renderer helpers to avoid constructing a new `Float32Array` from an existing `Float32Array`.
-- Expand binary sections only when measurements justify it. Good candidates are static mesh placement matrices/scale batches and setup/gfx render geometry if those routes become hot.
+- Expand binary sections only when measurements justify it. Good candidates are static mesh placement matrices/scale batches and setup-model placement batches if those routes become hot.
 - Decide whether `lookup_asset_binary` should become a generic binary-capable lookup route or stay pack-specific after Phase 9 trims DTOs.
 
 Potential cleanup targets:
@@ -1108,6 +1113,7 @@ Initial cleanup targets:
 - Replace binary decoder role-string branching with a typed section codec table if binary transport expands beyond landblock packs.
 - Move prepared geometry payloads toward typed-array views so binary hydration does not rebuild large plain JavaScript arrays.
 - Split debug-friendly object geometry DTOs from renderer-ready packed geometry contracts after Phase 8.1, so neither path carries the other's compromises.
+- Split `gfx-obj/*` source/debug DTOs from renderer-prepared `gfx-obj/*` payloads; the binary path now omits source vertices/polygons and should not leave the contract pretending those fields are always runtime-owned.
 - Tighten binary manifest path validation so section paths are known contract fields rather than generic dot-path assignment.
 - Remove summary/full-pack upgrade shims once distance-ring request policy has a single normal path.
 - Rename mixed scene-coverage request planner APIs that still say `LandblockPackCoverage` after Phase 6 introduced `landblock-summary/*` coverage.

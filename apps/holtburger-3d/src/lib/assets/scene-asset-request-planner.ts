@@ -11,6 +11,7 @@ import {
 } from "../../app/browser-mode";
 import {
 	formatLandblockPackAssetId,
+	formatLandblockSummaryAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import type { PreparedAssetRecord, PreparedLandblockStaticMesh } from "./types";
@@ -35,7 +36,7 @@ export interface OutdoorSceneRequestOptions {
 }
 
 const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
-	terrainRadius: 1,
+	terrainRadius: 2,
 	buildingRadius: 1,
 	detailRadius: 1,
 	envCellRadius: 1,
@@ -176,8 +177,11 @@ export function deriveSceneCoverageAssetIds(
 	);
 	return [
 		...new Set([
-			...deriveLandblockPackCoverageLandblockIds(interest).map(
+			...deriveFullLandblockPackCoverageLandblockIds(interest).map(
 				formatLandblockPackAssetId,
+			),
+			...deriveLandblockSummaryCoverageLandblockIds(interest).map(
+				formatLandblockSummaryAssetId,
 			),
 		]),
 	].sort();
@@ -235,18 +239,32 @@ function createLandblockPackCoverageRequestsForInterest(
 	pendingAssetIds: string[],
 	interest: NormalizedOutdoorSceneInterest,
 ): AssetLookupRequestDto[] {
-	return createLandblockPackCoverageRequests(
-		runtimeBatch,
-		browserDestination,
-		priority,
-		preparedByAssetId,
-		pendingAssetIds,
-		prioritizeOutdoorLandblockIds(
+	const fullPackLandblockIds = deriveFullLandblockPackCoverageLandblockIds(interest);
+	const summaryLandblockIds = deriveLandblockSummaryCoverageLandblockIds(interest);
+	return [
+		...createLandblockPackCoverageRequests(
+			runtimeBatch,
+			browserDestination,
 			priority,
-			interest.focusLandblockId,
-			deriveLandblockPackCoverageLandblockIds(interest),
+			preparedByAssetId,
+			pendingAssetIds,
+			prioritizeOutdoorLandblockIds(
+				priority,
+				interest.focusLandblockId,
+				fullPackLandblockIds,
+			),
 		),
-	);
+		...(priority === "bootstrap"
+			? []
+			: createLandblockSummaryCoverageRequests(
+					runtimeBatch,
+					browserDestination,
+					priority,
+					preparedByAssetId,
+					pendingAssetIds,
+					summaryLandblockIds,
+				)),
+	];
 }
 
 function createLandblockPackCoverageRequests(
@@ -268,12 +286,41 @@ function createLandblockPackCoverageRequests(
 	);
 }
 
-function deriveLandblockPackCoverageLandblockIds(
+function createLandblockSummaryCoverageRequests(
+	runtimeBatch: RuntimeBatchDto,
+	browserDestination: BrowserLocationSelection | null,
+	priority: AssetPriority,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	pendingAssetIds: string[],
+	landblockIds: readonly number[],
+): AssetLookupRequestDto[] {
+	const requestScope = browserDestination ? "destination-summary" : "runtime-summary";
+	const preparedOrPendingPackIds = new Set([
+		...Object.keys(preparedByAssetId),
+		...pendingAssetIds,
+	]);
+	const summaryAssetIds = [...new Set(landblockIds)]
+		.filter(
+			(landblockId) =>
+				!preparedOrPendingPackIds.has(formatLandblockPackAssetId(landblockId)),
+		)
+		.map(formatLandblockSummaryAssetId);
+	return createUnpreparedRequests(
+		summaryAssetIds,
+		runtimeBatch,
+		priority,
+		requestScope,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+}
+
+function deriveFullLandblockPackCoverageLandblockIds(
 	interest: NormalizedOutdoorSceneInterest,
 ): number[] {
 	return unionOutdoorSceneLandblockIds(
 		unionOutdoorSceneLandblockIds(
-			interest.terrainLandblockIds,
+			[interest.focusLandblockId],
 			interest.buildingLandblockIds,
 		),
 		unionOutdoorSceneLandblockIds(
@@ -281,6 +328,17 @@ function deriveLandblockPackCoverageLandblockIds(
 			interest.envCellLandblockIds,
 		),
 	);
+}
+
+function deriveLandblockSummaryCoverageLandblockIds(
+	interest: NormalizedOutdoorSceneInterest,
+): number[] {
+	const fullPackIds = new Set(
+		deriveFullLandblockPackCoverageLandblockIds(interest),
+	);
+	return interest.terrainLandblockIds
+		.filter((landblockId) => !fullPackIds.has(landblockId))
+		.sort((left, right) => left - right);
 }
 
 export function createStaticRenderableAssetRequests(

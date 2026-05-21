@@ -4,6 +4,7 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedLandblockPackPayload,
+	PreparedLandblockSummaryPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { isPreparedTerrainLandblock } from "../assets/types";
@@ -157,6 +158,10 @@ function getTerrainMeshFromPreparedAsset(
 		return asset.payload.prepared.terrainMesh;
 	}
 
+	if (isPreparedLandblockSummaryWithTerrain(asset)) {
+		return asset.payload.prepared.terrainMesh;
+	}
+
 	return null;
 }
 
@@ -206,6 +211,12 @@ function inferTerrainDataSource(
 			: "unknown";
 	}
 
+	if (isPreparedLandblockSummaryWithTerrain(asset)) {
+		return asset.payload.provenance.source === "repo-local-hba"
+			? "repo-local-cell-landblock"
+			: "unknown";
+	}
+
 	if (asset.payload.provenance.source === "repo-local-hba") {
 		return "repo-local-cell-landblock";
 	}
@@ -222,6 +233,15 @@ function isPreparedLandblockPackWithTerrain(
 ): asset is PreparedAssetRecord & { payload: PreparedLandblockPackPayload } {
 	return (
 		asset.payload.kind === "landblock-pack" &&
+		asset.payload.prepared.terrainMesh !== null
+	);
+}
+
+function isPreparedLandblockSummaryWithTerrain(
+	asset: PreparedAssetRecord,
+): asset is PreparedAssetRecord & { payload: PreparedLandblockSummaryPayload } {
+	return (
+		asset.payload.kind === "landblock-summary" &&
 		asset.payload.prepared.terrainMesh !== null
 	);
 }

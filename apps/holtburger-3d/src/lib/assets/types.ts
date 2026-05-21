@@ -248,6 +248,54 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 	};
 }
 
+export interface PreparedLandblockSummaryPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-summary";
+	sourceAssetKind: "landblock-summary";
+	residencyKind: "landblock";
+	landblockId: number;
+	landblockInfoId: number;
+	classification: "outdoor" | "dungeon";
+	sourceFacts: {
+		cellLandblock: PreparedLandblockPackPayload["sourceFacts"]["cellLandblock"];
+		landblockInfo: PreparedLandblockPackPayload["sourceFacts"]["landblockInfo"];
+		objects: PreparedLandblockSummaryObject[];
+		buildings: PreparedLandblockSummaryBuilding[];
+	};
+	prepared: {
+		terrainMesh: PreparedTerrainMesh | null;
+	};
+	dependencies: {
+		cellDatIds: number[];
+		renderableAssetIds: string[];
+	};
+	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+}
+
+export interface PreparedLandblockSummaryObject {
+	instanceId: string;
+	owningLandblockId: number;
+	sourceDid: number;
+	sourceAssetId: string | null;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+}
+
+export interface PreparedLandblockSummaryBuildingPortal {
+	portalId: string;
+	sourceIndex: number;
+	flags: number;
+	otherCellId: number;
+	otherPortalId: number;
+	stabList: number[];
+	linkedEnvCellIds: number[];
+}
+
+export interface PreparedLandblockSummaryBuilding
+	extends PreparedLandblockSummaryObject {
+	numLeaves: number;
+	portals: PreparedLandblockSummaryBuildingPortal[];
+}
+
 export interface PreparedLandblockInteriorCell {
 	envCellId: number;
 	environmentId: number;
@@ -601,6 +649,7 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 export type PreparedAssetPayload =
 	| PreparedTerrainLandblockPayload
 	| PreparedLandblockPackPayload
+	| PreparedLandblockSummaryPayload
 	| PreparedOutdoorStaticScenePayload
 	| PreparedIndoorEnvCellPayload
 	| PreparedEnvironmentPayload
@@ -696,6 +745,10 @@ export function getPreparedAssetDependencies(
 		return asset.payload.dependencies.renderableAssetIds.map((assetId) => ({
 			assetId,
 		}));
+	}
+
+	if (asset.payload.kind === "landblock-summary") {
+		return [];
 	}
 
 	if (asset.payload.kind === "indoor-env-cell") {

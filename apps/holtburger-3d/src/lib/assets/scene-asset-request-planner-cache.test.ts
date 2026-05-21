@@ -25,6 +25,13 @@ const ENV_CELL_EXTENDED_OPTIONS: OutdoorSceneRequestOptions = {
 	envCellRadius: 1,
 };
 
+const DISTANT_TERRAIN_OPTIONS: OutdoorSceneRequestOptions = {
+	terrainRadius: 1,
+	buildingRadius: 0,
+	detailRadius: 0,
+	envCellRadius: 0,
+};
+
 describe("scene coverage asset ids", () => {
 	it("derives outdoor landblock-pack roots without filtering prepared assets", () => {
 		expect(
@@ -193,6 +200,38 @@ describe("scene coverage asset ids", () => {
 		expect(requests.map((request) => request.assetId)).toContain(
 			"landblock-pack/016cffff",
 		);
+	});
+
+	it("requests summaries for terrain-only outdoor landblocks", () => {
+		const requests = createSceneCoverageRequests(
+			createRuntimeBatch({
+				tick: 7,
+				residency: {
+					focusEntityId: null,
+					focusLandblockId: 0x016c0001,
+					focusCellId: 1,
+					focusEnvCellId: null,
+					visibleCellIds: [],
+					seenOutside: null,
+					environmentId: null,
+					cellStructureId: null,
+					focusLocationLabel: "outdoor",
+					indoors: false,
+					trackedBodyCount: 0,
+				},
+			}),
+			null,
+			"streaming",
+			{},
+			[],
+			DISTANT_TERRAIN_OPTIONS,
+		);
+		const assetIds = requests.map((request) => request.assetId);
+
+		expect(assetIds).toContain("landblock-pack/016cffff");
+		expect(assetIds).toContain("landblock-summary/016bffff");
+		expect(assetIds).toContain("landblock-summary/016dffff");
+		expect(assetIds).not.toContain("landblock-pack/016bffff");
 	});
 
 	it("requests landblock packs directly for wider outdoor env-cell coverage", () => {

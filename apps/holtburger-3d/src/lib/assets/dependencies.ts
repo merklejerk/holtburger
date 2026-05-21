@@ -3,6 +3,7 @@ import {
 	dependencyManifestPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
+	landblockSummaryPayloadDtoSchema,
 	outdoorStaticScenePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 } from "../host/contracts";
@@ -42,6 +43,13 @@ export function getAssetResponseDependencies(
 		return uniqueSortedAssetIds(
 			landblockPack.data.dependencies.renderableAssetIds,
 		);
+	}
+
+	const landblockSummary = landblockSummaryPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockSummary.success) {
+		return [];
 	}
 
 	const indoorEnvCell = indoorEnvCellPayloadDtoSchema.safeParse(

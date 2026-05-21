@@ -430,7 +430,7 @@ Scope:
 - Introduce `ContentDecodeCache` below the Tauri adapter, likely in `holtburger-content`.
 - Share it between landblock pack assembly and source/asset routes that decode DAT records:
   - `landblock-pack/*`;
-  - future `landblock-summary/*`;
+  - `landblock-summary/*`;
   - `gfx-obj/*`;
   - `setup-model/*`;
   - direct source routes such as `indoor-env-cell/*` and `environment/*` where clean.
@@ -510,7 +510,7 @@ Refinements for later phases:
 
 - Add runtime counters for queue wait time, coalesced waiters, worker duration, and per-request result size before tuning concurrency above `2`.
 - Consider a separate app-local projection worker only if profiling shows JSON DTO projection itself still causes a user-visible stall after binary transport.
-- Phase 6 `landblock-summary/*` should be added as a native `ContentAssetRequest` variant first, then projected by the 3D adapter.
+- Phase 6 added `landblock-summary/*` as a native `ContentAssetRequest` variant first, then projected it in the 3D adapter.
 - Phase 8 binary transport should consume the same native runtime results rather than creating a parallel lookup path.
 
 Potential cleanup targets:
@@ -529,7 +529,7 @@ Scope:
   - assemble `landblock-pack/*`;
   - load/project `gfx-obj/*`;
   - load/project `setup-model/*`;
-  - future `landblock-summary/*`;
+  - `landblock-summary/*`;
   - existing direct source routes.
 - Run asset lookup jobs on a bounded background blocking executor instead of the Tauri command path.
 - Have reusable runtime jobs return Rust-native content results, not Tauri/browser DTOs.
@@ -580,6 +580,8 @@ Exit criteria:
 
 ## Phase 6: Landblock Summary Asset
 
+Status: implemented.
+
 Goal: avoid full pack assembly for distant outdoor LoD landblocks.
 
 Browser asset id:
@@ -587,6 +589,61 @@ Browser asset id:
 ```text
 landblock-summary/<XXYYFFFF>
 ```
+
+Implemented:
+
+- Added `LandblockSummary` and `LandblockSummaryAssembler` in `holtburger-content`.
+- Summary assembly reuses the shared root decode/cache path and loads only:
+  - `CellLandblock`;
+  - `LandblockInfo`.
+- Summary payload includes:
+  - root `CellLandblockFact`;
+  - root `LandblockInfoFact`;
+  - prepared terrain mesh;
+  - authored `LandblockInfo.objects` references/placements;
+  - authored `LandblockInfo.buildings` references/placements;
+  - building `num_leaves`;
+  - building portal flags, target suffixes, stab lists, and derived linked env-cell ids;
+  - cheap root diagnostics.
+- Summary payload excludes env-cell enumeration, `Environment` records, generated scenery, setup/gfx expansion, static mesh preparation, spatial items, and BVH.
+- Added `ContentAssetRequest::LandblockSummary` / `ContentAsset::LandblockSummary` to the reusable runtime.
+- Added Tauri/browser route support for `landblock-summary/*`.
+- Added Zod DTO validation and worker normalization for `landblock-summary`.
+- Added prepared frontend asset type support and terrain-scene consumption of summary terrain meshes.
+- Updated scene coverage planning:
+  - bootstrap still requests only the focused full `landblock-pack/*`;
+  - streaming requests full packs for focus/building/detail/env-cell interest;
+  - streaming requests summaries for terrain-only landblocks;
+  - default outdoor terrain radius is now `2`, while building/detail/env-cell radii remain `1`.
+- Updated hydration/dependency policy so summaries are direct scene-coverage roots with no graph dependencies.
+
+Decisions:
+
+- Kept summaries rooted in official landblock records, not renderer-only terrain DTOs. The summary is cheap because it avoids child env-cell/environment/static mesh expansion, not because it is terrain-only.
+- Included authored object/building references even though the renderer currently only consumes terrain from summaries. This preserves cheap metadata for future distant building placeholders or full-pack upgrade decisions.
+- Did not request renderable dependencies from summaries. Loading setup/gfx assets for terrain-only LoD would erase most of the win.
+- Kept bootstrap focused on one full pack to avoid starting the app by fanning out a larger terrain summary ring.
+- Made summaries independent prepared assets rather than treating full packs as cache hits for summary asset ids. Full packs satisfy rendering needs, but cache aliasing separate asset ids would complicate retention and invalidation.
+
+Course corrections:
+
+- The first frontend policy draft made bootstrap request the distant summary ring. That was too aggressive for startup, so summaries are streaming-only.
+- Existing tests named around "landblock pack coverage" now cover mixed full-pack/summary scene coverage. Test names/assertions were updated where the behavior changed.
+- Summary object/building placements use the same frontend placement DTO shape as other static facts even though source `LandblockInfo` frames live in a separate Rust type from graphics frames.
+
+Refinements for later phases:
+
+- Decide whether summaries should render cheap authored building placeholders before full packs arrive, or whether terrain-only rendering is enough until full-pack upgrade.
+- Consider summary-to-full-pack upgrade policy based on camera distance, building radius, or interaction demand.
+- Add summary/full-pack root-fact equivalence tests at the content layer if future refactors touch root fact extraction.
+- Measure scene-load fanout again with default terrain radius `2`; the number of requests increases, but the expensive full-pack count should stay bounded to the interactive ring.
+
+Potential cleanup targets:
+
+- Rename request-planner functions that still say `LandblockPackCoverage` even though they now return mixed full-pack and summary coverage requests.
+- Reduce duplicated landblock root serialization between pack and summary payloads before Phase 8 binary manifests add another projection path.
+- Revisit whether `landblock-summary` should share a normalized frontend terrain mesh adapter with `terrain-landblock` and `landblock-pack` to avoid three terrain-bearing payload shapes.
+- Add a single helper for "full pack covers summary needs" so cache retention/eviction policy can avoid retaining redundant summaries beside full packs.
 
 Scope:
 
@@ -622,10 +679,61 @@ Validation:
 - Far terrain ring can request summaries without requiring full packs.
 - Full pack and summary agree on root facts and terrain output.
 - Timing shows fewer full pack builds during default outdoor scene load once frontend policy uses summaries.
+- Completed validation:
+  - `cargo fmt --all`
+  - `cargo test --manifest-path crates/holtburger-content/Cargo.toml`
+  - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`
+  - `npm run --prefix apps/holtburger-3d check`
+  - `npm run --prefix apps/holtburger-3d test:ts`
 
 Exit criteria:
 
 - Summary route exists and can be consumed by the frontend for distant outdoor terrain/building facts.
+
+## Phase 6.1: Summary Building Hydration
+
+Goal: render exterior building visuals from `landblock-summary/*` plus independent renderable assets, without promoting every building-distance landblock to a full `landblock-pack/*`.
+
+Scope:
+
+- Keep `landblock-pack/*` for focus/detail/env-cell/full spatial coverage.
+- Change building-distance coverage so building-radius landblocks can be satisfied by `landblock-summary/*` instead of full packs when no other full-pack interest applies.
+- Derive building renderable dependency requests from prepared summaries:
+  - `sourceAssetId` from summary buildings;
+  - `setup-model/*` and `gfx-obj/*` dependencies through the existing graph hydration path.
+- Add a frontend render-preparation path that expands prepared summary buildings into exterior static render work using fetched renderable assets.
+- Render summary building instances at their summary placements.
+- Preserve full-pack building rendering for landblocks that are already loaded as full packs.
+- Ensure a full pack supersedes any summary building render work for the same landblock to avoid duplicate buildings.
+
+Out of scope:
+
+- Summary object/detail rendering from `LandblockInfo.objects`.
+- Generated outdoor scenery.
+- Building interiors, env-cell residency, portal traversal, or structured cell coverage.
+- Full pack spatial items, BVH, ray-pick parity, or occlusion behavior for summary buildings.
+- Removing the browser building-distance slider.
+
+Implementation notes:
+
+- Treat summary building visuals as exterior renderables only.
+- Do not request renderable dependencies for every summary. Only request building assets for summaries selected by building-distance policy.
+- Keep the summary dependency list cheap and explicit; use a planner-side dependency derivation for selected summary buildings rather than making every summary graph-hydrate by default.
+- Prefer reusing existing static renderable instancing/material paths, but keep summary-origin instance identity separate from full-pack instance identity.
+- If a summary building source is unsupported or missing, skip that building with diagnostics rather than promoting the landblock to a full pack.
+
+Validation:
+
+- A building-distance landblock outside detail/env-cell coverage requests `landblock-summary/*`, not `landblock-pack/*`.
+- Prepared summaries inside building radius produce renderable asset requests for building `sourceAssetId`s.
+- Summary building instances render once their `setup-model/*` or `gfx-obj/*` payloads are prepared.
+- Loading a full pack for the same landblock removes/replaces summary building instances, preventing duplicate exterior buildings.
+- Existing full-pack building rendering remains unchanged.
+
+Exit criteria:
+
+- Building-distance coverage can show exterior authored buildings without full pack assembly for those landblocks.
 
 ## Phase 7: Dungeon Outdoor-Work Skip
 
@@ -831,6 +939,11 @@ Initial cleanup targets:
 - Remove binary/JSON dual-path test scaffolding once the normalized frontend asset shape is stable.
 - Revisit frontend asset dependency derivation after binary manifests land so dependency extraction is not split between incompatible JSON and binary conventions.
 - Remove summary/full-pack upgrade shims once distance-ring request policy has a single normal path.
+- Rename mixed scene-coverage request planner APIs that still say `LandblockPackCoverage` after Phase 6 introduced `landblock-summary/*` coverage.
+- Consolidate terrain-bearing frontend payload handling across `terrain-landblock`, `landblock-pack`, and `landblock-summary`.
+- Add cache-retention rules that can drop redundant summaries when a full pack for the same landblock is prepared.
+- Revisit summary authored object/building facts after distant building placeholder rendering lands; keep them cheap or remove fields the renderer never uses.
+- After Phase 6.1, revisit whether the browser building-distance slider should remain user-facing or become a derived internal full-pack/summary-building policy.
 - Retire stale profiling/timing scaffolding that was useful for this optimization campaign but is too noisy for day-to-day development.
 - Re-check crate boundaries after runtime work lands: content should own static content discovery/decoding, core/runtime should own reusable client execution policy if that split proves cleaner, and the Tauri adapter should remain projection/glue.
 
@@ -864,9 +977,10 @@ Validation:
 5. Phase 5: Reusable content asset runtime with coalescing.
 6. Phase 8: Binary landblock pack bulk arrays.
 7. Phase 6: Landblock summary asset.
-8. Phase 9: DTO trimming and contract tightening.
-9. Phase 10: Rust-side assembly hotspot follow-up.
-10. Phase 11: Cleanup legacy smells and migration scaffolding.
+8. Phase 6.1: Summary building hydration.
+9. Phase 9: DTO trimming and contract tightening.
+10. Phase 10: Rust-side assembly hotspot follow-up.
+11. Phase 11: Cleanup legacy smells and migration scaffolding.
 
 Phase 1 can be added opportunistically whenever a phase needs wall-clock clarity, but it is not the starting point.
 
@@ -878,6 +992,7 @@ Rationale for this order:
 - Binary transport is high priority from profiling, but it benefits from typed runtime/projection boundaries being clearer first.
 - Summary assets reduce far-ring full-pack pressure after the full-pack path is better structured.
 - Summary assets are scheduled after binary/cache/runtime because they require frontend planner policy, not just a Rust route.
+- Summary building hydration follows summaries so the building-distance slider controls visible exterior buildings without forcing full-pack promotion.
 - Existing `perf` data is strong enough to justify starting with assembly/cache structure. Add Phase 1 timing only when a later decision needs wall-clock evidence.
 
 ## Validation Matrix
@@ -903,7 +1018,6 @@ Run targeted validation after each phase:
 ## Open Questions
 
 - Whether summary terrain should initially reuse full prepared terrain shape or introduce a smaller terrain chunk DTO immediately.
-- Exact frontend policy for requesting `landblock-summary/*` versus `landblock-pack/*` in distance rings.
 - Exact binary command shape and whether dependencies live in the manifest or normalized response metadata.
 - Whether spatial item bounds belong in the first binary phase if preserving item identity/order makes the manifest too awkward.
 - Whether static mesh object graphs become large enough to justify a later binary or table-oriented representation.

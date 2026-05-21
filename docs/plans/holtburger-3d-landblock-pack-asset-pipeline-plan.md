@@ -593,22 +593,48 @@ Exit criteria:
 
 - Secondary Rust hotspots are either improved or explicitly deprioritized with measurements.
 
-## Phase 11: Cleanup And Consolidation
+## Phase 11: Cleanup Legacy Smells And Migration Scaffolding
 
-Goal: remove legacy smells created during migration and leave one coherent content-loading path.
+Status: running cleanup punch list. Add to it whenever a phase leaves behind a temporary adapter, naming mismatch, duplicated helper, compatibility shim, optional-field workaround, or migration-only abstraction.
 
-Targets to collect as phases land:
+Goal: remove legacy smells created during migration and leave one coherent content-loading path after the cache/runtime/binary/summary work lands.
+
+Initial cleanup targets:
 
 - Remove legacy landblock/env-cell discovery paths that are no longer needed after root-based pack/summary loading.
+- Keep lower-level source/debug routes explicit if they remain useful, but stop presenting them as normal scene-loading concepts.
 - Remove compatibility shims or duplicate route helpers introduced only for transition.
 - Consolidate naming around `landblock`, `landblock-pack`, and `landblock-summary`; avoid indoor/outdoor assumptions in asset ids unless the payload is actually classification-specific.
 - Tighten contracts/interfaces where optional fields are not optional in practice.
+- Audit `null`, `undefined`, optional properties, `unknown[]`, broad unions, and "maybe present" DTO fields after each migration slice. Split types when only some variants genuinely allow absence.
 - Remove stale diagnostics that the renderer can compute locally.
 - Collapse duplicated fixture/build helper logic once binary and JSON paths share normalized frontend assets.
 - Delete dead code after frontend uses summary/binary/runtime paths.
 - Remove duplicated source helper functions once the shared typed source reader is established.
 - Fix minor code smells found during dry run, including duplicate portal id deduplication and missing-source diagnostic suppression that can collide across setup-model and gfx-object roles.
 - Retire legacy `payloadKind: "bytes"` dead-end assumptions after the real binary command contract exists.
+- Remove or rename cache/runtime helper names that are pack-specific after they become shared by summaries, gfx/setup routes, diagnostics, or future client mode.
+- Revisit `ContentAssetRuntime` and `LandblockPackAssemblyContext` public surface area after Phase 5 so implementation-only cache/executor details do not leak.
+- Consolidate Rust and TypeScript landblock id/env-cell enumeration helpers into one canonical helper per side.
+- Remove redundant prepared terrain/interior/static JSON serializers once binary normalization becomes the primary pack path, or move shared projection helpers out of the Tauri adapter if the adapter keeps accumulating serializer weight.
+- Remove binary/JSON dual-path test scaffolding once the normalized frontend asset shape is stable.
+- Revisit frontend asset dependency derivation after binary manifests land so dependency extraction is not split between incompatible JSON and binary conventions.
+- Remove summary/full-pack upgrade shims once distance-ring request policy has a single normal path.
+- Retire stale profiling/timing scaffolding that was useful for this optimization campaign but is too noisy for day-to-day development.
+- Re-check crate boundaries after runtime work lands: content should own static content discovery/decoding, core/runtime should own reusable client execution policy if that split proves cleaner, and the Tauri adapter should remain projection/glue.
+
+Implemented cleanup slices:
+
+- None yet for this plan. Future implementation phases should append completed cleanup work here rather than burying it in phase notes.
+
+Decisions:
+
+- Cleanup is an explicit final phase, not an invitation to leave known debt untracked. If a phase creates a temporary shim or misleading name, add it to this punch list immediately.
+- Compatibility with migration-era tests is not a reason to keep stale abstractions. Update tests to describe the intended pack/cache/runtime behavior.
+
+Course corrections:
+
+- The initial dry run found this plan needs a running cleanup punch list like the original landblock pack plan. Phase 11 now owns that list.
 
 Validation:
 
@@ -628,7 +654,7 @@ Validation:
 7. Phase 6: Landblock summary asset.
 8. Phase 9: DTO trimming and contract tightening.
 9. Phase 10: Rust-side assembly hotspot follow-up.
-10. Phase 11: Cleanup and consolidation.
+10. Phase 11: Cleanup legacy smells and migration scaffolding.
 
 Phase 1 can be added opportunistically whenever a phase needs wall-clock clarity, but it is not the starting point.
 

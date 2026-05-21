@@ -128,14 +128,7 @@ function createPreparedLandblockPackAsset(
 			landblockInfoId: (landblockId & 0xffff0000) | 0xfffe,
 			classification: "dungeon",
 			sourceFacts: {
-				cellLandblock: null,
-				landblockInfo: null,
-				outdoor: {
-					explicitObjects: [],
-					buildings: [],
-					generatedScenery: [],
-				},
-				interiors: { envCells: [], environments: [] },
+				buildings: [],
 			},
 			prepared: {
 				terrainMesh: null,

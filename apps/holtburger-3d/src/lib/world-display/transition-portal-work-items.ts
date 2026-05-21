@@ -175,7 +175,7 @@ function collectActiveOutdoorBuildingPortals(
 			return [];
 		}
 
-		return asset.payload.sourceFacts.outdoor.buildings.flatMap(
+		return asset.payload.sourceFacts.buildings.flatMap(
 			(building) => building.portals,
 		);
 	});

@@ -164,14 +164,7 @@ describe("world display model helpers", () => {
 					landblockInfoId: 0x0102fffe,
 					classification: "outdoor",
 					sourceFacts: {
-						cellLandblock: null,
-						landblockInfo: null,
-						outdoor: {
-							explicitObjects: [],
-							buildings: [],
-							generatedScenery: [],
-						},
-						interiors: { envCells: [], environments: [] },
+						buildings: [],
 					},
 					prepared: {
 						terrainMesh: null,

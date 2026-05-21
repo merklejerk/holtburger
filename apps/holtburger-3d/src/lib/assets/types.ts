@@ -164,59 +164,7 @@ export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
 	landblockInfoId: number;
 	classification: "outdoor" | "dungeon";
 	sourceFacts: {
-		cellLandblock: {
-			id: number;
-			hasObjects: boolean;
-			gridSize: 9;
-			tileSize: number;
-			terrainTypes: number[];
-			heights: number[];
-			minHeight: number;
-			maxHeight: number;
-			allHeightsZero: boolean;
-		} | null;
-		landblockInfo: {
-			id: number;
-			firstEnvCellId: number | null;
-			numEnvCells: number;
-			objectCount: number;
-			buildingCount: number;
-			packMask: number;
-			restrictions: { cellId: number; restrictionObjectId: number }[];
-		} | null;
-		outdoor: {
-			explicitObjects: PreparedOutdoorStaticSceneInstance[];
-			buildings: PreparedOutdoorStaticSceneBuilding[];
-			generatedScenery: PreparedOutdoorStaticSceneGeneratedSceneryInstance[];
-		};
-		interiors: {
-			envCells: {
-				envCellId: number;
-				environmentId: number | null;
-				cellStructureId: number | null;
-				localPlacement: PlacementTransformDto;
-				surfaceIds: number[];
-				visibleCellIds: number[];
-				portals: {
-					portalId: string;
-					sourceIndex: number;
-					flags: number;
-					polygonId: number;
-					otherCellId: number;
-					otherPortalId: number;
-					targetEnvCellId: number | null;
-					isOutsideTransition: boolean;
-				}[];
-				staticObjects: PreparedIndoorStaticObject[];
-				seenOutside: boolean | null;
-				restrictionObjectId: number | null;
-			}[];
-			environments: {
-				id: number;
-				cellStructureIds: number[];
-				cellStructures: unknown[];
-			}[];
-		};
+		buildings: PreparedOutdoorStaticSceneBuilding[];
 	};
 	prepared: {
 		terrainMesh: PreparedTerrainMesh | null;
@@ -256,9 +204,6 @@ export interface PreparedLandblockSummaryPayload extends PreparedAssetPayloadBas
 	landblockInfoId: number;
 	classification: "outdoor" | "dungeon";
 	sourceFacts: {
-		cellLandblock: PreparedLandblockPackPayload["sourceFacts"]["cellLandblock"];
-		landblockInfo: PreparedLandblockPackPayload["sourceFacts"]["landblockInfo"];
-		objects: PreparedLandblockSummaryObject[];
 		buildings: PreparedLandblockSummaryBuilding[];
 	};
 	prepared: {

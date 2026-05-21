@@ -5,20 +5,18 @@ use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_content::{
-    CellLandblockFact, ContentDecodeCache, ContentRepository, EnvCellFact, EnvironmentFact,
-    GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
-    LandblockInfoFact, LandblockPack, LandblockPackSourceDiagnostics, LandblockRestriction,
-    LandblockSummary, LandblockSummaryBuilding, LandblockSummaryBuildingPortal,
-    LandblockSummaryObject, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
-    PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
-    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
-    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
-    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
-    SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
-    SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics,
-    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
-    format_static_object_source_asset_id, normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, GeneratedOutdoorSceneryDiagnostics,
+    LandblockClassification, LandblockPack, LandblockPackSourceDiagnostics, LandblockSummary,
+    LandblockSummaryBuilding, LandblockSummaryBuildingPortal, PreparedAabb, PreparedBvh,
+    PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
+    PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
+    PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
+    PreparedVec3, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
+    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
+    StaticOutdoorLayerDiagnostics, StaticOutdoorScene, StaticRenderableSourceFamily,
+    build_gfx_obj_render_geometry, format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -722,19 +720,7 @@ impl HostBoundaryAdapter {
                 "landblockInfoId": landblock_id & 0xffff_fffe,
                 "classification": "outdoor",
                 "sourceFacts": {
-                    "cellLandblock": null,
-                    "landblockInfo": null,
-                    "outdoor": serialize_landblock_pack_outdoor_facts(None),
-                    "interiors": {
-                        "envCells": [],
-                        "environments": [],
-                        "staticObjects": []
-                    },
-                    "renderables": {
-                        "gfxObjs": [],
-                        "setupModels": [],
-                        "unsupportedDids": []
-                    }
+                    "buildings": []
                 },
                 "prepared": {
                     "terrainMesh": null,
@@ -802,9 +788,6 @@ impl HostBoundaryAdapter {
                 "landblockInfoId": landblock_id & 0xffff_fffe,
                 "classification": "outdoor",
                 "sourceFacts": {
-                    "cellLandblock": null,
-                    "landblockInfo": null,
-                    "objects": [],
                     "buildings": []
                 },
                 "prepared": {
@@ -1790,9 +1773,6 @@ fn serialize_landblock_summary_binary_payload(
         "landblockInfoId": summary.landblock_info_id,
         "classification": serialize_landblock_classification(summary.classification),
         "sourceFacts": {
-            "cellLandblock": summary.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
-            "landblockInfo": summary.landblock_info.as_ref().map(serialize_landblock_info_fact),
-            "objects": summary.objects.iter().map(serialize_landblock_summary_object).collect::<Vec<_>>(),
             "buildings": summary.buildings.iter().map(serialize_landblock_summary_building).collect::<Vec<_>>(),
         },
         "prepared": {
@@ -1865,15 +1845,7 @@ fn serialize_landblock_pack_binary_payload(
         "landblockInfoId": pack.landblock_info_id,
         "classification": serialize_landblock_classification(pack.classification),
         "sourceFacts": {
-            "cellLandblock": pack.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
-            "landblockInfo": pack.landblock_info.as_ref().map(serialize_landblock_info_fact),
-            "outdoor": serialize_landblock_pack_outdoor_facts(pack.outdoor_scene.as_ref()),
-            "interiors": serialize_landblock_pack_interior_facts(pack),
-            "renderables": {
-                "gfxObjs": [],
-                "setupModels": [],
-                "unsupportedDids": []
-            }
+            "buildings": serialize_landblock_pack_building_facts(pack.outdoor_scene.as_ref())
         },
         "prepared": {
             "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(|mesh| {
@@ -2134,15 +2106,7 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
         "landblockInfoId": pack.landblock_info_id,
         "classification": serialize_landblock_classification(pack.classification),
         "sourceFacts": {
-            "cellLandblock": pack.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
-            "landblockInfo": pack.landblock_info.as_ref().map(serialize_landblock_info_fact),
-            "outdoor": serialize_landblock_pack_outdoor_facts(pack.outdoor_scene.as_ref()),
-            "interiors": serialize_landblock_pack_interior_facts(pack),
-            "renderables": {
-                "gfxObjs": [],
-                "setupModels": [],
-                "unsupportedDids": []
-            }
+            "buildings": serialize_landblock_pack_building_facts(pack.outdoor_scene.as_ref())
         },
         "prepared": {
             "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(serialize_prepared_terrain_mesh),
@@ -2178,9 +2142,6 @@ fn serialize_landblock_summary(summary: &LandblockSummary) -> serde_json::Value 
         "landblockInfoId": summary.landblock_info_id,
         "classification": serialize_landblock_classification(summary.classification),
         "sourceFacts": {
-            "cellLandblock": summary.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
-            "landblockInfo": summary.landblock_info.as_ref().map(serialize_landblock_info_fact),
-            "objects": summary.objects.iter().map(serialize_landblock_summary_object).collect::<Vec<_>>(),
             "buildings": summary.buildings.iter().map(serialize_landblock_summary_building).collect::<Vec<_>>(),
         },
         "prepared": {
@@ -2197,17 +2158,6 @@ fn serialize_landblock_summary(summary: &LandblockSummary) -> serde_json::Value 
             "errorCode": summary.diagnostics.errors.first().map(|error| error.error_code),
             "detail": summary.diagnostics.errors.first().map(|error| error.detail.clone())
         }
-    })
-}
-
-fn serialize_landblock_summary_object(object: &LandblockSummaryObject) -> serde_json::Value {
-    serde_json::json!({
-        "instanceId": object.instance_id,
-        "owningLandblockId": object.owning_landblock_id,
-        "sourceDid": object.source_did,
-        "sourceAssetId": object.source_asset_id,
-        "sourceIndex": object.source_index,
-        "localPlacement": serialize_frame(&object.local_placement),
     })
 }
 
@@ -2523,131 +2473,39 @@ fn serialize_landblock_classification(classification: LandblockClassification) -
     }
 }
 
-fn serialize_cell_landblock_fact(fact: &CellLandblockFact) -> serde_json::Value {
-    serde_json::json!({
-        "id": fact.id,
-        "hasObjects": fact.has_objects,
-        "gridSize": fact.grid_size,
-        "tileSize": fact.tile_size,
-        "terrainTypes": fact.terrain_types,
-        "heights": fact.heights,
-        "minHeight": fact.min_height,
-        "maxHeight": fact.max_height,
-        "allHeightsZero": fact.all_heights_zero,
-    })
-}
-
-fn serialize_landblock_info_fact(fact: &LandblockInfoFact) -> serde_json::Value {
-    serde_json::json!({
-        "id": fact.id,
-        "firstEnvCellId": fact.first_env_cell_id,
-        "numEnvCells": fact.num_env_cells,
-        "objectCount": fact.object_count,
-        "buildingCount": fact.building_count,
-        "packMask": fact.pack_mask,
-        "restrictions": fact.restrictions.iter().map(serialize_landblock_restriction).collect::<Vec<_>>(),
-    })
-}
-
-fn serialize_landblock_restriction(restriction: &LandblockRestriction) -> serde_json::Value {
-    serde_json::json!({
-        "cellId": restriction.cell_id,
-        "restrictionObjectId": restriction.restriction_object_id,
-    })
-}
-
-fn serialize_landblock_pack_outdoor_facts(scene: Option<&StaticOutdoorScene>) -> serde_json::Value {
-    serde_json::json!({
-        "explicitObjects": scene.map(|scene| {
-            scene.explicit_objects.iter().filter_map(serialize_static_outdoor_instance).collect::<Vec<_>>()
-        }).unwrap_or_default(),
-        "buildings": scene.map(|scene| {
-            scene.buildings.iter().filter_map(|building| {
-                serialize_static_outdoor_instance(&building.instance).map(|mut value| {
-                    value["numLeaves"] = serde_json::json!(building.num_leaves);
-                    value["portals"] = serde_json::json!(
-                        building.portals.iter().map(|portal| {
-                            serde_json::json!({
-                                "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
-                                "sourceIndex": portal.source_index,
-                                "flags": portal.flags,
-                                "otherCellId": portal.other_cell_id,
-                                "otherPortalId": portal.other_portal_id,
-                                "stabList": portal.stab_list,
-                                "linkedEnvCellIds": portal.linked_env_cell_ids,
-                            })
-                        }).collect::<Vec<_>>()
-                    );
-                    value
+fn serialize_landblock_pack_building_facts(
+    scene: Option<&StaticOutdoorScene>,
+) -> Vec<serde_json::Value> {
+    scene
+        .map(|scene| {
+            scene.buildings
+                .iter()
+                .filter_map(|building| {
+                    serialize_static_outdoor_instance(&building.instance).map(|mut value| {
+                        value["numLeaves"] = serde_json::json!(building.num_leaves);
+                        value["portals"] = serde_json::json!(
+                            building
+                                .portals
+                                .iter()
+                                .map(|portal| {
+                                    serde_json::json!({
+                                        "portalId": format!("{}/portal/{:04x}", building.instance.identity.stable_id(), portal.source_index),
+                                        "sourceIndex": portal.source_index,
+                                        "flags": portal.flags,
+                                        "otherCellId": portal.other_cell_id,
+                                        "otherPortalId": portal.other_portal_id,
+                                        "stabList": portal.stab_list,
+                                        "linkedEnvCellIds": portal.linked_env_cell_ids,
+                                    })
+                                })
+                                .collect::<Vec<_>>()
+                        );
+                        value
+                    })
                 })
-            }).collect::<Vec<_>>()
-        }).unwrap_or_default(),
-        "generatedScenery": scene.map(|scene| {
-            scene.generated_scenery.iter().filter_map(|generated| {
-                serialize_static_outdoor_instance(&generated.instance).map(|mut value| {
-                    value["terrainIndex"] = serde_json::json!(generated.terrain_index);
-                    value["sceneId"] = serde_json::json!(generated.scene_id);
-                    value["sceneTemplateIndex"] = serde_json::json!(generated.scene_template_index);
-                    value["scale"] = serde_json::json!(generated.scale);
-                    value
-                })
-            }).collect::<Vec<_>>()
-        }).unwrap_or_default(),
-    })
-}
-
-fn serialize_landblock_pack_interior_facts(pack: &LandblockPack) -> serde_json::Value {
-    serde_json::json!({
-        "envCells": pack.interiors.env_cells.iter().map(serialize_landblock_pack_env_cell).collect::<Vec<_>>(),
-        "environments": pack.interiors.environments.iter().map(serialize_landblock_pack_environment).collect::<Vec<_>>(),
-    })
-}
-
-fn serialize_landblock_pack_env_cell(env_cell: &EnvCellFact) -> serde_json::Value {
-    serde_json::json!({
-        "envCellId": env_cell.env_cell_id,
-        "environmentId": env_cell.environment_id,
-        "cellStructureId": env_cell.cell_structure_id,
-        "localPlacement": serialize_frame(&env_cell.local_placement),
-        "surfaceIds": env_cell.surface_ids,
-        "visibleCellIds": env_cell.visible_cell_ids,
-        "portals": env_cell.portals.iter().map(|portal| {
-            serde_json::json!({
-                "portalId": portal.portal_id,
-                "sourceIndex": portal.source_index,
-                "flags": portal.flags,
-                "polygonId": portal.polygon_id,
-                "otherCellId": portal.other_cell_id,
-                "otherPortalId": portal.other_portal_id,
-                "targetEnvCellId": portal.target_env_cell_id,
-                "isOutsideTransition": portal.is_outside_transition,
-            })
-        }).collect::<Vec<_>>(),
-        "staticObjects": env_cell.static_objects.iter().map(serialize_landblock_pack_indoor_static_object).collect::<Vec<_>>(),
-        "seenOutside": env_cell.seen_outside,
-        "restrictionObjectId": env_cell.restriction_object_id,
-    })
-}
-
-fn serialize_landblock_pack_indoor_static_object(
-    static_object: &IndoorStaticObjectFact,
-) -> serde_json::Value {
-    serde_json::json!({
-        "instanceId": static_object.instance_id,
-        "owningEnvCellId": static_object.owning_env_cell_id,
-        "sourceDid": static_object.source_did,
-        "sourceAssetId": static_object.source_asset_id,
-        "sourceIndex": static_object.source_index,
-        "localPlacement": serialize_frame(&static_object.local_placement),
-    })
-}
-
-fn serialize_landblock_pack_environment(environment: &EnvironmentFact) -> serde_json::Value {
-    serde_json::json!({
-        "id": environment.id,
-        "cellStructureIds": environment.cell_structure_ids,
-        "cellStructures": environment.cell_structures.iter().map(serialize_cell_structure).collect::<Vec<_>>(),
-    })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn derive_landblock_pack_renderable_asset_ids(pack: &LandblockPack) -> Vec<String> {
@@ -3436,7 +3294,7 @@ mod tests {
     }
 
     #[test]
-    fn landblock_pack_lookup_returns_manifest_source_facts() {
+    fn landblock_pack_lookup_returns_prepared_landblock_payload() {
         let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-landblock-pack".to_string(),
@@ -3454,32 +3312,8 @@ mod tests {
             asset.payload["classification"].as_str(),
             Some("outdoor" | "dungeon")
         ));
-        assert_eq!(
-            asset.payload["sourceFacts"]["landblockInfo"]["firstEnvCellId"],
-            0xda550100u32
-        );
-        let num_env_cells = asset.payload["sourceFacts"]["landblockInfo"]["numEnvCells"]
-            .as_u64()
-            .expect("fixture landblock info should expose an env-cell count");
-        assert!(num_env_cells > 0);
-        assert_eq!(
-            asset.payload["sourceFacts"]["interiors"]["envCells"]
-                .as_array()
-                .expect("pack should expose loaded env-cell facts")
-                .len(),
-            num_env_cells as usize
-        );
         assert!(
-            asset.payload["sourceFacts"]["interiors"]["environments"]
-                .as_array()
-                .expect("pack should expose referenced environment facts")
-                .iter()
-                .all(|environment| environment["cellStructures"]
-                    .as_array()
-                    .is_some_and(|cell_structures| !cell_structures.is_empty()))
-        );
-        assert!(
-            asset.payload["sourceFacts"]["outdoor"]["buildings"]
+            asset.payload["sourceFacts"]["buildings"]
                 .as_array()
                 .is_some()
         );
@@ -3676,7 +3510,7 @@ mod tests {
     }
 
     #[test]
-    fn landblock_summary_lookup_returns_root_facts_without_full_pack_work() {
+    fn landblock_summary_lookup_returns_light_payload_without_full_pack_work() {
         let runtime = HostRuntimeService::new(false);
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-landblock-summary".to_string(),
@@ -3690,10 +3524,6 @@ mod tests {
         assert_eq!(asset.payload["residencyKind"], "landblock");
         assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
         assert_eq!(asset.payload["landblockInfoId"], 0xda55fffeu32);
-        assert_eq!(
-            asset.payload["sourceFacts"]["landblockInfo"]["firstEnvCellId"],
-            0xda550100u32
-        );
         assert!(
             !asset.payload["prepared"]["terrainMesh"]["triangles"]
                 .as_array()
@@ -3701,7 +3531,6 @@ mod tests {
                 .is_empty()
         );
         assert!(asset.payload["prepared"]["staticMeshes"].is_null());
-        assert!(asset.payload["sourceFacts"]["interiors"].is_null());
         assert!(
             asset.payload["sourceFacts"]["buildings"]
                 .as_array()

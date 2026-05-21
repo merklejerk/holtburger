@@ -95,22 +95,7 @@ describe("asset response dependencies", () => {
 			landblockInfoId: 0xda55fffe,
 			classification: "outdoor",
 			sourceFacts: {
-				cellLandblock: null,
-				landblockInfo: null,
-				outdoor: {
-					explicitObjects: [],
-					buildings: [],
-					generatedScenery: [],
-				},
-				interiors: {
-					envCells: [],
-					environments: [],
-				},
-				renderables: {
-					gfxObjs: [],
-					setupModels: [],
-					unsupportedDids: [],
-				},
+				buildings: [],
 			},
 			prepared: {
 				terrainMesh: null,

@@ -46,10 +46,7 @@ const indoorRuntimeFieldIdValueSchema = z.enum([
 	"cell-structure-id",
 ]);
 
-const indoorAssetFamilyIdValueSchema = z.enum([
-	"indoor-env-cell",
-	"environment",
-]);
+const indoorAssetFamilyIdValueSchema = z.enum(["landblock-pack"]);
 
 const vec3DtoSchema = z.object({
 	x: z.number().finite(),
@@ -135,41 +132,6 @@ const outdoorStaticSceneBuildingDtoSchema =
 		portals: z.array(outdoorStaticSceneBuildingPortalDtoSchema),
 	});
 
-const outdoorStaticSceneGeneratedSceneryInstanceDtoSchema =
-	outdoorStaticSceneInstanceDtoSchema.extend({
-		terrainIndex: z.number().int().nonnegative(),
-		sceneId: z.number().int().nonnegative(),
-		sceneTemplateIndex: z.number().int().nonnegative(),
-		scale: z.number().finite().positive(),
-	});
-
-const outdoorStaticLayerDiagnosticsDtoSchema = z.object({
-	attempted: z.number().int().nonnegative(),
-	accepted: z.number().int().nonnegative(),
-	rejectedUnsupportedSource: z.number().int().nonnegative(),
-});
-
-const generatedOutdoorSceneryDiagnosticsDtoSchema =
-	outdoorStaticLayerDiagnosticsDtoSchema.extend({
-		skippedWeenieObj: z.number().int().nonnegative(),
-		rejectedFrequency: z.number().int().nonnegative(),
-		rejectedBounds: z.number().int().nonnegative(),
-		rejectedBuildingOccupancy: z.number().int().nonnegative(),
-		rejectedObjectBounds: z.number().int().nonnegative(),
-		objectBoundsUnavailable: z.number().int().nonnegative(),
-		rejectedRoad: z.number().int().nonnegative(),
-		rejectedSlope: z.number().int().nonnegative(),
-		rejectedOverlap: z.number().int().nonnegative(),
-	});
-
-const outdoorStaticSceneDiagnosticsDtoSchema = z.object({
-	landblockInfoAvailable: z.boolean(),
-	landblockInfoError: z.string().nullable(),
-	explicit: outdoorStaticLayerDiagnosticsDtoSchema,
-	buildings: outdoorStaticLayerDiagnosticsDtoSchema,
-	generated: generatedOutdoorSceneryDiagnosticsDtoSchema,
-});
-
 export const runtimeBatchDtoSchema = z.object({
 	tick: z.number().int().nonnegative(),
 	entities: z.array(runtimeEntitySnapshotDtoSchema),
@@ -206,21 +168,6 @@ export const assetProvenanceDtoSchema = z.object({
 	errorCode: assetErrorCodeValueSchema.nullable(),
 	detail: z.string().nullable(),
 });
-
-export const terrainLandblockPayloadDtoSchema = z.object({
-	kind: z.literal("terrain-landblock"),
-	residencyKind: z.string(),
-	sourceAssetKind: z.literal("cell-landblock"),
-	landblockId: z.number().int().nonnegative(),
-	gridSize: z.number().int().positive(),
-	tileSize: z.number().finite().positive(),
-	heights: z.array(z.number().finite()),
-	terrainTypes: z.array(z.number().finite()),
-	provenance: assetProvenanceDtoSchema,
-});
-export type TerrainLandblockPayloadDto = z.infer<
-	typeof terrainLandblockPayloadDtoSchema
->;
 
 const landblockClassificationValueSchema = z.enum(["outdoor", "dungeon"]);
 export type LandblockClassificationDto = z.infer<
@@ -522,64 +469,6 @@ export type LandblockSummaryPayloadDto = z.infer<
 	typeof landblockSummaryPayloadDtoSchema
 >;
 
-export const outdoorStaticScenePayloadDtoSchema = z.object({
-	kind: z.literal("outdoor-static-scene"),
-	residencyKind: z.literal("outdoor-landblock"),
-	sourceAssetKind: z.literal("outdoor-static-scene"),
-	landblockId: z.number().int().nonnegative(),
-	sceneryInstances: z.array(outdoorStaticSceneInstanceDtoSchema),
-	buildingInstances: z.array(outdoorStaticSceneBuildingDtoSchema),
-	generatedSceneryInstances: z.array(
-		outdoorStaticSceneGeneratedSceneryInstanceDtoSchema,
-	),
-	diagnostics: outdoorStaticSceneDiagnosticsDtoSchema,
-	provenance: assetProvenanceDtoSchema,
-});
-export type OutdoorStaticScenePayloadDto = z.infer<
-	typeof outdoorStaticScenePayloadDtoSchema
->;
-
-export const indoorEnvCellPayloadDtoSchema = z.object({
-	kind: z.literal("indoor-env-cell"),
-	residencyKind: z.literal("indoor-env-cell"),
-	sourceAssetKind: z.literal("env-cell"),
-	envCellId: z.number().int().nonnegative(),
-	environmentId: z.number().int().nonnegative().nullable(),
-	cellStructureId: z.number().int().nonnegative().nullable(),
-	localPlacement: placementTransformDtoSchema,
-	visibleCellIds: z.array(z.number().int().nonnegative()),
-	landblockEnvCellIds: z.array(z.number().int().nonnegative()),
-	seenOutside: z.boolean().nullable(),
-	surfaceIds: z.array(z.number().int().nonnegative()),
-	portalCount: z.number().int().nonnegative(),
-	portals: z.array(
-		z.object({
-			portalId: z.string().min(1),
-			sourceIndex: z.number().int().nonnegative(),
-			flags: z.number().int().nonnegative(),
-			polygonId: z.number().int().nonnegative(),
-			otherCellId: z.number().int().nonnegative(),
-			otherPortalId: z.number().int().nonnegative(),
-			targetEnvCellId: z.number().int().nonnegative(),
-		}),
-	),
-	staticObjectCount: z.number().int().nonnegative(),
-	staticObjects: z.array(
-		z.object({
-			instanceId: z.string(),
-			owningEnvCellId: z.number().int().nonnegative(),
-			sourceDid: z.number().int().nonnegative(),
-			sourceAssetId: z.string(),
-			sourceIndex: z.number().int().nonnegative(),
-			localPlacement: placementTransformDtoSchema,
-		}),
-	),
-	provenance: assetProvenanceDtoSchema,
-});
-export type IndoorEnvCellPayloadDto = z.infer<
-	typeof indoorEnvCellPayloadDtoSchema
->;
-
 const gfxObjVertexDtoSchema = z.object({
 	id: z.number().int().nonnegative(),
 	origin: vec3DtoSchema,
@@ -678,33 +567,6 @@ const gfxObjPhysicsWitnessDtoSchema = z.object({
 	hasBsp: z.boolean(),
 	rootKind: z.enum(["port", "leaf", "internal"]).nullable().optional(),
 });
-
-const cellStructBspWitnessDtoSchema = z.object({
-	hasBsp: z.boolean(),
-	rootKind: z.enum(["port", "leaf", "internal"]).nullable(),
-});
-
-const environmentCellStructDtoSchema = z.object({
-	id: z.number().int().nonnegative(),
-	vertexArray: gfxObjVertexArrayDtoSchema,
-	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
-	portalPolygonIds: z.array(z.number().int().nonnegative()),
-	cellBspWitness: cellStructBspWitnessDtoSchema,
-	cellBsp: polygonSetBspNodeDtoSchema,
-	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
-	drawingBsp: polygonSetBspNodeDtoSchema.nullable(),
-});
-
-export const environmentPayloadDtoSchema = z.object({
-	kind: z.literal("environment"),
-	residencyKind: z.literal("indoor-env-cell"),
-	sourceAssetKind: z.literal("environment"),
-	environmentId: z.number().int().nonnegative(),
-	cellStructureIds: z.array(z.number().int().nonnegative()),
-	cellStructures: z.array(environmentCellStructDtoSchema),
-	provenance: assetProvenanceDtoSchema,
-});
-export type EnvironmentPayloadDto = z.infer<typeof environmentPayloadDtoSchema>;
 
 export const gfxObjPayloadDtoSchema = z.object({
 	kind: z.literal("gfx-obj"),

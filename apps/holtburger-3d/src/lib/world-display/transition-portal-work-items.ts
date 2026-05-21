@@ -1,7 +1,7 @@
 import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
 import type {
 	AssetChannelState,
-	PreparedOutdoorStaticSceneBuildingPortal,
+	PreparedLandblockStaticBuildingPortal,
 } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 import { normalizeOutdoorLandblockId } from "../landblocks";
@@ -164,7 +164,7 @@ export function deriveTransitionPortalCandidates({
 function collectActiveOutdoorBuildingPortals(
 	assetState: AssetChannelState,
 	activeLandblockIds: ReadonlySet<number>,
-): PreparedOutdoorStaticSceneBuildingPortal[] {
+): PreparedLandblockStaticBuildingPortal[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (
 			asset.payload.kind !== "landblock-pack" ||
@@ -292,7 +292,7 @@ function createTransitionPortalCandidate({
 	assetState,
 }: {
 	aperture: PortalAperture;
-	portal: PreparedOutdoorStaticSceneBuildingPortal;
+	portal: PreparedLandblockStaticBuildingPortal;
 	stencilRef: number;
 	source: TransitionPortalSource;
 	assetState: AssetChannelState;

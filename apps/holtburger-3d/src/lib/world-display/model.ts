@@ -1,26 +1,24 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import type { AppModeId } from "../../app/modes";
 import {
-	browserDestinationToIndoorEnvCellId,
+	browserDestinationToInteriorCellId,
 	browserLocationToLandblockId,
 } from "../../app/browser-mode";
 import {
 	buildOutdoorCoverageLandblocks,
 	formatHex32,
 	formatLandblockLabel,
-	formatTerrainAssetId,
+	formatLandblockPackAssetId,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedLandblockPackPayload,
+	PreparedLandblockSummaryPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
-import {
-	describePreparedAssetPayload,
-	isPreparedTerrainLandblock,
-} from "../assets/types";
+import { describePreparedAssetPayload } from "../assets/types";
 import type {
 	CameraHintAckDto,
 	CameraHintDto,
@@ -220,7 +218,7 @@ function deriveSceneContext(
 	detailLodRadius: number,
 ): WorldDisplaySceneContext {
 	const browserFocusEnvCellId =
-		browserDestinationToIndoorEnvCellId(browserDestination);
+		browserDestinationToInteriorCellId(browserDestination);
 	if (browserFocusEnvCellId !== null) {
 		return deriveIndoorSceneContext(
 			browserFocusEnvCellId,
@@ -374,7 +372,7 @@ function createTerrainContract(
 	const focusChunk =
 		sceneContext?.chunks.find((chunk) => chunk.role === "focus") ?? null;
 	const requestKey = focusChunk
-		? formatTerrainAssetId(focusChunk.landblockId)
+		? formatLandblockPackAssetId(focusChunk.landblockId)
 		: null;
 
 	return {
@@ -435,7 +433,10 @@ function describeAssetState(assetState: AssetChannelState): string {
 export function deriveTerrainViewport(
 	preparedAsset: PreparedAssetRecord | null,
 ): WorldDisplayTerrainViewport {
-	if (!preparedAsset || !isPreparedTerrainLandblock(preparedAsset)) {
+	const terrainMesh = preparedAsset
+		? getTerrainMeshFromPreparedAsset(preparedAsset)
+		: null;
+	if (!terrainMesh) {
 		return {
 			ready: false,
 			landblockLabel: null,
@@ -447,7 +448,21 @@ export function deriveTerrainViewport(
 		};
 	}
 
-	return buildTerrainViewport(preparedAsset.payload.terrainMesh);
+	return buildTerrainViewport(terrainMesh);
+}
+
+function getTerrainMeshFromPreparedAsset(
+	asset: PreparedAssetRecord,
+): PreparedTerrainMesh | null {
+	if (asset.payload.kind === "landblock-pack") {
+		return asset.payload.prepared.terrainMesh;
+	}
+
+	if (asset.payload.kind === "landblock-summary") {
+		return asset.payload.prepared.terrainMesh;
+	}
+
+	return null;
 }
 
 function buildTerrainViewport(

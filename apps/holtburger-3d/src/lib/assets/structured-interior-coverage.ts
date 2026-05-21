@@ -1,8 +1,5 @@
-import { formatHex32, formatLandblockPackAssetId } from "../landblocks";
-import type {
-	PreparedAssetRecord,
-	PreparedIndoorEnvCellPayload,
-} from "./types";
+import { formatLandblockPackAssetId } from "../landblocks";
+import type { PreparedAssetRecord } from "./types";
 
 export type StructuredInteriorMembershipPolicy =
 	| { kind: "direct"; envCellIds: number[] }
@@ -28,20 +25,6 @@ export function deriveStructuredInteriorCoverage(
 		policy.seedEnvCellIds,
 		preparedByAssetId,
 	);
-}
-
-export function formatEnvCellAssetId(envCellId: number): string {
-	return `env-cell/${formatHex32(envCellId)}`;
-}
-
-export function formatEnvironmentAssetId(environmentId: number): string {
-	return `environment/${formatHex32(environmentId)}`;
-}
-
-export function isPreparedIndoorEnvCellAsset(
-	asset: PreparedAssetRecord | undefined,
-): asset is PreparedAssetRecord & { payload: PreparedIndoorEnvCellPayload } {
-	return asset?.payload.kind === "indoor-env-cell";
 }
 
 export function deriveBrowserFocusedStructuredInteriorMembershipPolicy(
@@ -70,14 +53,6 @@ function deriveLandblockClosureCoverage(
 			continue;
 		}
 
-		const asset = preparedByAssetId[formatEnvCellAssetId(seedEnvCellId)];
-		if (!isPreparedIndoorEnvCellAsset(asset)) {
-			continue;
-		}
-
-		for (const landblockEnvCellId of asset.payload.landblockEnvCellIds) {
-			envCellIds.add(landblockEnvCellId);
-		}
 	}
 
 	return {

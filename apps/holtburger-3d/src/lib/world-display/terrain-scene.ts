@@ -7,7 +7,6 @@ import type {
 	PreparedLandblockSummaryPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
-import { isPreparedTerrainLandblock } from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
 import {
@@ -150,10 +149,6 @@ export function deriveTerrainSceneModel(
 function getTerrainMeshFromPreparedAsset(
 	asset: PreparedAssetRecord,
 ): PreparedTerrainMesh | null {
-	if (isPreparedTerrainLandblock(asset)) {
-		return asset.payload.terrainMesh;
-	}
-
 	if (isPreparedLandblockPackWithTerrain(asset)) {
 		return asset.payload.prepared.terrainMesh;
 	}
@@ -215,14 +210,6 @@ function inferTerrainDataSource(
 		return asset.payload.provenance.source === "repo-local-hba"
 			? "repo-local-cell-landblock"
 			: "unknown";
-	}
-
-	if (asset.payload.provenance.source === "repo-local-hba") {
-		return "repo-local-cell-landblock";
-	}
-
-	if (asset.payload.provenance.source === "generated-fallback") {
-		return "generated-fallback";
 	}
 
 	return "unknown";

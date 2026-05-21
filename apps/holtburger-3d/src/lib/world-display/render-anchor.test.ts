@@ -16,7 +16,7 @@ import {
 describe("render anchor coordination", () => {
 	it("uses explicit browser destinations as immediate render anchors", () => {
 		const candidate = deriveRenderAnchorCandidate(createRuntimeBatch(), {
-			kind: "indoor-env-cell",
+			kind: "interior-cell",
 			label: "Env cell 0x016c0155",
 			source: "manual",
 			envCellId: 0x016c0155,

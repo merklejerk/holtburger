@@ -30,7 +30,7 @@ describe("deriveTerrainSpatialItems", () => {
 
 		expect(items).toHaveLength(1);
 		expect(items[0]).toMatchObject({
-			id: "terrain:terrain/01020304",
+			id: "terrain:landblock-pack/0102ffff",
 			kind: "terrain",
 			ownerKey: TERRAIN_SPATIAL_OWNER_KEY,
 			chunkKey: "landblock/0102ffff",
@@ -41,7 +41,7 @@ describe("deriveTerrainSpatialItems", () => {
 			metadata: {
 				kind: "terrain",
 				landblockId: 0x01020304,
-				assetId: "terrain/01020304",
+				assetId: "landblock-pack/0102ffff",
 				terrainQuad: null,
 			},
 		});
@@ -69,7 +69,7 @@ describe("deriveTerrainSpatialItems", () => {
 			new Set(["terrain"]),
 		);
 
-		expect(pick?.item.id).toBe("terrain:terrain/01020304");
+		expect(pick?.item.id).toBe("terrain:landblock-pack/0102ffff");
 		expect(pick?.point).toEqual({ x: 12, y: 0, z: -26 });
 		expect(pick?.distance).toBe(4);
 	});
@@ -272,7 +272,7 @@ describe("deriveLandblockPackSpatialItems", () => {
 						staticMeshes: [],
 						spatialItems: [
 							{
-								id: "landblock-pack/0102ffff/spatial/terrain/quad/03/04",
+								id: "landblock-pack/0102ffff/spatial/terrain-quad/03/04",
 								kind: "terrain",
 								ownerId: 0x0102ffff,
 								sourceAssetId: null,
@@ -329,7 +329,7 @@ describe("deriveLandblockPackSpatialItems", () => {
 		expect(items[0]?.metadata).toEqual({
 			kind: "terrain",
 			landblockId: 0x0102ffff,
-			assetId: "landblock-pack/0102ffff/spatial/terrain/quad/03/04",
+			assetId: "landblock-pack/0102ffff/spatial/terrain-quad/03/04",
 			terrainQuad: {
 				row: 3,
 				col: 4,
@@ -400,7 +400,7 @@ function createPreparedLandblockPackAsset(
 				staticMeshes: [],
 				spatialItems: [
 					{
-						id: `landblock-pack/${landblockId.toString(16).padStart(8, "0")}/spatial/terrain/quad/07/00`,
+						id: `landblock-pack/${landblockId.toString(16).padStart(8, "0")}/spatial/terrain-quad/07/00`,
 						kind: "terrain",
 						ownerId: landblockId,
 						sourceAssetId: null,
@@ -444,7 +444,7 @@ function createTerrainScene(): TerrainSceneModel {
 		dataSourceText: "",
 		tiles: [
 			{
-				assetId: "terrain/01020304",
+				assetId: "landblock-pack/0102ffff",
 				landblockId: 0x01020304,
 				renderChunk: deriveTerrainTileRenderChunk(0x01020304),
 				label: "01020304",
@@ -506,7 +506,7 @@ function createStructuredInteriorScene(): StructuredInteriorSceneModel {
 			},
 		],
 		missingEnvCellAssetIds: [],
-		missingEnvironmentAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText: "",
 		cacheText: "",

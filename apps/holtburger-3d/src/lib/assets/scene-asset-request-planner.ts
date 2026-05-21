@@ -4,7 +4,7 @@ import type {
 	RuntimeBatchDto,
 } from "../host/contracts";
 import {
-	browserDestinationToIndoorEnvCellId,
+	browserDestinationToInteriorCellId,
 	browserLocationToLandblockId,
 	isIndoorBrowserDestination,
 	type BrowserLocationSelection,
@@ -377,14 +377,14 @@ export function createStaticRenderableAssetRequests(
 	const buildingLandblockIds = new Set(outdoorInterest.buildingLandblockIds);
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
 	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
-	const linkedIndoorEnvCellIds = derivePackInteriorEnvCellIdsForLandblocks(
+	const linkedInteriorCellIds = derivePackInteriorEnvCellIdsForLandblocks(
 		preparedByAssetId,
 		envCellLandblockIds,
 	);
 	const linkedInteriorCoverage = deriveStructuredInteriorCoverage(
 		{
 			kind: "landblock-closure",
-			seedEnvCellIds: [...linkedIndoorEnvCellIds],
+			seedEnvCellIds: [...linkedInteriorCellIds],
 		},
 		preparedByAssetId,
 	);
@@ -458,7 +458,7 @@ function createIndoorStaticRenderableAssetRequests(
 	pendingAssetIds: string[],
 ): AssetLookupRequestDto[] {
 	const browserFocusEnvCellId =
-		browserDestinationToIndoorEnvCellId(browserDestination);
+		browserDestinationToInteriorCellId(browserDestination);
 	const activeEnvCellIds = deriveStructuredInteriorCoverage(
 		browserFocusEnvCellId === null
 			? createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch)

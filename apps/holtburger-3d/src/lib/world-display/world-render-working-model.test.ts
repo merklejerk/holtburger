@@ -22,13 +22,13 @@ describe("world render working model", () => {
 		const interiorStaticMesh = createInstancedMesh("interior-static");
 		const interiorShellMesh = createMesh("interior-shell");
 		const input = createWorkingModelInput({
-			terrainMeshes: new Map([["terrain/1", terrainMesh]]),
+			terrainMeshes: new Map([["landblock-pack/1", terrainMesh]]),
 			staticRenderableGroupMeshes: new Map([
 				["exterior-static|chunk/a|gfx-obj/1", exteriorStaticMesh],
 				["interior-static|chunk/a|gfx-obj/1", interiorStaticMesh],
 			]),
 			structuredInteriorMeshes: new Map([
-				["interior-cell-shell/env-cell/1", interiorShellMesh],
+				["interior-cell-shell/interior-cell/1", interiorShellMesh],
 			]),
 			staticRenderableScene: createStaticRenderableSceneModel([
 				[
@@ -43,7 +43,7 @@ describe("world render working model", () => {
 			structuredInteriorScene: createStructuredInteriorSceneModel([
 				createStructuredInteriorCell(
 					0x01020304,
-					"interior-cell-shell/env-cell/1",
+					"interior-cell-shell/interior-cell/1",
 				),
 			]),
 		});
@@ -56,7 +56,7 @@ describe("world render working model", () => {
 		expect(model.interior.staticRenderableMeshes).toEqual([interiorStaticMesh]);
 		expect(
 			model.interior.envCellIdByCellShellRenderKey.get(
-				"interior-cell-shell/env-cell/1",
+				"interior-cell-shell/interior-cell/1",
 			),
 		).toBe(0x01020304);
 		expect(model.interior.cellShellMeshByEnvCellId.get(0x01020304)).toBe(
@@ -69,7 +69,7 @@ describe("world render working model", () => {
 			structuredInteriorScene: createStructuredInteriorSceneModel([
 				createStructuredInteriorCell(
 					0x01020304,
-					"interior-cell-shell/env-cell/1",
+					"interior-cell-shell/interior-cell/1",
 				),
 			]),
 		});
@@ -153,7 +153,7 @@ function createStructuredInteriorSceneModel(
 		activeEnvCellIds: cells.map((cell) => cell.envCellId),
 		cells,
 		missingEnvCellAssetIds: [],
-		missingEnvironmentAssetIds: [],
+		missingInteriorGeometryAssetIds: [],
 		missingCellStructureKeys: [],
 		statusText: "ready",
 		cacheText: "ready",

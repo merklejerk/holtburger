@@ -1,10 +1,8 @@
 import type { AssetLookupResponseDto } from "../host/contracts";
 import {
 	dependencyManifestPayloadDtoSchema,
-	indoorEnvCellPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
-	outdoorStaticScenePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 } from "../host/contracts";
 
@@ -15,23 +13,6 @@ export interface AssetDependencyRef {
 export function getAssetResponseDependencies(
 	response: AssetLookupResponseDto,
 ): AssetDependencyRef[] {
-	const outdoorStaticScene = outdoorStaticScenePayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (outdoorStaticScene.success) {
-		return uniqueSortedAssetIds([
-			...outdoorStaticScene.data.sceneryInstances.map(
-				(instance) => instance.sourceAssetId,
-			),
-			...outdoorStaticScene.data.buildingInstances.map(
-				(instance) => instance.sourceAssetId,
-			),
-			...outdoorStaticScene.data.generatedSceneryInstances.map(
-				(instance) => instance.sourceAssetId,
-			),
-		]);
-	}
-
 	const landblockPack = landblockPackPayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -46,17 +27,6 @@ export function getAssetResponseDependencies(
 	);
 	if (landblockSummary.success) {
 		return [];
-	}
-
-	const indoorEnvCell = indoorEnvCellPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (indoorEnvCell.success) {
-		return uniqueSortedAssetIds(
-			indoorEnvCell.data.staticObjects.map(
-				(staticObject) => staticObject.sourceAssetId,
-			),
-		);
 	}
 
 	const setupModel = setupModelPayloadDtoSchema.safeParse(response.payload);

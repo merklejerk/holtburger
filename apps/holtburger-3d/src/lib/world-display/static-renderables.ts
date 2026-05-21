@@ -1,6 +1,6 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import {
-	browserDestinationToIndoorEnvCellId,
+	browserDestinationToInteriorCellId,
 	isIndoorBrowserDestination,
 } from "../../app/browser-mode";
 import type {
@@ -214,7 +214,7 @@ function deriveIndoorStaticRenderableSceneModel(
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
 ): StaticRenderableSceneModel {
-	const activeEnvCellIds = deriveActiveIndoorEnvCellIds(
+	const activeEnvCellIds = deriveActiveInteriorCellIds(
 		runtimeBatch,
 		assetState,
 		browserDestination,
@@ -477,7 +477,7 @@ function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
 	};
 }
 
-function deriveActiveIndoorEnvCellIds(
+function deriveActiveInteriorCellIds(
 	runtimeBatch: RuntimeBatchDto,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
@@ -488,7 +488,7 @@ function deriveActiveIndoorEnvCellIds(
 	}
 
 	const browserFocusEnvCellId =
-		browserDestinationToIndoorEnvCellId(browserDestination);
+		browserDestinationToInteriorCellId(browserDestination);
 	if (browserFocusEnvCellId !== null) {
 		return new Set(
 			deriveStructuredInteriorCoverage(

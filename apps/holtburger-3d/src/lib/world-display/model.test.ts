@@ -10,7 +10,9 @@ import {
 } from "./model";
 import {
 	createInitialAssetChannelState,
+	type PreparedLandblockPackPayload,
 	type PreparedLandblockStaticInstance,
+	type PreparedTerrainMesh,
 } from "../assets/types";
 import type { RuntimeBatchDto } from "../host/contracts";
 
@@ -56,56 +58,23 @@ describe("world display model helpers", () => {
 				preparedAsset: {
 					request: {
 						requestId: "fixture",
-						assetId: "terrain/0102ffff",
+						assetId: "landblock-pack/0102ffff",
 						priority: "bootstrap",
 					},
 					response: {
 						requestId: "fixture",
-						assetId: "terrain/0102ffff",
+						assetId: "landblock-pack/0102ffff",
 						payloadKind: "json",
-						payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
+						payload: { kind: "landblock-pack", landblockId: 0x0102ffff },
 					},
-					payload: {
-						kind: "terrain-landblock",
-						sourceAssetKind: "cell-landblock",
-						residencyKind: "outdoor-landblock",
-						provenance: {
-							source: "unknown",
-							sourceAssetKind: "cell-landblock",
-							errorCode: null,
-							detail: null,
-						},
-						debugPresentation: {
-							primitive: "terrain-landblock-mesh",
-							paletteKey: "terrain-0102ffff",
-						},
-						terrainMesh: {
-							landblockId: 0x0102ffff,
-							gridSize: 9,
-							tileSize: 24,
-							vertices: Array.from({ length: 81 }, (_, index) => ({
-								x: (index % 9) * 24,
-								y: Math.floor(index / 9) * 24,
-								z: index % 12,
-							})),
-							triangles: Array.from({ length: 128 }, (_, index) => ({
-								a: index % 40,
-								b: (index % 40) + 1,
-								c: (index % 40) + 9,
-								terrainType: index % 6,
-								averageHeight: (index % 10) + 2,
-							})),
-							minHeight: 0,
-							maxHeight: 11,
-						},
-					},
+					payload: createPreparedLandblockPackPayload(0x0102ffff),
 					preparedAt: "2026-04-26T00:00:00.000Z",
 				},
 				lastResponse: {
 					requestId: "fixture",
-					assetId: "terrain/0102ffff",
+					assetId: "landblock-pack/0102ffff",
 					payloadKind: "json",
-					payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
+					payload: { kind: "landblock-pack", landblockId: 0x0102ffff },
 				},
 				errorMessage: null,
 			},
@@ -134,10 +103,10 @@ describe("world display model helpers", () => {
 		expect(model.sceneContext.kind).toBe("outdoor-landblock-ring");
 		expect(model.sceneContext.chunks).toHaveLength(6);
 		expect(model.sceneContext.focusAnchorLabel).toBe("0x0001ffff");
-		expect(model.terrainContract.requestKey).toBe("terrain/0001ffff");
+		expect(model.terrainContract.requestKey).toBe("landblock-pack/0001ffff");
 		expect(model.terrainContract.decodeOwner).toBe("rust-host-adapter");
 		expect(model.renderCacheText).toMatch(/authoritative residency/);
-		expect(model.assetText).toMatch(/Prepared terrain\/0102ffff/);
+		expect(model.assetText).toMatch(/Prepared landblock-pack\/0102ffff/);
 	});
 
 	it("tracks pack-backed outdoor scenery membership separately from terrain chunks", () => {
@@ -232,46 +201,27 @@ describe("world display model helpers", () => {
 		const viewport = deriveTerrainViewport({
 			request: {
 				requestId: "fixture",
-				assetId: "terrain/0102ffff",
+				assetId: "landblock-pack/0102ffff",
 				priority: "bootstrap",
 			},
 			response: {
 				requestId: "fixture",
-				assetId: "terrain/0102ffff",
+				assetId: "landblock-pack/0102ffff",
 				payloadKind: "json",
-				payload: { kind: "terrain-landblock", landblockId: 0x0102ffff },
+				payload: { kind: "landblock-pack", landblockId: 0x0102ffff },
 			},
-			payload: {
-				kind: "terrain-landblock",
-				sourceAssetKind: "cell-landblock",
-				residencyKind: "outdoor-landblock",
-				provenance: {
-					source: "unknown",
-					sourceAssetKind: "cell-landblock",
-					errorCode: null,
-					detail: null,
-				},
-				debugPresentation: {
-					primitive: "terrain-landblock-mesh",
-					paletteKey: "terrain-0102ffff",
-				},
-				terrainMesh: {
-					landblockId: 0x0102ffff,
-					gridSize: 9,
-					tileSize: 24,
-					vertices: Array.from({ length: 81 }, (_, index) => ({
-						x: (index % 9) * 24,
-						y: Math.floor(index / 9) * 24,
-						z: (index % 9) + Math.floor(index / 9),
-					})),
-					triangles: [
-						{ a: 0, b: 9, c: 1, terrainType: 1, averageHeight: 4 },
-						{ a: 1, b: 9, c: 10, terrainType: 2, averageHeight: 5 },
-					],
-					minHeight: 0,
-					maxHeight: 12,
-				},
-			},
+			payload: createPreparedLandblockPackPayload(0x0102ffff, {
+				vertices: Array.from({ length: 81 }, (_, index) => ({
+					x: (index % 9) * 24,
+					y: Math.floor(index / 9) * 24,
+					z: (index % 9) + Math.floor(index / 9),
+				})),
+				triangles: [
+					{ a: 0, b: 9, c: 1, terrainType: 1, averageHeight: 4 },
+					{ a: 1, b: 9, c: 10, terrainType: 2, averageHeight: 5 },
+				],
+				maxHeight: 12,
+			}),
 			preparedAt: "2026-04-26T00:00:00.000Z",
 		});
 
@@ -299,52 +249,7 @@ describe("world display model helpers", () => {
 			viewModelFeed: null,
 			assetState: {
 				...createInitialAssetChannelState(),
-				preparedByAssetId: {
-					"env-cell/016c0155": {
-						request: {
-							requestId: "fixture-indoor",
-							assetId: "env-cell/016c0155",
-							priority: "bootstrap",
-						},
-						response: {
-							requestId: "fixture-indoor",
-							assetId: "env-cell/016c0155",
-							payloadKind: "json",
-							payload: { kind: "indoor-env-cell", envCellId: 0x016c0155 },
-						},
-						payload: {
-							kind: "indoor-env-cell",
-							sourceAssetKind: "env-cell",
-							residencyKind: "indoor-env-cell",
-							provenance: {
-								source: "repo-local-hba",
-								sourceAssetKind: "env-cell",
-								errorCode: null,
-								detail: "dats/assets.hba",
-							},
-							debugPresentation: {
-								primitive: "indoor-env-cell-metadata",
-								paletteKey: "env-cell-016c0155",
-							},
-							envCellId: 0x016c0155,
-							environmentId: 0x0d000001,
-							cellStructureId: 1,
-							localPlacement: {
-								origin: { x: 0, y: 0, z: 0 },
-								orientation: { w: 1, x: 0, y: 0, z: 0 },
-							},
-							visibleCellIds: [0x016c0156, 0x016c0157],
-							landblockEnvCellIds: [],
-							seenOutside: false,
-							surfaceIds: [],
-							portalCount: 0,
-							portals: [],
-							staticObjectCount: 0,
-							staticObjects: [],
-						},
-						preparedAt: "2026-04-28T00:00:00.000Z",
-					},
-				},
+				preparedByAssetId: {},
 			},
 			browserDestination: null,
 			terrainLodRadius: 1,
@@ -408,5 +313,64 @@ function createPackStaticInstance(
 			orientation: { w: 1, x: 0, y: 0, z: 0 },
 		},
 		sourceScale: { x: 1, y: 1, z: 1 },
+	};
+}
+
+function createPreparedLandblockPackPayload(
+	landblockId: number,
+	terrainOverrides: Partial<PreparedTerrainMesh> = {},
+): PreparedLandblockPackPayload {
+	return {
+		kind: "landblock-pack",
+		sourceAssetKind: "landblock-pack",
+		residencyKind: "landblock",
+		provenance: {
+			source: "unknown",
+			sourceAssetKind: "landblock-pack",
+			errorCode: null,
+			detail: null,
+		},
+		landblockId,
+		landblockInfoId: landblockId & 0xffff_fffe,
+		classification: "outdoor",
+		sourceFacts: {
+			buildings: [],
+		},
+		prepared: {
+			terrainMesh: {
+				landblockId,
+				gridSize: 9,
+				tileSize: 24,
+				vertices: Array.from({ length: 81 }, (_, index) => ({
+					x: (index % 9) * 24,
+					y: Math.floor(index / 9) * 24,
+					z: index % 12,
+				})),
+				triangles: Array.from({ length: 128 }, (_, index) => ({
+					a: index % 40,
+					b: (index % 40) + 1,
+					c: (index % 40) + 9,
+					terrainType: index % 6,
+					averageHeight: (index % 10) + 2,
+				})),
+				minHeight: 0,
+				maxHeight: 11,
+				...terrainOverrides,
+			},
+			outdoorStaticInstances: [],
+			interiorCells: [],
+			staticMeshes: [],
+			spatialItems: [],
+			staticLandblockBvh: null,
+		},
+		dependencies: {
+			cellDatIds: [],
+			portalDatIds: [],
+			renderableAssetIds: [],
+		},
+		diagnostics: {
+			sourceRecords: [],
+			errors: [],
+		},
 	};
 }

@@ -50,7 +50,7 @@
 	let isCollapsed = $state(false);
 	const focusedCellReference = $derived.by<FocusedCellReference>(() => {
 		const destination = $frontendState.browserMode.destination;
-		if (destination?.kind === "indoor-env-cell") {
+		if (destination?.kind === "interior-cell") {
 			return {
 				landblockId: normalizeOutdoorLandblockId(destination.landblockId),
 				cellId: destination.envCellId,

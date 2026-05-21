@@ -66,6 +66,74 @@ describe("decodeBinaryAssetEnvelope", () => {
 			},
 		});
 	});
+
+	it("preserves renderer-hot polygon geometry sections as typed arrays", () => {
+		const positions = new Float32Array([1, 2, 3, 4, 5, 6]);
+		const normals = new Float32Array([0, 1, 0, 0, 1, 0]);
+		const uvs = new Float32Array([0, 0, 1, 1]);
+		const response = decodeBinaryAssetEnvelope(
+			buildEnvelope({
+				response: {
+					requestId: "request-2",
+					assetId: "gfx-obj/02000000",
+					payloadKind: "json",
+					payload: {
+						renderGeometry: {
+							positions: [],
+							normals: [],
+							uvs: [],
+						},
+					},
+				},
+				sections: [
+					{
+						role: "prepared.gfxObj.renderGeometry.positions",
+						path: "payload.renderGeometry.positions",
+						scalarType: "f32",
+						componentCount: 3,
+						elementCount: 2,
+						byteOffset: 0,
+						byteLength: positions.byteLength,
+					},
+					{
+						role: "prepared.gfxObj.renderGeometry.normals",
+						path: "payload.renderGeometry.normals",
+						scalarType: "f32",
+						componentCount: 3,
+						elementCount: 2,
+						byteOffset: positions.byteLength,
+						byteLength: normals.byteLength,
+					},
+					{
+						role: "prepared.gfxObj.renderGeometry.uvs",
+						path: "payload.renderGeometry.uvs",
+						scalarType: "f32",
+						componentCount: 2,
+						elementCount: 2,
+						byteOffset: positions.byteLength + normals.byteLength,
+						byteLength: uvs.byteLength,
+					},
+				],
+				sectionData: [positions, normals, uvs],
+			}),
+		);
+
+		const renderGeometry = (
+			response.payload as {
+				renderGeometry: {
+					positions: unknown;
+					normals: unknown;
+					uvs: unknown;
+				};
+			}
+		).renderGeometry;
+		expect(renderGeometry.positions).toBeInstanceOf(Float32Array);
+		expect(renderGeometry.normals).toBeInstanceOf(Float32Array);
+		expect(renderGeometry.uvs).toBeInstanceOf(Float32Array);
+		expect(Array.from(renderGeometry.positions as Float32Array)).toEqual([
+			1, 2, 3, 4, 5, 6,
+		]);
+	});
 });
 
 function buildEnvelope({

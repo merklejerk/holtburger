@@ -6,6 +6,7 @@ import {
 	deriveLandblockEnvCellId,
 	deriveLandblockEnvCellIds,
 	formatLandblockPackAssetId,
+	formatLandblockSummaryAssetId,
 	formatLandblockLabel,
 	formatOutdoorStaticSceneAssetId,
 	formatTerrainAssetId,
@@ -27,6 +28,9 @@ describe("outdoor landblock helpers", () => {
 		);
 		expect(formatLandblockPackAssetId(landblockId)).toBe(
 			"landblock-pack/da55ffff",
+		);
+		expect(formatLandblockSummaryAssetId(landblockId)).toBe(
+			"landblock-summary/da55ffff",
 		);
 	});
 

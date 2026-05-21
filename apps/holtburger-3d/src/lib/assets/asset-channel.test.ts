@@ -174,8 +174,8 @@ describe("asset channel controller", () => {
 		expect(request?.assetId).toMatch(/^landblock-pack\//);
 	});
 
-	it("returns every missing landblock in the coverage ring immediately when nothing is in flight", () => {
-		const requests = createOutdoorLandblockPackCoverageRequests(
+		it("returns every missing landblock coverage asset immediately when nothing is in flight", () => {
+			const requests = createOutdoorLandblockPackCoverageRequests(
 			createRuntimeBatch(),
 			null,
 			"streaming",
@@ -185,9 +185,18 @@ describe("asset channel controller", () => {
 			[],
 		);
 
-		expect(requests).toHaveLength(8);
-		expect(
-			requests.every(
+			const assetIds = requests.map((request) => request.assetId);
+			const packAssetIds = assetIds.filter((assetId) =>
+				assetId.startsWith("landblock-pack/"),
+			);
+			const summaryAssetIds = assetIds.filter((assetId) =>
+				assetId.startsWith("landblock-summary/"),
+			);
+
+			expect(packAssetIds).toHaveLength(8);
+			expect(summaryAssetIds.length).toBeGreaterThan(0);
+			expect(
+				requests.every(
 				(request) => request.assetId !== "landblock-pack/0102ffff",
 			),
 		).toBe(true);
@@ -270,7 +279,7 @@ describe("asset channel controller", () => {
 		]);
 	});
 
-	it("requests landblock packs across the union of terrain and static LoD rings", () => {
+		it("requests landblock packs for static LoD and summaries for terrain-only LoD", () => {
 		const requests = createSceneCoverageRequests(
 			createRuntimeBatch(),
 			null,
@@ -280,9 +289,9 @@ describe("asset channel controller", () => {
 			{ terrainRadius: 2, buildingRadius: 1, detailRadius: 0 },
 		).map((request) => request.assetId);
 
-		expect(requests).toContain("landblock-pack/0302ffff");
-		expect(requests).toContain("landblock-pack/0202ffff");
-	});
+			expect(requests).toContain("landblock-summary/0302ffff");
+			expect(requests).toContain("landblock-pack/0202ffff");
+		});
 
 	it("derives demand-driven static renderable requests from prepared landblock pack facts", () => {
 		const runtimeBatch = createRuntimeBatch();
@@ -460,7 +469,7 @@ describe("asset channel controller", () => {
 		expect(requests).toEqual([]);
 	});
 
-	it("excludes already in-flight terrain assets from the immediate coverage enqueue set", () => {
+		it("excludes already in-flight coverage assets from the immediate coverage enqueue set", () => {
 		const requests = createOutdoorLandblockPackCoverageRequests(
 			createRuntimeBatch(),
 			null,
@@ -475,8 +484,12 @@ describe("asset channel controller", () => {
 		expect(
 			requests.some((request) => request.assetId === "landblock-pack/0101ffff"),
 		).toBe(false);
-		expect(requests).toHaveLength(7);
-	});
+			expect(
+				requests.filter((request) =>
+					request.assetId.startsWith("landblock-pack/"),
+				),
+			).toHaveLength(7);
+		});
 
 	it("requests the focused landblock pack when runtime residency is indoors", () => {
 		const runtimeBatch = createRuntimeBatch();

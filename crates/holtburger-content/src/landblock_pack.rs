@@ -33,6 +33,52 @@ pub struct LandblockPack {
 }
 
 #[derive(Debug, Clone)]
+pub struct LandblockSummary {
+    pub landblock_id: u32,
+    pub landblock_info_id: u32,
+    pub classification: LandblockClassification,
+    pub cell_landblock: Option<CellLandblockFact>,
+    pub landblock_info: Option<LandblockInfoFact>,
+    pub terrain_mesh: Option<PreparedTerrainMesh>,
+    pub objects: Vec<LandblockSummaryObject>,
+    pub buildings: Vec<LandblockSummaryBuilding>,
+    pub diagnostics: LandblockPackSourceDiagnostics,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSummaryObject {
+    pub instance_id: String,
+    pub owning_landblock_id: u32,
+    pub source_did: u32,
+    pub source_asset_id: Option<String>,
+    pub source_index: usize,
+    pub local_placement: Frame,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSummaryBuilding {
+    pub instance_id: String,
+    pub owning_landblock_id: u32,
+    pub source_did: u32,
+    pub source_asset_id: Option<String>,
+    pub source_index: usize,
+    pub local_placement: Frame,
+    pub num_leaves: u32,
+    pub portals: Vec<LandblockSummaryBuildingPortal>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LandblockSummaryBuildingPortal {
+    pub portal_id: String,
+    pub source_index: usize,
+    pub flags: u16,
+    pub other_cell_id: u16,
+    pub other_portal_id: u16,
+    pub stab_list: Vec<u16>,
+    pub linked_env_cell_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
 pub struct CellLandblockFact {
     pub id: u32,
     pub has_objects: bool,
@@ -354,6 +400,9 @@ pub struct SourceLoadError {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockPackAssembler;
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LandblockSummaryAssembler;
+
 struct LandblockPackAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
     diagnostics: LandblockPackSourceDiagnostics,
@@ -625,6 +674,75 @@ impl LandblockPackAssembler {
     }
 }
 
+impl LandblockSummaryAssembler {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn assemble_landblock(
+        &self,
+        content: &ContentRepository,
+        raw_landblock_id: u32,
+    ) -> LandblockSummary {
+        self.assemble_landblock_with_context(
+            LandblockPackAssemblyContext::new(content),
+            raw_landblock_id,
+        )
+    }
+
+    pub fn assemble_landblock_with_cache(
+        &self,
+        content: &ContentRepository,
+        decode_cache: &ContentDecodeCache,
+        raw_landblock_id: u32,
+    ) -> LandblockSummary {
+        self.assemble_landblock_with_context(
+            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
+            raw_landblock_id,
+        )
+    }
+
+    fn assemble_landblock_with_context(
+        &self,
+        mut context: LandblockPackAssemblyContext<'_>,
+        raw_landblock_id: u32,
+    ) -> LandblockSummary {
+        let landblock_id = normalize_landblock_id(raw_landblock_id);
+        let landblock_info_id = derive_landblock_info_id(landblock_id);
+        let cell_landblock_source = context.load_cell_landblock(landblock_id);
+        let landblock_info_source = context.load_landblock_info(landblock_id);
+        let cell_landblock = cell_landblock_source
+            .as_ref()
+            .map(CellLandblockFact::from_landblock);
+        let landblock_info = landblock_info_source
+            .as_ref()
+            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
+        let terrain_mesh = cell_landblock.as_ref().map(build_terrain_mesh);
+        let objects = landblock_info_source
+            .as_ref()
+            .map(|info| build_landblock_summary_objects(landblock_id, info))
+            .unwrap_or_default();
+        let buildings = landblock_info_source
+            .as_ref()
+            .map(|info| build_landblock_summary_buildings(landblock_id, info))
+            .unwrap_or_default();
+        let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
+        let diagnostics = context.into_diagnostics();
+
+        LandblockSummary {
+            landblock_id,
+            landblock_info_id,
+            classification,
+            cell_landblock,
+            landblock_info,
+            terrain_mesh,
+            objects,
+            buildings,
+            diagnostics,
+        }
+    }
+}
+
 pub fn derive_landblock_info_id(raw_landblock_id: u32) -> u32 {
     normalize_landblock_id(raw_landblock_id) & 0xffff_fffe
 }
@@ -858,6 +976,76 @@ impl EnvironmentFact {
             cell_structures,
         }
     }
+}
+
+fn build_landblock_summary_objects(
+    landblock_id: u32,
+    info: &LandblockInfo,
+) -> Vec<LandblockSummaryObject> {
+    info.objects
+        .iter()
+        .enumerate()
+        .map(|(source_index, object)| LandblockSummaryObject {
+            instance_id: format!(
+                "landblock-summary/{landblock_id:08x}/object/{source_index:04x}/{:08x}",
+                object.id
+            ),
+            owning_landblock_id: landblock_id,
+            source_did: object.id,
+            source_asset_id: renderable_source_asset_id(object.id),
+            source_index,
+            local_placement: Frame {
+                origin: object.frame.origin,
+                orientation: object.frame.orientation,
+            },
+        })
+        .collect()
+}
+
+fn build_landblock_summary_buildings(
+    landblock_id: u32,
+    info: &LandblockInfo,
+) -> Vec<LandblockSummaryBuilding> {
+    info.buildings
+        .iter()
+        .enumerate()
+        .map(|(source_index, building)| LandblockSummaryBuilding {
+            instance_id: format!(
+                "landblock-summary/{landblock_id:08x}/building/{source_index:04x}/{:08x}",
+                building.model_id
+            ),
+            owning_landblock_id: landblock_id,
+            source_did: building.model_id,
+            source_asset_id: renderable_source_asset_id(building.model_id),
+            source_index,
+            local_placement: Frame {
+                origin: building.frame.origin,
+                orientation: building.frame.orientation,
+            },
+            num_leaves: building.num_leaves,
+            portals: building
+                .portals
+                .iter()
+                .enumerate()
+                .map(|(portal_index, portal)| LandblockSummaryBuildingPortal {
+                    portal_id: format!(
+                        "landblock-summary/{landblock_id:08x}/building/{source_index:04x}/portal/{portal_index:04x}"
+                    ),
+                    source_index: portal_index,
+                    flags: portal.flags,
+                    other_cell_id: portal.other_cell_id,
+                    other_portal_id: portal.other_portal_id,
+                    stab_list: portal.stab_list.clone(),
+                    linked_env_cell_ids: portal
+                        .stab_list
+                        .iter()
+                        .copied()
+                        .map(|stab| crate::normalize_landblock_env_cell_id(landblock_id, stab))
+                        .collect(),
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 fn prepare_landblock_facts(

@@ -486,6 +486,35 @@ const landblockPackDependenciesDtoSchema = z.object({
 	unsupported: z.array(z.unknown()),
 });
 
+const landblockSummaryObjectDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	owningLandblockId: z.number().int().nonnegative(),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1).nullable(),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+});
+
+const landblockSummaryBuildingPortalDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	stabList: z.array(z.number().int().nonnegative()),
+	linkedEnvCellIds: z.array(z.number().int().nonnegative()),
+});
+
+const landblockSummaryBuildingDtoSchema = landblockSummaryObjectDtoSchema.extend({
+	numLeaves: z.number().int().nonnegative(),
+	portals: z.array(landblockSummaryBuildingPortalDtoSchema),
+});
+
+const landblockSummaryDependenciesDtoSchema = z.object({
+	cellDatIds: z.array(z.number().int().nonnegative()),
+	renderableAssetIds: z.array(z.string().min(1)),
+});
+
 const sourceRecordDiagnosticDtoSchema = z.object({
 	namespace: z.string().min(1),
 	fileId: z.number().int().nonnegative(),
@@ -529,6 +558,30 @@ export const landblockPackPayloadDtoSchema = z.object({
 });
 export type LandblockPackPayloadDto = z.infer<
 	typeof landblockPackPayloadDtoSchema
+>;
+
+export const landblockSummaryPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-summary"),
+	residencyKind: z.literal("landblock"),
+	sourceAssetKind: z.literal("landblock-summary"),
+	landblockId: z.number().int().nonnegative(),
+	landblockInfoId: z.number().int().nonnegative(),
+	classification: landblockClassificationValueSchema,
+	sourceFacts: z.object({
+		cellLandblock: cellLandblockFactDtoSchema.nullable(),
+		landblockInfo: landblockInfoFactDtoSchema.nullable(),
+		objects: z.array(landblockSummaryObjectDtoSchema),
+		buildings: z.array(landblockSummaryBuildingDtoSchema),
+	}),
+	prepared: z.object({
+		terrainMesh: preparedTerrainMeshDtoSchema.nullable(),
+	}),
+	dependencies: landblockSummaryDependenciesDtoSchema,
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockSummaryPayloadDto = z.infer<
+	typeof landblockSummaryPayloadDtoSchema
 >;
 
 export const outdoorStaticScenePayloadDtoSchema = z.object({

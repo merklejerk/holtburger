@@ -12,14 +12,15 @@ pub use landblock_pack::{
     CellLandblockFact, EnvCellFact, EnvCellPortalFact, EnvironmentFact, IndoorStaticObjectFact,
     LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,
     LandblockPackAssembler, LandblockPackSourceDiagnostics, LandblockPreparedFacts,
-    LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
-    PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
-    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
-    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
-    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainQuadSpatialMetadata,
-    PreparedTerrainTriangle, PreparedVec3, SourceLoadError, SourceRecordDiagnostic,
-    SourceRecordStatus, format_static_object_source_asset_id,
+    LandblockRestriction, LandblockSummary, LandblockSummaryAssembler, LandblockSummaryBuilding,
+    LandblockSummaryBuildingPortal, LandblockSummaryObject, PreparedAabb, PreparedBvh,
+    PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
+    PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
+    PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh,
+    PreparedTerrainQuadSpatialMetadata, PreparedTerrainTriangle, PreparedVec3, SourceLoadError,
+    SourceRecordDiagnostic, SourceRecordStatus, format_static_object_source_asset_id,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

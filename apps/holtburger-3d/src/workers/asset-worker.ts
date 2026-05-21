@@ -8,6 +8,7 @@ import type {
 	GfxObjPayloadDto,
 	IndoorEnvCellPayloadDto,
 	LandblockPackPayloadDto,
+	LandblockSummaryPayloadDto,
 	OutdoorStaticScenePayloadDto,
 	SetupModelPayloadDto,
 	TerrainLandblockPayloadDto,
@@ -21,6 +22,7 @@ import {
 	gfxObjPayloadDtoSchema,
 	indoorEnvCellPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
+	landblockSummaryPayloadDtoSchema,
 	outdoorStaticScenePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	terrainLandblockPayloadDtoSchema,
@@ -76,6 +78,17 @@ export function prepareAssetPayload(
 	);
 	if (landblockPackPayload.success) {
 		return prepareLandblockPack(request, response, landblockPackPayload.data);
+	}
+
+	const landblockSummaryPayload = landblockSummaryPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockSummaryPayload.success) {
+		return prepareLandblockSummary(
+			request,
+			response,
+			landblockSummaryPayload.data,
+		);
 	}
 
 	const outdoorStaticScenePayload =
@@ -193,6 +206,34 @@ function prepareLandblockPack(
 				portalDatIds: payload.dependencies.portalDatIds,
 				renderableAssetIds: payload.dependencies.renderableAssetIds,
 			},
+			diagnostics: {
+				sourceRecords: payload.diagnostics.sourceRecords,
+				errors: payload.diagnostics.errors,
+			},
+		},
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareLandblockSummary(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload: LandblockSummaryPayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			kind: "landblock-summary",
+			sourceAssetKind: payload.sourceAssetKind,
+			residencyKind: payload.residencyKind,
+			provenance: parseProvenance(payload.provenance),
+			landblockId: payload.landblockId,
+			landblockInfoId: payload.landblockInfoId,
+			classification: payload.classification,
+			sourceFacts: payload.sourceFacts,
+			prepared: payload.prepared,
+			dependencies: payload.dependencies,
 			diagnostics: {
 				sourceRecords: payload.diagnostics.sourceRecords,
 				errors: payload.diagnostics.errors,

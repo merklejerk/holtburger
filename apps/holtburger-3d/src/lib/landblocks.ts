@@ -85,6 +85,10 @@ export function formatLandblockPackAssetId(landblockId: number): string {
 	return `landblock-pack/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
 }
 
+export function formatLandblockSummaryAssetId(landblockId: number): string {
+	return `landblock-summary/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
+}
+
 export function deriveFirstEnvCellId(
 	landblockId: number,
 	numEnvCells: number,

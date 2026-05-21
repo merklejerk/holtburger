@@ -8,7 +8,8 @@ use holtburger_content::{
     CellLandblockFact, ContentDecodeCache, ContentRepository, EnvCellFact, EnvironmentFact,
     GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
     LandblockInfoFact, LandblockPack, LandblockPackSourceDiagnostics, LandblockRestriction,
-    PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
+    LandblockSummary, LandblockSummaryBuilding, LandblockSummaryBuildingPortal,
+    LandblockSummaryObject, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
     PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
     PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
     PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
@@ -288,6 +289,19 @@ impl HostBoundaryAdapter {
                 }
                 Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
                 Err(error) => self.build_failed_landblock_pack_lookup_response(
+                    request,
+                    normalize_landblock_id(landblock_id),
+                    error,
+                ),
+            },
+            ContentAssetRequest::LandblockSummary(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockSummary(summary)) => {
+                    self.build_landblock_summary_lookup_response(request, *summary)
+                }
+                Ok(_) => {
+                    unreachable!("content asset runtime returned mismatched landblock summary")
+                }
+                Err(error) => self.build_failed_landblock_summary_lookup_response(
                     request,
                     normalize_landblock_id(landblock_id),
                     error,
@@ -669,6 +683,69 @@ impl HostBoundaryAdapter {
                 "provenance": {
                     "source": "app-local-stub",
                     "sourceAssetKind": "landblock-pack",
+                    "errorCode": asset_cache_error_code(&error),
+                    "detail": format!("{error:#}")
+                }
+            }),
+        }
+    }
+
+    fn build_landblock_summary_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        summary: LandblockSummary,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serialize_landblock_summary(&summary),
+        }
+    }
+
+    fn build_failed_landblock_summary_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+        error: anyhow::Error,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serde_json::json!({
+                "kind": "landblock-summary",
+                "residencyKind": "landblock",
+                "sourceAssetKind": "landblock-summary",
+                "landblockId": landblock_id,
+                "landblockInfoId": landblock_id & 0xffff_fffe,
+                "classification": "outdoor",
+                "sourceFacts": {
+                    "cellLandblock": null,
+                    "landblockInfo": null,
+                    "objects": [],
+                    "buildings": []
+                },
+                "prepared": {
+                    "terrainMesh": null
+                },
+                "dependencies": {
+                    "cellDatIds": [landblock_id, landblock_id & 0xffff_fffe],
+                    "renderableAssetIds": []
+                },
+                "diagnostics": {
+                    "sourceRecords": [],
+                    "errors": [{
+                        "namespace": EOR_CELL_NAMESPACE,
+                        "fileId": landblock_id,
+                        "role": "landblock-summary",
+                        "errorCode": asset_cache_error_code(&error),
+                        "detail": format!("{error:#}")
+                    }]
+                },
+                "provenance": {
+                    "source": "app-local-stub",
+                    "sourceAssetKind": "landblock-summary",
                     "errorCode": asset_cache_error_code(&error),
                     "detail": format!("{error:#}")
                 }
@@ -1266,9 +1343,20 @@ fn parse_landblock_pack_asset_id(asset_id: &str) -> Option<u32> {
         .map(normalize_landblock_id)
 }
 
+fn parse_landblock_summary_asset_id(asset_id: &str) -> Option<u32> {
+    asset_id
+        .strip_prefix("landblock-summary/")
+        .filter(|hex| hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        .map(normalize_landblock_id)
+}
+
 fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetRequest> {
     parse_landblock_pack_asset_id(asset_id)
         .map(ContentAssetRequest::LandblockPack)
+        .or_else(|| {
+            parse_landblock_summary_asset_id(asset_id).map(ContentAssetRequest::LandblockSummary)
+        })
         .or_else(|| parse_terrain_asset_id(asset_id).map(ContentAssetRequest::Terrain))
         .or_else(|| {
             parse_outdoor_static_scene_asset_id(asset_id)
@@ -1473,6 +1561,75 @@ fn serialize_landblock_pack(pack: &LandblockPack) -> serde_json::Value {
             "errorCode": pack.diagnostics.errors.first().map(|error| error.error_code),
             "detail": pack.diagnostics.errors.first().map(|error| error.detail.clone())
         }
+    })
+}
+
+fn serialize_landblock_summary(summary: &LandblockSummary) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-summary",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-summary",
+        "landblockId": summary.landblock_id,
+        "landblockInfoId": summary.landblock_info_id,
+        "classification": serialize_landblock_classification(summary.classification),
+        "sourceFacts": {
+            "cellLandblock": summary.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
+            "landblockInfo": summary.landblock_info.as_ref().map(serialize_landblock_info_fact),
+            "objects": summary.objects.iter().map(serialize_landblock_summary_object).collect::<Vec<_>>(),
+            "buildings": summary.buildings.iter().map(serialize_landblock_summary_building).collect::<Vec<_>>(),
+        },
+        "prepared": {
+            "terrainMesh": summary.terrain_mesh.as_ref().map(serialize_prepared_terrain_mesh),
+        },
+        "dependencies": {
+            "cellDatIds": derive_landblock_summary_cell_dat_ids(summary),
+            "renderableAssetIds": derive_landblock_summary_renderable_asset_ids(summary),
+        },
+        "diagnostics": serialize_landblock_pack_diagnostics(&summary.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-summary",
+            "errorCode": summary.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": summary.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_landblock_summary_object(object: &LandblockSummaryObject) -> serde_json::Value {
+    serde_json::json!({
+        "instanceId": object.instance_id,
+        "owningLandblockId": object.owning_landblock_id,
+        "sourceDid": object.source_did,
+        "sourceAssetId": object.source_asset_id,
+        "sourceIndex": object.source_index,
+        "localPlacement": serialize_frame(&object.local_placement),
+    })
+}
+
+fn serialize_landblock_summary_building(building: &LandblockSummaryBuilding) -> serde_json::Value {
+    serde_json::json!({
+        "instanceId": building.instance_id,
+        "owningLandblockId": building.owning_landblock_id,
+        "sourceDid": building.source_did,
+        "sourceAssetId": building.source_asset_id,
+        "sourceIndex": building.source_index,
+        "localPlacement": serialize_frame(&building.local_placement),
+        "numLeaves": building.num_leaves,
+        "portals": building.portals.iter().map(serialize_landblock_summary_building_portal).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_landblock_summary_building_portal(
+    portal: &LandblockSummaryBuildingPortal,
+) -> serde_json::Value {
+    serde_json::json!({
+        "portalId": portal.portal_id,
+        "sourceIndex": portal.source_index,
+        "flags": portal.flags,
+        "otherCellId": portal.other_cell_id,
+        "otherPortalId": portal.other_portal_id,
+        "stabList": portal.stab_list,
+        "linkedEnvCellIds": portal.linked_env_cell_ids,
     })
 }
 
@@ -1726,6 +1883,30 @@ fn derive_landblock_pack_portal_dat_ids(pack: &LandblockPack) -> Vec<u32> {
         .map(|environment| environment.id)
         .collect::<Vec<_>>();
     ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn derive_landblock_summary_cell_dat_ids(summary: &LandblockSummary) -> Vec<u32> {
+    let mut ids = vec![summary.landblock_id, summary.landblock_info_id];
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+fn derive_landblock_summary_renderable_asset_ids(summary: &LandblockSummary) -> Vec<String> {
+    let mut ids = summary
+        .objects
+        .iter()
+        .filter_map(|object| object.source_asset_id.clone())
+        .chain(
+            summary
+                .buildings
+                .iter()
+                .filter_map(|building| building.source_asset_id.clone()),
+        )
+        .collect::<Vec<_>>();
+    ids.sort();
     ids.dedup();
     ids
 }
@@ -2743,6 +2924,46 @@ mod tests {
                 .expect("source records should be exposed")
                 .iter()
                 .any(|record| record["status"] == "loaded")
+        );
+    }
+
+    #[test]
+    fn landblock_summary_lookup_returns_root_facts_without_full_pack_work() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-landblock-summary".to_string(),
+            asset_id: "landblock-summary/da55ffff".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.request_id, "test-landblock-summary");
+        assert_eq!(asset.asset_id, "landblock-summary/da55ffff");
+        assert_eq!(asset.payload["kind"], "landblock-summary");
+        assert_eq!(asset.payload["residencyKind"], "landblock");
+        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
+        assert_eq!(asset.payload["landblockInfoId"], 0xda55fffeu32);
+        assert_eq!(
+            asset.payload["sourceFacts"]["landblockInfo"]["firstEnvCellId"],
+            0xda550100u32
+        );
+        assert!(
+            !asset.payload["prepared"]["terrainMesh"]["triangles"]
+                .as_array()
+                .expect("summary should expose Rust-prepared terrain triangles")
+                .is_empty()
+        );
+        assert!(asset.payload["prepared"]["staticMeshes"].is_null());
+        assert!(asset.payload["sourceFacts"]["interiors"].is_null());
+        assert!(
+            asset.payload["sourceFacts"]["buildings"]
+                .as_array()
+                .expect("summary should expose authored building references")
+                .iter()
+                .any(|building| building["portals"].as_array().is_some())
+        );
+        assert!(
+            asset.payload["dependencies"]["portalDatIds"].is_null(),
+            "summary should not enumerate Environment dependencies"
         );
     }
 

@@ -4,8 +4,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockPack, LandblockPackAssembler,
-    StaticOutdoorScene, StaticOutdoorSceneAssembler, normalize_landblock_id,
+    ContentDecodeCache, ContentRepository, LandblockPack, LandblockPackAssembler, LandblockSummary,
+    LandblockSummaryAssembler, StaticOutdoorScene, StaticOutdoorSceneAssembler,
+    normalize_landblock_id,
 };
 use holtburger_dat::file_type::{EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::landblock::CellLandblock;
@@ -16,6 +17,7 @@ const DEFAULT_CONTENT_ASSET_WORKERS: usize = 2;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentAssetRequest {
     LandblockPack(u32),
+    LandblockSummary(u32),
     Terrain(u32),
     OutdoorStaticScene(u32),
     EnvCell(u32),
@@ -27,6 +29,7 @@ pub enum ContentAssetRequest {
 #[derive(Debug, Clone)]
 pub enum ContentAsset {
     LandblockPack(Box<LandblockPack>),
+    LandblockSummary(Box<LandblockSummary>),
     Terrain(Box<CellLandblock>),
     OutdoorStaticScene(Box<StaticOutdoorScene>),
     EnvCell {
@@ -58,6 +61,16 @@ impl ContentAssetService {
                 let landblock_id = normalize_landblock_id(landblock_id);
                 Ok(ContentAsset::LandblockPack(Box::new(
                     LandblockPackAssembler::new().assemble_landblock_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        landblock_id,
+                    ),
+                )))
+            }
+            ContentAssetRequest::LandblockSummary(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                Ok(ContentAsset::LandblockSummary(Box::new(
+                    LandblockSummaryAssembler::new().assemble_landblock_with_cache(
                         &self.content,
                         &self.decode_cache,
                         landblock_id,

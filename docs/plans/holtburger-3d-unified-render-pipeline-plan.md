@@ -111,6 +111,8 @@ completed.
 - Phase 7.1 should happen before Phase 8 cleanup and Phase 9 profiling. Cleanup should not delete
   depth-recursion scaffolding that Phase 7.1 will reuse, and profiling before adjustable recursion
   lands would only measure the depth-1 pipeline.
+- Phase 8.1 should happen before Phase 9 profiling so measured renderer costs include typed-array
+  geometry consumption for binary-loaded landblock packs, summaries, and gfx objects.
 
 ## Phase 0: Baseline and Safety Rails
 
@@ -951,7 +953,7 @@ Tasks:
   - a depthless per-frame visible aperture candidate carrying direction, screen area, mask mesh, and
     source facts;
   - a graph-level render batch that pairs those candidates with the current transition depth.
-  This avoids pretending a portal candidate intrinsically belongs to one recursion depth.
+    This avoids pretending a portal candidate intrinsically belongs to one recursion depth.
 - Keep CPU candidate projection/frustum/area work one-pass-per-frame, then reuse the surviving
   directional candidate pools for each applicable depth level after applying depth-frontier
   eligibility.
@@ -969,7 +971,7 @@ Tasks:
 - Extend graph transition metadata to carry both current and parent stencil refs:
   - `stencilRef`;
   - `parentStencilRef: number | null`.
-  Avoid deriving parent refs ad hoc inside renderer material setup.
+    Avoid deriving parent refs ad hoc inside renderer material setup.
 - Stop clearing stencil on transition mask nodes. The base scene node should clear stencil before
   the first transition level; depth-level mask nodes must preserve earlier depth refs.
 - Ensure aperture mask depth testing remains enabled so already-rendered scene geometry occludes
@@ -977,7 +979,7 @@ Tasks:
 - Configure aperture mask material stencil state per graph node:
   - depth `1`: `Always` test, replace surviving fragments with current ref;
   - depth `N > 1`: `Equal(parentRef)` test, increment surviving fragments to the current ref.
-  Keep color writes disabled and depth testing/writing enabled for aperture masks.
+    Keep color writes disabled and depth testing/writing enabled for aperture masks.
 - Expose a browser Settings slider for max transition depth, constrained to the supported renderer
   cap. The label should make clear this is transition depth, not env-cell traversal depth.
 - Thread the setting through `BrowserModeState`, `frontend-state`, `BrowserWorldDisplay.svelte`,
@@ -1422,6 +1424,83 @@ Refinements to future steps:
   - portal aperture meshes.
 - If Phase 9 finds additional stale helper names during profiling, handle them as follow-up cleanup
   tied to measured profiler paths rather than expanding Phase 8 into unrelated refactors.
+
+## Phase 8.1: Typed-Array Prepared Geometry
+
+Status: complete for polygon render geometry; terrain renderer buffers deferred.
+
+Purpose: preserve binary transport sections as typed-array geometry in prepared frontend assets when
+the renderer can consume the raw numeric layout directly.
+
+Tasks:
+
+- Decode binary polygon render geometry sections as typed-array views instead of expanding them back
+  into large plain `number[]` arrays.
+- Allow prepared polygon render geometry DTOs and prepared asset types to carry `Float32Array`
+  fields for:
+  - positions;
+  - normals;
+  - UVs.
+- Update Three.js geometry construction so binary-loaded `Float32Array` values are passed directly
+  to `BufferAttribute` without wrapping them in a second `Float32Array`.
+- Keep Zod validation for binary manifest metadata, section bounds, section alignment, and ordinary
+  JSON payload metadata.
+- Add focused tests proving binary decode preserves typed arrays and renderer geometry construction
+  reuses them.
+
+Exit criteria:
+
+- Interior cell and gfx-object meshes can render from typed-array-backed positions, normals, and
+  UVs.
+- The worker accepts typed-array prepared render geometry from binary-loaded asset responses.
+- Three.js geometry construction avoids redundant typed-array copies for binary-loaded polygon
+  geometry.
+
+Phase 8.1 progress:
+
+- `decodeBinaryAssetEnvelope()` now hydrates `.renderGeometry.positions`,
+  `.renderGeometry.normals`, and `.renderGeometry.uvs` sections as `Float32Array` views.
+- The host contracts now accept either ordinary arrays or `Float32Array` for prepared polygon render
+  geometry positions, normals, and UVs. This keeps JSON paths valid while allowing binary paths to
+  stay packed through worker preparation.
+- Prepared frontend asset types now model those fields as `number[] | Float32Array`.
+- `buildGfxObjGeometry()` now reuses existing `Float32Array` buffers when creating Three.js
+  `BufferAttribute`s, avoiding the previous unconditional copy.
+- Added frontend tests covering typed-array binary hydration and no-copy Three.js geometry
+  construction.
+
+Decisions and course corrections:
+
+- Terrain mesh `vertices` and `triangles` remain object-shaped in this phase. Terrain still feeds
+  tile selection, browser viewport/debug projection, and triangle metadata paths that expect
+  `Vec3` and triangle objects. Moving terrain all the way to packed renderer buffers should be a
+  separate contract split rather than forcing typed arrays into inspection-shaped fields.
+- `renderGeometry.triangles` remains object-shaped for now because current render construction does
+  not consume it as a packed index buffer. Positions, normals, and UVs were the immediate renderer
+  hot path.
+- Typed-array support remains app-local at the host/asset-worker/renderer boundary. Shared Rust
+  content DTOs stay client-agnostic, and ordinary JSON asset routes still produce plain arrays.
+- This phase does not solve the structured-clone copy between the host response and asset worker.
+  It removes the larger object/array expansion and the renderer-side typed-array copy, but worker
+  transfer-list ownership should be evaluated separately if profiling still shows clone overhead.
+
+Phase 8.1 validation:
+
+- `npm run --prefix apps/holtburger-3d check` passed.
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/host/binary-asset-envelope.test.ts src/lib/world-display/static-renderable-geometry.test.ts` passed.
+
+Refinements to future steps:
+
+- Phase 9 profiling should distinguish:
+  - binary decode time;
+  - worker structured-clone time;
+  - Three.js `BufferAttribute` construction time.
+- If terrain still shows up in Phase 9 loading or render-prep costs, add a follow-up terrain
+  contract split with renderer-ready packed terrain positions/colors and separate debug/source
+  terrain objects.
+- If worker clone overhead remains visible, evaluate transferring binary section buffers directly
+  to the worker or decoding binary envelopes inside the worker so typed arrays are not cloned
+  across the main-thread/worker boundary.
 
 ## Phase 9: Reprofile and Decide Deferred Tracks
 

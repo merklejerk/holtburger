@@ -290,8 +290,7 @@ export interface PreparedLandblockSummaryBuildingPortal {
 	linkedEnvCellIds: number[];
 }
 
-export interface PreparedLandblockSummaryBuilding
-	extends PreparedLandblockSummaryObject {
+export interface PreparedLandblockSummaryBuilding extends PreparedLandblockSummaryObject {
 	numLeaves: number;
 	portals: PreparedLandblockSummaryBuildingPortal[];
 }
@@ -540,15 +539,17 @@ interface PreparedPolygonSetInvalidPolygon {
 	missingVertexIds: number[];
 }
 
+export type PreparedFloat32Array = number[] | Float32Array;
+
 export interface PreparedPolygonSetRenderGeometry {
 	sourceId: number;
 	vertexCount: number;
 	triangleCount: number;
 	/** Render-space coordinates: x is unchanged, y is AC z, z is negative AC y. */
-	positions: number[];
+	positions: PreparedFloat32Array;
 	/** Render-space normals using the same basis as positions. */
-	normals: number[];
-	uvs: number[];
+	normals: PreparedFloat32Array;
+	uvs: PreparedFloat32Array;
 	triangles: PreparedPolygonSetRenderTriangle[];
 	surfaceIds: number[];
 	invalidPolygons?: PreparedPolygonSetInvalidPolygon[];

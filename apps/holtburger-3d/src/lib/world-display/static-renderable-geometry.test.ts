@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import type { StaticRenderablePart } from "./static-renderables";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
-import { buildStaticRenderablePartMatrix } from "./static-renderable-geometry";
+import {
+	buildGfxObjGeometry,
+	buildStaticRenderablePartMatrix,
+} from "./static-renderable-geometry";
 
 describe("static renderable geometry", () => {
 	it("authors instance matrices in chunk-local coordinates", () => {
@@ -33,6 +36,29 @@ describe("static renderable geometry", () => {
 		const position = new Vector3().setFromMatrixPosition(matrix);
 
 		expect(position).toEqual(new Vector3(24, 6, -48));
+	});
+
+	it("reuses typed render geometry buffers without copying", () => {
+		const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+		const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+		const uvs = new Float32Array([0, 0, 1, 0, 0, 1]);
+		const geometry = buildGfxObjGeometry({
+			sourceId: 1,
+			vertexCount: 3,
+			triangleCount: 1,
+			positions,
+			normals,
+			uvs,
+			triangles: [{ polygonId: 0, surfaceId: null, firstVertex: 0 }],
+			surfaceIds: [],
+			invalidPolygons: [],
+			skippedPolygonCount: 0,
+			bounds: null,
+		});
+
+		expect(geometry.getAttribute("position").array).toBe(positions);
+		expect(geometry.getAttribute("normal").array).toBe(normals);
+		expect(geometry.getAttribute("uv").array).toBe(uvs);
 	});
 });
 

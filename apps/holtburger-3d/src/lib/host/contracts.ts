@@ -331,13 +331,18 @@ const preparedPolygonSetInvalidPolygonDtoSchema = z.object({
 	missingVertexIds: z.array(z.number().int()),
 });
 
+const preparedFloat32ArrayDtoSchema = z.union([
+	z.array(z.number().finite()),
+	z.instanceof(Float32Array),
+]);
+
 const preparedPolygonSetRenderGeometryDtoSchema = z.object({
 	sourceId: z.number().int().nonnegative(),
 	vertexCount: z.number().int().nonnegative(),
 	triangleCount: z.number().int().nonnegative(),
-	positions: z.array(z.number().finite()),
-	normals: z.array(z.number().finite()),
-	uvs: z.array(z.number().finite()),
+	positions: preparedFloat32ArrayDtoSchema,
+	normals: preparedFloat32ArrayDtoSchema,
+	uvs: preparedFloat32ArrayDtoSchema,
 	triangles: z.array(preparedPolygonSetRenderTriangleDtoSchema),
 	surfaceIds: z.array(z.number().int()),
 	invalidPolygons: z.array(preparedPolygonSetInvalidPolygonDtoSchema),

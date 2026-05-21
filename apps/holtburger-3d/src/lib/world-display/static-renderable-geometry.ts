@@ -7,7 +7,10 @@ import {
 	Vector3,
 } from "three";
 
-import type { PreparedPolygonSetRenderGeometry } from "../assets/types";
+import type {
+	PreparedFloat32Array,
+	PreparedPolygonSetRenderGeometry,
+} from "../assets/types";
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import type { StaticRenderablePart } from "./static-renderables";
 
@@ -56,12 +59,12 @@ export function buildGfxObjGeometry(
 	const geometry = new BufferGeometry();
 	geometry.setAttribute(
 		"position",
-		new BufferAttribute(new Float32Array(renderGeometry.positions), 3),
+		new BufferAttribute(toFloat32Array(renderGeometry.positions), 3),
 	);
 	if (renderGeometry.normals.length === renderGeometry.positions.length) {
 		geometry.setAttribute(
 			"normal",
-			new BufferAttribute(new Float32Array(renderGeometry.normals), 3),
+			new BufferAttribute(toFloat32Array(renderGeometry.normals), 3),
 		);
 	} else {
 		geometry.computeVertexNormals();
@@ -69,10 +72,14 @@ export function buildGfxObjGeometry(
 	if (renderGeometry.uvs.length > 0) {
 		geometry.setAttribute(
 			"uv",
-			new BufferAttribute(new Float32Array(renderGeometry.uvs), 2),
+			new BufferAttribute(toFloat32Array(renderGeometry.uvs), 2),
 		);
 	}
 	return geometry;
+}
+
+function toFloat32Array(values: PreparedFloat32Array): Float32Array {
+	return values instanceof Float32Array ? values : new Float32Array(values);
 }
 
 export function buildStaticRenderableColor(debugColorKey: string): Color {

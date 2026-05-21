@@ -119,6 +119,13 @@ function decodeBinarySection(
 	section: BinarySection,
 	bytes: Uint8Array,
 ): unknown {
+	if (
+		section.role.endsWith(".renderGeometry.positions") ||
+		section.role.endsWith(".renderGeometry.normals") ||
+		section.role.endsWith(".renderGeometry.uvs")
+	) {
+		return readFloat32Section(bytes);
+	}
 	if (section.role === "prepared.terrainMesh.vertices") {
 		return chunk(Array.from(readFloat32Section(bytes)), 3).map(([x, y, z]) => ({
 			x,

@@ -20,6 +20,7 @@ import {
 	runtimeBatchDtoSchema,
 	runtimeNotificationEnvelopeDtoSchema,
 } from "./contracts";
+import { decodeBinaryAssetEnvelope } from "./binary-asset-envelope";
 import type { ZodType } from "zod";
 
 const RUNTIME_NOTIFICATION_EVENT = "runtime:notification";
@@ -88,6 +89,14 @@ export async function lookupAsset(
 	request: AssetLookupRequestDto,
 ): Promise<AssetLookupResponseDto> {
 	requireTauriRuntime();
+
+	if (request.assetId.startsWith("landblock-pack/")) {
+		const { invoke } = await import("@tauri-apps/api/core");
+		const payload = await invoke<unknown>("lookup_asset_binary", { request });
+		return assetLookupResponseDtoSchema.parse(
+			decodeBinaryAssetEnvelope(payload),
+		);
+	}
 
 	return invokeCommand("lookup_asset", assetLookupResponseDtoSchema, {
 		request,

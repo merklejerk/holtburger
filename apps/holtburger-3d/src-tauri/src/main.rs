@@ -36,6 +36,19 @@ async fn lookup_asset(
 }
 
 #[tauri::command]
+async fn lookup_asset_binary(
+    runtime: tauri::State<'_, HostRuntimeService>,
+    request: AssetLookupRequestDto,
+) -> Result<tauri::ipc::Response, String> {
+    let runtime = runtime.inner().clone();
+    runtime
+        .asset_lookup_binary(request)
+        .await
+        .map(tauri::ipc::Response::new)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn get_host_boundary_overview(
     runtime: tauri::State<'_, HostRuntimeService>,
 ) -> HostBoundaryOverviewDto {
@@ -107,6 +120,7 @@ fn main() {
             get_runtime_batch,
             get_view_model_feed,
             lookup_asset,
+            lookup_asset_binary,
             get_host_boundary_overview,
             get_debug_config,
             submit_camera_hint,

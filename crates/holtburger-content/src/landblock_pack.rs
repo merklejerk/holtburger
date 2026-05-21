@@ -197,6 +197,7 @@ pub struct PreparedInteriorCell {
     pub portals: Vec<EnvCellPortalFact>,
     pub portal_apertures: Vec<PreparedPortalAperture>,
     pub static_object_count: usize,
+    pub cell_bsp: BspNode,
     pub render_geometry: PreparedPolygonSetRenderGeometry,
 }
 
@@ -1910,6 +1911,7 @@ fn build_prepared_interior_cells(interiors: &LandblockInteriorFacts) -> Vec<Prep
             portals: env_cell.portals.clone(),
             portal_apertures,
             static_object_count: env_cell.static_objects.len(),
+            cell_bsp: cell_structure.cell_bsp.clone(),
             render_geometry,
         });
     }

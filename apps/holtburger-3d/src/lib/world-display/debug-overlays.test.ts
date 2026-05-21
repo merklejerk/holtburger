@@ -232,6 +232,7 @@ function createStructuredInteriorCell(
 				},
 			},
 		},
+		cellBsp: createLeafBspNode(),
 		renderGeometry: {
 			sourceId: 1,
 			vertexCount: 3,

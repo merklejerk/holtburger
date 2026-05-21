@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { PreparedAssetRecord } from "./types";
+import type { PreparedAssetRecord, PreparedPolygonSetBspNode } from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
@@ -145,6 +145,7 @@ function createPreparedLandblockPackAsset(
 					portals: [],
 					portalApertures: [],
 					staticObjectCount: 0,
+					cellBsp: createLeafBspNode(),
 					renderGeometry: {
 						sourceId: index + 1,
 						vertexCount: 0,
@@ -170,6 +171,16 @@ function createPreparedLandblockPackAsset(
 			},
 			diagnostics: { sourceRecords: [], errors: [] },
 		},
+	};
+}
+
+function createLeafBspNode(): PreparedPolygonSetBspNode {
+	return {
+		kind: "leaf",
+		index: 0,
+		solid: 0,
+		sphere: null,
+		polyIds: [],
 	};
 }
 

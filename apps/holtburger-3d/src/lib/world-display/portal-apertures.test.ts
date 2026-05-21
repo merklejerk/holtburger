@@ -316,6 +316,7 @@ function createStructuredInteriorCell(
 			drawingBsp: null,
 			renderGeometry: createRenderGeometry(),
 		},
+		cellBsp: createLeafBspNode(),
 		renderGeometry: createRenderGeometry(),
 		debugColorKey: `cell-${envCellId.toString(16)}`,
 	};

@@ -5,7 +5,7 @@ use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_common::position::WorldPosition;
 use holtburger_content::{
-    CellLandblockFact, ContentRepository, EnvCellFact, EnvironmentFact,
+    CellLandblockFact, ContentDecodeCache, ContentRepository, EnvCellFact, EnvironmentFact,
     GeneratedOutdoorSceneryDiagnostics, IndoorStaticObjectFact, LandblockClassification,
     LandblockInfoFact, LandblockPack, LandblockPackAssembler, LandblockPackSourceDiagnostics,
     LandblockRestriction, PreparedAabb, PreparedBvh, PreparedBvhNode, PreparedInteriorCell,
@@ -19,7 +19,7 @@ use holtburger_content::{
     StaticOutdoorSceneAssembler, StaticRenderableSourceFamily,
     format_static_object_source_asset_id, normalize_landblock_id,
 };
-use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
+use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::landblock::CellLandblock;
@@ -50,6 +50,7 @@ const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
 
 pub struct HostBoundaryAdapter {
     content: Arc<ContentRepository>,
+    decode_cache: Arc<ContentDecodeCache>,
     verbose: bool,
 }
 
@@ -170,6 +171,7 @@ impl HostBoundaryAdapter {
             .expect("failed to open repo-local 3D app content repository");
         Self {
             content: Arc::new(content),
+            decode_cache: Arc::new(ContentDecodeCache::new()),
             verbose,
         }
     }
@@ -588,7 +590,11 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         landblock_id: u32,
     ) -> AssetLookupResponseDto {
-        let pack = LandblockPackAssembler::new().assemble_landblock(&self.content, landblock_id);
+        let pack = LandblockPackAssembler::new().assemble_landblock_with_cache(
+            &self.content,
+            &self.decode_cache,
+            landblock_id,
+        );
         let payload = serialize_landblock_pack(&pack);
 
         if self.verbose {
@@ -1087,24 +1093,14 @@ impl HostBoundaryAdapter {
         &self,
         gfx_obj_id: u32,
     ) -> Result<serde_json::Value, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
+        let source_detail = self.content.source_description().map(str::to_owned);
+        let gfx_obj = self
+            .decode_cache
+            .gfx_obj(&self.content, gfx_obj_id)
             .map_err(|error| {
                 (
-                    format!(
-                        "Could not read {}:0x{gfx_obj_id:08X} from content repository: {error}",
-                        EOR_PORTAL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-        let source_detail = resource.source_description.clone();
-        let gfx_obj =
-            GfxObj::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
-                (
-                    format!("Could not decode GfxObj 0x{gfx_obj_id:08X}: {error}"),
-                    "asset-decode-failed",
+                    format!("Could not load GfxObj 0x{gfx_obj_id:08X}: {error:#}"),
+                    asset_cache_error_code(&error),
                 )
             })?;
 
@@ -1137,24 +1133,14 @@ impl HostBoundaryAdapter {
         &self,
         setup_model_id: u32,
     ) -> Result<serde_json::Value, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
+        let source_detail = self.content.source_description().map(str::to_owned);
+        let setup_model = self
+            .decode_cache
+            .setup_model(&self.content, setup_model_id)
             .map_err(|error| {
                 (
-                    format!(
-                        "Could not read {}:0x{setup_model_id:08X} from content repository: {error}",
-                        EOR_PORTAL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-        let source_detail = resource.source_description.clone();
-        let setup_model =
-            SetupModel::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
-                (
-                    format!("Could not decode SetupModel 0x{setup_model_id:08X}: {error}"),
-                    "asset-decode-failed",
+                    format!("Could not load SetupModel 0x{setup_model_id:08X}: {error:#}"),
+                    asset_cache_error_code(&error),
                 )
             })?;
 
@@ -1214,6 +1200,14 @@ fn generated_fallback_terrain_payload(
             "detail": detail,
         }
     })
+}
+
+fn asset_cache_error_code(error: &anyhow::Error) -> &'static str {
+    if error.to_string().starts_with("Could not read ") {
+        "asset-read-failed"
+    } else {
+        "asset-decode-failed"
+    }
 }
 
 impl HostBoundaryAdapter {

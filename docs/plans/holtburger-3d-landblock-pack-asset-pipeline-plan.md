@@ -800,6 +800,37 @@ Exit criteria:
 
 - Proven dungeon packs avoid outdoor-only work.
 
+Progress:
+
+- Implemented in `holtburger-content`:
+  - full landblock pack assembly now classifies from root facts before outdoor static scene assembly;
+  - proven dungeon packs skip `StaticOutdoorSceneAssembler` and produce no outdoor static instances from that path;
+  - skipped outdoor work is recorded as a source omission diagnostic with reason `proven-dungeon-landblock`.
+- Updated the `apps/holtburger-3d` Tauri projection to serialize source omission diagnostics instead of always returning an empty `omissions` list.
+- Added content tests proving that:
+  - safe-rule dungeon packs skip outdoor static scene assembly;
+  - similar nonzero-height landblocks remain classified outdoor and still attempt outdoor static scene assembly.
+
+Decisions:
+
+- Kept the skip in `LandblockPackAssembler`, where outdoor static work is dispatched, instead of adding renderer-side filtering.
+- Kept the rule conservative: missing, corrupt, ambiguous, or nonzero-height roots still classify as outdoor and do not skip outdoor work.
+- Represented the skip as an omission diagnostic rather than an error, because it is intentional loader behavior.
+
+Course corrections:
+
+- `LandblockPackSourceDiagnostics` now has a typed `omissions` collection. The Tauri adapter already had an `omissions` DTO field but previously hardcoded it to an empty array.
+
+Refinements for later phases:
+
+- Surface omission diagnostics in frontend debug panels only if they become useful during real dungeon profiling; avoid adding UI noise for a currently low-level loader decision.
+- If future classification adds more proven dungeon/outdoor rules, keep them root-fact based and tested against ACE/ACViewer semantics rather than request-path naming.
+
+Potential cleanup targets:
+
+- Tighten the frontend diagnostics contract from `unknown[]` omissions to a typed omission DTO once more omission reasons exist.
+- Audit existing diagnostics consumers after typed omissions land; remove empty-list assumptions and any renderer-derived diagnostics that duplicate loader facts.
+
 ## Phase 8: Binary Landblock Pack Bulk Arrays
 
 Goal: remove the dominant JSON materialization cost for large prepared numeric arrays in full landblock packs.
@@ -979,6 +1010,8 @@ Initial cleanup targets:
 - After Phase 6.1, revisit whether the browser building-distance slider should remain user-facing or become a derived internal full-pack/summary-building policy.
 - Tighten summary building DTO contracts so renderable building records do not carry nullable `sourceAssetId` values after unsupported sources have already been filtered or represented as a distinct variant.
 - Revisit summary setup-model expansion after real-scene validation; if placement or bounds parity matters, move that transformation into the Rust loader beside full-pack static mesh preparation.
+- Tighten the frontend landblock diagnostics contract so source omissions are typed instead of `unknown[]`, now that Phase 7 introduced a real omission reason.
+- Revisit whether `outdoor-static-scene` omission diagnostics should be retained in normal frontend prepared assets or only surfaced in low-level loader/debug views.
 - Retire stale profiling/timing scaffolding that was useful for this optimization campaign but is too noisy for day-to-day development.
 - Re-check crate boundaries after runtime work lands: content should own static content discovery/decoding, core/runtime should own reusable client execution policy if that split proves cleaner, and the Tauri adapter should remain projection/glue.
 

@@ -17,13 +17,13 @@ use holtburger_content::{
     PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
     SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
     SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorLayerDiagnostics,
-    StaticOutdoorScene, StaticRenderableSourceFamily, format_static_object_source_asset_id,
-    normalize_landblock_id,
+    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
+    format_static_object_source_asset_id, normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
 };
-use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, SetupModel};
+use holtburger_dat::file_type::{CellStruct, EnvCell, Environment, GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::landblock::CellLandblock;
@@ -279,32 +279,63 @@ impl HostBoundaryAdapter {
             );
         }
 
-        let Some(ContentAssetRequest::LandblockPack(landblock_id)) =
-            content_asset_request_from_asset_id(&request.asset_id)
-        else {
+        let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) else {
             anyhow::bail!(
-                "binary asset lookup only supports landblock-pack assets, got {}",
+                "binary asset lookup only supports content assets, got {}",
                 request.asset_id
             );
         };
 
         let asset = self
             .content_asset_runtime
-            .load(ContentAssetRequest::LandblockPack(landblock_id))
+            .load(content_request.clone())
             .await;
-        let response = match asset {
-            Ok(ContentAsset::LandblockPack(pack)) => {
-                return serialize_landblock_pack_binary_response(request, &pack);
-            }
-            Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
-            Err(error) => self.build_failed_landblock_pack_lookup_response(
-                request,
-                normalize_landblock_id(landblock_id),
-                error,
+        match content_request {
+            ContentAssetRequest::LandblockPack(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockPack(pack)) => {
+                    serialize_landblock_pack_binary_response(request, &pack)
+                }
+                Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
+                Err(error) => serialize_asset_binary_response(
+                    self.build_failed_landblock_pack_lookup_response(
+                        request,
+                        normalize_landblock_id(landblock_id),
+                        error,
+                    ),
+                    BinaryAssetSectionWriter::default(),
+                ),
+            },
+            ContentAssetRequest::LandblockSummary(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockSummary(summary)) => {
+                    serialize_landblock_summary_binary_response(request, &summary)
+                }
+                Ok(_) => {
+                    unreachable!("content asset runtime returned mismatched landblock summary")
+                }
+                Err(error) => serialize_asset_binary_response(
+                    self.build_failed_landblock_summary_lookup_response(
+                        request,
+                        normalize_landblock_id(landblock_id),
+                        error,
+                    ),
+                    BinaryAssetSectionWriter::default(),
+                ),
+            },
+            ContentAssetRequest::GfxObj(gfx_obj_id) => match asset {
+                Ok(ContentAsset::GfxObj(gfx_obj)) => {
+                    serialize_gfx_obj_binary_response(request, &gfx_obj)
+                }
+                Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
+                Err(error) => serialize_asset_binary_response(
+                    self.build_gfx_obj_lookup_response(request, gfx_obj_id, Err(error)),
+                    BinaryAssetSectionWriter::default(),
+                ),
+            },
+            unsupported => anyhow::bail!(
+                "binary asset lookup does not support {unsupported:?} for {}",
+                request.asset_id
             ),
-        };
-
-        serialize_asset_binary_response(response, BinaryAssetSectionWriter::default())
+        }
     }
 
     #[cfg(test)]
@@ -1571,7 +1602,7 @@ fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value 
 }
 
 struct BinaryAssetSection {
-    role: &'static str,
+    role: String,
     path: String,
     scalar_type: &'static str,
     component_count: u32,
@@ -1589,7 +1620,7 @@ struct BinaryAssetSectionWriter {
 impl BinaryAssetSectionWriter {
     fn push_f32_section(
         &mut self,
-        role: &'static str,
+        role: impl Into<String>,
         path: impl Into<String>,
         component_count: u32,
         values: impl IntoIterator<Item = f32>,
@@ -1605,7 +1636,7 @@ impl BinaryAssetSectionWriter {
 
     fn push_i32_section(
         &mut self,
-        role: &'static str,
+        role: impl Into<String>,
         path: impl Into<String>,
         component_count: u32,
         values: impl IntoIterator<Item = i32>,
@@ -1621,7 +1652,7 @@ impl BinaryAssetSectionWriter {
 
     fn push_section(
         &mut self,
-        role: &'static str,
+        role: impl Into<String>,
         path: impl Into<String>,
         scalar_type: &'static str,
         component_count: u32,
@@ -1638,7 +1669,7 @@ impl BinaryAssetSectionWriter {
             "binary section scalar count must divide evenly by component count"
         );
         self.sections.push(BinaryAssetSection {
-            role,
+            role: role.into(),
             path: path.into(),
             scalar_type,
             component_count,
@@ -1682,6 +1713,36 @@ fn serialize_landblock_pack_binary_response(
     serialize_asset_binary_response(response, writer)
 }
 
+fn serialize_landblock_summary_binary_response(
+    request: AssetLookupRequestDto,
+    summary: &LandblockSummary,
+) -> anyhow::Result<Vec<u8>> {
+    let mut writer = BinaryAssetSectionWriter::default();
+    let payload = serialize_landblock_summary_binary_payload(summary, &mut writer);
+    let response = AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload,
+    };
+    serialize_asset_binary_response(response, writer)
+}
+
+fn serialize_gfx_obj_binary_response(
+    request: AssetLookupRequestDto,
+    gfx_obj: &GfxObj,
+) -> anyhow::Result<Vec<u8>> {
+    let mut writer = BinaryAssetSectionWriter::default();
+    let payload = serialize_gfx_obj_binary_payload(gfx_obj, &mut writer);
+    let response = AssetLookupResponseDto {
+        request_id: request.request_id,
+        asset_id: request.asset_id,
+        payload_kind: AssetPayloadKindDto::Json,
+        payload,
+    };
+    serialize_asset_binary_response(response, writer)
+}
+
 fn serialize_asset_binary_response(
     response: AssetLookupResponseDto,
     writer: BinaryAssetSectionWriter,
@@ -1715,6 +1776,81 @@ fn serialize_asset_binary_response(
     bytes.extend(manifest_bytes);
     bytes.extend(writer.data);
     Ok(bytes)
+}
+
+fn serialize_landblock_summary_binary_payload(
+    summary: &LandblockSummary,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-summary",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-summary",
+        "landblockId": summary.landblock_id,
+        "landblockInfoId": summary.landblock_info_id,
+        "classification": serialize_landblock_classification(summary.classification),
+        "sourceFacts": {
+            "cellLandblock": summary.cell_landblock.as_ref().map(serialize_cell_landblock_fact),
+            "landblockInfo": summary.landblock_info.as_ref().map(serialize_landblock_info_fact),
+            "objects": summary.objects.iter().map(serialize_landblock_summary_object).collect::<Vec<_>>(),
+            "buildings": summary.buildings.iter().map(serialize_landblock_summary_building).collect::<Vec<_>>(),
+        },
+        "prepared": {
+            "terrainMesh": summary.terrain_mesh.as_ref().map(|mesh| {
+                serialize_prepared_terrain_mesh_binary(mesh, writer)
+            }),
+        },
+        "dependencies": {
+            "cellDatIds": derive_landblock_summary_cell_dat_ids(summary),
+            "renderableAssetIds": derive_landblock_summary_renderable_asset_ids(summary),
+        },
+        "diagnostics": serialize_landblock_pack_diagnostics(&summary.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-summary",
+            "errorCode": summary.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": summary.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_gfx_obj_binary_payload(
+    gfx_obj: &GfxObj,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    let render_geometry = build_gfx_obj_render_geometry(gfx_obj);
+    serde_json::json!({
+        "kind": "gfx-obj",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "gfx-obj",
+        "gfxObjId": gfx_obj.id,
+        "flags": gfx_obj.flags.bits(),
+        "surfaceIds": render_geometry.surface_ids,
+        "vertexArray": {
+            "vertexType": gfx_obj.vertex_array.vertex_type,
+            "vertexCount": gfx_obj.vertex_array.vertices.len(),
+            "vertices": []
+        },
+        "drawingPolygons": [],
+        "drawingBsp": null,
+        "physicsWitness": {
+            "polygonCount": gfx_obj.physics_polygons.len(),
+            "hasBsp": gfx_obj.physics_bsp.is_some()
+        },
+        "renderGeometry": serialize_prepared_polygon_set_render_geometry_binary(
+            &render_geometry,
+            "payload.renderGeometry".to_string(),
+            writer,
+        ),
+        "sortCenter": serialize_vector3(&gfx_obj.sort_center),
+        "didDegrade": gfx_obj.did_degrade,
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "gfx-obj",
+            "errorCode": null,
+            "detail": null
+        }
+    })
 }
 
 fn serialize_landblock_pack_binary_payload(
@@ -1876,25 +2012,25 @@ fn serialize_prepared_polygon_set_render_geometry_binary(
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     writer.push_f32_section(
-        "prepared.interiorCells.renderGeometry.positions",
+        format!("{path}.positions"),
         format!("{path}.positions"),
         3,
         geometry.positions.iter().copied(),
     );
     writer.push_f32_section(
-        "prepared.interiorCells.renderGeometry.normals",
+        format!("{path}.normals"),
         format!("{path}.normals"),
         3,
         geometry.normals.iter().copied(),
     );
     writer.push_f32_section(
-        "prepared.interiorCells.renderGeometry.uvs",
+        format!("{path}.uvs"),
         format!("{path}.uvs"),
         2,
         geometry.uvs.iter().copied(),
     );
     writer.push_i32_section(
-        "prepared.interiorCells.renderGeometry.triangles",
+        format!("{path}.triangles"),
         format!("{path}.triangles"),
         3,
         geometry.triangles.iter().flat_map(|triangle| {
@@ -3419,18 +3555,7 @@ mod tests {
             }))
             .expect("binary landblock-pack lookup should succeed");
 
-        assert_eq!(&bytes[0..4], ASSET_BINARY_MAGIC);
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 1);
-        let manifest_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-        assert_eq!(
-            u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize,
-            bytes.len()
-        );
-        assert!((ASSET_BINARY_HEADER_LEN + manifest_len).is_multiple_of(4));
-        let manifest: serde_json::Value = serde_json::from_slice(
-            &bytes[ASSET_BINARY_HEADER_LEN..ASSET_BINARY_HEADER_LEN + manifest_len],
-        )
-        .expect("binary manifest should be JSON");
+        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
 
         assert_eq!(manifest["transport"], "holtburger-asset-binary");
         assert_eq!(
@@ -3446,16 +3571,108 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|section| section["role"] == "prepared.terrainMesh.vertices")
+                .any(|section| section["path"] == "payload.prepared.terrainMesh.vertices")
         );
-        assert!(
-            sections.iter().any(|section| section["role"]
-                == "prepared.interiorCells.renderGeometry.positions")
-        );
+        assert!(sections.iter().any(|section| {
+            section["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with(".renderGeometry.positions"))
+        }));
         assert!(
             bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
             "binary envelope should contain section data"
         );
+    }
+
+    #[test]
+    fn landblock_summary_binary_lookup_moves_terrain_arrays_into_sections() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes =
+            tauri::async_runtime::block_on(adapter.asset_lookup_binary(AssetLookupRequestDto {
+                request_id: "test-landblock-summary-binary".to_string(),
+                asset_id: "landblock-summary/da55ffff".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Streaming,
+            }))
+            .expect("binary landblock-summary lookup should succeed");
+
+        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
+        assert_eq!(manifest["response"]["payload"]["kind"], "landblock-summary");
+        assert_eq!(
+            manifest["response"]["payload"]["prepared"]["terrainMesh"]["triangles"]
+                .as_array()
+                .expect("summary terrain triangles should be manifest placeholders")
+                .len(),
+            0
+        );
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        assert!(
+            sections
+                .iter()
+                .any(|section| section["path"] == "payload.prepared.terrainMesh.vertices")
+        );
+        assert!(
+            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
+            "binary envelope should contain summary section data"
+        );
+    }
+
+    #[test]
+    fn gfx_obj_binary_lookup_moves_render_geometry_into_sections() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes =
+            tauri::async_runtime::block_on(adapter.asset_lookup_binary(AssetLookupRequestDto {
+                request_id: "test-gfx-obj-binary".to_string(),
+                asset_id: "gfx-obj/01000001".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Streaming,
+            }))
+            .expect("binary gfx-obj lookup should succeed");
+
+        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
+        assert_eq!(manifest["response"]["payload"]["kind"], "gfx-obj");
+        assert_eq!(
+            manifest["response"]["payload"]["vertexArray"]["vertices"]
+                .as_array()
+                .expect("binary gfx-obj should not carry source vertices")
+                .len(),
+            0
+        );
+        assert_eq!(
+            manifest["response"]["payload"]["renderGeometry"]["positions"]
+                .as_array()
+                .expect("render positions should be manifest placeholders")
+                .len(),
+            0
+        );
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        assert!(
+            sections
+                .iter()
+                .any(|section| section["path"] == "payload.renderGeometry.positions")
+        );
+        assert!(
+            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
+            "binary envelope should contain gfx section data"
+        );
+    }
+
+    fn decode_binary_manifest(bytes: &[u8]) -> (serde_json::Value, usize) {
+        assert_eq!(&bytes[0..4], ASSET_BINARY_MAGIC);
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), 1);
+        let manifest_len = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+        assert_eq!(
+            u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize,
+            bytes.len()
+        );
+        assert!((ASSET_BINARY_HEADER_LEN + manifest_len).is_multiple_of(4));
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &bytes[ASSET_BINARY_HEADER_LEN..ASSET_BINARY_HEADER_LEN + manifest_len],
+        )
+        .expect("binary manifest should be JSON");
+        (manifest, manifest_len)
     }
 
     #[test]

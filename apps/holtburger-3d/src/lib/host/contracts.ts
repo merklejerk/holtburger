@@ -505,10 +505,11 @@ const landblockSummaryBuildingPortalDtoSchema = z.object({
 	linkedEnvCellIds: z.array(z.number().int().nonnegative()),
 });
 
-const landblockSummaryBuildingDtoSchema = landblockSummaryObjectDtoSchema.extend({
-	numLeaves: z.number().int().nonnegative(),
-	portals: z.array(landblockSummaryBuildingPortalDtoSchema),
-});
+const landblockSummaryBuildingDtoSchema =
+	landblockSummaryObjectDtoSchema.extend({
+		numLeaves: z.number().int().nonnegative(),
+		portals: z.array(landblockSummaryBuildingPortalDtoSchema),
+	});
 
 const landblockSummaryDependenciesDtoSchema = z.object({
 	cellDatIds: z.array(z.number().int().nonnegative()),
@@ -779,6 +780,7 @@ export const gfxObjPayloadDtoSchema = z.object({
 	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
 	drawingBsp: polygonSetBspNodeDtoSchema.nullable(),
 	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
+	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema.optional(),
 	sortCenter: vec3DtoSchema.nullable(),
 	didDegrade: z.number().int().nonnegative().nullable(),
 	provenance: assetProvenanceDtoSchema,

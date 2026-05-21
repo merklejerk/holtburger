@@ -21,7 +21,7 @@ pub use landblock_pack::{
     PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh,
     PreparedTerrainQuadSpatialMetadata, PreparedTerrainTriangle, PreparedVec3, SourceLoadError,
     SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus,
-    format_static_object_source_asset_id,
+    build_gfx_obj_render_geometry, format_static_object_source_asset_id,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

@@ -343,15 +343,19 @@ function prepareGfxObj(
 	response: AssetLookupResponseDto,
 	payload: GfxObjPayloadDto,
 ): PreparedAssetRecord {
-	const renderGeometry = buildPolygonSetRenderGeometry({
-		sourceLabel: `GfxObj ${formatHexId(payload.gfxObjId)}`,
-		sourceId: payload.gfxObjId,
-		vertexArray: payload.vertexArray,
-		drawingPolygons: payload.drawingPolygons,
-		renderPolygonIds: collectDrawingBspRenderablePolygonIds(payload.drawingBsp),
-		renderUvlessPositiveSides: true,
-		duplicateCullModeNoneBackfaces: true,
-	});
+	const renderGeometry =
+		payload.renderGeometry ??
+		buildPolygonSetRenderGeometry({
+			sourceLabel: `GfxObj ${formatHexId(payload.gfxObjId)}`,
+			sourceId: payload.gfxObjId,
+			vertexArray: payload.vertexArray,
+			drawingPolygons: payload.drawingPolygons,
+			renderPolygonIds: collectDrawingBspRenderablePolygonIds(
+				payload.drawingBsp,
+			),
+			renderUvlessPositiveSides: true,
+			duplicateCullModeNoneBackfaces: true,
+		});
 
 	return {
 		request,

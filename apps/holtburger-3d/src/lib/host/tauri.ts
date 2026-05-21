@@ -90,7 +90,7 @@ export async function lookupAsset(
 ): Promise<AssetLookupResponseDto> {
 	requireTauriRuntime();
 
-	if (request.assetId.startsWith("landblock-pack/")) {
+	if (usesBinaryAssetLookup(request.assetId)) {
 		const { invoke } = await import("@tauri-apps/api/core");
 		const payload = await invoke<unknown>("lookup_asset_binary", { request });
 		return assetLookupResponseDtoSchema.parse(
@@ -101,6 +101,14 @@ export async function lookupAsset(
 	return invokeCommand("lookup_asset", assetLookupResponseDtoSchema, {
 		request,
 	});
+}
+
+function usesBinaryAssetLookup(assetId: string): boolean {
+	return (
+		assetId.startsWith("landblock-pack/") ||
+		assetId.startsWith("landblock-summary/") ||
+		assetId.startsWith("gfx-obj/")
+	);
 }
 
 export async function listenForRuntimeLifecycle(

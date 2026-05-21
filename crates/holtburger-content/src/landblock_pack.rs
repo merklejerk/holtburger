@@ -1660,7 +1660,7 @@ fn select_default_placement_frames(setup_model: &SetupModel) -> Option<&[Frame]>
         .map(|placement| placement.anim_frame.frames.as_slice())
 }
 
-fn build_gfx_obj_render_geometry(gfx_obj: &GfxObj) -> PreparedPolygonSetRenderGeometry {
+pub fn build_gfx_obj_render_geometry(gfx_obj: &GfxObj) -> PreparedPolygonSetRenderGeometry {
     build_polygon_set_render_geometry(
         gfx_obj.id,
         &gfx_obj.vertex_array,

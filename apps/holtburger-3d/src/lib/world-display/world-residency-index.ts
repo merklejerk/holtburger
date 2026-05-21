@@ -471,7 +471,7 @@ function deriveResidencyCellItem(
 		bounds,
 		center,
 		inverseCellRenderMatrix: cellRenderMatrix.clone().invert(),
-		cellBsp: cell.cellStructure?.cellBsp ?? null,
+		cellBsp: cell.cellBsp,
 	};
 }
 

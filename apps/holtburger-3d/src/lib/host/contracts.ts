@@ -310,6 +310,7 @@ const preparedLandblockInteriorCellDtoSchema = z.object({
 	portals: z.array(preparedLandblockCellPortalDtoSchema),
 	portalApertures: z.array(preparedPortalApertureDtoSchema),
 	staticObjectCount: z.number().int().nonnegative(),
+	cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
 	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 });
 

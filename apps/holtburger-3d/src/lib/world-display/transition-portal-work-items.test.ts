@@ -321,6 +321,7 @@ function createLandblockPackAsset(options: {
 				portals: [],
 				portalApertures: [],
 				staticObjectCount: 0,
+				cellBsp: createLeafBspNode(),
 				renderGeometry: createRenderGeometry(),
 			})),
 			staticMeshes: [],
@@ -471,6 +472,7 @@ function createStructuredInteriorCell(
 			drawingBsp: null,
 			renderGeometry: createRenderGeometry(),
 		},
+		cellBsp: createLeafBspNode(),
 		renderGeometry: createRenderGeometry(),
 		debugColorKey: `cell-${envCellId.toString(16)}`,
 	};

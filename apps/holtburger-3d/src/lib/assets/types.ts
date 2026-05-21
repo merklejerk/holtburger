@@ -249,6 +249,7 @@ export interface PreparedLandblockInteriorCell {
 	portals: PreparedLandblockCellPortal[];
 	portalApertures: PreparedPortalAperture[];
 	staticObjectCount: number;
+	cellBsp: PreparedPolygonSetBspNode;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 }
 

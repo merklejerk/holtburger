@@ -138,6 +138,36 @@ describe("world residency index", () => {
 		});
 	});
 
+	it("uses standalone CellBSP data for pack-backed cells", () => {
+		const landblockId = makeOutdoorLandblockId(1, 2);
+		const index = buildWorldResidencyIndex({
+			renderChunkTransforms: [createChunkTransform(landblockId, landblockId)],
+			cells: [
+				createCell({
+					envCellId: 0x01020001,
+					origin: { x: 10, y: 20, z: 30 },
+					boundsMin: { x: 0, y: 0, z: 0 },
+					boundsMax: { x: 10, y: 10, z: 10 },
+					includeCellStructure: false,
+					includeStandaloneCellBsp: true,
+				}),
+			],
+		});
+
+		const result = index.queryDetailed({ x: 15, y: 35, z: -15 });
+		expect(result.context).toEqual({
+			kind: "env-cell",
+			landblockId,
+			envCellId: 0x01020001,
+		});
+		expect(result.diagnostics).toMatchObject({
+			aabbCandidateCount: 1,
+			cellBspMatchCount: 1,
+			aabbFallbackCount: 0,
+			source: "cell-bsp",
+		});
+	});
+
 	it("returns outdoor landblock residency when no loaded cell contains the point", () => {
 		const landblockId = makeOutdoorLandblockId(1, 2);
 		const index = buildWorldResidencyIndex({
@@ -287,6 +317,7 @@ function createCell(options: {
 	boundsMax: { x: number; y: number; z: number };
 	cellBspMinX?: number;
 	includeCellStructure?: boolean;
+	includeStandaloneCellBsp?: boolean;
 }): StructuredInteriorCell {
 	const renderGeometry = createRenderGeometry(
 		options.boundsMin,
@@ -329,6 +360,10 @@ function createCell(options: {
 						drawingBsp: null,
 						renderGeometry,
 					},
+		cellBsp:
+			options.includeCellStructure === false && !options.includeStandaloneCellBsp
+				? null
+				: createCellBsp(options.cellBspMinX ?? options.boundsMin.x),
 		renderGeometry,
 		debugColorKey: "test",
 	};

@@ -9,6 +9,7 @@ import type {
 	PreparedEnvironmentPayload,
 	PreparedIndoorCellPortal,
 	PreparedLandblockInteriorCell,
+	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
 	PreparedPortalAperture,
 } from "../assets/types";
@@ -46,6 +47,7 @@ export interface StructuredInteriorCell {
 	portalApertures: PreparedPortalAperture[];
 	staticObjectCount: number;
 	cellStructure: PreparedEnvironmentCellStruct | null;
+	cellBsp: PreparedPolygonSetBspNode | null;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	debugColorKey: string;
 }
@@ -205,6 +207,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 				portalApertures: packCell.portalApertures,
 				staticObjectCount: packCell.staticObjectCount,
 				cellStructure: null,
+				cellBsp: packCell.cellBsp,
 				renderGeometry: packCell.renderGeometry,
 				debugColorKey: `landblock-pack:${envCellId}:${packCell.environmentId}:${formatHex32(packCell.cellStructureId)}`,
 			});
@@ -264,6 +267,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 			portalApertures: [],
 			staticObjectCount: envCellAsset.payload.staticObjectCount,
 			cellStructure,
+			cellBsp: cellStructure.cellBsp,
 			renderGeometry: cellStructure.renderGeometry,
 			debugColorKey: `${envCellAssetId}:${environmentAssetId}:${formatHex32(cellStructureId)}`,
 		});

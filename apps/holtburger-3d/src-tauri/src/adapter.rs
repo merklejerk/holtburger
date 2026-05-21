@@ -1944,6 +1944,7 @@ fn serialize_prepared_interior_cell_binary(
             serialize_prepared_portal_aperture_binary(aperture, cell_index, aperture_index, writer)
         }).collect::<Vec<_>>(),
         "staticObjectCount": cell.static_object_count,
+        "cellBsp": serialize_bsp_node(&cell.cell_bsp),
         "renderGeometry": serialize_prepared_polygon_set_render_geometry_binary(
             &cell.render_geometry,
             format!("payload.prepared.interiorCells.{cell_index}.renderGeometry"),
@@ -2231,6 +2232,7 @@ fn serialize_prepared_interior_cell(cell: &PreparedInteriorCell) -> serde_json::
         }).collect::<Vec<_>>(),
         "portalApertures": cell.portal_apertures.iter().map(serialize_prepared_portal_aperture).collect::<Vec<_>>(),
         "staticObjectCount": cell.static_object_count,
+        "cellBsp": serialize_bsp_node(&cell.cell_bsp),
         "renderGeometry": serialize_prepared_polygon_set_render_geometry(&cell.render_geometry),
     })
 }

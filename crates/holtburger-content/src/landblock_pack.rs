@@ -1995,6 +1995,87 @@ fn classify_landblock(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_dat::{DatError, FileMetadata, ResourceKey, ResourceSource};
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug)]
+    struct CountingSource {
+        files: HashMap<(String, u32), Vec<u8>>,
+        reads: Mutex<HashMap<(String, u32), usize>>,
+    }
+
+    impl CountingSource {
+        fn new(files: HashMap<(String, u32), Vec<u8>>) -> Self {
+            Self {
+                files,
+                reads: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn read_count(&self, namespace: &str, file_id: u32) -> usize {
+            self.reads
+                .lock()
+                .expect("counting source reads should not be poisoned")
+                .get(&(namespace.to_string(), file_id))
+                .copied()
+                .unwrap_or_default()
+        }
+    }
+
+    impl ResourceSource for CountingSource {
+        fn get_file_by_key(&self, key: ResourceKey<'_>) -> holtburger_dat::Result<Vec<u8>> {
+            let lookup_key = (key.namespace.to_string(), key.file_id);
+            *self
+                .reads
+                .lock()
+                .expect("counting source reads should not be poisoned")
+                .entry(lookup_key.clone())
+                .or_default() += 1;
+            self.files
+                .get(&lookup_key)
+                .cloned()
+                .ok_or(DatError::NotFound(key.file_id))
+        }
+
+        fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .map(|bytes| FileMetadata {
+                    id: key.file_id,
+                    size: bytes.len() as u32,
+                    is_pruned: false,
+                })
+        }
+
+        fn has_namespace(&self, namespace: &str) -> bool {
+            self.files
+                .keys()
+                .any(|(source_namespace, _)| source_namespace == namespace)
+        }
+    }
+
+    fn minimal_cell_landblock_bytes(landblock_id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&landblock_id.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        for _ in 0..81 {
+            bytes.extend_from_slice(&0u16.to_le_bytes());
+        }
+        bytes.extend(std::iter::repeat_n(0u8, 81));
+        bytes.push(0);
+        bytes
+    }
+
+    fn minimal_landblock_info_bytes(landblock_info_id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&landblock_info_id.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes
+    }
 
     #[test]
     fn env_cell_helpers_derive_contiguous_landblock_namespace_ids() {
@@ -2002,6 +2083,31 @@ mod tests {
         assert_eq!(derive_first_env_cell_id(0xda55ffff, 0), None);
         assert_eq!(derive_first_env_cell_id(0xda55ffff, 3), Some(0xda550100));
         assert_eq!(derive_landblock_env_cell_id(0xda55ffff, 2), 0xda550102);
+    }
+
+    #[test]
+    fn pack_static_outdoor_assembly_reuses_loaded_landblock_roots() {
+        let landblock_id = 0x0102ffff;
+        let landblock_info_id = 0x0102fffe;
+        let source = Arc::new(CountingSource::new(HashMap::from([
+            (
+                (EOR_CELL_NAMESPACE.to_string(), landblock_id),
+                minimal_cell_landblock_bytes(landblock_id),
+            ),
+            (
+                (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
+                minimal_landblock_info_bytes(landblock_info_id),
+            ),
+        ])));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+
+        let pack = LandblockPackAssembler::new().assemble_landblock(&repository, landblock_id);
+
+        assert!(pack.cell_landblock.is_some());
+        assert!(pack.landblock_info.is_some());
+        assert!(pack.outdoor_scene.is_none());
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
+        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
     }
 
     #[test]

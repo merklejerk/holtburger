@@ -433,7 +433,7 @@ Scope:
   - `landblock-summary/*`;
   - `gfx-obj/*`;
   - `setup-model/*`;
-  - direct source routes such as `indoor-env-cell/*` and `environment/*` where clean.
+  - direct source routes such as `env-cell/*` and `environment/*` where clean.
 - Add pinned `RegionDesc`.
 - Add bounded LRU buckets for `Scene`, `SetupModel`, `GfxObj`, `CellLandblock`, `LandblockInfo`, `EnvCell`, and `Environment`.
 
@@ -483,7 +483,7 @@ Implemented:
   - `landblock-pack/*`;
   - `terrain/*`;
   - `outdoor-static-scene/*`;
-  - `indoor-env-cell/*`;
+  - `env-cell/*`;
   - `environment/*`;
   - `gfx-obj/*`;
   - `setup-model/*`.
@@ -504,7 +504,7 @@ Course corrections:
 - Async Tauri commands that borrow state must return `Result`, so `lookup_asset` now clones `HostRuntimeService` before awaiting and returns `Result<AssetLookupResponseDto, String>`.
 - Clippy flagged `ContentAsset` as too large; large native products are boxed inside the enum while preserving typed runtime semantics.
 - Phase 5 did not move expensive JSON projection into background jobs. That would either push DTO concerns into `holtburger-core` or require a separate app-local projection executor. Keep this as a measured follow-up after Phase 8 binary transport work clarifies how much JSON projection remains.
-- The direct source route name `indoor-env-cell/*` remains for compatibility with existing frontend ids. Cleanup should rename this to `env-cell/*` once the frontend route migration is scheduled.
+- The direct source route name `indoor-env-cell/*` was left temporarily for compatibility with existing frontend ids. Phase 11 later renamed the route to `env-cell/*`.
 
 Refinements for later phases:
 
@@ -828,8 +828,7 @@ Refinements for later phases:
 
 Potential cleanup targets:
 
-- Tighten the frontend diagnostics contract from `unknown[]` omissions to a typed omission DTO once more omission reasons exist.
-- Audit existing diagnostics consumers after typed omissions land; remove empty-list assumptions and any renderer-derived diagnostics that duplicate loader facts.
+- Audit diagnostics consumers after typed omissions land; remove empty-list assumptions and any renderer-derived diagnostics that duplicate loader facts.
 
 ## Phase 8: Binary Landblock Pack Bulk Arrays
 
@@ -890,7 +889,7 @@ Implementation notes:
 - Binary transport is an adapter projection over typed Rust products, not the native runtime representation.
 - Keep normal JSON `lookup_asset` for small/debug/control assets.
 - Avoid broad BSON-like replacement; the problem is dense numeric arrays, not every object graph.
-- Do not rely on `AssetPayloadKindDto::Bytes` alone. The current response DTO still stores `payload` as JSON, so the binary path needs an explicit command/contract and frontend decoder.
+- Do not rely on an `AssetPayloadKindDto::Bytes` variant. The response DTO stores `payload` as JSON, so the binary path needs an explicit command/contract and frontend decoder. Phase 11 removed the dead placeholder variant after the real binary command existed.
 - The asset worker should receive a normalized prepared payload shape so renderer code does not branch on transport details.
 
 Validation:
@@ -959,7 +958,6 @@ Refinements for later phases:
 
 Potential cleanup targets:
 
-- Remove the old `AssetPayloadKindDto::Bytes` dead-end or make it describe the real envelope path; the command-level binary response is now the actual binary transport.
 - Collapse duplicated JSON and binary landblock-pack serializers once Phase 9 decides which prepared fields remain in browser DTOs.
 - Replace binary decoder role-string branching with a typed section codec table if a second asset family adopts binary sections.
 - Tighten binary manifest path handling so paths are validated against known payload schemas instead of generic dot-path assignment.
@@ -967,6 +965,8 @@ Potential cleanup targets:
 - Remove binary hydration back to plain arrays if renderer/prepared payload contracts move to typed arrays.
 
 ## Phase 8.1: Typed-Array Prepared Geometry
+
+Status: complete for polygon render geometry; terrain renderer buffers deferred.
 
 Goal: preserve Phase 8's binary sections as typed-array views in prepared frontend assets instead of expanding them back into large object/array graphs when the renderer can consume the raw numeric layout directly.
 
@@ -1010,7 +1010,34 @@ Exit criteria:
 - Three.js geometry construction avoids redundant typed-array copies for binary-loaded geometry.
 - Object/array hydration remains only where the frontend actually needs semantic objects.
 
+Progress:
+
+- `decodeBinaryAssetEnvelope()` now hydrates `.renderGeometry.positions`, `.renderGeometry.normals`, and `.renderGeometry.uvs` binary sections as `Float32Array` views.
+- Frontend host contracts and prepared asset types now accept `number[] | Float32Array` for prepared polygon render geometry positions, normals, and UVs.
+- `buildGfxObjGeometry()` now reuses existing `Float32Array` buffers when creating Three.js `BufferAttribute`s, avoiding the previous unconditional copy.
+- Added frontend tests proving binary render-geometry sections preserve typed arrays and Three.js geometry construction reuses those buffers.
+
+Decisions and course corrections:
+
+- Terrain mesh `vertices` and `triangles` remain object-shaped in this phase. Terrain still feeds tile selection, browser viewport/debug projection, and triangle metadata paths that expect `Vec3` and triangle objects. Moving terrain to packed renderer buffers should be a separate terrain contract split.
+- `renderGeometry.triangles` remains object-shaped because current render construction does not consume it as a packed index buffer. Positions, normals, and UVs were the immediate renderer-hot arrays.
+- Typed-array support remains app-local at the host/asset-worker/renderer boundary. Shared Rust content DTOs stay client-agnostic, and ordinary JSON asset routes still produce plain arrays.
+- This phase does not solve structured-clone copying between the host response and asset worker. It removes the larger object/array expansion and renderer-side typed-array copy; worker transfer-list ownership remains a profiling-driven follow-up.
+
+Validation:
+
+- `npm run --prefix apps/holtburger-3d check` passed.
+- `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/host/binary-asset-envelope.test.ts src/lib/world-display/static-renderable-geometry.test.ts` passed.
+
+Refinements for later phases:
+
+- Phase 9 and later profiling should distinguish binary decode time, worker structured-clone time, and Three.js `BufferAttribute` construction time.
+- If terrain still appears in loading or render-prep profiles, add a terrain contract split with renderer-ready packed terrain positions/colors and separate debug/source terrain objects.
+- If worker clone overhead remains visible, evaluate transferring binary section buffers directly to the worker or decoding binary envelopes inside the worker so typed arrays are not cloned across the main-thread/worker boundary.
+
 ## Phase 9: DTO Trimming And Contract Tightening
+
+Status: complete for active source-fact DTO trimming; broader optionality tightening remains a cleanup-track follow-up.
 
 Goal: remove large or legacy browser DTO fields and optional-field ambiguity after binary and summary paths clarify real contracts.
 
@@ -1037,6 +1064,50 @@ Validation:
 Exit criteria:
 
 - Browser DTOs represent actual browser needs instead of historical migration shape.
+
+Progress:
+
+- Audited active `sourceFacts` consumers across the frontend app, Tauri adapter, and tests. Tests were excluded as consumers.
+- Removed unconsumed landblock pack source facts from the active Tauri/frontend DTO contract:
+  - `cellLandblock`;
+  - `landblockInfo`;
+  - `outdoor.explicitObjects`;
+  - `outdoor.generatedScenery`;
+  - `interiors.envCells`;
+  - `interiors.environments`;
+  - placeholder `renderables` arrays.
+- Removed unconsumed landblock summary source facts from the active Tauri/frontend DTO contract:
+  - `cellLandblock`;
+  - `landblockInfo`;
+  - `objects`.
+- Kept only the source facts with production consumers:
+  - `landblock-pack.sourceFacts.buildings`, consumed by transition portal work-item derivation;
+  - `landblock-summary.sourceFacts.buildings`, consumed by distance building asset planning and static renderable source derivation.
+- Removed Rust serializer helpers and frontend Zod schemas that only existed to carry deleted fact fields.
+- Updated tests and fixtures so they no longer assert or provide source facts that production code does not consume.
+
+Decisions and course corrections:
+
+- Source facts must now justify themselves through runtime, renderer, diagnostics, or dependency scheduling consumers. Tests alone do not count.
+- Full landblock packs already carry prepared terrain, prepared interior cells, prepared static meshes, spatial items, BVH, dependencies, diagnostics, and provenance. Those active fields cover the browser/runtime consumers that previously made broad source facts look tempting.
+- Landblock summaries keep building source facts because summary-based distance building hydration uses them without loading full landblock packs.
+- This phase tightened the large active DTO shape, but did not attempt every optional-field cleanup in the app. Remaining optionality cleanup belongs in the final cleanup phase so it can be done coherently instead of opportunistically.
+
+Validation:
+
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passed.
+- `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings` passed.
+- `npm run --prefix apps/holtburger-3d check` passed.
+- `npm run --prefix apps/holtburger-3d test:ts` passed.
+- `npm run --prefix apps/holtburger-3d lint:ts` passed.
+- Prettier check for touched frontend/doc files passed.
+- `git diff --check` passed.
+
+Refinements for later phases:
+
+- Re-profile startup/navigation after the source-fact trim to measure payload-size and frontend materialization changes alongside the binary transport work.
+- If source facts expand again, require the consuming module to be named in the contract or plan note at the time the field is introduced.
+- Add remaining "optional but effectively required" DTO fields to the cleanup phase rather than expanding Phase 9 into a broad schema refactor.
 
 ## Phase 10: Rust-Side Assembly Hotspot Follow-Up
 
@@ -1080,8 +1151,7 @@ Initial cleanup targets:
 
 - Remove legacy landblock/env-cell discovery paths that are no longer needed after root-based pack/summary loading.
 - Keep lower-level direct source routes explicit if they remain useful, but stop presenting them as normal scene-loading concepts.
-- Audit and cull legacy direct scene asset routes that normal scene coverage no longer schedules: `terrain/*`, `outdoor-static-scene/*`, `environment/*`, and `indoor-env-cell/*`. Keep a route only if it has a current debug/tooling purpose that is clearer than the migration-era asset path.
-- Rename the direct `indoor-env-cell/*` source route to `env-cell/*` once normal scene loading no longer depends on the migration-era name. Dungeon env cells and outdoor-linked interior env cells are the same official env-cell record family; `indoor` is app-era terminology, not an official asset distinction.
+- Audit and cull legacy direct scene asset routes that normal scene coverage no longer schedules: `terrain/*`, `outdoor-static-scene/*`, `environment/*`, and direct `env-cell/*`. Keep a route only if it has a current debug/tooling purpose that is clearer than the migration-era asset path.
 - Remove compatibility shims or duplicate route helpers introduced only for transition.
 - Consolidate naming around `landblock`, `landblock-pack`, and `landblock-summary`; avoid indoor/outdoor assumptions in asset ids unless the payload is actually classification-specific.
 - Tighten contracts/interfaces where optional fields are not optional in practice.
@@ -1091,7 +1161,6 @@ Initial cleanup targets:
 - Delete dead code after frontend uses summary/binary/runtime paths.
 - Remove duplicated source helper functions once the shared typed source reader is established.
 - Fix minor code smells found during dry run, including duplicate portal id deduplication and missing-source diagnostic suppression that can collide across setup-model and gfx-object roles.
-- Retire legacy `payloadKind: "bytes"` dead-end assumptions after the real binary command contract exists.
 - Replace Phase 2's contextual/string-based source error classification with typed read/decode errors before the source reader becomes a shared runtime contract.
 - Audit `ContentSourceReader` clone-returning APIs after Phase 4; keep them if they remain cheap enough, or move cached decoded records to `Arc` when shared LRU storage lands.
 - Tune `ContentDecodeCache` bucket capacities from measured navigation/startup workloads instead of keeping Phase 4's conservative guesses forever.
@@ -1108,7 +1177,6 @@ Initial cleanup targets:
 - Remove redundant prepared terrain/interior/static JSON serializers once binary normalization becomes the primary pack path, or move shared projection helpers out of the Tauri adapter if the adapter keeps accumulating serializer weight.
 - Remove binary/JSON dual-path test scaffolding once the normalized frontend asset shape is stable.
 - Revisit frontend asset dependency derivation after binary manifests land so dependency extraction is not split between incompatible JSON and binary conventions.
-- Remove the `AssetPayloadKindDto::Bytes` placeholder or align it with the real command-level binary envelope path.
 - Collapse duplicated JSON and binary landblock-pack serializer code after DTO trimming decides the final browser payload shape.
 - Replace binary decoder role-string branching with a typed section codec table if binary transport expands beyond landblock packs.
 - Move prepared geometry payloads toward typed-array views so binary hydration does not rebuild large plain JavaScript arrays.
@@ -1123,7 +1191,6 @@ Initial cleanup targets:
 - After Phase 6.1, revisit whether the browser building-distance slider should remain user-facing or become a derived internal full-pack/summary-building policy.
 - Tighten summary building DTO contracts so renderable building records do not carry nullable `sourceAssetId` values after unsupported sources have already been filtered or represented as a distinct variant.
 - Revisit summary setup-model expansion after real-scene validation; if placement or bounds parity matters, move that transformation into the Rust loader beside full-pack static mesh preparation.
-- Tighten the frontend landblock diagnostics contract so source omissions are typed instead of `unknown[]`, now that Phase 7 introduced a real omission reason.
 - Revisit whether `outdoor-static-scene` omission diagnostics should be retained in normal frontend prepared assets or only surfaced in low-level loader/debug views.
 - Retire stale profiling/timing scaffolding that was useful for this optimization campaign but is too noisy for day-to-day development.
 - Re-check crate boundaries after runtime work lands: content should own static content discovery/decoding, core/runtime should own reusable client execution policy if that split proves cleaner, and the Tauri adapter should remain projection/glue.
@@ -1132,15 +1199,22 @@ Implemented cleanup slices:
 
 - Phase 5 removed dead synchronous adapter payload loaders that were superseded by the typed runtime path.
 - Phase 5 removed the redundant adapter-owned decode-cache field; cache ownership now flows through the shared content asset runtime/service.
+- Phase 11 renamed the direct env-cell source route from `indoor-env-cell/*` to `env-cell/*` across the Tauri adapter, structured-interior request helpers, and affected tests. The payload kind remains `indoor-env-cell` where it describes current browser residency/presentation semantics rather than the official source route.
+- Phase 11 removed the dead `AssetPayloadKindDto::Bytes` / `payloadKind: "bytes"` response variant. Binary assets now travel only through `lookup_asset_binary` and are normalized back into a JSON-shaped `AssetLookupResponseDto` after envelope decode.
+- Phase 11 tightened landblock pack/summary diagnostics so `omissions` are a typed frontend DTO matching Rust `SourceOmissionDiagnostic` instead of `unknown[]`.
 
 Decisions:
 
 - Cleanup is an explicit final phase, not an invitation to leave known debt untracked. If a phase creates a temporary shim or misleading name, add it to this punch list immediately.
 - Compatibility with migration-era tests is not a reason to keep stale abstractions. Update tests to describe the intended pack/cache/runtime behavior.
+- Direct `env-cell/*` remains a useful lower-level source/debug route, so Phase 11 renamed it instead of deleting it. Normal scene loading still flows through `landblock-pack/*` and `landblock-summary/*`.
+- The binary command stays separate from `payloadKind`. Reusing `AssetLookupResponseDto.payloadKind` for binary envelopes would reintroduce the dead-end shape Phase 8 intentionally avoided.
 
 Course corrections:
 
 - The initial dry run found this plan needs a running cleanup punch list like the original landblock pack plan. Phase 11 now owns that list.
+- Skipping Phase 10 was intentional for this pass. The cleanup work did not touch Rust-side assembly hotspot optimization.
+- The direct route rename exposed one stale sorted-order test expectation because `env-cell/*` sorts before `environment/*`; the assertion was updated to describe the new canonical route name.
 
 Validation:
 
@@ -1148,6 +1222,13 @@ Validation:
 - Relevant `holtburger-content` tests/checks.
 - `npm run --prefix apps/holtburger-3d check`.
 - Targeted frontend tests for asset channel, landblock pack preparation, and static renderables.
+- Completed validation for the Phase 11 cleanup slice:
+  - `npm run --prefix apps/holtburger-3d check`;
+  - `npm run --prefix apps/holtburger-3d test:ts -- --run src/lib/assets/dependencies.test.ts src/lib/assets/structured-interior-coverage.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/assets/asset-channel.test.ts src/lib/assets/asset-hydration-policy.test.ts src/lib/assets/asset-cache-policy.test.ts src/lib/world-display/model.test.ts src/lib/world-display/transition-portal-work-items.test.ts`;
+  - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`;
+  - `cargo clippy --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --all-targets -- -D warnings`;
+  - `npm run --prefix apps/holtburger-3d lint:ts`;
+  - `git diff --check`.
 
 ## Suggested Phase Order
 

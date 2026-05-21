@@ -16,7 +16,7 @@ import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
 	formatEnvironmentAssetId,
-	formatIndoorEnvCellAssetId,
+	formatEnvCellAssetId,
 	isPreparedIndoorEnvCellAsset,
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
@@ -211,7 +211,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 			continue;
 		}
 
-		const envCellAssetId = formatIndoorEnvCellAssetId(envCellId);
+		const envCellAssetId = formatEnvCellAssetId(envCellId);
 		const envCellAsset = assetState.preparedByAssetId[envCellAssetId];
 		if (!isPreparedIndoorEnvCellAsset(envCellAsset)) {
 			missingEnvCellAssetIds.add(envCellAssetId);

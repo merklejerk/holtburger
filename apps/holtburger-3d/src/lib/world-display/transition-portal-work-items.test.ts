@@ -6,7 +6,7 @@ import {
 	type PreparedAssetRecord,
 	type PreparedPolygonSetBspNode,
 } from "../assets/types";
-import { formatIndoorEnvCellAssetId } from "../assets/structured-interior-coverage";
+import { formatEnvCellAssetId } from "../assets/structured-interior-coverage";
 import {
 	classifyTransitionPortalDirection,
 	createTransitionPortalWorkItem,
@@ -344,7 +344,7 @@ function createIndoorEnvCellAsset(
 	visibleCellIds: number[],
 	landblockEnvCellIds: number[] = [],
 ): PreparedAssetRecord {
-	return createPreparedAssetRecord(formatIndoorEnvCellAssetId(envCellId), {
+	return createPreparedAssetRecord(formatEnvCellAssetId(envCellId), {
 		kind: "indoor-env-cell",
 		residencyKind: "indoor-env-cell",
 		sourceAssetKind: "env-cell",

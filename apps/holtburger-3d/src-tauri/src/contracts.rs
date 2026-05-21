@@ -150,7 +150,6 @@ pub struct AssetLookupRequestDto {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetPayloadKindDto {
-    Bytes,
     Json,
 }
 

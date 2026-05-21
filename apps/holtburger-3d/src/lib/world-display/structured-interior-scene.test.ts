@@ -18,7 +18,7 @@ describe("structured interior scene model", () => {
 	it("joins visible env-cell metadata to prepared environment cell structures", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+			"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 				0x016c0155,
 				0x0d000001,
 				1,
@@ -27,7 +27,7 @@ describe("structured interior scene model", () => {
 					orientation: IDENTITY_PLACEMENT.orientation,
 				},
 			),
-			"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
+			"env-cell/016c0156": createPreparedIndoorEnvCellAsset(
 				0x016c0156,
 				0x0d000001,
 				2,
@@ -68,13 +68,13 @@ describe("structured interior scene model", () => {
 	it("tracks missing visible env-cell, environment, and cell-structure inputs", () => {
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+			"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 				0x016c0155,
 				0x0d000001,
 				99,
 				IDENTITY_PLACEMENT,
 			),
-			"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
+			"env-cell/016c0156": createPreparedIndoorEnvCellAsset(
 				0x016c0156,
 				0x0d000002,
 				1,
@@ -103,7 +103,7 @@ describe("structured interior scene model", () => {
 		runtimeBatch.residency.visibleCellIds = [];
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+			"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 				0x016c0155,
 				0x0d000001,
 				1,
@@ -132,7 +132,7 @@ describe("structured interior scene model", () => {
 		runtimeBatch.residency.visibleCellIds = [];
 		const assetState = createInitialAssetChannelState();
 		assetState.preparedByAssetId = {
-			"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+			"env-cell/01020155": createPreparedIndoorEnvCellAsset(
 				0x01020155,
 				0x0d000001,
 				1,
@@ -192,7 +192,7 @@ function createPreparedIndoorEnvCellAsset(
 	cellStructureId: number,
 	localPlacement: PlacementTransformDto,
 ): PreparedAssetRecord {
-	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
+	const assetId = `env-cell/${envCellId.toString(16).padStart(8, "0")}`;
 	return {
 		request: { requestId: assetId, assetId, priority: "streaming" },
 		response: {

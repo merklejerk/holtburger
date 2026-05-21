@@ -435,7 +435,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).not.toContain(
-			"indoor-env-cell/01020155",
+			"env-cell/01020155",
 		);
 		expect(requests.map((request) => request.assetId)).toContain(
 			"landblock-pack/0102ffff",
@@ -455,7 +455,7 @@ describe("asset channel controller", () => {
 						0x0102ffff,
 						[0x01020155],
 					),
-				"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+				"env-cell/01020155": createPreparedIndoorEnvCellAsset(
 					0x01020155,
 					0x0d000123,
 					1,
@@ -482,7 +482,7 @@ describe("asset channel controller", () => {
 						0x0102ffff,
 						[0x01020155],
 					),
-				"indoor-env-cell/01020155": createPreparedIndoorEnvCellAsset(
+				"env-cell/01020155": createPreparedIndoorEnvCellAsset(
 					0x01020155,
 					0x0d000123,
 					1,
@@ -564,12 +564,12 @@ describe("asset channel controller", () => {
 		const preparedFocusEnvCell = prepareAssetPayload(
 			{
 				requestId: "indoor-1",
-				assetId: "indoor-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				priority: "bootstrap",
 			},
 			{
 				requestId: "indoor-1",
-				assetId: "indoor-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				payloadKind: "json",
 				payload: {
 					kind: "indoor-env-cell",
@@ -611,7 +611,7 @@ describe("asset channel controller", () => {
 			},
 			"streaming",
 			{
-				"indoor-env-cell/016c0155": preparedFocusEnvCell,
+				"env-cell/016c0155": preparedFocusEnvCell,
 			},
 			[],
 		);
@@ -633,7 +633,7 @@ describe("asset channel controller", () => {
 			},
 			"streaming",
 			{
-				"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+				"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 					0x016c0155,
 					0x0d000001,
 					1,
@@ -641,7 +641,7 @@ describe("asset channel controller", () => {
 					[0x016c0156],
 					[0x016c0155, 0x016c0156, 0x016c0157],
 				),
-				"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
+				"env-cell/016c0156": createPreparedIndoorEnvCellAsset(
 					0x016c0156,
 					0x0d000001,
 					2,
@@ -670,14 +670,14 @@ describe("asset channel controller", () => {
 			null,
 			"streaming",
 			{
-				"indoor-env-cell/016c0155": createPreparedIndoorEnvCellAsset(
+				"env-cell/016c0155": createPreparedIndoorEnvCellAsset(
 					0x016c0155,
 					0x0d000001,
 					1,
 					[],
 					[0x016c0156],
 				),
-				"indoor-env-cell/016c0156": createPreparedIndoorEnvCellAsset(
+				"env-cell/016c0156": createPreparedIndoorEnvCellAsset(
 					0x016c0156,
 					0x0d000001,
 					2,
@@ -690,7 +690,7 @@ describe("asset channel controller", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).not.toContain(
-			"indoor-env-cell/016c0157",
+			"env-cell/016c0157",
 		);
 	});
 
@@ -698,12 +698,12 @@ describe("asset channel controller", () => {
 		const preparedFocusEnvCell = prepareAssetPayload(
 			{
 				requestId: "indoor-1",
-				assetId: "indoor-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				priority: "bootstrap",
 			},
 			{
 				requestId: "indoor-1",
-				assetId: "indoor-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				payloadKind: "json",
 				payload: {
 					kind: "indoor-env-cell",
@@ -757,7 +757,7 @@ describe("asset channel controller", () => {
 			},
 			"streaming",
 			{
-				"indoor-env-cell/016c0155": preparedFocusEnvCell,
+				"env-cell/016c0155": preparedFocusEnvCell,
 			},
 			[],
 		);
@@ -1234,12 +1234,12 @@ describe("asset channel controller", () => {
 		const indoorEnvCell = prepareAssetPayload(
 			{
 				requestId: "indoor-1",
-				assetId: "indoor-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				priority: "bootstrap",
 			},
 			{
 				requestId: "indoor-1",
-				assetId: "indoor-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				payloadKind: "json",
 				payload: {
 					kind: "indoor-env-cell",
@@ -2877,7 +2877,7 @@ function createPreparedIndoorEnvCellAsset(
 	visibleCellIds: number[] = [],
 	landblockEnvCellIds: number[] = [],
 ): PreparedAssetRecord {
-	const assetId = `indoor-env-cell/${envCellId.toString(16).padStart(8, "0")}`;
+	const assetId = `env-cell/${envCellId.toString(16).padStart(8, "0")}`;
 	return prepareAssetPayload(
 		{
 			requestId: `cached-${assetId}`,

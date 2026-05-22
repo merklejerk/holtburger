@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 1 implemented; Phase 2 partially pulled forward.
+Status: Phase 2 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -58,10 +58,7 @@ Browser scene interest should always start from `browserMode.destination`.
 ```ts
 type BrowserNavigationFocusMode = "manual" | "follow-camera";
 
-type BrowserDestinationSource =
-	| "manual"
-	| "landblock-pick"
-	| "follow-camera";
+type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 ```
 
 Manual mode writes `browserMode.destination` from user input and picks. Follow mode writes
@@ -155,10 +152,10 @@ The renderer should expose structured camera residency, not only formatted debug
 
 ```ts
 interface BrowserCameraResidency {
-	kind: "outdoor-landblock" | "env-cell" | "unknown";
-	landblockId: number | null;
-	envCellId: number | null;
-	source: "cell-bsp" | "aabb-fallback" | "outdoor" | "unknown";
+  kind: "outdoor-landblock" | "env-cell" | "unknown";
+  landblockId: number | null;
+  envCellId: number | null;
+  source: "cell-bsp" | "aabb-fallback" | "outdoor" | "unknown";
 }
 ```
 
@@ -291,7 +288,7 @@ If a browser UI later needs host status, add the narrowest DTO for that workflow
 
 ```ts
 interface BrowserAssetHostStatusDto {
-	phase: "ready" | "unavailable";
+  phase: "ready" | "unavailable";
 }
 ```
 
@@ -343,14 +340,14 @@ one. Browser asset streaming should instead accept destination-driven input:
 
 ```ts
 interface BrowserSceneRequestInput {
-	requestRevision: number;
-	destination: BrowserLocationSelection | null;
-	terrainRadius: number;
-	buildingRadius: number;
-	detailRadius: number;
-	envCellRadius: number;
-	preparedByAssetId: Record<string, PreparedAssetRecord>;
-	pendingAssetIds: string[];
+  requestRevision: number;
+  destination: BrowserLocationSelection | null;
+  terrainRadius: number;
+  buildingRadius: number;
+  detailRadius: number;
+  envCellRadius: number;
+  preparedByAssetId: Record<string, PreparedAssetRecord>;
+  pendingAssetIds: string[];
 }
 ```
 
@@ -633,6 +630,52 @@ Exit criteria:
 - Browser asset requests can be derived from destination + prepared assets + radii.
 - Outdoor and dungeon browser requests work without host/player focus.
 - `SceneAssetStreamingController` does not accept or inspect legacy host snapshot DTO.
+
+Progress update:
+
+- Completed in `apps/holtburger-3d`:
+  - Added `describeBrowserDestinationIdentity` in `browser-mode.ts` so request planning and streaming
+    sync keys use stable destination identity rather than UI labels or destination source labels.
+  - Updated `scene-asset-request-planner.ts` request IDs to include stable browser destination
+    identity plus browser-owned request revision.
+  - Removed the obsolete no-destination request-scope fallback from landblock pack and summary
+    planning. Browser scene requests now require a destination or return no requests before entering
+    request construction.
+  - Made indoor coverage asset IDs explicitly use the destination's owning landblock pack, keeping
+    dungeon pack ownership obvious instead of relying on env-cell normalization as an implicit side
+    effect.
+  - Updated `SceneAssetStreamingController` sync/debug keys to use stable destination identity
+    instead of formatted destination labels.
+  - Added `scene-asset-request-planner.test.ts` coverage for outdoor destination requests, dungeon
+    pack requests, dungeon static dependency requests, and source-independent destination identity.
+
+Course corrections:
+
+- Phase 1 had already moved the major streaming shape to browser input. Phase 2 therefore focused
+  on hardening that path: stable identity, no stale fallback request scopes, and replacement tests.
+- Request IDs still include the requested asset ID, including slash-separated asset namespaces. That
+  matches the existing asset request convention and keeps request IDs readable in logs.
+- Destination identity intentionally ignores `BrowserDestinationSource`. Manual entries, landblock
+  picks, and future follow-camera updates should produce the same coverage and cache behavior when
+  they point at the same owning landblock or env cell.
+
+Future-step refinements:
+
+- Phase 7 should reuse `describeBrowserDestinationIdentity` when deduplicating follow-camera
+  destination writes.
+- Phase 6 should use the same destination identity helper when deciding whether an anchor shift is
+  necessary, but camera reset/fit policy should remain separate from scene-interest identity.
+- Phase 9 should keep the new planner tests and add controller-level tests if request-revision or
+  pruning behavior becomes more complex during follow traversal.
+
+Verification:
+
+- `npm run test:ts` passes with 31 test files and 150 tests.
+- `npm run check` passes.
+- `npm run lint:ts` passes after deleting unrelated stale unused test helpers that lint surfaced.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` still reports pre-existing formatting drift in unrelated files outside the
+  Phase 2 edits.
 
 ### Phase 3: Typed Renderer Camera Residency
 

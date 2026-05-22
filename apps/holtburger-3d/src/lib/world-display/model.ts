@@ -13,7 +13,6 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedLandblockPackPayload,
-	PreparedLandblockSummaryPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { describePreparedAssetPayload } from "../assets/types";

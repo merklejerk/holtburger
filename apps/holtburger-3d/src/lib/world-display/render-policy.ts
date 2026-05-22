@@ -38,7 +38,7 @@ export interface VisibleTransitionLevels {
 	hasVisibleTransitionLevel(level: TransitionPortalRenderLevel): boolean;
 }
 
-export interface TransitionPortalCandidatePolicy {
+interface TransitionPortalCandidatePolicy {
 	minScreenAreaRatio: number;
 }
 
@@ -56,9 +56,9 @@ export interface WorldRenderGraphSummary {
 export const MIN_TRANSITION_PORTAL_MAX_DEPTH = 0;
 export const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
 export const MAX_TRANSITION_PORTAL_MAX_DEPTH = 8;
-export const DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO = 0.0002;
+const DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO = 0.0002;
 
-export const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
+const DEFAULT_WORLD_RENDER_POLICY_OPTIONS: WorldRenderPolicyOptions = {
 	minPortalScreenAreaRatio: DEFAULT_MIN_PORTAL_SCREEN_AREA_RATIO,
 	enableUnknownResidencyDiagnosticFallback: true,
 	transitionPortalMaxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
@@ -136,7 +136,7 @@ export function directionForTransitionDepth(
 	return oddDepth ? "indoor-to-outdoor" : "outdoor-to-indoor";
 }
 
-export function compositeSceneForTransitionDirection(
+function compositeSceneForTransitionDirection(
 	direction: TransitionPortalGraphDirection,
 ): TransitionPortalGraphScene {
 	return direction === "outdoor-to-indoor" ? "interior" : "exterior";

@@ -21,7 +21,7 @@ export type TransitionPortalGraphDirection =
 
 export type TransitionPortalGraphScene = "exterior" | "interior";
 
-export type WorldRenderGraphNodeKind =
+type WorldRenderGraphNodeKind =
 	| "exterior-base"
 	| "interior-base"
 	| "transition-aperture-mask"

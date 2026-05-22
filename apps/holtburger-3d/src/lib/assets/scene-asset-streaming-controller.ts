@@ -19,7 +19,7 @@ import {
 } from "./scene-asset-request-planner";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 
-export interface SceneAssetChannel {
+interface SceneAssetChannel {
 	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
 	prepareAssetGraph(
 		rootRequest: AssetLookupRequestDto,

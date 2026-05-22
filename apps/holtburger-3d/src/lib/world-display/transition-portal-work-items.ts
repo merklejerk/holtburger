@@ -16,10 +16,7 @@ import {
 import type { RenderChunkPlacement } from "./render-chunks";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 
-export type TransitionPortalSource =
-	| "browser-free-camera"
-	| "walkabout"
-	| "runtime";
+type TransitionPortalSource = "browser-free-camera" | "walkabout" | "runtime";
 
 export type TransitionPortalDirection =
 	| "outdoor-to-indoor"
@@ -48,7 +45,7 @@ export interface TransitionPortalWorkItem extends TransitionPortalCandidate {
 	visibleSide: PortalApertureVisibleSide;
 }
 
-export interface TransitionPortalCandidateDiagnostics {
+interface TransitionPortalCandidateDiagnostics {
 	loadedEnvCellPortalFactCount: number;
 	topologyPortalCount: number;
 	linkedTopologyPortalCount: number;

@@ -8,14 +8,6 @@ export interface ModeState {
 	routingReason: string;
 }
 
-export function createInitialModeState(): ModeState {
-	return createModeState(
-		"browser",
-		"browser",
-		"The /browser route runs as a standalone scene browser.",
-	);
-}
-
 export function deriveModeState(browserMode: BrowserModeState): ModeState {
 	return createModeState(
 		"browser",

@@ -116,7 +116,7 @@ export function deriveRenderChunkTransforms(
 		}));
 }
 
-export function isOutsideRetainRadius(
+function isOutsideRetainRadius(
 	anchorLandblockId: number,
 	focusLandblockId: number,
 	retainRadius: number,

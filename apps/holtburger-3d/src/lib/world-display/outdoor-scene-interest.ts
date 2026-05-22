@@ -28,18 +28,6 @@ export const DEFAULT_BUILDING_LOD_RADIUS = 1;
 export const DEFAULT_DETAIL_LOD_RADIUS = 1;
 export const DEFAULT_ENV_CELL_LOD_RADIUS = 1;
 
-export function createDefaultOutdoorSceneInterest(
-	focusLandblockId: number,
-): NormalizedOutdoorSceneInterest {
-	return deriveOutdoorSceneInterest({
-		focusLandblockId,
-		terrainRadius: DEFAULT_TERRAIN_LOD_RADIUS,
-		buildingRadius: DEFAULT_BUILDING_LOD_RADIUS,
-		detailRadius: DEFAULT_DETAIL_LOD_RADIUS,
-		envCellRadius: DEFAULT_ENV_CELL_LOD_RADIUS,
-	});
-}
-
 export function deriveOutdoorSceneInterest(
 	interest: OutdoorSceneInterest,
 ): NormalizedOutdoorSceneInterest {

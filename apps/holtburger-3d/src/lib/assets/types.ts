@@ -23,7 +23,7 @@ export interface PreparedAssetProvenance {
 	detail: string | null;
 }
 
-export interface PreparedTerrainTriangle {
+interface PreparedTerrainTriangle {
 	a: number;
 	b: number;
 	c: number;
@@ -52,7 +52,7 @@ interface PreparedDebugPresentation {
 	paletteKey: string;
 }
 
-export interface PreparedLandblockStaticSourceInstance {
+interface PreparedLandblockStaticSourceInstance {
 	instanceId: string;
 	owningLandblockId: number;
 	sourceDid: number;
@@ -71,25 +71,9 @@ export interface PreparedLandblockStaticBuildingPortal {
 	linkedEnvCellIds: number[];
 }
 
-export interface PreparedLandblockStaticBuilding extends PreparedLandblockStaticSourceInstance {
+interface PreparedLandblockStaticBuilding extends PreparedLandblockStaticSourceInstance {
 	numLeaves: number;
 	portals: PreparedLandblockStaticBuildingPortal[];
-}
-
-export interface PreparedLandblockGeneratedSceneryInstance extends PreparedLandblockStaticSourceInstance {
-	terrainIndex: number;
-	sceneId: number;
-	sceneTemplateIndex: number;
-	scale: number;
-}
-
-export interface PreparedIndoorStaticObject {
-	instanceId: string;
-	owningEnvCellId: number;
-	sourceDid: number;
-	sourceAssetId: string;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
 }
 
 export interface PreparedIndoorCellPortal {
@@ -102,7 +86,7 @@ export interface PreparedIndoorCellPortal {
 	targetEnvCellId: number;
 }
 
-export interface PreparedLandblockCellPortal {
+interface PreparedLandblockCellPortal {
 	portalId: string;
 	sourceIndex: number;
 	flags: number;
@@ -173,7 +157,7 @@ export interface PreparedLandblockSummaryPayload extends PreparedAssetPayloadBas
 	diagnostics: PreparedLandblockPackPayload["diagnostics"];
 }
 
-export interface PreparedLandblockSummaryObject {
+interface PreparedLandblockSummaryObject {
 	instanceId: string;
 	owningLandblockId: number;
 	sourceDid: number;
@@ -182,7 +166,7 @@ export interface PreparedLandblockSummaryObject {
 	localPlacement: PlacementTransformDto;
 }
 
-export interface PreparedLandblockSummaryBuildingPortal {
+interface PreparedLandblockSummaryBuildingPortal {
 	portalId: string;
 	sourceIndex: number;
 	flags: number;
@@ -218,19 +202,19 @@ export interface PreparedPortalAperture {
 	plane: PreparedPortalAperturePlane | null;
 }
 
-export interface PreparedPortalAperturePlane {
+interface PreparedPortalAperturePlane {
 	normal: Vec3Dto;
 	constant: number;
 	source: "drawing-bsp-portal" | "derived-from-render-points";
 }
 
-export type PreparedLandblockStaticInstanceKind =
+type PreparedLandblockStaticInstanceKind =
 	| "scenery"
 	| "building"
 	| "generated-scenery"
 	| "indoor-static";
 
-export interface PreparedBounds {
+interface PreparedBounds {
 	min: Vec3Dto;
 	max: Vec3Dto;
 }
@@ -266,7 +250,7 @@ export interface PreparedLandblockStaticMesh {
 	instanceBounds: PreparedBounds | null;
 }
 
-export type PreparedLandblockSpatialItemKind =
+type PreparedLandblockSpatialItemKind =
 	| "terrain"
 	| "outdoor-static"
 	| "building"
@@ -274,7 +258,7 @@ export type PreparedLandblockSpatialItemKind =
 	| "indoor-static"
 	| "portal";
 
-export type PreparedLandblockSpatialItemMetadata =
+type PreparedLandblockSpatialItemMetadata =
 	| { kind: "none" }
 	| {
 			kind: "terrain-quad";
@@ -293,14 +277,14 @@ export interface PreparedLandblockSpatialItem {
 	metadata: PreparedLandblockSpatialItemMetadata;
 }
 
-export interface PreparedLandblockBvh {
+interface PreparedLandblockBvh {
 	coordinateSpace: "landblock-render-local";
 	landblockId: number;
 	scope: "static-landblock";
 	nodes: PreparedLandblockBvhNode[];
 }
 
-export interface PreparedLandblockBvhNode {
+interface PreparedLandblockBvhNode {
 	bounds: PreparedBounds;
 	left: number | null;
 	right: number | null;
@@ -308,12 +292,12 @@ export interface PreparedLandblockBvhNode {
 	kindMask: number;
 }
 
-export interface PreparedPolygonSetUv {
+interface PreparedPolygonSetUv {
 	u: number;
 	v: number;
 }
 
-export interface PreparedPolygonSetVertex {
+interface PreparedPolygonSetVertex {
 	id: number;
 	origin: Vec3Dto;
 	normal: Vec3Dto;
@@ -448,7 +432,7 @@ export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	didDegrade: number | null;
 }
 
-export interface PreparedSetupModelPart {
+interface PreparedSetupModelPart {
 	partIndex: number;
 	gfxObjId: number;
 	gfxObjAssetId: string;

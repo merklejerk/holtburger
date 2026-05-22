@@ -17,12 +17,12 @@ export interface WorldRenderWorkingModel {
 	interior: WorldInteriorRenderSceneSet;
 }
 
-export interface WorldRenderSceneSet {
+interface WorldRenderSceneSet {
 	terrainMeshes: Mesh[];
 	staticRenderableMeshes: InstancedMesh[];
 }
 
-export interface WorldInteriorRenderSceneSet {
+interface WorldInteriorRenderSceneSet {
 	cellShellMeshes: Mesh[];
 	staticRenderableMeshes: InstancedMesh[];
 	envCellIdByCellShellRenderKey: Map<string, number>;

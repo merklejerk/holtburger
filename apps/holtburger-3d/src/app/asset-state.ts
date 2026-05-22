@@ -13,16 +13,6 @@ export function createAssetState(): AssetChannelState {
 	return createInitialAssetChannelState();
 }
 
-export function updateAssetChannel(
-	assetState: AssetChannelState,
-	channel: string,
-): AssetChannelState {
-	return {
-		...assetState,
-		channel,
-	};
-}
-
 export function markAssetsPending(
 	assetState: AssetChannelState,
 	requests: readonly AssetLookupRequestDto[],

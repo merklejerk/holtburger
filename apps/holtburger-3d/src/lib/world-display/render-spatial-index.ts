@@ -17,12 +17,12 @@ export interface RenderVec3 {
 	z: number;
 }
 
-export interface RenderRay {
+interface RenderRay {
 	origin: RenderVec3;
 	direction: RenderVec3;
 }
 
-export interface RenderPlane {
+interface RenderPlane {
 	normal: RenderVec3;
 	constant: number;
 }
@@ -36,7 +36,7 @@ export interface RenderBounds {
 	max: RenderVec3;
 }
 
-export type RenderPickShape =
+type RenderPickShape =
 	| { kind: "box"; bounds: RenderBounds }
 	| { kind: "sphere"; center: RenderVec3; radius: number }
 	| { kind: "polygon"; points: RenderVec3[]; thickness: number };
@@ -97,14 +97,14 @@ export interface RenderSpatialPick {
 	point: RenderVec3;
 }
 
-export interface RenderSpatialIndexSink {
+interface RenderSpatialIndexSink {
 	clearOwner(ownerKey: string): void;
 	replaceOwnerItems(ownerKey: string, items: RenderSpatialItem[]): void;
 	upsertItem(item: RenderSpatialItem): void;
 	removeItem(itemId: RenderSpatialItemId): void;
 }
 
-export interface RenderSpatialChunkSink {
+interface RenderSpatialChunkSink {
 	replaceChunkTransforms(transforms: RenderChunkTransform[]): void;
 	removeChunkTransform(chunkKey: RenderChunkKey): void;
 }

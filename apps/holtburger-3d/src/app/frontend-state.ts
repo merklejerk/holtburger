@@ -35,7 +35,7 @@ import type {
 } from "../lib/assets/types";
 import type { AssetLookupRequestDto } from "../lib/host/contracts";
 
-export interface FrontendAppState {
+interface FrontendAppState {
 	asset: AssetChannelState;
 	browserMode: BrowserModeState;
 }
@@ -47,7 +47,7 @@ function createInitialFrontendState(): FrontendAppState {
 	};
 }
 
-export function createFrontendStateStore() {
+function createFrontendStateStore() {
 	const { subscribe, update } = writable<FrontendAppState>(
 		createInitialFrontendState(),
 	);

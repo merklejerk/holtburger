@@ -47,8 +47,8 @@ interface WorldDisplaySceneChunk {
 	reason: string;
 }
 
-interface WorldDisplaySceneContext {
-	kind: "outdoor-landblock-ring" | "indoor-visible-cell-set";
+interface BrowserWorldDisplaySceneContext {
+	kind: "outdoor-landblock-ring" | "indoor-landblock-pack";
 	statusText: string;
 	focusAnchorLabel: string;
 	destinationText: string;
@@ -86,19 +86,19 @@ export interface WorldDisplayTerrainViewport {
 	polygons: WorldDisplayTerrainPolygon[];
 }
 
-export interface WorldDisplayModel {
+export interface BrowserWorldDisplayModel {
 	headline: string;
-	focusLocationLabel: string;
+	destinationFocusLabel: string;
 	destinationLabel: string;
 	renderCacheText: string;
 	inputText: string;
 	assetText: string;
-	sceneContext: WorldDisplaySceneContext;
+	sceneContext: BrowserWorldDisplaySceneContext;
 	terrainContract: WorldDisplayTerrainContract;
 	entities: WorldDisplayDebugEntity[];
 }
 
-interface WorldDisplayModelInput {
+interface BrowserWorldDisplayModelInput {
 	assetState: AssetChannelState;
 	browserDestination: BrowserLocationSelection | null;
 	terrainLodRadius: number;
@@ -116,7 +116,7 @@ const DEFAULT_VIEWPORT_POINT: NormalizedViewportPoint = {
 
 const MIN_CAMERA_HINT_INTERVAL_MS = 250;
 
-export function deriveWorldDisplayModel({
+export function deriveBrowserWorldDisplayModel({
 	assetState,
 	browserDestination,
 	terrainLodRadius,
@@ -125,11 +125,11 @@ export function deriveWorldDisplayModel({
 	cameraAck,
 	rayPickResponse,
 	pendingCameraHint,
-}: WorldDisplayModelInput): WorldDisplayModel {
+}: BrowserWorldDisplayModelInput): BrowserWorldDisplayModel {
 	if (!browserDestination) {
 		return {
 			headline: "Browser scene viewer is waiting for a destination.",
-			focusLocationLabel: "No browser destination selected yet.",
+			destinationFocusLabel: "No browser destination selected yet.",
 			destinationLabel: "No browser destination selected yet.",
 			renderCacheText:
 				"Browser asset cache is ready for destination-driven coverage.",
@@ -151,7 +151,7 @@ export function deriveWorldDisplayModel({
 
 	return {
 		headline: "Browser destination is driving the shared world shell.",
-		focusLocationLabel: browserDestination.label,
+		destinationFocusLabel: browserDestination.label,
 		destinationLabel: browserDestination.label,
 		renderCacheText:
 			"Scene coverage is selected from browser destination and frontend cache state.",
@@ -169,7 +169,7 @@ export function deriveWorldDisplayModel({
 
 function createPendingSceneContext(
 	browserDestination: BrowserLocationSelection | null,
-): WorldDisplaySceneContext {
+): BrowserWorldDisplaySceneContext {
 	return {
 		kind: "outdoor-landblock-ring",
 		statusText:
@@ -194,7 +194,7 @@ function deriveSceneContext(
 	terrainLodRadius: number,
 	buildingLodRadius: number,
 	detailLodRadius: number,
-): WorldDisplaySceneContext {
+): BrowserWorldDisplaySceneContext {
 	const browserFocusEnvCellId =
 		browserDestinationToInteriorCellId(browserDestination);
 	if (browserFocusEnvCellId !== null) {
@@ -276,7 +276,7 @@ function deriveSceneContext(
 		destinationText,
 		coverageText: `Outdoor LoD selects ${chunks.length} terrain tile${chunks.length === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} inside distance ${buildingLodRadius}, and ${staticInstanceCount} detail object${staticInstanceCount === 1 ? "" : "s"} inside distance ${detailLodRadius} around ${focusLandblockLabel}.`,
 		gapText:
-			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but indoor visible-cell expansion and broader outdoor coverage are still pending.",
+			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but linked interior coverage and broader outdoor coverage still need cleanup.",
 		chunks,
 		staticRenderableInstanceCount: staticInstanceCount,
 		staticRenderableBuildingCount: staticBuildingCount,
@@ -290,7 +290,7 @@ function deriveIndoorSceneContext(
 	focusEnvCellId: number | null,
 	destinationLabel: string | null,
 	assetState: AssetChannelState,
-): WorldDisplaySceneContext {
+): BrowserWorldDisplaySceneContext {
 	const focusEnvCellLabel = focusEnvCellId
 		? formatEnvCellLabel(focusEnvCellId)
 		: "Unknown env cell";
@@ -304,14 +304,14 @@ function deriveIndoorSceneContext(
 		0,
 	);
 	return {
-		kind: "indoor-visible-cell-set",
+		kind: "indoor-landblock-pack",
 		statusText:
-			"Indoor scene context is explicit: WorldDisplay tracks env-cell and visible-cell membership separately from outdoor landblock terrain.",
+			"Browser dungeon scene context is explicit: WorldDisplay renders the owning landblock pack and tracks the current env-cell focus separately from outdoor terrain.",
 		focusAnchorLabel: focusEnvCellLabel,
 		destinationText: destinationLabel
-			? `Manual destination focus is ${destinationLabel}.`
-			: `Indoor focus is ${focusEnvCellLabel}.`,
-		coverageText: `Indoor focus ${focusEnvCellLabel} is backed by ${preparedIndoorCellCount} pack-prepared cell${preparedIndoorCellCount === 1 ? "" : "s"}. Browser dungeons load from the owning landblock pack instead of runtime visible-cell state.`,
+			? `Browser destination focus is ${destinationLabel}.`
+			: `Browser dungeon focus is ${focusEnvCellLabel}.`,
+		coverageText: `Dungeon focus ${focusEnvCellLabel} is backed by ${preparedIndoorCellCount} pack-prepared cell${preparedIndoorCellCount === 1 ? "" : "s"}. Browser dungeons load the owning landblock pack as an isolated scene.`,
 		gapText: null,
 		chunks: [],
 		staticRenderableInstanceCount: 0,
@@ -321,7 +321,7 @@ function deriveIndoorSceneContext(
 }
 
 function createTerrainContract(
-	sceneContext: WorldDisplaySceneContext | null,
+	sceneContext: BrowserWorldDisplaySceneContext | null,
 ): WorldDisplayTerrainContract {
 	const focusChunk =
 		sceneContext?.chunks.find((chunk) => chunk.role === "focus") ?? null;
@@ -338,7 +338,7 @@ function createTerrainContract(
 			"ACViewer.WorldViewer.LoadLandblock + ACE.DatLoader.CellLandblock",
 		geometryAnchor: "ACViewer.Render.R_Landblock + TerrainBatchDraw.AddTerrain",
 		indoorBranchText:
-			"Outdoor terrain should come from normalized landblock loads first; indoor env cells stay on a separate visible-cell expansion track.",
+			"Outdoor terrain comes from normalized landblock loads; dungeon env cells stay on a separate landblock-pack rendering track.",
 		statusText: requestKey
 			? `Phase 9 now exercises ${requestKey} end to end: Rust decodes CellLandblock terrain data into an app-local payload, and WorldDisplay keeps final mesh and GPU hydration on the frontend.`
 			: "The terrain contract shape is in place, but it still needs a focus outdoor landblock before the first request key can be selected.",
@@ -489,10 +489,10 @@ export function describeRayPickResponse(
 	}
 
 	if (rayPickResponse.resolved && rayPickResponse.hit) {
-		return `Resolved the authority-sensitive debug pick against ${rayPickResponse.hit.label} at ${rayPickResponse.hit.locationLabel}.`;
+		return `Resolved the browser debug pick against ${rayPickResponse.hit.label} at ${rayPickResponse.hit.locationLabel}.`;
 	}
 
-	return "No authoritative debug entity intersected the current pick ray.";
+	return "No browser debug entity intersected the current pick ray.";
 }
 
 function projectTerrainVertex(vertex: { x: number; y: number; z: number }) {

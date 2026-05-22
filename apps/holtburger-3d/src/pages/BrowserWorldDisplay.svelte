@@ -37,7 +37,7 @@
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
 	import {
 		buildCameraHint,
-		deriveWorldDisplayModel,
+		deriveBrowserWorldDisplayModel,
 		describeCameraHintAck,
 		describeRayPickResponse,
 		normalizeViewportPoint,
@@ -555,7 +555,7 @@
 	);
 	const pendingCameraHint = $derived(trailingCameraHint !== null);
 	const worldDisplay = $derived(
-		deriveWorldDisplayModel({
+		deriveBrowserWorldDisplayModel({
 			assetState,
 			browserDestination,
 			terrainLodRadius,
@@ -671,7 +671,7 @@
 	);
 	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
 		{ label: "Mode", value: sceneContextText },
-		{ label: "Focus", value: worldDisplay.focusLocationLabel },
+		{ label: "Destination", value: worldDisplay.destinationFocusLabel },
 		{ label: "Camera residency", value: cameraResidencyText },
 		{ label: "Base scene", value: renderGraphText },
 		{ label: "Landblocks", value: landblockVisibilityText },
@@ -725,7 +725,7 @@
 					label: "Ray pick",
 					value:
 						describeRayPickResponse(rayPickResponse) ??
-						"No authority-sensitive debug pick has been resolved yet.",
+						"No browser debug pick has been resolved yet.",
 				},
 				{ label: "Events", value: cameraPipelineDebugText },
 			],

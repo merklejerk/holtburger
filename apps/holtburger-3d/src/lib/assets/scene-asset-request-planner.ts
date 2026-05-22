@@ -1,8 +1,4 @@
-import type {
-	AssetLookupRequestDto,
-	AssetPriority,
-	RuntimeBatchDto,
-} from "../host/contracts";
+import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
 	browserDestinationToInteriorCellId,
 	browserLocationToLandblockId,
@@ -18,10 +14,8 @@ import type { PreparedAssetRecord, PreparedLandblockStaticMesh } from "./types";
 import {
 	deriveBrowserFocusedStructuredInteriorMembershipPolicy,
 	deriveStructuredInteriorCoverage,
-	type StructuredInteriorMembershipPolicy,
 } from "./structured-interior-coverage";
 import {
-	createDefaultOutdoorSceneInterest,
 	deriveOutdoorSceneInterest,
 	unionOutdoorSceneLandblockIds,
 	type NormalizedOutdoorSceneInterest,
@@ -35,6 +29,14 @@ export interface OutdoorSceneRequestOptions {
 	envCellRadius?: number;
 }
 
+export interface BrowserSceneRequestInput {
+	requestRevision: number;
+	browserDestination: BrowserLocationSelection | null;
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	pendingAssetIds?: string[];
+	options?: OutdoorSceneRequestOptions;
+}
+
 const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
 	terrainRadius: 2,
 	buildingRadius: 1,
@@ -43,48 +45,43 @@ const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
 };
 
 export function createFocusedAssetRequest(
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
+	requestRevision = 0,
 ): AssetLookupRequestDto | null {
-	if (
-		!runtimeBatch ||
-		runtimeBatch.residency.indoors ||
-		isIndoorBrowserDestination(browserDestination)
-	) {
+	if (!browserDestination || isIndoorBrowserDestination(browserDestination)) {
 		return null;
 	}
 
-	const landblockId = deriveTerrainFocusLandblockId(
-		runtimeBatch,
-		browserDestination,
-	);
+	const landblockId = browserLocationToLandblockId(browserDestination);
 	const assetId = formatLandblockPackAssetId(landblockId);
-	const requestScope = browserDestination ? "destination" : "runtime";
 
 	return {
-		requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
+		requestId: `${priority}-${requestRevision}-destination-${assetId}`,
 		assetId,
 		priority,
 	};
 }
 
 export function createSceneCoverageRequests(
-	runtimeBatch: RuntimeBatchDto | null,
-	browserDestination: BrowserLocationSelection | null,
+	input: BrowserSceneRequestInput,
 	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[] = [],
-	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 ): AssetLookupRequestDto[] {
-	if (!runtimeBatch) {
+	const {
+		requestRevision,
+		browserDestination,
+		preparedByAssetId,
+		pendingAssetIds = [],
+		options = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
+	} = input;
+	if (!browserDestination) {
 		return [];
 	}
 
 	if (isIndoorBrowserDestination(browserDestination)) {
 		return [
 			...createLandblockPackCoverageRequests(
-				runtimeBatch,
+				requestRevision,
 				browserDestination,
 				priority,
 				preparedByAssetId,
@@ -92,7 +89,7 @@ export function createSceneCoverageRequests(
 				[normalizeOutdoorLandblockId(browserDestination.envCellId)],
 			),
 			...createStaticRenderableAssetRequests(
-				runtimeBatch,
+				requestRevision,
 				browserDestination,
 				priority,
 				preparedByAssetId,
@@ -102,36 +99,14 @@ export function createSceneCoverageRequests(
 		];
 	}
 
-	if (runtimeBatch.residency.indoors) {
-		return [
-			...createLandblockPackCoverageRequests(
-				runtimeBatch,
-				browserDestination,
-				priority,
-				preparedByAssetId,
-				pendingAssetIds,
-				deriveRuntimeIndoorLandblockPackIds(runtimeBatch),
-			),
-			...createStaticRenderableAssetRequests(
-				runtimeBatch,
-				browserDestination,
-				priority,
-				preparedByAssetId,
-				pendingAssetIds,
-				options,
-			),
-		];
-	}
-
-	const interest = deriveOutdoorInterestForRuntime(
-		runtimeBatch,
+	const interest = deriveOutdoorInterestForBrowserDestination(
 		browserDestination,
 		options,
 	);
 
 	return [
 		...createLandblockPackCoverageRequestsForInterest(
-			runtimeBatch,
+			requestRevision,
 			browserDestination,
 			priority,
 			preparedByAssetId,
@@ -139,7 +114,7 @@ export function createSceneCoverageRequests(
 			interest,
 		),
 		...createStaticRenderableAssetRequests(
-			runtimeBatch,
+			requestRevision,
 			browserDestination,
 			priority,
 			preparedByAssetId,
@@ -151,12 +126,11 @@ export function createSceneCoverageRequests(
 }
 
 export function deriveSceneCoverageAssetIds(
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	_preparedByAssetId: Record<string, PreparedAssetRecord>,
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 ): string[] {
-	if (!runtimeBatch) {
+	if (!browserDestination) {
 		return [];
 	}
 
@@ -164,14 +138,7 @@ export function deriveSceneCoverageAssetIds(
 		return [formatLandblockPackAssetId(browserDestination.envCellId)];
 	}
 
-	if (runtimeBatch.residency.indoors) {
-		return deriveRuntimeIndoorLandblockPackIds(runtimeBatch)
-			.map(formatLandblockPackAssetId)
-			.sort();
-	}
-
-	const interest = deriveOutdoorInterestForRuntime(
-		runtimeBatch,
+	const interest = deriveOutdoorInterestForBrowserDestination(
 		browserDestination,
 		options,
 	);
@@ -188,51 +155,48 @@ export function deriveSceneCoverageAssetIds(
 }
 
 export function createOutdoorLandblockPackCoverageRequest(
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetId: string | null,
+	requestRevision = 0,
 ): AssetLookupRequestDto | null {
 	const requests = createOutdoorLandblockPackCoverageRequests(
-		runtimeBatch,
 		browserDestination,
 		priority,
 		preparedByAssetId,
 		pendingAssetId ? [pendingAssetId] : [],
+		DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
+		requestRevision,
 	);
 
 	return requests[0] ?? null;
 }
 
 export function createOutdoorLandblockPackCoverageRequests(
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	pendingAssetIds: string[] = [],
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
+	requestRevision = 0,
 ): AssetLookupRequestDto[] {
-	if (
-		!runtimeBatch ||
-		runtimeBatch.residency.indoors ||
-		isIndoorBrowserDestination(browserDestination)
-	) {
+	if (!browserDestination || isIndoorBrowserDestination(browserDestination)) {
 		return [];
 	}
 
 	return createLandblockPackCoverageRequestsForInterest(
-		runtimeBatch,
+		requestRevision,
 		browserDestination,
 		priority,
 		preparedByAssetId,
 		pendingAssetIds,
-		deriveOutdoorInterestForRuntime(runtimeBatch, browserDestination, options),
+		deriveOutdoorInterestForBrowserDestination(browserDestination, options),
 	);
 }
 
 function createLandblockPackCoverageRequestsForInterest(
-	runtimeBatch: RuntimeBatchDto,
+	requestRevision: number,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
@@ -245,7 +209,7 @@ function createLandblockPackCoverageRequestsForInterest(
 		deriveLandblockSummaryCoverageLandblockIds(interest);
 	return [
 		...createLandblockPackCoverageRequests(
-			runtimeBatch,
+			requestRevision,
 			browserDestination,
 			priority,
 			preparedByAssetId,
@@ -259,7 +223,7 @@ function createLandblockPackCoverageRequestsForInterest(
 		...(priority === "bootstrap"
 			? []
 			: createLandblockSummaryCoverageRequests(
-					runtimeBatch,
+					requestRevision,
 					browserDestination,
 					priority,
 					preparedByAssetId,
@@ -270,7 +234,7 @@ function createLandblockPackCoverageRequestsForInterest(
 }
 
 function createLandblockPackCoverageRequests(
-	runtimeBatch: RuntimeBatchDto,
+	requestRevision: number,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
@@ -280,7 +244,7 @@ function createLandblockPackCoverageRequests(
 	const requestScope = browserDestination ? "destination" : "runtime";
 	return createUnpreparedRequests(
 		[...new Set(landblockIds.map(formatLandblockPackAssetId))],
-		runtimeBatch,
+		requestRevision,
 		priority,
 		requestScope,
 		preparedByAssetId,
@@ -289,7 +253,7 @@ function createLandblockPackCoverageRequests(
 }
 
 function createLandblockSummaryCoverageRequests(
-	runtimeBatch: RuntimeBatchDto,
+	requestRevision: number,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
@@ -311,7 +275,7 @@ function createLandblockSummaryCoverageRequests(
 		.map(formatLandblockSummaryAssetId);
 	return createUnpreparedRequests(
 		summaryAssetIds,
-		runtimeBatch,
+		requestRevision,
 		priority,
 		requestScope,
 		preparedByAssetId,
@@ -346,7 +310,7 @@ function deriveLandblockSummaryCoverageLandblockIds(
 }
 
 export function createStaticRenderableAssetRequests(
-	runtimeBatch: RuntimeBatchDto | null,
+	requestRevision: number,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
@@ -354,16 +318,13 @@ export function createStaticRenderableAssetRequests(
 	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
 	interest: NormalizedOutdoorSceneInterest | null = null,
 ): AssetLookupRequestDto[] {
-	if (!runtimeBatch) {
+	if (!browserDestination) {
 		return [];
 	}
 
-	if (
-		runtimeBatch.residency.indoors ||
-		isIndoorBrowserDestination(browserDestination)
-	) {
+	if (isIndoorBrowserDestination(browserDestination)) {
 		return createIndoorStaticRenderableAssetRequests(
-			runtimeBatch,
+			requestRevision,
 			browserDestination,
 			priority,
 			preparedByAssetId,
@@ -373,7 +334,7 @@ export function createStaticRenderableAssetRequests(
 
 	const outdoorInterest =
 		interest ??
-		deriveOutdoorInterestForRuntime(runtimeBatch, browserDestination, options);
+		deriveOutdoorInterestForBrowserDestination(browserDestination, options);
 	const buildingLandblockIds = new Set(outdoorInterest.buildingLandblockIds);
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
 	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
@@ -411,7 +372,7 @@ export function createStaticRenderableAssetRequests(
 				!pendingAssetIdSet.has(assetId),
 		)
 		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-static-renderable-${assetId}`,
+			requestId: `${priority}-${requestRevision}-static-renderable-${assetId}`,
 			assetId,
 			priority,
 		}));
@@ -442,16 +403,13 @@ export function derivePackInteriorEnvCellIdsForLandblocks(
 }
 
 export function deriveTerrainFocusLandblockId(
-	runtimeBatch: RuntimeBatchDto,
-	browserDestination: BrowserLocationSelection | null,
+	browserDestination: BrowserLocationSelection,
 ): number {
-	return browserDestination
-		? browserLocationToLandblockId(browserDestination)
-		: normalizeOutdoorLandblockId(runtimeBatch.residency.focusLandblockId);
+	return browserLocationToLandblockId(browserDestination);
 }
 
 function createIndoorStaticRenderableAssetRequests(
-	runtimeBatch: RuntimeBatchDto,
+	requestRevision: number,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
@@ -459,12 +417,13 @@ function createIndoorStaticRenderableAssetRequests(
 ): AssetLookupRequestDto[] {
 	const browserFocusEnvCellId =
 		browserDestinationToInteriorCellId(browserDestination);
+	if (browserFocusEnvCellId === null) {
+		return [];
+	}
 	const activeEnvCellIds = deriveStructuredInteriorCoverage(
-		browserFocusEnvCellId === null
-			? createRuntimeStructuredInteriorMembershipPolicy(runtimeBatch)
-			: deriveBrowserFocusedStructuredInteriorMembershipPolicy(
-					browserFocusEnvCellId,
-				),
+		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+			browserFocusEnvCellId,
+		),
 		preparedByAssetId,
 	).envCellIds;
 	const pendingAssetIdSet = new Set(pendingAssetIds);
@@ -486,7 +445,7 @@ function createIndoorStaticRenderableAssetRequests(
 				!pendingAssetIdSet.has(assetId),
 		)
 		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-indoor-static-renderable-${assetId}`,
+			requestId: `${priority}-${requestRevision}-indoor-static-renderable-${assetId}`,
 			assetId,
 			priority,
 		}));
@@ -571,42 +530,11 @@ function isPackStaticMeshSelected(
 		: selection.detailLandblockIds.has(landblockId);
 }
 
-function createRuntimeStructuredInteriorMembershipPolicy(
-	runtimeBatch: RuntimeBatchDto,
-): StructuredInteriorMembershipPolicy {
-	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
-	return {
-		kind: "landblock-closure",
-		seedEnvCellIds:
-			focusEnvCellId === null
-				? []
-				: [focusEnvCellId, ...runtimeBatch.residency.visibleCellIds],
-	};
-}
-
-function deriveRuntimeIndoorLandblockPackIds(
-	runtimeBatch: RuntimeBatchDto,
-): number[] {
-	return [
-		...new Set(
-			[
-				runtimeBatch.residency.focusEnvCellId ??
-					runtimeBatch.residency.focusLandblockId,
-				...runtimeBatch.residency.visibleCellIds,
-			].map(normalizeOutdoorLandblockId),
-		),
-	].sort((left, right) => left - right);
-}
-
-function deriveOutdoorInterestForRuntime(
-	runtimeBatch: RuntimeBatchDto,
-	browserDestination: BrowserLocationSelection | null,
+function deriveOutdoorInterestForBrowserDestination(
+	browserDestination: BrowserLocationSelection,
 	options: OutdoorSceneRequestOptions,
 ): NormalizedOutdoorSceneInterest {
-	const focusLandblockId = deriveTerrainFocusLandblockId(
-		runtimeBatch,
-		browserDestination,
-	);
+	const focusLandblockId = deriveTerrainFocusLandblockId(browserDestination);
 	const requestedInterest: OutdoorSceneInterest = {
 		focusLandblockId,
 		terrainRadius: options.terrainRadius,
@@ -615,9 +543,7 @@ function deriveOutdoorInterestForRuntime(
 		envCellRadius: options.envCellRadius ?? options.detailRadius,
 	};
 
-	return browserDestination || !runtimeBatch.residency.indoors
-		? deriveOutdoorSceneInterest(requestedInterest)
-		: createDefaultOutdoorSceneInterest(focusLandblockId);
+	return deriveOutdoorSceneInterest(requestedInterest);
 }
 
 function prioritizeOutdoorLandblockIds(
@@ -630,7 +556,7 @@ function prioritizeOutdoorLandblockIds(
 
 function createUnpreparedRequests(
 	assetIds: string[],
-	runtimeBatch: RuntimeBatchDto,
+	requestRevision: number,
 	priority: AssetPriority,
 	requestScope: string,
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
@@ -643,7 +569,7 @@ function createUnpreparedRequests(
 				!preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
 		)
 		.map((assetId) => ({
-			requestId: `${priority}-${runtimeBatch.tick}-${requestScope}-${assetId}`,
+			requestId: `${priority}-${requestRevision}-${requestScope}-${assetId}`,
 			assetId,
 			priority,
 		}));

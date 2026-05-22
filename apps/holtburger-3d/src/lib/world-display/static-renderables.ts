@@ -21,11 +21,7 @@ import {
 	deriveStructuredInteriorCoverage,
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
-import type {
-	PlacementTransformDto,
-	RuntimeBatchDto,
-	Vec3Dto,
-} from "../host/contracts";
+import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import {
 	buildOutdoorCoverageLandblockIds,
 	formatHex32,
@@ -101,33 +97,25 @@ export interface OutdoorStaticRenderableSelection {
 }
 
 export function deriveStaticRenderableSceneModel(
-	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
 	detailLodRadius = 1,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null = null,
 	outdoorSelection: OutdoorStaticRenderableSelection | null = null,
 ): StaticRenderableSceneModel {
-	if (!runtimeBatch) {
+	if (!browserDestination) {
 		return createEmptyStaticRenderableSceneModel();
 	}
 
-	if (
-		runtimeBatch.residency.indoors ||
-		isIndoorBrowserDestination(browserDestination)
-	) {
+	if (isIndoorBrowserDestination(browserDestination)) {
 		return deriveIndoorStaticRenderableSceneModel(
-			runtimeBatch,
 			assetState,
 			browserDestination,
 			structuredInteriorCoverage,
 		);
 	}
 
-	const focusLandblockId = deriveTerrainFocusLandblockId(
-		runtimeBatch,
-		browserDestination,
-	);
+	const focusLandblockId = deriveTerrainFocusLandblockId(browserDestination);
 	const detailLandblockIds =
 		outdoorSelection?.detailLandblockIds ??
 		buildOutdoorCoverageLandblockIds(focusLandblockId, detailLodRadius);
@@ -209,13 +197,11 @@ export function deriveStaticRenderableSceneModel(
 }
 
 function deriveIndoorStaticRenderableSceneModel(
-	runtimeBatch: RuntimeBatchDto,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
 ): StaticRenderableSceneModel {
 	const activeEnvCellIds = deriveActiveInteriorCellIds(
-		runtimeBatch,
 		assetState,
 		browserDestination,
 		structuredInteriorCoverage,
@@ -478,7 +464,6 @@ function multiplyScale(left: Vec3Dto, right: Vec3Dto): Vec3Dto {
 }
 
 function deriveActiveInteriorCellIds(
-	runtimeBatch: RuntimeBatchDto,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null,
 	structuredInteriorCoverage: StructuredInteriorCoverage | null,
@@ -501,23 +486,7 @@ function deriveActiveInteriorCellIds(
 		);
 	}
 
-	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
-	if (focusEnvCellId === null) {
-		return new Set();
-	}
-
-	return new Set(
-		deriveStructuredInteriorCoverage(
-			{
-				kind: "landblock-closure",
-				seedEnvCellIds: [
-					focusEnvCellId,
-					...runtimeBatch.residency.visibleCellIds,
-				],
-			},
-			assetState.preparedByAssetId,
-		).envCellIds,
-	);
+	return new Set();
 }
 
 function collectPackStaticRenderableParts(

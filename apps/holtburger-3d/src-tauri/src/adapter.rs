@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use holtburger_common::Guid;
 use holtburger_common::math::{Quaternion, Vector3};
-use holtburger_common::position::WorldPosition;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockClassification, LandblockPack,
     LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
@@ -20,39 +18,24 @@ use holtburger_content::{
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
 };
-use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
+use holtburger_dat::EOR_CELL_NAMESPACE;
+use holtburger_dat::file_type::{GfxObj, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
-use holtburger_dat::{EOR_CELL_NAMESPACE, ResourceKey};
-use holtburger_world::entity::Entity;
-use holtburger_world::{WorldBootstrap, WorldState};
+use holtburger_world::WorldBootstrap;
 
 use crate::contracts::{
-    AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, BusyStateDto,
-    CameraHintAckDto, CameraHintDto, DebugConfigDto, FrontendStateFeedDto, HostBoundaryOverviewDto,
-    IndoorAssetFamilyIdDto, IndoorContractBacklogDto, IndoorRuntimeFieldIdDto, InteractionModeDto,
-    LifecyclePhaseDto, LifecycleStateDto, ModeHintDto, PlacementTransformDto, QuaternionDto,
-    RayPickHitDto, RayPickRequestDto, RayPickResponseDto, RuntimeBatchDto,
-    RuntimeEntitySnapshotDto, RuntimeNotificationEnvelopeDto, RuntimeResidencyDto, SessionStateDto,
-    Vec3Dto,
+    AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, CameraHintAckDto,
+    CameraHintDto, DebugConfigDto, PlacementTransformDto, QuaternionDto, RayPickRequestDto,
+    RayPickResponseDto, Vec3Dto,
 };
 
-pub const RUNTIME_CHANNEL: &str = "runtime";
-pub const ASSET_CHANNEL: &str = "asset";
-pub const RUNTIME_LIFECYCLE_TOPIC: &str = "lifecycle.state";
-pub const RUNTIME_BATCH_TOPIC: &str = "runtime.batch";
-pub const RUNTIME_NOTIFICATION_EVENT: &str = "runtime:notification";
-
-const LOCAL_PLAYER_GUID: Guid = Guid(0x5000_0001);
-const REMOTE_SCOUT_GUID: Guid = Guid(0x5000_0002);
-const REMOTE_SENTINEL_GUID: Guid = Guid(0x5000_0003);
 const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
 const ASSET_BINARY_VERSION: u32 = 1;
 const ASSET_BINARY_HEADER_LEN: usize = 16;
 
 pub struct HostBoundaryAdapter {
-    content: Arc<ContentRepository>,
     content_asset_runtime: ContentAssetRuntime,
     verbose: bool,
 }
@@ -64,8 +47,6 @@ pub struct HostRuntimeService {
 }
 
 struct HostRuntimeState {
-    tick: u64,
-    world: WorldState,
     last_camera_hint: Option<CameraHintDto>,
     camera_hint_sequence: u64,
 }
@@ -77,35 +58,6 @@ impl HostRuntimeService {
             state: Arc::new(Mutex::new(HostRuntimeState::new())),
             adapter,
         }
-    }
-
-    pub fn lifecycle_state(&self) -> LifecycleStateDto {
-        let state = self.state.lock().expect("host runtime state lock poisoned");
-        self.adapter.lifecycle_state(&state)
-    }
-
-    pub fn runtime_batch(&self) -> RuntimeBatchDto {
-        let state = self.state.lock().expect("host runtime state lock poisoned");
-        self.adapter.runtime_batch(&state)
-    }
-
-    pub fn view_model_feed(&self) -> FrontendStateFeedDto {
-        let state = self.state.lock().expect("host runtime state lock poisoned");
-        self.adapter.view_model_feed(&state)
-    }
-
-    pub fn startup_notifications(&self) -> Vec<RuntimeNotificationEnvelopeDto> {
-        let state = self.state.lock().expect("host runtime state lock poisoned");
-        vec![
-            self.adapter.lifecycle_notification(&state),
-            self.adapter.runtime_notification(&state),
-        ]
-    }
-
-    pub fn advance_runtime_notification(&self) -> RuntimeNotificationEnvelopeDto {
-        let mut state = self.state.lock().expect("host runtime state lock poisoned");
-        state.advance();
-        self.adapter.runtime_notification(&state)
     }
 
     pub fn submit_camera_hint(&self, hint: CameraHintDto) -> CameraHintAckDto {
@@ -134,10 +86,6 @@ impl HostRuntimeService {
         self.adapter.asset_lookup_blocking(request)
     }
 
-    pub fn boundary_overview(&self) -> HostBoundaryOverviewDto {
-        self.adapter.boundary_overview()
-    }
-
     pub fn debug_config(&self) -> DebugConfigDto {
         DebugConfigDto {
             verbose: self.adapter.verbose,
@@ -147,7 +95,7 @@ impl HostRuntimeService {
 
 impl HostRuntimeState {
     fn new() -> Self {
-        let mut world = WorldState::new(Arc::new(WorldBootstrap::new(
+        let _bootstrap = Arc::new(WorldBootstrap::new(
             SkillTable::default(),
             SpellTable {
                 id: SpellTable::FILE_ID,
@@ -157,26 +105,12 @@ impl HostRuntimeState {
             XpTable::default(),
             MotionKinematics::default(),
             SoulEmoteCatalog::default(),
-        )));
-
-        world.player.guid = LOCAL_PLAYER_GUID;
-        world.entities.insert(Entity::new(
-            LOCAL_PLAYER_GUID,
-            "Browser Scout".to_string(),
-            WorldPosition::default(),
         ));
-        world.sync_player_position(make_world_position(Guid(0x0102_0003), 44.0, 84.0, 2.0, 0.0));
 
         Self {
-            tick: 1,
-            world,
             last_camera_hint: None,
             camera_hint_sequence: 0,
         }
-    }
-
-    fn advance(&mut self) {
-        self.tick += 1;
     }
 }
 
@@ -191,57 +125,8 @@ impl HostBoundaryAdapter {
             Arc::clone(&decode_cache),
         ));
         Self {
-            content,
             content_asset_runtime,
             verbose,
-        }
-    }
-
-    fn lifecycle_state(&self, _state: &HostRuntimeState) -> LifecycleStateDto {
-        LifecycleStateDto {
-            phase: LifecyclePhaseDto::Ready,
-            active_mode_hint: Some(ModeHintDto::Client),
-            session_state: SessionStateDto::Unavailable,
-        }
-    }
-
-    fn runtime_batch(&self, state: &HostRuntimeState) -> RuntimeBatchDto {
-        RuntimeBatchDto {
-            tick: state.tick,
-            entities: Self::runtime_entities(state),
-            residency: self.runtime_residency(state),
-        }
-    }
-
-    fn view_model_feed(&self, state: &HostRuntimeState) -> FrontendStateFeedDto {
-        FrontendStateFeedDto {
-            selected_entity_id: Some(if state.tick.is_multiple_of(2) {
-                u32::from(REMOTE_SCOUT_GUID) as u64
-            } else {
-                u32::from(REMOTE_SENTINEL_GUID) as u64
-            }),
-            interaction_mode: InteractionModeDto::Inspect,
-            busy_state: BusyStateDto::Idle,
-        }
-    }
-
-    fn lifecycle_notification(&self, state: &HostRuntimeState) -> RuntimeNotificationEnvelopeDto {
-        RuntimeNotificationEnvelopeDto {
-            channel: RUNTIME_CHANNEL,
-            topic: RUNTIME_LIFECYCLE_TOPIC,
-            lifecycle_state: Some(self.lifecycle_state(state)),
-            runtime_batch: None,
-            view_model_feed: None,
-        }
-    }
-
-    fn runtime_notification(&self, state: &HostRuntimeState) -> RuntimeNotificationEnvelopeDto {
-        RuntimeNotificationEnvelopeDto {
-            channel: RUNTIME_CHANNEL,
-            topic: RUNTIME_BATCH_TOPIC,
-            lifecycle_state: None,
-            runtime_batch: Some(self.runtime_batch(state)),
-            view_model_feed: Some(self.view_model_feed(state)),
         }
     }
 
@@ -463,27 +348,6 @@ impl HostBoundaryAdapter {
         }
     }
 
-    pub fn boundary_overview(&self) -> HostBoundaryOverviewDto {
-        HostBoundaryOverviewDto {
-            asset_channel: ASSET_CHANNEL,
-            runtime_channel: RUNTIME_CHANNEL,
-            runtime_notification_event: RUNTIME_NOTIFICATION_EVENT,
-            runtime_lifecycle_topic: RUNTIME_LIFECYCLE_TOPIC,
-            runtime_batch_command: "get_runtime_batch",
-            asset_lookup_command: "lookup_asset",
-            indoor_contract_backlog: IndoorContractBacklogDto {
-                runtime_field_ids: vec![
-                    IndoorRuntimeFieldIdDto::FocusEnvCellId,
-                    IndoorRuntimeFieldIdDto::VisibleCellIds,
-                    IndoorRuntimeFieldIdDto::SeenOutside,
-                    IndoorRuntimeFieldIdDto::EnvironmentId,
-                    IndoorRuntimeFieldIdDto::CellStructureId,
-                ],
-                asset_family_ids: vec![IndoorAssetFamilyIdDto::LandblockPack],
-            },
-        }
-    }
-
     fn accept_camera_hint(
         &self,
         state: &mut HostRuntimeState,
@@ -505,53 +369,7 @@ impl HostBoundaryAdapter {
         state: &HostRuntimeState,
         request: RayPickRequestDto,
     ) -> RayPickResponseDto {
-        let batch = self.runtime_batch(state);
-        let direction = normalize_vec3(request.direction.clone());
-
-        let best_hit = batch
-            .entities
-            .iter()
-            .filter_map(|entity| {
-                let offset = Vec3Dto {
-                    x: entity.position.x - request.origin.x,
-                    y: entity.position.y - request.origin.y,
-                    z: entity.position.z - request.origin.z,
-                };
-                let distance = vec3_length(&offset);
-
-                if distance <= f32::EPSILON {
-                    return None;
-                }
-
-                let alignment = vec3_dot(&normalize_vec3(offset), &direction);
-
-                (alignment > 0.2).then_some((entity, alignment, distance))
-            })
-            .max_by(
-                |(_, left_alignment, left_distance), (_, right_alignment, right_distance)| {
-                    let left_score = *left_alignment - (*left_distance * 0.001);
-                    let right_score = *right_alignment - (*right_distance * 0.001);
-                    left_score
-                        .partial_cmp(&right_score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                },
-            );
-
-        if let Some((entity, _alignment, distance)) = best_hit {
-            return RayPickResponseDto {
-                request_id: request.request_id,
-                resolved: true,
-                camera_hint_sequence: Some(state.camera_hint_sequence)
-                    .filter(|_| state.last_camera_hint.is_some()),
-                hit: Some(RayPickHitDto {
-                    entity_id: entity.entity_id,
-                    label: entity.label.clone(),
-                    location_label: entity.location_label.clone(),
-                    distance,
-                }),
-            };
-        }
-
+        let _ = state;
         RayPickResponseDto {
             request_id: request.request_id,
             resolved: false,
@@ -559,97 +377,6 @@ impl HostBoundaryAdapter {
                 .filter(|_| state.last_camera_hint.is_some()),
             hit: None,
         }
-    }
-
-    fn runtime_residency(&self, state: &HostRuntimeState) -> RuntimeResidencyDto {
-        let focus_position = state.world.player_position().unwrap_or_default();
-        let indoor_metadata = focus_position
-            .is_indoors()
-            .then(|| {
-                self.load_env_cell_metadata(u32::from(focus_position.landblock_id))
-                    .ok()
-            })
-            .flatten();
-
-        RuntimeResidencyDto {
-            focus_entity_id: Some(u32::from(LOCAL_PLAYER_GUID) as u64),
-            focus_landblock_id: u32::from(focus_position.landblock_id),
-            focus_cell_id: focus_position.derived_outdoor_cell_id(),
-            focus_env_cell_id: focus_position
-                .is_indoors()
-                .then_some(u32::from(focus_position.landblock_id)),
-            visible_cell_ids: indoor_metadata
-                .as_ref()
-                .map(|metadata| metadata.visible_cell_ids.clone())
-                .unwrap_or_default(),
-            seen_outside: indoor_metadata
-                .as_ref()
-                .map(|metadata| metadata.seen_outside),
-            environment_id: indoor_metadata
-                .as_ref()
-                .map(|metadata| metadata.environment_id),
-            cell_structure_id: indoor_metadata
-                .as_ref()
-                .map(|metadata| metadata.cell_structure_id),
-            focus_location_label: focus_position.to_world_coords().to_string_with_precision(2),
-            indoors: focus_position.is_indoors(),
-            tracked_body_count: 3,
-        }
-    }
-
-    fn runtime_entities(state: &HostRuntimeState) -> Vec<RuntimeEntitySnapshotDto> {
-        let focus_position = state.world.player_position().unwrap_or_default();
-        let tick_offset = (state.tick.saturating_sub(1)) as f32;
-        let heading = tick_offset * 0.1;
-        let local_position = Vec3Dto {
-            x: focus_position.coords.x + (tick_offset * 0.75),
-            y: focus_position.coords.y + (tick_offset * 0.5),
-            z: focus_position.coords.z,
-        };
-
-        vec![
-            RuntimeEntitySnapshotDto {
-                entity_id: u32::from(LOCAL_PLAYER_GUID) as u64,
-                label: "Browser Scout".to_string(),
-                position: local_position.clone(),
-                heading_radians: heading,
-                appearance_id: "gfx/02000001".to_string(),
-                landblock_id: u32::from(focus_position.landblock_id),
-                cell_id: focus_position.derived_outdoor_cell_id(),
-                location_label: focus_position.to_world_coords().to_string_with_precision(2),
-                is_local_player: true,
-            },
-            RuntimeEntitySnapshotDto {
-                entity_id: u32::from(REMOTE_SCOUT_GUID) as u64,
-                label: "Survey Drudge".to_string(),
-                position: Vec3Dto {
-                    x: local_position.x + 12.0,
-                    y: local_position.y + 6.0,
-                    z: local_position.z,
-                },
-                heading_radians: 1.2,
-                appearance_id: "gfx/02000002".to_string(),
-                landblock_id: u32::from(focus_position.landblock_id),
-                cell_id: focus_position.derived_outdoor_cell_id(),
-                location_label: focus_position.to_world_coords().to_string_with_precision(2),
-                is_local_player: false,
-            },
-            RuntimeEntitySnapshotDto {
-                entity_id: u32::from(REMOTE_SENTINEL_GUID) as u64,
-                label: "Dungeon Sentinel".to_string(),
-                position: Vec3Dto {
-                    x: 18.0,
-                    y: -7.5,
-                    z: 0.0,
-                },
-                heading_radians: -0.35,
-                appearance_id: "gfx/02000003".to_string(),
-                landblock_id: 0x016C_0155,
-                cell_id: None,
-                location_label: "Indoors 0x016C0155".to_string(),
-                is_local_player: false,
-            },
-        ]
     }
 }
 
@@ -950,53 +677,6 @@ impl HostBoundaryAdapter {
             payload,
         }
     }
-}
-
-#[derive(Clone)]
-struct IndoorCellMetadata {
-    environment_id: u32,
-    cell_structure_id: u32,
-    visible_cell_ids: Vec<u32>,
-    seen_outside: bool,
-}
-
-impl HostBoundaryAdapter {
-    fn load_env_cell_metadata(
-        &self,
-        env_cell_id: u32,
-    ) -> Result<IndoorCellMetadata, (String, &'static str)> {
-        let resource = self
-            .content
-            .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
-            .map_err(|error| {
-                (
-                    format!(
-                        "Could not read {}:0x{env_cell_id:08X} from content repository: {error}",
-                        EOR_CELL_NAMESPACE
-                    ),
-                    "asset-read-failed",
-                )
-            })?;
-        let env_cell =
-            EnvCell::unpack(&mut std::io::Cursor::new(resource.bytes)).map_err(|error| {
-                (
-                    format!("Could not decode EnvCell 0x{env_cell_id:08X}: {error}"),
-                    "asset-decode-failed",
-                )
-            })?;
-
-        Ok(IndoorCellMetadata {
-            environment_id: 0x0D00_0000 | u32::from(env_cell.environment_id),
-            cell_structure_id: u32::from(env_cell.cell_structure),
-            visible_cell_ids: env_cell
-                .visible_cells
-                .into_iter()
-                .map(|cell_id| (env_cell_id & 0xFFFF_0000) | u32::from(cell_id))
-                .collect(),
-            seen_outside: (env_cell.flags & 0x01) != 0,
-        })
-    }
-
 }
 
 fn asset_cache_error_code(error: &anyhow::Error) -> &'static str {
@@ -2401,21 +2081,7 @@ fn repo_assets_hba_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../dats/assets.hba")
 }
 
-fn make_world_position(
-    landblock_id: Guid,
-    x: f32,
-    y: f32,
-    z: f32,
-    heading_radians: f32,
-) -> WorldPosition {
-    WorldPosition {
-        landblock_id,
-        coords: Vector3::new(x, y, z),
-        rotation: Quaternion::from_heading(heading_radians),
-    }
-    .normalize_outdoor_cell()
-}
-
+#[cfg(test)]
 fn normalize_vec3(vector: Vec3Dto) -> Vec3Dto {
     let length = vec3_length(&vector);
 
@@ -2434,12 +2100,9 @@ fn normalize_vec3(vector: Vec3Dto) -> Vec3Dto {
     }
 }
 
+#[cfg(test)]
 fn vec3_length(vector: &Vec3Dto) -> f32 {
     (vector.x.powi(2) + vector.y.powi(2) + vector.z.powi(2)).sqrt()
-}
-
-fn vec3_dot(left: &Vec3Dto, right: &Vec3Dto) -> f32 {
-    (left.x * right.x) + (left.y * right.y) + (left.z * right.z)
 }
 
 #[cfg(test)]
@@ -2447,162 +2110,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn startup_notifications_include_lifecycle_and_runtime_batch_topics() {
+    fn asset_lookup_remains_available_without_browser_runtime_residency() {
         let runtime = HostRuntimeService::new(false);
-
-        let notifications = runtime.startup_notifications();
-
-        assert_eq!(notifications.len(), 2);
-        assert_eq!(notifications[0].channel, RUNTIME_CHANNEL);
-        assert_eq!(notifications[0].topic, RUNTIME_LIFECYCLE_TOPIC);
-        assert!(notifications[0].lifecycle_state.is_some());
-        assert!(notifications[0].runtime_batch.is_none());
-        assert!(notifications[0].view_model_feed.is_none());
-
-        assert_eq!(notifications[1].channel, RUNTIME_CHANNEL);
-        assert_eq!(notifications[1].topic, RUNTIME_BATCH_TOPIC);
-        assert!(notifications[1].lifecycle_state.is_none());
-        assert!(notifications[1].runtime_batch.is_some());
-        assert!(notifications[1].view_model_feed.is_some());
-    }
-
-    #[test]
-    fn runtime_batch_exposes_authoritative_entities_and_residency_facts() {
-        let runtime = HostRuntimeService::new(false);
-
-        let batch = runtime.runtime_batch();
-
-        assert_eq!(batch.tick, 1);
-        assert_eq!(batch.entities.len(), 3);
-        assert_eq!(
-            batch.residency.focus_entity_id,
-            Some(u32::from(LOCAL_PLAYER_GUID) as u64)
-        );
-        assert_eq!(batch.residency.focus_landblock_id, 0x0102_000C);
-        assert_eq!(batch.residency.focus_cell_id, Some(12));
-        assert!(!batch.residency.indoors);
-        assert_eq!(batch.residency.tracked_body_count, 3);
-
-        let local_player = batch
-            .entities
-            .iter()
-            .find(|entity| entity.is_local_player)
-            .expect("local player entity should be present");
-        assert_eq!(local_player.entity_id, u32::from(LOCAL_PLAYER_GUID) as u64);
-        assert_eq!(local_player.label, "Browser Scout");
-        assert_eq!(local_player.appearance_id, "gfx/02000001");
-        assert_eq!(local_player.landblock_id, 0x0102_000C);
-        assert_eq!(local_player.cell_id, Some(12));
-
-        let indoor_entity = batch
-            .entities
-            .iter()
-            .find(|entity| entity.entity_id == u32::from(REMOTE_SENTINEL_GUID) as u64)
-            .expect("indoor sentinel entity should be present");
-        assert_eq!(indoor_entity.label, "Dungeon Sentinel");
-        assert_eq!(indoor_entity.landblock_id, 0x016C_0155);
-        assert_eq!(indoor_entity.cell_id, None);
-        assert!(indoor_entity.location_label.starts_with("Indoors"));
-    }
-
-    #[test]
-    fn runtime_batch_does_not_push_outdoor_static_content_facts() {
-        let runtime = HostRuntimeService::new(false);
-
-        let batch = runtime.runtime_batch();
-
-        assert_eq!(batch.residency.focus_landblock_id, 0x0102_000C);
-    }
-
-    #[test]
-    fn advancing_runtime_notification_increments_tick_and_updates_view_model_selection() {
-        let runtime = HostRuntimeService::new(false);
-
-        let initial_batch = runtime.runtime_batch();
-        let first = runtime.advance_runtime_notification();
-        let second = runtime.advance_runtime_notification();
-
-        let first_batch = first
-            .runtime_batch
-            .expect("first runtime notification should carry a batch");
-        let second_batch = second
-            .runtime_batch
-            .expect("second runtime notification should carry a batch");
-        let first_view_model = first
-            .view_model_feed
-            .expect("first runtime notification should carry a view model feed");
-        let second_view_model = second
-            .view_model_feed
-            .expect("second runtime notification should carry a view model feed");
-
-        assert_eq!(first.topic, RUNTIME_BATCH_TOPIC);
-        assert_eq!(first_batch.tick, initial_batch.tick + 1);
-        assert_eq!(second_batch.tick, first_batch.tick + 1);
-        assert_eq!(
-            first_view_model.selected_entity_id,
-            Some(u32::from(REMOTE_SCOUT_GUID) as u64)
-        );
-        assert_eq!(
-            second_view_model.selected_entity_id,
-            Some(u32::from(REMOTE_SENTINEL_GUID) as u64)
-        );
-
-        let initial_local_player = initial_batch
-            .entities
-            .iter()
-            .find(|entity| entity.is_local_player)
-            .expect("initial local player should be present");
-        let advanced_local_player = first_batch
-            .entities
-            .iter()
-            .find(|entity| entity.is_local_player)
-            .expect("advanced local player should be present");
-
-        assert_ne!(
-            advanced_local_player.position.x,
-            initial_local_player.position.x
-        );
-        assert_ne!(
-            advanced_local_player.position.y,
-            initial_local_player.position.y
-        );
-        assert_ne!(
-            advanced_local_player.heading_radians,
-            initial_local_player.heading_radians
-        );
-    }
-
-    #[test]
-    fn boundary_overview_and_asset_lookup_remain_runtime_asset_split() {
-        let runtime = HostRuntimeService::new(false);
-        let overview = runtime.boundary_overview();
         let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
             request_id: "test-request".to_string(),
             asset_id: "landblock-pack/0102ffff".to_string(),
             priority: crate::contracts::AssetPriorityDto::Bootstrap,
         });
 
-        assert_eq!(overview.runtime_channel, RUNTIME_CHANNEL);
-        assert_eq!(overview.asset_channel, ASSET_CHANNEL);
-        assert_eq!(
-            overview.runtime_notification_event,
-            RUNTIME_NOTIFICATION_EVENT
-        );
-        assert_eq!(overview.runtime_lifecycle_topic, RUNTIME_LIFECYCLE_TOPIC);
-        assert_eq!(overview.runtime_batch_command, "get_runtime_batch");
-        assert_eq!(overview.asset_lookup_command, "lookup_asset");
-        assert!(
-            overview
-                .indoor_contract_backlog
-                .runtime_field_ids
-                .contains(&IndoorRuntimeFieldIdDto::VisibleCellIds)
-        );
-        assert!(
-            overview
-                .indoor_contract_backlog
-                .asset_family_ids
-                .contains(&IndoorAssetFamilyIdDto::LandblockPack)
-        );
         assert_eq!(asset.request_id, "test-request");
         assert_eq!(asset.asset_id, "landblock-pack/0102ffff");
         assert!(matches!(asset.payload_kind, AssetPayloadKindDto::Json));
@@ -2953,50 +2468,40 @@ mod tests {
     }
 
     #[test]
-    fn camera_hints_are_accepted_and_picks_resolve_against_authoritative_debug_entities() {
+    fn camera_hints_are_accepted_without_runtime_residency() {
         let runtime = HostRuntimeService::new(false);
-        let batch = runtime.runtime_batch();
-        let local_player = batch
-            .entities
-            .iter()
-            .find(|entity| entity.is_local_player)
-            .expect("local player should be present");
-        let remote_scout = batch
-            .entities
-            .iter()
-            .find(|entity| entity.entity_id == u32::from(REMOTE_SCOUT_GUID) as u64)
-            .expect("remote scout should be present");
+        let position = Vec3Dto {
+            x: 96.0,
+            y: 96.0,
+            z: 24.0,
+        };
         let direction = normalize_vec3(Vec3Dto {
-            x: remote_scout.position.x - local_player.position.x,
-            y: remote_scout.position.y - local_player.position.y,
-            z: remote_scout.position.z - local_player.position.z,
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
         });
 
         let ack = runtime.submit_camera_hint(CameraHintDto {
-            mode: ModeHintDto::Client,
             source: "world-display".to_string(),
-            position: local_player.position.clone(),
+            position: position.clone(),
             forward: direction.clone(),
             viewport_normalized_x: 0.75,
             viewport_normalized_y: 0.5,
-            destination_label: Some(batch.residency.focus_location_label.clone()),
+            destination_label: Some("33.50S, 72.80E, 0.0Z".to_string()),
         });
         let response = runtime.resolve_ray_pick(RayPickRequestDto {
             request_id: "pick-1".to_string(),
-            origin: local_player.position.clone(),
+            origin: position,
             direction,
             screen_x_normalized: 0.75,
             screen_y_normalized: 0.5,
-            destination_label: Some(batch.residency.focus_location_label),
+            destination_label: Some("33.50S, 72.80E, 0.0Z".to_string()),
         });
 
         assert!(ack.accepted);
         assert_eq!(ack.sequence, 1);
-        assert!(response.resolved);
+        assert!(!response.resolved);
         assert_eq!(response.camera_hint_sequence, Some(1));
-        assert_eq!(
-            response.hit.as_ref().map(|hit| hit.entity_id),
-            Some(remote_scout.entity_id)
-        );
+        assert!(response.hit.is_none());
     }
 }

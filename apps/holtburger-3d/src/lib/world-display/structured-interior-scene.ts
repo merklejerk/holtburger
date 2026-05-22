@@ -18,7 +18,7 @@ import {
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto } from "../host/contracts";
-import { formatHex32 } from "../landblocks";
+import { formatHex32, formatLandblockPackAssetId } from "../landblocks";
 import {
 	deriveStructuredCellRenderChunk,
 	type RenderChunkPlacement,
@@ -193,14 +193,16 @@ function deriveBrowserFocusedEnvCellIdsFromPacks(
 	assetState: AssetChannelState,
 ): number[] | null {
 	const focusLandblockPrefix = focusEnvCellId & 0xffff0000;
-	const envCellIds = Object.values(assetState.preparedByAssetId)
-		.flatMap((asset) =>
-			asset.payload.kind === "landblock-pack"
-				? asset.payload.prepared.interiorCells
-				: [],
-		)
-		.filter((cell) => (cell.envCellId & 0xffff0000) === focusLandblockPrefix)
-		.map((cell) => cell.envCellId);
+	const focusLandblockAsset =
+		assetState.preparedByAssetId[formatLandblockPackAssetId(focusEnvCellId)];
+	const envCellIds =
+		focusLandblockAsset?.payload.kind === "landblock-pack"
+			? focusLandblockAsset.payload.prepared.interiorCells
+					.filter(
+						(cell) => (cell.envCellId & 0xffff0000) === focusLandblockPrefix,
+					)
+					.map((cell) => cell.envCellId)
+			: [];
 
 	return envCellIds.length > 0
 		? [...new Set(envCellIds)].sort((left, right) => left - right)
@@ -211,20 +213,16 @@ function findPreparedPackInteriorCell(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	envCellId: number,
 ): PreparedLandblockInteriorCell | null {
-	for (const asset of Object.values(preparedByAssetId)) {
-		if (asset.payload.kind !== "landblock-pack") {
-			continue;
-		}
-
-		const cell = asset.payload.prepared.interiorCells.find(
-			(candidate) => candidate.envCellId === envCellId,
-		);
-		if (cell) {
-			return cell;
-		}
+	const asset = preparedByAssetId[formatLandblockPackAssetId(envCellId)];
+	if (asset?.payload.kind !== "landblock-pack") {
+		return null;
 	}
 
-	return null;
+	return (
+		asset.payload.prepared.interiorCells.find(
+			(candidate) => candidate.envCellId === envCellId,
+		) ?? null
+	);
 }
 
 function compareStructuredInteriorCells(

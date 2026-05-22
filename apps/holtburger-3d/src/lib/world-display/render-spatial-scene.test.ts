@@ -13,6 +13,7 @@ import {
 	deriveDebugOverlaySpatialItems,
 	deriveLandblockPackRenderChunkPlacements,
 	deriveLandblockPackSpatialItems,
+	deriveLandblockPackSpatialOwnerKey,
 	deriveStructuredInteriorSpatialItems,
 	deriveTerrainSpatialItems,
 } from "./render-spatial-scene";
@@ -222,7 +223,7 @@ describe("deriveLandblockPackSpatialItems", () => {
 			expect.objectContaining({
 				id: "landblock-pack:pack/static/0",
 				kind: "outdoor-static",
-				ownerKey: LANDBLOCK_PACK_SPATIAL_OWNER_KEY,
+				ownerKey: deriveLandblockPackSpatialOwnerKey(0x0102ffff),
 				chunkKey: "landblock/0102ffff",
 				broadphaseBounds: {
 					min: { x: 1, y: 2, z: 3 },
@@ -357,7 +358,10 @@ describe("deriveLandblockPackSpatialItems", () => {
 		);
 
 		expect(() =>
-			index.replaceOwnerItems(LANDBLOCK_PACK_SPATIAL_OWNER_KEY, spatialItems),
+			index.replaceOwnerItems(
+				spatialItems[0]?.ownerKey ?? LANDBLOCK_PACK_SPATIAL_OWNER_KEY,
+				spatialItems,
+			),
 		).not.toThrow();
 		expect(chunkPlacements).toEqual([
 			{

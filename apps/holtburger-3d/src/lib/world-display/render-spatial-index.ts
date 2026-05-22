@@ -155,9 +155,27 @@ export function createLinearRenderSpatialIndex(): RenderSpatialIndex {
 			}
 		},
 		replaceOwnerItems(ownerKey, items) {
-			this.clearOwner(ownerKey);
+			const nextItemIds = new Set(items.map((item) => item.id));
+			const ownerItemIds = itemIdsByOwner.get(ownerKey);
+			if (ownerItemIds) {
+				for (const itemId of ownerItemIds) {
+					if (!nextItemIds.has(itemId)) {
+						itemsById.delete(itemId);
+					}
+				}
+			}
+
+			itemIdsByOwner.set(ownerKey, nextItemIds);
 			for (const item of items) {
-				this.upsertItem(item);
+				const previousItem = itemsById.get(item.id);
+				if (previousItem && previousItem.ownerKey !== ownerKey) {
+					removeItemFromOwner(previousItem);
+				}
+				itemsById.set(item.id, item);
+			}
+
+			if (nextItemIds.size === 0) {
+				itemIdsByOwner.delete(ownerKey);
 			}
 		},
 		upsertItem(item) {

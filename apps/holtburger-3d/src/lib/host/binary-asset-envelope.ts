@@ -21,20 +21,56 @@ const binarySectionSchema = z.object({
 	byteLength: z.number().int().nonnegative(),
 });
 
+const binaryEnvelopeHostProfileSchema = z.object({
+	requestCount: z.number().int().nonnegative(),
+	assetLoadMs: z.number().nonnegative(),
+	responseSerializeMs: z.number().nonnegative(),
+	cacheBefore: z.unknown().optional(),
+	cacheAfter: z.unknown().optional(),
+});
+
 const binaryEnvelopeManifestSchema = z.object({
 	transport: z.literal("holtburger-asset-binary"),
 	version: z.literal(VERSION),
 	byteOrder: z.literal("little-endian"),
 	sectionByteOffsetBase: z.literal("section-data"),
-	response: assetLookupResponseDtoSchema,
+	responses: z.array(assetLookupResponseDtoSchema),
 	sections: z.array(binarySectionSchema),
+	hostProfile: binaryEnvelopeHostProfileSchema.optional(),
 });
 
 type BinarySection = z.infer<typeof binarySectionSchema>;
 
+export type BinaryAssetBatchHostProfile = z.infer<
+	typeof binaryEnvelopeHostProfileSchema
+>;
+
+export interface DecodedBinaryAssetBatchEnvelope {
+	responses: AssetLookupResponseDto[];
+	hostProfile: BinaryAssetBatchHostProfile | null;
+}
+
 export function decodeBinaryAssetEnvelope(
 	value: unknown,
 ): AssetLookupResponseDto {
+	const responses = decodeBinaryAssetBatchEnvelope(value);
+	if (responses.length !== 1) {
+		throw new Error(
+			`Binary asset envelope contained ${responses.length} responses; expected exactly one.`,
+		);
+	}
+	return responses[0] as AssetLookupResponseDto;
+}
+
+export function decodeBinaryAssetBatchEnvelope(
+	value: unknown,
+): AssetLookupResponseDto[] {
+	return decodeBinaryAssetBatchEnvelopeWithTelemetry(value).responses;
+}
+
+export function decodeBinaryAssetBatchEnvelopeWithTelemetry(
+	value: unknown,
+): DecodedBinaryAssetBatchEnvelope {
 	const bytes = normalizeBinaryResponse(value);
 	if (bytes.byteLength < HEADER_LENGTH) {
 		throw new Error("Binary asset envelope is shorter than its fixed header.");
@@ -69,11 +105,16 @@ export function decodeBinaryAssetEnvelope(
 	);
 	const manifest = binaryEnvelopeManifestSchema.parse(JSON.parse(manifestText));
 	const sectionDataStart = manifestEnd;
-	const response = structuredClone(manifest.response);
+	const hydrated = {
+		responses: structuredClone(manifest.responses),
+	};
 	for (const section of manifest.sections) {
-		hydrateBinarySection(response, bytes, sectionDataStart, section);
+		hydrateBinarySection(hydrated, bytes, sectionDataStart, section);
 	}
-	return response;
+	return {
+		responses: hydrated.responses,
+		hostProfile: manifest.hostProfile ?? null,
+	};
 }
 
 function normalizeBinaryResponse(value: unknown): Uint8Array {
@@ -90,7 +131,7 @@ function normalizeBinaryResponse(value: unknown): Uint8Array {
 }
 
 function hydrateBinarySection(
-	response: AssetLookupResponseDto,
+	responseRoot: { responses: AssetLookupResponseDto[] },
 	envelopeBytes: Uint8Array,
 	sectionDataStart: number,
 	section: BinarySection,
@@ -112,7 +153,7 @@ function hydrateBinarySection(
 
 	const bytes = envelopeBytes.subarray(sectionStart, sectionEnd);
 	const target = decodeBinarySection(section, bytes);
-	assignPath(response, section.path, target);
+	assignPath(responseRoot, section.path, target);
 }
 
 function decodeBinarySection(
@@ -211,12 +252,12 @@ function scalarByteLength(scalarType: BinarySection["scalarType"]): number {
 }
 
 function assignPath(
-	response: AssetLookupResponseDto,
+	responseRoot: { responses: AssetLookupResponseDto[] },
 	path: string,
 	value: unknown,
 ): void {
 	const segments = path.split(".");
-	let target: unknown = response;
+	let target: unknown = responseRoot;
 	for (const segment of segments.slice(0, -1)) {
 		if (typeof target !== "object" || target === null) {
 			throw new Error(`Binary section path ${path} cannot be hydrated.`);

@@ -1,6 +1,7 @@
 import { writable } from "svelte/store";
 
 import {
+	applyBrowserCameraResidencyDestination,
 	createBrowserModeState,
 	previewBrowserLocation,
 	selectBrowserLandblockDestination,
@@ -10,12 +11,15 @@ import {
 	updateEnvCellLodRadius,
 	updateCellIndicatorVisibility,
 	updateLandblockInputMode,
+	updateNavigationFocusMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
 	updateTerrainLodRadius,
 	updateTransitionPortalMaxDepth,
+	type BrowserCameraResidencyDestinationInput,
 	type BrowserLandblockInputMode,
 	type BrowserModeState,
+	type BrowserNavigationFocusMode,
 } from "./browser-mode";
 import {
 	applyAssetCachePrune as applyAssetCachePruneToState,
@@ -112,6 +116,28 @@ export function createFrontendStateStore() {
 				browserMode: updateLandblockInputMode(
 					state.browserMode,
 					landblockInputMode,
+				),
+			}));
+		},
+		updateNavigationFocusMode(
+			navigationFocusMode: BrowserNavigationFocusMode,
+		): void {
+			update((state) => ({
+				...state,
+				browserMode: updateNavigationFocusMode(
+					state.browserMode,
+					navigationFocusMode,
+				),
+			}));
+		},
+		applyBrowserCameraResidencyDestination(
+			residency: BrowserCameraResidencyDestinationInput,
+		): void {
+			update((state) => ({
+				...state,
+				browserMode: applyBrowserCameraResidencyDestination(
+					state.browserMode,
+					residency,
 				),
 			}));
 		},

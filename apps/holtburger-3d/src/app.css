@@ -543,6 +543,30 @@ ul {
 	margin: 0;
 }
 
+.browser-form__segmented {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0.2rem;
+	padding: 0.2rem;
+	border: 1px solid rgba(162, 183, 209, 0.16);
+	border-radius: 8px;
+	background: rgba(0, 0, 0, 0.16);
+}
+
+.browser-form__segmented button {
+	min-height: 2.25rem;
+	padding: 0.45rem 0.65rem;
+	border-radius: 6px;
+	background: transparent;
+	color: #90a8c7;
+	box-shadow: none;
+}
+
+.browser-form__segmented button.active {
+	background: rgba(169, 213, 159, 0.18);
+	color: #e8ecf3;
+}
+
 .browser-form__field--checkbox {
 	grid-template-columns: minmax(0, 1fr) auto;
 	align-items: center;

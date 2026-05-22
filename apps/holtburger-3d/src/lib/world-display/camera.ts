@@ -223,6 +223,16 @@ export function convertBrowserFreeCameraStateBetweenAnchors(
 	};
 }
 
+export function prepareBrowserFreeCameraForDestinationFit(
+	state: BrowserFreeCameraState,
+): BrowserFreeCameraState {
+	return {
+		...state,
+		hasManualControl: false,
+		lastFitKey: null,
+	};
+}
+
 export function rotateBrowserFreeCamera(
 	state: BrowserFreeCameraState,
 	deltaPixels: { x: number; y: number },

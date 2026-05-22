@@ -950,7 +950,9 @@ impl EnvCellFact {
                 .map(|(source_index, portal)| {
                     let is_outside_transition = (portal.flags & 0x4) != 0;
                     EnvCellPortalFact {
-                        portal_id: format!("interior-cell/{env_cell_id:08x}/portal/{source_index:02x}"),
+                        portal_id: format!(
+                            "interior-cell/{env_cell_id:08x}/portal/{source_index:02x}"
+                        ),
                         source_index,
                         flags: portal.flags,
                         polygon_id: portal.polygon_id,

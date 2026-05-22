@@ -18,6 +18,9 @@ import {
 	deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
+import type { FrontendProfiler } from "../performance/frontend-profiler";
+
+const DEFAULT_SCENE_ASSET_REQUEST_CONCURRENCY_LIMIT = 4;
 
 interface SceneAssetChannel {
 	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
@@ -45,6 +48,8 @@ export interface SceneAssetStreamingControllerDeps {
 	applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void;
 	applyAssetError(request: AssetLookupRequestDto, message: string): void;
 	debugLog(label: string, detail: unknown): void;
+	profiler?: FrontendProfiler;
+	requestConcurrencyLimit?: number;
 	nowMs?(): number;
 	warmRetainMs?: number;
 }
@@ -130,21 +135,47 @@ export class SceneAssetStreamingController {
 		}
 
 		const preparedByAssetId = this.deps.getPreparedByAssetId();
-		const requests = createSceneCoverageRequests(
-			{
-				requestRevision: this.requestRevision,
-				browserDestination: input.browserDestination,
-				preparedByAssetId,
-				pendingAssetIds: [...this.inFlightAssetIds],
-				options: {
-					terrainRadius: input.terrainLodRadius,
-					buildingRadius: input.buildingLodRadius,
-					detailRadius: input.detailLodRadius,
-					envCellRadius: input.envCellLodRadius,
+		const requests =
+			this.deps.profiler?.measureSync(
+				"scene-coverage.plan",
+				{
+					priority,
+					requestRevision: this.requestRevision,
+					preparedCount: Object.keys(preparedByAssetId).length,
+					inFlightCount: this.inFlightAssetIds.size,
 				},
-			},
-			priority,
-		);
+				() =>
+					createSceneCoverageRequests(
+						{
+							requestRevision: this.requestRevision,
+							browserDestination: input.browserDestination,
+							preparedByAssetId,
+							pendingAssetIds: [...this.inFlightAssetIds],
+							options: {
+								terrainRadius: input.terrainLodRadius,
+								buildingRadius: input.buildingLodRadius,
+								detailRadius: input.detailLodRadius,
+								envCellRadius: input.envCellLodRadius,
+							},
+						},
+						priority,
+					),
+			) ??
+			createSceneCoverageRequests(
+				{
+					requestRevision: this.requestRevision,
+					browserDestination: input.browserDestination,
+					preparedByAssetId,
+					pendingAssetIds: [...this.inFlightAssetIds],
+					options: {
+						terrainRadius: input.terrainLodRadius,
+						buildingRadius: input.buildingLodRadius,
+						detailRadius: input.detailLodRadius,
+						envCellRadius: input.envCellLodRadius,
+					},
+				},
+				priority,
+			);
 
 		this.deps.debugLog("scene-coverage", {
 			priority,
@@ -158,6 +189,11 @@ export class SceneAssetStreamingController {
 			inFlightAssetIds: [...this.inFlightAssetIds],
 			requestAssetIds: requests.map((request) => request.assetId),
 		});
+		this.deps.profiler?.recordFrameWork("scene-coverage.requests", {
+			priority,
+			requestCount: requests.length,
+			pendingCount: this.inFlightAssetIds.size,
+		});
 
 		if (requests.length === 0) {
 			this.prunePreparedCache(input);
@@ -169,9 +205,29 @@ export class SceneAssetStreamingController {
 		}
 		this.deps.markAssetsPending(requests);
 
-		await Promise.allSettled(
-			requests.map((request) => this.prepareAndApplyRequest(request)),
-		);
+		const requestConcurrencyLimit =
+			this.deps.requestConcurrencyLimit ??
+			DEFAULT_SCENE_ASSET_REQUEST_CONCURRENCY_LIMIT;
+		await (this.deps.profiler?.measureAsync(
+			"scene-coverage.prepare-priority",
+			{
+				priority,
+				requestRevision: this.requestRevision,
+				requestCount: requests.length,
+				requestConcurrencyLimit,
+			},
+			() =>
+				settleWithConcurrency(
+					requests,
+					requestConcurrencyLimit,
+					async (request) => this.prepareAndApplyRequest(request),
+				),
+		) ??
+			settleWithConcurrency(
+				requests,
+				requestConcurrencyLimit,
+				async (request) => this.prepareAndApplyRequest(request),
+			));
 		this.prunePreparedCache(input);
 	}
 
@@ -181,7 +237,40 @@ export class SceneAssetStreamingController {
 		}
 
 		const preparedByAssetId = this.deps.getPreparedByAssetId();
-		const prunePlan = planPreparedAssetCachePrune({
+		const prunePlan =
+			this.deps.profiler?.measureSync(
+				"asset-cache.prune-plan",
+				{
+					preparedCount: Object.keys(preparedByAssetId).length,
+					inFlightCount: this.inFlightAssetIds.size,
+				},
+				() => this.planPreparedCachePrune(input, preparedByAssetId),
+			) ?? this.planPreparedCachePrune(input, preparedByAssetId);
+
+		this.deps.debugLog("asset-cache-prune", {
+			retainedAssetIds: prunePlan.retainedAssetIds,
+			evictedAssetIds: prunePlan.evictedAssetIds,
+			diagnostics: prunePlan.diagnostics,
+		});
+		if (this.deps.profiler) {
+			this.deps.profiler.measureSync(
+				"asset-cache.apply-prune",
+				{
+					retainedCount: prunePlan.retainedAssetIds.length,
+					evictedCount: prunePlan.evictedAssetIds.length,
+				},
+				() => this.deps.applyAssetCachePrune(prunePlan),
+			);
+		} else {
+			this.deps.applyAssetCachePrune(prunePlan);
+		}
+	}
+
+	private planPreparedCachePrune(
+		input: SceneAssetStreamingInput,
+		preparedByAssetId: Record<string, PreparedAssetRecord>,
+	): PreparedAssetCachePrunePlan {
+		return planPreparedAssetCachePrune({
 			preparedByAssetId,
 			cacheMetadataByAssetId: this.deps.getCacheMetadataByAssetId(),
 			activeCoverageAssetIds: deriveSceneCoverageAssetIds(
@@ -199,49 +288,56 @@ export class SceneAssetStreamingController {
 			warmRetainMs:
 				this.deps.warmRetainMs ?? DEFAULT_PREPARED_ASSET_WARM_RETAIN_MS,
 		});
-
-		this.deps.debugLog("asset-cache-prune", {
-			retainedAssetIds: prunePlan.retainedAssetIds,
-			evictedAssetIds: prunePlan.evictedAssetIds,
-			diagnostics: prunePlan.diagnostics,
-		});
-		this.deps.applyAssetCachePrune(prunePlan);
 	}
 
 	private async prepareAndApplyRequest(
 		request: AssetLookupRequestDto,
 	): Promise<void> {
 		try {
-			this.deps.debugLog("asset-request", request);
-			const preparedAssets =
-				classifyAssetHydration(request.assetId) === "direct"
+			const hydrationKind = classifyAssetHydration(request.assetId);
+			const preparedAssets = await (this.deps.profiler?.measureAsync(
+				"asset.prepare",
+				{
+					assetId: request.assetId,
+					priority: request.priority,
+					hydrationKind,
+				},
+				async () =>
+					hydrationKind === "direct"
+						? [await this.deps.assetChannel.prepareAsset(request)]
+						: (
+								await this.deps.assetChannel.prepareAssetGraph(
+									request,
+									this.deps.getPreparedByAssetId(),
+								)
+							).preparedAssets,
+			) ??
+				(hydrationKind === "direct"
 					? [await this.deps.assetChannel.prepareAsset(request)]
 					: (
-							await this.deps.assetChannel.prepareAssetGraph(request, {
-								...this.deps.getPreparedByAssetId(),
-							})
-						).preparedAssets;
-			this.deps.debugLog("asset-prepared", {
-				rootAssetId: request.assetId,
-				preparedAssetIds: preparedAssets.map((asset) => asset.request.assetId),
-			});
+							await this.deps.assetChannel.prepareAssetGraph(
+								request,
+								this.deps.getPreparedByAssetId(),
+							)
+						).preparedAssets));
 
 			if (this.disposed) {
 				return;
 			}
 
-			for (const preparedAsset of preparedAssets) {
-				const invalidPolygons =
-					preparedAsset.payload.kind === "gfx-obj"
-						? preparedAsset.payload.renderGeometry.invalidPolygons
-						: undefined;
-				this.deps.debugLog("asset-apply", {
-					assetId: preparedAsset.request.assetId,
-					kind: preparedAsset.payload.kind,
-					invalidPolygons,
-				});
+			if (this.deps.profiler) {
+				this.recordApplyPreparedFrameWork(request, preparedAssets);
+				this.deps.profiler.measureSync(
+					"asset.apply-prepared",
+					{
+						rootAssetId: request.assetId,
+						preparedCount: preparedAssets.length,
+					},
+					() => this.deps.applyPreparedAssets(preparedAssets),
+				);
+			} else {
+				this.deps.applyPreparedAssets(preparedAssets);
 			}
-			this.deps.applyPreparedAssets(preparedAssets);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this.deps.debugLog("asset-error", { request, message });
@@ -250,6 +346,24 @@ export class SceneAssetStreamingController {
 			}
 		} finally {
 			this.inFlightAssetIds.delete(request.assetId);
+		}
+	}
+
+	private recordApplyPreparedFrameWork(
+		request: AssetLookupRequestDto,
+		preparedAssets: readonly PreparedAssetRecord[],
+	): void {
+		const countsByKind = new Map<string, number>();
+		for (const asset of preparedAssets) {
+			countsByKind.set(asset.payload.kind, (countsByKind.get(asset.payload.kind) ?? 0) + 1);
+		}
+		for (const [assetKind, preparedCount] of countsByKind) {
+			this.deps.profiler?.recordFrameWork("asset.apply-prepared", {
+				assetKind,
+				priority: request.priority,
+				preparedCount,
+				activeCount: this.inFlightAssetIds.size,
+			});
 		}
 	}
 }
@@ -272,4 +386,36 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 	return destinationIdentity
 		? `${destinationIdentity}:${interestKey}`
 		: `none:${interestKey}`;
+}
+
+export async function settleWithConcurrency<T>(
+	items: readonly T[],
+	concurrencyLimit: number,
+	work: (item: T) => Promise<void>,
+): Promise<PromiseSettledResult<void>[]> {
+	if (items.length === 0) {
+		return [];
+	}
+	if (!Number.isInteger(concurrencyLimit) || concurrencyLimit <= 0) {
+		throw new Error("Scene asset request concurrency limit must be positive.");
+	}
+
+	const results: PromiseSettledResult<void>[] = new Array(items.length);
+	let nextIndex = 0;
+	const workerCount = Math.min(concurrencyLimit, items.length);
+	await Promise.all(
+		Array.from({ length: workerCount }, async () => {
+			while (nextIndex < items.length) {
+				const itemIndex = nextIndex;
+				nextIndex += 1;
+				try {
+					await work(items[itemIndex] as T);
+					results[itemIndex] = { status: "fulfilled", value: undefined };
+				} catch (reason) {
+					results[itemIndex] = { status: "rejected", reason };
+				}
+			}
+		}),
+	);
+	return results;
 }

@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockClassification, LandblockPack,
+    ContentDecodeCache, ContentDecodeCacheStats, ContentRepository, LandblockClassification,
+    LandblockPack,
     LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
     LandblockSummaryBuildingPortal, PreparedAabb, PreparedBvh, PreparedBvhNode,
     PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
@@ -33,10 +35,12 @@ use crate::contracts::{
 const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
 const ASSET_BINARY_VERSION: u32 = 1;
 const ASSET_BINARY_HEADER_LEN: usize = 16;
+const DEFAULT_ASSET_LOOKUP_LOG_MIN_MS: f64 = 25.0;
 
 pub struct HostBoundaryAdapter {
     content_asset_runtime: ContentAssetRuntime,
     verbose: bool,
+    asset_lookup_log_min_ms: f64,
 }
 
 #[derive(Clone)]
@@ -67,11 +71,11 @@ impl HostRuntimeService {
         self.adapter.asset_lookup(request).await
     }
 
-    pub async fn asset_lookup_binary(
+    pub async fn asset_lookup_binary_batch(
         &self,
-        request: AssetLookupRequestDto,
+        requests: Vec<AssetLookupRequestDto>,
     ) -> anyhow::Result<Vec<u8>> {
-        self.adapter.asset_lookup_binary(request).await
+        self.adapter.asset_lookup_binary_batch(requests).await
     }
 
     #[cfg(test)]
@@ -119,96 +123,95 @@ impl HostBoundaryAdapter {
         Self {
             content_asset_runtime,
             verbose,
+            asset_lookup_log_min_ms: asset_lookup_log_min_ms(),
         }
     }
 
     pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
-        if self.verbose {
-            eprintln!(
-                "[holtburger-3d][asset.lookup] request_id={} asset_id={} priority={:?}",
-                request.request_id, request.asset_id, request.priority
-            );
-        }
-
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
+            let started_at = Instant::now();
             let asset = self
                 .content_asset_runtime
                 .load(content_request.clone())
                 .await;
+            self.log_asset_lookup_complete("asset.lookup.complete", &request, started_at);
             return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
         self.build_app_local_asset_lookup_response(request)
     }
 
-    pub async fn asset_lookup_binary(
+    pub async fn asset_lookup_binary_batch(
         &self,
-        request: AssetLookupRequestDto,
+        requests: Vec<AssetLookupRequestDto>,
     ) -> anyhow::Result<Vec<u8>> {
-        if self.verbose {
-            eprintln!(
-                "[holtburger-3d][asset.lookup_binary] request_id={} asset_id={} priority={:?}",
-                request.request_id, request.asset_id, request.priority
-            );
-        }
+        let mut writer = BinaryAssetSectionWriter::default();
+        let mut responses = Vec::with_capacity(requests.len());
+        let cache_before = self.content_asset_runtime.decode_cache_stats();
+        let mut asset_load_ms = 0.0;
+        let mut response_serialize_ms = 0.0;
+        for request in requests {
+            let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id)
+            else {
+                anyhow::bail!(
+                    "binary asset lookup only supports content assets, got {}",
+                    request.asset_id
+                );
+            };
 
-        let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) else {
-            anyhow::bail!(
-                "binary asset lookup only supports content assets, got {}",
-                request.asset_id
-            );
+            let response_index = responses.len();
+            let path_prefix = format!("responses.{response_index}.payload");
+            let started_at = Instant::now();
+            let asset = self
+                .content_asset_runtime
+                .load(content_request.clone())
+                .await;
+            asset_load_ms += started_at.elapsed().as_secs_f64() * 1000.0;
+            self.log_asset_lookup_complete("asset.lookup_binary.complete", &request, started_at);
+            let serialize_started_at = Instant::now();
+            responses.push(serialize_content_asset_binary_response(
+                self,
+                request,
+                content_request,
+                asset,
+                &path_prefix,
+                &mut writer,
+            )?);
+            response_serialize_ms += serialize_started_at.elapsed().as_secs_f64() * 1000.0;
+        }
+        let host_profile = BinaryAssetBatchHostProfile {
+            request_count: responses.len(),
+            asset_load_ms,
+            response_serialize_ms,
+            cache_before,
+            cache_after: self.content_asset_runtime.decode_cache_stats(),
         };
+        serialize_asset_binary_batch_response(responses, writer, host_profile)
+    }
 
-        let asset = self
-            .content_asset_runtime
-            .load(content_request.clone())
-            .await;
-        match content_request {
-            ContentAssetRequest::LandblockPack(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockPack(pack)) => {
-                    serialize_landblock_pack_binary_response(request, &pack)
-                }
-                Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
-                Err(error) => serialize_asset_binary_response(
-                    self.build_failed_landblock_pack_lookup_response(
-                        request,
-                        normalize_landblock_id(landblock_id),
-                        error,
-                    ),
-                    BinaryAssetSectionWriter::default(),
-                ),
-            },
-            ContentAssetRequest::LandblockSummary(landblock_id) => match asset {
-                Ok(ContentAsset::LandblockSummary(summary)) => {
-                    serialize_landblock_summary_binary_response(request, &summary)
-                }
-                Ok(_) => {
-                    unreachable!("content asset runtime returned mismatched landblock summary")
-                }
-                Err(error) => serialize_asset_binary_response(
-                    self.build_failed_landblock_summary_lookup_response(
-                        request,
-                        normalize_landblock_id(landblock_id),
-                        error,
-                    ),
-                    BinaryAssetSectionWriter::default(),
-                ),
-            },
-            ContentAssetRequest::GfxObj(gfx_obj_id) => match asset {
-                Ok(ContentAsset::GfxObj(gfx_obj)) => {
-                    serialize_gfx_obj_binary_response(request, &gfx_obj)
-                }
-                Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
-                Err(error) => serialize_asset_binary_response(
-                    self.build_gfx_obj_lookup_response(request, gfx_obj_id, Err(error)),
-                    BinaryAssetSectionWriter::default(),
-                ),
-            },
-            unsupported => anyhow::bail!(
-                "binary asset lookup does not support {unsupported:?} for {}",
-                request.asset_id
-            ),
+    fn log_asset_lookup_complete(
+        &self,
+        label: &str,
+        request: &AssetLookupRequestDto,
+        started_at: Instant,
+    ) {
+        if !self.verbose {
+            return;
         }
+
+        let elapsed_ms = started_at.elapsed().as_secs_f64() * 1000.0;
+        if elapsed_ms < self.asset_lookup_log_min_ms {
+            return;
+        }
+
+        eprintln!(
+            "[holtburger-3d][{label}] request_id={} asset_id={} priority={:?} elapsed_ms={:.2} decode_cache={:?}",
+            request.request_id,
+            request.asset_id,
+            request.priority,
+            elapsed_ms,
+            self.content_asset_runtime.decode_cache_stats()
+        );
     }
 
     #[cfg(test)]
@@ -355,6 +358,14 @@ impl HostBoundaryAdapter {
     }
 }
 
+struct BinaryAssetBatchHostProfile {
+    request_count: usize,
+    asset_load_ms: f64,
+    response_serialize_ms: f64,
+    cache_before: ContentDecodeCacheStats,
+    cache_after: ContentDecodeCacheStats,
+}
+
 impl HostBoundaryAdapter {
     fn build_landblock_pack_lookup_response(
         &self,
@@ -362,22 +373,6 @@ impl HostBoundaryAdapter {
         pack: LandblockPack,
     ) -> AssetLookupResponseDto {
         let payload = serialize_landblock_pack(&pack);
-
-        if self.verbose {
-            eprintln!(
-                "[holtburger-3d][asset.lookup] response asset_id={} kind=landblock-pack classification={} errors={}",
-                request.asset_id,
-                payload
-                    .get("classification")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown"),
-                payload
-                    .get("diagnostics")
-                    .and_then(|diagnostics| diagnostics.get("errors"))
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len)
-            );
-        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -543,30 +538,6 @@ impl HostBoundaryAdapter {
                 })
             }
         };
-        if self.verbose {
-            eprintln!(
-                "[holtburger-3d][asset.lookup] response asset_id={} kind={} vertices={} polygons={} render_source={}",
-                request.asset_id,
-                payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown"),
-                payload
-                    .get("vertexArray")
-                    .and_then(|vertex_array| vertex_array.get("vertexCount"))
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0),
-                payload
-                    .get("drawingPolygons")
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len),
-                payload
-                    .get("provenance")
-                    .and_then(|provenance| provenance.get("source"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown")
-            );
-        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -625,25 +596,6 @@ impl HostBoundaryAdapter {
                 })
             }
         };
-        if self.verbose {
-            eprintln!(
-                "[holtburger-3d][asset.lookup] response asset_id={} kind={} parts={} provenance={}",
-                request.asset_id,
-                payload
-                    .get("kind")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown"),
-                payload
-                    .get("parts")
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len),
-                payload
-                    .get("provenance")
-                    .and_then(|provenance| provenance.get("source"))
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or("unknown")
-            );
-        }
 
         AssetLookupResponseDto {
             request_id: request.request_id,
@@ -660,6 +612,14 @@ fn asset_cache_error_code(error: &anyhow::Error) -> &'static str {
     } else {
         "asset-decode-failed"
     }
+}
+
+fn asset_lookup_log_min_ms() -> f64 {
+    std::env::var("HOLTBURGER_3D_ASSET_LOG_MIN_MS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(DEFAULT_ASSET_LOOKUP_LOG_MIN_MS)
 }
 
 fn parse_gfx_obj_asset_id(asset_id: &str) -> Option<u32> {
@@ -873,62 +833,73 @@ impl BinaryAssetSectionWriter {
     }
 }
 
-fn serialize_landblock_pack_binary_response(
+fn serialize_content_asset_binary_response(
+    adapter: &HostBoundaryAdapter,
     request: AssetLookupRequestDto,
-    pack: &LandblockPack,
-) -> anyhow::Result<Vec<u8>> {
-    let mut writer = BinaryAssetSectionWriter::default();
-    let payload = serialize_landblock_pack_binary_payload(pack, &mut writer);
-    let response = AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload,
-    };
-    serialize_asset_binary_response(response, writer)
+    content_request: ContentAssetRequest,
+    asset: anyhow::Result<ContentAsset>,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> anyhow::Result<AssetLookupResponseDto> {
+    Ok(match content_request {
+        ContentAssetRequest::LandblockPack(landblock_id) => match asset {
+            Ok(ContentAsset::LandblockPack(pack)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_landblock_pack_binary_payload(&pack, path_prefix, writer),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched landblock pack"),
+            Err(error) => adapter.build_failed_landblock_pack_lookup_response(
+                request,
+                normalize_landblock_id(landblock_id),
+                error,
+            ),
+        },
+        ContentAssetRequest::LandblockSummary(landblock_id) => match asset {
+            Ok(ContentAsset::LandblockSummary(summary)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_landblock_summary_binary_payload(&summary, path_prefix, writer),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched landblock summary"),
+            Err(error) => adapter.build_failed_landblock_summary_lookup_response(
+                request,
+                normalize_landblock_id(landblock_id),
+                error,
+            ),
+        },
+        ContentAssetRequest::GfxObj(gfx_obj_id) => match asset {
+            Ok(ContentAsset::GfxObj(gfx_obj)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_gfx_obj_binary_payload(&gfx_obj, path_prefix, writer),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
+            Err(error) => adapter.build_gfx_obj_lookup_response(request, gfx_obj_id, Err(error)),
+        },
+        unsupported => anyhow::bail!(
+            "binary asset lookup does not support {unsupported:?} for {}",
+            request.asset_id
+        ),
+    })
 }
 
-fn serialize_landblock_summary_binary_response(
-    request: AssetLookupRequestDto,
-    summary: &LandblockSummary,
-) -> anyhow::Result<Vec<u8>> {
-    let mut writer = BinaryAssetSectionWriter::default();
-    let payload = serialize_landblock_summary_binary_payload(summary, &mut writer);
-    let response = AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload,
-    };
-    serialize_asset_binary_response(response, writer)
-}
-
-fn serialize_gfx_obj_binary_response(
-    request: AssetLookupRequestDto,
-    gfx_obj: &GfxObj,
-) -> anyhow::Result<Vec<u8>> {
-    let mut writer = BinaryAssetSectionWriter::default();
-    let payload = serialize_gfx_obj_binary_payload(gfx_obj, &mut writer);
-    let response = AssetLookupResponseDto {
-        request_id: request.request_id,
-        asset_id: request.asset_id,
-        payload_kind: AssetPayloadKindDto::Json,
-        payload,
-    };
-    serialize_asset_binary_response(response, writer)
-}
-
-fn serialize_asset_binary_response(
-    response: AssetLookupResponseDto,
+fn serialize_asset_binary_batch_response(
+    responses: Vec<AssetLookupResponseDto>,
     writer: BinaryAssetSectionWriter,
+    host_profile: BinaryAssetBatchHostProfile,
 ) -> anyhow::Result<Vec<u8>> {
     let manifest = serde_json::json!({
         "transport": "holtburger-asset-binary",
         "version": ASSET_BINARY_VERSION,
         "byteOrder": "little-endian",
         "sectionByteOffsetBase": "section-data",
-        "response": response,
+        "responses": responses,
         "sections": writer.serialize_sections(),
+        "hostProfile": serialize_binary_asset_batch_host_profile(host_profile),
     });
     let mut manifest_bytes = serde_json::to_vec(&manifest)?;
     while !(ASSET_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
@@ -953,8 +924,43 @@ fn serialize_asset_binary_response(
     Ok(bytes)
 }
 
+fn serialize_binary_asset_batch_host_profile(
+    profile: BinaryAssetBatchHostProfile,
+) -> serde_json::Value {
+    serde_json::json!({
+        "requestCount": profile.request_count,
+        "assetLoadMs": profile.asset_load_ms,
+        "responseSerializeMs": profile.response_serialize_ms,
+        "cacheBefore": serialize_decode_cache_stats(profile.cache_before),
+        "cacheAfter": serialize_decode_cache_stats(profile.cache_after),
+    })
+}
+
+fn serialize_decode_cache_stats(stats: ContentDecodeCacheStats) -> serde_json::Value {
+    serde_json::json!({
+        "cellLandblocks": serialize_decode_cache_kind_stats(stats.cell_landblocks),
+        "landblockInfos": serialize_decode_cache_kind_stats(stats.landblock_infos),
+        "envCells": serialize_decode_cache_kind_stats(stats.env_cells),
+        "environments": serialize_decode_cache_kind_stats(stats.environments),
+        "regionDesc": serialize_decode_cache_kind_stats(stats.region_desc),
+        "scenes": serialize_decode_cache_kind_stats(stats.scenes),
+        "setupModels": serialize_decode_cache_kind_stats(stats.setup_models),
+        "gfxObjs": serialize_decode_cache_kind_stats(stats.gfx_objs),
+    })
+}
+
+fn serialize_decode_cache_kind_stats(
+    stats: holtburger_content::ContentDecodeCacheKindStats,
+) -> serde_json::Value {
+    serde_json::json!({
+        "hits": stats.hits,
+        "misses": stats.misses,
+    })
+}
+
 fn serialize_landblock_summary_binary_payload(
     summary: &LandblockSummary,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -969,7 +975,7 @@ fn serialize_landblock_summary_binary_payload(
         },
         "prepared": {
             "terrainMesh": summary.terrain_mesh.as_ref().map(|mesh| {
-                serialize_prepared_terrain_mesh_binary(mesh, writer)
+                serialize_prepared_terrain_mesh_binary(mesh, path_prefix, writer)
             }),
         },
         "dependencies": {
@@ -988,6 +994,7 @@ fn serialize_landblock_summary_binary_payload(
 
 fn serialize_gfx_obj_binary_payload(
     gfx_obj: &GfxObj,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     let render_geometry = build_gfx_obj_render_geometry(gfx_obj);
@@ -1011,7 +1018,7 @@ fn serialize_gfx_obj_binary_payload(
         },
         "renderGeometry": serialize_prepared_polygon_set_render_geometry_binary(
             &render_geometry,
-            "payload.renderGeometry".to_string(),
+            format!("{path_prefix}.renderGeometry"),
             writer,
         ),
         "sortCenter": serialize_vector3(&gfx_obj.sort_center),
@@ -1027,6 +1034,7 @@ fn serialize_gfx_obj_binary_payload(
 
 fn serialize_landblock_pack_binary_payload(
     pack: &LandblockPack,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -1041,18 +1049,18 @@ fn serialize_landblock_pack_binary_payload(
         },
         "prepared": {
             "terrainMesh": pack.prepared.terrain_mesh.as_ref().map(|mesh| {
-                serialize_prepared_terrain_mesh_binary(mesh, writer)
+                serialize_prepared_terrain_mesh_binary(mesh, path_prefix, writer)
             }),
             "outdoorStaticInstances": pack.prepared.outdoor_static_instances.iter().map(serialize_prepared_static_instance).collect::<Vec<_>>(),
             "interiorCells": pack.prepared.interior_cells.iter().enumerate().map(|(index, cell)| {
-                serialize_prepared_interior_cell_binary(cell, index, writer)
+                serialize_prepared_interior_cell_binary(cell, index, path_prefix, writer)
             }).collect::<Vec<_>>(),
             "staticMeshes": pack.prepared.static_meshes.iter().map(serialize_prepared_static_mesh).collect::<Vec<_>>(),
             "spatialItems": pack.prepared.spatial_items.iter().enumerate().map(|(index, item)| {
-                serialize_prepared_spatial_item_binary(item, index, writer)
+                serialize_prepared_spatial_item_binary(item, index, path_prefix, writer)
             }).collect::<Vec<_>>(),
             "staticLandblockBvh": pack.prepared.static_landblock_bvh.as_ref().map(|bvh| {
-                serialize_prepared_bvh_binary(bvh, writer)
+                serialize_prepared_bvh_binary(bvh, path_prefix, writer)
             })
         },
         "dependencies": {
@@ -1074,11 +1082,12 @@ fn serialize_landblock_pack_binary_payload(
 
 fn serialize_prepared_terrain_mesh_binary(
     mesh: &PreparedTerrainMesh,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     writer.push_f32_section(
         "prepared.terrainMesh.vertices",
-        "payload.prepared.terrainMesh.vertices",
+        format!("{path_prefix}.prepared.terrainMesh.vertices"),
         3,
         mesh.vertices
             .iter()
@@ -1086,7 +1095,7 @@ fn serialize_prepared_terrain_mesh_binary(
     );
     writer.push_f32_section(
         "prepared.terrainMesh.triangles",
-        "payload.prepared.terrainMesh.triangles",
+        format!("{path_prefix}.prepared.terrainMesh.triangles"),
         5,
         mesh.triangles.iter().flat_map(|triangle| {
             [
@@ -1112,6 +1121,7 @@ fn serialize_prepared_terrain_mesh_binary(
 fn serialize_prepared_interior_cell_binary(
     cell: &PreparedInteriorCell,
     cell_index: usize,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -1133,13 +1143,13 @@ fn serialize_prepared_interior_cell_binary(
             })
         }).collect::<Vec<_>>(),
         "portalApertures": cell.portal_apertures.iter().enumerate().map(|(aperture_index, aperture)| {
-            serialize_prepared_portal_aperture_binary(aperture, cell_index, aperture_index, writer)
+            serialize_prepared_portal_aperture_binary(aperture, cell_index, aperture_index, path_prefix, writer)
         }).collect::<Vec<_>>(),
         "staticObjectCount": cell.static_object_count,
         "cellBsp": serialize_bsp_node(&cell.cell_bsp),
         "renderGeometry": serialize_prepared_polygon_set_render_geometry_binary(
             &cell.render_geometry,
-            format!("payload.prepared.interiorCells.{cell_index}.renderGeometry"),
+            format!("{path_prefix}.prepared.interiorCells.{cell_index}.renderGeometry"),
             writer,
         ),
     })
@@ -1149,12 +1159,13 @@ fn serialize_prepared_portal_aperture_binary(
     aperture: &PreparedPortalAperture,
     cell_index: usize,
     aperture_index: usize,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     writer.push_f32_section(
         "prepared.interiorCells.portalApertures.points",
         format!(
-            "payload.prepared.interiorCells.{cell_index}.portalApertures.{aperture_index}.points"
+            "{path_prefix}.prepared.interiorCells.{cell_index}.portalApertures.{aperture_index}.points"
         ),
         3,
         aperture
@@ -1224,11 +1235,12 @@ fn serialize_prepared_polygon_set_render_geometry_binary(
 fn serialize_prepared_spatial_item_binary(
     item: &PreparedSpatialItem,
     item_index: usize,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     writer.push_f32_section(
         "prepared.spatialItems.bounds",
-        format!("payload.prepared.spatialItems.{item_index}.bounds"),
+        format!("{path_prefix}.prepared.spatialItems.{item_index}.bounds"),
         6,
         [
             item.bounds.min.x,
@@ -1251,6 +1263,7 @@ fn serialize_prepared_spatial_item_binary(
 
 fn serialize_prepared_bvh_binary(
     bvh: &PreparedBvh,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -1258,7 +1271,7 @@ fn serialize_prepared_bvh_binary(
         "landblockId": bvh.landblock_id,
         "scope": bvh.scope,
         "nodes": bvh.nodes.iter().enumerate().map(|(index, node)| {
-            serialize_prepared_bvh_node_binary(node, index, writer)
+            serialize_prepared_bvh_node_binary(node, index, path_prefix, writer)
         }).collect::<Vec<_>>(),
     })
 }
@@ -1266,11 +1279,12 @@ fn serialize_prepared_bvh_binary(
 fn serialize_prepared_bvh_node_binary(
     node: &PreparedBvhNode,
     node_index: usize,
+    path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     writer.push_f32_section(
         "prepared.staticLandblockBvh.nodes.bounds",
-        format!("payload.prepared.staticLandblockBvh.nodes.{node_index}.bounds"),
+        format!("{path_prefix}.prepared.staticLandblockBvh.nodes.{node_index}.bounds"),
         6,
         [
             node.bounds.min.x,
@@ -2189,19 +2203,20 @@ mod tests {
     #[test]
     fn landblock_pack_binary_lookup_moves_bulk_arrays_into_sections() {
         let adapter = HostBoundaryAdapter::new(false);
-        let bytes =
-            tauri::async_runtime::block_on(adapter.asset_lookup_binary(AssetLookupRequestDto {
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
                 request_id: "test-landblock-pack-binary".to_string(),
                 asset_id: "landblock-pack/da55012e".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Bootstrap,
-            }))
-            .expect("binary landblock-pack lookup should succeed");
+            },
+        ]))
+        .expect("binary landblock-pack lookup should succeed");
 
         let (manifest, manifest_len) = decode_binary_manifest(&bytes);
 
         assert_eq!(manifest["transport"], "holtburger-asset-binary");
         assert_eq!(
-            manifest["response"]["payload"]["prepared"]["terrainMesh"]["vertices"]
+            manifest["responses"][0]["payload"]["prepared"]["terrainMesh"]["vertices"]
                 .as_array()
                 .expect("bulk terrain vertices should be manifest placeholders")
                 .len(),
@@ -2213,7 +2228,8 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|section| section["path"] == "payload.prepared.terrainMesh.vertices")
+                .any(|section| section["path"]
+                    == "responses.0.payload.prepared.terrainMesh.vertices")
         );
         assert!(sections.iter().any(|section| {
             section["path"]
@@ -2229,18 +2245,22 @@ mod tests {
     #[test]
     fn landblock_summary_binary_lookup_moves_terrain_arrays_into_sections() {
         let adapter = HostBoundaryAdapter::new(false);
-        let bytes =
-            tauri::async_runtime::block_on(adapter.asset_lookup_binary(AssetLookupRequestDto {
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
                 request_id: "test-landblock-summary-binary".to_string(),
                 asset_id: "landblock-summary/da55ffff".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Streaming,
-            }))
-            .expect("binary landblock-summary lookup should succeed");
+            },
+        ]))
+        .expect("binary landblock-summary lookup should succeed");
 
         let (manifest, manifest_len) = decode_binary_manifest(&bytes);
-        assert_eq!(manifest["response"]["payload"]["kind"], "landblock-summary");
         assert_eq!(
-            manifest["response"]["payload"]["prepared"]["terrainMesh"]["triangles"]
+            manifest["responses"][0]["payload"]["kind"],
+            "landblock-summary"
+        );
+        assert_eq!(
+            manifest["responses"][0]["payload"]["prepared"]["terrainMesh"]["triangles"]
                 .as_array()
                 .expect("summary terrain triangles should be manifest placeholders")
                 .len(),
@@ -2252,7 +2272,8 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|section| section["path"] == "payload.prepared.terrainMesh.vertices")
+                .any(|section| section["path"]
+                    == "responses.0.payload.prepared.terrainMesh.vertices")
         );
         assert!(
             bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
@@ -2263,25 +2284,26 @@ mod tests {
     #[test]
     fn gfx_obj_binary_lookup_moves_render_geometry_into_sections() {
         let adapter = HostBoundaryAdapter::new(false);
-        let bytes =
-            tauri::async_runtime::block_on(adapter.asset_lookup_binary(AssetLookupRequestDto {
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
                 request_id: "test-gfx-obj-binary".to_string(),
                 asset_id: "gfx-obj/01000001".to_string(),
                 priority: crate::contracts::AssetPriorityDto::Streaming,
-            }))
-            .expect("binary gfx-obj lookup should succeed");
+            },
+        ]))
+        .expect("binary gfx-obj lookup should succeed");
 
         let (manifest, manifest_len) = decode_binary_manifest(&bytes);
-        assert_eq!(manifest["response"]["payload"]["kind"], "gfx-obj");
+        assert_eq!(manifest["responses"][0]["payload"]["kind"], "gfx-obj");
         assert_eq!(
-            manifest["response"]["payload"]["vertexArray"]["vertices"]
+            manifest["responses"][0]["payload"]["vertexArray"]["vertices"]
                 .as_array()
                 .expect("binary gfx-obj should not carry source vertices")
                 .len(),
             0
         );
         assert_eq!(
-            manifest["response"]["payload"]["renderGeometry"]["positions"]
+            manifest["responses"][0]["payload"]["renderGeometry"]["positions"]
                 .as_array()
                 .expect("render positions should be manifest placeholders")
                 .len(),
@@ -2293,7 +2315,7 @@ mod tests {
         assert!(
             sections
                 .iter()
-                .any(|section| section["path"] == "payload.renderGeometry.positions")
+                .any(|section| section["path"] == "responses.0.payload.renderGeometry.positions")
         );
         assert!(
             bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,

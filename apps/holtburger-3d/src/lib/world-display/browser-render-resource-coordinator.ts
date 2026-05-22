@@ -1,0 +1,861 @@
+import type { BrowserLocationSelection } from "../../app/browser-mode";
+import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
+import {
+	derivePackInteriorEnvCellIdsForLandblocks,
+	deriveTerrainFocusLandblockId,
+} from "../assets/scene-asset-request-planner";
+import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
+import {
+	createInitialAssetChannelState,
+	type AssetChannelState,
+} from "../assets/types";
+import { formatHex32, normalizeOutdoorLandblockId } from "../landblocks";
+import type { CameraHintAckDto } from "../host/contracts";
+import {
+	deriveBrowserWorldDisplayModel,
+	type BrowserWorldDisplayModel,
+} from "./model";
+import {
+	deriveWorldDebugOverlayModel,
+	type WorldDebugOverlayModel,
+} from "./debug-overlays";
+import { deriveOutdoorSceneInterest } from "./outdoor-scene-interest";
+import {
+	deriveRenderChunkTransforms,
+	type RenderChunkTransform,
+} from "./render-anchor";
+import type { RenderLandblockAnchor, RenderChunkPlacement } from "./render-chunks";
+import {
+	createLinearRenderSpatialIndex,
+	type RenderSpatialIndexQuery,
+	type RenderSpatialItem,
+	type RenderSpatialMetadata,
+} from "./render-spatial-index";
+import {
+	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+	LandblockPackSpatialItemCache,
+	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+	TERRAIN_SPATIAL_OWNER_KEY,
+	deriveDebugOverlaySpatialItems,
+	deriveLandblockPackRenderChunkPlacements,
+	deriveLandblockPackSpatialEntries,
+	deriveStructuredInteriorSpatialItems,
+	deriveTerrainSpatialItems,
+} from "./render-spatial-scene";
+import { deriveWorldRenderSceneContext } from "./render-scene-context";
+import {
+	StaticRenderableResourceCache,
+	deriveStaticRenderableSceneModel,
+	type StaticRenderableSceneModel,
+} from "./static-renderables";
+import {
+	deriveStructuredInteriorSceneModel,
+	type StructuredInteriorSceneModel,
+} from "./structured-interior-scene";
+import {
+	deriveTerrainSceneModel,
+	type TerrainSceneModel,
+} from "./terrain-scene";
+import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
+import { WORLD_RENDER_DOMAIN } from "./render-domains";
+import type { SceneCameraFrame } from "./camera";
+
+export interface BrowserRenderResourceCoordinatorInput {
+	assetState: AssetChannelState;
+	browserDestination: BrowserLocationSelection | null;
+	terrainLodRadius: number;
+	buildingLodRadius: number;
+	detailLodRadius: number;
+	envCellLodRadius: number;
+	transitionPortalMaxDepth: number;
+	showPortalPolygons: boolean;
+	showCellIndicators: boolean;
+	highlightPortalTargets: boolean;
+	diagnosticSelection: RenderSpatialMetadata | null;
+	activeRenderAnchor: RenderLandblockAnchor | null;
+	browserCameraFrame: SceneCameraFrame | null;
+	cameraAck: CameraHintAckDto | null;
+	pendingCameraHint: boolean;
+}
+
+export interface BrowserRenderResourceSnapshot {
+	worldDisplay: BrowserWorldDisplayModel;
+	renderSpatialQuery: RenderSpatialIndexQuery;
+	activeRenderChunkCount: number;
+	sceneStatusText: string;
+	sceneContextText: string;
+	terrainCacheText: string;
+	terrainDataSourceText: string;
+	sceneGeometryText: string;
+	terrainHeightText: string;
+	staticRenderableText: string;
+	staticRenderableLayerText: string;
+	structuredInteriorText: string;
+	cellIndicatorText: string;
+	portalDiagnosticsText: string;
+	landblockVisibilityText: string;
+	cellVisibilityFallbackText: string;
+}
+
+export interface BrowserRenderResourceSurface {
+	setAssetState(assetState: AssetChannelState): void;
+	setRenderSceneContext(
+		context: ReturnType<typeof deriveWorldRenderSceneContext>,
+	): void;
+	setRenderChunkTransforms(
+		transforms: readonly RenderChunkTransform[],
+	): void;
+	setTerrainScene(scene: TerrainSceneModel): void;
+	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
+	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
+	setTransitionPortalModel(
+		model: ReturnType<typeof deriveTransitionPortalCandidates>,
+	): void;
+	setDebugOverlayScene(scene: WorldDebugOverlayModel): void;
+	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
+	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
+	setTransitionPortalMaxDepth(maxDepth: number): void;
+}
+
+export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourceSnapshot {
+	return {
+		worldDisplay: deriveBrowserWorldDisplayModel({
+			assetState: createInitialAssetChannelState(),
+			browserDestination: null,
+			terrainLodRadius: 0,
+			buildingLodRadius: 0,
+			detailLodRadius: 0,
+			cameraAck: null,
+			pendingCameraHint: false,
+		}),
+		renderSpatialQuery: createLinearRenderSpatialIndex(),
+		activeRenderChunkCount: 0,
+		sceneStatusText:
+			"Local outdoor scene context will lock in once the browser has a destination.",
+		sceneContextText: "Outdoor",
+		terrainCacheText: "Terrain cache is idle.",
+		terrainDataSourceText: "No terrain provenance available yet.",
+		sceneGeometryText: "No terrain geometry is cached yet.",
+		terrainHeightText: "No terrain heights are cached yet.",
+		staticRenderableText:
+			"No static renderable source facts are active for the current outdoor coverage.",
+		staticRenderableLayerText: "Waiting for static renderable data.",
+		structuredInteriorText:
+			"Structured interior scene is dormant until the browser destination or outdoor links select env cells.",
+		cellIndicatorText: "Cell indicators are hidden.",
+		portalDiagnosticsText: "Portal polygon overlays are hidden.",
+		landblockVisibilityText: "Outdoor landblock selection is waiting for focus.",
+		cellVisibilityFallbackText: "0 loaded env cells; renderer visibility pending.",
+	};
+}
+
+export class BrowserRenderResourceCoordinator {
+	private readonly renderSpatialIndex = createLinearRenderSpatialIndex();
+	private readonly staticRenderableResourceCache =
+		new StaticRenderableResourceCache();
+	private readonly landblockPackSpatialItemCache =
+		new LandblockPackSpatialItemCache();
+	private activeLandblockPackSpatialOwnerKeys = new Set<string>();
+	private readonly appliedLandblockPackSpatialItems = new Map<
+		string,
+		readonly RenderSpatialItem[]
+	>();
+	private surface: BrowserRenderResourceSurface | null = null;
+	private snapshot = createEmptyBrowserRenderResourceSnapshot();
+	private appliedSurfaceSignatures: Partial<
+		Record<BrowserRenderResourceSurfaceKey, string>
+	> = {};
+
+	setSurface(surface: BrowserRenderResourceSurface | null): void {
+		this.surface = surface;
+		this.appliedSurfaceSignatures = {};
+	}
+
+	getSnapshot(): BrowserRenderResourceSnapshot {
+		return this.snapshot;
+	}
+
+	updateControlledCameraFrame(frame: SceneCameraFrame | null): void {
+		this.surface?.setControlledCameraFrame(frame);
+	}
+
+	update(input: BrowserRenderResourceCoordinatorInput): BrowserRenderResourceSnapshot {
+		const outdoorFocusLandblockId =
+			input.browserDestination?.kind === "outdoor-location"
+				? deriveTerrainFocusLandblockId(input.browserDestination)
+				: null;
+		const outdoorSceneInterest =
+			outdoorFocusLandblockId === null
+				? null
+				: deriveOutdoorSceneInterest({
+						focusLandblockId: outdoorFocusLandblockId,
+						terrainRadius: input.terrainLodRadius,
+						buildingRadius: input.buildingLodRadius,
+						detailRadius: input.detailLodRadius,
+						envCellRadius: input.envCellLodRadius,
+					});
+		const terrainScene = deriveTerrainSceneModel(
+			input.assetState,
+			input.browserDestination,
+			input.terrainLodRadius,
+			outdoorSceneInterest?.terrainLandblockIds ?? null,
+		);
+		const linkedOutdoorEnvCellIds =
+			outdoorSceneInterest === null
+				? []
+				: [
+						...derivePackInteriorEnvCellIdsForLandblocks(
+							input.assetState.preparedByAssetId,
+							new Set(outdoorSceneInterest.envCellLandblockIds),
+						),
+					].sort((left, right) => left - right);
+		const structuredInteriorCoverage = deriveStructuredInteriorCoverageForInput(
+			input,
+			linkedOutdoorEnvCellIds,
+		);
+		const staticRenderableScene = deriveStaticRenderableSceneModel(
+			input.assetState,
+			input.browserDestination,
+			input.detailLodRadius,
+			structuredInteriorCoverage,
+			outdoorSceneInterest === null
+				? null
+				: {
+						buildingLandblockIds: outdoorSceneInterest.buildingLandblockIds,
+					detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
+					envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
+				},
+			this.staticRenderableResourceCache,
+		);
+		const structuredInteriorScene = deriveStructuredInteriorSceneModel(
+			input.assetState,
+			input.browserDestination,
+			outdoorFocusLandblockId === null
+				? null
+				: {
+						envCellIds: linkedOutdoorEnvCellIds,
+					},
+			structuredInteriorCoverage,
+		);
+		const selectedDiagnosticPortalId =
+			input.diagnosticSelection?.kind === "portal"
+				? input.diagnosticSelection.portalId
+				: null;
+		const selectedDiagnosticEnvCellId =
+			input.diagnosticSelection?.kind === "structured-cell"
+				? input.diagnosticSelection.envCellId
+				: input.diagnosticSelection?.kind === "portal"
+					? input.diagnosticSelection.sourceEnvCellId
+					: null;
+		const debugOverlayScene = deriveWorldDebugOverlayModel(
+			structuredInteriorScene,
+			{
+				showPortalPolygons: input.showPortalPolygons,
+				showCellIndicators: input.showCellIndicators,
+				highlightPortalTargets: input.highlightPortalTargets,
+				selectedPortalId: selectedDiagnosticPortalId,
+				selectedEnvCellId: selectedDiagnosticEnvCellId,
+			},
+		);
+		const transitionPortalModel = deriveTransitionPortalCandidates({
+			assetState: input.assetState,
+			structuredInteriorScene,
+			activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
+		});
+		const activeLandblockPackIds = deriveActiveLandblockPackIds({
+			outdoorSceneInterest,
+			terrainScene,
+			staticRenderableScene,
+			structuredInteriorScene,
+		});
+		const landblockPackRenderChunkPlacements =
+			deriveLandblockPackRenderChunkPlacements(
+				input.assetState,
+				activeLandblockPackIds,
+			);
+		const activeRenderChunkPlacements = collectActiveRenderChunkPlacements(
+			terrainScene,
+			structuredInteriorScene,
+			debugOverlayScene,
+			staticRenderableScene,
+			landblockPackRenderChunkPlacements,
+		);
+		const activeRenderChunkTransforms = deriveRenderChunkTransforms(
+			input.activeRenderAnchor,
+			activeRenderChunkPlacements,
+		);
+		const renderSceneContext = deriveWorldRenderSceneContext({
+			activeRenderAnchor: input.activeRenderAnchor,
+			terrainScene,
+			structuredInteriorScene,
+		});
+
+		this.renderSpatialIndex.replaceChunkTransforms(activeRenderChunkTransforms);
+		this.renderSpatialIndex.replaceOwnerItems(
+			TERRAIN_SPATIAL_OWNER_KEY,
+			deriveTerrainSpatialItems(terrainScene),
+		);
+		this.renderSpatialIndex.replaceOwnerItems(
+			STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
+			deriveStructuredInteriorSpatialItems(structuredInteriorScene),
+		);
+		this.renderSpatialIndex.replaceOwnerItems(
+			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
+			deriveDebugOverlaySpatialItems(debugOverlayScene),
+		);
+		this.replaceLandblockPackSpatialItems(
+			input.assetState,
+			activeLandblockPackIds,
+		);
+
+		const surface = this.surface;
+		if (surface) {
+			this.applySurfaceResource(
+				"asset-state",
+				describeAssetStateSignature(input.assetState),
+				() => surface.setAssetState(input.assetState),
+			);
+			this.applySurfaceResource(
+				"render-scene-context",
+				describeRenderSceneContextSignature(renderSceneContext),
+				() => surface.setRenderSceneContext(renderSceneContext),
+			);
+			this.applySurfaceResource(
+				"render-chunk-transforms",
+				describeRenderChunkTransformsSignature(activeRenderChunkTransforms),
+				() => surface.setRenderChunkTransforms(activeRenderChunkTransforms),
+			);
+			this.applySurfaceResource(
+				"terrain-scene",
+				describeTerrainSceneSignature(terrainScene),
+				() => surface.setTerrainScene(terrainScene),
+			);
+			this.applySurfaceResource(
+				"static-renderable-scene",
+				describeStaticRenderableSceneSignature(staticRenderableScene),
+				() => surface.setStaticRenderableScene(staticRenderableScene),
+			);
+			this.applySurfaceResource(
+				"structured-interior-scene",
+				describeStructuredInteriorSceneSignature(structuredInteriorScene),
+				() => surface.setStructuredInteriorScene(structuredInteriorScene),
+			);
+			this.applySurfaceResource(
+				"transition-portal-model",
+				describeTransitionPortalModelSignature(transitionPortalModel),
+				() => surface.setTransitionPortalModel(transitionPortalModel),
+			);
+			this.applySurfaceResource(
+				"debug-overlay-scene",
+				describeDebugOverlaySceneSignature(debugOverlayScene),
+				() => surface.setDebugOverlayScene(debugOverlayScene),
+			);
+			this.applySurfaceResource(
+				"render-spatial-query",
+				describeRenderSpatialIndexSignature({
+					terrainScene,
+					structuredInteriorScene,
+					debugOverlayScene,
+					activeRenderChunkTransforms,
+					assetState: input.assetState,
+				}),
+				() => surface.setRenderSpatialQuery(this.renderSpatialIndex),
+			);
+			this.applySurfaceResource(
+				"controlled-camera-frame",
+				describeSceneCameraFrameSignature(input.browserCameraFrame),
+				() => surface.setControlledCameraFrame(input.browserCameraFrame),
+			);
+			this.applySurfaceResource(
+				"transition-portal-depth",
+				String(input.transitionPortalMaxDepth),
+				() => surface.setTransitionPortalMaxDepth(input.transitionPortalMaxDepth),
+			);
+		}
+
+		this.snapshot = deriveSnapshot({
+			input,
+			terrainScene,
+			staticRenderableScene,
+			structuredInteriorScene,
+			debugOverlayScene,
+			renderSceneContext,
+			outdoorSceneInterest,
+			linkedOutdoorEnvCellIds,
+			structuredInteriorCoverage,
+			activeRenderChunkTransforms,
+			renderSpatialQuery: this.renderSpatialIndex,
+		});
+		return this.snapshot;
+	}
+
+	private applySurfaceResource(
+		key: BrowserRenderResourceSurfaceKey,
+		signature: string,
+		apply: () => void,
+	): void {
+		if (this.appliedSurfaceSignatures[key] === signature) {
+			return;
+		}
+
+		apply();
+		this.appliedSurfaceSignatures[key] = signature;
+	}
+
+	private replaceLandblockPackSpatialItems(
+		assetState: AssetChannelState,
+		activeLandblockPackIds: ReadonlySet<number>,
+	): void {
+		const entries = deriveLandblockPackSpatialEntries(
+			assetState,
+			activeLandblockPackIds,
+			this.landblockPackSpatialItemCache,
+		);
+		const nextOwnerKeys = new Set<string>();
+		for (const entry of entries) {
+			nextOwnerKeys.add(entry.ownerKey);
+			if (
+				this.appliedLandblockPackSpatialItems.get(entry.ownerKey) !== entry.items
+			) {
+				this.renderSpatialIndex.replaceOwnerItems(entry.ownerKey, entry.items);
+				this.appliedLandblockPackSpatialItems.set(entry.ownerKey, entry.items);
+			}
+		}
+		for (const ownerKey of this.activeLandblockPackSpatialOwnerKeys) {
+			if (!nextOwnerKeys.has(ownerKey)) {
+				this.renderSpatialIndex.clearOwner(ownerKey);
+				this.appliedLandblockPackSpatialItems.delete(ownerKey);
+			}
+		}
+		this.activeLandblockPackSpatialOwnerKeys = nextOwnerKeys;
+	}
+}
+
+type BrowserRenderResourceSurfaceKey =
+	| "asset-state"
+	| "render-scene-context"
+	| "render-chunk-transforms"
+	| "terrain-scene"
+	| "static-renderable-scene"
+	| "structured-interior-scene"
+	| "transition-portal-model"
+	| "debug-overlay-scene"
+	| "render-spatial-query"
+	| "controlled-camera-frame"
+	| "transition-portal-depth";
+
+function deriveActiveLandblockPackIds({
+	outdoorSceneInterest,
+	terrainScene,
+	staticRenderableScene,
+	structuredInteriorScene,
+}: {
+	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
+	terrainScene: TerrainSceneModel;
+	staticRenderableScene: StaticRenderableSceneModel;
+	structuredInteriorScene: StructuredInteriorSceneModel;
+}): ReadonlySet<number> {
+	const landblockIds = new Set<number>();
+	if (outdoorSceneInterest) {
+		for (const landblockId of [
+			...outdoorSceneInterest.terrainLandblockIds,
+			...outdoorSceneInterest.buildingLandblockIds,
+			...outdoorSceneInterest.detailLandblockIds,
+			...outdoorSceneInterest.envCellLandblockIds,
+		]) {
+			landblockIds.add(normalizeOutdoorLandblockId(landblockId));
+		}
+	}
+
+	for (const tile of terrainScene.tiles) {
+		landblockIds.add(normalizeOutdoorLandblockId(tile.landblockId));
+	}
+	for (const landblockId of staticRenderableScene.activeLandblockIds) {
+		landblockIds.add(normalizeOutdoorLandblockId(landblockId));
+	}
+	for (const cell of structuredInteriorScene.cells) {
+		landblockIds.add(normalizeOutdoorLandblockId(cell.envCellId));
+	}
+
+	return landblockIds;
+}
+
+function describeAssetStateSignature(state: AssetChannelState): string {
+	return [
+		state.channel,
+		state.status,
+		Object.keys(state.preparedByAssetId).sort().join(","),
+		Object.keys(state.cacheMetadataByAssetId).sort().join(","),
+	].join(";");
+}
+
+function describeRenderSceneContextSignature(
+	context: ReturnType<typeof deriveWorldRenderSceneContext>,
+): string {
+	return `${context.kind}:${context.anchorLandblockId ?? "none"}`;
+}
+
+function describeRenderChunkTransformsSignature(
+	transforms: readonly RenderChunkTransform[],
+): string {
+	return transforms
+		.map(
+			(transform) =>
+				`${transform.chunkKey}:${transform.chunkLandblockId}:${formatVectorSignature(transform.offset)}`,
+		)
+		.join("|");
+}
+
+function describeTerrainSceneSignature(scene: TerrainSceneModel): string {
+	return [
+		`focus=${scene.focusLandblockId ?? "none"}`,
+		...scene.tiles.map(
+			(tile) =>
+				`${tile.assetId}:${tile.landblockId}:${tile.renderChunk.chunkKey}:${tile.dataSource}`,
+		),
+	].join("|");
+}
+
+function describeStaticRenderableSceneSignature(
+	scene: StaticRenderableSceneModel,
+): string {
+	return [
+		`focus=${scene.focusLandblockId ?? "none"}`,
+		`landblocks=${scene.activeLandblockIds.join(",")}`,
+		`sources=${scene.sourceInstances.length}`,
+		`parts=${scene.parts.length}`,
+		`groups=${scene.partsByRenderDomainChunkAndGfxAssetId.size}`,
+		`missingSources=${scene.missingSourceAssetIds.join(",")}`,
+		`missingGfx=${scene.missingGfxAssetIds.join(",")}`,
+	].join(";");
+}
+
+function describeStructuredInteriorSceneSignature(
+	scene: StructuredInteriorSceneModel,
+): string {
+	return [
+		`focus=${scene.focusEnvCellId ?? "none"}`,
+		`active=${scene.activeEnvCellIds.join(",")}`,
+		`cells=${scene.cells
+			.map(
+				(cell) =>
+					`${cell.envCellId}:${cell.renderKey}:${cell.renderChunk.chunkKey}:${cell.portalCount}:${cell.staticObjectCount}:${cell.renderGeometry.vertexCount}:${cell.renderGeometry.triangleCount}`,
+			)
+			.sort()
+			.join(",")}`,
+		`missingEnv=${scene.missingEnvCellAssetIds.join(",")}`,
+	].join(";");
+}
+
+function describeTransitionPortalModelSignature(
+	model: ReturnType<typeof deriveTransitionPortalCandidates>,
+): string {
+	return [
+		...model.candidates.map(
+			(candidate) =>
+				`${candidate.id}:${candidate.stencilRef}:${candidate.targetStatus}:${candidate.entryEnvCellId}:${candidate.requestedInteriorEnvCellIds.join(",")}`,
+		),
+		`diagnostics=${Object.values(model.diagnostics).join(",")}`,
+	]
+		.sort()
+		.join("|");
+}
+
+function describeDebugOverlaySceneSignature(
+	scene: WorldDebugOverlayModel,
+): string {
+	return [
+		`portals=${scene.showPortalPolygons}`,
+		`cells=${scene.showCellIndicators}`,
+		`targets=${scene.highlightPortalTargets}`,
+		`cellIds=${scene.cells.map((cell) => `${cell.envCellId}:${cell.colorKey}:${cell.isSelected}`).join(",")}`,
+		`portalIds=${scene.portals.map((portal) => `${portal.portalId}:${portal.colorKey}:${portal.isSelected}:${portal.targetStatus}`).join(",")}`,
+	].join(";");
+}
+
+function describeRenderSpatialIndexSignature({
+	terrainScene,
+	structuredInteriorScene,
+	debugOverlayScene,
+	activeRenderChunkTransforms,
+	assetState,
+}: {
+	terrainScene: TerrainSceneModel;
+	structuredInteriorScene: StructuredInteriorSceneModel;
+	debugOverlayScene: WorldDebugOverlayModel;
+	activeRenderChunkTransforms: readonly RenderChunkTransform[];
+	assetState: AssetChannelState;
+}): string {
+	return [
+		describeTerrainSceneSignature(terrainScene),
+		describeStructuredInteriorSceneSignature(structuredInteriorScene),
+		describeDebugOverlaySceneSignature(debugOverlayScene),
+		describeRenderChunkTransformsSignature(activeRenderChunkTransforms),
+		Object.keys(assetState.preparedByAssetId)
+			.filter((assetId) => assetId.startsWith("landblock-pack/"))
+			.sort()
+			.join(","),
+	].join(";");
+}
+
+function describeSceneCameraFrameSignature(frame: SceneCameraFrame | null): string {
+	if (!frame) {
+		return "none";
+	}
+
+	return [
+		frame.position,
+		frame.target,
+		frame.up,
+		{
+			x: frame.fovDegrees,
+			y: frame.near,
+			z: frame.far,
+		},
+		{
+			x: frame.aspect,
+			y: 0,
+			z: 0,
+		},
+	]
+		.map(formatVectorSignature)
+		.join("|");
+}
+
+function formatVectorSignature(vector: { x: number; y: number; z: number }): string {
+	return `${vector.x.toFixed(5)},${vector.y.toFixed(5)},${vector.z.toFixed(5)}`;
+}
+
+function deriveStructuredInteriorCoverageForInput(
+	input: BrowserRenderResourceCoordinatorInput,
+	linkedOutdoorEnvCellIds: readonly number[],
+) {
+	const browserFocusEnvCellId = browserDestinationToInteriorCellId(
+		input.browserDestination,
+	);
+	if (browserFocusEnvCellId !== null) {
+		return deriveStructuredInteriorCoverage(
+			{
+				kind: "landblock-closure",
+				seedEnvCellIds: [browserFocusEnvCellId],
+			},
+			input.assetState.preparedByAssetId,
+		);
+	}
+
+	if (linkedOutdoorEnvCellIds.length > 0) {
+		return deriveStructuredInteriorCoverage(
+			{
+				kind: "landblock-closure",
+				seedEnvCellIds: [...linkedOutdoorEnvCellIds],
+			},
+			input.assetState.preparedByAssetId,
+		);
+	}
+
+	return null;
+}
+
+function collectActiveRenderChunkPlacements(
+	terrain: TerrainSceneModel,
+	structuredInterior: StructuredInteriorSceneModel,
+	debugOverlay: WorldDebugOverlayModel,
+	staticRenderables: StaticRenderableSceneModel,
+	landblockPacks: RenderChunkPlacement[],
+): RenderChunkPlacement[] {
+	const chunksByKey = new Map<string, RenderChunkPlacement>();
+	for (const chunk of [
+		...terrain.tiles.map((tile) => tile.renderChunk),
+		...structuredInterior.cells.map((cell) => cell.renderChunk),
+		...debugOverlay.cells.map((cell) => cell.renderChunk),
+		...debugOverlay.portals.map((portal) => portal.renderChunk),
+		...staticRenderables.parts.map((part) => part.renderChunk),
+		...landblockPacks,
+	]) {
+		chunksByKey.set(chunk.chunkKey, chunk);
+	}
+
+	return [...chunksByKey.values()].sort((left, right) =>
+		left.chunkKey.localeCompare(right.chunkKey),
+	);
+}
+
+function deriveSnapshot({
+	input,
+	terrainScene,
+	staticRenderableScene,
+	structuredInteriorScene,
+	debugOverlayScene,
+	renderSceneContext,
+	outdoorSceneInterest,
+	linkedOutdoorEnvCellIds,
+	structuredInteriorCoverage,
+	activeRenderChunkTransforms,
+	renderSpatialQuery,
+}: {
+	input: BrowserRenderResourceCoordinatorInput;
+	terrainScene: TerrainSceneModel;
+	staticRenderableScene: StaticRenderableSceneModel;
+	structuredInteriorScene: StructuredInteriorSceneModel;
+	debugOverlayScene: WorldDebugOverlayModel;
+	renderSceneContext: ReturnType<typeof deriveWorldRenderSceneContext>;
+	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
+	linkedOutdoorEnvCellIds: readonly number[];
+	structuredInteriorCoverage: ReturnType<
+		typeof deriveStructuredInteriorCoverage
+	> | null;
+	activeRenderChunkTransforms: readonly RenderChunkTransform[];
+	renderSpatialQuery: RenderSpatialIndexQuery;
+}): BrowserRenderResourceSnapshot {
+	const terrainVertexCount = terrainScene.tiles.reduce(
+		(total, tile) => total + tile.mesh.vertices.length,
+		0,
+	);
+	const terrainTriangleCount = terrainScene.tiles.reduce(
+		(total, tile) => total + tile.mesh.triangles.length,
+		0,
+	);
+	const terrainMinHeight =
+		terrainScene.tiles.length === 0
+			? null
+			: Math.min(...terrainScene.tiles.map((tile) => tile.mesh.minHeight));
+	const terrainMaxHeight =
+		terrainScene.tiles.length === 0
+			? null
+			: Math.max(...terrainScene.tiles.map((tile) => tile.mesh.maxHeight));
+	const structuredInteriorPackSourceCount = new Set(
+		structuredInteriorScene.cells.map((cell) => cell.renderChunk.chunkKey),
+	).size;
+
+	return {
+		worldDisplay: deriveBrowserWorldDisplayModel({
+			assetState: input.assetState,
+			browserDestination: input.browserDestination,
+			terrainLodRadius: input.terrainLodRadius,
+			buildingLodRadius: input.buildingLodRadius,
+			detailLodRadius: input.detailLodRadius,
+			cameraAck: input.cameraAck,
+			pendingCameraHint: input.pendingCameraHint,
+		}),
+		renderSpatialQuery,
+		activeRenderChunkCount: activeRenderChunkTransforms.length,
+		sceneStatusText:
+			structuredInteriorScene.cells.length > 0
+				? structuredInteriorScene.statusText
+				: terrainScene.statusText,
+		sceneContextText: `${renderSceneContext.kind === "dungeon" ? "Dungeon" : "Outdoor"}${renderSceneContext.anchorLandblockId === null ? "" : ` anchored at 0x${formatHex32(renderSceneContext.anchorLandblockId)}`}`,
+		terrainCacheText: terrainScene.cacheText,
+		terrainDataSourceText: terrainScene.dataSourceText,
+		sceneGeometryText:
+			structuredInteriorScene.cells.length > 0
+				? `${structuredInteriorScene.cells.length} env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} loaded.`
+				: terrainScene.tiles.length === 0
+					? "No terrain geometry is cached yet."
+					: `${terrainScene.tiles.length} tile${terrainScene.tiles.length === 1 ? "" : "s"}, ${terrainVertexCount} vertices, ${terrainTriangleCount} triangles.`,
+		terrainHeightText:
+			terrainMinHeight === null || terrainMaxHeight === null
+				? "No terrain heights are cached yet."
+				: `Height range ${terrainMinHeight.toFixed(1)} to ${terrainMaxHeight.toFixed(1)} across cached tiles.`,
+		staticRenderableText:
+			staticRenderableScene.parts.length === 0
+				? describeStaticRenderableIdleState(
+						staticRenderableScene,
+						input.browserDestination,
+					)
+				: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size} domain-safe chunked instanced group${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size === 1 ? "" : "s"}.`,
+		staticRenderableLayerText:
+			describeStaticRenderableLayerState(staticRenderableScene),
+		structuredInteriorText:
+			structuredInteriorScene.cells.length > 0
+				? linkedOutdoorEnvCellIds.length > 0 &&
+					input.browserDestination?.kind !== "interior-cell"
+					? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorPackSourceCount} landblock pack${structuredInteriorPackSourceCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked, ${structuredInteriorCoverage?.envCellIds.length ?? linkedOutdoorEnvCellIds.length} covered${structuredInteriorCoverage?.truncated ? " (truncated)" : ""}.`
+					: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorPackSourceCount} landblock pack${structuredInteriorPackSourceCount === 1 ? "" : "s"}.`
+				: describeStructuredInteriorIdleState(
+						input.browserDestination,
+						linkedOutdoorEnvCellIds,
+						structuredInteriorScene,
+					),
+		cellIndicatorText: debugOverlayScene.showCellIndicators
+			? `${debugOverlayScene.diagnostics.cellCount} cell indicator${debugOverlayScene.diagnostics.cellCount === 1 ? "" : "s"} visible.`
+			: "Cell indicators are hidden.",
+		portalDiagnosticsText: debugOverlayScene.showPortalPolygons
+			? `${debugOverlayScene.diagnostics.portalCount} portal overlay${debugOverlayScene.diagnostics.portalCount === 1 ? "" : "s"}; ${debugOverlayScene.diagnostics.loadedTargetCount}/${debugOverlayScene.diagnostics.knownTargetCount} known target${debugOverlayScene.diagnostics.knownTargetCount === 1 ? "" : "s"} loaded${debugOverlayScene.diagnostics.missingPortalPolygonCount > 0 ? `; ${debugOverlayScene.diagnostics.missingPortalPolygonCount} missing polygon witness${debugOverlayScene.diagnostics.missingPortalPolygonCount === 1 ? "" : "es"}` : ""}.`
+			: "Portal polygon overlays are hidden.",
+		landblockVisibilityText:
+			renderSceneContext.kind === "dungeon"
+				? "Dungeon context; outdoor landblock rendering is inactive."
+				: !outdoorSceneInterest
+					? "Outdoor landblock selection is waiting for focus."
+					: `Terrain ${terrainScene.tiles.length}/${outdoorSceneInterest.terrainLandblockIds.length}, buildings ${outdoorSceneInterest.buildingLandblockIds.length}, detail ${outdoorSceneInterest.detailLandblockIds.length}.`,
+		cellVisibilityFallbackText: `${structuredInteriorScene.cells.length} loaded env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"}; renderer visibility pending.`,
+	};
+}
+
+function describeStaticRenderableIdleState(
+	staticRenderableScene: StaticRenderableSceneModel,
+	browserDestination: BrowserLocationSelection | null,
+): string {
+	if (staticRenderableScene.sourceInstances.length === 0) {
+		return browserDestination?.kind === "interior-cell"
+			? "No indoor static object source facts are active for the current visible env cells."
+			: "No static renderable source facts are active for the current outdoor coverage.";
+	}
+
+	if (staticRenderableScene.missingSourceAssetIds.length > 0) {
+		return `Waiting for ${staticRenderableScene.missingSourceAssetIds.length} static renderable source asset${staticRenderableScene.missingSourceAssetIds.length === 1 ? "" : "s"}.`;
+	}
+
+	if (staticRenderableScene.missingGfxAssetIds.length > 0) {
+		return `Waiting for ${staticRenderableScene.missingGfxAssetIds.length} gfx geometry dependenc${staticRenderableScene.missingGfxAssetIds.length === 1 ? "y" : "ies"}.`;
+	}
+
+	return "Static renderable source facts are active, but no drawable gfx geometry is ready.";
+}
+
+function describeStructuredInteriorIdleState(
+	browserDestination: BrowserLocationSelection | null,
+	linkedOutdoorEnvCellIds: readonly number[],
+	structuredInteriorScene: StructuredInteriorSceneModel,
+): string {
+	if (
+		browserDestination?.kind !== "interior-cell" &&
+		linkedOutdoorEnvCellIds.length === 0
+	) {
+		return "Structured interior rendering is dormant while the browser destination has no linked env cells.";
+	}
+
+	if (structuredInteriorScene.missingEnvCellAssetIds.length > 0) {
+		return `Waiting for ${structuredInteriorScene.missingEnvCellAssetIds.length} visible interior metadata payload${structuredInteriorScene.missingEnvCellAssetIds.length === 1 ? "" : "s"}.`;
+	}
+
+	return "Structured interior source facts are active, but no drawable cell geometry is ready.";
+}
+
+function describeStaticRenderableLayerState(
+	staticRenderableScene: StaticRenderableSceneModel,
+): string {
+	const explicitCount = staticRenderableScene.sourceInstances.filter(
+		(instance) => instance.kind === "scenery",
+	).length;
+	const buildingCount = staticRenderableScene.sourceInstances.filter(
+		(instance) => instance.kind === "building",
+	).length;
+	const generatedCount = staticRenderableScene.sourceInstances.filter(
+		(instance) => instance.kind === "generated-scenery",
+	).length;
+	const indoorCount = staticRenderableScene.sourceInstances.filter(
+		(instance) => instance.kind === "indoor-static",
+	).length;
+	const exteriorGroupCount = [
+		...staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.values(),
+	].filter(
+		(parts) => parts[0]?.renderDomain === WORLD_RENDER_DOMAIN.exteriorStatic,
+	).length;
+	const interiorGroupCount = [
+		...staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.values(),
+	].filter(
+		(parts) => parts[0]?.renderDomain === WORLD_RENDER_DOMAIN.interiorStatic,
+	).length;
+	return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}, indoor ${indoorCount}; groups exterior ${exteriorGroupCount}, interior ${interiorGroupCount}.`;
+}

@@ -40,6 +40,12 @@ pub struct AssetLookupRequestDto {
     pub priority: AssetPriorityDto,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetLookupBatchRequestDto {
+    pub requests: Vec<AssetLookupRequestDto>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetPayloadKindDto {

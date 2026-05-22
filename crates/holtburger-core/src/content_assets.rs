@@ -4,8 +4,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockPack, LandblockPackAssembler, LandblockSummary,
-    LandblockSummaryAssembler, normalize_landblock_id,
+    ContentDecodeCache, ContentDecodeCacheStats, ContentRepository, LandblockPack,
+    LandblockPackAssembler, LandblockSummary, LandblockSummaryAssembler, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, SetupModel};
 use tokio::sync::{Mutex, Semaphore};
@@ -80,6 +80,10 @@ impl ContentAssetService {
             }
         }
     }
+
+    pub fn decode_cache_stats(&self) -> ContentDecodeCacheStats {
+        self.decode_cache.stats()
+    }
 }
 
 type SharedAssetFuture =
@@ -128,6 +132,10 @@ impl ContentAssetRuntime {
         drop(in_flight);
 
         result.map_err(|error| anyhow!("{error:#}"))
+    }
+
+    pub fn decode_cache_stats(&self) -> ContentDecodeCacheStats {
+        self.service.decode_cache_stats()
     }
 
     pub fn load_blocking(&self, request: ContentAssetRequest) -> Result<ContentAsset> {

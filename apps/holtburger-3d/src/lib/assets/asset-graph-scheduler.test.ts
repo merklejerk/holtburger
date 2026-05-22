@@ -4,10 +4,7 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 } from "../host/contracts";
-import type {
-	AssetPreparationGateway,
-	LookedUpAssetResponse,
-} from "./asset-channel";
+import type { AssetPreparationGateway } from "./asset-channel";
 import {
 	AssetGraphScheduler,
 	createDependencyRequest,
@@ -27,7 +24,6 @@ describe("asset graph scheduler", () => {
 			priority: "streaming",
 		});
 
-		expect(gateway.lookupAssetIds).toEqual(["synthetic/root"]);
 		expect(gateway.prepareAssetIds).toEqual(["synthetic/root"]);
 		expect(result.rootAsset.request.assetId).toBe("synthetic/root");
 		expect(result.preparedAssets.map((asset) => asset.request.assetId)).toEqual(
@@ -50,10 +46,14 @@ describe("asset graph scheduler", () => {
 			priority: "bootstrap",
 		});
 
-		expect(gateway.lookupAssetIds).toEqual([
+		expect(gateway.prepareAssetIds).toEqual([
 			"synthetic/root",
-			"synthetic/leaf-b",
 			"synthetic/leaf-a",
+			"synthetic/leaf-b",
+		]);
+		expect(gateway.prepareBatches).toEqual([
+			["synthetic/root"],
+			["synthetic/leaf-a", "synthetic/leaf-b"],
 		]);
 		expect(Object.keys(result.preparedByAssetId).sort()).toEqual([
 			"synthetic/leaf-a",
@@ -64,56 +64,6 @@ describe("asset graph scheduler", () => {
 			status: "ready",
 			dependencyAssetIds: ["synthetic/leaf-a", "synthetic/leaf-b"],
 		});
-	});
-
-	it("starts dependency lookups before root worker preparation completes", async () => {
-		const gateway = new FakeGraphGateway({
-			"synthetic/root": ["synthetic/leaf-a", "synthetic/leaf-b"],
-			"synthetic/leaf-a": [],
-			"synthetic/leaf-b": [],
-		});
-		const releaseRootPreparation = gateway.blockPreparation("synthetic/root");
-		const scheduler = new AssetGraphScheduler(gateway);
-
-		const graph = scheduler.prepareAssetGraph({
-			requestId: "root",
-			assetId: "synthetic/root",
-			priority: "streaming",
-		});
-		await waitForMicrotasks(20);
-
-		expect(gateway.lookupAssetIds).toEqual([
-			"synthetic/root",
-			"synthetic/leaf-a",
-			"synthetic/leaf-b",
-		]);
-
-		releaseRootPreparation();
-		await graph;
-	});
-
-	it("does not let slow worker preparation consume a lookup slot", async () => {
-		const gateway = new FakeGraphGateway({
-			"synthetic/root": ["synthetic/leaf-a", "synthetic/leaf-b"],
-			"synthetic/leaf-a": [],
-			"synthetic/leaf-b": [],
-		});
-		const releaseRootPreparation = gateway.blockPreparation("synthetic/root");
-		const scheduler = new AssetGraphScheduler(gateway, {
-			lookupConcurrencyLimit: 1,
-		});
-
-		const graph = scheduler.prepareAssetGraph({
-			requestId: "root",
-			assetId: "synthetic/root",
-			priority: "streaming",
-		});
-		await waitForMicrotasks(20);
-
-		expect(gateway.lookupAssetIds).toContain("synthetic/leaf-a");
-
-		releaseRootPreparation();
-		await graph;
 	});
 
 	it("looks up a shared dependency once inside one graph", async () => {
@@ -130,15 +80,15 @@ describe("asset graph scheduler", () => {
 		});
 
 		expect(
-			gateway.lookupAssetIds.filter(
+			gateway.prepareAssetIds.filter(
 				(assetId) => assetId === "synthetic/shared",
 			),
 		).toHaveLength(1);
 	});
 
-	it("fails hard when lookup fails", async () => {
+	it("fails hard when preparation fails", async () => {
 		const gateway = new FakeGraphGateway({});
-		gateway.failLookupAssetIds.add("synthetic/root");
+		gateway.failPrepareAssetIds.add("synthetic/root");
 		const scheduler = new AssetGraphScheduler(gateway);
 
 		await expect(
@@ -147,7 +97,7 @@ describe("asset graph scheduler", () => {
 				assetId: "synthetic/root",
 				priority: "streaming",
 			}),
-		).rejects.toThrow("lookup failed for synthetic/root");
+		).rejects.toThrow("prepare failed for synthetic/root");
 	});
 
 	it("creates dependency requests from the root request metadata", () => {
@@ -169,50 +119,32 @@ describe("asset graph scheduler", () => {
 });
 
 class FakeGraphGateway implements AssetPreparationGateway {
-	readonly lookupAssetIds: string[] = [];
+	readonly prepareBatches: string[][] = [];
 	readonly prepareAssetIds: string[] = [];
-	readonly failLookupAssetIds = new Set<string>();
-	private readonly preparationGatesByAssetId = new Map<string, Promise<void>>();
+	readonly failPrepareAssetIds = new Set<string>();
 
 	constructor(
 		private readonly dependenciesByAssetId: Record<string, string[]>,
 	) {}
 
-	async lookupAssetResponse(
-		request: AssetLookupRequestDto,
-	): Promise<LookedUpAssetResponse> {
-		this.lookupAssetIds.push(request.assetId);
-		if (this.failLookupAssetIds.has(request.assetId)) {
-			throw new Error(`lookup failed for ${request.assetId}`);
-		}
-
-		const dependencyAssetIds =
-			this.dependenciesByAssetId[request.assetId] ?? [];
-		return {
-			request,
-			response: createResponse(request, dependencyAssetIds),
-			dependencyAssetIds,
-		};
+	async prepareAssets(
+		requests: readonly AssetLookupRequestDto[],
+	): Promise<PreparedAssetRecord[]> {
+		this.prepareBatches.push(requests.map((request) => request.assetId));
+		return Promise.all(requests.map((request) => this.prepareOne(request)));
 	}
 
-	async prepareLookedUpAsset(
-		lookedUp: LookedUpAssetResponse,
+	private async prepareOne(
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
 		this.prepareAssetIds.push(request.assetId);
-		await this.preparationGatesByAssetId.get(request.assetId);
-		return createPreparedAsset(request, lookedUp.response);
-	}
-
-	blockPreparation(assetId: string): () => void {
-		let release = () => {};
-		this.preparationGatesByAssetId.set(
-			assetId,
-			new Promise<void>((resolve) => {
-				release = resolve;
-			}),
+		if (this.failPrepareAssetIds.has(request.assetId)) {
+			throw new Error(`prepare failed for ${request.assetId}`);
+		}
+		return createPreparedAsset(
+			request,
+			createResponse(request, this.dependenciesByAssetId[request.assetId] ?? []),
 		);
-		return release;
 	}
 }
 
@@ -270,10 +202,4 @@ function createPreparedAsset(
 			},
 		},
 	};
-}
-
-async function waitForMicrotasks(iterations = 4): Promise<void> {
-	for (let index = 0; index < iterations; index += 1) {
-		await Promise.resolve();
-	}
 }

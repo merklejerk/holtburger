@@ -1,57 +1,54 @@
 import type {
 	AssetLookupRequestDto,
-	AssetLookupResponseDto,
 } from "../host/contracts";
-import { lookupAsset } from "../host/tauri";
+import {
+	lookupBinaryAssetEnvelopes,
+	type BinaryAssetLookupEnvelopeDto,
+} from "../host/tauri";
 import {
 	AssetGraphScheduler,
 	type AssetGraphPreparationResult,
 } from "./asset-graph-scheduler";
-import { getAssetResponseDependencies } from "./dependencies";
 import type { PreparedAssetRecord } from "./types";
 import type {
+	AssetWorkerHostBinaryEnvelope,
+	AssetWorkerHostLookupBinaryRequestMessage,
+	AssetWorkerPreparedResult,
 	AssetWorkerRequestMessage,
 	AssetWorkerResponseMessage,
+	AssetWorkerReadyProfile,
 } from "../../workers/asset-worker";
+import type { FrontendProfiler } from "../performance/frontend-profiler";
 
 export interface AssetWorkerLike {
 	onmessage: ((event: MessageEvent<AssetWorkerResponseMessage>) => void) | null;
 	onerror: ((event: Event | ErrorEvent) => void) | null;
-	postMessage(message: AssetWorkerRequestMessage): void;
+	postMessage(
+		message: AssetWorkerRequestMessage,
+		transferables?: Transferable[],
+	): void;
 	terminate(): void;
 }
 
-type AssetLookupFn = (
-	request: AssetLookupRequestDto,
-) => Promise<AssetLookupResponseDto>;
+type AssetLookupBatchFn = (
+	requests: readonly AssetLookupRequestDto[],
+) => Promise<BinaryAssetLookupEnvelopeDto[]>;
 
 type PendingAssetRequest = {
+	request: AssetLookupRequestDto;
 	resolve: (asset: PreparedAssetRecord) => void;
 	reject: (error: Error) => void;
 };
 
 interface AssetLoadEntry {
-	responseRequestId: string | null;
-	responsePromise: Promise<LookedUpAssetResponse> | null;
-	responseReject: ((error: Error) => void) | null;
 	preparedRequestId: string | null;
 	preparedPromise: Promise<PreparedAssetRecord> | null;
 }
 
-export interface LookedUpAssetResponse {
-	request: AssetLookupRequestDto;
-	response: AssetLookupResponseDto;
-	dependencyAssetIds: string[];
-}
-
 export interface AssetPreparationGateway {
-	lookupAssetResponse(
-		request: AssetLookupRequestDto,
-	): Promise<LookedUpAssetResponse>;
-	prepareLookedUpAsset(
-		lookedUp: LookedUpAssetResponse,
-		request: AssetLookupRequestDto,
-	): Promise<PreparedAssetRecord>;
+	prepareAssets(
+		requests: readonly AssetLookupRequestDto[],
+	): Promise<PreparedAssetRecord[]>;
 }
 
 export class AssetChannelController {
@@ -61,35 +58,57 @@ export class AssetChannelController {
 
 	private readonly loadEntriesByAssetId = new Map<string, AssetLoadEntry>();
 
+	private readonly queuedPrepareRequests: PendingAssetRequest[] = [];
+
+	private prepareFlushScheduled = false;
+
 	private disposed = false;
 
 	constructor(
-		private readonly lookupAssetFn: AssetLookupFn = lookupAsset,
+		private readonly lookupAssetsFn: AssetLookupBatchFn = lookupBinaryAssetEnvelopes,
 		workerFactory: () => AssetWorkerLike = createAssetWorker,
+		private readonly profiler?: FrontendProfiler,
 	) {
 		this.worker = workerFactory();
 		this.worker.onmessage = (event) => {
+			const receivedAtEpochMs = performance.timeOrigin + performance.now();
 			const message = event.data;
-			if (message.type === "asset-ready") {
-				const pending = this.pendingRequests.get(
-					message.asset.request.requestId,
-				);
-				if (!pending) {
-					return;
+			if (message.type === "host-lookup-assets-binary") {
+				this.profiler?.recordFrameWork("asset-host.worker-request", {
+					requestCount: message.requests.length,
+					priority: commonPriority(message.requests),
+					pendingCount: this.pendingRequests.size,
+				});
+				void this.handleWorkerHostLookupBinary(message);
+				return;
+			}
+
+			this.recordWorkerResultFrameWork(message.results);
+			for (const result of message.results) {
+				if (result.type === "asset-ready") {
+					this.recordWorkerReadyProfile(result.profile, receivedAtEpochMs);
+					if (this.profiler) {
+						this.profiler.measureSync(
+							`asset-worker.message-handler.${result.profile.assetKind}`,
+							createWorkerProfileDetail(result.profile),
+							() => {
+								this.resolvePreparedAsset(result.asset);
+							},
+						);
+					} else {
+						this.resolvePreparedAsset(result.asset);
+					}
+					continue;
 				}
 
-				this.pendingRequests.delete(message.asset.request.requestId);
-				pending.resolve(message.asset);
-				return;
-			}
+				const pending = this.pendingRequests.get(result.requestId);
+				if (!pending) {
+					continue;
+				}
 
-			const pending = this.pendingRequests.get(message.requestId);
-			if (!pending) {
-				return;
+				this.pendingRequests.delete(result.requestId);
+				pending.reject(new Error(result.message));
 			}
-
-			this.pendingRequests.delete(message.requestId);
-			pending.reject(new Error(message.message));
 		};
 		this.worker.onerror = (event) => {
 			const errorMessage =
@@ -107,89 +126,52 @@ export class AssetChannelController {
 	async prepareAsset(
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
-		const lookedUp = await this.lookupAssetResponse(request);
-		return this.prepareLookedUpAsset(lookedUp, request);
+		const [asset] = await this.prepareAssets([request]);
+		if (!asset) {
+			throw new Error(`No prepared asset returned for ${request.assetId}.`);
+		}
+		return asset;
 	}
 
-	async lookupAssetResponse(
-		request: AssetLookupRequestDto,
-	): Promise<LookedUpAssetResponse> {
-		this.throwIfDisposed();
-
-		const entry = this.getOrCreateLoadEntry(request.assetId);
-		if (entry.responsePromise) {
-			return rebindLookedUpAssetResponse(await entry.responsePromise, request);
+	async prepareAssets(
+		requests: readonly AssetLookupRequestDto[],
+	): Promise<PreparedAssetRecord[]> {
+		if (requests.length === 0) {
+			return [];
 		}
-
-		entry.responseRequestId = request.requestId;
-		entry.responsePromise = new Promise<LookedUpAssetResponse>(
-			(resolve, reject) => {
-				entry.responseReject = reject;
-				void (async () => {
-					try {
-						const response = await this.lookupAssetFn(request);
-						this.throwIfDisposed();
-						const reboundResponse = rebindAssetLookupResponse(
-							response,
-							request,
-						);
-						resolve({
-							request,
-							response: reboundResponse,
-							dependencyAssetIds: getAssetResponseDependencies(
-								reboundResponse,
-							).map((dependency) => dependency.assetId),
-						});
-					} catch (error) {
-						reject(toError(error));
-					}
-				})();
-			},
+		return Promise.all(
+			requests.map((request) => this.prepareAssetSingle(request)),
 		);
-
-		try {
-			return await entry.responsePromise;
-		} catch (error) {
-			this.clearResponseLoadEntry(request.assetId, request.requestId);
-			throw error;
-		} finally {
-			queueMicrotask(() => {
-				const active = this.loadEntriesByAssetId.get(request.assetId);
-				if (
-					active?.responseRequestId === request.requestId &&
-					!active.preparedPromise
-				) {
-					this.clearResponseLoadEntry(request.assetId, request.requestId);
-				}
-			});
-		}
 	}
 
-	async prepareLookedUpAsset(
-		lookedUp: LookedUpAssetResponse,
+	private async prepareAssetSingle(
 		request: AssetLookupRequestDto,
 	): Promise<PreparedAssetRecord> {
 		this.throwIfDisposed();
 
 		const entry = this.getOrCreateLoadEntry(request.assetId);
 		if (entry.preparedPromise) {
+			this.profiler?.recordEvent("asset-channel.prepare-cache-hit", {
+				assetId: request.assetId,
+				priority: request.priority,
+			});
 			return rebindPreparedAssetRequest(await entry.preparedPromise, request);
 		}
 
+		this.profiler?.recordEvent("asset-channel.prepare-cache-miss", {
+			assetId: request.assetId,
+			priority: request.priority,
+		});
 		entry.preparedRequestId = request.requestId;
 		entry.preparedPromise = new Promise<PreparedAssetRecord>(
 			(resolve, reject) => {
-				this.pendingRequests.set(request.requestId, { resolve, reject });
-				try {
-					this.worker.postMessage({
-						type: "prepare-asset",
-						request,
-						response: rebindAssetLookupResponse(lookedUp.response, request),
-					});
-				} catch (error) {
-					this.pendingRequests.delete(request.requestId);
-					reject(toError(error));
-				}
+				const pending = {
+					request,
+					resolve,
+					reject,
+				};
+				this.pendingRequests.set(request.requestId, pending);
+				this.enqueuePrepareRequest(pending);
 			},
 		);
 
@@ -216,10 +198,10 @@ export class AssetChannelController {
 		const error = new Error(
 			"Asset channel was disposed before preparation completed.",
 		);
-		for (const entry of this.loadEntriesByAssetId.values()) {
-			entry.responseReject?.(error);
-		}
 		this.loadEntriesByAssetId.clear();
+		for (const pending of this.queuedPrepareRequests.splice(0)) {
+			pending.reject(error);
+		}
 		for (const pending of this.pendingRequests.values()) {
 			pending.reject(error);
 		}
@@ -233,26 +215,11 @@ export class AssetChannelController {
 		}
 
 		const entry: AssetLoadEntry = {
-			responseRequestId: null,
-			responsePromise: null,
-			responseReject: null,
 			preparedRequestId: null,
 			preparedPromise: null,
 		};
 		this.loadEntriesByAssetId.set(assetId, entry);
 		return entry;
-	}
-
-	private clearResponseLoadEntry(assetId: string, requestId: string): void {
-		const entry = this.loadEntriesByAssetId.get(assetId);
-		if (!entry || entry.responseRequestId !== requestId) {
-			return;
-		}
-
-		entry.responseRequestId = null;
-		entry.responsePromise = null;
-		entry.responseReject = null;
-		this.deleteLoadEntryIfIdle(assetId, entry);
 	}
 
 	private clearPreparedLoadEntry(assetId: string, requestId: string): void {
@@ -263,14 +230,11 @@ export class AssetChannelController {
 
 		entry.preparedRequestId = null;
 		entry.preparedPromise = null;
-		entry.responseRequestId = null;
-		entry.responsePromise = null;
-		entry.responseReject = null;
 		this.deleteLoadEntryIfIdle(assetId, entry);
 	}
 
 	private deleteLoadEntryIfIdle(assetId: string, entry: AssetLoadEntry): void {
-		if (!entry.responsePromise && !entry.preparedPromise) {
+		if (!entry.preparedPromise) {
 			this.loadEntriesByAssetId.delete(assetId);
 		}
 	}
@@ -280,6 +244,271 @@ export class AssetChannelController {
 			throw new Error("Asset channel was disposed before work completed.");
 		}
 	}
+
+	private enqueuePrepareRequest(pending: PendingAssetRequest): void {
+		this.queuedPrepareRequests.push(pending);
+		if (this.prepareFlushScheduled) {
+			return;
+		}
+
+		this.prepareFlushScheduled = true;
+		queueMicrotask(() => {
+			this.prepareFlushScheduled = false;
+			this.flushPrepareRequests();
+		});
+	}
+
+	private flushPrepareRequests(): void {
+		const pendingRequests = this.queuedPrepareRequests.splice(0);
+		if (pendingRequests.length === 0) {
+			return;
+		}
+
+		try {
+			this.throwIfDisposed();
+			for (const pending of pendingRequests) {
+				this.postPrepareRequest(pending);
+			}
+		} catch (error) {
+			const normalized = toError(error);
+			for (const pending of pendingRequests) {
+				this.pendingRequests.delete(pending.request.requestId);
+				pending.reject(normalized);
+			}
+		}
+	}
+
+	private postPrepareRequest(pending: PendingAssetRequest): void {
+		const mainPostStartedAtEpochMs = performance.timeOrigin + performance.now();
+		const message = {
+			type: "prepare-assets",
+			items: [
+				{
+					request: pending.request,
+					mainPostStartedAtEpochMs,
+				},
+			],
+		} satisfies AssetWorkerRequestMessage;
+		if (this.profiler) {
+			this.profiler.measureSync(
+				"asset-worker.post-message",
+				{
+					requestCount: 1,
+					priority: pending.request.priority,
+				},
+				() => this.worker.postMessage(message),
+			);
+		} else {
+			this.worker.postMessage(message);
+		}
+	}
+
+	private async handleWorkerHostLookupBinary(
+		message: AssetWorkerHostLookupBinaryRequestMessage,
+	): Promise<void> {
+		const mainRequestReceivedAtEpochMs =
+			performance.timeOrigin + performance.now();
+		try {
+			const mainLookupStartedAtEpochMs =
+				performance.timeOrigin + performance.now();
+			const envelopes = await (this.profiler?.measureAsync(
+				"asset-channel.lookup-host-batch",
+				{
+					requestCount: message.requests.length,
+					priority: commonPriority(message.requests),
+					responseMode: "raw-envelope",
+				},
+				() => this.lookupAssetsFn(message.requests),
+			) ?? this.lookupAssetsFn(message.requests));
+			const mainLookupEndedAtEpochMs =
+				performance.timeOrigin + performance.now();
+			const workerEnvelopes = envelopes.map((envelope) => ({
+				payload: envelope.payload,
+			})) satisfies AssetWorkerHostBinaryEnvelope[];
+			const byteLength = workerEnvelopes.reduce(
+				(total, envelope) => total + envelope.payload.byteLength,
+				0,
+			);
+			this.profiler?.recordFrameWork("asset-host.worker-response", {
+				requestCount: message.requests.length,
+				priority: commonPriority(message.requests),
+				byteLength,
+				byteLengthBucket: bucketBytes(byteLength),
+			});
+			this.worker.postMessage(
+				{
+					type: "host-lookup-assets-binary-complete",
+					requestId: message.requestId,
+					envelopes: workerEnvelopes,
+					workerRequestPostedAtEpochMs: message.workerPostStartedAtEpochMs,
+					mainRequestReceivedAtEpochMs,
+					mainLookupStartedAtEpochMs,
+					mainLookupEndedAtEpochMs,
+					mainResponsePostStartedAtEpochMs:
+						performance.timeOrigin + performance.now(),
+				},
+				workerEnvelopes.map((envelope) => envelope.payload),
+			);
+		} catch (error) {
+			this.worker.postMessage({
+				type: "host-lookup-assets-binary-error",
+				requestId: message.requestId,
+				message: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	private recordWorkerReadyProfile(
+		profile: AssetWorkerReadyProfile,
+		receivedAtEpochMs: number,
+	): void {
+		const detail = createWorkerProfileDetail(profile);
+		this.profiler?.recordDuration(
+			`asset-worker.main-to-worker-latency.${profile.assetKind}`,
+			profile.workerReceivedAtEpochMs - profile.mainPostStartedAtEpochMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-worker.host-lookup-wait.${profile.assetKind}`,
+			profile.hostLookupEndedAtMs - profile.hostLookupStartedAtMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-bridge.worker-to-main.${profile.assetKind}`,
+			profile.mainHostRequestReceivedAtEpochMs -
+				profile.workerHostRequestPostedAtEpochMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-bridge.main-lookup.${profile.assetKind}`,
+			profile.mainHostLookupEndedAtEpochMs -
+				profile.mainHostLookupStartedAtEpochMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-bridge.main-to-worker.${profile.assetKind}`,
+			profile.workerHostResponseReceivedAtEpochMs -
+				profile.mainHostResponsePostStartedAtEpochMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-bridge.roundtrip.${profile.assetKind}`,
+			profile.workerHostResponseReceivedAtEpochMs -
+				profile.workerHostRequestPostedAtEpochMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-worker.decode-binary-envelope.${profile.assetKind}`,
+			profile.decodeEndedAtMs - profile.decodeStartedAtMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-host.rust-asset-load.${profile.assetKind}`,
+			profile.rustAssetLoadMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-host.rust-response-serialize.${profile.assetKind}`,
+			profile.rustResponseSerializeMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-worker.prepare-payload.${profile.assetKind}`,
+			profile.prepareEndedAtMs - profile.prepareStartedAtMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-worker.collect-transferables.${profile.assetKind}`,
+			profile.transferCollectEndedAtMs - profile.transferCollectStartedAtMs,
+			detail,
+		);
+		this.profiler?.recordDuration(
+			`asset-worker.message-latency.${profile.assetKind}`,
+			receivedAtEpochMs - profile.postStartedAtEpochMs,
+			detail,
+		);
+		this.profiler?.recordEvent("asset-worker.ready", detail);
+	}
+
+	private recordWorkerResultFrameWork(
+		results: readonly AssetWorkerPreparedResult[],
+	): void {
+		if (!this.profiler) {
+			return;
+		}
+
+		let errorCount = 0;
+		const countsByKind = new Map<
+			string,
+			{
+				resultCount: number;
+				geometryBytes: number;
+				transferableBytes: number;
+			}
+		>();
+		for (const result of results) {
+			if (result.type === "asset-error") {
+				errorCount += 1;
+				continue;
+			}
+
+			const kind = result.profile.assetKind;
+			const existing = countsByKind.get(kind) ?? {
+				resultCount: 0,
+				geometryBytes: 0,
+				transferableBytes: 0,
+			};
+			existing.resultCount += 1;
+			existing.geometryBytes += result.profile.geometryBytes;
+			existing.transferableBytes += result.profile.transferableBytes;
+			countsByKind.set(kind, existing);
+		}
+
+		for (const [assetKind, counts] of countsByKind) {
+			this.profiler.recordFrameWork("asset-worker.results", {
+				assetKind,
+				resultCount: counts.resultCount,
+				geometryBytes: counts.geometryBytes,
+				geometryBytesBucket: bucketBytes(counts.geometryBytes),
+				transferableBytes: counts.transferableBytes,
+				transferableBytesBucket: bucketBytes(counts.transferableBytes),
+				pendingCount: this.pendingRequests.size,
+			});
+		}
+		if (errorCount > 0) {
+			this.profiler.recordFrameWork("asset-worker.errors", {
+				errorCount,
+				pendingCount: this.pendingRequests.size,
+			});
+		}
+	}
+
+	private resolvePreparedAsset(asset: PreparedAssetRecord): void {
+		const pending = this.pendingRequests.get(asset.request.requestId);
+		if (!pending) {
+			return;
+		}
+
+		this.pendingRequests.delete(asset.request.requestId);
+		pending.resolve(asset);
+	}
+}
+
+function createWorkerProfileDetail(
+	profile: AssetWorkerReadyProfile,
+): Record<string, unknown> {
+	return {
+		assetKind: profile.assetKind,
+		geometryBytes: profile.geometryBytes,
+		geometryBytesBucket: bucketBytes(profile.geometryBytes),
+		transferableBytes: profile.transferableBytes,
+		transferableBytesBucket: bucketBytes(profile.transferableBytes),
+		transferableCount: profile.transferableCount,
+		requestCount: profile.hostRequestCount,
+		byteLength: profile.hostResponseByteLength,
+		byteLengthBucket: bucketBytes(profile.hostResponseByteLength),
+		mainPostPayloadKind: profile.mainPostPayloadKind,
+	};
 }
 
 function rebindPreparedAssetRequest(
@@ -297,26 +526,33 @@ function rebindPreparedAssetRequest(
 	};
 }
 
-function rebindLookedUpAssetResponse(
-	lookedUp: LookedUpAssetResponse,
-	request: AssetLookupRequestDto,
-): LookedUpAssetResponse {
-	return {
-		...lookedUp,
-		request,
-		response: rebindAssetLookupResponse(lookedUp.response, request),
-	};
+function bucketBytes(byteCount: number): string {
+	if (byteCount === 0) {
+		return "0";
+	}
+	if (byteCount < 16 * 1024) {
+		return "<16KiB";
+	}
+	if (byteCount < 64 * 1024) {
+		return "16-64KiB";
+	}
+	if (byteCount < 256 * 1024) {
+		return "64-256KiB";
+	}
+	if (byteCount < 1024 * 1024) {
+		return "256KiB-1MiB";
+	}
+	return ">=1MiB";
 }
 
-function rebindAssetLookupResponse(
-	response: AssetLookupResponseDto,
-	request: AssetLookupRequestDto,
-): AssetLookupResponseDto {
-	return {
-		...response,
-		requestId: request.requestId,
-		assetId: request.assetId,
-	};
+function commonPriority(requests: readonly AssetLookupRequestDto[]): string {
+	const [first] = requests;
+	if (!first) {
+		return "none";
+	}
+	return requests.every((request) => request.priority === first.priority)
+		? first.priority
+		: "mixed";
 }
 
 function toError(error: unknown): Error {

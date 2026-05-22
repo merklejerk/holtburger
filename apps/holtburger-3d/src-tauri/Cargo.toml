@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 build = "build.rs"
 
+[features]
+profile-devtools = ["tauri/devtools"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

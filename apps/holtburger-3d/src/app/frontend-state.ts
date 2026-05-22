@@ -35,7 +35,7 @@ import type {
 } from "../lib/assets/types";
 import type { AssetLookupRequestDto } from "../lib/host/contracts";
 
-interface FrontendAppState {
+export interface FrontendAppState {
 	asset: AssetChannelState;
 	browserMode: BrowserModeState;
 }

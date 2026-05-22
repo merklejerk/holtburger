@@ -36,6 +36,7 @@ import {
 } from "three";
 
 import type { AssetChannelState } from "../assets/types";
+import { getActiveFrontendProfiler } from "../performance/frontend-profiler";
 import type { NormalizedViewportPoint } from "./model";
 import type {
 	CellDebugOverlay,
@@ -193,6 +194,7 @@ const PERFORMANCE_REPORT_INTERVAL_MS = 500;
 const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
+const MIN_STATIC_RENDERABLE_INSTANCE_CAPACITY = 8;
 
 interface VisibleTransitionPortalWork {
 	workItem: TransitionPortalWorkItem;
@@ -267,8 +269,10 @@ export function createWorldDisplayRenderer(
 	const terrainMeshes = new Map<string, Mesh>();
 	const staticGeometryCache = new Map<string, BufferGeometry>();
 	const staticRenderableGroupMeshes = new Map<string, InstancedMesh>();
+	const staticRenderableGroupPartSignatures = new Map<string, string>();
 	const structuredInteriorMeshes = new Map<string, Mesh>();
 	const portalMaskMeshes = new Map<string, Mesh>();
+	const portalMaskGeometrySignatures = new Map<string, string>();
 	let renderWorkingModel: WorldRenderWorkingModel =
 		createEmptyWorldRenderWorkingModel();
 	let residencyIndex: WorldResidencyIndex = createEmptyWorldResidencyIndex();
@@ -349,32 +353,48 @@ export function createWorldDisplayRenderer(
 		},
 		setTerrainScene(nextScene) {
 			terrainScene = nextScene;
-			syncTerrainMeshes(nextScene);
+			measureRendererSync("world-render.sync-terrain-meshes", {}, () =>
+				syncTerrainMeshes(nextScene),
+			);
 		},
 		setStaticRenderableScene(nextScene) {
 			staticRenderableScene = nextScene;
-			syncStaticRenderableMeshes(nextScene);
+			measureRendererSync("world-render.sync-static-renderables", {}, () =>
+				syncStaticRenderableMeshes(nextScene),
+			);
 		},
 		setStructuredInteriorScene(nextScene) {
 			structuredInteriorScene = nextScene;
-			syncStructuredInteriorMeshes(nextScene);
+			measureRendererSync("world-render.sync-structured-interiors", {}, () =>
+				syncStructuredInteriorMeshes(nextScene),
+			);
 		},
 		setTransitionPortalModel(nextModel) {
 			transitionPortalModel = nextModel;
-			syncPortalMaskMeshes(nextModel);
+			measureRendererSync("world-render.sync-portal-masks", {}, () =>
+				syncPortalMaskMeshes(nextModel),
+			);
 		},
 		setDebugOverlayScene(nextScene) {
 			debugOverlayScene = nextScene;
-			syncDebugOverlayMeshes(nextScene);
+			measureRendererSync("world-render.sync-debug-overlays", {}, () =>
+				syncDebugOverlayMeshes(nextScene),
+			);
 		},
 		setRenderSceneContext(nextContext) {
 			renderSceneContext = nextContext;
-			updateResidencyIndex();
+			measureRendererSync("world-render.update-residency-index", {}, () =>
+				updateResidencyIndex(),
+			);
 		},
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
-			syncRenderChunkRoots(nextTransforms);
-			updateResidencyIndex();
+			measureRendererSync("world-render.sync-chunk-roots", {}, () =>
+				syncRenderChunkRoots(nextTransforms),
+			);
+			measureRendererSync("world-render.update-residency-index", {}, () =>
+				updateResidencyIndex(),
+			);
 		},
 		setRenderSpatialQuery(nextQuery) {
 			renderSpatialQuery = nextQuery;
@@ -422,7 +442,9 @@ export function createWorldDisplayRenderer(
 		if (disposed) {
 			return;
 		}
-		syncSpatialVisibility();
+		measureRendererSync("world-render.sync-spatial-visibility", {}, () =>
+			syncSpatialVisibility(),
+		);
 		syncReducedFrameRateState();
 		if (
 			isReducedFrameRateActive &&
@@ -434,7 +456,9 @@ export function createWorldDisplayRenderer(
 
 		const frameStartedAt = frameAt;
 		const renderStartedAt = window.performance.now();
-		renderWorldPasses();
+		measureRendererSync("world-render.render-passes", {}, () =>
+			renderWorldPasses(),
+		);
 		const renderMs = window.performance.now() - renderStartedAt;
 		lastRenderedAt = frameStartedAt;
 		if (lastFrameAt !== null) {
@@ -465,6 +489,19 @@ export function createWorldDisplayRenderer(
 			performanceWindowStartedAt = frameStartedAt;
 		}
 		lastFrameAt = frameStartedAt;
+	}
+
+	function measureRendererSync<T>(
+		name: string,
+		detail: Record<string, unknown>,
+		work: () => T,
+	): T {
+		const profiler = getActiveFrontendProfiler();
+		if (!profiler) {
+			return work();
+		}
+
+		return profiler.measureSync(name, detail, work);
 	}
 
 	function resetPerformanceWindow(): void {
@@ -1334,13 +1371,17 @@ export function createWorldDisplayRenderer(
 
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
 			const activeParts = partsByGroupKey.get(groupKey);
-			if (activeParts && mesh.count === activeParts.length) {
+			if (
+				activeParts &&
+				activeParts.length <= staticRenderableMeshCapacity(mesh)
+			) {
 				continue;
 			}
 
 			mesh.removeFromParent();
 			disposeMeshMaterial(mesh);
 			staticRenderableGroupMeshes.delete(groupKey);
+			staticRenderableGroupPartSignatures.delete(groupKey);
 		}
 
 		for (const [groupKey, parts] of partsByGroupKey.entries()) {
@@ -1373,7 +1414,13 @@ export function createWorldDisplayRenderer(
 			if (firstPart.kind === "indoor-static") {
 				mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
 			}
-			updateStaticRenderableInstancedMesh(mesh, parts);
+			const partsSignature = describeStaticRenderablePartsSignature(parts);
+			if (staticRenderableGroupPartSignatures.get(groupKey) !== partsSignature) {
+				updateStaticRenderableInstancedMesh(mesh, parts);
+				staticRenderableGroupPartSignatures.set(groupKey, partsSignature);
+			} else {
+				mesh.count = parts.length;
+			}
 		}
 
 		for (const [gfxAssetId, geometry] of staticGeometryCache.entries()) {
@@ -1478,6 +1525,7 @@ export function createWorldDisplayRenderer(
 			mesh.removeFromParent();
 			disposeMesh(mesh);
 			portalMaskMeshes.delete(groupId);
+			portalMaskGeometrySignatures.delete(groupId);
 			const passMesh = portalAperturePassMeshes.get(groupId);
 			if (passMesh) {
 				passMesh.removeFromParent();
@@ -1492,8 +1540,20 @@ export function createWorldDisplayRenderer(
 				mesh = createPortalMaskMesh(candidate);
 				chunkRoot.add(mesh);
 				portalMaskMeshes.set(candidate.id, mesh);
+				portalMaskGeometrySignatures.set(
+					candidate.id,
+					describePortalMaskGeometrySignature(candidate),
+				);
 			} else {
 				chunkRoot.attach(mesh);
+				const geometrySignature = describePortalMaskGeometrySignature(candidate);
+				if (
+					portalMaskGeometrySignatures.get(candidate.id) !== geometrySignature
+				) {
+					mesh.geometry.dispose();
+					mesh.geometry = buildPortalMaskGeometry(candidate.aperture.points);
+					portalMaskGeometrySignatures.set(candidate.id, geometrySignature);
+				}
 				updatePortalMaskMesh(mesh, candidate);
 			}
 		}
@@ -1539,8 +1599,6 @@ export function createWorldDisplayRenderer(
 		mesh: Mesh,
 		group: TransitionPortalCandidate,
 	): void {
-		mesh.geometry.dispose();
-		mesh.geometry = buildPortalMaskGeometry(group.aperture.points);
 		mesh.matrix.copy(
 			buildAcPlacementMatrix(
 				group.aperture.chunkLocalPlacement,
@@ -1552,6 +1610,21 @@ export function createWorldDisplayRenderer(
 		if (!Array.isArray(material)) {
 			material.stencilRef = group.stencilRef;
 		}
+	}
+
+	function describePortalMaskGeometrySignature(
+		group: TransitionPortalCandidate,
+	): string {
+		return [
+			group.aperture.id,
+			describePlacementSignature(group.aperture.chunkLocalPlacement),
+			group.aperture.points
+				.map(
+					(point) =>
+						`${point.x.toFixed(5)},${point.y.toFixed(5)},${point.z.toFixed(5)}`,
+				)
+				.join(";"),
+		].join("|");
 	}
 
 	function buildPortalMaskGeometry(
@@ -2057,7 +2130,12 @@ export function createWorldDisplayRenderer(
 			metalness: 0.02,
 			roughness: 0.88,
 		});
-		const mesh = new InstancedMesh(geometry, material, count);
+		const mesh = new InstancedMesh(
+			geometry,
+			material,
+			nextStaticRenderableInstanceCapacity(count),
+		);
+		mesh.count = count;
 		mesh.name = `static-renderable/${groupKey}`;
 		mesh.userData.gfxAssetId = gfxAssetId;
 		return mesh;
@@ -2067,6 +2145,7 @@ export function createWorldDisplayRenderer(
 		mesh: InstancedMesh,
 		parts: StaticRenderablePart[],
 	): void {
+		mesh.count = parts.length;
 		parts.forEach((part, index) => {
 			mesh.setMatrixAt(index, buildStaticRenderablePartMatrix(part));
 			mesh.setColorAt(index, buildStaticRenderableColor(part.debugColorKey));
@@ -2075,6 +2154,40 @@ export function createWorldDisplayRenderer(
 		if (mesh.instanceColor) {
 			mesh.instanceColor.needsUpdate = true;
 		}
+	}
+
+	function staticRenderableMeshCapacity(mesh: InstancedMesh): number {
+		return mesh.instanceMatrix.count;
+	}
+
+	function nextStaticRenderableInstanceCapacity(requiredCount: number): number {
+		let capacity = MIN_STATIC_RENDERABLE_INSTANCE_CAPACITY;
+		while (capacity < requiredCount) {
+			capacity *= 2;
+		}
+		return capacity;
+	}
+
+	function describeStaticRenderablePartsSignature(
+		parts: readonly StaticRenderablePart[],
+	): string {
+		return parts.map((part) => part.renderKey).join("|");
+	}
+
+	function describePlacementSignature(
+		placement: StaticRenderablePart["chunkLocalInstancePlacement"],
+	): string {
+		return [
+			placement.origin.x,
+			placement.origin.y,
+			placement.origin.z,
+			placement.orientation.w,
+			placement.orientation.x,
+			placement.orientation.y,
+			placement.orientation.z,
+		]
+			.map((value) => value.toFixed(5))
+			.join(",");
 	}
 
 	function createTerrainTileMesh(tile: TerrainSceneTile): Mesh {
@@ -2108,6 +2221,7 @@ export function createWorldDisplayRenderer(
 			disposeMeshMaterial(mesh);
 		}
 		staticRenderableGroupMeshes.clear();
+		staticRenderableGroupPartSignatures.clear();
 		for (const geometry of staticGeometryCache.values()) {
 			geometry.dispose();
 		}
@@ -2120,6 +2234,7 @@ export function createWorldDisplayRenderer(
 			disposeMesh(mesh);
 		}
 		portalMaskMeshes.clear();
+		portalMaskGeometrySignatures.clear();
 		portalAperturePassScene.clear();
 		portalAperturePassMeshes.clear();
 		for (const object of debugOverlayObjects.values()) {

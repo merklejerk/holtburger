@@ -110,6 +110,10 @@ export function deriveTransitionPortalCandidates({
 		truncatedInteriorGroupCount: 0,
 	};
 	const candidates: TransitionPortalCandidate[] = [];
+	const coverageBySeedKey = new Map<
+		string,
+		ReturnType<typeof deriveStructuredInteriorCoverage>
+	>();
 	let nextStencilRef = 1;
 
 	for (const portal of collectActiveOutdoorBuildingPortals(
@@ -133,6 +137,7 @@ export function deriveTransitionPortalCandidates({
 					stencilRef: nextStencilRef,
 					source,
 					assetState,
+					coverageBySeedKey,
 				});
 				if (candidate.kind === "skip") {
 					diagnostics[candidate.reason] += 1;
@@ -287,12 +292,17 @@ function createTransitionPortalCandidate({
 	stencilRef,
 	source,
 	assetState,
+	coverageBySeedKey,
 }: {
 	aperture: PortalAperture;
 	portal: PreparedLandblockStaticBuildingPortal;
 	stencilRef: number;
 	source: TransitionPortalSource;
 	assetState: AssetChannelState;
+	coverageBySeedKey: Map<
+		string,
+		ReturnType<typeof deriveStructuredInteriorCoverage>
+	>;
 }): TransitionPortalCandidateCreationResult {
 	if (
 		aperture.targetStatus === "missing-polygon" ||
@@ -314,13 +324,18 @@ function createTransitionPortalCandidate({
 		...portal.linkedEnvCellIds,
 		...portal.stabList.filter(isEnvCellId),
 	]);
-	const coverage = deriveStructuredInteriorCoverage(
-		{
-			kind: "landblock-closure",
-			seedEnvCellIds,
-		},
-		assetState.preparedByAssetId,
-	);
+	const seedKey = seedEnvCellIds.join(",");
+	let coverage = coverageBySeedKey.get(seedKey);
+	if (!coverage) {
+		coverage = deriveStructuredInteriorCoverage(
+			{
+				kind: "landblock-closure",
+				seedEnvCellIds,
+			},
+			assetState.preparedByAssetId,
+		);
+		coverageBySeedKey.set(seedKey, coverage);
+	}
 
 	return {
 		kind: "candidate",

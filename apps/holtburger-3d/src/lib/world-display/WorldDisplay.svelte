@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { onMount, tick } from "svelte";
 
 	import {
 		createInitialAssetChannelState,
@@ -72,38 +72,15 @@
 	let controlledCameraFrame: SceneCameraFrame | null = null;
 	let transitionPortalMaxDepth = 1;
 
-	let assetStateRevision = "initial";
-	let terrainSceneRevision = "initial";
-	let staticRenderableSceneRevision = "initial";
-	let structuredInteriorSceneRevision = "initial";
-	let transitionPortalModelRevision = "initial";
-	let debugOverlaySceneRevision = "initial";
-	let renderSceneContextRevision = "initial";
-	let renderChunkTransformsRevision = "initial";
-	let renderSpatialQueryRevision = "initial";
-	let controlledCameraFrameRevision = "initial";
-	let transitionPortalMaxDepthRevision = "initial";
+	onMount(() => {
+		let disposed = false;
 
-	let appliedAssetStateRevision: string | null = null;
-	let appliedTerrainSceneRevision: string | null = null;
-	let appliedStaticRenderableSceneRevision: string | null = null;
-	let appliedStructuredInteriorSceneRevision: string | null = null;
-	let appliedTransitionPortalModelRevision: string | null = null;
-	let appliedDebugOverlaySceneRevision: string | null = null;
-	let appliedRenderSceneContextRevision: string | null = null;
-	let appliedRenderChunkTransformsRevision: string | null = null;
-	let appliedRenderSpatialQueryRevision: string | null = null;
-	let appliedControlledCameraFrameRevision: string | null = null;
-	let appliedTransitionPortalMaxDepthRevision: string | null = null;
+		void tick().then(() => {
+			if (disposed || !viewportHost) {
+				return;
+			}
 
-	$effect(() => {
-		if (!viewportHost) {
-			return;
-		}
-
-		const controller = createWorldDisplayRenderer(
-			viewportHost,
-			untrack(() => ({
+			const controller = createWorldDisplayRenderer(viewportHost, {
 				assetState,
 				terrainScene,
 				staticRenderableScene,
@@ -118,150 +95,84 @@
 				onCameraFrameChange,
 				onRenderMetricsChange,
 				onCameraResidencyChange,
-			})),
-		);
-		appliedAssetStateRevision = assetStateRevision;
-		appliedTerrainSceneRevision = terrainSceneRevision;
-		appliedStaticRenderableSceneRevision = staticRenderableSceneRevision;
-		appliedStructuredInteriorSceneRevision = structuredInteriorSceneRevision;
-		appliedTransitionPortalModelRevision = transitionPortalModelRevision;
-		appliedDebugOverlaySceneRevision = debugOverlaySceneRevision;
-		appliedRenderSceneContextRevision = renderSceneContextRevision;
-		appliedRenderChunkTransformsRevision = renderChunkTransformsRevision;
-		appliedRenderSpatialQueryRevision = renderSpatialQueryRevision;
-		appliedControlledCameraFrameRevision = controlledCameraFrameRevision;
-		appliedTransitionPortalMaxDepthRevision = transitionPortalMaxDepthRevision;
-		rendererController = controller;
+			});
+			rendererController = controller;
+		});
 
 		return () => {
-			if (rendererController === controller) {
-				rendererController = null;
-			}
-			controller.dispose();
+			disposed = true;
+			rendererController?.dispose();
+			rendererController = null;
 		};
 	});
 
-	$effect(() => {
-		const controller = rendererController;
-		if (!controller) {
-			return;
-		}
-		controller.setCameraFrameChangeHandler(onCameraFrameChange);
-	});
-
-	$effect(() => {
-		const controller = rendererController;
-		if (!controller) {
-			return;
-		}
-		controller.setRenderMetricsChangeHandler(onRenderMetricsChange);
-	});
-
-	$effect(() => {
-		const controller = rendererController;
-		if (!controller) {
-			return;
-		}
-		controller.setCameraResidencyChangeHandler(onCameraResidencyChange);
-	});
-
-	export function setAssetState(
-		revision: string,
-		nextAssetState: AssetChannelState,
-	): void {
+	export function setAssetState(nextAssetState: AssetChannelState): void {
 		assetState = nextAssetState;
-		assetStateRevision = revision;
-		applyAssetState();
+		rendererController?.setAssetState(assetState);
 	}
 
-	export function setTerrainScene(
-		revision: string,
-		nextScene: TerrainSceneModel,
-	): void {
+	export function setTerrainScene(nextScene: TerrainSceneModel): void {
 		terrainScene = nextScene;
-		terrainSceneRevision = revision;
-		applyTerrainScene();
+		rendererController?.setTerrainScene(terrainScene);
 	}
 
 	export function setStaticRenderableScene(
-		revision: string,
 		nextScene: StaticRenderableSceneModel,
 	): void {
 		staticRenderableScene = nextScene;
-		staticRenderableSceneRevision = revision;
-		applyStaticRenderableScene();
+		rendererController?.setStaticRenderableScene(staticRenderableScene);
 	}
 
 	export function setStructuredInteriorScene(
-		revision: string,
 		nextScene: StructuredInteriorSceneModel,
 	): void {
 		structuredInteriorScene = nextScene;
-		structuredInteriorSceneRevision = revision;
-		applyStructuredInteriorScene();
+		rendererController?.setStructuredInteriorScene(structuredInteriorScene);
 	}
 
 	export function setTransitionPortalModel(
-		revision: string,
 		nextModel: TransitionPortalCandidateModel,
 	): void {
 		transitionPortalModel = nextModel;
-		transitionPortalModelRevision = revision;
-		applyTransitionPortalModel();
+		rendererController?.setTransitionPortalModel(transitionPortalModel);
 	}
 
-	export function setDebugOverlayScene(
-		revision: string,
-		nextScene: WorldDebugOverlayModel,
-	): void {
+	export function setDebugOverlayScene(nextScene: WorldDebugOverlayModel): void {
 		debugOverlayScene = nextScene;
-		debugOverlaySceneRevision = revision;
-		applyDebugOverlayScene();
+		rendererController?.setDebugOverlayScene(debugOverlayScene);
 	}
 
 	export function setRenderSceneContext(
-		revision: string,
 		nextContext: WorldRenderSceneContext,
 	): void {
 		renderSceneContext = nextContext;
-		renderSceneContextRevision = revision;
-		applyRenderSceneContext();
+		rendererController?.setRenderSceneContext(renderSceneContext);
 	}
 
 	export function setRenderChunkTransforms(
-		revision: string,
 		nextTransforms: readonly RenderChunkTransform[],
 	): void {
 		renderChunkTransforms = nextTransforms;
-		renderChunkTransformsRevision = revision;
-		applyRenderChunkTransforms();
+		rendererController?.setRenderChunkTransforms(renderChunkTransforms);
 	}
 
 	export function setRenderSpatialQuery(
-		revision: string,
 		nextQuery: RenderSpatialIndexQuery | null,
 	): void {
 		renderSpatialQuery = nextQuery;
-		renderSpatialQueryRevision = revision;
-		applyRenderSpatialQuery();
+		rendererController?.setRenderSpatialQuery(renderSpatialQuery);
 	}
 
 	export function setControlledCameraFrame(
-		revision: string,
 		nextFrame: SceneCameraFrame | null,
 	): void {
 		controlledCameraFrame = nextFrame;
-		controlledCameraFrameRevision = revision;
-		applyControlledCameraFrame();
+		rendererController?.setControlledCameraFrame(controlledCameraFrame);
 	}
 
-	export function setTransitionPortalMaxDepth(
-		revision: string,
-		nextMaxDepth: number,
-	): void {
+	export function setTransitionPortalMaxDepth(nextMaxDepth: number): void {
 		transitionPortalMaxDepth = nextMaxDepth;
-		transitionPortalMaxDepthRevision = revision;
-		applyTransitionPortalMaxDepth();
+		rendererController?.setTransitionPortalMaxDepth(transitionPortalMaxDepth);
 	}
 
 	export function pickTerrainLandblockAtViewportPoint(
@@ -284,132 +195,6 @@
 		);
 	}
 
-	function applyAssetState(): void {
-		const controller = rendererController;
-		if (!controller || appliedAssetStateRevision === assetStateRevision) {
-			return;
-		}
-		controller.setAssetState(assetState);
-		appliedAssetStateRevision = assetStateRevision;
-	}
-
-	function applyTerrainScene(): void {
-		const controller = rendererController;
-		if (!controller || appliedTerrainSceneRevision === terrainSceneRevision) {
-			return;
-		}
-		controller.setTerrainScene(terrainScene);
-		appliedTerrainSceneRevision = terrainSceneRevision;
-	}
-
-	function applyStaticRenderableScene(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedStaticRenderableSceneRevision === staticRenderableSceneRevision
-		) {
-			return;
-		}
-		controller.setStaticRenderableScene(staticRenderableScene);
-		appliedStaticRenderableSceneRevision = staticRenderableSceneRevision;
-	}
-
-	function applyStructuredInteriorScene(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedStructuredInteriorSceneRevision === structuredInteriorSceneRevision
-		) {
-			return;
-		}
-		controller.setStructuredInteriorScene(structuredInteriorScene);
-		appliedStructuredInteriorSceneRevision = structuredInteriorSceneRevision;
-	}
-
-	function applyTransitionPortalModel(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedTransitionPortalModelRevision === transitionPortalModelRevision
-		) {
-			return;
-		}
-		controller.setTransitionPortalModel(transitionPortalModel);
-		appliedTransitionPortalModelRevision = transitionPortalModelRevision;
-	}
-
-	function applyDebugOverlayScene(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedDebugOverlaySceneRevision === debugOverlaySceneRevision
-		) {
-			return;
-		}
-		controller.setDebugOverlayScene(debugOverlayScene);
-		appliedDebugOverlaySceneRevision = debugOverlaySceneRevision;
-	}
-
-	function applyRenderSceneContext(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedRenderSceneContextRevision === renderSceneContextRevision
-		) {
-			return;
-		}
-		controller.setRenderSceneContext(renderSceneContext);
-		appliedRenderSceneContextRevision = renderSceneContextRevision;
-	}
-
-	function applyRenderChunkTransforms(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedRenderChunkTransformsRevision === renderChunkTransformsRevision
-		) {
-			return;
-		}
-		controller.setRenderChunkTransforms(renderChunkTransforms);
-		appliedRenderChunkTransformsRevision = renderChunkTransformsRevision;
-	}
-
-	function applyRenderSpatialQuery(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedRenderSpatialQueryRevision === renderSpatialQueryRevision
-		) {
-			return;
-		}
-		controller.setRenderSpatialQuery(renderSpatialQuery);
-		appliedRenderSpatialQueryRevision = renderSpatialQueryRevision;
-	}
-
-	function applyControlledCameraFrame(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedControlledCameraFrameRevision === controlledCameraFrameRevision
-		) {
-			return;
-		}
-		controller.setControlledCameraFrame(controlledCameraFrame);
-		appliedControlledCameraFrameRevision = controlledCameraFrameRevision;
-	}
-
-	function applyTransitionPortalMaxDepth(): void {
-		const controller = rendererController;
-		if (
-			!controller ||
-			appliedTransitionPortalMaxDepthRevision ===
-				transitionPortalMaxDepthRevision
-		) {
-			return;
-		}
-		controller.setTransitionPortalMaxDepth(transitionPortalMaxDepth);
-		appliedTransitionPortalMaxDepthRevision = transitionPortalMaxDepthRevision;
-	}
 </script>
 
 <div class="world-display">

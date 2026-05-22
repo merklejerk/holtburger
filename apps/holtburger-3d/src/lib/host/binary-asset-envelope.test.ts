@@ -25,7 +25,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 				sections: [
 					{
 						role: "prepared.terrainMesh.vertices",
-						path: "payload.prepared.terrainMesh.vertices",
+						path: "responses.0.payload.prepared.terrainMesh.vertices",
 						scalarType: "f32",
 						componentCount: 3,
 						elementCount: 2,
@@ -34,7 +34,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 					},
 					{
 						role: "prepared.terrainMesh.triangles",
-						path: "payload.prepared.terrainMesh.triangles",
+						path: "responses.0.payload.prepared.terrainMesh.triangles",
 						scalarType: "f32",
 						componentCount: 5,
 						elementCount: 1,
@@ -88,7 +88,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 				sections: [
 					{
 						role: "prepared.gfxObj.renderGeometry.positions",
-						path: "payload.renderGeometry.positions",
+						path: "responses.0.payload.renderGeometry.positions",
 						scalarType: "f32",
 						componentCount: 3,
 						elementCount: 2,
@@ -97,7 +97,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 					},
 					{
 						role: "prepared.gfxObj.renderGeometry.normals",
-						path: "payload.renderGeometry.normals",
+						path: "responses.0.payload.renderGeometry.normals",
 						scalarType: "f32",
 						componentCount: 3,
 						elementCount: 2,
@@ -106,7 +106,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 					},
 					{
 						role: "prepared.gfxObj.renderGeometry.uvs",
-						path: "payload.renderGeometry.uvs",
+						path: "responses.0.payload.renderGeometry.uvs",
 						scalarType: "f32",
 						componentCount: 2,
 						elementCount: 2,
@@ -151,7 +151,7 @@ function buildEnvelope({
 		version: 1,
 		byteOrder: "little-endian",
 		sectionByteOffsetBase: "section-data",
-		response,
+		responses: [response],
 		sections,
 	};
 	const manifestBytes = Array.from(encoder.encode(JSON.stringify(manifest)));

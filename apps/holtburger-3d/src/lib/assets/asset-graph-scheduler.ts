@@ -37,14 +37,11 @@ export class AssetGraphScheduler {
 	): Promise<AssetGraphPreparationResult> {
 		const graph = new GraphTraversalState(rootRequest, preparedByAssetId);
 		const activeLookupTasks = new Set<Promise<void>>();
-		const activePreparationTasks = new Set<Promise<void>>();
 
-		const scheduleLookup = (request: AssetLookupRequestDto): void => {
-			const lookupTask = this.runLookup(
-				graph,
-				request,
-				activePreparationTasks,
-			).finally(() => {
+		const scheduleLookupBatch = (
+			requests: readonly AssetLookupRequestDto[],
+		): void => {
+			const lookupTask = this.runLookupBatch(graph, requests).finally(() => {
 				activeLookupTasks.delete(lookupTask);
 			});
 			activeLookupTasks.add(lookupTask);
@@ -56,9 +53,11 @@ export class AssetGraphScheduler {
 				graph.hasReadyRequests() &&
 				activeLookupTasks.size < this.lookupConcurrencyLimit
 			) {
-				const request = graph.shiftReadyRequest();
-				if (request) {
-					scheduleLookup(request);
+				const requests = graph.shiftReadyRequests(
+					this.lookupConcurrencyLimit - activeLookupTasks.size,
+				);
+				if (requests.length > 0) {
+					scheduleLookupBatch(requests);
 				}
 			}
 
@@ -69,32 +68,28 @@ export class AssetGraphScheduler {
 			await Promise.race(activeLookupTasks);
 		}
 
-		await Promise.all(activePreparationTasks);
 		return graph.toResult();
 	}
 
-	private async runLookup(
+	private async runLookupBatch(
 		graph: GraphTraversalState,
-		request: AssetLookupRequestDto,
-		activePreparationTasks: Set<Promise<void>>,
+		requests: readonly AssetLookupRequestDto[],
 	): Promise<void> {
 		try {
-			const lookedUp = await this.gateway.lookupAssetResponse(request);
-			graph.enqueueDependencies(lookedUp.dependencyAssetIds);
-			const preparationTask = this.gateway
-				.prepareLookedUpAsset(lookedUp, request)
-				.then((asset) => {
-					graph.addPreparedAsset(asset);
-				})
-				.catch((error: unknown) => {
-					graph.addFailure(request.assetId, toError(error));
-				})
-				.finally(() => {
-					activePreparationTasks.delete(preparationTask);
-				});
-			activePreparationTasks.add(preparationTask);
+			const assets = await this.gateway.prepareAssets(requests);
+			for (const asset of assets) {
+				graph.addPreparedAsset(asset);
+				graph.enqueueDependencies(
+					getPreparedAssetDependencies(asset).map(
+						(dependency) => dependency.assetId,
+					),
+				);
+			}
 		} catch (error) {
-			graph.addFailure(request.assetId, toError(error));
+			const normalized = toError(error);
+			for (const request of requests) {
+				graph.addFailure(request.assetId, normalized);
+			}
 		}
 	}
 }
@@ -134,8 +129,11 @@ class GraphTraversalState {
 		return this.readyQueue.length > 0;
 	}
 
-	shiftReadyRequest(): AssetLookupRequestDto | null {
-		return this.readyQueue.shift() ?? null;
+	shiftReadyRequests(maxCount: number): AssetLookupRequestDto[] {
+		if (!Number.isInteger(maxCount) || maxCount <= 0) {
+			throw new Error("Graph lookup batch size must be positive.");
+		}
+		return this.readyQueue.splice(0, maxCount);
 	}
 
 	hasFailed(): boolean {

@@ -78,6 +78,8 @@ import {
 	type SceneCameraFrame,
 } from "./camera";
 import type {
+	BrowserCameraResidency,
+	BrowserCameraResidencyChangeHandler,
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderDebugMetrics,
 	WorldRenderMetrics,
@@ -131,6 +133,7 @@ import {
 import {
 	buildWorldResidencyIndex,
 	createEmptyWorldResidencyIndex,
+	deriveBrowserCameraResidency,
 	describeCameraViewResidencyContext,
 	type CameraViewResidencyContext,
 	type WorldResidencyIndex,
@@ -151,6 +154,7 @@ export interface WorldDisplayRendererOptions {
 	transitionPortalMaxDepth?: number;
 	onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 	onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
+	onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
 }
 
 export interface WorldDisplayRenderer {
@@ -170,6 +174,9 @@ export interface WorldDisplayRenderer {
 	): void;
 	setRenderMetricsChangeHandler(
 		handler: WorldRenderMetricsChangeHandler | undefined,
+	): void;
+	setCameraResidencyChangeHandler(
+		handler: BrowserCameraResidencyChangeHandler | undefined,
 	): void;
 	pickTerrainLandblockAtViewportPoint(
 		viewportPoint: NormalizedViewportPoint,
@@ -220,6 +227,7 @@ export function createWorldDisplayRenderer(
 	);
 	let onCameraFrameChange = options.onCameraFrameChange;
 	let onRenderMetricsChange = options.onRenderMetricsChange;
+	let onCameraResidencyChange = options.onCameraResidencyChange;
 
 	const renderer = new WebGLRenderer({
 		antialias: true,
@@ -268,6 +276,13 @@ export function createWorldDisplayRenderer(
 		kind: "unknown",
 		landblockId: null,
 	};
+	let latestCameraResidency: BrowserCameraResidency = {
+		kind: "unknown",
+		landblockId: null,
+		envCellId: null,
+		source: "unknown",
+	};
+	let lastReportedCameraResidencyKey: string | null = null;
 	const debugOverlayObjects = new Map<string, Object3D>();
 	const chunkRoots = new Map<RenderChunkKey, RenderChunkRootRecord<Group>>();
 	let lastReportedMetricsKey: string | null = null;
@@ -377,6 +392,11 @@ export function createWorldDisplayRenderer(
 		setRenderMetricsChangeHandler(handler) {
 			onRenderMetricsChange = handler;
 			reportRenderMetrics();
+		},
+		setCameraResidencyChangeHandler(handler) {
+			onCameraResidencyChange = handler;
+			lastReportedCameraResidencyKey = null;
+			reportCameraResidency();
 		},
 		pickTerrainLandblockAtViewportPoint(viewportPoint) {
 			const pick = this.pickAtViewportPoint(
@@ -506,6 +526,12 @@ export function createWorldDisplayRenderer(
 			z: camera.position.z,
 		});
 		cameraViewResidency = cameraResidencyQuery.context;
+		reportCameraResidency(
+			deriveBrowserCameraResidency(
+				cameraResidencyQuery.context,
+				cameraResidencyQuery.diagnostics,
+			),
+		);
 		renderer.info.reset();
 		const renderPolicy = deriveActiveRenderPolicy();
 		const transitionWorkBatches =
@@ -790,7 +816,9 @@ export function createWorldDisplayRenderer(
 		>,
 		level: Pick<TransitionPortalRenderLevel, "direction" | "recursionDepth">,
 	): readonly VisibleTransitionPortalWork[] {
-		return transitionWorkBatches.get(transitionPortalDepthBatchKey(level)) ?? [];
+		return (
+			transitionWorkBatches.get(transitionPortalDepthBatchKey(level)) ?? []
+		);
 	}
 
 	function countTransitionPortalRenderWorkItems(
@@ -1259,6 +1287,19 @@ export function createWorldDisplayRenderer(
 
 		lastReportedMetricsKey = metricsKey;
 		onRenderMetricsChange?.(metrics);
+	}
+
+	function reportCameraResidency(
+		nextResidency: BrowserCameraResidency = latestCameraResidency,
+	): void {
+		latestCameraResidency = nextResidency;
+		const residencyKey = describeBrowserCameraResidencyKey(nextResidency);
+		if (residencyKey === lastReportedCameraResidencyKey) {
+			return;
+		}
+
+		lastReportedCameraResidencyKey = residencyKey;
+		onCameraResidencyChange?.(nextResidency);
 	}
 
 	function terrainVertexCount(): number {
@@ -2184,6 +2225,17 @@ function countVisibleObjects(objects: Iterable<Object3D>): number {
 		}
 	}
 	return count;
+}
+
+function describeBrowserCameraResidencyKey(
+	residency: BrowserCameraResidency,
+): string {
+	return [
+		residency.kind,
+		residency.landblockId ?? "none",
+		residency.envCellId ?? "none",
+		residency.source,
+	].join(":");
 }
 
 function createPortalRenderMetrics(

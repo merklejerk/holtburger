@@ -44,7 +44,10 @@
 		shouldSendThrottledCameraHint,
 		type NormalizedViewportPoint,
 	} from "../lib/world-display/model";
-	import type { WorldRenderMetrics } from "../lib/world-display/renderer-contract";
+	import type {
+		BrowserCameraResidency,
+		WorldRenderMetrics,
+	} from "../lib/world-display/renderer-contract";
 	import {
 		deriveStaticRenderableSceneModel,
 		isPreparedGfxObjAsset,
@@ -149,6 +152,7 @@
 	let worldDisplaySurface = $state<WorldDisplay | null>(null);
 	const renderSpatialIndex = createLinearRenderSpatialIndex();
 	let renderMetrics = $state<WorldRenderMetrics | null>(null);
+	let rendererCameraResidency = $state<BrowserCameraResidency | null>(null);
 	let browserCameraState = $state<BrowserFreeCameraState>(
 		createBrowserFreeCameraState(),
 	);
@@ -494,11 +498,10 @@
 		`${renderSceneContext.kind === "dungeon" ? "Dungeon" : "Outdoor"}${renderSceneContext.anchorLandblockId === null ? "" : ` anchored at 0x${formatHex32(renderSceneContext.anchorLandblockId)}`}`,
 	);
 	const cameraResidencyText = $derived.by(() => {
-		const debug = renderMetrics?.debug;
-		if (!debug) {
+		if (!rendererCameraResidency) {
 			return "Waiting for renderer residency.";
 		}
-		return `${debug.cameraViewResidency} via ${debug.residencySource}`;
+		return describeBrowserCameraResidency(rendererCameraResidency);
 	});
 	const renderGraphText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
@@ -802,6 +805,38 @@
 			browserCameraFrame = cameraFrame;
 			scheduleRenderedCameraHint({ normalizedX: 0.5, normalizedY: 0.5 }, true);
 		}
+	}
+
+	function handleRendererCameraResidencyChange(
+		residency: BrowserCameraResidency,
+	): void {
+		rendererCameraResidency = residency;
+	}
+
+	function describeBrowserCameraResidency(
+		residency: BrowserCameraResidency,
+	): string {
+		const sourceText = `via ${residency.source}`;
+		if (residency.kind === "env-cell" && residency.envCellId !== null) {
+			return `env cell 0x${formatHex32(residency.envCellId)} in ${formatNullableLandblockId(residency.landblockId)} ${sourceText}`;
+		}
+
+		if (
+			residency.kind === "outdoor-landblock" &&
+			residency.landblockId !== null
+		) {
+			return `outdoor landblock 0x${formatHex32(residency.landblockId)} ${sourceText}`;
+		}
+
+		return residency.landblockId === null
+			? `unknown ${sourceText}`
+			: `unknown in ${formatNullableLandblockId(residency.landblockId)} ${sourceText}`;
+	}
+
+	function formatNullableLandblockId(landblockId: number | null): string {
+		return landblockId === null
+			? "unknown landblock"
+			: `0x${formatHex32(landblockId)}`;
 	}
 
 	function describeBrowserCameraSceneKey(
@@ -1780,6 +1815,7 @@
 		bind:this={worldDisplaySurface}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
+		onCameraResidencyChange={handleRendererCameraResidencyChange}
 	/>
 
 	<div class="browser-world-display__fps">{renderPerformanceText}</div>

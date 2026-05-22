@@ -14,6 +14,7 @@
 	import type { RenderChunkTransform } from "./render-anchor";
 	import type { SceneCameraFrame } from "./camera";
 	import type {
+		BrowserCameraResidencyChangeHandler,
 		WorldRenderCameraFrameChangeHandler,
 		WorldRenderMetricsChangeHandler,
 	} from "./renderer-contract";
@@ -46,9 +47,11 @@
 	let {
 		onCameraFrameChange,
 		onRenderMetricsChange,
+		onCameraResidencyChange,
 	}: {
 		onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 		onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
+		onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
 	} = $props();
 
 	let viewportHost = $state<HTMLDivElement | null>(null);
@@ -114,6 +117,7 @@
 				controlledCameraFrame,
 				onCameraFrameChange,
 				onRenderMetricsChange,
+				onCameraResidencyChange,
 			})),
 		);
 		appliedAssetStateRevision = assetStateRevision;
@@ -151,6 +155,14 @@
 			return;
 		}
 		controller.setRenderMetricsChangeHandler(onRenderMetricsChange);
+	});
+
+	$effect(() => {
+		const controller = rendererController;
+		if (!controller) {
+			return;
+		}
+		controller.setCameraResidencyChangeHandler(onCameraResidencyChange);
 	});
 
 	export function setAssetState(
@@ -306,8 +318,7 @@
 		const controller = rendererController;
 		if (
 			!controller ||
-			appliedStructuredInteriorSceneRevision ===
-				structuredInteriorSceneRevision
+			appliedStructuredInteriorSceneRevision === structuredInteriorSceneRevision
 		) {
 			return;
 		}
@@ -397,8 +408,7 @@
 			return;
 		}
 		controller.setTransitionPortalMaxDepth(transitionPortalMaxDepth);
-		appliedTransitionPortalMaxDepthRevision =
-			transitionPortalMaxDepthRevision;
+		appliedTransitionPortalMaxDepthRevision = transitionPortalMaxDepthRevision;
 	}
 </script>
 

@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 2 implemented.
+Status: Phase 3 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -689,6 +689,53 @@ Exit criteria:
 
 - Browser composition receives prompt typed residency changes without parsing debug strings.
 - Residency notifications do not write state every render frame.
+
+Progress update:
+
+- Completed in `apps/holtburger-3d`:
+  - Added `BrowserCameraResidency` and `BrowserCameraResidencyChangeHandler` to the renderer
+    contract.
+  - Added `deriveBrowserCameraResidency` so renderer residency context plus query diagnostics become
+    a typed browser-facing shape with `kind`, normalized `landblockId`, optional `envCellId`, and
+    query `source`.
+  - Added `onCameraResidencyChange` to `world-display-renderer.ts` and `WorldDisplay.svelte`.
+  - The renderer now emits camera residency directly from the existing per-render residency query,
+    deduped by `kind`, `landblockId`, `envCellId`, and `source`.
+  - `BrowserWorldDisplay` now stores the typed renderer residency separately from render metrics.
+    Panel text formats that typed value; the old formatted metrics text remains debug-only inside
+    renderer diagnostics.
+  - Added `world-residency-index.test.ts` coverage for typed browser residency conversion and
+    landblock normalization.
+
+Course corrections:
+
+- The renderer still computes residency on each rendered world frame because render policy already
+  depends on that answer. The new callback only writes Svelte state when the stable residency key
+  changes, so follow mode gets prompt updates without per-frame store churn.
+- The callback is intentionally renderer-local and frontend-only. No Rust/Tauri command or route
+  mode plumbing was added.
+- The typed residency source reuses the existing query diagnostic source values. That keeps the
+  source useful for follow-mode decisions without parsing human-readable strings.
+
+Future-step refinements:
+
+- Phase 7 should consume `rendererCameraResidency` directly when implementing follow-camera
+  destination updates.
+- Phase 7 should dedupe destination writes by `describeBrowserDestinationIdentity`, while renderer
+  residency notification dedupe should remain based on raw residency identity.
+- Phase 4 can keep renderer diagnostics text as debug detail, but browser scene/status rows should
+  continue to prefer typed browser state over formatted renderer metrics.
+
+Verification:
+
+- `npm run check` passes.
+- `npm run test:ts` passes with 31 test files and 151 tests.
+- `npm run lint:ts` passes.
+- `npm run lint` still fails at `lint:dead` on the existing unused-export cleanup backlog. That
+  belongs with Phase 9 unless a dead export directly blocks a follow-mode phase.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` still reports pre-existing formatting drift in unrelated files outside the
+  Phase 3 edits.
 
 ### Phase 4: Destination-Only Scene Models
 

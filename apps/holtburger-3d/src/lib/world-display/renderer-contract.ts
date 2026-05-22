@@ -81,10 +81,21 @@ export interface WorldRenderDebugMetrics {
 	renderPoints: number;
 }
 
+export interface BrowserCameraResidency {
+	kind: "outdoor-landblock" | "env-cell" | "unknown";
+	landblockId: number | null;
+	envCellId: number | null;
+	source: "cell-bsp" | "aabb-fallback" | "outdoor" | "unknown";
+}
+
 export type WorldRenderMetricsChangeHandler = (
 	metrics: WorldRenderMetrics,
 ) => void;
 
 export type WorldRenderCameraFrameChangeHandler = (
 	cameraFrame: SceneCameraFrame,
+) => void;
+
+export type BrowserCameraResidencyChangeHandler = (
+	residency: BrowserCameraResidency,
 ) => void;

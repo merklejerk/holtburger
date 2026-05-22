@@ -46,14 +46,12 @@ export type RenderSpatialMetadata =
 			kind: "terrain";
 			landblockId: number;
 			assetId: string;
-			terrainQuad:
-				| {
-						row: number;
-						col: number;
-						quadIndex: number;
-						triangleIndices: [number, number];
-				  }
-				| null;
+			terrainQuad: {
+				row: number;
+				col: number;
+				quadIndex: number;
+				triangleIndices: [number, number];
+			} | null;
 	  }
 	| {
 			kind: "structured-cell";

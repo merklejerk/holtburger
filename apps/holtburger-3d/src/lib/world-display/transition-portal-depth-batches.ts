@@ -14,12 +14,16 @@ export interface TransitionPortalDepthCandidate {
 	requestedInteriorEnvCellIds: readonly number[];
 }
 
-export interface TransitionPortalVisiblePools<T extends TransitionPortalDepthCandidate> {
+export interface TransitionPortalVisiblePools<
+	T extends TransitionPortalDepthCandidate,
+> {
 	outdoorToIndoor: T[];
 	indoorToOutdoor: T[];
 }
 
-export interface TransitionPortalDepthBatchModel<T extends TransitionPortalDepthCandidate> {
+export interface TransitionPortalDepthBatchModel<
+	T extends TransitionPortalDepthCandidate,
+> {
 	batches: Map<TransitionPortalDepthBatchKey, T[]>;
 	maskedInteriorCellIds: Set<number>;
 }
@@ -79,10 +83,9 @@ function visiblePoolForDirection<T extends TransitionPortalDepthCandidate>(
 		: pools.indoorToOutdoor;
 }
 
-function filterIndoorToOutdoorCandidates<T extends TransitionPortalDepthCandidate>(
-	pool: readonly T[],
-	interiorFrontier: ReadonlySet<number> | null,
-): T[] {
+function filterIndoorToOutdoorCandidates<
+	T extends TransitionPortalDepthCandidate,
+>(pool: readonly T[], interiorFrontier: ReadonlySet<number> | null): T[] {
 	if (interiorFrontier === null) {
 		return [...pool];
 	}

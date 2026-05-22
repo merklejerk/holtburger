@@ -9,12 +9,11 @@ import {
 	type TransitionPortalRenderLevel,
 } from "./render-policy";
 
-function visibleDirections(
-	directions: readonly string[],
-): { hasVisibleTransitionLevel(level: TransitionPortalRenderLevel): boolean } {
+function visibleDirections(directions: readonly string[]): {
+	hasVisibleTransitionLevel(level: TransitionPortalRenderLevel): boolean;
+} {
 	return {
-		hasVisibleTransitionLevel: (level) =>
-			directions.includes(level.direction),
+		hasVisibleTransitionLevel: (level) => directions.includes(level.direction),
 	};
 }
 

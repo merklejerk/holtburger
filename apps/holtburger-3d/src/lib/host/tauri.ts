@@ -4,14 +4,11 @@ import type {
 	CameraHintAckDto,
 	CameraHintDto,
 	DebugConfigDto,
-	RayPickRequestDto,
-	RayPickResponseDto,
 } from "./contracts";
 import {
 	assetLookupResponseDtoSchema,
 	cameraHintAckDtoSchema,
 	debugConfigDtoSchema,
-	rayPickResponseDtoSchema,
 } from "./contracts";
 import { decodeBinaryAssetEnvelope } from "./binary-asset-envelope";
 import type { ZodType } from "zod";
@@ -85,14 +82,4 @@ export async function submitCameraHint(
 	requireTauriRuntime();
 
 	return invokeCommand("submit_camera_hint", cameraHintAckDtoSchema, { hint });
-}
-
-export async function resolveRayPick(
-	request: RayPickRequestDto,
-): Promise<RayPickResponseDto> {
-	requireTauriRuntime();
-
-	return invokeCommand("resolve_ray_pick", rayPickResponseDtoSchema, {
-		request,
-	});
 }

@@ -8,10 +8,7 @@
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
-	import type {
-		CameraHintAckDto,
-		RayPickResponseDto,
-	} from "../lib/host/contracts";
+	import type { CameraHintAckDto, CameraHintDto } from "../lib/host/contracts";
 	import { submitCameraHint } from "../lib/host/tauri";
 	import {
 		buildCameraHintFromSceneCameraFrame,
@@ -36,10 +33,8 @@
 	} from "../lib/assets/scene-asset-request-planner";
 	import { deriveStructuredInteriorCoverage } from "../lib/assets/structured-interior-coverage";
 	import {
-		buildCameraHint,
 		deriveBrowserWorldDisplayModel,
 		describeCameraHintAck,
-		describeRayPickResponse,
 		normalizeViewportPoint,
 		shouldSendThrottledCameraHint,
 		type NormalizedViewportPoint,
@@ -158,12 +153,9 @@
 	);
 	let browserCameraFrame = $state<SceneCameraFrame | null>(null);
 	let cameraAck = $state<CameraHintAckDto | null>(null);
-	let rayPickResponse = $state<RayPickResponseDto | null>(null);
 	let diagnosticSelection = $state<RenderSpatialMetadata | null>(null);
 	let lastCameraHintAt = $state<number | null>(null);
-	let trailingCameraHint = $state<ReturnType<typeof buildCameraHint> | null>(
-		null,
-	);
+	let trailingCameraHint = $state<CameraHintDto | null>(null);
 	let activePointerDrag = $state<{
 		pointerId: number;
 		lastX: number;
@@ -562,7 +554,6 @@
 			buildingLodRadius,
 			detailLodRadius,
 			cameraAck,
-			rayPickResponse,
 			pendingCameraHint,
 		}),
 	);
@@ -720,12 +711,6 @@
 					value:
 						describeCameraHintAck(cameraAck) ??
 						"Waiting for the first world-display camera hint acknowledgement.",
-				},
-				{
-					label: "Ray pick",
-					value:
-						describeRayPickResponse(rayPickResponse) ??
-						"No browser debug pick has been resolved yet.",
 				},
 				{ label: "Events", value: cameraPipelineDebugText },
 			],
@@ -1454,9 +1439,9 @@
 
 	function buildRenderedCameraHint(
 		viewportPoint: NormalizedViewportPoint,
-	): NonNullable<ReturnType<typeof buildCameraHint>> | null {
+	): CameraHintDto | null {
 		if (!browserCameraFrame) {
-			return buildCameraHint(browserDestination, viewportPoint);
+			return null;
 		}
 
 		return buildCameraHintFromSceneCameraFrame(
@@ -1467,10 +1452,7 @@
 		);
 	}
 
-	function scheduleCameraHint(
-		hint: NonNullable<ReturnType<typeof buildCameraHint>>,
-		immediate: boolean,
-	): void {
+	function scheduleCameraHint(hint: CameraHintDto, immediate: boolean): void {
 		const now = Date.now();
 
 		if (
@@ -1512,9 +1494,7 @@
 		);
 	}
 
-	async function flushCameraHint(
-		hint: NonNullable<ReturnType<typeof buildCameraHint>>,
-	): Promise<void> {
+	async function flushCameraHint(hint: CameraHintDto): Promise<void> {
 		cameraAck = await submitCameraHint(hint);
 		lastCameraHintAt = Date.now();
 	}

@@ -23,4 +23,3 @@ export function deriveWorldRenderSceneContext(options: {
 		anchorLandblockId: options.activeRenderAnchor?.landblockId ?? null,
 	};
 }
-

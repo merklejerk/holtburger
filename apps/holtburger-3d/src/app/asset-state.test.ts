@@ -39,8 +39,14 @@ describe("asset state reducer", () => {
 		const state = applyPreparedAssets(
 			createAssetState(),
 			[
-				createPreparedTerrainAsset("bootstrap-terrain-a", "landblock-pack/0102ffff"),
-				createPreparedTerrainAsset("bootstrap-terrain-b", "landblock-pack/0103ffff"),
+				createPreparedTerrainAsset(
+					"bootstrap-terrain-a",
+					"landblock-pack/0102ffff",
+				),
+				createPreparedTerrainAsset(
+					"bootstrap-terrain-b",
+					"landblock-pack/0103ffff",
+				),
 			],
 			1_777,
 		);
@@ -68,8 +74,14 @@ describe("asset state reducer", () => {
 		const state = applyPreparedAssets(
 			createAssetState(),
 			[
-				createPreparedTerrainAsset("bootstrap-terrain-a", "landblock-pack/0102ffff"),
-				createPreparedTerrainAsset("bootstrap-terrain-b", "landblock-pack/0103ffff"),
+				createPreparedTerrainAsset(
+					"bootstrap-terrain-a",
+					"landblock-pack/0102ffff",
+				),
+				createPreparedTerrainAsset(
+					"bootstrap-terrain-b",
+					"landblock-pack/0103ffff",
+				),
 			],
 			1_000,
 		);

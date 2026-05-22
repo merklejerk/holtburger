@@ -17,6 +17,7 @@ import {
 	landblockRenderPointToCellAcLocalPoint,
 	pointInsideCellBsp,
 } from "./cell-bsp-residency";
+import type { BrowserCameraResidency } from "./renderer-contract";
 import type { RenderChunkTransform } from "./render-anchor";
 import type { WorldRenderSceneContext } from "./render-scene-context";
 import type { StructuredInteriorCell } from "./structured-interior-scene";
@@ -164,6 +165,45 @@ export function describeCameraViewResidencyContext(
 				? "unknown"
 				: `unknown in ${formatResidencyHex(context.landblockId)}`;
 	}
+}
+
+export function deriveBrowserCameraResidency(
+	context: CameraViewResidencyContext,
+	diagnostics: WorldResidencyQueryDiagnostics,
+): BrowserCameraResidency {
+	if (context.kind === "env-cell") {
+		return {
+			kind: "env-cell",
+			landblockId: normalizeOutdoorLandblockId(context.landblockId),
+			envCellId: context.envCellId,
+			source: diagnostics.source,
+		};
+	}
+
+	if (context.kind === "outdoor-landblock") {
+		return {
+			kind: "outdoor-landblock",
+			landblockId: normalizeOutdoorLandblockId(context.landblockId),
+			envCellId: null,
+			source: diagnostics.source,
+		};
+	}
+
+	return {
+		kind: "unknown",
+		landblockId:
+			context.landblockId === null
+				? normalizeNullableOutdoorLandblockId(diagnostics.landblockId)
+				: normalizeOutdoorLandblockId(context.landblockId),
+		envCellId: null,
+		source: diagnostics.source,
+	};
+}
+
+function normalizeNullableOutdoorLandblockId(
+	landblockId: number | null,
+): number | null {
+	return landblockId === null ? null : normalizeOutdoorLandblockId(landblockId);
 }
 
 export function inferRenderAnchor(

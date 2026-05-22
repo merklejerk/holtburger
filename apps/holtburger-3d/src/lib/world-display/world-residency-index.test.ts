@@ -13,6 +13,7 @@ import type { StructuredInteriorCell } from "./structured-interior-scene";
 import {
 	buildWorldResidencyIndex,
 	computeRendererPositionLandblockResidency,
+	deriveBrowserCameraResidency,
 	deriveConservativeResidencyCellBounds,
 	deriveResidencyCellBounds,
 	inferRenderAnchor,
@@ -44,6 +45,51 @@ describe("world residency index", () => {
 		).toMatchObject({
 			landblockId: makeOutdoorLandblockId(11, 22),
 			landblockRelativePosition: { x: 13, y: 7, z: -5 },
+		});
+	});
+
+	it("converts renderer residency into browser camera residency", () => {
+		expect(
+			deriveBrowserCameraResidency(
+				{
+					kind: "env-cell",
+					landblockId: 0x016c0155,
+					envCellId: 0x016c0155,
+				},
+				{
+					landblockId: 0x016cffff,
+					aabbCandidateCount: 1,
+					cellBspMatchCount: 1,
+					aabbFallbackCount: 0,
+					source: "cell-bsp",
+				},
+			),
+		).toEqual({
+			kind: "env-cell",
+			landblockId: 0x016cffff,
+			envCellId: 0x016c0155,
+			source: "cell-bsp",
+		});
+
+		expect(
+			deriveBrowserCameraResidency(
+				{
+					kind: "unknown",
+					landblockId: null,
+				},
+				{
+					landblockId: 0xda550123,
+					aabbCandidateCount: 0,
+					cellBspMatchCount: 0,
+					aabbFallbackCount: 0,
+					source: "unknown",
+				},
+			),
+		).toEqual({
+			kind: "unknown",
+			landblockId: 0xda55ffff,
+			envCellId: null,
+			source: "unknown",
 		});
 	});
 
@@ -361,7 +407,8 @@ function createCell(options: {
 						renderGeometry,
 					},
 		cellBsp:
-			options.includeCellStructure === false && !options.includeStandaloneCellBsp
+			options.includeCellStructure === false &&
+			!options.includeStandaloneCellBsp
 				? null
 				: createCellBsp(options.cellBspMinX ?? options.boundsMin.x),
 		renderGeometry,

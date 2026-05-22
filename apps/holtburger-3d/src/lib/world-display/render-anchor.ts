@@ -1,6 +1,6 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import { browserLocationToLandblockId } from "../../app/browser-mode";
-import type { RuntimeBatchDto, Vec3Dto } from "../host/contracts";
+import type { Vec3Dto } from "../host/contracts";
 import {
 	getOutdoorLandblockCoords,
 	normalizeOutdoorLandblockId,
@@ -12,7 +12,7 @@ import {
 	type RenderLandblockAnchor,
 } from "./render-chunks";
 
-export type RenderAnchorSource = "browser-destination" | "runtime-residency";
+export type RenderAnchorSource = "browser-destination";
 
 export interface RenderAnchorCandidate {
 	anchor: RenderLandblockAnchor;
@@ -32,37 +32,23 @@ export interface RenderChunkTransform {
 	offset: Vec3Dto;
 }
 
-export const DEFAULT_RESIDENCY_RENDER_ANCHOR_RETAIN_RADIUS = 3;
 export const EXPLICIT_RENDER_ANCHOR_RETAIN_RADIUS = 0;
 
 export function deriveRenderAnchorCandidate(
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 ): RenderAnchorCandidate | null {
-	if (!runtimeBatch) {
+	if (!browserDestination) {
 		return null;
-	}
-
-	if (browserDestination) {
-		return {
-			anchor: {
-				landblockId: normalizeOutdoorLandblockId(
-					browserLocationToLandblockId(browserDestination),
-				),
-			},
-			source: "browser-destination",
-			retainRadius: EXPLICIT_RENDER_ANCHOR_RETAIN_RADIUS,
-		};
 	}
 
 	return {
 		anchor: {
 			landblockId: normalizeOutdoorLandblockId(
-				runtimeBatch.residency.focusLandblockId,
+				browserLocationToLandblockId(browserDestination),
 			),
 		},
-		source: "runtime-residency",
-		retainRadius: DEFAULT_RESIDENCY_RENDER_ANCHOR_RETAIN_RADIUS,
+		source: "browser-destination",
+		retainRadius: EXPLICIT_RENDER_ANCHOR_RETAIN_RADIUS,
 	};
 }
 

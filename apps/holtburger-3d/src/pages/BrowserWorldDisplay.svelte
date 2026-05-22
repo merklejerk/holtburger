@@ -4,15 +4,13 @@
 	import { frontendState } from "../app/frontend-state";
 	import {
 		browserDestinationToInteriorCellId,
+		browserLocationToLandblockId,
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
-	import type { AppModeId } from "../app/modes";
 	import type { AssetChannelState } from "../lib/assets/types";
 	import type {
 		CameraHintAckDto,
-		FrontendStateFeedDto,
 		RayPickResponseDto,
-		RuntimeBatchDto,
 	} from "../lib/host/contracts";
 	import { submitCameraHint } from "../lib/host/tauri";
 	import {
@@ -124,11 +122,6 @@
 	}
 
 	let {
-		activeMode,
-		activeModeLabel,
-		hostStatus,
-		runtimeBatch,
-		viewModelFeed,
 		assetState,
 		browserDestination,
 		terrainLodRadius,
@@ -140,11 +133,6 @@
 		showCellIndicators,
 		highlightPortalTargets,
 	}: {
-		activeMode: AppModeId;
-		activeModeLabel: string;
-		hostStatus: string;
-		runtimeBatch: RuntimeBatchDto | null;
-		viewModelFeed: FrontendStateFeedDto | null;
 		assetState: AssetChannelState;
 		browserDestination: BrowserLocationSelection | null;
 		terrainLodRadius: number;
@@ -196,17 +184,15 @@
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
 	const browserCameraSceneKey = $derived(
-		describeBrowserCameraSceneKey(browserDestination, runtimeBatch),
+		describeBrowserCameraSceneKey(browserDestination),
 	);
 	const renderAnchorCandidate = $derived(
-		deriveRenderAnchorCandidate(runtimeBatch, browserDestination),
+		deriveRenderAnchorCandidate(browserDestination),
 	);
 
 	const outdoorFocusLandblockId = $derived(
-		runtimeBatch &&
-			!runtimeBatch.residency.indoors &&
-			browserDestination?.kind !== "interior-cell"
-			? deriveTerrainFocusLandblockId(runtimeBatch, browserDestination)
+		browserDestination?.kind === "outdoor-location"
+			? deriveTerrainFocusLandblockId(browserDestination)
 			: null,
 	);
 	const outdoorSceneInterest = $derived(
@@ -222,7 +208,6 @@
 	);
 	const terrainScene = $derived(
 		deriveTerrainSceneModel(
-			runtimeBatch,
 			assetState,
 			browserDestination,
 			terrainLodRadius,
@@ -268,7 +253,6 @@
 	});
 	const staticRenderableScene = $derived(
 		deriveStaticRenderableSceneModel(
-			runtimeBatch,
 			assetState,
 			browserDestination,
 			detailLodRadius,
@@ -284,7 +268,6 @@
 	);
 	const structuredInteriorScene = $derived(
 		deriveStructuredInteriorSceneModel(
-			runtimeBatch,
 			assetState,
 			browserDestination,
 			outdoorFocusLandblockId === null
@@ -450,14 +433,14 @@
 		return `Explicit ${explicitCount}, buildings ${buildingCount}, generated ${generatedCount}, indoor ${indoorCount}; groups exterior ${exteriorGroupCount}, interior ${interiorGroupCount}.`;
 	});
 	const structuredInteriorPackSourceCount = $derived(
-		new Set(structuredInteriorScene.cells.map((cell) => cell.renderChunk.chunkKey))
-			.size,
+		new Set(
+			structuredInteriorScene.cells.map((cell) => cell.renderChunk.chunkKey),
+		).size,
 	);
 	const structuredInteriorText = $derived(
 		structuredInteriorScene.cells.length > 0
 			? linkedOutdoorEnvCellIds.length > 0 &&
-				browserDestination?.kind !== "interior-cell" &&
-				!runtimeBatch?.residency.indoors
+				browserDestination?.kind !== "interior-cell"
 				? `${structuredInteriorScene.cells.length} outdoor-linked env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorPackSourceCount} landblock pack${structuredInteriorPackSourceCount === 1 ? "" : "s"}; ${linkedOutdoorEnvCellIds.length} linked, ${structuredInteriorCoverage?.envCellIds.length ?? linkedOutdoorEnvCellIds.length} covered${structuredInteriorCoverage?.truncated ? " (truncated)" : ""}.`
 				: `${structuredInteriorScene.cells.length} visible env cell${structuredInteriorScene.cells.length === 1 ? "" : "s"} rendered from ${structuredInteriorPackSourceCount} landblock pack${structuredInteriorPackSourceCount === 1 ? "" : "s"}.`
 			: describeStructuredInteriorIdleState(),
@@ -570,10 +553,6 @@
 	const pendingCameraHint = $derived(trailingCameraHint !== null);
 	const worldDisplay = $derived(
 		deriveWorldDisplayModel({
-			activeModeLabel,
-			hostStatus,
-			runtimeBatch,
-			viewModelFeed,
 			assetState,
 			browserDestination,
 			terrainLodRadius,
@@ -827,28 +806,18 @@
 
 	function describeBrowserCameraSceneKey(
 		destination: BrowserLocationSelection | null,
-		runtime: RuntimeBatchDto | null,
 	): string {
 		if (destination?.kind === "interior-cell") {
 			return `browser:indoor:${destination.envCellId.toString(16).padStart(8, "0")}`;
 		}
 
 		if (destination?.kind === "outdoor-location") {
-			const landblockKey =
-				destination.landblockId === null
-					? "unresolved"
-					: normalizeOutdoorLandblockId(destination.landblockId)
-							.toString(16)
-							.padStart(8, "0");
+			const landblockKey = normalizeOutdoorLandblockId(
+				browserLocationToLandblockId(destination),
+			)
+				.toString(16)
+				.padStart(8, "0");
 			return `browser:outdoor:${landblockKey}`;
-		}
-
-		if (runtime?.residency.indoors) {
-			return `runtime:indoor:${runtime.residency.focusEnvCellId?.toString(16).padStart(8, "0") ?? "none"}`;
-		}
-
-		if (runtime) {
-			return `runtime:outdoor:${normalizeOutdoorLandblockId(runtime.residency.focusLandblockId).toString(16).padStart(8, "0")}`;
 		}
 
 		return "pending";
@@ -1452,17 +1421,10 @@
 		viewportPoint: NormalizedViewportPoint,
 	): NonNullable<ReturnType<typeof buildCameraHint>> | null {
 		if (!browserCameraFrame) {
-			return buildCameraHint(
-				activeMode,
-				runtimeBatch,
-				browserDestination,
-				viewportPoint,
-			);
+			return buildCameraHint(browserDestination, viewportPoint);
 		}
 
 		return buildCameraHintFromSceneCameraFrame(
-			activeMode,
-			runtimeBatch,
 			browserDestination,
 			browserCameraFrame,
 			viewportPoint,
@@ -1620,8 +1582,7 @@
 
 	function describeStaticRenderableIdleState(): string {
 		if (staticRenderableScene.sourceInstances.length === 0) {
-			return browserDestination?.kind === "interior-cell" ||
-				runtimeBatch?.residency.indoors
+			return browserDestination?.kind === "interior-cell"
 				? "No indoor static object source facts are active for the current visible env cells."
 				: "No static renderable source facts are active for the current outdoor coverage.";
 		}
@@ -1639,11 +1600,10 @@
 
 	function describeStructuredInteriorIdleState(): string {
 		if (
-			!runtimeBatch?.residency.indoors &&
 			browserDestination?.kind !== "interior-cell" &&
 			linkedOutdoorEnvCellIds.length === 0
 		) {
-			return "Structured interior rendering is dormant while outdoor residency is active.";
+			return "Structured interior rendering is dormant while the browser destination has no linked env cells.";
 		}
 
 		if (structuredInteriorScene.missingEnvCellAssetIds.length > 0) {

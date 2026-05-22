@@ -4,14 +4,13 @@
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
-	import {
-		listenForRuntimeLifecycle,
-		readDebugConfig,
-		readHostBoundarySnapshot,
-	} from "./lib/host/tauri";
+	import { readDebugConfig } from "./lib/host/tauri";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
+	const currentRoute =
+		typeof window === "undefined" ? "/browser" : window.location.pathname;
+	const isBrowserRoute = currentRoute === "/" || currentRoute === "/browser";
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
 
@@ -35,9 +34,7 @@
 		});
 
 		const unsubscribeFrontendState = frontendState.subscribe((state) => {
-			const runtimeBatch = state.host.boundarySnapshot?.runtimeBatch ?? null;
 			sceneStreamer.syncSceneInterest({
-				runtimeBatch,
 				browserDestination: state.browserMode.destination,
 				terrainLodRadius: state.browserMode.terrainLodRadius,
 				buildingLodRadius: state.browserMode.buildingLodRadius,
@@ -52,23 +49,6 @@
 				const debugConfig = await readDebugConfig();
 				verboseDiagnostics = debugConfig.verbose;
 				debugLog("debug-config", debugConfig);
-
-				dispose = await listenForRuntimeLifecycle((notification) => {
-					debugLog("runtime-notification", {
-						topic: notification.topic,
-						tick: notification.runtimeBatch?.tick ?? null,
-					});
-					frontendState.applyRuntimeNotification(notification);
-				});
-
-				const snapshot = await readHostBoundarySnapshot();
-				debugLog("snapshot", {
-					tick: snapshot.runtimeBatch.tick,
-					runtimeFocus: snapshot.runtimeBatch.residency.focusLocationLabel,
-					draftDestination:
-						$frontendState.browserMode.destination?.label ?? null,
-				});
-				frontendState.loadSnapshot(snapshot);
 				startupError = null;
 			} catch (error) {
 				startupError = error instanceof Error ? error.message : String(error);
@@ -96,19 +76,29 @@
 	<title>Holtburger 3D World Viewer</title>
 	<meta
 		name="description"
-		content="Tauri-backed world viewer for Holtburger 3D with authoritative runtime lifecycle and demand-driven terrain asset loading."
+		content="Tauri-backed browser scene viewer for Holtburger 3D with frontend-owned navigation and demand-driven terrain asset loading."
 	/>
 </svelte:head>
 
 <main class="viewer-shell">
-	{#if $frontendState.host.boundarySnapshot}
+	{#if !isBrowserRoute}
+		<section class="viewer-unavailable">
+			<p class="kicker">Route Reserved</p>
+			<h1>Client mode is not implemented yet.</h1>
+			<p class="lede">Open /browser to use the standalone scene browser.</p>
+		</section>
+	{:else if startupError}
+		<section class="viewer-unavailable">
+			<p class="kicker">Tauri Required</p>
+			<h1>{startupError}</h1>
+			<p class="lede">
+				Start the native app to access the asset channel used by the scene
+				browser.
+			</p>
+			<pre>{tauriLaunchCommand}</pre>
+		</section>
+	{:else}
 		<BrowserWorldDisplay
-			activeMode={$frontendState.mode.activeMode}
-			activeModeLabel={$frontendState.mode.activeModeLabel}
-			hostStatus={$frontendState.host.boundaryStatus}
-			runtimeBatch={$frontendState.host.boundarySnapshot?.runtimeBatch ?? null}
-			viewModelFeed={$frontendState.host.boundarySnapshot?.viewModelFeed ??
-				null}
 			assetState={$frontendState.asset}
 			browserDestination={$frontendState.browserMode.destination}
 			terrainLodRadius={$frontendState.browserMode.terrainLodRadius}
@@ -121,15 +111,5 @@
 			showCellIndicators={$frontendState.browserMode.showCellIndicators}
 			highlightPortalTargets={$frontendState.browserMode.highlightPortalTargets}
 		/>
-	{:else}
-		<section class="viewer-unavailable">
-			<p class="kicker">Tauri Required</p>
-			<h1>{startupError ?? "World viewer failed before startup completed."}</h1>
-			<p class="lede">
-				Start the native app to access the live host boundary, terrain asset
-				channel, and authoritative runtime lifecycle.
-			</p>
-			<pre>{tauriLaunchCommand}</pre>
-		</section>
 	{/if}
 </main>

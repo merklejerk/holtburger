@@ -1,4 +1,3 @@
-import type { RuntimeResidencyDto } from "../lib/host/contracts";
 import {
 	formatLandblockLabel,
 	formatHex32,
@@ -24,10 +23,7 @@ import {
 
 type BrowserPageId = "location-entry" | "destination-preview";
 
-type BrowserDestinationSource =
-	| "manual"
-	| "runtime-residency"
-	| "landblock-pick";
+type BrowserDestinationSource = "manual" | "landblock-pick";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
 type EastWestHemisphere = "E" | "W";
@@ -106,10 +102,6 @@ export function createBrowserModeState(): BrowserModeState {
 	};
 }
 
-function formatResidencyDraft(residency: RuntimeResidencyDto): string {
-	return residency.focusLocationLabel.trim();
-}
-
 export function parseBrowserLocationInput(
 	value: string,
 	source: BrowserDestinationSource = "manual",
@@ -156,24 +148,6 @@ export function parseBrowserLocationInput(
 		elevation: Number(elevation),
 		source,
 		landblockId: null,
-	};
-}
-
-export function seedBrowserDraftFromResidency(
-	browserMode: BrowserModeState,
-	residency: RuntimeResidencyDto,
-): BrowserModeState {
-	if (
-		browserMode.draftInputEditedByUser ||
-		browserMode.draftInput.trim().length > 0
-	) {
-		return browserMode;
-	}
-
-	return {
-		...browserMode,
-		draftInput: formatResidencyDraft(residency),
-		draftInputEditedByUser: false,
 	};
 }
 
@@ -331,45 +305,6 @@ export function previewBrowserLocation(
 	return {
 		draftInput: browserMode.draftInput,
 		draftInputEditedByUser: browserMode.draftInputEditedByUser,
-		validationMessage: null,
-		destination: parsedLocation,
-		terrainLodRadius: browserMode.terrainLodRadius,
-		buildingLodRadius: browserMode.buildingLodRadius,
-		detailLodRadius: browserMode.detailLodRadius,
-		envCellLodRadius: browserMode.envCellLodRadius,
-		transitionPortalMaxDepth: browserMode.transitionPortalMaxDepth,
-		landblockInputMode: browserMode.landblockInputMode,
-		showPortalPolygons: browserMode.showPortalPolygons,
-		showCellIndicators: browserMode.showCellIndicators,
-		highlightPortalTargets: browserMode.highlightPortalTargets,
-		page: "destination-preview",
-	};
-}
-
-export function selectRuntimeResidencyDestination(
-	browserMode: BrowserModeState,
-	residency: RuntimeResidencyDto,
-): BrowserModeState {
-	const parsedLocation = parseBrowserLocationInput(
-		formatResidencyDraft(residency),
-		"runtime-residency",
-	);
-
-	if (!parsedLocation) {
-		return {
-			...browserMode,
-			draftInput: formatResidencyDraft(residency),
-			draftInputEditedByUser: false,
-			validationMessage:
-				"The current runtime residency location could not be parsed into the browser-mode destination format.",
-			destination: null,
-			page: "location-entry",
-		};
-	}
-
-	return {
-		draftInput: parsedLocation.label,
-		draftInputEditedByUser: false,
 		validationMessage: null,
 		destination: parsedLocation,
 		terrainLodRadius: browserMode.terrainLodRadius,

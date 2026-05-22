@@ -17,7 +17,7 @@ import {
 	deriveStructuredInteriorCoverage,
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
-import type { PlacementTransformDto, RuntimeBatchDto } from "../host/contracts";
+import type { PlacementTransformDto } from "../host/contracts";
 import { formatHex32 } from "../landblocks";
 import {
 	deriveStructuredCellRenderChunk,
@@ -69,7 +69,6 @@ export function createEmptyStructuredInteriorSceneModel(): StructuredInteriorSce
 }
 
 export function deriveStructuredInteriorSceneModel(
-	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
 	linkedOutdoorInteriors: LinkedOutdoorInteriorSelection | null = null,
@@ -85,57 +84,26 @@ export function deriveStructuredInteriorSceneModel(
 		);
 	}
 
-	if (!runtimeBatch || !runtimeBatch.residency.indoors) {
-		if (
-			linkedOutdoorInteriors &&
-			linkedOutdoorInteriors.envCellIds.length > 0
-		) {
-			return deriveStructuredInteriorSceneForEnvCells(
-				null,
-				structuredInteriorCoverage?.envCellIds ??
-					deriveStructuredInteriorCoverage(
-						{
-							kind: "landblock-closure",
-							seedEnvCellIds: linkedOutdoorInteriors.envCellIds,
-						},
-						assetState.preparedByAssetId,
-					).envCellIds,
-				assetState,
-			);
-		}
-
-		return emptyStructuredInteriorSceneModel(
+	if (linkedOutdoorInteriors && linkedOutdoorInteriors.envCellIds.length > 0) {
+		return deriveStructuredInteriorSceneForEnvCells(
 			null,
-			[],
-			"Structured interior scene is dormant while outdoor residency is active.",
-			"Structured interior cache is idle.",
+			structuredInteriorCoverage?.envCellIds ??
+				deriveStructuredInteriorCoverage(
+					{
+						kind: "landblock-closure",
+						seedEnvCellIds: linkedOutdoorInteriors.envCellIds,
+					},
+					assetState.preparedByAssetId,
+				).envCellIds,
+			assetState,
 		);
 	}
 
-	const focusEnvCellId = runtimeBatch.residency.focusEnvCellId;
-	if (focusEnvCellId === null) {
-		return emptyStructuredInteriorSceneModel(
-			null,
-			[],
-			"Indoor residency is active, but no focus env cell is available yet.",
-			describePreparedIndoorCache(assetState),
-		);
-	}
-
-	const activeEnvCellIds = deriveStructuredInteriorCoverage(
-		{
-			kind: "landblock-closure",
-			seedEnvCellIds: [
-				focusEnvCellId,
-				...runtimeBatch.residency.visibleCellIds,
-			],
-		},
-		assetState.preparedByAssetId,
-	).envCellIds;
-	return deriveStructuredInteriorSceneForEnvCells(
-		focusEnvCellId,
-		activeEnvCellIds,
-		assetState,
+	return emptyStructuredInteriorSceneModel(
+		null,
+		[],
+		"Structured interior scene is dormant until the browser destination or outdoor links select env cells.",
+		"Structured interior cache is idle.",
 	);
 }
 

@@ -4,26 +4,17 @@ import type {
 	CameraHintAckDto,
 	CameraHintDto,
 	DebugConfigDto,
-	HostBoundarySnapshot,
 	RayPickRequestDto,
 	RayPickResponseDto,
-	RuntimeNotificationEnvelopeDto,
 } from "./contracts";
 import {
 	assetLookupResponseDtoSchema,
 	cameraHintAckDtoSchema,
 	debugConfigDtoSchema,
-	frontendStateFeedDtoSchema,
-	hostBoundaryOverviewDtoSchema,
-	lifecycleStateDtoSchema,
 	rayPickResponseDtoSchema,
-	runtimeBatchDtoSchema,
-	runtimeNotificationEnvelopeDtoSchema,
 } from "./contracts";
 import { decodeBinaryAssetEnvelope } from "./binary-asset-envelope";
 import type { ZodType } from "zod";
-
-const RUNTIME_NOTIFICATION_EVENT = "runtime:notification";
 
 declare global {
 	interface Window {
@@ -56,29 +47,6 @@ async function invokeCommand<T>(
 	return schema.parse(payload);
 }
 
-export async function readHostBoundarySnapshot(): Promise<HostBoundarySnapshot> {
-	requireTauriRuntime();
-
-	const [lifecycleState, runtimeBatch, viewModelFeed, overview] =
-		await Promise.all([
-			invokeCommand("get_lifecycle_state", lifecycleStateDtoSchema),
-			invokeCommand("get_runtime_batch", runtimeBatchDtoSchema),
-			invokeCommand("get_view_model_feed", frontendStateFeedDtoSchema),
-			invokeCommand(
-				"get_host_boundary_overview",
-				hostBoundaryOverviewDtoSchema,
-			),
-		]);
-
-	return {
-		source: "tauri",
-		lifecycleState,
-		runtimeBatch,
-		viewModelFeed,
-		overview,
-	};
-}
-
 export async function readDebugConfig(): Promise<DebugConfigDto> {
 	requireTauriRuntime();
 
@@ -109,23 +77,6 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 		assetId.startsWith("landblock-summary/") ||
 		assetId.startsWith("gfx-obj/")
 	);
-}
-
-export async function listenForRuntimeLifecycle(
-	onNotification: (notification: RuntimeNotificationEnvelopeDto) => void,
-): Promise<() => void> {
-	requireTauriRuntime();
-
-	const { listen } = await import("@tauri-apps/api/event");
-	const unlisten = await listen<RuntimeNotificationEnvelopeDto>(
-		RUNTIME_NOTIFICATION_EVENT,
-		(event) =>
-			onNotification(runtimeNotificationEnvelopeDtoSchema.parse(event.payload)),
-	);
-
-	return () => {
-		unlisten();
-	};
 }
 
 export async function submitCameraHint(

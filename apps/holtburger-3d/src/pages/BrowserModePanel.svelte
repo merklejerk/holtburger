@@ -66,20 +66,7 @@
 			};
 		}
 
-		const residency =
-			$frontendState.host.boundarySnapshot?.runtimeBatch.residency;
-		if (!residency) {
-			return { landblockId: null, cellId: null };
-		}
-
-		const landblockId = normalizeOutdoorLandblockId(residency.focusLandblockId);
-		const cellId =
-			residency.focusEnvCellId ??
-			(residency.focusCellId === null
-				? null
-				: normalizeLandblockCellId(landblockId, residency.focusCellId));
-
-		return { landblockId, cellId };
+		return { landblockId: null, cellId: null };
 	});
 	const draftIsLandblockPrefix = $derived(
 		isLandblockPrefixInput($frontendState.browserMode.draftInput),
@@ -113,10 +100,6 @@
 	function previewDestination(event?: SubmitEvent): void {
 		event?.preventDefault();
 		frontendState.previewBrowserLocation();
-	}
-
-	function useCurrentRuntimeResidency(): void {
-		frontendState.useRuntimeResidencyDestination();
 	}
 
 	function handleTerrainLodInput(event: Event): void {
@@ -157,13 +140,6 @@
 	function handlePortalTargetHighlightToggle(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updatePortalTargetHighlighting(input.checked);
-	}
-
-	function normalizeLandblockCellId(
-		landblockId: number,
-		focusCellId: number,
-	): number {
-		return ((landblockId & 0xffff0000) | (focusCellId & 0xffff)) >>> 0;
 	}
 
 	function formatOptionalHex32(value: number | null): string {
@@ -237,10 +213,7 @@
 				<div>
 					<dt>Anchor</dt>
 					<dd>
-						{$frontendState.browserMode.destination?.label ??
-							$frontendState.host.boundarySnapshot?.runtimeBatch.residency
-								.focusLocationLabel ??
-							"unavailable"}
+						{$frontendState.browserMode.destination?.label ?? "unavailable"}
 					</dd>
 				</div>
 				<div>
@@ -295,13 +268,6 @@
 
 				<div class="browser-form__actions">
 					<button type="submit">Set destination</button>
-					<button
-						type="button"
-						onclick={useCurrentRuntimeResidency}
-						disabled={!$frontendState.host.boundarySnapshot}
-					>
-						Use current
-					</button>
 					<button
 						type="button"
 						onclick={onResetCamera}

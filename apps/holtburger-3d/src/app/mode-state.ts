@@ -1,4 +1,3 @@
-import type { LifecycleStateDto } from "../lib/host/contracts";
 import type { BrowserModeState } from "./browser-mode";
 import { availableModes, type AppModeId } from "./modes";
 
@@ -11,23 +10,17 @@ export interface ModeState {
 
 export function createInitialModeState(): ModeState {
 	return createModeState(
-		"client",
-		"world-viewer",
-		"The app runs as a Tauri-backed world viewer; plain browser preview is intentionally unsupported.",
+		"browser",
+		"browser",
+		"The /browser route runs as a standalone scene browser.",
 	);
 }
 
-export function deriveModeState(
-	lifecycleState: LifecycleStateDto | null,
-	browserMode: BrowserModeState,
-): ModeState {
+export function deriveModeState(browserMode: BrowserModeState): ModeState {
 	return createModeState(
-		"client",
-		browserMode.destination ? browserMode.page : "world-viewer",
-		lifecycleState?.phase === "ready" &&
-			lifecycleState.sessionState === "connected"
-			? "The host lifecycle reports a ready connected client session, so the world viewer is live."
-			: "The app stays in one world-viewer mode; navigation overlays can change focus without becoming a separate app mode.",
+		"browser",
+		browserMode.destination ? browserMode.page : "browser",
+		"Browser navigation is frontend-owned and destination-driven.",
 	);
 }
 

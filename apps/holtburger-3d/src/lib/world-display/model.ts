@@ -1,5 +1,4 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
-import type { AppModeId } from "../../app/modes";
 import {
 	browserDestinationToInteriorCellId,
 	browserLocationToLandblockId,
@@ -9,7 +8,6 @@ import {
 	formatHex32,
 	formatLandblockLabel,
 	formatLandblockPackAssetId,
-	normalizeOutdoorLandblockId,
 } from "../landblocks";
 import type {
 	AssetChannelState,
@@ -22,10 +20,8 @@ import { describePreparedAssetPayload } from "../assets/types";
 import type {
 	CameraHintAckDto,
 	CameraHintDto,
-	FrontendStateFeedDto,
 	RayPickRequestDto,
 	RayPickResponseDto,
-	RuntimeBatchDto,
 } from "../host/contracts";
 
 export interface NormalizedViewportPoint {
@@ -104,10 +100,6 @@ export interface WorldDisplayModel {
 }
 
 interface WorldDisplayModelInput {
-	activeModeLabel: string;
-	hostStatus: string;
-	runtimeBatch: RuntimeBatchDto | null;
-	viewModelFeed: FrontendStateFeedDto | null;
 	assetState: AssetChannelState;
 	browserDestination: BrowserLocationSelection | null;
 	terrainLodRadius: number;
@@ -126,10 +118,6 @@ const DEFAULT_VIEWPORT_POINT: NormalizedViewportPoint = {
 const MIN_CAMERA_HINT_INTERVAL_MS = 250;
 
 export function deriveWorldDisplayModel({
-	activeModeLabel,
-	hostStatus,
-	runtimeBatch,
-	viewModelFeed,
 	assetState,
 	browserDestination,
 	terrainLodRadius,
@@ -139,15 +127,14 @@ export function deriveWorldDisplayModel({
 	rayPickResponse,
 	pendingCameraHint,
 }: WorldDisplayModelInput): WorldDisplayModel {
-	if (!runtimeBatch) {
+	if (!browserDestination) {
 		return {
-			headline: `${activeModeLabel} is waiting for a runtime-backed world shell.`,
-			focusLocationLabel: "No runtime residency available yet.",
-			destinationLabel:
-				browserDestination?.label ?? "No manual destination selected yet.",
-			renderCacheText: hostStatus,
-			inputText:
-				"Camera hints and authority-sensitive picks activate once runtime data arrives.",
+			headline: "Browser scene viewer is waiting for a destination.",
+			focusLocationLabel: "No browser destination selected yet.",
+			destinationLabel: "No browser destination selected yet.",
+			renderCacheText:
+				"Browser asset cache is ready for destination-driven coverage.",
+			inputText: "Camera hints and picks use browser-owned camera state only.",
 			assetText: describeAssetState(assetState),
 			sceneContext: createPendingSceneContext(browserDestination),
 			terrainContract: createTerrainContract(null),
@@ -155,31 +142,25 @@ export function deriveWorldDisplayModel({
 		};
 	}
 
-	void viewModelFeed;
-	const destinationLabel =
-		browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel;
 	const sceneContext = deriveSceneContext(
-		runtimeBatch,
-		browserDestination,
 		assetState,
+		browserDestination,
 		terrainLodRadius,
 		buildingLodRadius,
 		detailLodRadius,
 	);
 
 	return {
-		headline: browserDestination
-			? "Manual destination focus is now driving the shared world shell."
-			: "The shared world shell is anchored to live runtime residency.",
-		focusLocationLabel:
-			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
-		destinationLabel,
-		renderCacheText: `Runtime tick ${runtimeBatch.tick} with terrain coverage selected from authoritative residency instead of fixture entities.`,
+		headline: "Browser destination is driving the shared world shell.",
+		focusLocationLabel: browserDestination.label,
+		destinationLabel: browserDestination.label,
+		renderCacheText:
+			"Scene coverage is selected from browser destination and frontend cache state.",
 		inputText: pendingCameraHint
-			? "Camera hints are being throttled through the app-local runtime channel."
+			? "Camera hints are being throttled through the browser diagnostics channel."
 			: (describeRayPickResponse(rayPickResponse) ??
 				describeCameraHintAck(cameraAck) ??
-				"Viewport input is ready to send camera hints. Picks stay dormant until real world entities exist."),
+				"Viewport input is ready to send browser camera hints."),
 		assetText: describeAssetState(assetState),
 		sceneContext,
 		terrainContract: createTerrainContract(sceneContext),
@@ -193,15 +174,14 @@ function createPendingSceneContext(
 	return {
 		kind: "outdoor-landblock-ring",
 		statusText:
-			"Local outdoor scene context will lock in once authoritative runtime residency arrives.",
+			"Local outdoor scene context will lock in once the browser has a destination.",
 		focusAnchorLabel: "No focus landblock yet.",
 		destinationText: browserDestination
-			? `Manual destination focus is staged for ${browserDestination.label}, but chunk selection still waits on authoritative residency.`
-			: "No manual destination focus is staged yet.",
+			? `Browser destination focus is staged for ${browserDestination.label}.`
+			: "No browser destination focus is staged yet.",
 		coverageText:
-			"Phase 7 keeps chunk selection app-local and outdoor-first; indoor visible-cell expansion remains deferred.",
-		gapText:
-			"The app still needs an authoritative coordinate-to-landblock query before manual destinations can choose terrain chunks directly.",
+			"Browser chunk selection is app-local and destination-driven.",
+		gapText: null,
 		chunks: [],
 		staticRenderableInstanceCount: 0,
 		staticRenderableBuildingCount: 0,
@@ -210,9 +190,8 @@ function createPendingSceneContext(
 }
 
 function deriveSceneContext(
-	runtimeBatch: RuntimeBatchDto,
-	browserDestination: BrowserLocationSelection | null,
 	assetState: AssetChannelState,
+	browserDestination: BrowserLocationSelection,
 	terrainLodRadius: number,
 	buildingLodRadius: number,
 	detailLodRadius: number,
@@ -222,28 +201,14 @@ function deriveSceneContext(
 	if (browserFocusEnvCellId !== null) {
 		return deriveIndoorSceneContext(
 			browserFocusEnvCellId,
-			browserDestination?.label ?? null,
+			browserDestination.label,
 			assetState,
-			null,
 		);
 	}
 
-	const focusLandblockId = browserDestination
-		? browserLocationToLandblockId(browserDestination)
-		: normalizeOutdoorLandblockId(runtimeBatch.residency.focusLandblockId);
+	const focusLandblockId = browserLocationToLandblockId(browserDestination);
 	const focusLandblockLabel = formatLandblockLabel(focusLandblockId);
-	const destinationText = browserDestination
-		? `Manual destination focus is ${browserDestination.label}, and outdoor LoD now anchors to the selected landblock ${focusLandblockLabel}.`
-		: `No manual destination override is active, so outdoor LoD follows authoritative runtime landblock ${focusLandblockLabel}.`;
-
-	if (runtimeBatch.residency.indoors) {
-		return deriveIndoorSceneContext(
-			runtimeBatch.residency.focusEnvCellId,
-			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
-			assetState,
-			runtimeBatch,
-		);
-	}
+	const destinationText = `Browser destination focus is ${browserDestination.label}, and outdoor LoD anchors to selected landblock ${focusLandblockLabel}.`;
 
 	const chunks = buildOutdoorTerrainTiles(
 		focusLandblockId,
@@ -326,12 +291,10 @@ function deriveIndoorSceneContext(
 	focusEnvCellId: number | null,
 	destinationLabel: string | null,
 	assetState: AssetChannelState,
-	runtimeBatch: RuntimeBatchDto | null,
 ): WorldDisplaySceneContext {
 	const focusEnvCellLabel = focusEnvCellId
 		? formatEnvCellLabel(focusEnvCellId)
 		: "Unknown env cell";
-	const visibleCount = runtimeBatch?.residency.visibleCellIds.length ?? 0;
 	const preparedIndoorCellCount = Object.values(
 		assetState.preparedByAssetId,
 	).reduce(
@@ -341,14 +304,6 @@ function deriveIndoorSceneContext(
 				: total,
 		0,
 	);
-	const seenOutsideText =
-		runtimeBatch?.residency.seenOutside === null ||
-		runtimeBatch?.residency.seenOutside === undefined
-			? "SeenOutside is not available for this browser-selected env cell yet."
-			: runtimeBatch.residency.seenOutside
-				? "SeenOutside is set, so outdoor relevance may still matter."
-				: "SeenOutside is clear, so indoor visible-cell relevance stays local to env cells.";
-
 	return {
 		kind: "indoor-visible-cell-set",
 		statusText:
@@ -357,7 +312,7 @@ function deriveIndoorSceneContext(
 		destinationText: destinationLabel
 			? `Manual destination focus is ${destinationLabel}.`
 			: `Indoor focus is ${focusEnvCellLabel}.`,
-		coverageText: `Indoor focus ${focusEnvCellLabel} currently exposes ${visibleCount} visible cell${visibleCount === 1 ? "" : "s"}, ${preparedIndoorCellCount} pack-prepared cell${preparedIndoorCellCount === 1 ? "" : "s"}, and ${seenOutsideText}`,
+		coverageText: `Indoor focus ${focusEnvCellLabel} is backed by ${preparedIndoorCellCount} pack-prepared cell${preparedIndoorCellCount === 1 ? "" : "s"}. Browser dungeons load from the owning landblock pack instead of runtime visible-cell state.`,
 		gapText: null,
 		chunks: [],
 		staticRenderableInstanceCount: 0,
@@ -569,27 +524,14 @@ export function shouldSendThrottledCameraHint(
 }
 
 export function buildCameraHint(
-	activeMode: AppModeId,
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	viewportPoint: NormalizedViewportPoint = DEFAULT_VIEWPORT_POINT,
 ): CameraHintDto | null {
-	if (!runtimeBatch) {
-		return null;
-	}
-
-	const focusEntity =
-		runtimeBatch.entities.find((entity) => entity.isLocalPlayer) ??
-		runtimeBatch.entities[0] ??
-		null;
-	const anchorPosition = focusEntity?.position ?? { x: 96, y: 96, z: 24 };
-	const anchorHeading = focusEntity?.headingRadians ?? 0;
-
-	const yaw = anchorHeading + (viewportPoint.normalizedX - 0.5) * 1.4;
+	const anchorPosition = { x: 96, y: 96, z: 24 };
+	const yaw = (viewportPoint.normalizedX - 0.5) * 1.4;
 	const pitch = (0.5 - viewportPoint.normalizedY) * 0.65;
 
 	return {
-		mode: activeMode,
 		source: "world-display",
 		position: anchorPosition,
 		forward: normalizeVec3({
@@ -599,8 +541,7 @@ export function buildCameraHint(
 		}),
 		viewportNormalizedX: viewportPoint.normalizedX,
 		viewportNormalizedY: viewportPoint.normalizedY,
-		destinationLabel:
-			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
+		destinationLabel: browserDestination?.label ?? null,
 	};
 }
 

@@ -1,9 +1,5 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
-import type {
-	AssetLookupRequestDto,
-	AssetPriority,
-	RuntimeBatchDto,
-} from "../host/contracts";
+import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
 	classifyAssetHydration,
 	isSceneCoverageAssetId,
@@ -29,7 +25,6 @@ export interface SceneAssetChannel {
 }
 
 export interface SceneAssetStreamingInput {
-	runtimeBatch: RuntimeBatchDto | null;
 	browserDestination: BrowserLocationSelection | null;
 	terrainLodRadius: number;
 	buildingLodRadius: number;
@@ -55,6 +50,7 @@ export class SceneAssetStreamingController {
 	private readonly inFlightAssetIds = new Set<string>();
 	private latestInput: SceneAssetStreamingInput | null = null;
 	private lastSyncedKey: string | null = null;
+	private requestRevision = 0;
 	private running = false;
 	private disposed = false;
 
@@ -85,11 +81,12 @@ export class SceneAssetStreamingController {
 			while (!this.disposed && this.latestInput) {
 				const input = this.latestInput;
 				const syncKey = createSceneInterestSyncKey(input);
-				if (!input.runtimeBatch || syncKey === this.lastSyncedKey) {
+				if (syncKey === this.lastSyncedKey) {
 					break;
 				}
 
 				this.lastSyncedKey = syncKey;
+				this.requestRevision += 1;
 				this.deps.debugLog("coverage-key", {
 					coverageKey: syncKey,
 					destination: input.browserDestination?.label ?? null,
@@ -97,7 +94,7 @@ export class SceneAssetStreamingController {
 					buildingLodRadius: input.buildingLodRadius,
 					detailLodRadius: input.detailLodRadius,
 					envCellLodRadius: input.envCellLodRadius,
-					runtimeTick: input.runtimeBatch.tick,
+					requestRevision: this.requestRevision,
 				});
 
 				await this.syncPriority(input, "bootstrap");
@@ -112,7 +109,7 @@ export class SceneAssetStreamingController {
 			this.running = false;
 			if (!this.disposed && this.latestInput) {
 				const syncKey = createSceneInterestSyncKey(this.latestInput);
-				if (this.latestInput.runtimeBatch && syncKey !== this.lastSyncedKey) {
+				if (syncKey !== this.lastSyncedKey) {
 					this.syncSceneInterest(this.latestInput);
 				}
 			}
@@ -123,29 +120,30 @@ export class SceneAssetStreamingController {
 		input: SceneAssetStreamingInput,
 		priority: AssetPriority,
 	): Promise<void> {
-		const runtimeBatch = input.runtimeBatch;
-		if (!runtimeBatch || this.disposed) {
+		if (this.disposed) {
 			return;
 		}
 
 		const preparedByAssetId = this.deps.getPreparedByAssetId();
 		const requests = createSceneCoverageRequests(
-			runtimeBatch,
-			input.browserDestination,
-			priority,
-			preparedByAssetId,
-			[...this.inFlightAssetIds],
 			{
-				terrainRadius: input.terrainLodRadius,
-				buildingRadius: input.buildingLodRadius,
-				detailRadius: input.detailLodRadius,
-				envCellRadius: input.envCellLodRadius,
+				requestRevision: this.requestRevision,
+				browserDestination: input.browserDestination,
+				preparedByAssetId,
+				pendingAssetIds: [...this.inFlightAssetIds],
+				options: {
+					terrainRadius: input.terrainLodRadius,
+					buildingRadius: input.buildingLodRadius,
+					detailRadius: input.detailLodRadius,
+					envCellRadius: input.envCellLodRadius,
+				},
 			},
+			priority,
 		);
 
 		this.deps.debugLog("scene-coverage", {
 			priority,
-			tick: runtimeBatch.tick,
+			requestRevision: this.requestRevision,
 			destination: input.browserDestination?.label ?? null,
 			terrainLodRadius: input.terrainLodRadius,
 			buildingLodRadius: input.buildingLodRadius,
@@ -173,8 +171,7 @@ export class SceneAssetStreamingController {
 	}
 
 	private prunePreparedCache(input: SceneAssetStreamingInput): void {
-		const runtimeBatch = input.runtimeBatch;
-		if (!runtimeBatch || this.disposed) {
+		if (this.disposed) {
 			return;
 		}
 
@@ -183,7 +180,6 @@ export class SceneAssetStreamingController {
 			preparedByAssetId,
 			cacheMetadataByAssetId: this.deps.getCacheMetadataByAssetId(),
 			activeCoverageAssetIds: deriveSceneCoverageAssetIds(
-				runtimeBatch,
 				input.browserDestination,
 				preparedByAssetId,
 				{
@@ -269,5 +265,5 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 
 	return destination
 		? `${destination.source}:${destination.label}:${interestKey}`
-		: `runtime:${interestKey}`;
+		: `none:${interestKey}`;
 }

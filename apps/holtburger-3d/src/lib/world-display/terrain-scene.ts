@@ -7,7 +7,6 @@ import type {
 	PreparedLandblockSummaryPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
-import type { RuntimeBatchDto } from "../host/contracts";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
 import {
 	buildOutdoorCoverageLandblockIds,
@@ -42,7 +41,7 @@ export function createEmptyTerrainSceneModel(): TerrainSceneModel {
 	return {
 		focusLandblockId: null,
 		statusText:
-			"Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
+			"Waiting for a browser destination before the Three.js terrain scene can select landblocks.",
 		cacheText: "Terrain cache is idle.",
 		dataSourceText: "No terrain provenance available yet.",
 		tiles: [],
@@ -50,17 +49,16 @@ export function createEmptyTerrainSceneModel(): TerrainSceneModel {
 }
 
 export function deriveTerrainSceneModel(
-	runtimeBatch: RuntimeBatchDto | null,
 	assetState: AssetChannelState,
 	browserDestination: BrowserLocationSelection | null = null,
 	terrainLodRadius = 1,
 	terrainLandblockIds: readonly number[] | null = null,
 ): TerrainSceneModel {
-	if (!runtimeBatch) {
+	if (!browserDestination) {
 		return {
 			focusLandblockId: null,
 			statusText:
-				"Waiting for runtime residency before the Three.js terrain scene can select landblocks.",
+				"Waiting for a browser destination before the Three.js terrain scene can select landblocks.",
 			cacheText: `Terrain cache is idle with ${Object.keys(assetState.preparedByAssetId).length} prepared records.`,
 			dataSourceText: "No terrain provenance available yet.",
 			tiles: [],
@@ -78,21 +76,7 @@ export function deriveTerrainSceneModel(
 		};
 	}
 
-	if (runtimeBatch.residency.indoors) {
-		return {
-			focusLandblockId: null,
-			statusText:
-				"Indoor runtime residency is active, so the outdoor Three.js terrain scene is intentionally dormant until env-cell scene ownership lands.",
-			cacheText: `Outdoor terrain cache is holding ${countPreparedTerrainAssets(assetState.preparedByAssetId)} landblocks while indoor scene work remains deferred.`,
-			dataSourceText: describeTerrainDataSources([]),
-			tiles: [],
-		};
-	}
-
-	const focusLandblockId = deriveTerrainFocusLandblockId(
-		runtimeBatch,
-		browserDestination,
-	);
+	const focusLandblockId = deriveTerrainFocusLandblockId(browserDestination);
 	const activeLandblockIds = new Set(
 		terrainLandblockIds ??
 			buildOutdoorCoverageLandblockIds(focusLandblockId, terrainLodRadius),

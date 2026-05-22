@@ -1,10 +1,5 @@
-import type { AppModeId } from "../../app/modes";
 import type { BrowserLocationSelection } from "../../app/browser-mode";
-import type {
-	CameraHintDto,
-	RuntimeBatchDto,
-	Vec3Dto,
-} from "../host/contracts";
+import type { CameraHintDto, Vec3Dto } from "../host/contracts";
 import {
 	getOutdoorLandblockCoords,
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -447,19 +442,12 @@ function getCameraAxes(
 }
 
 export function buildCameraHintFromSceneCameraFrame(
-	activeMode: AppModeId,
-	runtimeBatch: RuntimeBatchDto | null,
 	browserDestination: BrowserLocationSelection | null,
 	frame: SceneCameraFrame,
 	viewportPoint: NormalizedViewportPoint,
 	activeRenderAnchor: RenderLandblockAnchor | null = null,
 ): CameraHintDto | null {
-	if (!runtimeBatch) {
-		return null;
-	}
-
 	return {
-		mode: activeMode,
 		source: "world-display",
 		position: rendererPointToAcPosition(frame.position, activeRenderAnchor),
 		forward: normalizeVec3(
@@ -467,8 +455,7 @@ export function buildCameraHintFromSceneCameraFrame(
 		),
 		viewportNormalizedX: viewportPoint.normalizedX,
 		viewportNormalizedY: viewportPoint.normalizedY,
-		destinationLabel:
-			browserDestination?.label ?? runtimeBatch.residency.focusLocationLabel,
+		destinationLabel: browserDestination?.label ?? null,
 	};
 }
 

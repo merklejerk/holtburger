@@ -11,7 +11,6 @@ import {
 	parseBrowserLocationInput,
 	previewBrowserLocation,
 	selectBrowserLandblockDestination,
-	selectRuntimeResidencyDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
 	updateCellIndicatorVisibility,
@@ -23,21 +22,6 @@ import {
 	updateTerrainLodRadius,
 	updateTransitionPortalMaxDepth,
 } from "./browser-mode";
-import type { RuntimeResidencyDto } from "../lib/host/contracts";
-
-const runtimeResidency: RuntimeResidencyDto = {
-	focusEntityId: 0x01020304,
-	focusLandblockId: 0x01020003,
-	focusCellId: 3,
-	focusEnvCellId: null,
-	visibleCellIds: [],
-	seenOutside: null,
-	environmentId: null,
-	cellStructureId: null,
-	focusLocationLabel: "100.40S, 101.55W, 1.0Z",
-	indoors: false,
-	trackedBodyCount: 2,
-};
 
 describe("browser-mode location policy", () => {
 	it("starts with a known non-flat browser destination selected", () => {
@@ -144,19 +128,6 @@ describe("browser-mode location policy", () => {
 		);
 		expect(state.destination).toBeNull();
 		expect(state.page).toBe("location-entry");
-	});
-
-	it("can promote the live runtime residency into the selected browser destination", () => {
-		const state = selectRuntimeResidencyDestination(
-			createBrowserModeState(),
-			runtimeResidency,
-		);
-
-		expect(state.destination?.source).toBe("runtime-residency");
-		expect(state.destination?.label).toBe(runtimeResidency.focusLocationLabel);
-		expect(state.destination?.kind).toBe("outdoor-location");
-		expect(state.destination?.landblockId).toBeNull();
-		expect(state.page).toBe("destination-preview");
 	});
 
 	it("can select a browser destination from an exact picked landblock id", () => {

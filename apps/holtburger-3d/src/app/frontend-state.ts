@@ -4,8 +4,6 @@ import {
 	createBrowserModeState,
 	previewBrowserLocation,
 	selectBrowserLandblockDestination,
-	seedBrowserDraftFromResidency,
-	selectRuntimeResidencyDestination,
 	updateBuildingLodRadius,
 	updateBrowserDraft,
 	updateDetailLodRadius,
@@ -25,44 +23,24 @@ import {
 	applyPreparedAssets as applyPreparedAssetsToState,
 	createAssetState,
 	markAssetsPending as markAssetsPendingInState,
-	updateAssetChannel,
 } from "./asset-state";
 import type { PreparedAssetCachePrunePlan } from "../lib/assets/asset-cache-policy";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 } from "../lib/assets/types";
-import type {
-	AssetLookupRequestDto,
-	HostBoundarySnapshot,
-	RuntimeNotificationEnvelopeDto,
-} from "../lib/host/contracts";
-import {
-	applyLoadedSnapshot as applyLoadedHostSnapshot,
-	applyRuntimeNotification as applyHostRuntimeNotification,
-	createHostConnectionState,
-	type HostConnectionState,
-} from "./host-state";
-import {
-	createInitialModeState,
-	deriveModeState,
-	type ModeState,
-} from "./mode-state";
+import type { AssetLookupRequestDto } from "../lib/host/contracts";
 
 export interface FrontendAppState {
-	host: HostConnectionState;
 	asset: AssetChannelState;
 	browserMode: BrowserModeState;
-	mode: ModeState;
 }
 
 function createInitialFrontendState(): FrontendAppState {
-	return reconcileModeState({
-		host: createHostConnectionState(),
+	return {
 		asset: createAssetState(),
 		browserMode: createBrowserModeState(),
-		mode: createInitialModeState(),
-	});
+	};
 }
 
 export function createFrontendStateStore() {
@@ -72,101 +50,70 @@ export function createFrontendStateStore() {
 
 	return {
 		subscribe,
-		loadSnapshot(snapshot: HostBoundarySnapshot): void {
-			update((state) =>
-				reconcileModeState(applyLoadedSnapshot(state, snapshot)),
-			);
-		},
-		applyRuntimeNotification(
-			notification: RuntimeNotificationEnvelopeDto,
-		): void {
-			update((state) =>
-				reconcileModeState(applyRuntimeNotification(state, notification)),
-			);
-		},
 		updateBrowserDraft(draftInput: string): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateBrowserDraft(state.browserMode, draftInput),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateBrowserDraft(state.browserMode, draftInput),
+			}));
 		},
 		previewBrowserLocation(): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: previewBrowserLocation(state.browserMode),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: previewBrowserLocation(state.browserMode),
+			}));
 		},
 		updateTerrainLodRadius(terrainLodRadius: number): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateTerrainLodRadius(
-						state.browserMode,
-						terrainLodRadius,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateTerrainLodRadius(
+					state.browserMode,
+					terrainLodRadius,
+				),
+			}));
 		},
 		updateBuildingLodRadius(buildingLodRadius: number): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateBuildingLodRadius(
-						state.browserMode,
-						buildingLodRadius,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateBuildingLodRadius(
+					state.browserMode,
+					buildingLodRadius,
+				),
+			}));
 		},
 		updateDetailLodRadius(detailLodRadius: number): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateDetailLodRadius(
-						state.browserMode,
-						detailLodRadius,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateDetailLodRadius(state.browserMode, detailLodRadius),
+			}));
 		},
 		updateEnvCellLodRadius(envCellLodRadius: number): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateEnvCellLodRadius(
-						state.browserMode,
-						envCellLodRadius,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateEnvCellLodRadius(
+					state.browserMode,
+					envCellLodRadius,
+				),
+			}));
 		},
 		updateTransitionPortalMaxDepth(maxDepth: number): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateTransitionPortalMaxDepth(
-						state.browserMode,
-						maxDepth,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateTransitionPortalMaxDepth(
+					state.browserMode,
+					maxDepth,
+				),
+			}));
 		},
 		updateLandblockInputMode(
 			landblockInputMode: BrowserLandblockInputMode,
 		): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: updateLandblockInputMode(
-						state.browserMode,
-						landblockInputMode,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: updateLandblockInputMode(
+					state.browserMode,
+					landblockInputMode,
+				),
+			}));
 		},
 		updatePortalPolygonVisibility(showPortalPolygons: boolean): void {
 			update((state) => ({
@@ -196,15 +143,13 @@ export function createFrontendStateStore() {
 			}));
 		},
 		selectBrowserLandblockDestination(landblockId: number): void {
-			update((state) =>
-				reconcileModeState({
-					...state,
-					browserMode: selectBrowserLandblockDestination(
-						state.browserMode,
-						landblockId,
-					),
-				}),
-			);
+			update((state) => ({
+				...state,
+				browserMode: selectBrowserLandblockDestination(
+					state.browserMode,
+					landblockId,
+				),
+			}));
 		},
 		markAssetPending(request: AssetLookupRequestDto): void {
 			this.markAssetsPending([request]);
@@ -247,67 +192,7 @@ export function createFrontendStateStore() {
 				asset: applyAssetErrorToState(state.asset, request, errorMessage),
 			}));
 		},
-		useRuntimeResidencyDestination(): void {
-			update((state) => {
-				const residency = state.host.boundarySnapshot?.runtimeBatch.residency;
-
-				if (!residency) {
-					return state;
-				}
-
-				return reconcileModeState({
-					...state,
-					browserMode: selectRuntimeResidencyDestination(
-						state.browserMode,
-						residency,
-					),
-				});
-			});
-		},
 	};
 }
 
 export const frontendState = createFrontendStateStore();
-
-function applyLoadedSnapshot(
-	state: FrontendAppState,
-	snapshot: HostBoundarySnapshot,
-): FrontendAppState {
-	return {
-		...state,
-		host: applyLoadedHostSnapshot(state.host, snapshot),
-		asset: updateAssetChannel(state.asset, snapshot.overview.assetChannel),
-		browserMode: seedBrowserDraftFromResidency(
-			state.browserMode,
-			snapshot.runtimeBatch.residency,
-		),
-	};
-}
-
-function applyRuntimeNotification(
-	state: FrontendAppState,
-	notification: RuntimeNotificationEnvelopeDto,
-): FrontendAppState {
-	const host = applyHostRuntimeNotification(state.host, notification);
-
-	return {
-		...state,
-		host,
-		browserMode: host.boundarySnapshot
-			? seedBrowserDraftFromResidency(
-					state.browserMode,
-					host.boundarySnapshot.runtimeBatch.residency,
-				)
-			: state.browserMode,
-	};
-}
-
-function reconcileModeState(state: FrontendAppState): FrontendAppState {
-	return {
-		...state,
-		mode: deriveModeState(
-			state.host.boundarySnapshot?.lifecycleState ?? null,
-			state.browserMode,
-		),
-	};
-}

@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Planning.
+Status: Phase 1 implemented; Phase 2 partially pulled forward.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -174,21 +174,21 @@ coupling to delete from browser mode, including the Rust/Tauri DTO path.
 
 Observed browser-facing coupling:
 
-- `contracts.rs` defines `RuntimeResidencyDto`, and `RuntimeBatchDto` embeds it.
-- `HostBoundaryAdapter::runtime_batch` fills `RuntimeBatchDto.residency`.
+- `contracts.rs` defines legacy residency DTO, and legacy host snapshot DTO embeds it.
+- `HostBoundaryAdapter::legacy_host_snapshot` fills `legacy host snapshot DTO.residency`.
 - `HostBoundaryAdapter::runtime_residency` synthesizes residency from the fake "Browser Scout"
   world/player position.
-- `RuntimeNotificationEnvelopeDto` can push that runtime batch to the browser.
-- `HostBoundaryOverviewDto` exposes `runtimeChannel`, `runtimeNotificationEvent`,
-  `runtimeLifecycleTopic`, and `runtimeBatchCommand`, so the browser boundary itself advertises the
+- legacy notification envelope can push that legacy host snapshot to the browser.
+- legacy host overview exposes `runtimeChannel`, `runtimeNotificationEvent`,
+  `runtimeLifecycleTopic`, and `legacyHostSnapshotCommand`, so the browser boundary itself advertises the
   wrong model.
-- `readHostBoundarySnapshot` invokes `get_runtime_batch` and makes `runtimeBatch` mandatory before
+- `readlegacy host snapshot` invokes `legacy host snapshot command` and makes legacy host snapshot mandatory before
   `BrowserWorldDisplay` can mount.
 - `BrowserModePanel.svelte` shows host focus text and has a "Use current" action.
 - `frontend-state.ts` seeds browser drafts from host focus and exposes
-  `useRuntimeResidencyDestination`.
-- `browser-mode.ts` includes a `"runtime-residency"` destination source and
-  `selectRuntimeResidencyDestination`.
+  legacy residency destination action.
+- `browser-mode.ts` includes a `"legacy residency destination"` destination source and
+  legacy residency destination selector.
 - `BrowserWorldDisplay.svelte` derives outdoor focus and camera scene keys from host focus when no
   browser destination is available.
 - `scene-asset-request-planner.ts`, `terrain-scene.ts`, `static-renderables.ts`,
@@ -197,22 +197,22 @@ Observed browser-facing coupling:
 
 Required cleanup:
 
-- Delete `RuntimeResidencyDto` from the browser-mode Tauri contract.
-- Delete or replace `RuntimeBatchDto` from the browser-mode Tauri contract; do not keep a
-  browser-mode DTO named `RuntimeBatchDto`.
+- Delete legacy residency DTO from the browser-mode Tauri contract.
+- Delete or replace legacy host snapshot DTO from the browser-mode Tauri contract; do not keep a
+  browser-mode DTO named legacy host snapshot DTO.
 - Delete `HostBoundaryAdapter::runtime_residency`.
-- Replace `get_runtime_batch` with a browser host/debug snapshot command only if the browser still
+- Replace `legacy host snapshot command` with a browser host/debug snapshot command only if the browser still
   needs synthetic debug entities. That snapshot must not contain focus, visible cells, or
   authoritative/player residency.
-- Replace `RuntimeNotificationEnvelopeDto` with a browser host notification envelope that carries
-  lifecycle, debug feed, or asset availability changes, not runtime batches.
+- Replace legacy notification envelope with a browser host notification envelope that carries
+  lifecycle, debug feed, or asset availability changes, not legacy host snapshots.
 - Rename overview fields away from `runtime*` terminology unless they truly refer to a future client
   runtime path that browser mode does not subscribe to.
-- Remove tests that assert `runtime_batch` exposes residency facts.
+- Remove tests that assert legacy host snapshot exposes residency facts.
 - If a future real client mode needs authoritative residency, add a separate client-mode contract
   later instead of keeping it in browser mode.
 - Delete browser UI/actions that expose host/player focus.
-- Delete `"runtime-residency"` as a browser destination source.
+- Delete `"legacy residency destination"` as a browser destination source.
 - Delete browser draft seeding from host focus.
 - Make browser scene interest destination-only.
 - If the native host still needs to exist for asset delivery, pass only an asset/request context to
@@ -225,7 +225,7 @@ The current app has no real browser/client mode boundary:
 - `AppModeId` is only `"client"`.
 - `deriveModeState` always returns `"client"` and treats browser navigation as an overlay/page.
 - Rust `lifecycle_state` always reports `active_mode_hint: Some(Client)`.
-- TypeScript host contracts only accept `activeModeHint: "client"`.
+- TypeScript host contracts only accept `legacy active mode hint: "client"`.
 - `App.svelte` imports `BrowserWorldDisplay` directly and does not use a router.
 - `tauri.conf.json` currently points the dev URL at the app root, not `/browser`.
 
@@ -235,12 +235,12 @@ from browser mode, not renamed into equally vague browser ceremony.
 Current browser-facing snapshot shape:
 
 ```ts
-interface HostBoundarySnapshot {
+interface legacy host snapshot {
 	source: "tauri";
-	lifecycleState: LifecycleStateDto;
-	runtimeBatch: RuntimeBatchDto;
-	viewModelFeed: FrontendStateFeedDto;
-	overview: HostBoundaryOverviewDto;
+	lifecycleState: legacy lifecycle DTO;
+	legacyHostSnapshot: legacy host snapshot DTO;
+	legacy view-model feed: legacy view-model feed;
+	overview: legacy host overview;
 }
 ```
 
@@ -267,7 +267,7 @@ The loaded route is the mode boundary. Browser mode calls browser-safe commands 
 - explicit one-off diagnostics, if still useful.
 
 Browser mode should not subscribe to runtime lifecycle or session notifications. It also does not
-need a mandatory `BrowserHostSnapshot`, `BrowserDebugFeedDto`, or `LifecycleStateDto`. Startup can
+need a mandatory `BrowserHostSnapshot`, `BrowserDebugFeedDto`, or legacy lifecycle DTO. Startup can
 mount `BrowserWorldDisplay` once required asset commands are available, and asset command failures
 can drive the unavailable/error UI.
 
@@ -315,24 +315,24 @@ points:
 
 - `App.svelte` currently gates rendering on `$frontendState.host.boundarySnapshot`. `/browser` must
   render without that snapshot.
-- `App.svelte` currently subscribes to `listenForRuntimeLifecycle`, calls
-  `readHostBoundarySnapshot`, and logs `runtimeBatch.residency`. `/browser` should delete that
+- `App.svelte` currently subscribes to legacy runtime listener, calls
+  `readlegacy host snapshot`, and logs `legacyHostSnapshot.residency`. `/browser` should delete that
   startup path.
-- `SceneAssetStreamingController.syncSceneInterest` receives `runtimeBatch` from the host snapshot
+- `SceneAssetStreamingController.syncSceneInterest` receives legacy host snapshot from the host snapshot
   and refuses to sync without it. This remains a hard blocker; browser streaming needs
   destination/revision input.
 - `BrowserWorldDisplay` props include `activeMode`, `activeModeLabel`, `hostStatus`,
-  `runtimeBatch`, and `viewModelFeed`. `/browser` should remove those props or replace display text
+  legacy host snapshot, and `legacy view-model feed`. `/browser` should remove those props or replace display text
   with route-local constants and browser state.
 - `deriveWorldDisplayModel`, `camera.ts`, scene derivation helpers, and render-anchor helpers still
-  use `RuntimeBatchDto`. Route separation alone does not fix this; it only makes the correct
+  use legacy host snapshot DTO. Route separation alone does not fix this; it only makes the correct
   deletion boundary obvious.
 - `lookup_asset` and `lookup_asset_binary` are already content/asset commands and can stay shared
   while they remain mode-agnostic.
 - `get_debug_config` can stay shared if it remains a simple host diagnostic toggle.
 - `submit_camera_hint` and `resolve_ray_pick` are optional diagnostics. If retained in `/browser`,
-  they must not require runtime batches or fake entities.
-- Rust `main.rs` currently emits startup and interval `runtime:notification` events unconditionally.
+  they must not require legacy host snapshots or fake entities.
+- Rust `main.rs` currently emits startup and interval legacy legacy notification event events unconditionally.
   Browser mode should not subscribe to them, and the Rust browser host can delete that emitter path
   once no current route consumes it.
 
@@ -356,7 +356,7 @@ interface BrowserSceneRequestInput {
 
 `requestRevision` should be owned by browser state and increment when destination identity or LOD
 radii change. It must not be derived from a host tick. Existing sync keys and request ids currently
-include `runtimeBatch.tick`; those should move to browser request revision plus destination identity.
+include `legacyHostSnapshot.tick`; those should move to browser request revision plus destination identity.
 
 The browser request planner should derive:
 
@@ -382,7 +382,7 @@ composition should stop using mixed helpers that have host/player alternate-focu
 
 `deriveWorldDisplayModel` is also part of the cleanup. It currently produces text like
 "authoritative residency" and "No runtime residency available yet" and builds scene context from
-`runtimeBatch.residency`. Browser mode should either retire this helper or replace it with
+`legacyHostSnapshot.residency`. Browser mode should either retire this helper or replace it with
 `deriveBrowserWorldDisplayModel` that accepts browser destination, renderer camera residency,
 prepared asset state, and optional debug feed. The browser display model should not mention
 authoritative/runtime residency.
@@ -394,22 +394,22 @@ runtime residency.
 
 Current coupling:
 
-- `buildCameraHintFromSceneCameraFrame` returns `null` without `RuntimeBatchDto`.
+- `buildCameraHintFromSceneCameraFrame` returns `null` without legacy host snapshot DTO.
 - `buildCameraHintFromSceneCameraFrame` falls back to
-  `runtimeBatch.residency.focusLocationLabel`.
+  `legacyHostSnapshot.residency.focusLocationLabel`.
 - `buildCameraHint` in `model.ts` chooses a camera origin from fake runtime entities and falls back
   to runtime residency text.
-- `resolve_ray_pick` uses `self.runtime_batch(state)` to pick synthetic debug entities.
+- `resolve_ray_pick` uses `self.legacy_host_snapshot(state)` to pick synthetic debug entities.
 
 Required cleanup:
 
 - Build rendered camera hints from the renderer camera frame, active render anchor, route-specific
   source label, and `browserDestination?.label ?? null`.
-- Remove `runtimeBatch` from camera-hint builders.
+- Remove legacy host snapshot from camera-hint builders.
 - Keep ray pick explicitly debug-only if synthetic debug entities remain, or drop it from browser
   mode until a real client/debug target needs it.
 - If ray pick remains, source it from a `BrowserDebugEntitySnapshotDto[]` carrier, not from
-  `RuntimeBatchDto`.
+  legacy host snapshot DTO.
 
 ### Existing Camera Rebase Helper Should Be Reused
 
@@ -454,12 +454,12 @@ residency. Newly streamed bounds must not tug the camera.
 ## Hard Blockers
 
 1. Remove browser-mode Rust/Tauri exposure of host/player residency.
-2. Remove browser-mode dependence on `LifecycleStateDto`, `HostBoundarySnapshot`,
-   `FrontendStateFeedDto`, runtime notifications, and client-mode `activeModeHint`.
+2. Remove browser-mode dependence on legacy lifecycle DTO, legacy host snapshot,
+   legacy view-model feed, legacy notifications, and client-mode legacy active mode hint.
 3. Add a browser scene request input that does not carry host/player focus or host ticks.
 4. Add typed, deduplicated renderer camera residency notifications.
 5. Make destination-driven scene derivation the only browser path.
-6. Decouple camera hints/ray picks from runtime batches.
+6. Decouple camera hints/ray picks from legacy host snapshots.
 7. Prevent destination updates from triggering camera scene-key resets.
 8. Apply anchor rebase compensation to both `browserCameraFrame` and `browserCameraState.position`.
 
@@ -467,19 +467,19 @@ residency. Newly streamed bounds must not tug the camera.
 
 1. **Delete legacy browser residency contract**
    - Remove Rust/Tauri residency DTO fields and adapter synthesis.
-   - Remove runtime batch, lifecycle/session, mode-hint, snapshot, debug-feed, and notification
+   - Remove legacy host snapshot, lifecycle/session, mode-hint, snapshot, debug-feed, and notification
      dependencies from browser mode unless directly required by asset lookup.
    - Remove the "Use current" action, destination source, draft seeding, panel host-focus text, fake
      runtime startup notification, and lifecycle-derived app mode.
    - Make `/browser` the current route-level app surface. Reserve `/client` for future client mode
      instead of adding a persistent Tauri/frontend mode indicator.
    - Keep shared asset commands shared while they remain mode-agnostic.
-   - Update tests so browser mode has no host/player focus destination path, runtime batch DTO, or
+   - Update tests so browser mode has no host/player focus destination path, legacy host snapshot DTO, or
      client lifecycle dependency.
 
 2. **Decouple browser streaming from host ticks**
    - Create browser request input and browser-owned request revision.
-   - Split scene streaming sync keys from host/runtime batches.
+   - Split scene streaming sync keys from host/legacy host snapshots.
    - Keep request IDs stable with destination identity and revision.
 
 3. **Add typed renderer camera residency**
@@ -514,19 +514,19 @@ residency. Newly streamed bounds must not tug the camera.
 
 ### Phase 1: Remove Legacy Browser Residency Exposure
 
-- Remove `RuntimeResidencyDto` from `apps/holtburger-3d/src-tauri/src/contracts.rs`.
-- Delete or replace `RuntimeBatchDto`; do not keep a browser-mode DTO named `RuntimeBatchDto`.
+- Remove legacy residency DTO from `apps/holtburger-3d/src-tauri/src/contracts.rs`.
+- Delete or replace legacy host snapshot DTO; do not keep a browser-mode DTO named legacy host snapshot DTO.
 - Remove `HostBoundaryAdapter::runtime_residency`.
-- Replace `HostRuntimeService::runtime_batch`, `HostBoundaryAdapter::runtime_batch`,
-  `get_runtime_batch`, `RuntimeNotificationEnvelopeDto.runtime_batch`, and the `runtime.batch`
+- Replace `HostRuntimeService::legacy_host_snapshot`, `HostBoundaryAdapter::legacy_host_snapshot`,
+  `legacy host snapshot command`, `legacy notification envelope.legacy_host_snapshot`, and the `legacy host snapshot notification`
   browser startup notification by deleting the browser-mode call/subscription path.
-- Remove `LifecycleStateDto.active_mode_hint`, `ModeHintDto`, and `sessionState` from browser-mode
+- Remove `legacy lifecycle DTO.active_mode_hint`, legacy mode hint DTO, and legacy session state from browser-mode
   contracts; keep them only if moved behind future client-mode-only contracts.
-- Remove `HostBoundarySnapshot` as a browser startup prerequisite. Browser startup should be driven
+- Remove legacy host snapshot as a browser startup prerequisite. Browser startup should be driven
   by required asset command availability and explicit startup errors.
-- Remove `FrontendStateFeedDto`/`viewModelFeed` from browser mode unless a concrete browser debug
+- Remove legacy view-model feed/`legacy view-model feed` from browser mode unless a concrete browser debug
   workflow is added in the same change.
-- Remove `HostBoundaryOverviewDto` as a browser-mode prerequisite. If asset channel names are still
+- Remove legacy host overview as a browser-mode prerequisite. If asset channel names are still
   needed, use constants or a narrow asset-host config with no lifecycle/session/runtime fields.
 - Remove Rust adapter tests that assert residency fields, replacing them with tests that assert the
   browser host contract has no residency field.
@@ -546,42 +546,93 @@ residency. Newly streamed bounds must not tug the camera.
 - Split command namespaces only when command behavior would differ by route. Shared content commands
   such as asset lookup can stay shared if they remain mode-agnostic.
 - Keep `lookup_asset`, `lookup_asset_binary`, and `get_debug_config` available to `/browser`.
-- Remove `"runtime-residency"` from `BrowserDestinationSource`.
-- Remove `selectRuntimeResidencyDestination`.
+- Remove `"legacy residency destination"` from `BrowserDestinationSource`.
+- Remove legacy residency destination selector.
 - Remove `seedBrowserDraftFromResidency`.
-- Remove `useRuntimeResidencyDestination`.
+- Remove legacy residency destination action.
 - Remove panel rows/buttons that expose host/player focus as browser destination.
 - Update tests that currently assert host-focus browser destination behavior.
 
 Exit criteria:
 
 - The Rust/Tauri browser-mode contract does not expose residency.
-- The Rust/Tauri browser-mode contract does not expose a `RuntimeBatchDto`.
-- Browser startup does not emit or consume `runtime.batch`, lifecycle/session state, or client
-  `activeModeHint`.
-- Browser mode can mount from asset host availability without `HostBoundarySnapshot`.
+- The Rust/Tauri browser-mode contract does not expose a legacy host snapshot DTO.
+- Browser startup does not emit or consume `legacy host snapshot notification`, lifecycle/session state, or client
+  legacy active mode hint.
+- Browser mode can mount from asset host availability without legacy host snapshot.
 - Browser mode is selected by `/browser`, not by Tauri lifecycle state or a global mode flag.
-- `/browser` can render without importing or passing `runtimeBatch`, `viewModelFeed`, `hostStatus`,
+- `/browser` can render without importing or passing legacy host snapshot, `legacy view-model feed`, `hostStatus`,
   `activeMode`, or `activeModeLabel`.
 - Browser mode state cannot create a destination from host/player focus.
 - Browser UI cannot select host/player focus.
 - Browser draft input is initialized only from browser defaults or user actions.
 
+Progress update:
+
+- Completed in `apps/holtburger-3d`:
+  - `/browser` is now the browser surface, with `/` accepted as a transitional browser route and
+    other routes reserved for future client mode.
+  - `App.svelte` no longer reads legacy host snapshot, lifecycle state, legacy host snapshots,
+    frontend view-model feed, host overview, or legacy notifications before mounting
+    `BrowserWorldDisplay`.
+  - `BrowserWorldDisplay` no longer accepts or imports legacy host snapshot, `legacy view-model feed`,
+    `hostStatus`, `activeMode`, or `activeModeLabel`.
+  - `BrowserModePanel` no longer exposes a host/player "Use current" action or host focus fallback.
+  - Browser app state now contains browser navigation state and asset state only; host connection
+    and mode/lifecycle state were removed from the active browser store path.
+  - TypeScript host contracts no longer export legacy host snapshot DTO, legacy residency DTO,
+    legacy lifecycle DTO, legacy notification envelope, legacy view-model feed,
+    legacy host snapshot, or legacy host overview.
+  - Tauri browser commands now expose shared asset lookup, debug config, camera hints, and ray-pick
+    diagnostics only. `legacy host snapshot command`, `get_lifecycle_state`, `get_view_model_feed`, and
+    `get_host_boundary_overview` were removed.
+  - Rust startup no longer emits legacy legacy notification event or a periodic `legacy host snapshot notification`.
+  - Rust fake residency/entity generation was deleted from the browser host adapter.
+  - Tauri dev URL now opens `/browser`.
+
+Course corrections:
+
+- Phase 2 request planning had to move forward enough to keep the browser functional. The old
+  streaming controller refused to run without legacy host snapshot DTO, so phase 1 also introduced a
+  browser-owned request revision and changed browser asset coverage requests to derive from
+  `browserMode.destination`, prepared assets, pending assets, and LOD radii.
+- Browser scene derivation also had to move forward enough to remove the prop-level legacy host snapshot.
+  Terrain, static renderables, structured interiors, render anchors, world-display summary text, and
+  camera hints now use browser destination input rather than host/player focus.
+- The old TypeScript test suite was deeply coupled to the removed runtime DTOs. Stale tests that
+  asserted the old host-driven architecture were deleted, and the remaining tests now pass against
+  browser-owned state and asset-only fixtures. Future phases should add replacement tests for the
+  new destination/follow behavior rather than restoring compatibility shims.
+- Rust tests that asserted legacy host snapshot/lifecycle behavior were replaced or removed where they
+  lived in the Tauri adapter. Asset lookup tests remain, and camera hint diagnostics now assert that
+  hints work without runtime residency.
+
+Verification:
+
+- `npm run check` passes for production Svelte/TypeScript.
+- `npm run check:rust` passes.
+- `npm run lint:rust` passes.
+- `npm run build` passes.
+- `npm run format:check` still reports pre-existing formatting drift in unrelated files not touched
+  by this phase.
+- `npm run test:ts` passes after deleting stale host-driven tests and keeping asset-only fixtures.
+
 ### Phase 2: Browser Request Planning
 
-- Add `BrowserSceneRequestInput`.
-- Add browser request-planner entry points that do not require host/player scene input.
-- Refactor `SceneAssetStreamingController` or wrap it so browser sync uses browser request input.
-- Add a browser-owned `requestRevision` and increment it when destination identity or LOD radii
-  change.
+- `BrowserSceneRequestInput` exists in the request planner.
+- Browser request-planner entry points no longer require host/player scene input.
+- `SceneAssetStreamingController` now uses browser request input.
+- A browser-owned `requestRevision` exists and increments when the scene interest sync key changes.
 - Use destination identity and `requestRevision`, not formatted labels or host ticks, in sync keys.
 - Preserve warm cache retention behavior.
+- Replace obsolete TypeScript planner/cache tests with browser-destination tests.
+- Tighten request ids/sync keys if formatted destination labels prove too unstable for follow mode.
 
 Exit criteria:
 
 - Browser asset requests can be derived from destination + prepared assets + radii.
 - Outdoor and dungeon browser requests work without host/player focus.
-- `SceneAssetStreamingController` does not accept or inspect `RuntimeBatchDto`.
+- `SceneAssetStreamingController` does not accept or inspect legacy host snapshot DTO.
 
 ### Phase 3: Typed Renderer Camera Residency
 
@@ -613,18 +664,18 @@ Exit criteria:
 
 ### Phase 5: Debug Camera Hints And Ray Picks
 
-- Remove `runtimeBatch` from `buildCameraHintFromSceneCameraFrame`.
+- Remove legacy host snapshot from `buildCameraHintFromSceneCameraFrame`.
 - Use `browserDestination?.label ?? null` for camera-hint and ray-pick destination labels.
 - Remove `buildCameraHint` paths that synthesize camera origin from fake runtime entities, unless
   retained under an explicit debug-only helper name.
-- Update Rust ray-pick diagnostics so they do not call `runtime_batch`.
+- Update Rust ray-pick diagnostics so they do not call legacy host snapshot.
 - If debug entity ray-pick remains, move synthetic entities into a browser debug DTO and keep them
   out of browser scene interest.
 
 Exit criteria:
 
-- Camera hints can be submitted without any runtime batch.
-- Ray-pick diagnostics, if retained, do not depend on runtime residency or runtime batches.
+- Camera hints can be submitted without any legacy host snapshot.
+- Ray-pick diagnostics, if retained, do not depend on runtime residency or legacy host snapshots.
 
 ### Phase 6: Standard Anchor And Camera Continuity
 
@@ -674,16 +725,78 @@ Exit criteria:
 - No full-scene clear/rebuild is visible during normal destination changes.
 - Browser mode operates independently of host/player focus.
 
+### Phase 9: Cleanup Legacy Smells And Migration Scaffolding
+
+Status: running cleanup punch list. Add to it whenever a phase leaves behind a temporary adapter,
+misleading name, duplicated helper, compatibility shim, obsolete test, optional-field workaround, or
+migration-only abstraction.
+
+Goal: keep the browser follow-mode work from accumulating hidden architectural debt while the
+destination-driven model replaces the old host-driven model.
+
+Initial cleanup targets:
+
+- Replace deleted runtime-oriented TypeScript coverage with tests that prove the new destination
+  contracts:
+  - browser host contracts expose only asset/debug command shapes;
+  - request planning derives coverage from browser destination and radii;
+  - render-anchor policy does not depend on destination source;
+  - camera hints and ray picks do not require host/player state.
+- Audit old test deletion fallout before implementation is considered complete. Deleted tests should
+  either be replaced with destination-owned tests or explicitly judged obsolete because their subject
+  no longer exists.
+- Rename browser helper APIs that still read as transitional after Phase 2. In particular, avoid
+  names that imply landblock-pack-only coverage once summaries, dungeon packs, and renderer residency
+  all share the same browser scene-interest path.
+- Revisit `tsconfig.app.json` test exclusions after replacement tests are in place. The production
+  typecheck should not hide active source files, and test exclusions should not become a permanent
+  way to avoid broken contracts.
+- Remove or rewrite status/debug text that still describes browser behavior as a "world shell" once
+  follow mode lands. Browser text should describe destination, coverage, cache, anchor, and renderer
+  state directly.
+- Revisit camera hint and ray-pick command naming after Phase 5. If they remain browser diagnostics,
+  name them as diagnostics; if future client mode needs authority-sensitive picks, keep that behind
+  `/client` contracts.
+- Audit plan prose after each phase for stale deleted identifiers. Grep should not keep old host
+  architecture names alive unless the section is explicitly historical and useful.
+- Collapse duplicate outdoor/interior focus derivation helpers once renderer camera residency and
+  manual destinations both feed the same destination-normalization path.
+- Revisit browser route handling once `/client` exists. `/` may remain a convenience redirect or
+  become an explicit route selection page, but it should not grow a hidden mode flag.
+
+Implemented cleanup slices:
+
+- Phase 1 follow-up deleted stale host-driven TypeScript tests and restored a minimal asset-only
+  fixture file.
+- Phase 1 follow-up scrubbed the plan and app tree of the old runtime-batch identifiers so grep no
+  longer suggests the browser depends on that model.
+
+Validation:
+
+- `rg` for the deleted runtime-batch identifiers across `apps/holtburger-3d` and this plan returns
+  no matches.
+- `npm run test:ts`.
+- `npm run check`.
+- `npm run lint:rust`.
+- `npm run build`.
+
+Notes:
+
+- Cleanup is an explicit final phase, not permission to leave known debt untracked. If a phase
+  creates temporary scaffolding, add it to this list immediately.
+- Do not use cleanup to preserve backwards-compatible aliases for deleted browser/runtime contracts.
+  If a compatibility shim is tempting, first ask whether it would keep the old architecture alive.
+
 ## Testing Plan
 
 Add focused TypeScript tests:
 
-- browser host contracts reject or omit runtime batches, residency fields, lifecycle/session fields,
+- browser host contracts reject or omit legacy host snapshots, residency fields, lifecycle/session fields,
   and client mode hints;
-- browser startup does not require `HostBoundarySnapshot`;
+- browser startup does not require legacy host snapshot;
 - `/browser` mounts the browser surface without calling a mode-setting command or reading Tauri
   lifecycle state;
-- `/browser` does not subscribe to runtime notifications;
+- `/browser` does not subscribe to legacy notifications;
 - `/browser` keeps using shared asset lookup commands without a mode handshake;
 - browser destination sources exclude host/player focus;
 - renderer residency conversion preserves outdoor landblock ids and env-cell ids;
@@ -696,16 +809,16 @@ Add focused TypeScript tests:
 - retain-radius anchor policy avoids boundary ping-pong;
 - camera rebase preserves canonical position and updates camera state;
 - destination changes do not change the camera reset key unless an explicit fit/reset is requested.
-- camera hints build from renderer camera frame without runtime batches.
+- camera hints build from renderer camera frame without legacy host snapshots.
 
 Add focused Rust/Tauri tests:
 
 - browser mode does not require a host overview command;
-- startup notifications do not include a `runtime.batch` topic in browser mode;
+- startup notifications do not include a `legacy host snapshot notification` topic in browser mode;
 - shared asset lookup commands remain available without client lifecycle/session state;
 - browser-mode contracts do not expose lifecycle/session/mode-hint DTOs unless moved behind a
   client-mode-only boundary;
-- ray-pick diagnostics, if retained, do not construct a runtime batch.
+- ray-pick diagnostics, if retained, do not construct a legacy host snapshot.
 
 ## Acceptance Criteria
 
@@ -718,8 +831,8 @@ Add focused Rust/Tauri tests:
 - Browser mode has no host/player focus button, source, draft seeding, panel text, or alternate
   focus path.
 - Rust/Tauri browser-mode DTOs do not expose authoritative/runtime residency.
-- Rust/Tauri browser-mode DTOs do not expose `RuntimeBatchDto`, `LifecycleStateDto`,
-  client `ModeHintDto`, session state, or a `runtime.batch` notification.
+- Rust/Tauri browser-mode DTOs do not expose legacy host snapshot DTO, legacy lifecycle DTO,
+  client legacy mode hint DTO, session state, or a `legacy host snapshot notification` notification.
 - Browser mode is selected by `/browser`; future `/client` will use separate client-mode contracts
   rather than shared browser lifecycle plumbing.
 - Crossing landblock boundaries does not visibly clear or rebuild the entire scene.

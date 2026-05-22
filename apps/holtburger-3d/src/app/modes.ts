@@ -1,4 +1,4 @@
-export type AppModeId = "client";
+export type AppModeId = "browser";
 
 export interface AppModeSummary {
 	id: AppModeId;
@@ -7,7 +7,7 @@ export interface AppModeSummary {
 
 export const availableModes: AppModeSummary[] = [
 	{
-		id: "client",
-		label: "World Viewer",
+		id: "browser",
+		label: "Scene Browser",
 	},
 ];

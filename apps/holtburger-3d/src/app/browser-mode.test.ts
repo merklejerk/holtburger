@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	MAX_TRANSITION_PORTAL_MAX_DEPTH,
 	MIN_TRANSITION_PORTAL_MAX_DEPTH,
+	applyBrowserCameraResidencyDestination,
 	browserDestinationToInteriorCellId,
 	browserLocationToLandblockId,
 	createBrowserModeState,
@@ -17,6 +18,7 @@ import {
 	updateDetailLodRadius,
 	updateEnvCellLodRadius,
 	updateLandblockInputMode,
+	updateNavigationFocusMode,
 	updatePortalPolygonVisibility,
 	updatePortalTargetHighlighting,
 	updateTerrainLodRadius,
@@ -44,6 +46,7 @@ describe("browser-mode location policy", () => {
 		expect(state.showPortalPolygons).toBe(false);
 		expect(state.showCellIndicators).toBe(false);
 		expect(state.highlightPortalTargets).toBe(false);
+		expect(state.navigationFocusMode).toBe("manual");
 		expect(state.page).toBe("destination-preview");
 	});
 
@@ -227,6 +230,93 @@ describe("browser-mode location policy", () => {
 			0x016c0155,
 		);
 		expect(browserLocationToLandblockId(state.destination!)).toBe(0x016cffff);
+	});
+
+	it("keeps renderer residency from changing the destination in manual mode", () => {
+		const initialState = createBrowserModeState();
+		const state = applyBrowserCameraResidencyDestination(initialState, {
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+			envCellId: null,
+		});
+
+		expect(state).toBe(initialState);
+		expect(state.navigationFocusMode).toBe("manual");
+		expect(state.destination?.source).toBe("manual");
+	});
+
+	it("promotes outdoor renderer residency into the follow destination", () => {
+		const state = applyBrowserCameraResidencyDestination(
+			updateNavigationFocusMode(createBrowserModeState(), "follow-camera"),
+			{
+				kind: "outdoor-landblock",
+				landblockId: 0xda550123,
+				envCellId: null,
+			},
+		);
+
+		expect(state.navigationFocusMode).toBe("follow-camera");
+		expect(state.destination?.kind).toBe("outdoor-location");
+		expect(state.destination?.source).toBe("follow-camera");
+		expect(state.destination?.landblockId).toBe(0xda55ffff);
+		expect(state.draftInput).toBe(state.destination?.label);
+		expect(state.draftInputEditedByUser).toBe(false);
+	});
+
+	it("keeps outdoor follow in outdoor mode when renderer enters an env cell", () => {
+		const state = applyBrowserCameraResidencyDestination(
+			updateNavigationFocusMode(createBrowserModeState(), "follow-camera"),
+			{
+				kind: "env-cell",
+				landblockId: null,
+				envCellId: 0x016c0155,
+			},
+		);
+
+		expect(state.navigationFocusMode).toBe("follow-camera");
+		expect(state.destination?.kind).toBe("outdoor-location");
+		expect(state.destination?.source).toBe("follow-camera");
+		expect(state.destination?.landblockId).toBe(0x016cffff);
+		expect(browserDestinationToInteriorCellId(state.destination)).toBeNull();
+	});
+
+	it("promotes env-cell renderer residency into a dungeon follow destination while already indoors", () => {
+		const indoorState = previewBrowserLocation(
+			updateBrowserDraft(createBrowserModeState(), "016c0100"),
+		);
+		const state = applyBrowserCameraResidencyDestination(
+			updateNavigationFocusMode(indoorState, "follow-camera"),
+			{
+				kind: "env-cell",
+				landblockId: null,
+				envCellId: 0x016c0155,
+			},
+		);
+
+		expect(state.destination).toEqual({
+			kind: "interior-cell",
+			label: "Env cell 0x016c0155 (0x016cffff)",
+			source: "follow-camera",
+			envCellId: 0x016c0155,
+			landblockId: 0x016cffff,
+		});
+		expect(browserDestinationToInteriorCellId(state.destination)).toBe(
+			0x016c0155,
+		);
+	});
+
+	it("ignores unknown renderer residency in follow mode", () => {
+		const followState = updateNavigationFocusMode(
+			createBrowserModeState(),
+			"follow-camera",
+		);
+		const state = applyBrowserCameraResidencyDestination(followState, {
+			kind: "unknown",
+			landblockId: null,
+			envCellId: null,
+		});
+
+		expect(state).toBe(followState);
 	});
 
 	it("clamps browser LoD radii to ordered supported values", () => {

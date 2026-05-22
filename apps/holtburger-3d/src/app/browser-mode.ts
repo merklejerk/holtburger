@@ -23,10 +23,17 @@ import {
 
 type BrowserPageId = "location-entry" | "destination-preview";
 
-type BrowserDestinationSource = "manual" | "landblock-pick";
+export type BrowserNavigationFocusMode = "manual" | "follow-camera";
+type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
 type EastWestHemisphere = "E" | "W";
+
+export interface BrowserCameraResidencyDestinationInput {
+	kind: "outdoor-landblock" | "env-cell" | "unknown";
+	landblockId: number | null;
+	envCellId: number | null;
+}
 
 interface BrowserOutdoorLocationSelection {
 	kind: "outdoor-location";
@@ -57,6 +64,7 @@ export interface BrowserModeState {
 	draftInputEditedByUser: boolean;
 	validationMessage: string | null;
 	destination: BrowserLocationSelection | null;
+	navigationFocusMode: BrowserNavigationFocusMode;
 	terrainLodRadius: number;
 	buildingLodRadius: number;
 	detailLodRadius: number;
@@ -87,6 +95,7 @@ export function createBrowserModeState(): BrowserModeState {
 		draftInputEditedByUser: false,
 		validationMessage: null,
 		destination: DEFAULT_BROWSER_DESTINATION,
+		navigationFocusMode: "manual",
 		terrainLodRadius: DEFAULT_TERRAIN_LOD_RADIUS,
 		buildingLodRadius: DEFAULT_BUILDING_LOD_RADIUS,
 		detailLodRadius: DEFAULT_DETAIL_LOD_RADIUS,
@@ -159,6 +168,22 @@ export function updateBrowserDraft(
 		...browserMode,
 		draftInput,
 		draftInputEditedByUser: true,
+		validationMessage: null,
+		navigationFocusMode: "manual",
+	};
+}
+
+export function updateNavigationFocusMode(
+	browserMode: BrowserModeState,
+	navigationFocusMode: BrowserNavigationFocusMode,
+): BrowserModeState {
+	if (browserMode.navigationFocusMode === navigationFocusMode) {
+		return browserMode;
+	}
+
+	return {
+		...browserMode,
+		navigationFocusMode,
 		validationMessage: null,
 	};
 }
@@ -307,6 +332,7 @@ export function previewBrowserLocation(
 		draftInputEditedByUser: browserMode.draftInputEditedByUser,
 		validationMessage: null,
 		destination: parsedLocation,
+		navigationFocusMode: "manual",
 		terrainLodRadius: browserMode.terrainLodRadius,
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
@@ -339,6 +365,7 @@ export function selectBrowserLandblockDestination(
 			source: "landblock-pick",
 			landblockId: normalizedLandblockId,
 		},
+		navigationFocusMode: "manual",
 		terrainLodRadius: browserMode.terrainLodRadius,
 		buildingLodRadius: browserMode.buildingLodRadius,
 		detailLodRadius: browserMode.detailLodRadius,
@@ -348,6 +375,36 @@ export function selectBrowserLandblockDestination(
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
+		page: "destination-preview",
+	};
+}
+
+export function applyBrowserCameraResidencyDestination(
+	browserMode: BrowserModeState,
+	residency: BrowserCameraResidencyDestinationInput,
+): BrowserModeState {
+	if (browserMode.navigationFocusMode !== "follow-camera") {
+		return browserMode;
+	}
+
+	const destination = browserCameraResidencyToDestination(
+		residency,
+		browserMode.destination,
+	);
+	if (destination === null) {
+		return browserMode;
+	}
+
+	if (areBrowserDestinationsEquivalent(browserMode.destination, destination)) {
+		return browserMode;
+	}
+
+	return {
+		...browserMode,
+		draftInput: destination.label,
+		draftInputEditedByUser: false,
+		validationMessage: null,
+		destination,
 		page: "destination-preview",
 	};
 }
@@ -482,6 +539,84 @@ function parseBrowserCellIdInput(
 
 export function isLandblockPrefixInput(value: string): boolean {
 	return LANDBLOCK_PREFIX_INPUT_PATTERN.test(value);
+}
+
+function browserCameraResidencyToDestination(
+	residency: BrowserCameraResidencyDestinationInput,
+	currentDestination: BrowserLocationSelection | null,
+): BrowserLocationSelection | null {
+	if (
+		residency.kind === "outdoor-landblock" &&
+		residency.landblockId !== null
+	) {
+		return followOutdoorLandblockDestination(residency.landblockId);
+	}
+
+	if (residency.kind === "env-cell" && residency.envCellId !== null) {
+		const envCellId = residency.envCellId >>> 0;
+		const landblockId = normalizeOutdoorLandblockId(
+			residency.landblockId ?? envCellId,
+		);
+
+		if (currentDestination?.kind !== "interior-cell") {
+			return followOutdoorLandblockDestination(landblockId);
+		}
+
+		return {
+			kind: "interior-cell",
+			label: `Env cell 0x${formatHex32(envCellId)} (${formatLandblockLabel(landblockId)})`,
+			source: "follow-camera",
+			envCellId,
+			landblockId,
+		};
+	}
+
+	return null;
+}
+
+function followOutdoorLandblockDestination(
+	landblockId: number,
+): BrowserOutdoorLocationSelection {
+	const centerLocation = outdoorLandblockIdToApproximateCenterLocation(
+		normalizeOutdoorLandblockId(landblockId),
+	);
+
+	return {
+		...centerLocation,
+		kind: "outdoor-location",
+		source: "follow-camera",
+		landblockId: normalizeOutdoorLandblockId(landblockId),
+	};
+}
+
+function areBrowserDestinationsEquivalent(
+	left: BrowserLocationSelection | null,
+	right: BrowserLocationSelection,
+): boolean {
+	if (left === null || left.kind !== right.kind) {
+		return false;
+	}
+
+	if (left.source !== right.source) {
+		return false;
+	}
+
+	if (left.kind === "interior-cell" && right.kind === "interior-cell") {
+		return (
+			left.envCellId === right.envCellId &&
+			normalizeOutdoorLandblockId(left.landblockId) ===
+				normalizeOutdoorLandblockId(right.landblockId)
+		);
+	}
+
+	if (left.kind !== "outdoor-location" || right.kind !== "outdoor-location") {
+		return false;
+	}
+
+	return (
+		normalizeOutdoorLandblockId(browserLocationToLandblockId(left)) ===
+		normalizeOutdoorLandblockId(browserLocationToLandblockId(right))
+	);
 }
 
 function outdoorLandblockIdToApproximateCenterLocation(

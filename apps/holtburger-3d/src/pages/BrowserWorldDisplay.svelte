@@ -4,6 +4,7 @@
 	import { frontendState } from "../app/frontend-state";
 	import {
 		browserDestinationToInteriorCellId,
+		describeBrowserDestinationIdentity,
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
@@ -20,6 +21,7 @@
 		moveBrowserFreeCameraLocalUpByWheel,
 		moveBrowserFreeCameraLocal,
 		panBrowserFreeCamera,
+		prepareBrowserFreeCameraForDestinationFit,
 		rotateBrowserFreeCamera,
 		rotateBrowserFreeCameraAroundLocalUp,
 		type BrowserFreeCameraState,
@@ -177,8 +179,13 @@
 	let keyboardLinearMovementStartedAt: number | null = null;
 	let isCameraSlowModifierActive = false;
 	const pressedCameraControlKeys = new Set<string>();
+	let lastAppliedFollowResidencyKey: string | null = null;
+	let lastManualFitDestinationIdentity: string | null = null;
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
+	const browserDestinationIdentity = $derived(
+		describeBrowserDestinationIdentity(browserDestination),
+	);
 	const renderAnchorCandidate = $derived(
 		deriveRenderAnchorCandidate(browserDestination),
 	);
@@ -492,6 +499,14 @@
 		}
 		return describeBrowserCameraResidency(rendererCameraResidency);
 	});
+	const navigationFocusText = $derived(
+		$frontendState.browserMode.navigationFocusMode === "follow-camera"
+			? "Follow camera"
+			: "Manual",
+	);
+	const destinationSourceText = $derived(
+		describeBrowserDestinationSource(browserDestination),
+	);
 	const renderGraphText = $derived.by(() => {
 		const debug = renderMetrics?.debug;
 		if (!debug) {
@@ -667,6 +682,51 @@
 			transitionPortalMaxDepth,
 		);
 	});
+	$effect(() => {
+		if ($frontendState.browserMode.navigationFocusMode !== "manual") {
+			lastManualFitDestinationIdentity = browserDestinationIdentity;
+			return;
+		}
+
+		if (browserDestination?.kind !== "interior-cell") {
+			lastManualFitDestinationIdentity = browserDestinationIdentity;
+			return;
+		}
+
+		if (
+			browserDestinationIdentity === null ||
+			browserDestinationIdentity === lastManualFitDestinationIdentity
+		) {
+			return;
+		}
+
+		lastManualFitDestinationIdentity = browserDestinationIdentity;
+		browserCameraState =
+			prepareBrowserFreeCameraForDestinationFit(browserCameraState);
+		browserCameraFrame = null;
+		activePointerDrag = null;
+		suppressNextBrowserClick = false;
+		stopCameraMovement();
+	});
+	$effect(() => {
+		if ($frontendState.browserMode.navigationFocusMode !== "follow-camera") {
+			lastAppliedFollowResidencyKey = null;
+			return;
+		}
+
+		const residencyKey = describeFollowResidencyKey(rendererCameraResidency);
+		if (
+			residencyKey === null ||
+			residencyKey === lastAppliedFollowResidencyKey
+		) {
+			return;
+		}
+
+		lastAppliedFollowResidencyKey = residencyKey;
+		frontendState.applyBrowserCameraResidencyDestination(
+			rendererCameraResidency!,
+		);
+	});
 	const sceneStatusText = $derived(
 		structuredInteriorScene.cells.length > 0
 			? structuredInteriorScene.statusText
@@ -674,7 +734,9 @@
 	);
 	const browserPanelSceneRows = $derived<BrowserPanelRow[]>([
 		{ label: "Mode", value: sceneContextText },
+		{ label: "Navigation", value: navigationFocusText },
 		{ label: "Destination", value: worldDisplay.destinationFocusLabel },
+		{ label: "Destination source", value: destinationSourceText },
 		{ label: "Camera residency", value: cameraResidencyText },
 		{ label: "Base scene", value: renderGraphText },
 		{ label: "Landblocks", value: landblockVisibilityText },
@@ -814,6 +876,36 @@
 		return residency.landblockId === null
 			? `unknown ${sourceText}`
 			: `unknown in ${formatNullableLandblockId(residency.landblockId)} ${sourceText}`;
+	}
+
+	function describeFollowResidencyKey(
+		residency: BrowserCameraResidency | null,
+	): string | null {
+		if (residency === null || residency.kind === "unknown") {
+			return null;
+		}
+
+		return [
+			residency.kind,
+			residency.landblockId?.toString(16) ?? "none",
+			residency.envCellId?.toString(16) ?? "none",
+			residency.source,
+		].join(":");
+	}
+
+	function describeBrowserDestinationSource(
+		destination: BrowserLocationSelection | null,
+	): string {
+		switch (destination?.source) {
+			case "follow-camera":
+				return "Follow camera";
+			case "landblock-pick":
+				return "Landblock pick";
+			case "manual":
+				return "Manual";
+			default:
+				return "Unavailable";
+		}
 	}
 
 	function formatNullableLandblockId(landblockId: number | null): string {

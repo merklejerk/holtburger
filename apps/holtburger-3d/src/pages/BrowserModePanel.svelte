@@ -7,6 +7,7 @@
 		MAX_TRANSITION_PORTAL_MAX_DEPTH,
 		MIN_BROWSER_LOD_RADIUS,
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
+		type BrowserNavigationFocusMode,
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
 	import { countOutdoorSceneLodTiles } from "../lib/world-display/outdoor-scene-interest";
@@ -83,6 +84,12 @@
 	function handleDraftInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updateBrowserDraft(input.value);
+	}
+
+	function setNavigationFocusMode(
+		navigationFocusMode: BrowserNavigationFocusMode,
+	): void {
+		frontendState.updateNavigationFocusMode(navigationFocusMode);
 	}
 
 	function toggleLandblockInputMode(): void {
@@ -211,6 +218,14 @@
 		<div class="browser-panel__body" role="tabpanel">
 			<dl class="data-list compact-data-list">
 				<div>
+					<dt>Navigation</dt>
+					<dd>
+						{$frontendState.browserMode.navigationFocusMode === "follow-camera"
+							? "Follow camera"
+							: "Manual"}
+					</dd>
+				</div>
+				<div>
 					<dt>Anchor</dt>
 					<dd>
 						{$frontendState.browserMode.destination?.label ?? "unavailable"}
@@ -225,6 +240,33 @@
 					<dd>{formatOptionalHex32(focusedCellReference.cellId)}</dd>
 				</div>
 			</dl>
+
+			<div
+				class="browser-form__segmented"
+				role="group"
+				aria-label="Navigation focus mode"
+			>
+				<button
+					type="button"
+					class:active={$frontendState.browserMode.navigationFocusMode ===
+						"manual"}
+					aria-pressed={$frontendState.browserMode.navigationFocusMode ===
+						"manual"}
+					onclick={() => setNavigationFocusMode("manual")}
+				>
+					Manual
+				</button>
+				<button
+					type="button"
+					class:active={$frontendState.browserMode.navigationFocusMode ===
+						"follow-camera"}
+					aria-pressed={$frontendState.browserMode.navigationFocusMode ===
+						"follow-camera"}
+					onclick={() => setNavigationFocusMode("follow-camera")}
+				>
+					Follow camera
+				</button>
+			</div>
 
 			<form class="browser-form" onsubmit={previewDestination}>
 				<label class="browser-form__field" for="browser-location-input">

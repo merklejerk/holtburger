@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 6 implemented.
+Status: Phase 7 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -929,6 +929,69 @@ Exit criteria:
 - Follow mode updates `browserMode.destination` from renderer residency.
 - Manual mode ignores renderer residency for destination updates.
 - Dungeon follow updates current env-cell destination while keeping the dungeon pack loaded.
+
+Progress:
+
+- Added `navigationFocusMode` to browser mode state with `"manual"` and `"follow-camera"` values.
+  Browser mode still starts in manual mode.
+- Added `"follow-camera"` as a browser destination source. The source is debug/UI metadata only;
+  downstream coverage, anchoring, streaming, and scene derivation still consume
+  `browserMode.destination`.
+- Added `applyBrowserCameraResidencyDestination`, which promotes typed renderer camera residency
+  into a browser destination only while follow mode is active.
+- Outdoor renderer residency becomes an outdoor destination at the normalized landblock center.
+- Env-cell renderer residency is context-sensitive: while the browser destination is already an
+  isolated interior destination, follow mode updates the interior env-cell focus; otherwise it keeps
+  browser scene interest outdoor and promotes the owning landblock to an outdoor destination.
+- Unknown residency is ignored and does not clear or replace the current destination.
+- Manual edits, manual preview, and landblock picks switch navigation back to manual mode.
+- Wired `BrowserWorldDisplay` to apply renderer residency in follow mode with a local dedupe key, so
+  enabling follow can immediately promote the latest residency without creating a store update loop.
+- Added the browser panel Manual/Follow camera toggle and scene/debug rows for navigation mode and
+  destination source.
+- Added browser-mode reducer tests covering manual ignore, outdoor follow, env-cell follow, and
+  unknown-residency ignore.
+
+Course corrections:
+
+- Follow mode was implemented as a destination writer, not as a second scene-interest path. This
+  keeps the Phase 6 retain-radius and camera-continuity policy shared between manual and follow
+  navigation.
+- Same-landblock follow updates still replace manual/pick source metadata with `"follow-camera"` so
+  the panel accurately reports who last wrote the destination, even though downstream scene identity
+  is unchanged.
+- The follow updater lives in browser mode state rather than renderer code. Renderer residency stays
+  a typed observation; browser mode decides whether that observation should become a destination.
+- Follow-mode env-cell promotion originally treated every env cell as a dungeon destination. That
+  was wrong for outdoor landblock interiors: render policy should still see env-cell residency for
+  portal rendering, but browser scene interest must remain outdoor unless the current destination is
+  already an isolated dungeon/interior.
+- Phase 6 made bounds auto-fit one-shot to protect follow traversal, but that also meant manual
+  dungeon jumps could inherit the old camera fit and appear blank. Manual interior-cell destination
+  identity changes now explicitly request a fresh one-shot bounds fit; follow mode and outdoor
+  destination changes still avoid destination-driven camera snaps.
+
+Future-step refinements:
+
+- Phase 8 should manually validate the first follow-mode toggle when the latest renderer residency
+  is already known, because the updater now intentionally applies the cached residency immediately.
+- Phase 8 should include a same-landblock follow toggle check: the destination source should change
+  to follow-camera without forcing anchor/camera churn.
+- Phase 8 should include outdoor-building traversal while in follow mode. Entering an outdoor
+  env-cell should keep outdoor terrain/landblock interest active while the renderer uses interior
+  base-scene portal rendering.
+- Phase 9 should revisit whether destination source should remain visible in the Scene tab or move
+  to Debug once follow-mode behavior is proven.
+
+Verification:
+
+- `npm run test:ts -- src/app/browser-mode.test.ts` passes with 23 tests.
+- `npm run check` passes.
+- `npm run lint:ts` passes.
+- `npm run test:ts` passes with 35 test files and 164 tests.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` passes.
+- `npm run lint` still fails at the existing `lint:dead` backlog.
 
 ### Phase 8: Validation
 

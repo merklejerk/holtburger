@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
 	convertBrowserFreeCameraStateBetweenAnchors,
 	createBrowserFreeCameraState,
+	prepareBrowserFreeCameraForDestinationFit,
 } from "./camera";
 import { convertCameraFrameBetweenAnchors } from "./render-chunks";
 
@@ -37,5 +38,19 @@ describe("browser camera helpers", () => {
 		});
 		expect(convertedState.hasManualControl).toBe(true);
 		expect(convertedState.lastFitKey).toBe("initial-fit");
+	});
+
+	it("prepares manually controlled camera state for a destination fit", () => {
+		const state = {
+			...createBrowserFreeCameraState(),
+			hasManualControl: true,
+			lastFitKey: "previous-scene",
+		};
+
+		expect(prepareBrowserFreeCameraForDestinationFit(state)).toEqual({
+			...state,
+			hasManualControl: false,
+			lastFitKey: null,
+		});
 	});
 });

@@ -4,7 +4,6 @@
 	import { frontendState } from "../app/frontend-state";
 	import {
 		browserDestinationToInteriorCellId,
-		browserLocationToLandblockId,
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
@@ -13,6 +12,7 @@
 	import {
 		buildCameraHintFromSceneCameraFrame,
 		buildBrowserFreeCameraFrame,
+		convertBrowserFreeCameraStateBetweenAnchors,
 		createBrowserFreeCameraState,
 		fitBrowserFreeCameraToBounds,
 		getBrowserFreeCameraKeyboardMoveSpeedMultiplier,
@@ -61,7 +61,7 @@
 		deriveStructuredInteriorSceneModel,
 		type StructuredInteriorSceneModel,
 	} from "../lib/world-display/structured-interior-scene";
-	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
+	import { formatHex32 } from "../lib/landblocks";
 	import { deriveOutdoorSceneInterest } from "../lib/world-display/outdoor-scene-interest";
 	import {
 		deriveTransitionPortalCandidates,
@@ -97,9 +97,10 @@
 		deriveStructuredInteriorSpatialItems,
 		deriveTerrainSpatialItems,
 	} from "../lib/world-display/render-spatial-scene";
-	import type {
-		RenderChunkPlacement,
-		RenderLandblockAnchor,
+	import {
+		convertCameraFrameBetweenAnchors,
+		type RenderChunkPlacement,
+		type RenderLandblockAnchor,
 	} from "../lib/world-display/render-chunks";
 	import BrowserModePanel from "./BrowserModePanel.svelte";
 
@@ -163,7 +164,6 @@
 		mode: "orbit" | "pan";
 		moved: boolean;
 	} | null>(null);
-	let activeCameraSceneKey = $state<string | null>(null);
 	let activeRenderAnchor = $state<RenderLandblockAnchor | null>(null);
 	let activeRenderAnchorSource = $state<RenderAnchorSource | null>(null);
 	let renderMetricsEventCount = $state(0);
@@ -179,9 +179,6 @@
 	const pressedCameraControlKeys = new Set<string>();
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
-	const browserCameraSceneKey = $derived(
-		describeBrowserCameraSceneKey(browserDestination),
-	);
 	const renderAnchorCandidate = $derived(
 		deriveRenderAnchorCandidate(browserDestination),
 	);
@@ -558,12 +555,27 @@
 		}),
 	);
 	$effect(() => {
+		const previousAnchor = activeRenderAnchor;
 		const commit = commitRenderAnchorCandidate(
 			activeRenderAnchor,
 			renderAnchorCandidate,
 		);
 		activeRenderAnchor = commit.anchor;
 		activeRenderAnchorSource = commit.source;
+
+		if (
+			!commit.committed ||
+			previousAnchor === null ||
+			commit.anchor === null ||
+			previousAnchor.landblockId === commit.anchor.landblockId
+		) {
+			return;
+		}
+
+		rebaseBrowserCameraBetweenAnchors(
+			previousAnchor.landblockId,
+			commit.anchor.landblockId,
+		);
 	});
 	$effect(() => {
 		renderSpatialIndex.replaceChunkTransforms(activeRenderChunkTransforms);
@@ -733,30 +745,16 @@
 		},
 	]);
 
-	$effect(() => {
-		if (activeCameraSceneKey === null) {
-			activeCameraSceneKey = browserCameraSceneKey;
-			return;
-		}
-
-		if (activeCameraSceneKey === browserCameraSceneKey) {
-			return;
-		}
-
-		activeCameraSceneKey = browserCameraSceneKey;
-		browserCameraState = createBrowserFreeCameraState();
-		browserCameraFrame = null;
-		activePointerDrag = null;
-		suppressNextBrowserClick = false;
-		stopCameraMovement();
-	});
-
 	// Browser free-camera controls are a navigation policy, not the future client camera.
 	function handleRenderMetricsChange(metrics: WorldRenderMetrics): void {
 		renderMetricsEventCount += 1;
 		renderMetrics = metrics;
 
-		if (metrics.bounds) {
+		if (
+			metrics.bounds &&
+			!browserCameraState.hasManualControl &&
+			browserCameraState.lastFitKey === null
+		) {
 			const fitKey = [
 				metrics.bounds.center.x.toFixed(2),
 				metrics.bounds.center.y.toFixed(2),
@@ -822,25 +820,6 @@
 		return landblockId === null
 			? "unknown landblock"
 			: `0x${formatHex32(landblockId)}`;
-	}
-
-	function describeBrowserCameraSceneKey(
-		destination: BrowserLocationSelection | null,
-	): string {
-		if (destination?.kind === "interior-cell") {
-			return `browser:indoor:${destination.envCellId.toString(16).padStart(8, "0")}`;
-		}
-
-		if (destination?.kind === "outdoor-location") {
-			const landblockKey = normalizeOutdoorLandblockId(
-				browserLocationToLandblockId(destination),
-			)
-				.toString(16)
-				.padStart(8, "0");
-			return `browser:outdoor:${landblockKey}`;
-		}
-
-		return "pending";
 	}
 
 	function handleBrowserPointerDownCapture(event: PointerEvent): void {
@@ -1255,6 +1234,25 @@
 		browserCameraFrame = nextFrame;
 		cameraFrameApplyCount += 1;
 		scheduleRenderedCameraHint(viewportPoint, immediate);
+	}
+
+	function rebaseBrowserCameraBetweenAnchors(
+		oldAnchorLandblockId: number,
+		newAnchorLandblockId: number,
+	): void {
+		if (browserCameraFrame) {
+			browserCameraFrame = convertCameraFrameBetweenAnchors(
+				browserCameraFrame,
+				oldAnchorLandblockId,
+				newAnchorLandblockId,
+			);
+		}
+
+		browserCameraState = convertBrowserFreeCameraStateBetweenAnchors(
+			browserCameraState,
+			oldAnchorLandblockId,
+			newAnchorLandblockId,
+		);
 	}
 
 	function areSceneCameraFramesEquivalent(

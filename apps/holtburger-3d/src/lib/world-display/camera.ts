@@ -5,7 +5,11 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import type { NormalizedViewportPoint } from "./model";
-import type { RenderLandblockAnchor } from "./render-chunks";
+import {
+	convertCameraFrameBetweenAnchors,
+	type RenderCameraFrame,
+	type RenderLandblockAnchor,
+} from "./render-chunks";
 
 export interface SceneCameraFrame {
 	position: Vec3Dto;
@@ -199,6 +203,23 @@ export function fitBrowserFreeCameraToBounds(
 	return {
 		...nextState,
 		position: subtractVec3(bounds.center, scaleVec3(forward, focusDistance)),
+	};
+}
+
+export function convertBrowserFreeCameraStateBetweenAnchors(
+	state: BrowserFreeCameraState,
+	oldAnchorLandblockId: number,
+	newAnchorLandblockId: number,
+): BrowserFreeCameraState {
+	const convertedFrame = convertCameraFrameBetweenAnchors(
+		createCameraStateRebaseFrame(state.position),
+		oldAnchorLandblockId,
+		newAnchorLandblockId,
+	);
+
+	return {
+		...state,
+		position: convertedFrame.position,
 	};
 }
 
@@ -509,6 +530,18 @@ function rendererPointToAcPosition(
 		x: anchorCoords.x * OUTDOOR_LANDBLOCK_WORLD_SIZE + acPoint.x,
 		y: anchorCoords.y * OUTDOOR_LANDBLOCK_WORLD_SIZE + acPoint.y,
 		z: acPoint.z,
+	};
+}
+
+function createCameraStateRebaseFrame(position: Vec3Dto): RenderCameraFrame {
+	return {
+		position,
+		target: position,
+		up: { x: 0, y: 1, z: 0 },
+		aspect: 1,
+		fovDegrees: DEFAULT_BROWSER_FREE_CAMERA_CONFIG.fovDegrees,
+		near: DEFAULT_BROWSER_FREE_CAMERA_CONFIG.near,
+		far: DEFAULT_BROWSER_FREE_CAMERA_CONFIG.far,
 	};
 }
 

@@ -32,7 +32,7 @@ export interface RenderChunkTransform {
 	offset: Vec3Dto;
 }
 
-export const EXPLICIT_RENDER_ANCHOR_RETAIN_RADIUS = 0;
+export const STANDARD_RENDER_ANCHOR_RETAIN_RADIUS = 1;
 
 export function deriveRenderAnchorCandidate(
 	browserDestination: BrowserLocationSelection | null,
@@ -48,7 +48,7 @@ export function deriveRenderAnchorCandidate(
 			),
 		},
 		source: "browser-destination",
-		retainRadius: EXPLICIT_RENDER_ANCHOR_RETAIN_RADIUS,
+		retainRadius: STANDARD_RENDER_ANCHOR_RETAIN_RADIUS,
 	};
 }
 
@@ -65,7 +65,6 @@ export function commitRenderAnchorCandidate(
 	}
 
 	if (
-		candidate.source === "browser-destination" ||
 		currentAnchor === null ||
 		isOutsideRetainRadius(
 			currentAnchor.landblockId,

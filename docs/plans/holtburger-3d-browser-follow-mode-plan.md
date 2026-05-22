@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 5 implemented.
+Status: Phase 6 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -866,6 +866,54 @@ Exit criteria:
 - Destination changes do not clear or snap the scene.
 - Anchor shifts preserve visible camera/world continuity.
 - Manual and follow destinations use the same coverage/anchor/streaming behavior.
+
+Progress:
+
+- Replaced the immediate browser-destination anchor commit path with
+  `STANDARD_RENDER_ANCHOR_RETAIN_RADIUS`. Browser destinations now keep the current render anchor
+  while the destination remains inside the retain radius and only commit a new anchor after leaving
+  that radius.
+- Removed the destination scene-key camera reset from `BrowserWorldDisplay`. Destination identity no
+  longer clears `browserCameraState`, `browserCameraFrame`, pointer drag state, or keyboard motion.
+- Added anchor-shift camera rebasing in `BrowserWorldDisplay`. When a retained anchor finally moves,
+  both `browserCameraFrame` and `browserCameraState.position` are converted across anchors.
+- Added `convertBrowserFreeCameraStateBetweenAnchors` beside the other camera helpers so camera
+  state and scene camera frames use the same rebase math.
+- Limited bounds-driven auto-fit to the initial non-manual fit. Explicit reset still forces a fit,
+  but ordinary destination/streaming updates no longer tug the camera after the first fit.
+- Added focused tests for render-anchor retain behavior and free-camera state rebasing.
+
+Course corrections:
+
+- The previous `browser-destination` source branch in `commitRenderAnchorCandidate` made the retain
+  radius unreachable. Phase 6 deleted that source-specific bypass instead of adding another
+  follow-mode-specific anchor source.
+- Camera reset needed to be split from destination identity before follow mode exists. Phase 7 can
+  now update `browserMode.destination` from renderer residency without inheriting a scene-key snap.
+- The camera-state rebase was extracted into a pure helper instead of living only in Svelte local
+  state, which keeps the continuity rule testable.
+
+Future-step refinements:
+
+- Phase 7 should only add the follow destination updater and UI. It should not add a second anchor,
+  streaming, or camera reset policy for follow mode.
+- Phase 7 debug rows should show whether the current destination came from manual input or renderer
+  residency, but downstream scene derivation should continue to ignore that source.
+- Phase 8 manual validation should pay special attention to the first bounds fit versus subsequent
+  traversal updates, because auto-fit is now intentionally one-shot until the user explicitly
+  resets the camera.
+
+Verification:
+
+- `npm run test:ts -- src/lib/world-display/render-anchor.test.ts src/lib/world-display/camera.test.ts`
+  passes with 2 test files and 5 tests.
+- `npm run check` passes.
+- `npm run lint:ts` passes.
+- `npm run test:ts` passes with 35 test files and 159 tests.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` passes.
+- `npm run lint` still fails at the existing `lint:dead` backlog. The deleted explicit-anchor
+  constant is gone from the report; the remaining exported helper backlog is tracked in Phase 9.
 
 ### Phase 7: Follow Destination Updater And UI
 

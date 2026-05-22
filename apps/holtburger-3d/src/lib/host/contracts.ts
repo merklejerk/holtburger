@@ -628,27 +628,3 @@ export const cameraHintAckDtoSchema = z.object({
 	sequence: z.number().int().nonnegative(),
 });
 export type CameraHintAckDto = z.infer<typeof cameraHintAckDtoSchema>;
-
-export interface RayPickRequestDto {
-	requestId: string;
-	origin: Vec3Dto;
-	direction: Vec3Dto;
-	screenXNormalized: number;
-	screenYNormalized: number;
-	destinationLabel: string | null;
-}
-
-const rayPickHitDtoSchema = z.object({
-	entityId: z.number().int().nonnegative(),
-	label: z.string(),
-	locationLabel: z.string(),
-	distance: z.number().finite(),
-});
-
-export const rayPickResponseDtoSchema = z.object({
-	requestId: z.string().min(1),
-	resolved: z.boolean(),
-	cameraHintSequence: z.number().int().nonnegative().nullable(),
-	hit: rayPickHitDtoSchema.nullable(),
-});
-export type RayPickResponseDto = z.infer<typeof rayPickResponseDtoSchema>;

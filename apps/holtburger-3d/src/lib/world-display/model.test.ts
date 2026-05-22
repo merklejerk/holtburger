@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseBrowserLocationInput } from "../../app/browser-mode";
 import { createInitialAssetChannelState } from "../assets/types";
-import {
-	deriveBrowserWorldDisplayModel,
-	describeRayPickResponse,
-} from "./model";
+import { deriveBrowserWorldDisplayModel } from "./model";
 
 describe("browser world display model", () => {
 	it("derives browser status from destination-owned state", () => {
@@ -17,7 +14,6 @@ describe("browser world display model", () => {
 			buildingLodRadius: 0,
 			detailLodRadius: 0,
 			cameraAck: null,
-			rayPickResponse: null,
 			pendingCameraHint: false,
 		});
 
@@ -37,7 +33,6 @@ describe("browser world display model", () => {
 			buildingLodRadius: 0,
 			detailLodRadius: 0,
 			cameraAck: null,
-			rayPickResponse: null,
 			pendingCameraHint: false,
 		});
 
@@ -48,16 +43,6 @@ describe("browser world display model", () => {
 		expect(collectModelText(model)).not.toMatch(
 			/\bruntime\b|\bauthoritative\b|visible-cell/i,
 		);
-	});
-
-	it("describes ray-pick diagnostics without authority language", () => {
-		expect(
-			describeRayPickResponse({
-				requestId: "pick-1",
-				resolved: false,
-				hit: null,
-			}),
-		).toBe("No browser debug entity intersected the current pick ray.");
 	});
 });
 

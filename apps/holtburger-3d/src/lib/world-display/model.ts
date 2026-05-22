@@ -16,12 +16,7 @@ import type {
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { describePreparedAssetPayload } from "../assets/types";
-import type {
-	CameraHintAckDto,
-	CameraHintDto,
-	RayPickRequestDto,
-	RayPickResponseDto,
-} from "../host/contracts";
+import type { CameraHintAckDto } from "../host/contracts";
 
 export interface NormalizedViewportPoint {
 	normalizedX: number;
@@ -105,14 +100,8 @@ interface BrowserWorldDisplayModelInput {
 	buildingLodRadius: number;
 	detailLodRadius: number;
 	cameraAck: CameraHintAckDto | null;
-	rayPickResponse: RayPickResponseDto | null;
 	pendingCameraHint: boolean;
 }
-
-const DEFAULT_VIEWPORT_POINT: NormalizedViewportPoint = {
-	normalizedX: 0.5,
-	normalizedY: 0.5,
-};
 
 const MIN_CAMERA_HINT_INTERVAL_MS = 250;
 
@@ -123,7 +112,6 @@ export function deriveBrowserWorldDisplayModel({
 	buildingLodRadius,
 	detailLodRadius,
 	cameraAck,
-	rayPickResponse,
 	pendingCameraHint,
 }: BrowserWorldDisplayModelInput): BrowserWorldDisplayModel {
 	if (!browserDestination) {
@@ -133,7 +121,7 @@ export function deriveBrowserWorldDisplayModel({
 			destinationLabel: "No browser destination selected yet.",
 			renderCacheText:
 				"Browser asset cache is ready for destination-driven coverage.",
-			inputText: "Camera hints and picks use browser-owned camera state only.",
+			inputText: "Camera hints use rendered browser camera state only.",
 			assetText: describeAssetState(assetState),
 			sceneContext: createPendingSceneContext(browserDestination),
 			terrainContract: createTerrainContract(null),
@@ -157,8 +145,7 @@ export function deriveBrowserWorldDisplayModel({
 			"Scene coverage is selected from browser destination and frontend cache state.",
 		inputText: pendingCameraHint
 			? "Camera hints are being throttled through the browser diagnostics channel."
-			: (describeRayPickResponse(rayPickResponse) ??
-				describeCameraHintAck(cameraAck) ??
+			: (describeCameraHintAck(cameraAck) ??
 				"Viewport input is ready to send browser camera hints."),
 		assetText: describeAssetState(assetState),
 		sceneContext,
@@ -481,20 +468,6 @@ export function describeCameraHintAck(
 		: `Rejected camera hint #${cameraAck.sequence}.`;
 }
 
-export function describeRayPickResponse(
-	rayPickResponse: RayPickResponseDto | null,
-): string | null {
-	if (!rayPickResponse) {
-		return null;
-	}
-
-	if (rayPickResponse.resolved && rayPickResponse.hit) {
-		return `Resolved the browser debug pick against ${rayPickResponse.hit.label} at ${rayPickResponse.hit.locationLabel}.`;
-	}
-
-	return "No browser debug entity intersected the current pick ray.";
-}
-
 function projectTerrainVertex(vertex: { x: number; y: number; z: number }) {
 	return {
 		x: (vertex.x - vertex.y) * 0.92,
@@ -522,56 +495,6 @@ export function shouldSendThrottledCameraHint(
 	return lastSentAt === null || now - lastSentAt >= minIntervalMs;
 }
 
-export function buildCameraHint(
-	browserDestination: BrowserLocationSelection | null,
-	viewportPoint: NormalizedViewportPoint = DEFAULT_VIEWPORT_POINT,
-): CameraHintDto | null {
-	const anchorPosition = { x: 96, y: 96, z: 24 };
-	const yaw = (viewportPoint.normalizedX - 0.5) * 1.4;
-	const pitch = (0.5 - viewportPoint.normalizedY) * 0.65;
-
-	return {
-		source: "world-display",
-		position: anchorPosition,
-		forward: normalizeVec3({
-			x: Math.cos(yaw),
-			y: Math.sin(yaw),
-			z: pitch,
-		}),
-		viewportNormalizedX: viewportPoint.normalizedX,
-		viewportNormalizedY: viewportPoint.normalizedY,
-		destinationLabel: browserDestination?.label ?? null,
-	};
-}
-
-export function buildRayPickRequest(
-	cameraHint: CameraHintDto,
-	requestId: string,
-): RayPickRequestDto {
-	return {
-		requestId,
-		origin: cameraHint.position,
-		direction: cameraHint.forward,
-		screenXNormalized: cameraHint.viewportNormalizedX,
-		screenYNormalized: cameraHint.viewportNormalizedY,
-		destinationLabel: cameraHint.destinationLabel,
-	};
-}
-
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(Math.max(value, min), max);
-}
-
-function normalizeVec3(vector: { x: number; y: number; z: number }) {
-	const length = Math.hypot(vector.x, vector.y, vector.z);
-
-	if (length === 0) {
-		return { x: 0, y: 1, z: 0 };
-	}
-
-	return {
-		x: vector.x / length,
-		y: vector.y / length,
-		z: vector.z / length,
-	};
 }

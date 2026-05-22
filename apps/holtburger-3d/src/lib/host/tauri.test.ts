@@ -1,13 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import {
-	lookupAsset,
-	resolveRayPick,
-	submitCameraHint,
-} from "./tauri";
+import { lookupAsset, submitCameraHint } from "./tauri";
 
 describe("Tauri host commands", () => {
-	it("fails fast outside the Tauri runtime when submitting camera hints or picks", async () => {
+	it("fails fast outside the Tauri runtime when submitting camera hints", async () => {
 		await expect(
 			submitCameraHint({
 				source: "world-display",
@@ -15,17 +11,6 @@ describe("Tauri host commands", () => {
 				forward: { x: 0, y: 1, z: 0 },
 				viewportNormalizedX: 0.65,
 				viewportNormalizedY: 0.5,
-				destinationLabel: "100.40S, 101.55W, 1.0Z",
-			}),
-		).rejects.toThrow(/requires the Tauri runtime/i);
-
-		await expect(
-			resolveRayPick({
-				requestId: "fallback-pick",
-				origin: { x: 12, y: -4.5, z: 1 },
-				direction: { x: 0, y: 1, z: 0 },
-				screenXNormalized: 0.65,
-				screenYNormalized: 0.5,
 				destinationLabel: "100.40S, 101.55W, 1.0Z",
 			}),
 		).rejects.toThrow(/requires the Tauri runtime/i);

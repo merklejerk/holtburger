@@ -21,12 +21,8 @@ describe("cell BSP residency", () => {
 		const cellBsp = makeCellBsp({ normal: { x: 1, y: 0, z: 0 }, d: -2 });
 
 		expect(pointInsideCellBsp(cellBsp, { x: 2, y: 0, z: 0 })).toBe(true);
-		expect(pointInsideCellBsp(cellBsp, { x: 2.0001, y: 0, z: 0 })).toBe(
-			true,
-		);
-		expect(pointInsideCellBsp(cellBsp, { x: 1.9999, y: 0, z: 0 })).toBe(
-			true,
-		);
+		expect(pointInsideCellBsp(cellBsp, { x: 2.0001, y: 0, z: 0 })).toBe(true);
+		expect(pointInsideCellBsp(cellBsp, { x: 1.9999, y: 0, z: 0 })).toBe(true);
 		expect(pointInsideCellBsp(cellBsp, { x: 1.5, y: 0, z: 0 })).toBe(false);
 	});
 

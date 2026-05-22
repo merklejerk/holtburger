@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 4 implemented.
+Status: Phase 5 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -327,8 +327,9 @@ points:
 - `lookup_asset` and `lookup_asset_binary` are already content/asset commands and can stay shared
   while they remain mode-agnostic.
 - `get_debug_config` can stay shared if it remains a simple host diagnostic toggle.
-- `submit_camera_hint` and `resolve_ray_pick` are optional diagnostics. If retained in `/browser`,
-  they must not require legacy host snapshots or fake entities.
+- `submit_camera_hint` is a lightweight browser diagnostic and can stay while it only samples the
+  rendered browser camera frame. The unused `resolve_ray_pick` diagnostic should be deleted from
+  browser mode until a real frontend or future client workflow needs picking.
 - Rust `main.rs` currently emits startup and interval legacy legacy notification event events unconditionally.
   Browser mode should not subscribe to them, and the Rust browser host can delete that emitter path
   once no current route consumes it.
@@ -384,29 +385,29 @@ composition should stop using mixed helpers that have host/player alternate-focu
 prepared asset state, and optional debug feed. The browser display model should not mention
 authoritative/runtime residency.
 
-### Camera Hints And Ray Picks Are Debug Services, Not Scene Interest
+### Camera Hints Are Debug Services, Not Scene Interest
 
-The browser can keep host-side camera-hint and ray-pick diagnostics, but they must be decoupled from
-runtime residency.
+The browser can keep host-side camera-hint diagnostics, but they must be decoupled from runtime
+residency and must only report the rendered browser camera frame.
 
 Current coupling:
 
-- `buildCameraHintFromSceneCameraFrame` returns `null` without legacy host snapshot DTO.
-- `buildCameraHintFromSceneCameraFrame` falls back to
-  `legacyHostSnapshot.residency.focusLocationLabel`.
-- `buildCameraHint` in `model.ts` chooses a camera origin from fake runtime entities and falls back
-  to runtime residency text.
-- `resolve_ray_pick` uses `self.legacy_host_snapshot(state)` to pick synthetic debug entities.
+- `buildCameraHintFromSceneCameraFrame` has already been cleaned up to use the scene camera frame,
+  active render anchor, and `browserDestination?.label ?? null`.
+- The old `buildCameraHint` fallback in `model.ts` still synthesizes a camera sample when the
+  renderer has not provided a camera frame.
+- The `resolve_ray_pick` Rust/Tauri command is now only an unused unresolved stub and has no current
+  browser caller.
 
 Required cleanup:
 
 - Build rendered camera hints from the renderer camera frame, active render anchor, route-specific
   source label, and `browserDestination?.label ?? null`.
-- Remove legacy host snapshot from camera-hint builders.
-- Keep ray pick explicitly debug-only if synthetic debug entities remain, or drop it from browser
-  mode until a real client/debug target needs it.
-- If ray pick remains, source it from a `BrowserDebugEntitySnapshotDto[]` carrier, not from
-  legacy host snapshot DTO.
+- Remove the synthetic camera-hint fallback. If the renderer has not produced a camera frame yet, do
+  not send a camera hint.
+- Delete the unused browser ray-pick DTOs, TypeScript wrapper, Tauri command, Rust adapter method,
+  and stub test. Reintroduce picking later only with a concrete browser frontend target or a
+  `/client` contract.
 
 ### Existing Camera Rebase Helper Should Be Reused
 
@@ -456,7 +457,7 @@ residency. Newly streamed bounds must not tug the camera.
 3. Add a browser scene request input that does not carry host/player focus or host ticks.
 4. Add typed, deduplicated renderer camera residency notifications.
 5. Make destination-driven scene derivation the only browser path.
-6. Decouple camera hints/ray picks from legacy host snapshots.
+6. Keep browser camera hints renderer-frame-only and delete unused browser ray-pick plumbing.
 7. Prevent destination updates from triggering camera scene-key resets.
 8. Apply anchor rebase compensation to both `browserCameraFrame` and `browserCameraState.position`.
 
@@ -489,9 +490,9 @@ residency. Newly streamed bounds must not tug the camera.
    - No destination produces no browser scene.
    - Replace browser display-model text that mentions runtime/authoritative residency.
 
-5. **Decouple debug services**
+5. **Clean up debug services**
    - Build camera hints from renderer camera frame and browser destination only.
-   - Keep or remove ray-pick debug entities without feeding scene interest.
+   - Delete unused browser ray-pick debug plumbing until a concrete caller exists.
 
 6. **Standardize anchor/streaming policy**
    - One destination-driven retain-radius anchor policy.
@@ -580,8 +581,8 @@ Progress update:
   - TypeScript host contracts no longer export legacy host snapshot DTO, legacy residency DTO,
     legacy lifecycle DTO, legacy notification envelope, legacy view-model feed,
     legacy host snapshot, or legacy host overview.
-  - Tauri browser commands now expose shared asset lookup, debug config, camera hints, and ray-pick
-    diagnostics only. `legacy host snapshot command`, `get_lifecycle_state`, `get_view_model_feed`, and
+  - Tauri browser commands now expose shared asset lookup, debug config, and camera hints only.
+    `legacy host snapshot command`, `get_lifecycle_state`, `get_view_model_feed`, and
     `get_host_boundary_overview` were removed.
   - Rust startup no longer emits legacy legacy notification event or a periodic `legacy host snapshot notification`.
   - Rust fake residency/entity generation was deleted from the browser host adapter.
@@ -787,14 +788,12 @@ Course corrections:
 
 Future-step refinements:
 
-- Phase 5 should rename or remove remaining debug helpers whose names read like future client
-  authority, especially if ray-pick diagnostics stay browser-local.
 - Phase 6 should avoid reintroducing source-specific display-model wording when anchor retention
   lands; destination source should remain irrelevant to scene derivation.
 - Phase 7 follow-camera UI should write `browserMode.destination` and then rely on the same
   `deriveBrowserWorldDisplayModel`, terrain, static, and structured-interior paths.
-- Phase 9 should include the remaining `model.ts` dead-export items reported by `lint:dead`
-  (`deriveTerrainViewport` and `buildRayPickRequest`) in the cleanup punch list.
+- Phase 9 should include remaining `model.ts` dead-export items reported by `lint:dead`, such as
+  `deriveTerrainViewport`, in the cleanup punch list.
 
 Verification:
 
@@ -807,20 +806,51 @@ Verification:
 - `npm run lint` still fails at `lint:dead` on the existing unused-export cleanup backlog. Phase 4
   added two specific `model.ts` dead-export follow-ups to Phase 9.
 
-### Phase 5: Debug Camera Hints And Ray Picks
+### Phase 5: Camera Hint Cleanup And Ray-Pick Deletion
 
-- Remove legacy host snapshot from `buildCameraHintFromSceneCameraFrame`.
-- Use `browserDestination?.label ?? null` for camera-hint and ray-pick destination labels.
-- Remove `buildCameraHint` paths that synthesize camera origin from fake runtime entities, unless
-  retained under an explicit debug-only helper name.
-- Update Rust ray-pick diagnostics so they do not call legacy host snapshot.
-- If debug entity ray-pick remains, move synthetic entities into a browser debug DTO and keep them
-  out of browser scene interest.
+- Keep `buildCameraHintFromSceneCameraFrame` as the only browser camera-hint builder.
+- Use `browserDestination?.label ?? null` for camera-hint destination labels.
+- Remove `buildCameraHint` paths that synthesize camera origin when no renderer camera frame exists.
+- Delete the unused TypeScript and Rust/Tauri ray-pick boundary.
+- Remove display-model and panel text that implies browser host ray picking exists.
 
 Exit criteria:
 
-- Camera hints can be submitted without any legacy host snapshot.
-- Ray-pick diagnostics, if retained, do not depend on runtime residency or legacy host snapshots.
+- Camera hints can be submitted without any legacy host snapshot or synthetic fallback sample.
+- Browser mode exposes no `resolve_ray_pick` command, ray-pick DTO, TypeScript wrapper, or model
+  helper.
+
+Progress:
+
+- Deleted the browser ray-pick host contract from TypeScript and Rust/Tauri:
+  `RayPickRequestDto`, `RayPickResponseDto`, `rayPickResponseDtoSchema`, `resolveRayPick`,
+  `resolve_ray_pick`, and the adapter stub are gone.
+- Removed the synthetic `buildCameraHint` fallback and `buildRayPickRequest` from the browser world
+  display model. Camera hints now wait for the actual rendered `SceneCameraFrame`.
+- Removed browser display-model and panel dependencies on ray-pick response state.
+- Updated focused tests that still referenced the deleted ray-pick path.
+
+Course corrections:
+
+- Earlier plan language treated ray pick as a possibly retained debug service. Dry-run inspection
+  showed the Rust side was an unresolved stub and the Svelte page did not call it, so deleting it is
+  cleaner than renaming or wrapping it.
+- `submit_camera_hint` remains for now because it has an active browser caller and a narrow
+  diagnostic contract. It does not define scene interest.
+
+Verification:
+
+- `rg` for `RayPick`, `rayPick`, `resolve_ray_pick`, `resolveRayPick`, `buildRayPickRequest`,
+  `describeRayPickResponse`, `rayPickResponse`, `buildCameraHint(`, and
+  `ReturnType<typeof buildCameraHint>` returns no active app-tree matches.
+- `npm run check` passes.
+- `npm run lint:ts` passes.
+- `npm run test:ts` passes with 33 test files and 154 tests.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` passes.
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes with 10 tests.
+- `npm run lint` still fails at the existing `lint:dead` backlog. The removed ray-pick exports no
+  longer appear in the unused-export report.
 
 ### Phase 6: Standard Anchor And Camera Continuity
 
@@ -886,7 +916,7 @@ Initial cleanup targets:
   - browser host contracts expose only asset/debug command shapes;
   - request planning derives coverage from browser destination and radii;
   - render-anchor policy does not depend on destination source;
-  - camera hints and ray picks do not require host/player state.
+  - camera hints do not require host/player state.
 - Audit old test deletion fallout before implementation is considered complete. Deleted tests should
   either be replaced with destination-owned tests or explicitly judged obsolete because their subject
   no longer exists.
@@ -899,12 +929,11 @@ Initial cleanup targets:
 - Remove or rewrite status/debug text that still describes browser behavior as a "world shell" once
   follow mode lands. Browser text should describe destination, coverage, cache, anchor, and renderer
   state directly.
-- Revisit camera hint and ray-pick command naming after Phase 5. If they remain browser diagnostics,
-  name them as diagnostics; if future client mode needs authority-sensitive picks, keep that behind
-  `/client` contracts.
+- Revisit camera hint command naming if it grows beyond a lightweight browser diagnostic. Future
+  client-mode authority-sensitive picks should live behind `/client` contracts, not the browser
+  host boundary.
 - Remove or internalize stale `model.ts` exports reported by `lint:dead`, especially
-  `deriveTerrainViewport` and `buildRayPickRequest`, unless Phase 5 gives them a current browser
-  diagnostics caller.
+  `deriveTerrainViewport`.
 - Audit plan prose after each phase for stale deleted identifiers. Grep should not keep old host
   architecture names alive unless the section is explicitly historical and useful.
 - Collapse duplicate outdoor/interior focus derivation helpers once renderer camera residency and
@@ -918,6 +947,7 @@ Implemented cleanup slices:
   fixture file.
 - Phase 1 follow-up scrubbed the plan and app tree of the old runtime-batch identifiers so grep no
   longer suggests the browser depends on that model.
+- Phase 5 deleted the unused browser ray-pick boundary and the synthetic camera-hint fallback.
 
 Validation:
 
@@ -965,8 +995,7 @@ Add focused Rust/Tauri tests:
 - startup notifications do not include a `legacy host snapshot notification` topic in browser mode;
 - shared asset lookup commands remain available without client lifecycle/session state;
 - browser-mode contracts do not expose lifecycle/session/mode-hint DTOs unless moved behind a
-  client-mode-only boundary;
-- ray-pick diagnostics, if retained, do not construct a legacy host snapshot.
+  client-mode-only boundary.
 
 ## Acceptance Criteria
 

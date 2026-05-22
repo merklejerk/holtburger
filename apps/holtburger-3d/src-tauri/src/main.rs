@@ -4,7 +4,6 @@ mod contracts;
 use adapter::HostRuntimeService;
 use contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, CameraHintAckDto, CameraHintDto, DebugConfigDto,
-    RayPickRequestDto, RayPickResponseDto,
 };
 
 #[tauri::command]
@@ -42,14 +41,6 @@ fn submit_camera_hint(
     runtime.submit_camera_hint(hint)
 }
 
-#[tauri::command]
-fn resolve_ray_pick(
-    runtime: tauri::State<'_, HostRuntimeService>,
-    request: RayPickRequestDto,
-) -> RayPickResponseDto {
-    runtime.resolve_ray_pick(request)
-}
-
 fn main() {
     let verbose = verbose_logging_enabled();
     if verbose {
@@ -65,7 +56,6 @@ fn main() {
             lookup_asset_binary,
             get_debug_config,
             submit_camera_hint,
-            resolve_ray_pick,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Holtburger 3D host");

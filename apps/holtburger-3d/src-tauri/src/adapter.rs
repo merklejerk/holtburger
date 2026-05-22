@@ -27,8 +27,7 @@ use holtburger_world::WorldBootstrap;
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, CameraHintAckDto,
-    CameraHintDto, DebugConfigDto, PlacementTransformDto, QuaternionDto, RayPickRequestDto,
-    RayPickResponseDto, Vec3Dto,
+    CameraHintDto, DebugConfigDto, PlacementTransformDto, QuaternionDto, Vec3Dto,
 };
 
 const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
@@ -47,7 +46,6 @@ pub struct HostRuntimeService {
 }
 
 struct HostRuntimeState {
-    last_camera_hint: Option<CameraHintDto>,
     camera_hint_sequence: u64,
 }
 
@@ -63,11 +61,6 @@ impl HostRuntimeService {
     pub fn submit_camera_hint(&self, hint: CameraHintDto) -> CameraHintAckDto {
         let mut state = self.state.lock().expect("host runtime state lock poisoned");
         self.adapter.accept_camera_hint(&mut state, hint)
-    }
-
-    pub fn resolve_ray_pick(&self, request: RayPickRequestDto) -> RayPickResponseDto {
-        let state = self.state.lock().expect("host runtime state lock poisoned");
-        self.adapter.resolve_ray_pick(&state, request)
     }
 
     pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
@@ -108,7 +101,6 @@ impl HostRuntimeState {
         ));
 
         Self {
-            last_camera_hint: None,
             camera_hint_sequence: 0,
         }
     }
@@ -351,31 +343,14 @@ impl HostBoundaryAdapter {
     fn accept_camera_hint(
         &self,
         state: &mut HostRuntimeState,
-        hint: CameraHintDto,
+        _hint: CameraHintDto,
     ) -> CameraHintAckDto {
         state.camera_hint_sequence += 1;
         let sequence = state.camera_hint_sequence;
 
-        state.last_camera_hint = Some(hint);
-
         CameraHintAckDto {
             accepted: true,
             sequence,
-        }
-    }
-
-    fn resolve_ray_pick(
-        &self,
-        state: &HostRuntimeState,
-        request: RayPickRequestDto,
-    ) -> RayPickResponseDto {
-        let _ = state;
-        RayPickResponseDto {
-            request_id: request.request_id,
-            resolved: false,
-            camera_hint_sequence: Some(state.camera_hint_sequence)
-                .filter(|_| state.last_camera_hint.is_some()),
-            hit: None,
         }
     }
 }
@@ -2489,19 +2464,7 @@ mod tests {
             viewport_normalized_y: 0.5,
             destination_label: Some("33.50S, 72.80E, 0.0Z".to_string()),
         });
-        let response = runtime.resolve_ray_pick(RayPickRequestDto {
-            request_id: "pick-1".to_string(),
-            origin: position,
-            direction,
-            screen_x_normalized: 0.75,
-            screen_y_normalized: 0.5,
-            destination_label: Some("33.50S, 72.80E, 0.0Z".to_string()),
-        });
-
         assert!(ack.accepted);
         assert_eq!(ack.sequence, 1);
-        assert!(!response.resolved);
-        assert_eq!(response.camera_hint_sequence, Some(1));
-        assert!(response.hit.is_none());
     }
 }

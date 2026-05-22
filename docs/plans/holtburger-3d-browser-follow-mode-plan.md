@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 3 implemented.
+Status: Phase 4 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -752,6 +752,61 @@ Exit criteria:
 - Manual and follow destination updates use the same scene derivation path.
 - Browser status text does not mention authoritative/runtime residency.
 
+Progress update:
+
+- Completed in `apps/holtburger-3d`:
+  - Renamed the browser display-model entry point from `deriveWorldDisplayModel` to
+    `deriveBrowserWorldDisplayModel` so browser composition no longer calls through a generic
+    client-shaped helper name.
+  - Renamed the display model's focus row data from `focusLocationLabel` to
+    `destinationFocusLabel`, and the Browser Mode panel now labels that row as `Destination`.
+  - Scrubbed browser-facing status text that still mentioned authoritative picks, runtime
+    visible-cell state, or authority-sensitive diagnostics.
+  - Changed the indoor browser scene-context discriminator from `indoor-visible-cell-set` to
+    `indoor-landblock-pack`.
+  - Kept outdoor terrain, static renderables, linked interiors, and dungeon interiors on the
+    destination-derived scene path already pulled forward in earlier phases.
+  - Added `model.test.ts` coverage that browser display text stays free of runtime/authoritative
+    wording and that dungeon display text describes owning landblock-pack loading.
+  - Added `structured-interior-scene.test.ts` coverage proving a dungeon destination renders every
+    prepared env cell in the owning landblock pack while marking only the destination env cell as
+    focused.
+
+Course corrections:
+
+- Phase 1 had already removed the host/player scene input from terrain, static renderable,
+  structured interior, render-anchor, and browser composition paths. Phase 4 therefore focused on
+  naming, user-facing text, and tests that lock in the destination-only model.
+- Renderer internals still use camera residency terminology for render-policy decisions. That is not
+  browser scene interest and remains valid: Phase 4 only removed fake host/player residency from
+  browser model composition and browser-facing text.
+- The display model still contains a terrain-contract block with ACViewer/Rust asset-pipeline
+  provenance. That is static asset/debug context, not scene interest. Phase 9 should decide whether
+  this older explanatory panel is still useful or should be deleted with the other transitional UI
+  text.
+
+Future-step refinements:
+
+- Phase 5 should rename or remove remaining debug helpers whose names read like future client
+  authority, especially if ray-pick diagnostics stay browser-local.
+- Phase 6 should avoid reintroducing source-specific display-model wording when anchor retention
+  lands; destination source should remain irrelevant to scene derivation.
+- Phase 7 follow-camera UI should write `browserMode.destination` and then rely on the same
+  `deriveBrowserWorldDisplayModel`, terrain, static, and structured-interior paths.
+- Phase 9 should include the remaining `model.ts` dead-export items reported by `lint:dead`
+  (`deriveTerrainViewport` and `buildRayPickRequest`) in the cleanup punch list.
+
+Verification:
+
+- `npm run check` passes.
+- `npm run test:ts` passes with 33 test files and 155 tests.
+- `npm run lint:ts` passes.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` still reports pre-existing formatting drift in unrelated files outside the
+  Phase 4 edits.
+- `npm run lint` still fails at `lint:dead` on the existing unused-export cleanup backlog. Phase 4
+  added two specific `model.ts` dead-export follow-ups to Phase 9.
+
 ### Phase 5: Debug Camera Hints And Ray Picks
 
 - Remove legacy host snapshot from `buildCameraHintFromSceneCameraFrame`.
@@ -847,6 +902,9 @@ Initial cleanup targets:
 - Revisit camera hint and ray-pick command naming after Phase 5. If they remain browser diagnostics,
   name them as diagnostics; if future client mode needs authority-sensitive picks, keep that behind
   `/client` contracts.
+- Remove or internalize stale `model.ts` exports reported by `lint:dead`, especially
+  `deriveTerrainViewport` and `buildRayPickRequest`, unless Phase 5 gives them a current browser
+  diagnostics caller.
 - Audit plan prose after each phase for stale deleted identifiers. Grep should not keep old host
   architecture names alive unless the section is explicitly historical and useful.
 - Collapse duplicate outdoor/interior focus derivation helpers once renderer camera residency and

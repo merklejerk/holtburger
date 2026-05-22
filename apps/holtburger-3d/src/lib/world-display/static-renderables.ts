@@ -234,7 +234,7 @@ function deriveIndoorStaticRenderableSceneModel(
 	};
 }
 
-export function formatStaticRenderableRenderGroupKey(
+function formatStaticRenderableRenderGroupKey(
 	renderDomain: StaticRenderableRenderDomain,
 	chunkKey: RenderChunkKey,
 	gfxObjAssetId: string,

@@ -44,7 +44,7 @@ export function deriveRenderChunkKeyFromEnvCellId(
 	return deriveRenderChunkKeyFromLandblockId(envCellId);
 }
 
-export function deriveRenderChunkLandblockId(landblockId: number): number {
+function deriveRenderChunkLandblockId(landblockId: number): number {
 	return normalizeOutdoorLandblockId(landblockId);
 }
 
@@ -134,7 +134,7 @@ export function convertCameraFrameBetweenAnchors<
 	};
 }
 
-export function deriveAnchorRebaseOffset(
+function deriveAnchorRebaseOffset(
 	oldAnchorLandblockId: number,
 	newAnchorLandblockId: number,
 ): Vec3Dto {

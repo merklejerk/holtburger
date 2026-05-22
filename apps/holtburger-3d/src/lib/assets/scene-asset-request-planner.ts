@@ -44,25 +44,6 @@ const DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS: OutdoorSceneRequestOptions = {
 	envCellRadius: 1,
 };
 
-export function createFocusedAssetRequest(
-	browserDestination: BrowserLocationSelection | null,
-	priority: AssetPriority,
-	requestRevision = 0,
-): AssetLookupRequestDto | null {
-	if (!browserDestination || isIndoorBrowserDestination(browserDestination)) {
-		return null;
-	}
-
-	const landblockId = browserLocationToLandblockId(browserDestination);
-	const assetId = formatLandblockPackAssetId(landblockId);
-
-	return {
-		requestId: `${priority}-${requestRevision}-destination-${assetId}`,
-		assetId,
-		priority,
-	};
-}
-
 export function createSceneCoverageRequests(
 	input: BrowserSceneRequestInput,
 	priority: AssetPriority,
@@ -152,47 +133,6 @@ export function deriveSceneCoverageAssetIds(
 			),
 		]),
 	].sort();
-}
-
-export function createOutdoorLandblockPackCoverageRequest(
-	browserDestination: BrowserLocationSelection | null,
-	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetId: string | null,
-	requestRevision = 0,
-): AssetLookupRequestDto | null {
-	const requests = createOutdoorLandblockPackCoverageRequests(
-		browserDestination,
-		priority,
-		preparedByAssetId,
-		pendingAssetId ? [pendingAssetId] : [],
-		DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
-		requestRevision,
-	);
-
-	return requests[0] ?? null;
-}
-
-export function createOutdoorLandblockPackCoverageRequests(
-	browserDestination: BrowserLocationSelection | null,
-	priority: AssetPriority,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[] = [],
-	options: OutdoorSceneRequestOptions = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
-	requestRevision = 0,
-): AssetLookupRequestDto[] {
-	if (!browserDestination || isIndoorBrowserDestination(browserDestination)) {
-		return [];
-	}
-
-	return createLandblockPackCoverageRequestsForInterest(
-		requestRevision,
-		browserDestination,
-		priority,
-		preparedByAssetId,
-		pendingAssetIds,
-		deriveOutdoorInterestForBrowserDestination(browserDestination, options),
-	);
 }
 
 function createLandblockPackCoverageRequestsForInterest(
@@ -305,7 +245,7 @@ function deriveLandblockSummaryCoverageLandblockIds(
 		.sort((left, right) => left - right);
 }
 
-export function createStaticRenderableAssetRequests(
+function createStaticRenderableAssetRequests(
 	requestRevision: number,
 	browserDestination: BrowserLocationSelection | null,
 	priority: AssetPriority,

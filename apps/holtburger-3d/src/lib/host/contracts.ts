@@ -99,9 +99,6 @@ export const assetProvenanceDtoSchema = z.object({
 });
 
 const landblockClassificationValueSchema = z.enum(["outdoor", "dungeon"]);
-export type LandblockClassificationDto = z.infer<
-	typeof landblockClassificationValueSchema
->;
 
 const preparedTerrainTriangleDtoSchema = z.object({
 	a: z.number().int().nonnegative(),

@@ -128,7 +128,7 @@ function isCameraOnPortalVisibleSide(
 	return visibleSide === "positive" ? signedDistance > 0 : signedDistance < 0;
 }
 
-export function calculateClippedProjectedAreaPx(
+function calculateClippedProjectedAreaPx(
 	points: readonly Vector3[],
 	projectionScreenMatrix: Matrix4,
 	viewport: Vector2,

@@ -1,6 +1,6 @@
 # Holtburger 3D Browser Follow Mode Plan
 
-Status: Phase 7 implemented.
+Status: Phase 9 implemented.
 
 Implementation note: update this plan after each completed phase with progress, decisions, course
 corrections, and any needed adjustment to later phases.
@@ -666,7 +666,7 @@ Future-step refinements:
   destination writes.
 - Phase 6 should use the same destination identity helper when deciding whether an anchor shift is
   necessary, but camera reset/fit policy should remain separate from scene-interest identity.
-- Phase 9 should keep the new planner tests and add controller-level tests if request-revision or
+- Phase 9 kept the planner tests in place. Add controller-level tests later if request-revision or
   pruning behavior becomes more complex during follow traversal.
 
 Verification:
@@ -732,8 +732,8 @@ Verification:
 - `npm run check` passes.
 - `npm run test:ts` passes with 31 test files and 151 tests.
 - `npm run lint:ts` passes.
-- `npm run lint` still fails at `lint:dead` on the existing unused-export cleanup backlog. That
-  belongs with Phase 9 unless a dead export directly blocks a follow-mode phase.
+- `npm run lint` still failed at `lint:dead` during Phase 3. Phase 9 later cleared that
+  unused-export backlog.
 - `npm run build` passes with the existing Vite chunk-size warning.
 - `npm run format:check` still reports pre-existing formatting drift in unrelated files outside the
   Phase 3 edits.
@@ -782,9 +782,8 @@ Course corrections:
   browser scene interest and remains valid: Phase 4 only removed fake host/player residency from
   browser model composition and browser-facing text.
 - The display model still contains a terrain-contract block with ACViewer/Rust asset-pipeline
-  provenance. That is static asset/debug context, not scene interest. Phase 9 should decide whether
-  this older explanatory panel is still useful or should be deleted with the other transitional UI
-  text.
+  provenance. That is static asset/debug context, not scene interest. Phase 9 kept the active
+  contract text but removed the stale terrain viewport projection helper and phase-specific UI copy.
 
 Future-step refinements:
 
@@ -792,8 +791,8 @@ Future-step refinements:
   lands; destination source should remain irrelevant to scene derivation.
 - Phase 7 follow-camera UI should write `browserMode.destination` and then rely on the same
   `deriveBrowserWorldDisplayModel`, terrain, static, and structured-interior paths.
-- Phase 9 should include remaining `model.ts` dead-export items reported by `lint:dead`, such as
-  `deriveTerrainViewport`, in the cleanup punch list.
+- Phase 9 cleaned up the remaining `model.ts` dead-export items reported by `lint:dead`, including
+  `deriveTerrainViewport`.
 
 Verification:
 
@@ -803,8 +802,8 @@ Verification:
 - `npm run build` passes with the existing Vite chunk-size warning.
 - `npm run format:check` still reports pre-existing formatting drift in unrelated files outside the
   Phase 4 edits.
-- `npm run lint` still fails at `lint:dead` on the existing unused-export cleanup backlog. Phase 4
-  added two specific `model.ts` dead-export follow-ups to Phase 9.
+- `npm run lint` still failed at `lint:dead` during Phase 4. Phase 9 later cleared the
+  unused-export backlog, including the `model.ts` follow-ups.
 
 ### Phase 5: Camera Hint Cleanup And Ray-Pick Deletion
 
@@ -849,8 +848,9 @@ Verification:
 - `npm run build` passes with the existing Vite chunk-size warning.
 - `npm run format:check` passes.
 - `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` passes with 10 tests.
-- `npm run lint` still fails at the existing `lint:dead` backlog. The removed ray-pick exports no
-  longer appear in the unused-export report.
+- `npm run lint` still failed at the existing `lint:dead` backlog during Phase 5. The removed
+  ray-pick exports no longer appeared in that report, and Phase 9 later cleared the remaining
+  unused-export backlog.
 
 ### Phase 6: Standard Anchor And Camera Continuity
 
@@ -912,8 +912,9 @@ Verification:
 - `npm run test:ts` passes with 35 test files and 159 tests.
 - `npm run build` passes with the existing Vite chunk-size warning.
 - `npm run format:check` passes.
-- `npm run lint` still fails at the existing `lint:dead` backlog. The deleted explicit-anchor
-  constant is gone from the report; the remaining exported helper backlog is tracked in Phase 9.
+- `npm run lint` still failed at the existing `lint:dead` backlog during Phase 6. The deleted
+  explicit-anchor constant was gone from the report, and Phase 9 later cleared the remaining
+  exported helper backlog.
 
 ### Phase 7: Follow Destination Updater And UI
 
@@ -973,15 +974,15 @@ Course corrections:
 
 Future-step refinements:
 
-- Phase 8 should manually validate the first follow-mode toggle when the latest renderer residency
-  is already known, because the updater now intentionally applies the cached residency immediately.
-- Phase 8 should include a same-landblock follow toggle check: the destination source should change
-  to follow-camera without forcing anchor/camera churn.
-- Phase 8 should include outdoor-building traversal while in follow mode. Entering an outdoor
-  env-cell should keep outdoor terrain/landblock interest active while the renderer uses interior
-  base-scene portal rendering.
-- Phase 9 should revisit whether destination source should remain visible in the Scene tab or move
-  to Debug once follow-mode behavior is proven.
+- Phase 8 validated the first follow-mode toggle when the latest renderer residency is already
+  known, because the updater intentionally applies the cached residency immediately.
+- Phase 8 included a same-landblock follow toggle check: the destination source changes to
+  follow-camera without forcing anchor/camera churn.
+- Phase 8 included outdoor-building traversal while in follow mode. Entering an outdoor env-cell
+  keeps outdoor terrain/landblock interest active while the renderer uses interior base-scene portal
+  rendering.
+- Phase 9 revisited destination source placement and kept it visible for now because it remains
+  useful while validating manual/follow handoff behavior.
 
 Verification:
 
@@ -991,7 +992,8 @@ Verification:
 - `npm run test:ts` passes with 35 test files and 164 tests.
 - `npm run build` passes with the existing Vite chunk-size warning.
 - `npm run format:check` passes.
-- `npm run lint` still fails at the existing `lint:dead` backlog.
+- `npm run lint` still failed at the existing `lint:dead` backlog during Phase 7. Phase 9 later
+  cleared that backlog.
 
 ### Phase 8: Validation
 
@@ -1011,11 +1013,24 @@ Exit criteria:
 - No full-scene clear/rebuild is visible during normal destination changes.
 - Browser mode operates independently of host/player focus.
 
+Progress update:
+
+- Phase 8 passed manual verification. Follow-mode outdoor traversal, dungeon follow entry, manual
+  navigation handoff, and the manual dungeon auto-fit correction are considered validated for this
+  implementation pass.
+
+Course corrections:
+
+- The manual dungeon auto-fit follow-up from Phase 7 stayed intentionally narrow: it only applies to
+  manual `interior-cell` destination identity changes. Outdoor manual navigation and follow-camera
+  traversal keep the camera continuous.
+
 ### Phase 9: Cleanup Legacy Smells And Migration Scaffolding
 
-Status: running cleanup punch list. Add to it whenever a phase leaves behind a temporary adapter,
-misleading name, duplicated helper, compatibility shim, obsolete test, optional-field workaround, or
-migration-only abstraction.
+Status: implemented for the browser follow-mode cleanup slice. Keep this section as a running punch
+list if future follow-mode phases leave behind temporary adapters, misleading names, duplicated
+helpers, compatibility shims, obsolete tests, optional-field workarounds, or migration-only
+abstractions.
 
 Goal: keep the browser follow-mode work from accumulating hidden architectural debt while the
 destination-driven model replaces the old host-driven model.
@@ -1059,15 +1074,53 @@ Implemented cleanup slices:
 - Phase 1 follow-up scrubbed the plan and app tree of the old runtime-batch identifiers so grep no
   longer suggests the browser depends on that model.
 - Phase 5 deleted the unused browser ray-pick boundary and the synthetic camera-hint fallback.
+- Phase 9 made `npm run lint:dead` clean for `apps/holtburger-3d` by deleting obsolete helpers,
+  removing dead private DTO interfaces, and internalizing helpers/types that are not module
+  contracts.
+- Phase 9 deleted the old `deriveTerrainViewport` debug helper and its SVG-style terrain viewport
+  model. Terrain rendering now lives in the actual terrain scene path instead of a stale display
+  model projection helper.
+- Phase 9 removed unused destination/request-planner helper variants that predated the unified
+  `createSceneCoverageRequests` browser scene-interest entry point.
+- Phase 9 removed `updateAssetChannel`, `createInitialModeState`, and other unused app-state exports
+  that made the browser store look more externally extensible than it is.
+- Phase 9 rewrote browser display-model status text that still referred to a "shared world shell" or
+  phase-specific terrain proof text. The panel copy now describes destination-driven scene coverage
+  and asset ownership directly.
+
+Course corrections:
+
+- Most `lint:dead` findings were not behavior bugs; they were overly public module internals. The
+  cleanup preferred internalizing those symbols over deleting active implementation detail.
+- A few findings were genuinely dead code and were deleted instead of made private:
+  `createDefaultOutdoorSceneInterest`, focused-only request helpers, generated-scenery/interior
+  static DTO interfaces, and the terrain viewport helper family.
+- `PreparedLandblockStaticBuildingPortal` remains exported because transition-portal derivation uses
+  that prepared source-fact type across module boundaries. The cleanup did not force it private just
+  to satisfy a mechanical report.
+
+Future-step refinements:
+
+- Keep destination source visible in the Scene tab for now. It is still useful while verifying
+  manual-to-follow handoff behavior; move it to Debug only if the main navigation panel starts
+  feeling noisy.
+- The remaining browser route cleanup is intentionally future work. `/client` does not exist yet, so
+  `/` as a browser convenience route is acceptable as long as no hidden mode flag or runtime
+  residency path is reintroduced.
+- Any new exported renderer/world-display type should have a concrete importer. If it is only used
+  inside its module, keep it private immediately instead of relying on a later cleanup pass.
 
 Validation:
 
 - `rg` for the deleted runtime-batch identifiers across `apps/holtburger-3d` and this plan returns
   no matches.
-- `npm run test:ts`.
-- `npm run check`.
-- `npm run lint:rust`.
-- `npm run build`.
+- `npm run lint:dead` passes.
+- `npm run lint:ts` passes.
+- `npm run check` passes.
+- `npm run test:ts` passes with 35 test files and 165 tests.
+- `npm run build` passes with the existing Vite chunk-size warning.
+- `npm run format:check` passes.
+- `npm run lint` passes, including Rust clippy for the Tauri crate.
 
 Notes:
 

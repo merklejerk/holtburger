@@ -44,7 +44,7 @@ export interface WorldResidencyIndex {
 	queryDetailed(position: Vec3Dto): WorldResidencyQueryResult;
 }
 
-export interface WorldResidencyQueryResult {
+interface WorldResidencyQueryResult {
 	context: CameraViewResidencyContext;
 	diagnostics: WorldResidencyQueryDiagnostics;
 }

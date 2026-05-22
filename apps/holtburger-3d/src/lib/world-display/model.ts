@@ -11,9 +11,7 @@ import {
 } from "../landblocks";
 import type {
 	AssetChannelState,
-	PreparedAssetRecord,
 	PreparedLandblockPackPayload,
-	PreparedTerrainMesh,
 } from "../assets/types";
 import { describePreparedAssetPayload } from "../assets/types";
 import type { CameraHintAckDto } from "../host/contracts";
@@ -64,21 +62,6 @@ interface WorldDisplayTerrainContract {
 	geometryAnchor: string;
 	indoorBranchText: string;
 	statusText: string;
-}
-
-interface WorldDisplayTerrainPolygon {
-	key: string;
-	points: string;
-	fill: string;
-	stroke: string;
-}
-
-export interface WorldDisplayTerrainViewport {
-	ready: boolean;
-	landblockLabel: string | null;
-	statusText: string;
-	viewBox: string;
-	polygons: WorldDisplayTerrainPolygon[];
 }
 
 export interface BrowserWorldDisplayModel {
@@ -138,7 +121,7 @@ export function deriveBrowserWorldDisplayModel({
 	);
 
 	return {
-		headline: "Browser destination is driving the shared world shell.",
+		headline: "Browser destination is driving scene coverage.",
 		destinationFocusLabel: browserDestination.label,
 		destinationLabel: browserDestination.label,
 		renderCacheText:
@@ -263,7 +246,7 @@ function deriveSceneContext(
 		destinationText,
 		coverageText: `Outdoor LoD selects ${chunks.length} terrain tile${chunks.length === 1 ? "" : "s"}, ${staticBuildingCount} building${staticBuildingCount === 1 ? "" : "s"} inside distance ${buildingLodRadius}, and ${staticInstanceCount} detail object${staticInstanceCount === 1 ? "" : "s"} inside distance ${detailLodRadius} around ${focusLandblockLabel}.`,
 		gapText:
-			"Phase 9 now proves one real outdoor terrain payload on the asset channel, but linked interior coverage and broader outdoor coverage still need cleanup.",
+			"Outdoor coverage is selected from destination-owned terrain, building, and detail radii.",
 		chunks,
 		staticRenderableInstanceCount: staticInstanceCount,
 		staticRenderableBuildingCount: staticBuildingCount,
@@ -327,7 +310,7 @@ function createTerrainContract(
 		indoorBranchText:
 			"Outdoor terrain comes from normalized landblock loads; dungeon env cells stay on a separate landblock-pack rendering track.",
 		statusText: requestKey
-			? `Phase 9 now exercises ${requestKey} end to end: Rust decodes CellLandblock terrain data into an app-local payload, and WorldDisplay keeps final mesh and GPU hydration on the frontend.`
+			? `${requestKey} is ready: Rust decodes CellLandblock data into an app-local payload, and WorldDisplay owns final mesh and GPU hydration.`
 			: "The terrain contract shape is in place, but it still needs a focus outdoor landblock before the first request key can be selected.",
 	};
 }
@@ -371,91 +354,6 @@ function describeAssetState(assetState: AssetChannelState): string {
 	return "Asset worker ingress is waiting for the next demand-driven asset response.";
 }
 
-export function deriveTerrainViewport(
-	preparedAsset: PreparedAssetRecord | null,
-): WorldDisplayTerrainViewport {
-	const terrainMesh = preparedAsset
-		? getTerrainMeshFromPreparedAsset(preparedAsset)
-		: null;
-	if (!terrainMesh) {
-		return {
-			ready: false,
-			landblockLabel: null,
-			statusText: preparedAsset
-				? `Most recent asset ${preparedAsset.request.assetId} does not carry a terrain mesh yet.`
-				: "Waiting for the first outdoor terrain asset to be prepared.",
-			viewBox: "0 0 360 240",
-			polygons: [],
-		};
-	}
-
-	return buildTerrainViewport(terrainMesh);
-}
-
-function getTerrainMeshFromPreparedAsset(
-	asset: PreparedAssetRecord,
-): PreparedTerrainMesh | null {
-	if (asset.payload.kind === "landblock-pack") {
-		return asset.payload.prepared.terrainMesh;
-	}
-
-	if (asset.payload.kind === "landblock-summary") {
-		return asset.payload.prepared.terrainMesh;
-	}
-
-	return null;
-}
-
-function buildTerrainViewport(
-	terrainMesh: PreparedTerrainMesh,
-): WorldDisplayTerrainViewport {
-	const projectedVertices = terrainMesh.vertices.map(projectTerrainVertex);
-	const bounds = projectedVertices.reduce(
-		(accumulator, vertex) => ({
-			minX: Math.min(accumulator.minX, vertex.x),
-			maxX: Math.max(accumulator.maxX, vertex.x),
-			minY: Math.min(accumulator.minY, vertex.y),
-			maxY: Math.max(accumulator.maxY, vertex.y),
-		}),
-		{
-			minX: Number.POSITIVE_INFINITY,
-			maxX: Number.NEGATIVE_INFINITY,
-			minY: Number.POSITIVE_INFINITY,
-			maxY: Number.NEGATIVE_INFINITY,
-		},
-	);
-	const padding = 20;
-	const width = bounds.maxX - bounds.minX + padding * 2;
-	const height = bounds.maxY - bounds.minY + padding * 2;
-	const heightSpan = Math.max(terrainMesh.maxHeight - terrainMesh.minHeight, 1);
-
-	const polygons = terrainMesh.triangles.map((triangle, index) => {
-		const vertices = [triangle.a, triangle.b, triangle.c].map((vertexIndex) => {
-			const vertex = projectedVertices[vertexIndex];
-			return `${(vertex.x - bounds.minX + padding).toFixed(2)},${(vertex.y - bounds.minY + padding).toFixed(2)}`;
-		});
-		const heightRatio =
-			(triangle.averageHeight - terrainMesh.minHeight) / heightSpan;
-		const hue = 86 + (triangle.terrainType % 6) * 14;
-		const lightness = 28 + heightRatio * 26;
-
-		return {
-			key: `${terrainMesh.landblockId}-${index}`,
-			points: vertices.join(" "),
-			fill: `hsl(${hue} 34% ${lightness}%)`,
-			stroke: `hsl(${hue} 28% ${Math.max(lightness - 10, 18)}%)`,
-		};
-	});
-
-	return {
-		ready: true,
-		landblockLabel: formatLandblockLabel(terrainMesh.landblockId),
-		statusText: `Prepared landblock ${formatLandblockLabel(terrainMesh.landblockId)} with ${terrainMesh.triangles.length} terrain triangles and a height range of ${terrainMesh.minHeight.toFixed(1)}-${terrainMesh.maxHeight.toFixed(1)}.`,
-		viewBox: `0 0 ${width.toFixed(2)} ${height.toFixed(2)}`,
-		polygons,
-	};
-}
-
 export function describeCameraHintAck(
 	cameraAck: CameraHintAckDto | null,
 ): string | null {
@@ -466,13 +364,6 @@ export function describeCameraHintAck(
 	return cameraAck.accepted
 		? `Accepted camera hint #${cameraAck.sequence}.`
 		: `Rejected camera hint #${cameraAck.sequence}.`;
-}
-
-function projectTerrainVertex(vertex: { x: number; y: number; z: number }) {
-	return {
-		x: (vertex.x - vertex.y) * 0.92,
-		y: (vertex.x + vertex.y) * 0.46 - vertex.z * 1.25,
-	};
 }
 
 export function normalizeViewportPoint(

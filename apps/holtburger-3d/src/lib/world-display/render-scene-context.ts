@@ -2,7 +2,7 @@ import type { RenderLandblockAnchor } from "./render-chunks";
 import type { StructuredInteriorSceneModel } from "./structured-interior-scene";
 import type { TerrainSceneModel } from "./terrain-scene";
 
-export type WorldRenderSceneContextKind = "outdoor" | "dungeon";
+type WorldRenderSceneContextKind = "outdoor" | "dungeon";
 
 export interface WorldRenderSceneContext {
 	kind: WorldRenderSceneContextKind;

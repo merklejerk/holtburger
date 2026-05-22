@@ -39,7 +39,7 @@ export interface BrowserFreeCameraState {
 	lastFitKey: string | null;
 }
 
-export interface BrowserFreeCameraConfig {
+interface BrowserFreeCameraConfig {
 	defaultPosition: Vec3Dto;
 	defaultYawRadians: number;
 	defaultPitchRadians: number;
@@ -76,7 +76,7 @@ const DEFAULT_UP: Vec3Dto = { x: 0, y: 1, z: 0 };
 const DEFAULT_CAMERA_YAW_RADIANS = Math.PI * 0.74;
 const DEFAULT_CAMERA_PITCH_RADIANS = -Math.PI / 4;
 
-export const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
+const DEFAULT_BROWSER_FREE_CAMERA_CONFIG: BrowserFreeCameraConfig = {
 	defaultPosition: { x: 180, y: 220, z: 180 },
 	defaultYawRadians: DEFAULT_CAMERA_YAW_RADIANS,
 	defaultPitchRadians: DEFAULT_CAMERA_PITCH_RADIANS,

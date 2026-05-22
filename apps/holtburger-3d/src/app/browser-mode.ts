@@ -387,6 +387,22 @@ export function browserDestinationToInteriorCellId(
 	return location?.kind === "interior-cell" ? location.envCellId : null;
 }
 
+export function describeBrowserDestinationIdentity(
+	location: BrowserLocationSelection | null,
+): string | null {
+	if (!location) {
+		return null;
+	}
+
+	if (location.kind === "interior-cell") {
+		return `interior-cell-${formatHex32(location.envCellId)}-landblock-${formatHex32(
+			normalizeOutdoorLandblockId(location.landblockId),
+		)}`;
+	}
+
+	return `outdoor-landblock-${formatHex32(browserLocationToLandblockId(location))}`;
+}
+
 export function isIndoorBrowserDestination(
 	location: BrowserLocationSelection | null,
 ): location is BrowserInteriorCellSelection {

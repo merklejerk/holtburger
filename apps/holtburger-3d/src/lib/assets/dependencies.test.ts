@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-	AssetLookupResponseDto,
-	PlacementTransformDto,
-} from "../host/contracts";
+import type { AssetLookupResponseDto } from "../host/contracts";
 import { getAssetResponseDependencies } from "./dependencies";
-
-const localPlacement: PlacementTransformDto = {
-	origin: { x: 0, y: 0, z: 0 },
-	orientation: { w: 1, x: 0, y: 0, z: 0 },
-};
 
 const provenance = {
 	source: "repo-local-hba" as const,
@@ -146,28 +138,6 @@ function createJsonResponse(
 	};
 }
 
-function createOutdoorInstance(instanceId: string, sourceAssetId: string) {
-	return {
-		instanceId,
-		owningLandblockId: 0xda55ffff,
-		sourceDid: 1,
-		sourceAssetId,
-		sourceIndex: 0,
-		localPlacement,
-	};
-}
-
-function createIndoorStaticObject(instanceId: string, sourceAssetId: string) {
-	return {
-		instanceId,
-		owningEnvCellId: 0xda55012e,
-		sourceDid: 1,
-		sourceAssetId,
-		sourceIndex: 0,
-		localPlacement,
-	};
-}
-
 function createSetupPart(partIndex: number, gfxObjAssetId: string) {
 	return {
 		partIndex,
@@ -175,32 +145,5 @@ function createSetupPart(partIndex: number, gfxObjAssetId: string) {
 		gfxObjAssetId,
 		parentIndex: null,
 		scale: null,
-	};
-}
-
-function createOutdoorDiagnostics() {
-	const layer = {
-		attempted: 0,
-		accepted: 0,
-		rejectedUnsupportedSource: 0,
-	};
-
-	return {
-		landblockInfoAvailable: true,
-		landblockInfoError: null,
-		explicit: layer,
-		buildings: layer,
-		generated: {
-			...layer,
-			skippedWeenieObj: 0,
-			rejectedFrequency: 0,
-			rejectedBounds: 0,
-			rejectedBuildingOccupancy: 0,
-			rejectedObjectBounds: 0,
-			objectBoundsUnavailable: 0,
-			rejectedRoad: 0,
-			rejectedSlope: 0,
-			rejectedOverlap: 0,
-		},
 	};
 }

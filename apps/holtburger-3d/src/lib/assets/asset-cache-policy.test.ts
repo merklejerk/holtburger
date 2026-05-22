@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { createPreparedTerrainAsset } from "../../app/test-fixtures";
 import { planPreparedAssetCachePrune } from "./asset-cache-policy";
 import type {
 	PreparedAssetPayload,
@@ -132,7 +131,10 @@ function createPreparedLandblockPackAsset(
 	assetId: string,
 	renderableAssetIds: readonly string[],
 ): PreparedAssetRecord {
-	const landblockId = Number.parseInt(assetId.slice("landblock-pack/".length), 16);
+	const landblockId = Number.parseInt(
+		assetId.slice("landblock-pack/".length),
+		16,
+	);
 	return createPreparedAsset(assetId, {
 		kind: "landblock-pack",
 		sourceAssetKind: "landblock-pack",
@@ -266,20 +268,5 @@ function createProvenance(sourceAssetKind: string) {
 		sourceAssetKind,
 		errorCode: null,
 		detail: null,
-	};
-}
-
-function createPlacement() {
-	return {
-		origin: { x: 0, y: 0, z: 0 },
-		orientation: { w: 1, x: 0, y: 0, z: 0 },
-	};
-}
-
-function createLayerDiagnostics() {
-	return {
-		attempted: 1,
-		accepted: 1,
-		rejectedUnsupportedSource: 0,
 	};
 }

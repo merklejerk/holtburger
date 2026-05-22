@@ -1,4 +1,7 @@
-import type { BrowserLocationSelection } from "../../app/browser-mode";
+import {
+	describeBrowserDestinationIdentity,
+	type BrowserLocationSelection,
+} from "../../app/browser-mode";
 import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
 	classifyAssetHydration,
@@ -89,7 +92,9 @@ export class SceneAssetStreamingController {
 				this.requestRevision += 1;
 				this.deps.debugLog("coverage-key", {
 					coverageKey: syncKey,
-					destination: input.browserDestination?.label ?? null,
+					destination: describeBrowserDestinationIdentity(
+						input.browserDestination,
+					),
 					terrainLodRadius: input.terrainLodRadius,
 					buildingLodRadius: input.buildingLodRadius,
 					detailLodRadius: input.detailLodRadius,
@@ -144,7 +149,7 @@ export class SceneAssetStreamingController {
 		this.deps.debugLog("scene-coverage", {
 			priority,
 			requestRevision: this.requestRevision,
-			destination: input.browserDestination?.label ?? null,
+			destination: describeBrowserDestinationIdentity(input.browserDestination),
 			terrainLodRadius: input.terrainLodRadius,
 			buildingLodRadius: input.buildingLodRadius,
 			detailLodRadius: input.detailLodRadius,
@@ -263,7 +268,8 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`prepared-${preparedSceneAssetKey}`,
 	].join(":");
 
-	return destination
-		? `${destination.source}:${destination.label}:${interestKey}`
+	const destinationIdentity = describeBrowserDestinationIdentity(destination);
+	return destinationIdentity
+		? `${destinationIdentity}:${interestKey}`
 		: `none:${interestKey}`;
 }

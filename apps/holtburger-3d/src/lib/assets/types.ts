@@ -426,6 +426,9 @@ export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	vertexArray: PreparedPolygonSetVertexArray;
 	drawingPolygons: PreparedPolygonSetPolygon[];
 	drawingBsp: PreparedPolygonSetBspNode | null;
+	dependencies?: {
+		materialAssetIds: string[];
+	};
 	physicsWitness: PreparedGfxObjPhysicsWitness;
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	sortCenter: Vec3Dto | null;
@@ -486,6 +489,105 @@ export interface PreparedSetupModelPayload extends PreparedAssetPayloadBase {
 	defaultMotionTable: number | null;
 	defaultSoundTable: number | null;
 	defaultScriptTable: number | null;
+	dependencies?: {
+		gfxObjAssetIds: string[];
+		setupAppearanceAssetId: string;
+	};
+}
+
+export interface PreparedMaterialRecipePayload extends PreparedAssetPayloadBase {
+	kind: "material-recipe";
+	sourceAssetKind: "material-recipe";
+	surfaceId: number;
+	surfaceType: number;
+	source:
+		| { kind: "solid-color"; argb: number }
+		| {
+				kind: "texture";
+				renderTextureId: number;
+				renderSurfaceIds: number[];
+				paletteId: number | null;
+				renderSurfaceDefaultPaletteIds: number[];
+		  };
+	translucency: number;
+	luminosity: number;
+	diffuse: number;
+	dependencies: {
+		renderTextureAssetIds: string[];
+		renderSurfaceAssetIds: string[];
+		paletteAssetIds: string[];
+	};
+}
+
+export interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase {
+	kind: "setup-appearance";
+	sourceAssetKind: "setup-appearance";
+	setupModelId: number;
+	appearanceKey: string;
+	parts: {
+		partIndex: number;
+		gfxObjId: number;
+		gfxObjAssetId: string;
+		materialSlots: {
+			slotIndex: number;
+			surfaceId: number;
+			materialAssetId: string;
+		}[];
+	}[];
+	textureChanges: {
+		partIndex: number;
+		oldTexture: number;
+		newTexture: number;
+	}[];
+	animPartChanges: {
+		partIndex: number;
+		partId: number;
+	}[];
+	paletteId: number | null;
+	subPalettes: {
+		subId: number;
+		offset: number;
+		numColors: number;
+	}[];
+	dependencies: {
+		materialAssetIds: string[];
+		paletteAssetIds: string[];
+	};
+}
+
+export interface PreparedRenderTexturePayload extends PreparedAssetPayloadBase {
+	kind: "render-texture";
+	sourceAssetKind: "render-texture";
+	renderTextureId: number;
+	textureType: number;
+	unknown: number;
+	renderSurfaceIds: number[];
+	dependencies: {
+		renderSurfaceAssetIds: string[];
+	};
+}
+
+export interface PreparedRenderSurfacePayload extends PreparedAssetPayloadBase {
+	kind: "render-surface";
+	sourceAssetKind: "render-surface";
+	renderSurfaceId: number;
+	unknown: number;
+	width: number;
+	height: number;
+	formatRaw: number;
+	format: string;
+	sourceByteLength: number;
+	defaultPaletteId: number | null;
+	dependencies: {
+		paletteAssetIds: string[];
+	};
+}
+
+export interface PreparedPalettePayload extends PreparedAssetPayloadBase {
+	kind: "palette";
+	sourceAssetKind: "palette";
+	paletteId: number;
+	colorCount: number;
 }
 
 interface PreparedVisualAssetStubPayload extends PreparedAssetPayloadBase {
@@ -512,6 +614,11 @@ export type PreparedAssetPayload =
 	| PreparedLandblockSummaryPayload
 	| PreparedGfxObjPayload
 	| PreparedSetupModelPayload
+	| PreparedMaterialRecipePayload
+	| PreparedSetupAppearancePayload
+	| PreparedRenderTexturePayload
+	| PreparedRenderSurfacePayload
+	| PreparedPalettePayload
 	| PreparedVisualAssetStubPayload
 	| PreparedDependencyManifestPayload
 	| PreparedUnknownAssetPayload;
@@ -569,9 +676,47 @@ export function getPreparedAssetDependencies(
 	}
 
 	if (asset.payload.kind === "setup-model") {
-		return [...new Set(asset.payload.parts.map((part) => part.gfxObjAssetId))]
-			.sort()
-			.map((assetId) => ({ assetId }));
+		const dependencies = asset.payload.dependencies;
+		if (!dependencies) {
+			return uniqueSortedAssetIds(
+				asset.payload.parts.map((part) => part.gfxObjAssetId),
+			);
+		}
+		return uniqueSortedAssetIds([
+			...dependencies.gfxObjAssetIds,
+			dependencies.setupAppearanceAssetId,
+		]);
+	}
+
+	if (asset.payload.kind === "gfx-obj") {
+		return uniqueSortedAssetIds(
+			asset.payload.dependencies?.materialAssetIds ?? [],
+		);
+	}
+
+	if (asset.payload.kind === "setup-appearance") {
+		return uniqueSortedAssetIds([
+			...asset.payload.dependencies.materialAssetIds,
+			...asset.payload.dependencies.paletteAssetIds,
+		]);
+	}
+
+	if (asset.payload.kind === "material-recipe") {
+		return uniqueSortedAssetIds([
+			...asset.payload.dependencies.renderTextureAssetIds,
+			...asset.payload.dependencies.renderSurfaceAssetIds,
+			...asset.payload.dependencies.paletteAssetIds,
+		]);
+	}
+
+	if (asset.payload.kind === "render-texture") {
+		return uniqueSortedAssetIds(
+			asset.payload.dependencies.renderSurfaceAssetIds,
+		);
+	}
+
+	if (asset.payload.kind === "render-surface") {
+		return uniqueSortedAssetIds(asset.payload.dependencies.paletteAssetIds);
 	}
 
 	if (asset.payload.kind === "landblock-pack") {
@@ -585,6 +730,12 @@ export function getPreparedAssetDependencies(
 	}
 
 	return [];
+}
+
+function uniqueSortedAssetIds(
+	assetIds: readonly string[],
+): PreparedAssetDependency[] {
+	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
 }
 
 export function derivePreparedAssetDependencyStatus(

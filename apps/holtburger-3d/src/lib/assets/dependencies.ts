@@ -1,9 +1,14 @@
 import type { AssetLookupResponseDto } from "../host/contracts";
 import {
 	dependencyManifestPayloadDtoSchema,
+	gfxObjPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
+	materialRecipePayloadDtoSchema,
+	renderSurfacePayloadDtoSchema,
+	renderTexturePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
+	setupAppearancePayloadDtoSchema,
 } from "../host/contracts";
 
 export interface AssetDependencyRef {
@@ -31,8 +36,53 @@ export function getAssetResponseDependencies(
 
 	const setupModel = setupModelPayloadDtoSchema.safeParse(response.payload);
 	if (setupModel.success) {
+		return uniqueSortedAssetIds([
+			...setupModel.data.dependencies.gfxObjAssetIds,
+			setupModel.data.dependencies.setupAppearanceAssetId,
+		]);
+	}
+
+	const gfxObj = gfxObjPayloadDtoSchema.safeParse(response.payload);
+	if (gfxObj.success) {
+		return uniqueSortedAssetIds(gfxObj.data.dependencies.materialAssetIds);
+	}
+
+	const setupAppearance = setupAppearancePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (setupAppearance.success) {
+		return uniqueSortedAssetIds([
+			...setupAppearance.data.dependencies.materialAssetIds,
+			...setupAppearance.data.dependencies.paletteAssetIds,
+		]);
+	}
+
+	const materialRecipe = materialRecipePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (materialRecipe.success) {
+		return uniqueSortedAssetIds([
+			...materialRecipe.data.dependencies.renderTextureAssetIds,
+			...materialRecipe.data.dependencies.renderSurfaceAssetIds,
+			...materialRecipe.data.dependencies.paletteAssetIds,
+		]);
+	}
+
+	const renderTexture = renderTexturePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (renderTexture.success) {
 		return uniqueSortedAssetIds(
-			setupModel.data.parts.map((part) => part.gfxObjAssetId),
+			renderTexture.data.dependencies.renderSurfaceAssetIds,
+		);
+	}
+
+	const renderSurface = renderSurfacePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (renderSurface.success) {
+		return uniqueSortedAssetIds(
+			renderSurface.data.dependencies.paletteAssetIds,
 		);
 	}
 

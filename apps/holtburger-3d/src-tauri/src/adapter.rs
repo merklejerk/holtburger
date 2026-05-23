@@ -11,7 +11,8 @@ use holtburger_content::{
     PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
     PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
     PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
-    PreparedVec3, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
+    PreparedVec3, ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource,
+    ResolvedSetupAppearance, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
     SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
     StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
     normalize_landblock_id,
@@ -20,7 +21,7 @@ use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
 };
 use holtburger_dat::EOR_CELL_NAMESPACE;
-use holtburger_dat::file_type::{GfxObj, SetupModel};
+use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
@@ -224,6 +225,21 @@ impl HostBoundaryAdapter {
             }
             ContentAssetRequest::SetupModel(setup_model_id) => {
                 self.build_setup_model_lookup_response(request, setup_model_id, asset)
+            }
+            ContentAssetRequest::MaterialRecipe(surface_id) => {
+                self.build_material_recipe_lookup_response(request, surface_id, asset)
+            }
+            ContentAssetRequest::SetupAppearance(setup_model_id) => {
+                self.build_setup_appearance_lookup_response(request, setup_model_id, asset)
+            }
+            ContentAssetRequest::RenderTexture(render_texture_id) => {
+                self.build_render_texture_lookup_response(request, render_texture_id, asset)
+            }
+            ContentAssetRequest::RenderSurface(render_surface_id) => {
+                self.build_render_surface_lookup_response(request, render_surface_id, asset)
+            }
+            ContentAssetRequest::Palette(palette_id) => {
+                self.build_palette_lookup_response(request, palette_id, asset)
             }
         }
     }
@@ -504,6 +520,9 @@ impl HostBoundaryAdapter {
                     },
                     "drawingPolygons": [],
                     "drawingBsp": null,
+                    "dependencies": {
+                        "materialAssetIds": []
+                    },
                     "physicsWitness": {
                         "polygonCount": 0,
                         "hasBsp": false
@@ -568,6 +587,10 @@ impl HostBoundaryAdapter {
                 "defaultMotionTable": null,
                 "defaultSoundTable": null,
                 "defaultScriptTable": null,
+                "dependencies": {
+                    "gfxObjAssetIds": [],
+                    "setupAppearanceAssetId": format_setup_appearance_asset_id(setup_model_id)
+                },
                 "provenance": {
                     "source": "app-local-stub",
                     "sourceAssetKind": "setup-model",
@@ -576,6 +599,112 @@ impl HostBoundaryAdapter {
                     }
                 })
             }
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_material_recipe_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        surface_id: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::MaterialRecipe(recipe)) => serialize_material_recipe_payload(&recipe),
+            Ok(_) => unreachable!("content asset runtime returned mismatched material recipe"),
+            Err(error) => failed_dependency_payload("material-recipe", surface_id, error),
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_setup_appearance_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        setup_model_id: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::SetupAppearance(appearance)) => {
+                serialize_setup_appearance_payload(&appearance)
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched setup appearance"),
+            Err(error) => failed_dependency_payload("setup-appearance", setup_model_id, error),
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_render_texture_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        render_texture_id: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::RenderTexture(render_texture)) => {
+                serialize_render_texture_payload(&render_texture)
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched render texture"),
+            Err(error) => failed_dependency_payload("render-texture", render_texture_id, error),
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_render_surface_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        render_surface_id: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::RenderSurface(render_surface)) => {
+                serialize_render_surface_payload(&render_surface)
+            }
+            Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
+            Err(error) => failed_dependency_payload("render-surface", render_surface_id, error),
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
+    fn build_palette_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        palette_id: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::Palette(palette)) => serialize_palette_payload(&palette),
+            Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
+            Err(error) => failed_dependency_payload("palette", palette_id, error),
         };
 
         AssetLookupResponseDto {
@@ -621,6 +750,40 @@ fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
         .filter(|id| (id >> 24) == 0x02)
 }
 
+fn parse_setup_appearance_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "setup-appearance/", 0x02)
+}
+
+fn parse_material_recipe_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "material/", 0x08)
+}
+
+fn parse_render_texture_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "render-texture/", 0x05)
+}
+
+fn parse_render_surface_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "render-surface/", 0x06)
+        .or_else(|| parse_prefixed_data_id(asset_id, "render-surface/", 0x07))
+}
+
+fn parse_palette_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "palette/", 0x04)
+}
+
+fn parse_prefixed_data_id(asset_id: &str, prefix: &str, expected_type: u32) -> Option<u32> {
+    let raw_hex = asset_id.strip_prefix(prefix)?;
+    let hex = raw_hex
+        .strip_prefix("0x")
+        .or_else(|| raw_hex.strip_prefix("0X"))
+        .unwrap_or(raw_hex);
+
+    (hex.len() == 8 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(hex, 16).ok())
+        .flatten()
+        .filter(|id| (id >> 24) == expected_type)
+}
+
 fn parse_landblock_pack_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("landblock-pack/")
@@ -645,6 +808,15 @@ fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetReq
         })
         .or_else(|| parse_gfx_obj_asset_id(asset_id).map(ContentAssetRequest::GfxObj))
         .or_else(|| parse_setup_model_asset_id(asset_id).map(ContentAssetRequest::SetupModel))
+        .or_else(|| {
+            parse_material_recipe_asset_id(asset_id).map(ContentAssetRequest::MaterialRecipe)
+        })
+        .or_else(|| {
+            parse_setup_appearance_asset_id(asset_id).map(ContentAssetRequest::SetupAppearance)
+        })
+        .or_else(|| parse_render_texture_asset_id(asset_id).map(ContentAssetRequest::RenderTexture))
+        .or_else(|| parse_render_surface_asset_id(asset_id).map(ContentAssetRequest::RenderSurface))
+        .or_else(|| parse_palette_asset_id(asset_id).map(ContentAssetRequest::Palette))
 }
 
 fn serialize_gfx_obj_payload(gfx_obj: &holtburger_dat::file_type::GfxObj) -> serde_json::Value {
@@ -658,6 +830,9 @@ fn serialize_gfx_obj_payload(gfx_obj: &holtburger_dat::file_type::GfxObj) -> ser
         "vertexArray": serialize_vertex_array(&gfx_obj.vertex_array),
         "drawingPolygons": serialize_polygons(&gfx_obj.polygons),
         "drawingBsp": gfx_obj.drawing_bsp.as_ref().map(serialize_bsp_node),
+        "dependencies": {
+            "materialAssetIds": gfx_obj.surfaces.iter().map(|surface_id| format_material_asset_id(*surface_id)).collect::<Vec<_>>(),
+        },
         "physicsWitness": {
             "polygonCount": gfx_obj.physics_polygons.len(),
             "hasBsp": gfx_obj.physics_bsp.is_some()
@@ -700,11 +875,205 @@ fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Value 
         "defaultMotionTable": setup_model.default_motion_table,
         "defaultSoundTable": setup_model.default_sound_table,
         "defaultScriptTable": setup_model.default_script_table,
+        "dependencies": {
+            "gfxObjAssetIds": setup_model.parts.iter().map(|gfx_obj_id| format_gfx_obj_asset_id(*gfx_obj_id)).collect::<Vec<_>>(),
+            "setupAppearanceAssetId": format_setup_appearance_asset_id(setup_model.id),
+        },
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "setup-model",
             "errorCode": null,
             "detail": null
+        }
+    })
+}
+
+fn serialize_material_recipe_payload(recipe: &ResolvedMaterialRecipe) -> serde_json::Value {
+    let (source, dependencies) = match &recipe.source {
+        ResolvedMaterialSource::SolidColor(color) => (
+            serde_json::json!({
+                "kind": "solid-color",
+                "argb": color,
+            }),
+            serde_json::json!({
+                "renderTextureAssetIds": [],
+                "renderSurfaceAssetIds": [],
+                "paletteAssetIds": [],
+            }),
+        ),
+        ResolvedMaterialSource::Texture(texture) => (
+            serde_json::json!({
+                "kind": "texture",
+                "renderTextureId": texture.render_texture_id,
+                "renderSurfaceIds": texture.render_surface_ids,
+                "paletteId": texture.palette_id,
+                "renderSurfaceDefaultPaletteIds": texture.render_surface_default_palette_ids,
+            }),
+            serde_json::json!({
+                "renderTextureAssetIds": [format_render_texture_asset_id(texture.render_texture_id)],
+                "renderSurfaceAssetIds": texture.render_surface_ids.iter().map(|id| format_render_surface_asset_id(*id)).collect::<Vec<_>>(),
+                "paletteAssetIds": recipe_palette_asset_ids(texture),
+            }),
+        ),
+    };
+
+    serde_json::json!({
+        "kind": "material-recipe",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "material-recipe",
+        "surfaceId": recipe.surface_id,
+        "surfaceType": recipe.surface_type.bits(),
+        "source": source,
+        "translucency": recipe.translucency,
+        "luminosity": recipe.luminosity,
+        "diffuse": recipe.diffuse,
+        "dependencies": dependencies,
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "material-recipe",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_setup_appearance_payload(appearance: &ResolvedSetupAppearance) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "setup-appearance",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "setup-appearance",
+        "setupModelId": appearance.setup_model_id,
+        "appearanceKey": appearance.appearance_key,
+        "parts": appearance.parts.iter().map(serialize_setup_appearance_part).collect::<Vec<_>>(),
+        "textureChanges": appearance.texture_changes.iter().map(|change| {
+            serde_json::json!({
+                "partIndex": change.part_index,
+                "oldTexture": change.old_texture,
+                "newTexture": change.new_texture,
+            })
+        }).collect::<Vec<_>>(),
+        "animPartChanges": appearance.anim_part_changes.iter().map(|change| {
+            serde_json::json!({
+                "partIndex": change.part_index,
+                "partId": change.part_id,
+            })
+        }).collect::<Vec<_>>(),
+        "paletteId": appearance.palette_id,
+        "subPalettes": appearance.sub_palettes.iter().map(|sub| {
+            serde_json::json!({
+                "subId": sub.sub_id,
+                "offset": sub.offset,
+                "numColors": sub.num_colors,
+            })
+        }).collect::<Vec<_>>(),
+        "dependencies": {
+            "materialAssetIds": appearance.material_asset_ids.iter().map(|surface_id| format_material_asset_id(*surface_id)).collect::<Vec<_>>(),
+            "paletteAssetIds": appearance.palette_dependencies.iter().map(|palette_id| format_palette_asset_id(*palette_id)).collect::<Vec<_>>(),
+        },
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "setup-appearance",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_setup_appearance_part(
+    part: &holtburger_content::ResolvedSetupAppearancePart,
+) -> serde_json::Value {
+    serde_json::json!({
+        "partIndex": part.part_index,
+        "gfxObjId": part.gfx_obj_id,
+        "gfxObjAssetId": format_gfx_obj_asset_id(part.gfx_obj_id),
+        "materialSlots": part.material_slots.iter().map(serialize_material_slot).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_material_slot(slot: &ResolvedMaterialSlot) -> serde_json::Value {
+    serde_json::json!({
+        "slotIndex": slot.slot_index,
+        "surfaceId": slot.material.surface_id,
+        "materialAssetId": format_material_asset_id(slot.material.surface_id),
+    })
+}
+
+fn serialize_render_texture_payload(render_texture: &RenderTexture) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "render-texture",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "render-texture",
+        "renderTextureId": render_texture.id,
+        "textureType": render_texture.texture_type,
+        "unknown": render_texture.unknown,
+        "renderSurfaceIds": render_texture.render_surface_ids,
+        "dependencies": {
+            "renderSurfaceAssetIds": render_texture.render_surface_ids.iter().map(|id| format_render_surface_asset_id(*id)).collect::<Vec<_>>(),
+        },
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "render-texture",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_render_surface_payload(render_surface: &RenderSurface) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "render-surface",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "render-surface",
+        "renderSurfaceId": render_surface.id,
+        "unknown": render_surface.unknown,
+        "width": render_surface.width,
+        "height": render_surface.height,
+        "formatRaw": render_surface.format_raw,
+        "format": format!("{:?}", render_surface.format),
+        "sourceByteLength": render_surface.source_data.len(),
+        "defaultPaletteId": render_surface.default_palette_id,
+        "dependencies": {
+            "paletteAssetIds": render_surface.default_palette_id.into_iter().map(format_palette_asset_id).collect::<Vec<_>>(),
+        },
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "render-surface",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn serialize_palette_payload(palette: &Palette) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "palette",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "palette",
+        "paletteId": palette.id,
+        "colorCount": palette.colors_argb.len(),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "palette",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+fn failed_dependency_payload(kind: &str, file_id: u32, error: anyhow::Error) -> serde_json::Value {
+    let detail = format!("{error:#}");
+    let error_code = asset_cache_error_code(&error);
+    serde_json::json!({
+        "kind": kind,
+        "residencyKind": "unknown",
+        "sourceAssetKind": kind,
+        "fileId": file_id,
+        "dependencies": {},
+        "provenance": {
+            "source": "app-local-stub",
+            "sourceAssetKind": kind,
+            "errorCode": error_code,
+            "detail": detail
         }
     })
 }
@@ -949,6 +1318,9 @@ fn serialize_gfx_obj_binary_payload(
         },
         "drawingPolygons": [],
         "drawingBsp": null,
+        "dependencies": {
+            "materialAssetIds": gfx_obj.surfaces.iter().map(|surface_id| format_material_asset_id(*surface_id)).collect::<Vec<_>>(),
+        },
         "physicsWitness": {
             "polygonCount": gfx_obj.physics_polygons.len(),
             "hasBsp": gfx_obj.physics_bsp.is_some()
@@ -1690,6 +2062,42 @@ fn is_static_renderable_asset_id(asset_id: &str) -> bool {
     asset_id.starts_with("gfx-obj/") || asset_id.starts_with("setup-model/")
 }
 
+fn format_gfx_obj_asset_id(gfx_obj_id: u32) -> String {
+    format!("gfx-obj/{gfx_obj_id:08x}")
+}
+
+fn format_setup_appearance_asset_id(setup_model_id: u32) -> String {
+    format!("setup-appearance/{setup_model_id:08x}")
+}
+
+fn format_material_asset_id(surface_id: u32) -> String {
+    format!("material/{surface_id:08x}")
+}
+
+fn format_render_texture_asset_id(render_texture_id: u32) -> String {
+    format!("render-texture/{render_texture_id:08x}")
+}
+
+fn format_render_surface_asset_id(render_surface_id: u32) -> String {
+    format!("render-surface/{render_surface_id:08x}")
+}
+
+fn format_palette_asset_id(palette_id: u32) -> String {
+    format!("palette/{palette_id:08x}")
+}
+
+fn recipe_palette_asset_ids(texture: &holtburger_content::ResolvedTextureMaterial) -> Vec<String> {
+    let mut palette_ids = texture
+        .palette_id
+        .into_iter()
+        .chain(texture.render_surface_default_palette_ids.iter().copied())
+        .map(format_palette_asset_id)
+        .collect::<Vec<_>>();
+    palette_ids.sort();
+    palette_ids.dedup();
+    palette_ids
+}
+
 fn serialize_landblock_pack_diagnostics(
     diagnostics: &LandblockPackSourceDiagnostics,
 ) -> serde_json::Value {
@@ -1829,7 +2237,7 @@ fn serialize_setup_model_parts(setup_model: &SetupModel) -> Vec<serde_json::Valu
             serde_json::json!({
                 "partIndex": index,
                 "gfxObjId": gfx_obj_id,
-                "gfxObjAssetId": format!("gfx-obj/{gfx_obj_id:08x}"),
+                "gfxObjAssetId": format_gfx_obj_asset_id(*gfx_obj_id),
                 "parentIndex": setup_model.parent_index.get(index).copied(),
                 "scale": setup_model.default_scale.get(index).map(serialize_vector3),
             })

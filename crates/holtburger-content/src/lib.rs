@@ -31,7 +31,9 @@ pub use material_capabilities::{
     VisualSourceRecordCoverage,
 };
 pub use material_graph::{
-    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedTextureMaterial,
+    MaterialAppearanceInput, ResolvedAnimationPartChange, ResolvedMaterialRecipe,
+    ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
+    ResolvedSetupAppearancePart, ResolvedTextureChange, ResolvedTextureMaterial,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

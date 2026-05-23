@@ -7,6 +7,11 @@ import type {
 	GfxObjPayloadDto,
 	LandblockPackPayloadDto,
 	LandblockSummaryPayloadDto,
+	MaterialRecipePayloadDto,
+	PalettePayloadDto,
+	RenderSurfacePayloadDto,
+	RenderTexturePayloadDto,
+	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
 } from "../lib/host/contracts";
 import {
@@ -17,6 +22,11 @@ import {
 	gfxObjPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
+	materialRecipePayloadDtoSchema,
+	palettePayloadDtoSchema,
+	renderSurfacePayloadDtoSchema,
+	renderTexturePayloadDtoSchema,
+	setupAppearancePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 } from "../lib/host/contracts";
 import { decodeBinaryAssetBatchEnvelope } from "../lib/host/binary-asset-envelope";
@@ -120,6 +130,55 @@ export function prepareAssetPayload(
 	);
 	if (setupModelPayload.success) {
 		return prepareSetupModel(request, response, setupModelPayload.data);
+	}
+
+	const setupAppearancePayload = setupAppearancePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (setupAppearancePayload.success) {
+		return preparePassthroughAsset(
+			request,
+			response,
+			setupAppearancePayload.data,
+		);
+	}
+
+	const materialRecipePayload = materialRecipePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (materialRecipePayload.success) {
+		return preparePassthroughAsset(
+			request,
+			response,
+			materialRecipePayload.data,
+		);
+	}
+
+	const renderTexturePayload = renderTexturePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (renderTexturePayload.success) {
+		return preparePassthroughAsset(
+			request,
+			response,
+			renderTexturePayload.data,
+		);
+	}
+
+	const renderSurfacePayload = renderSurfacePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (renderSurfacePayload.success) {
+		return preparePassthroughAsset(
+			request,
+			response,
+			renderSurfacePayload.data,
+		);
+	}
+
+	const palettePayload = palettePayloadDtoSchema.safeParse(response.payload);
+	if (palettePayload.success) {
+		return preparePassthroughAsset(request, response, palettePayload.data);
 	}
 
 	const appearancePayload = appearanceManifestPayloadDtoSchema.safeParse(
@@ -266,6 +325,7 @@ function prepareGfxObj(
 			vertexArray: payload.vertexArray,
 			drawingPolygons: payload.drawingPolygons,
 			drawingBsp: payload.drawingBsp,
+			dependencies: payload.dependencies,
 			physicsWitness: payload.physicsWitness,
 			renderGeometry,
 			sortCenter: payload.sortCenter,
@@ -307,7 +367,29 @@ function prepareSetupModel(
 			defaultMotionTable: payload.defaultMotionTable,
 			defaultSoundTable: payload.defaultSoundTable,
 			defaultScriptTable: payload.defaultScriptTable,
+			dependencies: payload.dependencies,
 		},
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function preparePassthroughAsset(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload:
+		| SetupAppearancePayloadDto
+		| MaterialRecipePayloadDto
+		| RenderTexturePayloadDto
+		| RenderSurfacePayloadDto
+		| PalettePayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			...payload,
+			provenance: parseProvenance(payload.provenance),
+		} as PreparedAssetPayload,
 		preparedAt: new Date().toISOString(),
 	};
 }
@@ -873,7 +955,9 @@ class AssetWorkerPrepareScheduler {
 		}
 	}
 
-	private async processBatch(items: readonly QueuedPrepareItem[]): Promise<void> {
+	private async processBatch(
+		items: readonly QueuedPrepareItem[],
+	): Promise<void> {
 		const results: AssetWorkerPreparedResult[] = [];
 		const transferables: Transferable[] = [];
 		let responses: AssetLookupResponseDto[];
@@ -1010,11 +1094,7 @@ function prepareAssetForPostMessage(
 	const transferables: Transferable[] = [];
 	const transferredBuffers = new Set<ArrayBuffer>();
 	asset.response = createPreparedResponseSummary(asset.response);
-	collectPreparedAssetTransferables(
-		asset,
-		transferables,
-		transferredBuffers,
-	);
+	collectPreparedAssetTransferables(asset, transferables, transferredBuffers);
 	return transferables;
 }
 

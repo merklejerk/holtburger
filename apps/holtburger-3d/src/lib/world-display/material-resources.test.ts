@@ -6,7 +6,7 @@ import type {
 	PreparedMaterialRecipePayload,
 	PreparedRenderSurfacePayload,
 } from "../assets/types";
-import type { AssetLookupRequestDto } from "../host/contracts";
+import type { AssetErrorCode, AssetLookupRequestDto } from "../host/contracts";
 import {
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
@@ -60,6 +60,69 @@ describe("world material resource cache", () => {
 		expect((material as MeshStandardMaterial).map).not.toBeNull();
 		cache.dispose();
 	});
+
+	it("reports missing material recipes before drawing a fallback", () => {
+		const diagnostics: string[] = [];
+		const cache = new WorldMaterialResourceCache((diagnostic) => {
+			diagnostics.push(diagnostic.key);
+			expect(diagnostic.detail).toMatchObject({
+				materialAssetId: "material/08000003",
+				preparedKind: null,
+				preparedMaterialRecipeCount: 0,
+			});
+		});
+
+		const plan = cache.resolveMaterialPlan({
+			slots: [
+				{
+					slotIndex: 0,
+					surfaceId: 0x08000003,
+					materialAssetId: "material/08000003",
+				},
+			],
+			appearanceKey: "visible-cell",
+			preparedByAssetId: {},
+			fallbackColorKey: "visible-cell",
+		});
+
+		expect(diagnostics).toEqual(["missing-recipe:material/08000003"]);
+		expect(plan.materials[0]).toBeInstanceOf(MeshStandardMaterial);
+		cache.dispose();
+	});
+
+	it("reports failed material recipe provenance as an asset contract failure", () => {
+		const diagnostics: string[] = [];
+		const materialAssetId = formatMaterialAssetId(0x08000004);
+		const cache = new WorldMaterialResourceCache((diagnostic) => {
+			diagnostics.push(diagnostic.key);
+			expect(diagnostic.detail).toMatchObject({
+				materialAssetId,
+				errorCode: "asset-decode-failed",
+				detail: "synthetic decode failure",
+			});
+		});
+
+		cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000004, materialAssetId }],
+			appearanceKey: "visible-cell",
+			preparedByAssetId: {
+				[materialAssetId]: createPreparedAsset(
+					materialAssetId,
+					createFailedMaterialRecipe(
+						0x08000004,
+						"asset-decode-failed",
+						"synthetic decode failure",
+					),
+				),
+			},
+			fallbackColorKey: "visible-cell",
+		});
+
+		expect(diagnostics).toEqual([
+			"failed-recipe:material/08000004:asset-decode-failed",
+		]);
+		cache.dispose();
+	});
 });
 
 function createSolidMaterialRecipe(
@@ -107,6 +170,22 @@ function createTextureMaterialRecipe(
 			renderTextureAssetIds: [],
 			renderSurfaceAssetIds: ["render-surface/06000002"],
 			paletteAssetIds: [],
+		},
+	};
+}
+
+function createFailedMaterialRecipe(
+	surfaceId: number,
+	errorCode: AssetErrorCode,
+	detail: string,
+): PreparedMaterialRecipePayload {
+	return {
+		...createSolidMaterialRecipe(surfaceId, 0xffff00ff),
+		provenance: {
+			source: "repo-local-hba",
+			sourceAssetKind: "material-recipe",
+			errorCode,
+			detail,
 		},
 	};
 }

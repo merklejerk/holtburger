@@ -101,18 +101,18 @@ dependencies instead of hiding them under `landblock-pack.prepared`.
 
 Use granular, REST-like asset IDs:
 
-| Route | Purpose | Dependencies |
-|---|---|---|
-| `landblock/{id}/terrain` | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, terrain-only BVH, and building shell render geometry. | Terrain material assets derived by the frontend from `regionNumber` plus quad pcodes, plus building render material dependencies. |
-| `landblock/{id}/scene` | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`. |
-| `env-cell/{id}` | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots. | `material/{did}` for every referenced `CSurface`. |
-| `gfx-obj/{did}` | One GfxObj render/physics projection. | `material/{did}` for every referenced `CSurface`. |
-| `setup-model/{did}` | Setup parts, placements, lights, and default part composition. | `gfx-obj/{did}` for each part. |
-| `terrain-material/{regionNumber}/{pcode}` | One generated LandSurf/TexMerge terrain material recipe. | Terrain base, overlay, alpha, road, and detail texture dependencies as required. |
-| `material/{did}` | One `CSurface` material recipe. | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required. |
-| `render-texture/{did}` | One `RenderTexture` mip chain descriptor. | `render-surface/{did}`. |
-| `render-surface/{did}` | One image payload. | `palette/{did}` for indexed/default-palette surfaces. |
-| `palette/{did}` | One palette payload. | None. |
+| Route                                     | Purpose                                                                                                                                                                                        | Dependencies                                                                                                                      |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `landblock/{id}/terrain`                  | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, terrain-only BVH, and building shell render geometry.                                         | Terrain material assets derived by the frontend from `regionNumber` plus quad pcodes, plus building render material dependencies. |
+| `landblock/{id}/scene`                    | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`.                                         |
+| `env-cell/{id}`                           | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                                                 |
+| `gfx-obj/{did}`                           | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                                                 |
+| `setup-model/{did}`                       | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                                                    |
+| `terrain-material/{regionNumber}/{pcode}` | One generated LandSurf/TexMerge terrain material recipe.                                                                                                                                       | Terrain base, overlay, alpha, road, and detail texture dependencies as required.                                                  |
+| `material/{did}`                          | One `CSurface` material recipe.                                                                                                                                                                | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                                                  |
+| `render-texture/{did}`                    | One `RenderTexture` mip chain descriptor.                                                                                                                                                      | `render-surface/{did}`.                                                                                                           |
+| `render-surface/{did}`                    | One image payload.                                                                                                                                                                             | `palette/{did}` for indexed/default-palette surfaces.                                                                             |
+| `palette/{did}`                           | One palette payload.                                                                                                                                                                           | None.                                                                                                                             |
 
 ### Route Notes
 
@@ -248,47 +248,47 @@ Recommended shape:
 
 ```ts
 interface PreparedLandblockTerrainPayload {
-    kind: "landblock-terrain";
-    landblockId: LandblockId;
-    regionId: DataId; // RegionDesc file ID, currently 0x13000000.
-    regionNumber: number;
-    terrain: LandblockTerrain;
-    buildingShells: LandblockTerrainBuildingShell[];
-    diagnostics: PreparedLandblockDiagnostics;
+  kind: "landblock-terrain";
+  landblockId: LandblockId;
+  regionId: DataId; // RegionDesc file ID, currently 0x13000000.
+  regionNumber: number;
+  terrain: LandblockTerrain;
+  buildingShells: LandblockTerrainBuildingShell[];
+  diagnostics: PreparedLandblockDiagnostics;
 }
 
 interface LandblockTerrain {
-    gridSize: number;
-    tileSize: number;
-    vertices: Vec3Dto[];
-    triangles: PreparedTerrainTriangle[];
-    quads: PreparedTerrainQuad[];
-    terrainBvh: PreparedTerrainBvh;
-    minHeight: number;
-    maxHeight: number;
-    bounds: PreparedBounds | null;
+  gridSize: number;
+  tileSize: number;
+  vertices: Vec3Dto[];
+  triangles: PreparedTerrainTriangle[];
+  quads: PreparedTerrainQuad[];
+  terrainBvh: PreparedTerrainBvh;
+  minHeight: number;
+  maxHeight: number;
+  bounds: PreparedBounds | null;
 }
 
 interface PreparedTerrainBvh {
-    coordinateSpace: "landblock-terrain-local";
-    nodes: PreparedBvhNode[];
-    items: PreparedTerrainBvhItem[];
+  coordinateSpace: "landblock-terrain-local";
+  nodes: PreparedBvhNode[];
+  items: PreparedTerrainBvhItem[];
 }
 
 interface PreparedTerrainBvhItem {
-    row: number;
-    col: number;
-    quadIndex: number;
-    triangleIndices: [number, number];
+  row: number;
+  col: number;
+  quadIndex: number;
+  triangleIndices: [number, number];
 }
 
 interface LandblockTerrainBuildingShell {
-    instanceId: string;
-    sourceDid: DataId;
-    sourceIndex: number;
-    localPlacement: PlacementTransformDto;
-    renderGeometry: PreparedPolygonSetRenderGeometry;
-    materialSurfaceIds: DataId[];
+  instanceId: string;
+  sourceDid: DataId;
+  sourceIndex: number;
+  localPlacement: PlacementTransformDto;
+  renderGeometry: PreparedPolygonSetRenderGeometry;
+  materialSurfaceIds: DataId[];
 }
 ```
 
@@ -409,154 +409,154 @@ type PolygonId = number;
 type PortalId = string;
 
 interface Vec3Dto {
-    x: number;
-    y: number;
-    z: number;
+  x: number;
+  y: number;
+  z: number;
 }
 
 interface PlacementTransformDto {
-    origin: Vec3Dto;
-    orientation: {
-        w: number;
-        x: number;
-        y: number;
-        z: number;
-    };
+  origin: Vec3Dto;
+  orientation: {
+    w: number;
+    x: number;
+    y: number;
+    z: number;
+  };
 }
 
 interface PreparedBounds {
-    min: Vec3Dto;
-    max: Vec3Dto;
+  min: Vec3Dto;
+  max: Vec3Dto;
 }
 
 interface PreparedBvhNode {
-    bounds: PreparedBounds;
-    left: number | null;
-    right: number | null;
-    itemIndices: number[];
-    kindMask: number;
+  bounds: PreparedBounds;
+  left: number | null;
+  right: number | null;
+  itemIndices: number[];
+  kindMask: number;
 }
 
 interface PreparedLandblockScenePayload {
-    kind: "landblock-scene";
-    landblockId: LandblockId;
-    landblockInfoId: DataId;
-    classification: "outdoor" | "dungeon";
-    statics: LandblockSceneStaticMember[];
-    buildings: LandblockSceneBuildingMember[];
-    envCells: LandblockSceneEnvCellMember[];
-    portalLinks: LandblockScenePortalLink[];
-    envCellResidencyBvh: PreparedEnvCellResidencyBvh;
-    outdoorBvh: PreparedOutdoorBvh | null;
-    // Existing prepared diagnostic shape; not expanded in this plan.
-    diagnostics: PreparedLandblockDiagnostics;
+  kind: "landblock-scene";
+  landblockId: LandblockId;
+  landblockInfoId: DataId;
+  classification: "outdoor" | "dungeon";
+  statics: LandblockSceneStaticMember[];
+  buildings: LandblockSceneBuildingMember[];
+  envCells: LandblockSceneEnvCellMember[];
+  portalLinks: LandblockScenePortalLink[];
+  envCellResidencyBvh: PreparedEnvCellResidencyBvh;
+  outdoorBvh: PreparedOutdoorBvh | null;
+  // Existing prepared diagnostic shape; not expanded in this plan.
+  diagnostics: PreparedLandblockDiagnostics;
 }
 
 interface PreparedEnvCellResidencyBvh {
-    coordinateSpace: "landblock-scene-residency";
-    nodes: PreparedBvhNode[];
-    items: PreparedEnvCellResidencyBvhItem[];
+  coordinateSpace: "landblock-scene-residency";
+  nodes: PreparedBvhNode[];
+  items: PreparedEnvCellResidencyBvhItem[];
 }
 
 interface PreparedEnvCellResidencyBvhItem {
-    envCellId: EnvCellId;
-    memberId: LandblockSceneMemberId;
-    assetId: AssetId; // env-cell/{id}
-    source: "building-portal-link" | "env-cell-placement" | "derived";
+  envCellId: EnvCellId;
+  memberId: LandblockSceneMemberId;
+  assetId: AssetId; // env-cell/{id}
+  source: "building-portal-link" | "env-cell-placement" | "derived";
 }
 
 interface PreparedOutdoorBvh {
-    coordinateSpace: "landblock-render-local";
-    nodes: PreparedBvhNode[];
-    items: PreparedOutdoorBvhItem[];
+  coordinateSpace: "landblock-render-local";
+  nodes: PreparedBvhNode[];
+  items: PreparedOutdoorBvhItem[];
 }
 
 type PreparedOutdoorBvhItem =
-    | {
-          kind: "static";
-          instanceId: string;
-      }
-    | {
-          kind: "building";
-          instanceId: string;
-      }
-    | {
-          kind: "building-portal-anchor";
-          portalId: PortalId;
-      };
+  | {
+      kind: "static";
+      instanceId: string;
+    }
+  | {
+      kind: "building";
+      instanceId: string;
+    }
+  | {
+      kind: "building-portal-anchor";
+      portalId: PortalId;
+    };
 
 interface LandblockScenePlacedSourceMemberBase {
-    instanceId: string;
-    memberId: LandblockSceneMemberId;
-    sourceDid: DataId;
-    sourceAssetId: AssetId; // setup-model/{did} or gfx-obj/{did}
-    sourceIndex: number;
-    localPlacement: PlacementTransformDto;
-    sourceScale: Vec3Dto;
-    sourceBounds: PreparedBounds | null;
-    instanceBounds: PreparedBounds | null;
+  instanceId: string;
+  memberId: LandblockSceneMemberId;
+  sourceDid: DataId;
+  sourceAssetId: AssetId; // setup-model/{did} or gfx-obj/{did}
+  sourceIndex: number;
+  localPlacement: PlacementTransformDto;
+  sourceScale: Vec3Dto;
+  sourceBounds: PreparedBounds | null;
+  instanceBounds: PreparedBounds | null;
 }
 
 interface LandblockSceneStaticMember extends LandblockScenePlacedSourceMemberBase {
-    kind: "scenery" | "generated-scenery";
+  kind: "scenery" | "generated-scenery";
 }
 
 interface LandblockSceneBuildingMember extends LandblockScenePlacedSourceMemberBase {
-    kind: "building";
-    // Source BuildInfo.NumLeaves. ACE/ACViewer use it to size BuildingObj.LeafCells;
-    // keep the source value without assigning stronger semantics yet.
-    numLeaves: number;
-    portals: LandblockSceneBuildingPortal[];
+  kind: "building";
+  // Source BuildInfo.NumLeaves. ACE/ACViewer use it to size BuildingObj.LeafCells;
+  // keep the source value without assigning stronger semantics yet.
+  numLeaves: number;
+  portals: LandblockSceneBuildingPortal[];
 }
 
 interface LandblockSceneBuildingPortal {
-    portalId: PortalId;
-    sourceIndex: number;
-    flags: number;
-    otherCellId: number;
-    otherPortalId: number;
-    /** Raw CBldPortal.StabList entries: 16-bit local cell IDs, not full env-cell DataIDs. */
-    stabLocalCellIds: number[];
-    linkedEnvCellIds: EnvCellId[];
+  portalId: PortalId;
+  sourceIndex: number;
+  flags: number;
+  otherCellId: number;
+  otherPortalId: number;
+  /** Raw CBldPortal.StabList entries: 16-bit local cell IDs, not full env-cell DataIDs. */
+  stabLocalCellIds: number[];
+  linkedEnvCellIds: EnvCellId[];
 }
 
 interface LandblockSceneEnvCellMember {
-    memberId: LandblockSceneMemberId;
-    envCellId: EnvCellId;
-    assetId: AssetId; // env-cell/{id}
-    localPlacement: PlacementTransformDto;
-    visibleEnvCellIds: EnvCellId[];
-    restrictionObjectId: DataId | null;
-    seenOutside: boolean | null;
+  memberId: LandblockSceneMemberId;
+  envCellId: EnvCellId;
+  assetId: AssetId; // env-cell/{id}
+  localPlacement: PlacementTransformDto;
+  visibleEnvCellIds: EnvCellId[];
+  restrictionObjectId: DataId | null;
+  seenOutside: boolean | null;
 }
 
 interface LandblockScenePortalLink {
-    linkId: string;
-    source:
-        | {
-              kind: "landblock-building";
-              instanceId: string;
-              portalId: PortalId;
-          }
-        | {
-              kind: "env-cell";
-              envCellId: EnvCellId;
-              portalId: PortalId;
-          };
-    target:
-        | {
-              kind: "outside";
-              landblockId: LandblockId;
-          }
-        | {
-              kind: "env-cell";
-              envCellId: EnvCellId;
-          };
-    flags: number;
-    otherCellId: number;
-    otherPortalId: number;
-    polygonId: PolygonId | null;
-    sourceIndex: number;
+  linkId: string;
+  source:
+    | {
+        kind: "landblock-building";
+        instanceId: string;
+        portalId: PortalId;
+      }
+    | {
+        kind: "env-cell";
+        envCellId: EnvCellId;
+        portalId: PortalId;
+      };
+  target:
+    | {
+        kind: "outside";
+        landblockId: LandblockId;
+      }
+    | {
+        kind: "env-cell";
+        envCellId: EnvCellId;
+      };
+  flags: number;
+  otherCellId: number;
+  otherPortalId: number;
+  polygonId: PolygonId | null;
+  sourceIndex: number;
 }
 ```
 
@@ -609,33 +609,32 @@ Shared terrain member shapes:
 
 ```ts
 interface PreparedTerrainTriangle {
-    terrainTriangleId: string;
-    quadIndex: number;
-    triangleInQuad: 0 | 1;
-    vertexIndices: [number, number, number];
-    averageHeight: number;
-    bounds: PreparedBounds;
+  terrainTriangleId: string;
+  quadIndex: number;
+  triangleInQuad: 0 | 1;
+  vertexIndices: [number, number, number];
+  averageHeight: number;
+  bounds: PreparedBounds;
 }
 
 interface PreparedTerrainQuad {
-    terrainQuadId: string;
-    row: number;
-    col: number;
-    quadIndex: number;
-    /** Indices into the 9x9 source CellLandblock.terrain grid. */
-    sourceTerrainIndices: [number, number, number, number];
-    /** Source grid vertices in southwest, southeast, northwest, northeast order. */
-    vertexIndices: [number, number, number, number];
-    triangleIndices: [number, number];
-    diagonal: "southwest-northeast" | "southeast-northwest";
-    /** Raw source CellLandblock.terrain values in southwest, southeast, northwest, northeast order. */
-    cornerTerrainCodes: [number, number, number, number];
-    /** Client/LandSurf pal code for this terrain quad, including terrain and road bits. */
-    pcode: number;
-    averageHeight: number;
-    bounds: PreparedBounds;
+  terrainQuadId: string;
+  row: number;
+  col: number;
+  quadIndex: number;
+  /** Indices into the 9x9 source CellLandblock.terrain grid. */
+  sourceTerrainIndices: [number, number, number, number];
+  /** Source grid vertices in southwest, southeast, northwest, northeast order. */
+  vertexIndices: [number, number, number, number];
+  triangleIndices: [number, number];
+  diagonal: "southwest-northeast" | "southeast-northwest";
+  /** Raw source CellLandblock.terrain values in southwest, southeast, northwest, northeast order. */
+  cornerTerrainCodes: [number, number, number, number];
+  /** Client/LandSurf pal code for this terrain quad, including terrain and road bits. */
+  pcode: number;
+  averageHeight: number;
+  bounds: PreparedBounds;
 }
-
 ```
 
 The terrain quad fields should line up with `PreparedTerrainBvhItem`: `row`,
@@ -690,60 +689,60 @@ Recommended shape:
 
 ```ts
 interface PreparedTerrainMaterialPayload {
-    kind: "terrain-material";
-    regionNumber: number;
-    pcode: number;
-    materialKind: "tex-merge";
-    base: TerrainTextureLayer;
-    terrainOverlays: TerrainTextureLayer[];
-    roadOverlays: TerrainRoadLayer[];
-    detail: TerrainDetailLayer | null;
-    colorVariation: TerrainColorVariation | null;
-    dependencies: TerrainMaterialDependencies;
+  kind: "terrain-material";
+  regionNumber: number;
+  pcode: number;
+  materialKind: "tex-merge";
+  base: TerrainTextureLayer;
+  terrainOverlays: TerrainTextureLayer[];
+  roadOverlays: TerrainRoadLayer[];
+  detail: TerrainDetailLayer | null;
+  colorVariation: TerrainColorVariation | null;
+  dependencies: TerrainMaterialDependencies;
 }
 
 interface TerrainTextureLayer {
-    terrainType: number;
-    textureAssetId: AssetId; // render-texture/{did}
-    textureDid: DataId;
-    tiling: number;
-    alphaTextureAssetId: AssetId | null; // render-texture/{did}
-    alphaTextureDid: DataId | null;
-    alphaIndex: number | null;
-    rotation: 0 | 1 | 2 | 3;
+  terrainType: number;
+  textureAssetId: AssetId; // render-texture/{did}
+  textureDid: DataId;
+  tiling: number;
+  alphaTextureAssetId: AssetId | null; // render-texture/{did}
+  alphaTextureDid: DataId | null;
+  alphaIndex: number | null;
+  rotation: 0 | 1 | 2 | 3;
 }
 
 interface TerrainRoadLayer {
-    textureAssetId: AssetId; // render-texture/{did}
-    textureDid: DataId;
-    alphaTextureAssetId: AssetId; // render-texture/{did}
-    alphaTextureDid: DataId;
-    alphaIndex: number;
-    rotation: 0 | 1 | 2 | 3;
+  textureAssetId: AssetId; // render-texture/{did}
+  textureDid: DataId;
+  alphaTextureAssetId: AssetId; // render-texture/{did}
+  alphaTextureDid: DataId;
+  alphaIndex: number;
+  rotation: 0 | 1 | 2 | 3;
 }
 
 interface TerrainDetailLayer {
-    textureAssetId: AssetId; // render-texture/{did}
-    textureDid: DataId;
-    tiling: number;
-    fadeNear: number; // retail starts fading after zw = 10
-    fadeFar: number; // retail reaches zero at zw = 50
+  textureAssetId: AssetId; // render-texture/{did}
+  textureDid: DataId;
+  tiling: number;
+  fadeNear: number; // retail starts fading after zw = 10
+  fadeFar: number; // retail reaches zero at zw = 50
 }
 
 interface TerrainColorVariation {
-    minVertBright: number;
-    maxVertBright: number;
-    minVertSaturate: number;
-    maxVertSaturate: number;
-    minVertHue: number;
-    maxVertHue: number;
-    activeRenderPath: false;
+  minVertBright: number;
+  maxVertBright: number;
+  minVertSaturate: number;
+  maxVertSaturate: number;
+  minVertHue: number;
+  maxVertHue: number;
+  activeRenderPath: false;
 }
 
 interface TerrainMaterialDependencies {
-    renderTextureAssetIds: AssetId[];
-    renderSurfaceAssetIds: AssetId[];
-    paletteAssetIds: AssetId[];
+  renderTextureAssetIds: AssetId[];
+  renderSurfaceAssetIds: AssetId[];
+  paletteAssetIds: AssetId[];
 }
 ```
 
@@ -787,85 +786,85 @@ Recommended shape:
 
 ```ts
 interface PreparedEnvCellPayload {
-    kind: "env-cell";
-    envCellId: EnvCellId;
-    environmentId: EnvironmentId;
-    cellStructureId: CellStructureId;
-    surfaces: EnvCellSurfaceSlot[];
-    portals: EnvCellPortal[];
-    visibleEnvCellIds: EnvCellId[];
-    portalApertures: PreparedPortalAperture[];
-    statics: EnvCellStaticMember[];
-    /** Existing prepared render geometry shape, with triangle surface IDs treated as slot IDs. */
-    renderGeometry: PreparedPolygonSetRenderGeometry;
-    /** Existing prepared BSP witness shape from the selected CellStruct. */
-    cellBsp: PreparedPolygonSetBspNode;
-    localBvh: PreparedEnvCellBvh;
+  kind: "env-cell";
+  envCellId: EnvCellId;
+  environmentId: EnvironmentId;
+  cellStructureId: CellStructureId;
+  surfaces: EnvCellSurfaceSlot[];
+  portals: EnvCellPortal[];
+  visibleEnvCellIds: EnvCellId[];
+  portalApertures: PreparedPortalAperture[];
+  statics: EnvCellStaticMember[];
+  /** Existing prepared render geometry shape, with triangle surface IDs treated as slot IDs. */
+  renderGeometry: PreparedPolygonSetRenderGeometry;
+  /** Existing prepared BSP witness shape from the selected CellStruct. */
+  cellBsp: PreparedPolygonSetBspNode;
+  localBvh: PreparedEnvCellBvh;
 }
 
 interface PreparedEnvCellBvh {
-    coordinateSpace: "env-cell-local";
-    nodes: PreparedBvhNode[];
-    items: PreparedEnvCellBvhItem[];
+  coordinateSpace: "env-cell-local";
+  nodes: PreparedBvhNode[];
+  items: PreparedEnvCellBvhItem[];
 }
 
 type PreparedEnvCellBvhItem =
-    | {
-          kind: "render-geometry";
-          polygonId: PolygonId | null;
-          triangleRange: [number, number];
-      }
-    | {
-          kind: "static";
-          instanceId: string;
-      }
-    | {
-          kind: "portal";
-          portalId: PortalId;
-      };
+  | {
+      kind: "render-geometry";
+      polygonId: PolygonId | null;
+      triangleRange: [number, number];
+    }
+  | {
+      kind: "static";
+      instanceId: string;
+    }
+  | {
+      kind: "portal";
+      portalId: PortalId;
+    };
 
 interface EnvCellPortal {
-    portalId: PortalId;
-    sourceIndex: number;
-    flags: number;
-    polygonId: PolygonId;
-    otherCellId: number;
-    otherPortalId: number;
-    targetEnvCellId: EnvCellId | null;
-    isOutsideTransition: boolean;
+  portalId: PortalId;
+  sourceIndex: number;
+  flags: number;
+  polygonId: PolygonId;
+  otherCellId: number;
+  otherPortalId: number;
+  targetEnvCellId: EnvCellId | null;
+  isOutsideTransition: boolean;
 }
 
 interface PreparedPortalAperture {
-    portalId: PortalId;
-    sourceIndex: number;
-    polygonId: PolygonId;
-    points: Vec3Dto[];
-    plane: PreparedPortalAperturePlane | null;
+  portalId: PortalId;
+  sourceIndex: number;
+  polygonId: PolygonId;
+  points: Vec3Dto[];
+  plane: PreparedPortalAperturePlane | null;
 }
 
 interface PreparedPortalAperturePlane {
-    normal: Vec3Dto;
-    constant: number;
-    source: "drawing-bsp-portal" | "derived-from-render-points";
+  normal: Vec3Dto;
+  constant: number;
+  source: "drawing-bsp-portal" | "derived-from-render-points";
 }
 
 interface EnvCellSurfaceSlot {
-    /** 1-based slot matching polygon surface slot IDs. */
-    slotId: number;
-    surfaceId: DataId;
-    materialAssetId: AssetId; // material/{did}
+  /** 1-based slot matching polygon surface slot IDs. */
+  slotId: number;
+  surfaceId: DataId;
+  materialAssetId: AssetId; // material/{did}
 }
 
 interface EnvCellStaticMember {
-    instanceId: string;
-    sourceDid: DataId;
-    sourceAssetId: AssetId; // setup-model/{did} or gfx-obj/{did}
-    sourceIndex: number;
-    // Placement relative to the owning env-cell, not outdoor landblock space.
-    localPlacement: PlacementTransformDto;
-    sourceScale: Vec3Dto;
-    sourceBounds: PreparedBounds | null;
-    instanceBounds: PreparedBounds | null;
+  instanceId: string;
+  sourceDid: DataId;
+  sourceAssetId: AssetId; // setup-model/{did} or gfx-obj/{did}
+  sourceIndex: number;
+  // Placement relative to the owning env-cell, not outdoor landblock space.
+  localPlacement: PlacementTransformDto;
+  sourceScale: Vec3Dto;
+  sourceBounds: PreparedBounds | null;
+  instanceBounds: PreparedBounds | null;
 }
 ```
 
@@ -1177,6 +1176,37 @@ Validation:
   data only if it documents a route invariant needed by the new design.
 - No new tests should require `landblock-pack` or `landblock-summary` to remain
   dependency owners.
+
+Progress as of 2026-05-23:
+
+- Renamed the existing `landblock-pack` dependency extraction test as a
+  migration-target baseline rather than a desired future contract.
+- Renamed the existing `setup-model` -> `setup-appearance` dependency extraction
+  test as a migration-target baseline. Phase 3 should remove default
+  setup-appearance extraction from the setup-model path.
+- Added a durable dependency extraction invariant proving `gfx-obj/*`
+  dependency extraction uses typed `dependencies.materialAssetIds` rather than
+  inferring materials from source `surfaceIds` or render-geometry `surfaceIds`.
+- Added renderer material-resource tests proving visible geometry with a missing
+  material recipe emits a diagnostic before drawing a fallback material.
+- Added renderer material-resource tests proving a failed material recipe
+  provenance is represented as an asset contract failure diagnostic.
+- Ran:
+  `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/world-display/material-resources.test.ts`.
+
+Phase 0 course corrections:
+
+- Do not check in large old `landblock-pack` or `landblock-summary` payload
+  fixtures unless a fixture captures an invariant that the new route shape must
+  preserve. Existing synthetic tests already expose enough of the old ownership
+  problem to guide the first migration steps.
+- Treat existing tests that assert `landblock-pack`, `landblock-summary`, or
+  default `setup-appearance` ownership as migration targets. They should be
+  rewritten or deleted as route ownership moves to `landblock/{id}/terrain`,
+  `landblock/{id}/scene`, `env-cell/{id}`, `gfx-obj/{did}`, and
+  `terrain-material/{regionNumber}/{pcode}`.
+- Future dependency tests should be added around the new route-specific
+  extractors, not around additional scans of nested old pack payloads.
 
 ### Phase 1: Introduce Route Helpers and DTO Types
 

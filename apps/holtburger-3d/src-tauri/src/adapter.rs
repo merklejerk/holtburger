@@ -5,15 +5,16 @@ use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockClassification, LandblockPack,
     LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
-    LandblockSummaryBuildingPortal, PreparedAabb, PreparedBvh, PreparedBvhNode,
-    PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
-    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
-    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
-    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
-    SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
-    SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorScene,
-    StaticRenderableSourceFamily, build_gfx_obj_render_geometry, normalize_landblock_id,
+    LandblockSummaryBuildingPortal, MaterialArchiveCapabilityReport, PreparedAabb, PreparedBvh,
+    PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
+    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
+    PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
+    PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
+    PreparedVec3, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
+    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
+    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
+    normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -110,6 +111,7 @@ impl HostBoundaryAdapter {
     pub fn new(verbose: bool) -> Self {
         let content = ContentRepository::from_hba_path(repo_assets_hba_path())
             .expect("failed to open repo-local 3D app content repository");
+        log_material_capability_report(&content.material_capability_report());
         let content = Arc::new(content);
         let decode_cache = Arc::new(ContentDecodeCache::new());
         let content_asset_runtime = ContentAssetRuntime::new(ContentAssetService::new(
@@ -309,6 +311,31 @@ impl HostBoundaryAdapter {
             sequence,
         }
     }
+}
+
+fn log_material_capability_report(report: &MaterialArchiveCapabilityReport) {
+    let log_line = format!(
+        "Material capability: complete={} CSurface {}/{} available, RenderTexture {}/{} available, RenderSurface {}/{} available, Palette {}/{} available, ClothingTable {}/{} available, visual sources {}/{} available, referenced CSurfaces {} available / {} pruned / {} missing / {} parse failures",
+        report.material_complete,
+        report.record_counts.c_surface.available,
+        report.record_counts.c_surface.total,
+        report.record_counts.render_texture.available,
+        report.record_counts.render_texture.total,
+        report.record_counts.render_surface.available,
+        report.record_counts.render_surface.total,
+        report.record_counts.palette.available,
+        report.record_counts.palette.total,
+        report.record_counts.clothing_table.available,
+        report.record_counts.clothing_table.total,
+        report.visual_source_records.available,
+        report.visual_source_records.total,
+        report.material_references.available_csurfaces,
+        report.material_references.pruned_csurfaces.len(),
+        report.material_references.missing_csurfaces.len(),
+        report.material_references.parse_failures.len(),
+    );
+
+    eprintln!("[holtburger-3d][content] {log_line}");
 }
 
 impl HostBoundaryAdapter {

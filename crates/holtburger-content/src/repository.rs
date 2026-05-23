@@ -11,9 +11,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::SoulEmoteCatalog;
+use crate::material_capabilities::{MaterialArchiveCapabilityReport, RepositoryResourceIndexEntry};
 
 pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
+    resource_index: Vec<RepositoryResourceIndexEntry>,
     source_description: Option<String>,
 }
 
@@ -39,20 +41,23 @@ impl ContentRepository {
     pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut mounts = Vec::new();
+        let mut resource_index = Vec::new();
 
         if path.extension() == Some(OsStr::new("hba")) {
-            mount_hba_source(&path, &mut mounts)?;
+            mount_hba_source(&path, &mut mounts, &mut resource_index)?;
             return Ok(Self {
                 mounts,
+                resource_index,
                 source_description: Some(path.display().to_string()),
             });
         }
 
         let hba_path = path.with_extension("hba");
         if hba_path.exists() {
-            mount_hba_source(&hba_path, &mut mounts)?;
+            mount_hba_source(&hba_path, &mut mounts, &mut resource_index)?;
             return Ok(Self {
                 mounts,
+                resource_index,
                 source_description: Some(hba_path.display().to_string()),
             });
         }
@@ -66,6 +71,7 @@ impl ContentRepository {
     pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
         let mut mounts = Vec::new();
+        let mut resource_index = Vec::new();
 
         if !path.is_dir() {
             return Err(anyhow!(
@@ -74,9 +80,10 @@ impl ContentRepository {
             ));
         }
 
-        discover_hba_mounts_in_dir(&path, &mut mounts)?;
+        discover_hba_mounts_in_dir(&path, &mut mounts, &mut resource_index)?;
         Ok(Self {
             mounts,
+            resource_index,
             source_description: Some(path.display().to_string()),
         })
     }
@@ -84,6 +91,7 @@ impl ContentRepository {
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
+            resource_index: Vec::new(),
             source_description: None,
         }
     }
@@ -142,6 +150,15 @@ impl ContentRepository {
         self.source_description.as_deref()
     }
 
+    pub fn resource_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata> {
+        let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
+        resources.get_metadata_by_key(key)
+    }
+
+    pub fn material_capability_report(&self) -> MaterialArchiveCapabilityReport {
+        MaterialArchiveCapabilityReport::build(self, &self.resource_index)
+    }
+
     pub fn read_soul_emote_catalog(&self) -> Result<SoulEmoteCatalog> {
         let chat_pose_table = self
             .read_asset::<ChatPoseTable>("chat pose table")
@@ -169,6 +186,7 @@ fn missing_asset_error(key: ResourceKey<'_>, source_description: Option<&str>) -
 fn discover_hba_mounts_in_dir(
     dats_path: &Path,
     mounts: &mut Vec<Arc<dyn ResourceSource>>,
+    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
 ) -> Result<()> {
     let mut candidates = Vec::new();
 
@@ -218,13 +236,17 @@ fn discover_hba_mounts_in_dir(
     });
 
     for (path, namespaces, archive) in candidates {
-        mount_archive_source(&path, archive, namespaces, mounts)?;
+        mount_archive_source(&path, archive, namespaces, mounts, resource_index)?;
     }
 
     Ok(())
 }
 
-fn mount_hba_source(path: &Path, mounts: &mut Vec<Arc<dyn ResourceSource>>) -> Result<()> {
+fn mount_hba_source(
+    path: &Path,
+    mounts: &mut Vec<Arc<dyn ResourceSource>>,
+    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
+) -> Result<()> {
     let archive = HbaReader::open(path)
         .map_err(|error| anyhow!("Could not open HBA archive {}: {}", path.display(), error))?;
     let namespaces = archive
@@ -239,7 +261,7 @@ fn mount_hba_source(path: &Path, mounts: &mut Vec<Arc<dyn ResourceSource>>) -> R
         ));
     }
 
-    mount_archive_source(path, Arc::new(archive), namespaces, mounts)
+    mount_archive_source(path, Arc::new(archive), namespaces, mounts, resource_index)
 }
 
 fn mount_archive_source(
@@ -247,6 +269,7 @@ fn mount_archive_source(
     archive: Arc<HbaReader>,
     namespaces: Vec<String>,
     mounts: &mut Vec<Arc<dyn ResourceSource>>,
+    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
 ) -> Result<()> {
     log::info!(
         "Mounted content source {} with namespaces [{}]",
@@ -254,7 +277,35 @@ fn mount_archive_source(
         namespaces.join(", ")
     );
 
+    append_archive_index(path, &archive, resource_index)?;
     mounts.push(archive);
+
+    Ok(())
+}
+
+fn append_archive_index(
+    path: &Path,
+    archive: &HbaReader,
+    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
+) -> Result<()> {
+    let source_description = path.display().to_string();
+
+    for entry in archive.entries() {
+        let entry = entry.with_context(|| {
+            format!(
+                "Could not read HBA index entry while mounting {}",
+                path.display()
+            )
+        })?;
+        resource_index.push(RepositoryResourceIndexEntry {
+            namespace: entry.namespace_id()?.to_string(),
+            file_id: entry.file_id,
+            type_id: entry.type_id,
+            size: entry.size,
+            is_pruned: entry.is_pruned(),
+            source_description: source_description.clone(),
+        });
+    }
 
     Ok(())
 }
@@ -263,8 +314,9 @@ fn mount_archive_source(
 mod tests {
     use super::*;
     use holtburger_dat::file_type::{
-        CharGen, ChatPoseTable, MotionKinematics, SkillTable, SpellTable, XpTable,
+        CharGen, ChatPoseTable, EnvCell, MotionKinematics, SkillTable, SpellTable, XpTable,
     };
+    use holtburger_dat::graphics::Frame;
     use holtburger_dat::{
         DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
         HbaWriter, LayeredResourceResolver,
@@ -393,6 +445,86 @@ mod tests {
                 vec![0xCC],
             )
             .expect("malformed spell table test HBA entry should be added");
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_material_capability_hba(path: &Path) {
+        let mut env_cell_bytes = std::io::Cursor::new(Vec::new());
+        EnvCell {
+            id: 0x0D00_0001,
+            flags: 0,
+            cell_id: 1,
+            surfaces: vec![1, 2, 3],
+            environment_id: 0,
+            cell_structure: 0,
+            position: Frame::default(),
+            portals: Vec::new(),
+            visible_cells: Vec::new(),
+            static_objects: Vec::new(),
+            restriction_obj: None,
+        }
+        .pack(&mut env_cell_bytes)
+        .expect("test env cell should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0D00_0001,
+                DatFileType::EnvCell as u32,
+                env_cell_bytes.into_inner(),
+            )
+            .expect("env cell should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0001,
+                DatFileType::Surface as u32,
+                vec![0x08],
+            )
+            .expect("surface should be added");
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0002,
+                DatFileType::Surface as u32,
+                vec![],
+            )
+            .expect("pruned surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0001,
+                DatFileType::SurfaceTexture as u32,
+                vec![0x05],
+            )
+            .expect("render texture should be added");
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0001,
+                DatFileType::Texture as u32,
+                vec![],
+            )
+            .expect("pruned render surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0001,
+                DatFileType::Palette as u32,
+                vec![0x04],
+            )
+            .expect("palette should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x1000_0001,
+                DatFileType::Clothing as u32,
+                vec![0x10],
+            )
+            .expect("clothing table should be added");
+
         writer.write(path).expect("test HBA should be written");
     }
 
@@ -558,5 +690,35 @@ mod tests {
             .expect_err("malformed spell table should fail");
 
         assert!(error.to_string().contains("failed to parse spell table"));
+    }
+
+    #[test]
+    fn material_capability_report_counts_material_records_and_surface_references() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_material_capability_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let report = repository.material_capability_report();
+
+        assert_eq!(report.record_counts.c_surface.total, 2);
+        assert_eq!(report.record_counts.c_surface.available, 1);
+        assert_eq!(report.record_counts.c_surface.pruned, 1);
+        assert_eq!(report.record_counts.render_texture.available, 1);
+        assert_eq!(report.record_counts.render_surface.pruned, 1);
+        assert_eq!(report.record_counts.palette.available, 1);
+        assert_eq!(report.record_counts.clothing_table.available, 1);
+        assert_eq!(report.visual_source_records.available, 1);
+        assert_eq!(report.material_references.referenced_csurfaces, 3);
+        assert_eq!(report.material_references.available_csurfaces, 1);
+        assert_eq!(
+            report.material_references.pruned_csurfaces,
+            vec![0x0800_0002]
+        );
+        assert_eq!(
+            report.material_references.missing_csurfaces,
+            vec![0x0800_0003]
+        );
+        assert!(!report.material_complete);
     }
 }

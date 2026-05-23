@@ -1,6 +1,7 @@
 pub mod character_gen;
 pub mod decode_cache;
 pub mod landblock_pack;
+pub mod material_capabilities;
 pub mod repository;
 pub mod soul_emote;
 mod source_reader;
@@ -22,6 +23,11 @@ pub use landblock_pack::{
     PreparedTerrainQuadSpatialMetadata, PreparedTerrainTriangle, PreparedVec3, SourceLoadError,
     SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus,
     build_gfx_obj_render_geometry, format_static_object_source_asset_id,
+};
+pub use material_capabilities::{
+    MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,
+    MaterialReferenceCoverage, MaterialReferenceParseFailure, RepositoryResourceIndexEntry,
+    VisualSourceRecordCoverage,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

@@ -11,7 +11,7 @@ const provenance = {
 };
 
 describe("asset response dependencies", () => {
-	it("extracts landblock pack shared renderable references", () => {
+	it("documents migration-target landblock pack shared renderable extraction", () => {
 		const response = createJsonResponse("landblock-pack/da55ffff", {
 			kind: "landblock-pack",
 			residencyKind: "landblock",
@@ -55,7 +55,7 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
-	it("extracts setup-model part gfx objects without worker preparation", () => {
+	it("documents migration-target setup-model setup-appearance extraction", () => {
 		const response = createJsonResponse("setup-model/02000010", {
 			kind: "setup-model",
 			residencyKind: "unknown",
@@ -101,6 +101,44 @@ describe("asset response dependencies", () => {
 			{ assetId: "gfx-obj/01000010" },
 			{ assetId: "gfx-obj/01000011" },
 			{ assetId: "setup-appearance/02000010" },
+		]);
+	});
+
+	it("uses typed gfx material dependencies instead of inferring from source surface ids", () => {
+		const response = createJsonResponse("gfx-obj/01000010", {
+			kind: "gfx-obj",
+			residencyKind: "unknown",
+			sourceAssetKind: "gfx-obj",
+			gfxObjId: 0x01000010,
+			flags: null,
+			surfaceIds: [0x08000020],
+			vertexArray: { vertexType: null, vertexCount: 0, vertices: [] },
+			drawingPolygons: [],
+			drawingBsp: null,
+			dependencies: {
+				materialAssetIds: ["material/08000010"],
+			},
+			physicsWitness: { polygonCount: 0, hasBsp: false },
+			renderGeometry: {
+				sourceId: 0x01000010,
+				vertexCount: 0,
+				triangleCount: 0,
+				positions: [],
+				normals: [],
+				uvs: [],
+				triangles: [],
+				surfaceIds: [0x08000020],
+				invalidPolygons: [],
+				skippedPolygonCount: 0,
+				bounds: null,
+			},
+			sortCenter: null,
+			didDegrade: null,
+			provenance,
+		});
+
+		expect(getAssetResponseDependencies(response)).toEqual([
+			{ assetId: "material/08000010" },
 		]);
 	});
 

@@ -315,7 +315,7 @@ impl HostBoundaryAdapter {
 
 fn log_material_capability_report(report: &MaterialArchiveCapabilityReport) {
     let log_line = format!(
-        "Material capability: complete={} CSurface {}/{} available, RenderTexture {}/{} available, RenderSurface {}/{} available, Palette {}/{} available, ClothingTable {}/{} available, visual sources {}/{} available, referenced CSurfaces {} available / {} pruned / {} missing / {} parse failures",
+        "Material capability: complete={} CSurface {}/{} available, RenderTexture {}/{} available, RenderSurface {}/{} available, Palette {}/{} available, ClothingTable {}/{} available, visual sources {}/{} available, dependency refs: CSurface {} available / {} pruned / {} missing, RenderTexture {} available / {} pruned / {} missing, RenderSurface {} available / {} pruned / {} missing, Palette {} available / {} pruned / {} missing, {} parse failures",
         report.material_complete,
         report.record_counts.c_surface.available,
         report.record_counts.c_surface.total,
@@ -332,6 +332,15 @@ fn log_material_capability_report(report: &MaterialArchiveCapabilityReport) {
         report.material_references.available_csurfaces,
         report.material_references.pruned_csurfaces.len(),
         report.material_references.missing_csurfaces.len(),
+        report.material_references.available_render_textures,
+        report.material_references.pruned_render_textures.len(),
+        report.material_references.missing_render_textures.len(),
+        report.material_references.available_render_surfaces,
+        report.material_references.pruned_render_surfaces.len(),
+        report.material_references.missing_render_surfaces.len(),
+        report.material_references.available_palettes,
+        report.material_references.pruned_palettes.len(),
+        report.material_references.missing_palettes.len(),
         report.material_references.parse_failures.len(),
     );
 

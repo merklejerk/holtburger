@@ -316,6 +316,7 @@ mod tests {
     use holtburger_dat::file_type::{
         CharGen, ChatPoseTable, EnvCell, MotionKinematics, SkillTable, SpellTable, XpTable,
     };
+    use holtburger_dat::file_type::{PixelFormatId, SurfaceType};
     use holtburger_dat::graphics::Frame;
     use holtburger_dat::{
         DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
@@ -481,7 +482,7 @@ mod tests {
                 EOR_PORTAL_NAMESPACE,
                 0x0800_0001,
                 DatFileType::Surface as u32,
-                vec![0x08],
+                solid_csurface_bytes(0xFFAA_5500),
             )
             .expect("surface should be added");
         writer
@@ -526,6 +527,241 @@ mod tests {
             .expect("clothing table should be added");
 
         writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_material_dependency_hba(path: &Path) {
+        let mut env_cell_bytes = std::io::Cursor::new(Vec::new());
+        EnvCell {
+            id: 0x0D00_0002,
+            flags: 0,
+            cell_id: 2,
+            surfaces: vec![0x10, 0x11, 0x12],
+            environment_id: 0,
+            cell_structure: 0,
+            position: Frame::default(),
+            portals: Vec::new(),
+            visible_cells: Vec::new(),
+            static_objects: Vec::new(),
+            restriction_obj: None,
+        }
+        .pack(&mut env_cell_bytes)
+        .expect("test env cell should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0D00_0002,
+                DatFileType::EnvCell as u32,
+                env_cell_bytes.into_inner(),
+            )
+            .expect("env cell should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0010,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0010, 0x0400_0010),
+            )
+            .expect("textured surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0011,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0011, 0),
+            )
+            .expect("missing-texture surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0012,
+                DatFileType::Surface as u32,
+                solid_csurface_bytes(0xFF00_AACC),
+            )
+            .expect("solid surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0010,
+                DatFileType::SurfaceTexture as u32,
+                render_texture_bytes(0x0500_0010, &[0x0600_0010, 0x0600_0011, 0x0600_0012]),
+            )
+            .expect("render texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0010,
+                DatFileType::Texture as u32,
+                render_surface_bytes(
+                    0x0600_0010,
+                    PixelFormatId::P8,
+                    &[1, 2, 3, 4],
+                    Some(0x0400_0011),
+                ),
+            )
+            .expect("render surface should be added");
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0011,
+                DatFileType::Texture as u32,
+                vec![],
+            )
+            .expect("pruned render surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0010,
+                DatFileType::Palette as u32,
+                palette_bytes(0x0400_0010),
+            )
+            .expect("palette should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x1000_0010,
+                DatFileType::Clothing as u32,
+                vec![0x10],
+            )
+            .expect("clothing table should be added");
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn write_resolvable_material_hba(path: &Path) {
+        let mut env_cell_bytes = std::io::Cursor::new(Vec::new());
+        EnvCell {
+            id: 0x0D00_0003,
+            flags: 0,
+            cell_id: 3,
+            surfaces: vec![0x20, 0x21],
+            environment_id: 0,
+            cell_structure: 0,
+            position: Frame::default(),
+            portals: Vec::new(),
+            visible_cells: Vec::new(),
+            static_objects: Vec::new(),
+            restriction_obj: None,
+        }
+        .pack(&mut env_cell_bytes)
+        .expect("test env cell should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0D00_0003,
+                DatFileType::EnvCell as u32,
+                env_cell_bytes.into_inner(),
+            )
+            .expect("env cell should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0020,
+                DatFileType::Surface as u32,
+                solid_csurface_bytes(0xFF11_2233),
+            )
+            .expect("solid surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0021,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0021, 0x0400_0021),
+            )
+            .expect("textured surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0021,
+                DatFileType::SurfaceTexture as u32,
+                render_texture_bytes(0x0500_0021, &[0x0600_0021]),
+            )
+            .expect("render texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0021,
+                DatFileType::Texture as u32,
+                render_surface_bytes(0x0600_0021, PixelFormatId::A8R8G8B8, &[1, 2, 3, 4], None),
+            )
+            .expect("render surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0021,
+                DatFileType::Palette as u32,
+                palette_bytes(0x0400_0021),
+            )
+            .expect("palette should be added");
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn solid_csurface_bytes(color: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&SurfaceType::BASE1_SOLID.bits().to_le_bytes());
+        bytes.extend_from_slice(&color.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes
+    }
+
+    fn textured_csurface_bytes(render_texture_id: u32, palette_id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&SurfaceType::BASE1_IMAGE.bits().to_le_bytes());
+        bytes.extend_from_slice(&render_texture_id.to_le_bytes());
+        bytes.extend_from_slice(&palette_id.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes.extend_from_slice(&0.0f32.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        bytes
+    }
+
+    fn render_texture_bytes(id: u32, render_surface_ids: &[u32]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.push(1);
+        bytes.extend_from_slice(&(render_surface_ids.len() as u32).to_le_bytes());
+        for render_surface_id in render_surface_ids {
+            bytes.extend_from_slice(&render_surface_id.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn render_surface_bytes(
+        id: u32,
+        format: PixelFormatId,
+        source_data: &[u8],
+        default_palette_id: Option<u32>,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&format.raw().to_le_bytes());
+        bytes.extend_from_slice(&(source_data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(source_data);
+        if let Some(default_palette_id) = default_palette_id {
+            bytes.extend_from_slice(&default_palette_id.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn palette_bytes(id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&id.to_le_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes());
+        bytes.extend_from_slice(&0xFF00_0000u32.to_le_bytes());
+        bytes.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        bytes
     }
 
     #[test]
@@ -719,6 +955,78 @@ mod tests {
             report.material_references.missing_csurfaces,
             vec![0x0800_0003]
         );
+        assert_eq!(report.material_references.referenced_render_textures, 0);
+        assert!(report.material_references.parse_failures.is_empty());
         assert!(!report.material_complete);
+    }
+
+    #[test]
+    fn material_capability_report_validates_deep_material_dependencies() {
+        let dir = tempdir().expect("tempdir should be created");
+        write_material_dependency_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let report = repository.material_capability_report();
+
+        assert_eq!(report.material_references.referenced_csurfaces, 3);
+        assert_eq!(report.material_references.available_csurfaces, 3);
+        assert_eq!(report.material_references.referenced_render_textures, 2);
+        assert_eq!(report.material_references.available_render_textures, 1);
+        assert_eq!(
+            report.material_references.missing_render_textures,
+            vec![0x0500_0011]
+        );
+        assert_eq!(report.material_references.referenced_render_surfaces, 3);
+        assert_eq!(report.material_references.available_render_surfaces, 1);
+        assert_eq!(
+            report.material_references.pruned_render_surfaces,
+            vec![0x0600_0011]
+        );
+        assert_eq!(
+            report.material_references.missing_render_surfaces,
+            vec![0x0600_0012]
+        );
+        assert_eq!(report.material_references.referenced_palettes, 2);
+        assert_eq!(report.material_references.available_palettes, 1);
+        assert_eq!(
+            report.material_references.missing_palettes,
+            vec![0x0400_0011]
+        );
+        assert!(report.material_references.parse_failures.is_empty());
+        assert!(!report.material_complete);
+    }
+
+    #[test]
+    fn resolves_env_cell_material_slots_to_material_recipes() {
+        use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_resolvable_material_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let slots = repository
+            .resolve_env_cell_material_slots(0x0D00_0003)
+            .expect("material slots should resolve");
+
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].slot_index, 0);
+        assert_eq!(slots[0].material.surface_id, 0x0800_0020);
+        assert_eq!(
+            slots[0].material.source,
+            ResolvedMaterialSource::SolidColor(0xFF11_2233)
+        );
+        assert_eq!(slots[1].slot_index, 1);
+        assert_eq!(slots[1].material.surface_id, 0x0800_0021);
+        assert_eq!(
+            slots[1].material.source,
+            ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
+                render_texture_id: 0x0500_0021,
+                render_surface_ids: vec![0x0600_0021],
+                palette_id: Some(0x0400_0021),
+                render_surface_default_palette_ids: Vec::new(),
+            })
+        );
     }
 }

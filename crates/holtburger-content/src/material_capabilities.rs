@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 
-use holtburger_dat::file_type::{DatFileType, EnvCell, GfxObj};
+use holtburger_dat::file_type::{
+    CSurface, CSurfaceSource, DatFileType, EnvCell, GfxObj, Palette, RenderSurface, RenderTexture,
+};
 use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, ResourceKey};
 
 use crate::ContentRepository;
@@ -22,7 +24,6 @@ pub struct MaterialArchiveCapabilityReport {
     pub visual_source_records: VisualSourceRecordCoverage,
     pub material_references: MaterialReferenceCoverage,
     pub material_complete: bool,
-    pub limitations: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -54,6 +55,18 @@ pub struct MaterialReferenceCoverage {
     pub available_csurfaces: usize,
     pub missing_csurfaces: Vec<u32>,
     pub pruned_csurfaces: Vec<u32>,
+    pub referenced_render_textures: usize,
+    pub available_render_textures: usize,
+    pub missing_render_textures: Vec<u32>,
+    pub pruned_render_textures: Vec<u32>,
+    pub referenced_render_surfaces: usize,
+    pub available_render_surfaces: usize,
+    pub missing_render_surfaces: Vec<u32>,
+    pub pruned_render_surfaces: Vec<u32>,
+    pub referenced_palettes: usize,
+    pub available_palettes: usize,
+    pub missing_palettes: Vec<u32>,
+    pub pruned_palettes: Vec<u32>,
     pub skipped_pruned_visual_sources: usize,
     pub parse_failures: Vec<MaterialReferenceParseFailure>,
 }
@@ -87,6 +100,12 @@ impl MaterialArchiveCapabilityReport {
             && visual_source_records.pruned == 0
             && material_references.missing_csurfaces.is_empty()
             && material_references.pruned_csurfaces.is_empty()
+            && material_references.missing_render_textures.is_empty()
+            && material_references.pruned_render_textures.is_empty()
+            && material_references.missing_render_surfaces.is_empty()
+            && material_references.pruned_render_surfaces.is_empty()
+            && material_references.missing_palettes.is_empty()
+            && material_references.pruned_palettes.is_empty()
             && material_references.parse_failures.is_empty();
 
         Self {
@@ -94,9 +113,6 @@ impl MaterialArchiveCapabilityReport {
             visual_source_records,
             material_references,
             material_complete,
-            limitations: vec![
-                "Phase 0 only validates archive-level material records and mesh-to-CSurface references; CSurface texture, render-surface, and palette dependency validation waits for typed material parsers.".to_string(),
-            ],
         }
     }
 }
@@ -217,9 +233,13 @@ fn inspect_material_references(
     let mut missing_csurfaces = Vec::new();
     let mut pruned_csurfaces = Vec::new();
     let mut available_csurfaces = 0;
+    let mut available_surface_ids = Vec::new();
     for (surface_id, status) in material_status_by_id {
         match status {
-            Some(false) => available_csurfaces += 1,
+            Some(false) => {
+                available_csurfaces += 1;
+                available_surface_ids.push(surface_id);
+            }
             Some(true) => pruned_csurfaces.push(surface_id),
             None => missing_csurfaces.push(surface_id),
         }
@@ -227,15 +247,222 @@ fn inspect_material_references(
 
     missing_csurfaces.sort_unstable();
     pruned_csurfaces.sort_unstable();
+    available_surface_ids.sort_unstable();
+
+    let dependency_coverage = inspect_deep_material_dependencies(content, &available_surface_ids);
 
     MaterialReferenceCoverage {
         referenced_csurfaces: referenced_csurfaces.len(),
         available_csurfaces,
         missing_csurfaces,
         pruned_csurfaces,
+        referenced_render_textures: dependency_coverage.render_textures.referenced(),
+        available_render_textures: dependency_coverage.render_textures.available,
+        missing_render_textures: dependency_coverage.render_textures.missing,
+        pruned_render_textures: dependency_coverage.render_textures.pruned,
+        referenced_render_surfaces: dependency_coverage.render_surfaces.referenced(),
+        available_render_surfaces: dependency_coverage.render_surfaces.available,
+        missing_render_surfaces: dependency_coverage.render_surfaces.missing,
+        pruned_render_surfaces: dependency_coverage.render_surfaces.pruned,
+        referenced_palettes: dependency_coverage.palettes.referenced(),
+        available_palettes: dependency_coverage.palettes.available,
+        missing_palettes: dependency_coverage.palettes.missing,
+        pruned_palettes: dependency_coverage.palettes.pruned,
         skipped_pruned_visual_sources,
-        parse_failures,
+        parse_failures: parse_failures
+            .into_iter()
+            .chain(dependency_coverage.parse_failures)
+            .collect(),
     }
+}
+
+#[derive(Debug, Default)]
+struct DeepMaterialDependencyCoverage {
+    render_textures: DependencyRecordCoverage,
+    render_surfaces: DependencyRecordCoverage,
+    palettes: DependencyRecordCoverage,
+    parse_failures: Vec<MaterialReferenceParseFailure>,
+}
+
+#[derive(Debug, Default)]
+struct DependencyRecordCoverage {
+    available: usize,
+    available_ids: Vec<u32>,
+    missing: Vec<u32>,
+    pruned: Vec<u32>,
+}
+
+impl DependencyRecordCoverage {
+    fn referenced(&self) -> usize {
+        self.available + self.missing.len() + self.pruned.len()
+    }
+}
+
+fn inspect_deep_material_dependencies(
+    content: &ContentRepository,
+    surface_ids: &[u32],
+) -> DeepMaterialDependencyCoverage {
+    let mut coverage = DeepMaterialDependencyCoverage::default();
+    let mut render_texture_ids = HashSet::new();
+    let mut render_surface_ids = HashSet::new();
+    let mut palette_ids = HashSet::new();
+
+    for surface_id in surface_ids {
+        let c_surface =
+            match read_and_parse_dependency(content, *surface_id, "CSurface", CSurface::unpack) {
+                Ok(c_surface) => c_surface,
+                Err(detail) => {
+                    coverage.parse_failures.push(MaterialReferenceParseFailure {
+                        namespace: EOR_PORTAL_NAMESPACE.to_string(),
+                        file_id: *surface_id,
+                        detail,
+                    });
+                    continue;
+                }
+            };
+
+        match c_surface.source {
+            CSurfaceSource::SolidColor(_) => {}
+            CSurfaceSource::Texture {
+                orig_texture_id,
+                orig_palette_id,
+            } => {
+                render_texture_ids.insert(orig_texture_id);
+                if orig_palette_id != 0 {
+                    palette_ids.insert(orig_palette_id);
+                }
+
+                if !is_available_dependency(content, orig_texture_id) {
+                    continue;
+                }
+
+                let render_texture = match read_and_parse_dependency(
+                    content,
+                    orig_texture_id,
+                    "RenderTexture",
+                    RenderTexture::unpack,
+                ) {
+                    Ok(render_texture) => render_texture,
+                    Err(detail) => {
+                        coverage.parse_failures.push(MaterialReferenceParseFailure {
+                            namespace: EOR_PORTAL_NAMESPACE.to_string(),
+                            file_id: orig_texture_id,
+                            detail,
+                        });
+                        continue;
+                    }
+                };
+
+                for render_surface_id in render_texture.render_surface_ids {
+                    render_surface_ids.insert(render_surface_id);
+                    if !is_available_dependency(content, render_surface_id) {
+                        continue;
+                    }
+
+                    match read_and_parse_dependency(
+                        content,
+                        render_surface_id,
+                        "RenderSurface",
+                        RenderSurface::unpack,
+                    ) {
+                        Ok(render_surface) => {
+                            if let Some(palette_id) = render_surface.default_palette_id {
+                                palette_ids.insert(palette_id);
+                            }
+                        }
+                        Err(detail) => {
+                            coverage.parse_failures.push(MaterialReferenceParseFailure {
+                                namespace: EOR_PORTAL_NAMESPACE.to_string(),
+                                file_id: render_surface_id,
+                                detail,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    coverage.render_textures = classify_dependency_records(
+        content,
+        render_texture_ids,
+        DatFileType::SurfaceTexture,
+        "RenderTexture",
+    );
+    coverage.render_surfaces = classify_dependency_records(
+        content,
+        render_surface_ids,
+        DatFileType::Texture,
+        "RenderSurface",
+    );
+    coverage.palettes =
+        classify_dependency_records(content, palette_ids, DatFileType::Palette, "Palette");
+
+    for palette_id in &coverage.palettes.available_ids {
+        if let Err(detail) =
+            read_and_parse_dependency(content, *palette_id, "Palette", Palette::unpack)
+        {
+            coverage.parse_failures.push(MaterialReferenceParseFailure {
+                namespace: EOR_PORTAL_NAMESPACE.to_string(),
+                file_id: *palette_id,
+                detail,
+            });
+        }
+    }
+
+    coverage
+}
+
+fn read_and_parse_dependency<T>(
+    content: &ContentRepository,
+    file_id: u32,
+    label: &str,
+    unpack: impl FnOnce(&mut Cursor<Vec<u8>>) -> binrw::BinResult<T>,
+) -> Result<T, String> {
+    let resource = content
+        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, file_id))
+        .map_err(|error| format!("could not read {label} 0x{file_id:08X}: {error:#}"))?;
+    unpack(&mut Cursor::new(resource.bytes))
+        .map_err(|error| format!("could not parse {label} 0x{file_id:08X}: {error}"))
+}
+
+fn is_available_dependency(content: &ContentRepository, file_id: u32) -> bool {
+    content
+        .resource_metadata(ResourceKey::new(EOR_PORTAL_NAMESPACE, file_id))
+        .is_some_and(|metadata| !metadata.is_pruned)
+}
+
+fn classify_dependency_records(
+    content: &ContentRepository,
+    ids: HashSet<u32>,
+    expected_type: DatFileType,
+    label: &str,
+) -> DependencyRecordCoverage {
+    let mut coverage = DependencyRecordCoverage::default();
+
+    let mut sorted_ids = ids.into_iter().collect::<Vec<_>>();
+    sorted_ids.sort_unstable();
+    for id in sorted_ids {
+        match content.resource_metadata(ResourceKey::new(EOR_PORTAL_NAMESPACE, id)) {
+            Some(metadata) if metadata.is_pruned => coverage.pruned.push(id),
+            Some(_) if DatFileType::from_id(id) == expected_type => {
+                coverage.available += 1;
+                coverage.available_ids.push(id);
+            }
+            Some(_) => coverage.missing.push(id),
+            None => coverage.missing.push(id),
+        }
+    }
+
+    if !coverage.missing.is_empty() {
+        log::debug!(
+            "{} dependency coverage found {} missing IDs",
+            label,
+            coverage.missing.len()
+        );
+    }
+
+    coverage
 }
 
 fn is_visual_source_record(entry: &RepositoryResourceIndexEntry) -> bool {

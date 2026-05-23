@@ -55,6 +55,7 @@ export function buildStaticRenderablePartMatrix(
 
 export function buildGfxObjGeometry(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
+	materialSlots: readonly MaterialGeometrySlot[] = [],
 ): BufferGeometry {
 	const geometry = new BufferGeometry();
 	geometry.setAttribute(
@@ -75,7 +76,64 @@ export function buildGfxObjGeometry(
 			new BufferAttribute(toFloat32Array(renderGeometry.uvs), 2),
 		);
 	}
+	applyMaterialGroups(geometry, renderGeometry, materialSlots);
 	return geometry;
+}
+
+export interface MaterialGeometrySlot {
+	surfaceId: number;
+	materialIndex: number;
+}
+
+function applyMaterialGroups(
+	geometry: BufferGeometry,
+	renderGeometry: PreparedPolygonSetRenderGeometry,
+	materialSlots: readonly MaterialGeometrySlot[],
+): void {
+	if (materialSlots.length === 0 || renderGeometry.triangles.length === 0) {
+		return;
+	}
+
+	const materialIndexBySurfaceId = new Map(
+		materialSlots.map((slot) => [slot.surfaceId, slot.materialIndex]),
+	);
+	let activeMaterialIndex: number | null = null;
+	let activeStartVertex = 0;
+	let activeVertexCount = 0;
+
+	for (const triangle of renderGeometry.triangles) {
+		const nextMaterialIndex =
+			triangle.surfaceId === null
+				? 0
+				: (materialIndexBySurfaceId.get(triangle.surfaceId) ?? 0);
+		if (activeMaterialIndex === null) {
+			activeMaterialIndex = nextMaterialIndex;
+			activeStartVertex = triangle.firstVertex;
+			activeVertexCount = 3;
+			continue;
+		}
+		if (activeMaterialIndex === nextMaterialIndex) {
+			activeVertexCount += 3;
+			continue;
+		}
+
+		geometry.addGroup(
+			activeStartVertex,
+			activeVertexCount,
+			activeMaterialIndex,
+		);
+		activeMaterialIndex = nextMaterialIndex;
+		activeStartVertex = triangle.firstVertex;
+		activeVertexCount = 3;
+	}
+
+	if (activeMaterialIndex !== null) {
+		geometry.addGroup(
+			activeStartVertex,
+			activeVertexCount,
+			activeMaterialIndex,
+		);
+	}
 }
 
 function toFloat32Array(values: PreparedFloat32Array): Float32Array {

@@ -1000,28 +1000,128 @@ the binary texture payload format is implemented.
 
 ### Phase 4: renderer material resource cache
 
-Add an app-local material resource cache under `apps/holtburger-3d` and inject
-it into the world-display renderer. Its responsibilities:
+Status: **implemented for material identity, material-owned Three.js resources,
+and metadata-only texture placeholders.**
 
-- convert resolved material recipes into Three.js `Material` and `Texture`
-  resources;
-- cache GPU textures by render-surface ID and decode parameters;
-- cache palette textures by palette ID plus subpalette edits;
-- cache material instances by resolved appearance key, including runtime
-  texture substitutions and palette/subpalette edits, not by mesh ID;
-- dispose textures and materials through the renderer lifecycle.
+This phase added an app-local `WorldMaterialResourceCache` under
+`apps/holtburger-3d`. It consumes prepared material, render-texture,
+render-surface, and palette payloads from the existing asset cache and returns
+Three.js material arrays plus geometry-group slots for the renderer. The cache
+is deliberately app-local: it owns browser/Three.js GPU-facing resources and
+does not promote renderer policy into shared crates.
 
-Keep the existing debug material path behind an explicit missing-material
-fallback so world rendering remains usable while individual formats are added.
+Implemented behavior:
+
+- static renderable scene parts now carry a material appearance key, resolved
+  surface-to-material slots, and a material signature;
+- setup-model parts use the prepared `setup-appearance` payload when available,
+  so base setup appearance material slots can differ from raw `GfxObj` slots;
+- static render groups now include material signature in the group key, avoiding
+  `GfxObj`-only instancing when material identity differs;
+- `BufferGeometry` creation can emit contiguous groups from triangle
+  `surfaceId`s, allowing a Three.js material array to map onto AC surface
+  assignments;
+- structured interiors now build material groups from their cell `surfaceIds`
+  instead of using only debug cell colors;
+- solid-color `CSurface` recipes become `MeshStandardMaterial`s with the parsed
+  ARGB color and translucency-derived opacity;
+- texture-backed recipes produce deterministic placeholder materials derived
+  from their render-texture/render-surface/palette metadata until source pixel
+  bytes are available;
+- missing or malformed material dependencies still produce explicit fallback
+  materials instead of blocking world rendering;
+- the world-display renderer invalidates materialized static/interior meshes
+  when asset state changes, so meshes created before material dependencies
+  arrive are rebuilt with the newly available recipes;
+- cache-owned materials are disposed by the material cache on renderer teardown,
+  while mesh disposal avoids double-disposing shared material instances.
+
+Decision: phase 4 **does not upload real texture bytes yet**. Phase 3
+intentionally kept render-surface payloads as compact metadata, and no binary
+texture payload exists today. Creating fake decoded textures here would blur
+the host/worker/renderer contract. Instead, texture recipes are represented by
+stable placeholder materials keyed from their dependency metadata. This keeps
+material identity and batching honest while leaving the pixel path for the
+next phase.
+
+Course correction: the original phase 4 wording included render-surface texture
+and palette texture caches. Those caches need a binary render-surface payload
+shape first. The material cache is structured so that later `Texture` records
+can be owned alongside `Material` records, but the current implementation only
+creates Three.js materials.
+
+Course correction: asset-state changes currently invalidate materialized
+static/interior meshes coarsely so fallback materials are not retained after
+their real material recipes arrive. This is correct but not maximally
+efficient. After binary texture payloads exist, replace this with fine-grained
+material-resource invalidation keyed by changed asset IDs.
+
+Refinement: phase 4 already introduced the first conservative material-aware
+grouping shape for static renderables and structured interiors. Before moving
+deeper into batching or terrain materials, add the missing compact binary
+texture payload and actual decode/upload policy, then replace texture
+placeholder materials with direct-color texture materials.
+
+### Phase 4.1: render-surface binary payload and direct-color texture upload
+
+Add the missing contract between the phase 3 material manifests and the phase
+4 renderer material cache. This step should be narrow and should not try to
+solve indexed palettes, clothing, or terrain blending.
+
+Host and worker responsibilities:
+
+- extend binary asset lookup for `render-surface/{surface_did}` while retaining
+  the existing JSON render-surface metadata payload;
+- attach the raw `RenderSurface` source bytes through the binary asset envelope
+  using a compact typed section instead of base64-in-JSON;
+- keep `render-texture/{texture_did}` as a manifest that points at
+  render-surface payloads; do not duplicate mip bytes into the render-texture
+  payload;
+- preserve `formatRaw`, normalized format label, dimensions, default palette ID,
+  and source byte length in the JSON payload so unsupported formats can be
+  diagnosed without reading GPU resources;
+- fail hard on malformed dimensions, byte lengths, or unsupported envelope
+  scalar/section shapes rather than silently creating broken textures.
+
+Renderer responsibilities:
+
+- add `Texture` ownership to `WorldMaterialResourceCache`;
+- cache decoded/uploaded textures by render-surface ID plus decode parameters;
+- decode and upload direct-color formats first, starting with the formats
+  present in current archived material dependencies;
+- choose the first supported render-surface mip for a texture recipe, then keep
+  the remaining mip IDs available for later mip-policy work;
+- replace metadata-only texture placeholders with `MeshStandardMaterial.map`
+  when a supported direct-color texture is resident;
+- keep explicit fallback materials for missing, indexed, compressed, or
+  unsupported render-surface formats.
+
+Out of scope for phase 4.1:
+
+- indexed texture sampling and palette/subpalette composition;
+- clipmap alpha discard;
+- terrain texture arrays, roads, and detail texture overlays;
+- modern `RenderMaterial` / `MaterialInstance` / `MaterialModifier` support.
+
+Course correction: this phase exists because the phase 4 implementation proved
+that real texture upload cannot be done honestly from metadata-only
+render-surface payloads. It is a contract step, not a detour.
+
+Refinement for phase 5: after phase 4.1, batching work should stay limited to
+cases where material recipe, selected texture, and appearance key are identical.
 
 ### Phase 5: first batching shape
 
-Use a conservative material-aware batching path first:
+Status: **partially implemented during phase 4 for static renderables and
+structured interiors.**
+
+Use and refine the conservative material-aware batching path:
 
 - structured interiors: use `BufferGeometry` groups or split geometry by
-  contiguous material runs;
+  contiguous material runs; phase 4 uses `BufferGeometry` groups;
 - static `GfxObj`s: create render buckets by chunk, `GfxObj`, material recipe,
-  and appearance key;
+  and appearance key; phase 4 buckets by chunk, `GfxObj`, and material
+  signature;
 - keep `InstancedMesh` only for objects whose material recipe and appearance key
   are identical.
 

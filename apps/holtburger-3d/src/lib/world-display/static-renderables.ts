@@ -13,6 +13,7 @@ import type {
 	PreparedLandblockStaticInstance,
 	PreparedLandblockStaticMesh,
 	PreparedSetupModelPayload,
+	PreparedSetupAppearancePayload,
 } from "../assets/types";
 import {
 	derivePackInteriorEnvCellIdsForLandblocks,
@@ -40,6 +41,10 @@ import {
 	formatRenderDomainKey,
 	type StaticRenderableRenderDomain,
 } from "./render-domains";
+import {
+	formatMaterialAssetId,
+	type ResolvedMaterialSlot,
+} from "./material-resources";
 
 type StaticRenderableInstanceKind =
 	| "indoor-static"
@@ -85,6 +90,9 @@ export interface StaticRenderablePart {
 	partIndex: number;
 	gfxObjId: number;
 	gfxObjAssetId: string;
+	materialAppearanceKey: string;
+	materialSlots: ResolvedMaterialSlot[];
+	materialSignature: string;
 	parentPlacements: PlacementTransformDto[];
 	chunkLocalInstancePlacement: PlacementTransformDto;
 	partPlacements: PlacementTransformDto[];
@@ -310,8 +318,9 @@ function formatStaticRenderableRenderGroupKey(
 	renderDomain: StaticRenderableRenderDomain,
 	chunkKey: RenderChunkKey,
 	gfxObjAssetId: string,
+	materialSignature: string,
 ): string {
-	return `${renderDomain}|${chunkKey}|${gfxObjAssetId}`;
+	return `${renderDomain}|${chunkKey}|${gfxObjAssetId}|${materialSignature}`;
 }
 
 function groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(
@@ -326,6 +335,7 @@ function groupStaticRenderablePartsByRenderDomainChunkAndGfxAssetId(
 			part.renderDomain,
 			part.renderChunk.chunkKey,
 			part.gfxObjAssetId,
+			part.materialSignature,
 		);
 		const groupedParts = partsByDomainChunkAndGfxAssetId.get(groupKey);
 		if (groupedParts) {
@@ -383,11 +393,7 @@ function collectPackStaticRenderableSourceInstances(
 	},
 	cache: StaticRenderableResourceCache | null,
 ): StaticRenderableSourceInstance[] {
-	return collectSelectedLandblockPackResources(
-		assetState,
-		selection,
-		cache,
-	)
+	return collectSelectedLandblockPackResources(assetState, selection, cache)
 		.flatMap((resource) => resource.sourceInstances)
 		.filter((instance) => isPackStaticInstanceSelected(instance, selection));
 }
@@ -488,6 +494,8 @@ function createStaticRenderablePart(
 		partIndex: number;
 		gfxObjId: number;
 		gfxObjAssetId: string;
+		materialAppearanceKey: string;
+		materialSlots: ResolvedMaterialSlot[];
 		partPlacements: PlacementTransformDto[];
 		scale: Vec3Dto;
 	},
@@ -509,6 +517,12 @@ function createStaticRenderablePart(
 		partIndex: part.partIndex,
 		gfxObjId: part.gfxObjId,
 		gfxObjAssetId: part.gfxObjAssetId,
+		materialAppearanceKey: part.materialAppearanceKey,
+		materialSlots: part.materialSlots,
+		materialSignature: describeMaterialSignature(
+			part.materialAppearanceKey,
+			part.materialSlots,
+		),
 		parentPlacements: instance.parentPlacements,
 		chunkLocalInstancePlacement: instance.chunkLocalInstancePlacement,
 		partPlacements: part.partPlacements,
@@ -573,13 +587,27 @@ function collectPackStaticRenderableParts(
 		.flatMap((resource) => resource.parts)
 		.filter((part) => isStaticRenderablePartSelected(part, selection))
 		.flatMap((part) => {
-			if (
-				!isPreparedGfxObjAsset(assetState.preparedByAssetId[part.gfxObjAssetId])
-			) {
+			const gfxObjAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
+			if (!isPreparedGfxObjAsset(gfxObjAsset)) {
 				missingGfxAssetIds.add(part.gfxObjAssetId);
 				return [];
 			}
-			return [part];
+			const materialAppearance = resolveStaticRenderablePartMaterialAppearance(
+				assetState,
+				part,
+				gfxObjAsset.payload,
+			);
+			return [
+				{
+					...part,
+					materialAppearanceKey: materialAppearance.appearanceKey,
+					materialSlots: materialAppearance.slots,
+					materialSignature: describeMaterialSignature(
+						materialAppearance.appearanceKey,
+						materialAppearance.slots,
+					),
+				},
+			];
 		});
 }
 
@@ -592,14 +620,17 @@ function collectSummaryBuildingStaticRenderableParts(
 	missingGfxAssetIds: Set<string>,
 	cache: StaticRenderableResourceCache | null,
 ): StaticRenderablePart[] {
-	return collectSummaryBuildingSourceInstances(assetState, selection, cache).flatMap(
-		(instance) =>
-			expandStaticRenderableSourceInstanceParts(
-				instance,
-				assetState,
-				missingSourceAssetIds,
-				missingGfxAssetIds,
-			),
+	return collectSummaryBuildingSourceInstances(
+		assetState,
+		selection,
+		cache,
+	).flatMap((instance) =>
+		expandStaticRenderableSourceInstanceParts(
+			instance,
+			assetState,
+			missingSourceAssetIds,
+			missingGfxAssetIds,
+		),
 	);
 }
 
@@ -621,6 +652,8 @@ function expandStaticRenderableSourceInstanceParts(
 				partIndex: 0,
 				gfxObjId: sourceAsset.payload.gfxObjId,
 				gfxObjAssetId: instance.sourceAssetId,
+				materialAppearanceKey: "base",
+				materialSlots: resolveGfxObjMaterialSlots(sourceAsset.payload),
 				partPlacements: [],
 				scale: UNIT_SCALE,
 			}),
@@ -628,6 +661,10 @@ function expandStaticRenderableSourceInstanceParts(
 	}
 
 	if (isPreparedSetupModelAsset(sourceAsset)) {
+		const setupAppearance = resolveSetupAppearance(
+			assetState,
+			sourceAsset.payload,
+		);
 		return sourceAsset.payload.parts.flatMap((part) => {
 			if (
 				!isPreparedGfxObjAsset(assetState.preparedByAssetId[part.gfxObjAssetId])
@@ -641,6 +678,12 @@ function expandStaticRenderableSourceInstanceParts(
 					partIndex: part.partIndex,
 					gfxObjId: part.gfxObjId,
 					gfxObjAssetId: part.gfxObjAssetId,
+					materialAppearanceKey: setupAppearance?.appearanceKey ?? "setup-base",
+					materialSlots: resolveSetupPartMaterialSlots(
+						assetState,
+						part,
+						setupAppearance,
+					),
 					partPlacements: [],
 					scale: part.scale ?? UNIT_SCALE,
 				}),
@@ -672,9 +715,96 @@ function normalizePackStaticRenderablePart(
 		partIndex: mesh.partIndex,
 		gfxObjId: mesh.gfxObjId,
 		gfxObjAssetId: mesh.gfxObjAssetId,
+		materialAppearanceKey: "base",
+		materialSlots: [],
 		partPlacements: mesh.partPlacements,
 		scale: mesh.partScale,
 	});
+}
+
+function resolveGfxObjMaterialSlots(
+	gfxObj: PreparedGfxObjPayload,
+): ResolvedMaterialSlot[] {
+	return gfxObj.surfaceIds.map((surfaceId) => ({
+		surfaceId,
+		materialAssetId: formatMaterialAssetId(surfaceId),
+	}));
+}
+
+function resolveSetupAppearance(
+	assetState: AssetChannelState,
+	setupModel: PreparedSetupModelPayload,
+): PreparedSetupAppearancePayload | null {
+	const setupAppearanceAssetId =
+		setupModel.dependencies?.setupAppearanceAssetId ?? null;
+	if (!setupAppearanceAssetId) {
+		return null;
+	}
+	const asset = assetState.preparedByAssetId[setupAppearanceAssetId];
+	return asset?.payload.kind === "setup-appearance" ? asset.payload : null;
+}
+
+function resolveSetupPartMaterialSlots(
+	assetState: AssetChannelState,
+	part: PreparedSetupModelPayload["parts"][number],
+	setupAppearance: PreparedSetupAppearancePayload | null,
+): ResolvedMaterialSlot[] {
+	const appearancePart = setupAppearance?.parts.find(
+		(candidate) => candidate.partIndex === part.partIndex,
+	);
+	if (appearancePart) {
+		return appearancePart.materialSlots.map((slot) => ({
+			surfaceId: slot.surfaceId,
+			materialAssetId: slot.materialAssetId,
+		}));
+	}
+
+	const gfxObjAsset = assetState.preparedByAssetId[part.gfxObjAssetId];
+	return isPreparedGfxObjAsset(gfxObjAsset)
+		? resolveGfxObjMaterialSlots(gfxObjAsset.payload)
+		: [];
+}
+
+function resolveStaticRenderablePartMaterialAppearance(
+	assetState: AssetChannelState,
+	part: StaticRenderablePart,
+	gfxObj: PreparedGfxObjPayload,
+): { appearanceKey: string; slots: ResolvedMaterialSlot[] } {
+	const sourceAsset = assetState.preparedByAssetId[part.sourceAssetId];
+	if (isPreparedSetupModelAsset(sourceAsset)) {
+		const setupAppearance = resolveSetupAppearance(
+			assetState,
+			sourceAsset.payload,
+		);
+		const setupPart = sourceAsset.payload.parts.find(
+			(candidate) => candidate.partIndex === part.partIndex,
+		);
+		if (setupPart) {
+			return {
+				appearanceKey: setupAppearance?.appearanceKey ?? "setup-base",
+				slots: resolveSetupPartMaterialSlots(
+					assetState,
+					setupPart,
+					setupAppearance,
+				),
+			};
+		}
+	}
+
+	return {
+		appearanceKey: "base",
+		slots: resolveGfxObjMaterialSlots(gfxObj),
+	};
+}
+
+function describeMaterialSignature(
+	appearanceKey: string,
+	slots: readonly ResolvedMaterialSlot[],
+): string {
+	return [
+		appearanceKey,
+		...slots.map((slot) => `${slot.surfaceId}:${slot.materialAssetId}`).sort(),
+	].join(",");
 }
 
 function isPackStaticInstanceSelected(
@@ -799,10 +929,8 @@ function isLandblockPackPrepared(
 	assetState: AssetChannelState,
 	landblockId: number,
 ): boolean {
-	return (
-		isPreparedLandblockPackAsset(
-			assetState.preparedByAssetId[formatLandblockPackAssetId(landblockId)],
-		)
+	return isPreparedLandblockPackAsset(
+		assetState.preparedByAssetId[formatLandblockPackAssetId(landblockId)],
 	);
 }
 

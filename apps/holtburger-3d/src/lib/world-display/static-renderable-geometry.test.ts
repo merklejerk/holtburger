@@ -26,6 +26,9 @@ describe("static renderable geometry", () => {
 			partIndex: 0,
 			gfxObjId: 0x01000001,
 			gfxObjAssetId: "gfx-obj/01000001",
+			materialAppearanceKey: "base",
+			materialSlots: [],
+			materialSignature: "base",
 			parentPlacements: [],
 			chunkLocalInstancePlacement: createPlacement({ x: 24, y: 48, z: 6 }),
 			partPlacements: [],
@@ -59,6 +62,37 @@ describe("static renderable geometry", () => {
 		expect(geometry.getAttribute("position").array).toBe(positions);
 		expect(geometry.getAttribute("normal").array).toBe(normals);
 		expect(geometry.getAttribute("uv").array).toBe(uvs);
+	});
+
+	it("creates contiguous material groups from triangle surface ids", () => {
+		const geometry = buildGfxObjGeometry(
+			{
+				sourceId: 1,
+				vertexCount: 9,
+				triangleCount: 3,
+				positions: new Float32Array(27),
+				normals: new Float32Array(27),
+				uvs: new Float32Array(18),
+				triangles: [
+					{ polygonId: 0, surfaceId: 0x08000001, firstVertex: 0 },
+					{ polygonId: 1, surfaceId: 0x08000001, firstVertex: 3 },
+					{ polygonId: 2, surfaceId: 0x08000002, firstVertex: 6 },
+				],
+				surfaceIds: [0x08000001, 0x08000002],
+				invalidPolygons: [],
+				skippedPolygonCount: 0,
+				bounds: null,
+			},
+			[
+				{ surfaceId: 0x08000001, materialIndex: 0 },
+				{ surfaceId: 0x08000002, materialIndex: 1 },
+			],
+		);
+
+		expect(geometry.groups).toEqual([
+			{ start: 0, count: 6, materialIndex: 0 },
+			{ start: 6, count: 3, materialIndex: 1 },
+		]);
 	});
 });
 

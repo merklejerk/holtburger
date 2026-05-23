@@ -62,10 +62,15 @@ import {
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
 import {
+	WorldMaterialResourceCache,
+	formatMaterialAssetId,
+} from "./material-resources";
+import {
 	buildAcPlacementMatrix,
 	buildGfxObjGeometry,
 	buildStaticRenderableColor,
 	buildStaticRenderablePartMatrix,
+	type MaterialGeometrySlot,
 } from "./static-renderable-geometry";
 import type {
 	StructuredInteriorCell,
@@ -250,6 +255,7 @@ export function createWorldDisplayRenderer(
 	const portalAperturePassMeshes = new Map<string, Mesh>();
 
 	const scene = new Scene();
+	const materialResourceCache = new WorldMaterialResourceCache();
 
 	const camera = new PerspectiveCamera(52, 1, 0.1, 5000);
 
@@ -349,6 +355,10 @@ export function createWorldDisplayRenderer(
 	return {
 		setAssetState(nextAssetState) {
 			assetState = nextAssetState;
+			clearMaterializedSceneMeshes();
+			materialResourceCache.dispose();
+			syncStaticRenderableMeshes(staticRenderableScene);
+			syncStructuredInteriorMeshes(structuredInteriorScene);
 		},
 		setTerrainScene(nextScene) {
 			terrainScene = nextScene;
@@ -1329,11 +1339,7 @@ export function createWorldDisplayRenderer(
 		syncRenderChunkRoots(renderChunkTransforms);
 
 		const partsByGroupKey = sceneModel.partsByRenderDomainChunkAndGfxAssetId;
-		const activeGfxAssetIds = new Set(
-			[...partsByGroupKey.values()].flatMap((parts) =>
-				parts[0] ? [parts[0].gfxObjAssetId] : [],
-			),
-		);
+		const activeStaticGeometryKeys = new Set<string>();
 
 		for (const [groupKey, mesh] of staticRenderableGroupMeshes.entries()) {
 			const activeParts = partsByGroupKey.get(groupKey);
@@ -1356,10 +1362,23 @@ export function createWorldDisplayRenderer(
 				continue;
 			}
 			const gfxAssetId = firstPart.gfxObjAssetId;
-			const geometry = getStaticRenderableGeometry(gfxAssetId);
+			const materialPlan = materialResourceCache.resolveMaterialPlan({
+				slots: firstPart.materialSlots,
+				appearanceKey: firstPart.materialAppearanceKey,
+				preparedByAssetId: assetState.preparedByAssetId,
+				fallbackColorKey: firstPart.debugColorKey,
+			});
+			const geometry = getStaticRenderableGeometry(
+				gfxAssetId,
+				materialPlan.signature,
+				materialPlan.geometrySlots,
+			);
 			if (!geometry) {
 				continue;
 			}
+			activeStaticGeometryKeys.add(
+				formatStaticGeometryCacheKey(gfxAssetId, materialPlan.signature),
+			);
 
 			const chunkRoot = getRenderChunkRoot(firstPart.renderChunk.chunkKey);
 			let mesh = staticRenderableGroupMeshes.get(groupKey);
@@ -1368,6 +1387,7 @@ export function createWorldDisplayRenderer(
 					groupKey,
 					gfxAssetId,
 					geometry,
+					materialPlan.materials,
 					parts.length,
 				);
 				chunkRoot.add(mesh);
@@ -1381,7 +1401,9 @@ export function createWorldDisplayRenderer(
 				mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
 			}
 			const partsSignature = describeStaticRenderablePartsSignature(parts);
-			if (staticRenderableGroupPartSignatures.get(groupKey) !== partsSignature) {
+			if (
+				staticRenderableGroupPartSignatures.get(groupKey) !== partsSignature
+			) {
 				updateStaticRenderableInstancedMesh(mesh, parts);
 				staticRenderableGroupPartSignatures.set(groupKey, partsSignature);
 			} else {
@@ -1389,13 +1411,13 @@ export function createWorldDisplayRenderer(
 			}
 		}
 
-		for (const [gfxAssetId, geometry] of staticGeometryCache.entries()) {
-			if (activeGfxAssetIds.has(gfxAssetId)) {
+		for (const [geometryKey, geometry] of staticGeometryCache.entries()) {
+			if (activeStaticGeometryKeys.has(geometryKey)) {
 				continue;
 			}
 
 			geometry.dispose();
-			staticGeometryCache.delete(gfxAssetId);
+			staticGeometryCache.delete(geometryKey);
 		}
 
 		syncRenderChunkRoots(renderChunkTransforms);
@@ -1477,6 +1499,24 @@ export function createWorldDisplayRenderer(
 		updateCameraFrame();
 	}
 
+	function clearMaterializedSceneMeshes(): void {
+		for (const mesh of staticRenderableGroupMeshes.values()) {
+			mesh.removeFromParent();
+			disposeMeshMaterial(mesh);
+		}
+		staticRenderableGroupMeshes.clear();
+		staticRenderableGroupPartSignatures.clear();
+		for (const geometry of staticGeometryCache.values()) {
+			geometry.dispose();
+		}
+		staticGeometryCache.clear();
+		for (const mesh of structuredInteriorMeshes.values()) {
+			mesh.removeFromParent();
+			disposeMesh(mesh);
+		}
+		structuredInteriorMeshes.clear();
+	}
+
 	function syncPortalMaskMeshes(model: TransitionPortalCandidateModel): void {
 		syncRenderChunkRoots(renderChunkTransforms);
 
@@ -1512,7 +1552,8 @@ export function createWorldDisplayRenderer(
 				);
 			} else {
 				chunkRoot.attach(mesh);
-				const geometrySignature = describePortalMaskGeometrySignature(candidate);
+				const geometrySignature =
+					describePortalMaskGeometrySignature(candidate);
 				if (
 					portalMaskGeometrySignatures.get(candidate.id) !== geometrySignature
 				) {
@@ -1532,15 +1573,22 @@ export function createWorldDisplayRenderer(
 	function createStructuredInteriorCellMesh(
 		cell: StructuredInteriorCell,
 	): Mesh {
-		const geometry = buildGfxObjGeometry(cell.renderGeometry);
-		const material = new MeshStandardMaterial({
-			color: buildStaticRenderableColor(cell.debugColorKey),
-			flatShading: true,
-			metalness: 0.02,
-			roughness: 0.9,
+		const materialPlan = materialResourceCache.resolveMaterialPlan({
+			slots: cell.surfaceIds.map((surfaceId) => ({
+				surfaceId,
+				materialAssetId: formatMaterialAssetId(surfaceId),
+			})),
+			appearanceKey: "structured-interior",
+			preparedByAssetId: assetState.preparedByAssetId,
+			fallbackColorKey: cell.debugColorKey,
 		});
-		const mesh = new Mesh(geometry, material);
+		const geometry = buildGfxObjGeometry(
+			cell.renderGeometry,
+			materialPlan.geometrySlots,
+		);
+		const mesh = new Mesh(geometry, materialPlan.materials);
 		mesh.name = `structured-interior/${cell.renderKey}`;
+		mesh.userData.materialOwnedByResourceCache = true;
 		mesh.matrixAutoUpdate = false;
 		mesh.layers.set(WORLD_RENDER_LAYER.diagnosticInterior);
 		mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
@@ -2065,8 +2113,14 @@ export function createWorldDisplayRenderer(
 
 	function getStaticRenderableGeometry(
 		gfxAssetId: string,
+		materialSignature: string,
+		materialSlots: readonly MaterialGeometrySlot[],
 	): BufferGeometry | null {
-		const cachedGeometry = staticGeometryCache.get(gfxAssetId);
+		const geometryKey = formatStaticGeometryCacheKey(
+			gfxAssetId,
+			materialSignature,
+		);
+		const cachedGeometry = staticGeometryCache.get(geometryKey);
 		if (cachedGeometry) {
 			return cachedGeometry;
 		}
@@ -2079,31 +2133,37 @@ export function createWorldDisplayRenderer(
 			return null;
 		}
 
-		const geometry = buildGfxObjGeometry(asset.payload.renderGeometry);
-		staticGeometryCache.set(gfxAssetId, geometry);
+		const geometry = buildGfxObjGeometry(
+			asset.payload.renderGeometry,
+			materialSlots,
+		);
+		staticGeometryCache.set(geometryKey, geometry);
 		return geometry;
+	}
+
+	function formatStaticGeometryCacheKey(
+		gfxAssetId: string,
+		materialSignature: string,
+	): string {
+		return `${gfxAssetId}|${materialSignature}`;
 	}
 
 	function createStaticRenderableInstancedMesh(
 		groupKey: string,
 		gfxAssetId: string,
 		geometry: BufferGeometry,
+		materials: Material[],
 		count: number,
 	): InstancedMesh {
-		const material = new MeshStandardMaterial({
-			color: "#ffffff",
-			flatShading: true,
-			metalness: 0.02,
-			roughness: 0.88,
-		});
 		const mesh = new InstancedMesh(
 			geometry,
-			material,
+			materials,
 			nextStaticRenderableInstanceCapacity(count),
 		);
 		mesh.count = count;
 		mesh.name = `static-renderable/${groupKey}`;
 		mesh.userData.gfxAssetId = gfxAssetId;
+		mesh.userData.materialOwnedByResourceCache = true;
 		return mesh;
 	}
 
@@ -2114,7 +2174,7 @@ export function createWorldDisplayRenderer(
 		mesh.count = parts.length;
 		parts.forEach((part, index) => {
 			mesh.setMatrixAt(index, buildStaticRenderablePartMatrix(part));
-			mesh.setColorAt(index, buildStaticRenderableColor(part.debugColorKey));
+			mesh.setColorAt(index, new Color("#ffffff"));
 		});
 		mesh.instanceMatrix.needsUpdate = true;
 		if (mesh.instanceColor) {
@@ -2207,6 +2267,7 @@ export function createWorldDisplayRenderer(
 			disposeObjectTree(object);
 		}
 		debugOverlayObjects.clear();
+		materialResourceCache.dispose();
 		chunkRoots.clear();
 		chunkRootContainer.clear();
 		portalBatchMaskMaterial.dispose();
@@ -2396,6 +2457,9 @@ function createRenderDebugMetrics(
 }
 
 function disposeMeshMaterial(mesh: Mesh): void {
+	if (mesh.userData.materialOwnedByResourceCache === true) {
+		return;
+	}
 	const material = mesh.material;
 	if (Array.isArray(material)) {
 		for (const entry of material) {

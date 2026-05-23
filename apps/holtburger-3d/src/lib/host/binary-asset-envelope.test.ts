@@ -134,6 +134,41 @@ describe("decodeBinaryAssetEnvelope", () => {
 			1, 2, 3, 4, 5, 6,
 		]);
 	});
+
+	it("hydrates render-surface source bytes as a Uint8Array", () => {
+		const sourceBytes = new Uint8Array([0x11, 0x22, 0x33, 0x44]);
+		const response = decodeBinaryAssetEnvelope(
+			buildEnvelope({
+				response: {
+					requestId: "request-3",
+					assetId: "render-surface/06000001",
+					payloadKind: "json",
+					payload: {
+						kind: "render-surface",
+						sourceBytes: [],
+					},
+				},
+				sections: [
+					{
+						role: "renderSurface.sourceBytes",
+						path: "responses.0.payload.sourceBytes",
+						scalarType: "u8",
+						componentCount: 1,
+						elementCount: sourceBytes.byteLength,
+						byteOffset: 0,
+						byteLength: sourceBytes.byteLength,
+					},
+				],
+				sectionData: [sourceBytes],
+			}),
+		);
+
+		const payload = response.payload as { sourceBytes: unknown };
+		expect(payload.sourceBytes).toBeInstanceOf(Uint8Array);
+		expect(Array.from(payload.sourceBytes as Uint8Array)).toEqual([
+			0x11, 0x22, 0x33, 0x44,
+		]);
+	});
 });
 
 function buildEnvelope({

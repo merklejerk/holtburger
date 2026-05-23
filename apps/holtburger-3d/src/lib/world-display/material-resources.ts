@@ -1,4 +1,13 @@
-import { Color, MeshStandardMaterial, type Material } from "three";
+import {
+	Color,
+	DataTexture,
+	MeshStandardMaterial,
+	RGBAFormat,
+	SRGBColorSpace,
+	UnsignedByteType,
+	type Material,
+	type Texture,
+} from "three";
 
 import type {
 	PreparedAssetRecord,
@@ -11,6 +20,7 @@ import { formatHex32 } from "../landblocks";
 import type { MaterialGeometrySlot } from "./static-renderable-geometry";
 
 export interface ResolvedMaterialSlot {
+	slotIndex: number;
 	surfaceId: number;
 	materialAssetId: string;
 }
@@ -21,14 +31,55 @@ export interface MaterialResourcePlan {
 	geometrySlots: MaterialGeometrySlot[];
 }
 
+export interface MaterialResourceDiagnostic {
+	key: string;
+	message: string;
+	detail: Record<string, unknown>;
+}
+
+type MaterialResourceDiagnosticHandler = (
+	diagnostic: MaterialResourceDiagnostic,
+) => void;
+
 interface MaterialResourceRecord {
 	material: Material;
 }
 
+interface TextureResourceRecord {
+	texture: Texture;
+}
+
 const FALLBACK_MATERIAL_ASSET_ID = "material/fallback";
+const PIXEL_FORMAT_R8G8B8 = 0x14;
+const PIXEL_FORMAT_A8R8G8B8 = 0x15;
+const PIXEL_FORMAT_X8R8G8B8 = 0x16;
+const PIXEL_FORMAT_R5G6B5 = 0x17;
+const PIXEL_FORMAT_A4R4G4B4 = 0x1a;
+const PIXEL_FORMAT_A8 = 0x1c;
+const PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8 = 0xf3;
+const FULL_ALPHA = 255;
+const BYTE_MAX = 255;
+const R5G6B5_RED_SHIFT = 11;
+const R5G6B5_GREEN_SHIFT = 5;
+const R5G6B5_RED_MASK = 0x1f;
+const R5G6B5_GREEN_MASK = 0x3f;
+const R5G6B5_BLUE_MASK = 0x1f;
+const A4R4G4B4_ALPHA_SHIFT = 12;
+const A4R4G4B4_RED_SHIFT = 8;
+const A4R4G4B4_GREEN_SHIFT = 4;
+const A4R4G4B4_CHANNEL_MASK = 0x0f;
+const COLOR_HASH_MULTIPLIER = 31;
+const HUE_DEGREES = 360;
+const LEGACY_OPACITY_BYTE_SCALE = 255;
 
 export class WorldMaterialResourceCache {
 	private readonly materialRecords = new Map<string, MaterialResourceRecord>();
+	private readonly textureRecords = new Map<string, TextureResourceRecord>();
+	private readonly reportedDiagnosticKeys = new Set<string>();
+
+	constructor(
+		private readonly reportDiagnostic?: MaterialResourceDiagnosticHandler,
+	) {}
 
 	resolveMaterialPlan(options: {
 		slots: readonly ResolvedMaterialSlot[];
@@ -41,6 +92,7 @@ export class WorldMaterialResourceCache {
 				? dedupeMaterialSlots(options.slots)
 				: [
 						{
+							slotIndex: 0,
 							surfaceId: 0,
 							materialAssetId: FALLBACK_MATERIAL_ASSET_ID,
 						},
@@ -56,11 +108,14 @@ export class WorldMaterialResourceCache {
 		return {
 			signature: [
 				options.appearanceKey,
-				...slots.map((slot) => `${slot.surfaceId}:${slot.materialAssetId}`),
+				...slots.map(
+					(slot) =>
+						`${slot.slotIndex}:${slot.surfaceId}:${slot.materialAssetId}`,
+				),
 			].join("|"),
 			materials,
 			geometrySlots: slots.map((slot, index) => ({
-				surfaceId: slot.surfaceId,
+				surfaceId: slot.slotIndex + 1,
 				materialIndex: index,
 			})),
 		};
@@ -71,6 +126,10 @@ export class WorldMaterialResourceCache {
 			record.material.dispose();
 		}
 		this.materialRecords.clear();
+		for (const record of this.textureRecords.values()) {
+			record.texture.dispose();
+		}
+		this.textureRecords.clear();
 	}
 
 	private getMaterial(options: {
@@ -85,9 +144,41 @@ export class WorldMaterialResourceCache {
 			return cached.material;
 		}
 
-		const material = createMaterial(options);
+		const material = createMaterial({
+			...options,
+			resolveTexture: (renderSurface) => this.getTexture({ renderSurface }),
+			reportDiagnostic: (diagnostic) => this.reportOnce(diagnostic),
+		});
 		this.materialRecords.set(materialKey, { material });
 		return material;
+	}
+
+	getTexture(options: {
+		renderSurface: PreparedRenderSurfacePayload;
+	}): Texture | null {
+		const textureKey = describeRenderSurfaceDecodeKey(options.renderSurface);
+		const cached = this.textureRecords.get(textureKey);
+		if (cached) {
+			return cached.texture;
+		}
+
+		const texture = createTexture(options.renderSurface);
+		if (!texture) {
+			return null;
+		}
+		this.textureRecords.set(textureKey, { texture });
+		return texture;
+	}
+
+	private reportOnce(diagnostic: MaterialResourceDiagnostic): void {
+		if (
+			!this.reportDiagnostic ||
+			this.reportedDiagnosticKeys.has(diagnostic.key)
+		) {
+			return;
+		}
+		this.reportedDiagnosticKeys.add(diagnostic.key);
+		this.reportDiagnostic(diagnostic);
 	}
 }
 
@@ -98,12 +189,12 @@ export function formatMaterialAssetId(surfaceId: number): string {
 function dedupeMaterialSlots(
 	slots: readonly ResolvedMaterialSlot[],
 ): ResolvedMaterialSlot[] {
-	const slotBySurfaceId = new Map<number, ResolvedMaterialSlot>();
+	const slotByIndex = new Map<number, ResolvedMaterialSlot>();
 	for (const slot of slots) {
-		slotBySurfaceId.set(slot.surfaceId, slot);
+		slotByIndex.set(slot.slotIndex, slot);
 	}
-	return [...slotBySurfaceId.values()].sort(
-		(left, right) => left.surfaceId - right.surfaceId,
+	return [...slotByIndex.values()].sort(
+		(left, right) => left.slotIndex - right.slotIndex,
 	);
 }
 
@@ -111,13 +202,45 @@ function createMaterial(options: {
 	materialAssetId: string;
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 	fallbackColorKey: string;
+	resolveTexture: (
+		renderSurface: PreparedRenderSurfacePayload,
+	) => Texture | null;
+	reportDiagnostic: MaterialResourceDiagnosticHandler;
 }): Material {
 	const recipeAsset = options.preparedByAssetId[options.materialAssetId];
 	if (recipeAsset?.payload.kind !== "material-recipe") {
+		options.reportDiagnostic({
+			key: `missing-recipe:${options.materialAssetId}`,
+			message: `Using fallback material because ${options.materialAssetId} is not prepared as a material recipe.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				preparedKind: recipeAsset?.payload.kind ?? null,
+				preparedAssetCounts: countPreparedAssetsByKind(
+					options.preparedByAssetId,
+				),
+				preparedMaterialRecipeCount: countPreparedMaterialRecipes(
+					options.preparedByAssetId,
+				),
+				preparedMaterialAssetIdSamples: samplePreparedMaterialAssetIds(
+					options.preparedByAssetId,
+				),
+			},
+		});
 		return createDebugFallbackMaterial(options.fallbackColorKey);
 	}
 
 	const recipe = recipeAsset.payload;
+	if (recipe.provenance.errorCode !== null) {
+		options.reportDiagnostic({
+			key: `failed-recipe:${options.materialAssetId}:${recipe.provenance.errorCode}`,
+			message: `Using fallback material because ${options.materialAssetId} failed to resolve.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				errorCode: recipe.provenance.errorCode,
+				detail: recipe.provenance.detail,
+			},
+		});
+	}
 	if (recipe.source.kind === "solid-color") {
 		return new MeshStandardMaterial({
 			color: colorFromArgb(recipe.source.argb),
@@ -133,11 +256,36 @@ function createMaterial(options: {
 		recipe,
 		options.preparedByAssetId,
 	);
-	const renderSurface = firstPreparedRenderSurface(
+	const renderSurface = firstSupportedPreparedRenderSurface(
 		recipe,
 		options.preparedByAssetId,
 	);
 	const palette = firstPreparedPalette(recipe, options.preparedByAssetId);
+	const texture = renderSurface ? options.resolveTexture(renderSurface) : null;
+	if (texture && renderSurface) {
+		const opacity = normalizeLegacyOpacity(recipe.translucency);
+		return new MeshStandardMaterial({
+			color: "#ffffff",
+			map: texture,
+			flatShading: true,
+			metalness: 0.02,
+			roughness: 0.88,
+			transparent: opacity < 1 || hasSourceAlpha(renderSurface.formatRaw),
+			opacity,
+		});
+	}
+
+	reportTextureFallbackDiagnostics({
+		recipe,
+		materialAssetId: options.materialAssetId,
+		preparedByAssetId: options.preparedByAssetId,
+		renderTexture,
+		renderSurface,
+		palette,
+		texture,
+		reportDiagnostic: options.reportDiagnostic,
+	});
+
 	const color = buildTexturePlaceholderColor(recipe, {
 		renderTexture,
 		renderSurface,
@@ -153,6 +301,121 @@ function createMaterial(options: {
 	});
 }
 
+function reportTextureFallbackDiagnostics(options: {
+	recipe: PreparedMaterialRecipePayload;
+	materialAssetId: string;
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
+	renderTexture: PreparedRenderTexturePayload | null;
+	renderSurface: PreparedRenderSurfacePayload | null;
+	palette: PreparedPalettePayload | null;
+	texture: Texture | null;
+	reportDiagnostic: MaterialResourceDiagnosticHandler;
+}): void {
+	for (const assetId of options.recipe.dependencies.renderTextureAssetIds) {
+		const asset = options.preparedByAssetId[assetId];
+		if (asset?.payload.kind !== "render-texture") {
+			options.reportDiagnostic({
+				key: `missing-render-texture:${options.materialAssetId}:${assetId}`,
+				message: `Using placeholder material because ${options.materialAssetId} is missing render texture ${assetId}.`,
+				detail: {
+					materialAssetId: options.materialAssetId,
+					renderTextureAssetId: assetId,
+					preparedKind: asset?.payload.kind ?? null,
+				},
+			});
+		}
+	}
+
+	const renderSurfaceAssetIds = textureCandidateRenderSurfaceAssetIds(
+		options.recipe,
+	);
+	for (const assetId of renderSurfaceAssetIds) {
+		const asset = options.preparedByAssetId[assetId];
+		if (asset?.payload.kind !== "render-surface") {
+			options.reportDiagnostic({
+				key: `missing-render-surface:${options.materialAssetId}:${assetId}`,
+				message: `Using placeholder material because ${options.materialAssetId} is missing render surface ${assetId}.`,
+				detail: {
+					materialAssetId: options.materialAssetId,
+					renderSurfaceAssetId: assetId,
+					preparedKind: asset?.payload.kind ?? null,
+				},
+			});
+			continue;
+		}
+		if (!isSupportedDirectColorFormat(asset.payload.formatRaw)) {
+			options.reportDiagnostic({
+				key: `unsupported-render-surface:${options.materialAssetId}:${assetId}:${asset.payload.formatRaw}`,
+				message: `Using placeholder material because ${assetId} uses unsupported format ${asset.payload.format}.`,
+				detail: {
+					materialAssetId: options.materialAssetId,
+					renderSurfaceAssetId: assetId,
+					format: asset.payload.format,
+					formatRaw: asset.payload.formatRaw,
+				},
+			});
+		}
+	}
+
+	for (const assetId of options.recipe.dependencies.paletteAssetIds) {
+		const asset = options.preparedByAssetId[assetId];
+		if (asset?.payload.kind !== "palette") {
+			options.reportDiagnostic({
+				key: `missing-palette:${options.materialAssetId}:${assetId}`,
+				message: `Material ${options.materialAssetId} references missing palette ${assetId}.`,
+				detail: {
+					materialAssetId: options.materialAssetId,
+					paletteAssetId: assetId,
+					preparedKind: asset?.payload.kind ?? null,
+				},
+			});
+		}
+	}
+
+	if (options.renderSurface && !options.texture) {
+		options.reportDiagnostic({
+			key: `texture-upload-failed:${options.materialAssetId}:${options.renderSurface.renderSurfaceId}`,
+			message: `Using placeholder material because ${formatRenderSurfaceAssetId(options.renderSurface.renderSurfaceId)} could not be uploaded as a texture.`,
+			detail: {
+				materialAssetId: options.materialAssetId,
+				renderSurfaceId: formatHex32(options.renderSurface.renderSurfaceId),
+				format: options.renderSurface.format,
+				formatRaw: options.renderSurface.formatRaw,
+				width: options.renderSurface.width,
+				height: options.renderSurface.height,
+				sourceByteLength: options.renderSurface.sourceByteLength,
+			},
+		});
+	}
+}
+
+function countPreparedAssetsByKind(
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const asset of Object.values(preparedByAssetId)) {
+		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function countPreparedMaterialRecipes(
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): number {
+	return Object.values(preparedByAssetId).filter(
+		(asset) => asset.payload.kind === "material-recipe",
+	).length;
+}
+
+function samplePreparedMaterialAssetIds(
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): string[] {
+	return Object.keys(preparedByAssetId)
+		.filter((assetId) => assetId.startsWith("material/"))
+		.sort()
+		.slice(0, 12);
+}
+
 function firstPreparedRenderTexture(
 	recipe: PreparedMaterialRecipePayload,
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
@@ -166,17 +429,229 @@ function firstPreparedRenderTexture(
 	return null;
 }
 
-function firstPreparedRenderSurface(
+function firstSupportedPreparedRenderSurface(
 	recipe: PreparedMaterialRecipePayload,
 	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
 ): PreparedRenderSurfacePayload | null {
-	for (const assetId of recipe.dependencies.renderSurfaceAssetIds) {
+	const assetIds = textureCandidateRenderSurfaceAssetIds(recipe);
+	for (const assetId of assetIds) {
 		const asset = preparedByAssetId[assetId];
-		if (asset?.payload.kind === "render-surface") {
+		if (
+			asset?.payload.kind === "render-surface" &&
+			isSupportedDirectColorFormat(asset.payload.formatRaw)
+		) {
 			return asset.payload;
 		}
 	}
 	return null;
+}
+
+function textureCandidateRenderSurfaceAssetIds(
+	recipe: PreparedMaterialRecipePayload,
+): string[] {
+	return recipe.source.kind === "texture"
+		? recipe.source.renderSurfaceIds.map(formatRenderSurfaceAssetId)
+		: recipe.dependencies.renderSurfaceAssetIds;
+}
+
+function formatRenderSurfaceAssetId(renderSurfaceId: number): string {
+	return `render-surface/${formatHex32(renderSurfaceId)}`;
+}
+
+function createTexture(
+	renderSurface: PreparedRenderSurfacePayload,
+): Texture | null {
+	if (!isSupportedDirectColorFormat(renderSurface.formatRaw)) {
+		return null;
+	}
+	const rgba = decodeDirectColorRenderSurface(renderSurface);
+	const texture = new DataTexture(
+		rgba,
+		renderSurface.width,
+		renderSurface.height,
+		RGBAFormat,
+		UnsignedByteType,
+	);
+	texture.colorSpace = SRGBColorSpace;
+	texture.needsUpdate = true;
+	return texture;
+}
+
+function decodeDirectColorRenderSurface(
+	renderSurface: PreparedRenderSurfacePayload,
+): Uint8Array {
+	const pixelCount = assertValidSurfaceDimensions(renderSurface);
+	const expectedByteLength = expectedDirectColorSourceByteLength(renderSurface);
+	if (renderSurface.sourceBytes.byteLength !== expectedByteLength) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} ${renderSurface.format} expected ${expectedByteLength} source bytes, got ${renderSurface.sourceBytes.byteLength}.`,
+		);
+	}
+	if (renderSurface.sourceByteLength !== renderSurface.sourceBytes.byteLength) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} declared ${renderSurface.sourceByteLength} source bytes but binary payload carried ${renderSurface.sourceBytes.byteLength}.`,
+		);
+	}
+
+	const rgba = new Uint8Array(pixelCount * 4);
+	const source = renderSurface.sourceBytes;
+	switch (renderSurface.formatRaw) {
+		case PIXEL_FORMAT_R8G8B8:
+		case PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8:
+			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+				const sourceOffset = pixel * 3;
+				const targetOffset = pixel * 4;
+				rgba[targetOffset] = source[sourceOffset] ?? 0;
+				rgba[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
+				rgba[targetOffset + 2] = source[sourceOffset + 2] ?? 0;
+				rgba[targetOffset + 3] = FULL_ALPHA;
+			}
+			return rgba;
+		case PIXEL_FORMAT_A8R8G8B8:
+		case PIXEL_FORMAT_X8R8G8B8:
+			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+				const sourceOffset = pixel * 4;
+				const targetOffset = pixel * 4;
+				rgba[targetOffset] = source[sourceOffset + 2] ?? 0;
+				rgba[targetOffset + 1] = source[sourceOffset + 1] ?? 0;
+				rgba[targetOffset + 2] = source[sourceOffset] ?? 0;
+				rgba[targetOffset + 3] =
+					renderSurface.formatRaw === PIXEL_FORMAT_A8R8G8B8
+						? (source[sourceOffset + 3] ?? FULL_ALPHA)
+						: FULL_ALPHA;
+			}
+			return rgba;
+		case PIXEL_FORMAT_R5G6B5:
+			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+				const sourceOffset = pixel * 2;
+				const targetOffset = pixel * 4;
+				const value =
+					(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
+				rgba[targetOffset] = scaleBitsToByte(
+					(value >> R5G6B5_RED_SHIFT) & R5G6B5_RED_MASK,
+					5,
+				);
+				rgba[targetOffset + 1] = scaleBitsToByte(
+					(value >> R5G6B5_GREEN_SHIFT) & R5G6B5_GREEN_MASK,
+					6,
+				);
+				rgba[targetOffset + 2] = scaleBitsToByte(value & R5G6B5_BLUE_MASK, 5);
+				rgba[targetOffset + 3] = FULL_ALPHA;
+			}
+			return rgba;
+		case PIXEL_FORMAT_A4R4G4B4:
+			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+				const sourceOffset = pixel * 2;
+				const targetOffset = pixel * 4;
+				const value =
+					(source[sourceOffset] ?? 0) | ((source[sourceOffset + 1] ?? 0) << 8);
+				rgba[targetOffset] = scaleBitsToByte(
+					(value >> A4R4G4B4_RED_SHIFT) & A4R4G4B4_CHANNEL_MASK,
+					4,
+				);
+				rgba[targetOffset + 1] = scaleBitsToByte(
+					(value >> A4R4G4B4_GREEN_SHIFT) & A4R4G4B4_CHANNEL_MASK,
+					4,
+				);
+				rgba[targetOffset + 2] = scaleBitsToByte(
+					value & A4R4G4B4_CHANNEL_MASK,
+					4,
+				);
+				rgba[targetOffset + 3] = scaleBitsToByte(
+					(value >> A4R4G4B4_ALPHA_SHIFT) & A4R4G4B4_CHANNEL_MASK,
+					4,
+				);
+			}
+			return rgba;
+		case PIXEL_FORMAT_A8:
+			for (let pixel = 0; pixel < pixelCount; pixel += 1) {
+				const targetOffset = pixel * 4;
+				const value = source[pixel] ?? 0;
+				rgba[targetOffset] = value;
+				rgba[targetOffset + 1] = value;
+				rgba[targetOffset + 2] = value;
+				rgba[targetOffset + 3] = FULL_ALPHA;
+			}
+			return rgba;
+		default:
+			throw new Error(
+				`Unsupported direct-color RenderSurface format ${renderSurface.formatRaw}.`,
+			);
+	}
+}
+
+function assertValidSurfaceDimensions(
+	renderSurface: PreparedRenderSurfacePayload,
+): number {
+	if (renderSurface.width <= 0 || renderSurface.height <= 0) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} has invalid dimensions ${renderSurface.width}x${renderSurface.height}.`,
+		);
+	}
+	const pixelCount = renderSurface.width * renderSurface.height;
+	if (!Number.isSafeInteger(pixelCount)) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} dimensions are too large.`,
+		);
+	}
+	return pixelCount;
+}
+
+function expectedDirectColorSourceByteLength(
+	renderSurface: PreparedRenderSurfacePayload,
+): number {
+	const bytesPerPixel = directColorBytesPerPixel(renderSurface.formatRaw);
+	if (bytesPerPixel === null) {
+		throw new Error(
+			`RenderSurface ${formatHex32(renderSurface.renderSurfaceId)} format ${renderSurface.format} is not a direct-color upload format.`,
+		);
+	}
+	return renderSurface.width * renderSurface.height * bytesPerPixel;
+}
+
+function directColorBytesPerPixel(formatRaw: number): number | null {
+	switch (formatRaw) {
+		case PIXEL_FORMAT_R8G8B8:
+		case PIXEL_FORMAT_CUSTOM_LANDSCAPE_R8G8B8:
+			return 3;
+		case PIXEL_FORMAT_A8R8G8B8:
+		case PIXEL_FORMAT_X8R8G8B8:
+			return 4;
+		case PIXEL_FORMAT_R5G6B5:
+		case PIXEL_FORMAT_A4R4G4B4:
+			return 2;
+		case PIXEL_FORMAT_A8:
+			return 1;
+		default:
+			return null;
+	}
+}
+
+function isSupportedDirectColorFormat(formatRaw: number): boolean {
+	return directColorBytesPerPixel(formatRaw) !== null;
+}
+
+function hasSourceAlpha(formatRaw: number): boolean {
+	return (
+		formatRaw === PIXEL_FORMAT_A8R8G8B8 || formatRaw === PIXEL_FORMAT_A4R4G4B4
+	);
+}
+
+function scaleBitsToByte(value: number, bitCount: number): number {
+	const maxValue = (1 << bitCount) - 1;
+	return Math.round((value / maxValue) * 255);
+}
+
+function describeRenderSurfaceDecodeKey(
+	renderSurface: PreparedRenderSurfacePayload,
+): string {
+	return [
+		renderSurface.renderSurfaceId,
+		renderSurface.formatRaw,
+		renderSurface.width,
+		renderSurface.height,
+		renderSurface.sourceByteLength,
+	].join(":");
 }
 
 function firstPreparedPalette(
@@ -222,12 +697,14 @@ function colorFromArgb(argb: number): Color {
 	const red = (argb >>> 16) & 0xff;
 	const green = (argb >>> 8) & 0xff;
 	const blue = argb & 0xff;
-	return new Color(red / 255, green / 255, blue / 255);
+	return new Color(red / BYTE_MAX, green / BYTE_MAX, blue / BYTE_MAX);
 }
 
 function normalizeLegacyOpacity(translucency: number): number {
 	const normalized =
-		translucency > 1 ? 1 - Math.min(translucency, 255) / 255 : 1 - translucency;
+		translucency > 1
+			? 1 - Math.min(translucency, LEGACY_OPACITY_BYTE_SCALE) / BYTE_MAX
+			: 1 - translucency;
 	return Math.max(0, Math.min(1, normalized));
 }
 
@@ -238,7 +715,11 @@ function colorFromString(
 ): Color {
 	let hash = 0;
 	for (let index = 0; index < value.length; index += 1) {
-		hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+		hash = (hash * COLOR_HASH_MULTIPLIER + value.charCodeAt(index)) >>> 0;
 	}
-	return new Color().setHSL((hash % 360) / 360, saturation, lightness);
+	return new Color().setHSL(
+		(hash % HUE_DEGREES) / HUE_DEGREES,
+		saturation,
+		lightness,
+	);
 }

@@ -700,6 +700,7 @@ export const renderSurfacePayloadDtoSchema = z.object({
 	formatRaw: z.number().int().nonnegative(),
 	format: z.string().min(1),
 	sourceByteLength: z.number().int().nonnegative(),
+	sourceBytes: z.instanceof(Uint8Array),
 	defaultPaletteId: z.number().int().nonnegative().nullable(),
 	dependencies: z.object({
 		paletteAssetIds: z.array(z.string().min(1)),

@@ -577,6 +577,7 @@ export interface PreparedRenderSurfacePayload extends PreparedAssetPayloadBase {
 	formatRaw: number;
 	format: string;
 	sourceByteLength: number;
+	sourceBytes: Uint8Array;
 	defaultPaletteId: number | null;
 	dependencies: {
 		paletteAssetIds: string[];

@@ -6,6 +6,7 @@ import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
 	classifyAssetHydration,
 	isSceneCoverageAssetId,
+	isStaticRenderableAssetId,
 } from "./asset-hydration-policy";
 import type { AssetGraphPreparationResult } from "./asset-graph-scheduler";
 import {
@@ -16,6 +17,8 @@ import {
 import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
+	deriveVisibleMaterialAssetIdsForBrowserDestination,
+	type OutdoorSceneRequestOptions,
 } from "./scene-asset-request-planner";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 
@@ -161,6 +164,27 @@ export class SceneAssetStreamingController {
 			inFlightAssetIds: [...this.inFlightAssetIds],
 			requestAssetIds: requests.map((request) => request.assetId),
 		});
+		reportMaterialGraphRequests({
+			priority,
+			requestRevision: this.requestRevision,
+			requests,
+			preparedByAssetId,
+			inFlightAssetIds: [...this.inFlightAssetIds],
+		});
+		reportMaterialPlannerMismatch({
+			priority,
+			requestRevision: this.requestRevision,
+			browserDestination: input.browserDestination,
+			preparedByAssetId,
+			pendingAssetIds: [...this.inFlightAssetIds],
+			requests,
+			options: {
+				terrainRadius: input.terrainLodRadius,
+				buildingRadius: input.buildingLodRadius,
+				detailRadius: input.detailLodRadius,
+				envCellRadius: input.envCellLodRadius,
+			},
+		});
 
 		if (requests.length === 0) {
 			this.prunePreparedCache(input);
@@ -224,8 +248,8 @@ export class SceneAssetStreamingController {
 	private async prepareAndApplyRequest(
 		request: AssetLookupRequestDto,
 	): Promise<void> {
+		const hydrationKind = classifyAssetHydration(request.assetId);
 		try {
-			const hydrationKind = classifyAssetHydration(request.assetId);
 			const preparedAssets =
 				hydrationKind === "direct"
 					? [await this.deps.assetChannel.prepareAsset(request)]
@@ -243,7 +267,17 @@ export class SceneAssetStreamingController {
 			this.deps.applyPreparedAssets(preparedAssets);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.deps.debugLog("asset-error", { request, message });
+			const detail = {
+				request,
+				hydrationKind,
+				message,
+				preparedAssetCounts: countPreparedAssetsByKind(
+					this.deps.getPreparedByAssetId(),
+				),
+				inFlightAssetIds: [...this.inFlightAssetIds],
+			};
+			console.error("[holtburger-3d][asset-graph]", detail);
+			this.deps.debugLog("asset-error", detail);
 			if (!this.disposed) {
 				this.deps.applyAssetError(request, message);
 			}
@@ -253,9 +287,88 @@ export class SceneAssetStreamingController {
 	}
 }
 
+function countPreparedAssetsByKind(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): Record<string, number> {
+	const counts: Record<string, number> = {};
+	for (const asset of Object.values(preparedByAssetId)) {
+		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
+	}
+	return counts;
+}
+
+function reportMaterialGraphRequests(options: {
+	priority: AssetPriority;
+	requestRevision: number;
+	requests: readonly AssetLookupRequestDto[];
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	inFlightAssetIds: string[];
+}): void {
+	const materialRequests = options.requests.filter((request) =>
+		request.assetId.startsWith("material/"),
+	);
+	if (materialRequests.length === 0) {
+		return;
+	}
+
+	console.error("[holtburger-3d][asset-graph][material-requested]", {
+		priority: options.priority,
+		requestRevision: options.requestRevision,
+		requestCount: materialRequests.length,
+		requestAssetIds: materialRequests
+			.map((request) => request.assetId)
+			.slice(0, 32),
+		preparedAssetCounts: countPreparedAssetsByKind(options.preparedByAssetId),
+		inFlightMaterialAssetIds: options.inFlightAssetIds
+			.filter((assetId) => assetId.startsWith("material/"))
+			.slice(0, 32),
+	});
+}
+
+function reportMaterialPlannerMismatch(options: {
+	priority: AssetPriority;
+	requestRevision: number;
+	browserDestination: SceneAssetStreamingInput["browserDestination"];
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	pendingAssetIds: string[];
+	requests: readonly AssetLookupRequestDto[];
+	options: OutdoorSceneRequestOptions;
+}): void {
+	const materialRequests = options.requests.filter((request) =>
+		request.assetId.startsWith("material/"),
+	);
+	if (materialRequests.length > 0) {
+		return;
+	}
+
+	const visibleMaterialAssetIds = deriveVisibleMaterialAssetIdsForBrowserDestination({
+		browserDestination: options.browserDestination,
+		preparedByAssetId: options.preparedByAssetId,
+		pendingAssetIds: options.pendingAssetIds,
+		options: options.options,
+	});
+	if (visibleMaterialAssetIds.length === 0) {
+		return;
+	}
+
+	console.error("[holtburger-3d][asset-planner][material-mismatch]", {
+		priority: options.priority,
+		requestRevision: options.requestRevision,
+		visibleMaterialAssetIds: visibleMaterialAssetIds.slice(0, 64),
+		visibleMaterialCount: visibleMaterialAssetIds.length,
+		preparedAssetCounts: countPreparedAssetsByKind(options.preparedByAssetId),
+		pendingMaterialAssetIds: options.pendingAssetIds
+			.filter((assetId) => assetId.startsWith("material/"))
+			.slice(0, 64),
+	});
+}
+
 function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
-	const preparedSceneAssetKey = Object.keys(input.preparedByAssetId)
-		.filter(isSceneCoverageAssetId)
+	const preparedPlanningAssetKey = Object.keys(input.preparedByAssetId)
+		.filter(
+			(assetId) =>
+				isSceneCoverageAssetId(assetId) || isStaticRenderableAssetId(assetId),
+		)
 		.sort()
 		.join(",");
 	const destination = input.browserDestination;
@@ -264,7 +377,7 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 		`buildings-${input.buildingLodRadius}`,
 		`detail-${input.detailLodRadius}`,
 		`env-cells-${input.envCellLodRadius}`,
-		`prepared-${preparedSceneAssetKey}`,
+		`prepared-${preparedPlanningAssetKey}`,
 	].join(":");
 
 	const destinationIdentity = describeBrowserDestinationIdentity(destination);

@@ -804,8 +804,8 @@ until a visible asset needs it.
 Status: **implemented for archive-level capability and current visual
 source-to-`CSurface` references**.
 
-The implemented phase 0 path lives in `holtburger-content` and is surfaced by
-the `holtburger-3d` host startup:
+The implemented phase 0 path lives in `holtburger-content` and is available as
+an explicit diagnostic:
 
 - count available `CSurface`, `RenderTexture`, `RenderSurface`, `Palette`, and
   `ClothingTable` records;
@@ -828,9 +828,14 @@ the DAT structs exist.
 Course correction: the capability report belongs in `holtburger-content`, not
 inside the Three.js renderer. The content repository already owns mounted HBA
 indexes and resource lookup behavior, so it can produce the same report for the
-browser app, debug harnesses, and future client frontends. The Tauri adapter
-currently logs the report on startup; a later host-contract phase can expose it
-as a typed frontend diagnostic if the UI needs it.
+browser app, debug harnesses, and future client frontends.
+
+Course correction: the Tauri adapter must not run the material capability report
+on normal startup. Once phase 4.1 expanded the report to validate the deep
+`CSurface -> RenderTexture -> RenderSurface -> Palette` chain, the report became
+a full archive/material dependency scan. It is still useful as an explicit
+diagnostic, but running it before the window appears makes app launch
+unacceptably slow.
 
 For normal 3D development, add or use an HBA profile that preserves visual data
 and the material stack; do not rely on the logic-only or micro profiles.
@@ -1064,37 +1069,48 @@ placeholder materials with direct-color texture materials.
 
 ### Phase 4.1: render-surface binary payload and direct-color texture upload
 
-Add the missing contract between the phase 3 material manifests and the phase
-4 renderer material cache. This step should be narrow and should not try to
-solve indexed palettes, clothing, or terrain blending.
+Status: **implemented for binary render-surface source bytes and uncompressed
+direct-color texture upload.**
+
+This phase added the missing contract between the phase 3 material manifests
+and the phase 4 renderer material cache. It intentionally stayed narrow and
+did not try to solve indexed palettes, clothing, or terrain blending.
 
 Host and worker responsibilities:
 
-- extend binary asset lookup for `render-surface/{surface_did}` while retaining
-  the existing JSON render-surface metadata payload;
-- attach the raw `RenderSurface` source bytes through the binary asset envelope
-  using a compact typed section instead of base64-in-JSON;
-- keep `render-texture/{texture_did}` as a manifest that points at
-  render-surface payloads; do not duplicate mip bytes into the render-texture
-  payload;
-- preserve `formatRaw`, normalized format label, dimensions, default palette ID,
-  and source byte length in the JSON payload so unsupported formats can be
-  diagnosed without reading GPU resources;
-- fail hard on malformed dimensions, byte lengths, or unsupported envelope
-  scalar/section shapes rather than silently creating broken textures.
+- binary asset lookup now includes `render-surface/{surface_did}`;
+- the binary envelope supports a `u8` scalar section type;
+- render-surface binary responses keep the JSON metadata payload and hydrate a
+  `sourceBytes: Uint8Array` field from a `renderSurface.sourceBytes` binary
+  section;
+- `render-texture/{texture_did}` remains a manifest that points at
+  render-surface payloads; mip bytes are not duplicated there;
+- `formatRaw`, normalized format label, dimensions, default palette ID, source
+  byte length, and palette dependencies remain in JSON metadata;
+- malformed binary envelope section shapes still fail in the envelope decoder.
 
 Renderer responsibilities:
 
-- add `Texture` ownership to `WorldMaterialResourceCache`;
-- cache decoded/uploaded textures by render-surface ID plus decode parameters;
-- decode and upload direct-color formats first, starting with the formats
-  present in current archived material dependencies;
-- choose the first supported render-surface mip for a texture recipe, then keep
-  the remaining mip IDs available for later mip-policy work;
-- replace metadata-only texture placeholders with `MeshStandardMaterial.map`
-  when a supported direct-color texture is resident;
-- keep explicit fallback materials for missing, indexed, compressed, or
-  unsupported render-surface formats.
+- `WorldMaterialResourceCache` now owns cached Three.js `Texture` resources
+  alongside `Material` resources;
+- textures are cached by render-surface ID, format, dimensions, and source byte
+  length;
+- direct-color decode/upload supports `R8G8B8`, `A8R8G8B8`, `X8R8G8B8`,
+  `R5G6B5`, `A4R4G4B4`, `A8`, and custom landscape `R8G8B8`;
+- texture recipes choose the first supported render-surface ID in recipe order;
+- supported direct-color textures are uploaded as RGBA `DataTexture`s and bound
+  as `MeshStandardMaterial.map`;
+- missing, indexed, compressed, and unsupported render-surface formats still use
+  explicit fallback/placeholder materials.
+
+Validation and failure behavior:
+
+- direct-color uploads fail hard on invalid dimensions, source byte length
+  mismatches, or binary payload length mismatches;
+- unsupported texture formats do not crash rendering and remain visible through
+  deterministic placeholder materials;
+- render-surface JSON payloads without hydrated `sourceBytes` do not satisfy the
+  frontend contract.
 
 Out of scope for phase 4.1:
 
@@ -1106,6 +1122,29 @@ Out of scope for phase 4.1:
 Course correction: this phase exists because the phase 4 implementation proved
 that real texture upload cannot be done honestly from metadata-only
 render-surface payloads. It is a contract step, not a detour.
+
+Decision: render-surface payloads are now binary-only in the active app lookup
+path. The JSON command can still produce metadata for diagnostics, but the
+frontend schema requires hydrated `sourceBytes`, so material rendering must use
+the binary lookup route for render surfaces.
+
+Course correction: static renderable geometry must not wait for the full
+material dependency graph. After direct-color texture upload landed, graph
+hydrating every `GfxObj` through material -> render-texture -> render-surface
+made startup much slower and delayed visible static/building geometry. `GfxObj`
+and setup-model assets are now direct hydration assets; material/render-surface
+dependencies should be fetched by a separate material warmup path and fall back
+visibly when unavailable.
+
+Course correction: polygon render triangles carry local one-based surface slot
+IDs, while material recipes use full `CSurface` DIDs. Renderer geometry groups
+must match against `slotIndex + 1`, not the full material DID, or whole meshes
+can accidentally bind to the first material slot.
+
+Course correction: `A8` is uploaded as grayscale RGB with full alpha for now,
+matching the existing ACViewer-style image conversion. Terrain alpha maps and
+clip/alpha-mask semantics remain terrain/indexed-material work, not general
+static-material work.
 
 Refinement for phase 5: after phase 4.1, batching work should stay limited to
 cases where material recipe, selected texture, and appearance key are identical.

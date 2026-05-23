@@ -801,17 +801,39 @@ until a visible asset needs it.
 
 ### Phase 0: archive capability and diagnostics
 
-Add a lightweight material capability report to the HBA/content startup path:
+Status: **implemented for archive-level capability and current visual
+source-to-`CSurface` references**.
+
+The implemented phase 0 path lives in `holtburger-content` and is surfaced by
+the `holtburger-3d` host startup:
 
 - count available `CSurface`, `RenderTexture`, `RenderSurface`, `Palette`, and
   `ClothingTable` records;
-- report whether any referenced material dependency is missing;
-- report whether visual source records used by the 3D client are pruned.
+- report whether visual source records used by the 3D client are pruned;
+- parse available `GfxObj` and `EnvCell` visual source records only far enough
+  to collect referenced `CSurface` IDs;
+- report referenced `CSurface` IDs as available, pruned, or missing;
+- mark the archive material-complete only when all tracked legacy material
+  record classes are present and unpruned, current visual source records are
+  unpruned, and referenced `CSurface` records are present;
+- keep the current debug material renderer as the fallback when the archive is
+  not material-complete.
 
-Treat the current debug material renderer as the fallback when this report says
-the archive is not material-complete. For normal 3D development, add or use an
-HBA profile that preserves visual data and the material stack; do not rely on
-the logic-only or micro profiles.
+Decision: phase 0 does **not** validate deep material dependencies yet. Without
+typed `CSurface`, `RenderTexture`, `RenderSurface`, and `Palette` parsers, any
+claim that `CSurface -> RenderTexture -> RenderSurface -> Palette` edges are
+complete would be guesswork. That validation moves into phases 1 and 2 after
+the DAT structs exist.
+
+Course correction: the capability report belongs in `holtburger-content`, not
+inside the Three.js renderer. The content repository already owns mounted HBA
+indexes and resource lookup behavior, so it can produce the same report for the
+browser app, debug harnesses, and future client frontends. The Tauri adapter
+currently logs the report on startup; a later host-contract phase can expose it
+as a typed frontend diagnostic if the UI needs it.
+
+For normal 3D development, add or use an HBA profile that preserves visual data
+and the material stack; do not rely on the logic-only or micro profiles.
 
 ### Phase 1: DAT parsers and focused fixtures
 
@@ -828,6 +850,17 @@ Prioritize pixel formats required by static world objects and equipment:
 Add DXT1/DXT3/DXT5 and raw JPEG next, because high-resolution and later EOR
 assets rely on them.
 
+Refinement from phase 0: parser tests should include dependency fixtures that
+exercise the exact edges the capability report intentionally cannot inspect
+yet:
+
+- `CSurface` solid color only;
+- `CSurface` with `orig_texture_id` and no palette;
+- `CSurface` with `orig_texture_id` plus `orig_palette_id`;
+- `RenderTexture` mip chains pointing at direct-color and indexed
+  `RenderSurface` records;
+- missing and pruned dependency cases for each edge.
+
 ### Phase 2: material graph in `holtburger-content`
 
 Add content-level resolution APIs that turn existing geometry references into
@@ -837,6 +870,12 @@ explicit material recipes:
 - env-cell surface indices -> `ResolvedMaterialSlot[]`;
 - `Setup + ObjDesc` -> per-part mesh selection plus texture and palette
   changes.
+
+Start this phase by extending the phase 0 report from shallow `CSurface`
+existence checks to full dependency validation using the new parsers:
+`CSurface -> RenderTexture -> RenderSurface -> Palette`. That gives the asset
+scheduler a proven dependency graph instead of requiring each frontend to
+rediscover missing material records.
 
 Keep parsed DAT records immutable. Put runtime appearance state in separate
 resolved descriptors keyed by the actual inputs: surface ID, render texture ID,

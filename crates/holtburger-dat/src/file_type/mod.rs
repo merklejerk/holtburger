@@ -4,6 +4,7 @@ pub mod chat_pose_table;
 pub mod env_cell;
 pub mod environment;
 pub mod gfx_obj;
+pub mod material;
 pub mod motion_kinematics;
 pub mod motion_table;
 pub mod region;
@@ -19,6 +20,10 @@ pub use chat_pose_table::{ChatEmoteData, ChatPoseTable};
 pub use env_cell::EnvCell;
 pub use environment::{CellStruct, Environment};
 pub use gfx_obj::GfxObj;
+pub use material::{
+    CSurface, CSurfaceSource, ObjDesc, Palette, PixelFormatId, RenderSurface, RenderTexture,
+    SurfaceType,
+};
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};
 pub use region::{REGION_DESC_FILE_ID, RegionDesc};

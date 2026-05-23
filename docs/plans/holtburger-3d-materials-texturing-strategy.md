@@ -837,7 +837,10 @@ and the material stack; do not rely on the logic-only or micro profiles.
 
 ### Phase 1: DAT parsers and focused fixtures
 
-Add typed parsers in `holtburger-dat` for:
+Status: **implemented for the legacy material records and ObjDesc appearance
+changes needed by the near-term renderer**.
+
+Added typed parsers in `holtburger-dat` for:
 
 - `Palette` (`0x04`);
 - `RenderTexture` (`0x05`, currently named `SurfaceTexture` in ACE);
@@ -845,21 +848,37 @@ Add typed parsers in `holtburger-dat` for:
 - `CSurface` (`0x08`);
 - `ObjDesc` texture and palette changes, matching retail dedup behavior.
 
-Prioritize pixel formats required by static world objects and equipment:
-`A8R8G8B8`, `R8G8B8`, `R5G6B5`, `A4R4G4B4`, `P8`, `INDEX16`, and `A8`.
-Add DXT1/DXT3/DXT5 and raw JPEG next, because high-resolution and later EOR
-assets rely on them.
+Parser coverage and tests now include:
 
-Refinement from phase 0: parser tests should include dependency fixtures that
-exercise the exact edges the capability report intentionally cannot inspect
-yet:
+- `Palette` ARGB tables;
+- `RenderSurface` headers, source bytes, indexed default palettes, and
+  `PixelFormatId` metadata for `A8R8G8B8`, `R8G8B8`, `R5G6B5`, `A4R4G4B4`,
+  `P8`, `INDEX16`, `A8`, `DXT1`, `DXT3`, `DXT5`, and raw JPEG;
+- `RenderTexture` mip/source surface ID chains;
+- `CSurface` solid color, textured-without-palette, and textured-with-palette
+  cases. `CSurface` records do not carry their own DataID in the body; callers
+  must pair the parsed body with the archive entry ID;
+- `ObjDesc` marker validation and retail texture-change deduplication, where a
+  later change replaces an earlier change with the same part index and old
+  texture.
 
-- `CSurface` solid color only;
-- `CSurface` with `orig_texture_id` and no palette;
-- `CSurface` with `orig_texture_id` plus `orig_palette_id`;
-- `RenderTexture` mip chains pointing at direct-color and indexed
-  `RenderSurface` records;
-- missing and pruned dependency cases for each edge.
+Decision: phase 1 is a **lossless parser step**, not a texture decoder step.
+`RenderSurface` preserves source bytes and format metadata; conversion to GPU
+formats, palette sampling, DXT upload/decompression policy, and JPEG decoding
+belong in renderer/resource-cache phases. This keeps `holtburger-dat` focused
+on static DAT decoding instead of frontend presentation.
+
+Course correction: the existing `char_gen` `ObjDesc` reader also needed the
+retail `0x11` marker check and duplicate-change behavior. It now matches the
+new material `ObjDesc` parser, avoiding two subtly different parsers for the
+same appearance structure.
+
+Open follow-up: `RenderTexture` preserves the ACE-observed persisted shape
+(`id`, unknown `i32`, texture type byte, `RenderSurface` ID list). The retail
+runtime `RenderTexture` contains richer per-level resource state, but the DAT
+file loader path currently proven in ACE/ACViewer does not expose meaningful
+names for the unknown field. Keep it named `unknown` until a retail trace or
+fixture proves its semantic role.
 
 ### Phase 2: material graph in `holtburger-content`
 

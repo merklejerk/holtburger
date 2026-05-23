@@ -1,11 +1,9 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
-    ContentDecodeCache, ContentDecodeCacheStats, ContentRepository, LandblockClassification,
-    LandblockPack,
+    ContentDecodeCache, ContentRepository, LandblockClassification, LandblockPack,
     LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
     LandblockSummaryBuildingPortal, PreparedAabb, PreparedBvh, PreparedBvhNode,
     PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
@@ -35,12 +33,10 @@ use crate::contracts::{
 const ASSET_BINARY_MAGIC: &[u8; 4] = b"HBAB";
 const ASSET_BINARY_VERSION: u32 = 1;
 const ASSET_BINARY_HEADER_LEN: usize = 16;
-const DEFAULT_ASSET_LOOKUP_LOG_MIN_MS: f64 = 25.0;
 
 pub struct HostBoundaryAdapter {
     content_asset_runtime: ContentAssetRuntime,
     verbose: bool,
-    asset_lookup_log_min_ms: f64,
 }
 
 #[derive(Clone)]
@@ -123,18 +119,15 @@ impl HostBoundaryAdapter {
         Self {
             content_asset_runtime,
             verbose,
-            asset_lookup_log_min_ms: asset_lookup_log_min_ms(),
         }
     }
 
     pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
-            let started_at = Instant::now();
             let asset = self
                 .content_asset_runtime
                 .load(content_request.clone())
                 .await;
-            self.log_asset_lookup_complete("asset.lookup.complete", &request, started_at);
             return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
@@ -147,9 +140,6 @@ impl HostBoundaryAdapter {
     ) -> anyhow::Result<Vec<u8>> {
         let mut writer = BinaryAssetSectionWriter::default();
         let mut responses = Vec::with_capacity(requests.len());
-        let cache_before = self.content_asset_runtime.decode_cache_stats();
-        let mut asset_load_ms = 0.0;
-        let mut response_serialize_ms = 0.0;
         for request in requests {
             let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id)
             else {
@@ -161,14 +151,10 @@ impl HostBoundaryAdapter {
 
             let response_index = responses.len();
             let path_prefix = format!("responses.{response_index}.payload");
-            let started_at = Instant::now();
             let asset = self
                 .content_asset_runtime
                 .load(content_request.clone())
                 .await;
-            asset_load_ms += started_at.elapsed().as_secs_f64() * 1000.0;
-            self.log_asset_lookup_complete("asset.lookup_binary.complete", &request, started_at);
-            let serialize_started_at = Instant::now();
             responses.push(serialize_content_asset_binary_response(
                 self,
                 request,
@@ -177,41 +163,8 @@ impl HostBoundaryAdapter {
                 &path_prefix,
                 &mut writer,
             )?);
-            response_serialize_ms += serialize_started_at.elapsed().as_secs_f64() * 1000.0;
         }
-        let host_profile = BinaryAssetBatchHostProfile {
-            request_count: responses.len(),
-            asset_load_ms,
-            response_serialize_ms,
-            cache_before,
-            cache_after: self.content_asset_runtime.decode_cache_stats(),
-        };
-        serialize_asset_binary_batch_response(responses, writer, host_profile)
-    }
-
-    fn log_asset_lookup_complete(
-        &self,
-        label: &str,
-        request: &AssetLookupRequestDto,
-        started_at: Instant,
-    ) {
-        if !self.verbose {
-            return;
-        }
-
-        let elapsed_ms = started_at.elapsed().as_secs_f64() * 1000.0;
-        if elapsed_ms < self.asset_lookup_log_min_ms {
-            return;
-        }
-
-        eprintln!(
-            "[holtburger-3d][{label}] request_id={} asset_id={} priority={:?} elapsed_ms={:.2} decode_cache={:?}",
-            request.request_id,
-            request.asset_id,
-            request.priority,
-            elapsed_ms,
-            self.content_asset_runtime.decode_cache_stats()
-        );
+        serialize_asset_binary_batch_response(responses, writer)
     }
 
     #[cfg(test)]
@@ -356,14 +309,6 @@ impl HostBoundaryAdapter {
             sequence,
         }
     }
-}
-
-struct BinaryAssetBatchHostProfile {
-    request_count: usize,
-    asset_load_ms: f64,
-    response_serialize_ms: f64,
-    cache_before: ContentDecodeCacheStats,
-    cache_after: ContentDecodeCacheStats,
 }
 
 impl HostBoundaryAdapter {
@@ -612,14 +557,6 @@ fn asset_cache_error_code(error: &anyhow::Error) -> &'static str {
     } else {
         "asset-decode-failed"
     }
-}
-
-fn asset_lookup_log_min_ms() -> f64 {
-    std::env::var("HOLTBURGER_3D_ASSET_LOG_MIN_MS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .unwrap_or(DEFAULT_ASSET_LOOKUP_LOG_MIN_MS)
 }
 
 fn parse_gfx_obj_asset_id(asset_id: &str) -> Option<u32> {
@@ -890,7 +827,6 @@ fn serialize_content_asset_binary_response(
 fn serialize_asset_binary_batch_response(
     responses: Vec<AssetLookupResponseDto>,
     writer: BinaryAssetSectionWriter,
-    host_profile: BinaryAssetBatchHostProfile,
 ) -> anyhow::Result<Vec<u8>> {
     let manifest = serde_json::json!({
         "transport": "holtburger-asset-binary",
@@ -899,7 +835,6 @@ fn serialize_asset_binary_batch_response(
         "sectionByteOffsetBase": "section-data",
         "responses": responses,
         "sections": writer.serialize_sections(),
-        "hostProfile": serialize_binary_asset_batch_host_profile(host_profile),
     });
     let mut manifest_bytes = serde_json::to_vec(&manifest)?;
     while !(ASSET_BINARY_HEADER_LEN + manifest_bytes.len()).is_multiple_of(4) {
@@ -922,40 +857,6 @@ fn serialize_asset_binary_batch_response(
     bytes.extend(manifest_bytes);
     bytes.extend(writer.data);
     Ok(bytes)
-}
-
-fn serialize_binary_asset_batch_host_profile(
-    profile: BinaryAssetBatchHostProfile,
-) -> serde_json::Value {
-    serde_json::json!({
-        "requestCount": profile.request_count,
-        "assetLoadMs": profile.asset_load_ms,
-        "responseSerializeMs": profile.response_serialize_ms,
-        "cacheBefore": serialize_decode_cache_stats(profile.cache_before),
-        "cacheAfter": serialize_decode_cache_stats(profile.cache_after),
-    })
-}
-
-fn serialize_decode_cache_stats(stats: ContentDecodeCacheStats) -> serde_json::Value {
-    serde_json::json!({
-        "cellLandblocks": serialize_decode_cache_kind_stats(stats.cell_landblocks),
-        "landblockInfos": serialize_decode_cache_kind_stats(stats.landblock_infos),
-        "envCells": serialize_decode_cache_kind_stats(stats.env_cells),
-        "environments": serialize_decode_cache_kind_stats(stats.environments),
-        "regionDesc": serialize_decode_cache_kind_stats(stats.region_desc),
-        "scenes": serialize_decode_cache_kind_stats(stats.scenes),
-        "setupModels": serialize_decode_cache_kind_stats(stats.setup_models),
-        "gfxObjs": serialize_decode_cache_kind_stats(stats.gfx_objs),
-    })
-}
-
-fn serialize_decode_cache_kind_stats(
-    stats: holtburger_content::ContentDecodeCacheKindStats,
-) -> serde_json::Value {
-    serde_json::json!({
-        "hits": stats.hits,
-        "misses": stats.misses,
-    })
 }
 
 fn serialize_landblock_summary_binary_payload(

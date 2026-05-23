@@ -135,7 +135,6 @@ class FakeAssetWorker implements AssetWorkerLike {
 				type: "host-lookup-assets-binary",
 				requestId,
 				requests,
-				workerPostStartedAtEpochMs: performance.timeOrigin + performance.now(),
 			},
 		} as MessageEvent<AssetWorkerResponseMessage>);
 	}
@@ -147,7 +146,6 @@ class FakeAssetWorker implements AssetWorkerLike {
 				results: message.items.map((item) => ({
 					type: "asset-ready",
 					asset: createPreparedAsset(item.request),
-					profile: createProfile(item),
 				})),
 			},
 		} as MessageEvent<AssetWorkerResponseMessage>);
@@ -197,44 +195,6 @@ function createQueuedItem(
 ): QueuedPrepareItem {
 	return {
 		request: createRequest(requestId, assetId),
-		mainPostStartedAtEpochMs: 0,
-		workerReceivedAtMs: 0,
-		workerReceivedAtEpochMs: 0,
-	};
-}
-
-function createProfile(
-	item: AssetWorkerPrepareBatchRequest["items"][number],
-) {
-	return {
-		assetKind: "unknown",
-		geometryBytes: 0,
-		transferableBytes: 0,
-		transferableCount: 0,
-		workerReceivedAtMs: 0,
-		hostLookupStartedAtMs: 0,
-		hostLookupEndedAtMs: 0,
-		workerHostRequestPostedAtEpochMs: item.mainPostStartedAtEpochMs,
-		mainHostRequestReceivedAtEpochMs: item.mainPostStartedAtEpochMs,
-		mainHostLookupStartedAtEpochMs: item.mainPostStartedAtEpochMs,
-		mainHostLookupEndedAtEpochMs: item.mainPostStartedAtEpochMs,
-		mainHostResponsePostStartedAtEpochMs: item.mainPostStartedAtEpochMs,
-		workerHostResponseReceivedAtEpochMs: item.mainPostStartedAtEpochMs,
-		hostRequestCount: 1,
-		hostResponseByteLength: 0,
-		decodeStartedAtMs: 0,
-		decodeEndedAtMs: 0,
-		rustAssetLoadMs: 0,
-		rustResponseSerializeMs: 0,
-		workerReceivedAtEpochMs: item.mainPostStartedAtEpochMs,
-		mainPostStartedAtEpochMs: item.mainPostStartedAtEpochMs,
-		mainPostPayloadKind: "synthetic",
-		prepareStartedAtMs: 0,
-		prepareEndedAtMs: 0,
-		transferCollectStartedAtMs: 0,
-		transferCollectEndedAtMs: 0,
-		postStartedAtMs: 0,
-		postStartedAtEpochMs: performance.timeOrigin + performance.now(),
 	};
 }
 

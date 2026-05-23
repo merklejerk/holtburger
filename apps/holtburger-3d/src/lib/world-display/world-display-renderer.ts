@@ -36,7 +36,6 @@ import {
 } from "three";
 
 import type { AssetChannelState } from "../assets/types";
-import { getActiveFrontendProfiler } from "../performance/frontend-profiler";
 import type { NormalizedViewportPoint } from "./model";
 import type {
 	CellDebugOverlay,
@@ -353,48 +352,32 @@ export function createWorldDisplayRenderer(
 		},
 		setTerrainScene(nextScene) {
 			terrainScene = nextScene;
-			measureRendererSync("world-render.sync-terrain-meshes", {}, () =>
-				syncTerrainMeshes(nextScene),
-			);
+			syncTerrainMeshes(nextScene);
 		},
 		setStaticRenderableScene(nextScene) {
 			staticRenderableScene = nextScene;
-			measureRendererSync("world-render.sync-static-renderables", {}, () =>
-				syncStaticRenderableMeshes(nextScene),
-			);
+			syncStaticRenderableMeshes(nextScene);
 		},
 		setStructuredInteriorScene(nextScene) {
 			structuredInteriorScene = nextScene;
-			measureRendererSync("world-render.sync-structured-interiors", {}, () =>
-				syncStructuredInteriorMeshes(nextScene),
-			);
+			syncStructuredInteriorMeshes(nextScene);
 		},
 		setTransitionPortalModel(nextModel) {
 			transitionPortalModel = nextModel;
-			measureRendererSync("world-render.sync-portal-masks", {}, () =>
-				syncPortalMaskMeshes(nextModel),
-			);
+			syncPortalMaskMeshes(nextModel);
 		},
 		setDebugOverlayScene(nextScene) {
 			debugOverlayScene = nextScene;
-			measureRendererSync("world-render.sync-debug-overlays", {}, () =>
-				syncDebugOverlayMeshes(nextScene),
-			);
+			syncDebugOverlayMeshes(nextScene);
 		},
 		setRenderSceneContext(nextContext) {
 			renderSceneContext = nextContext;
-			measureRendererSync("world-render.update-residency-index", {}, () =>
-				updateResidencyIndex(),
-			);
+			updateResidencyIndex();
 		},
 		setRenderChunkTransforms(nextTransforms) {
 			renderChunkTransforms = nextTransforms;
-			measureRendererSync("world-render.sync-chunk-roots", {}, () =>
-				syncRenderChunkRoots(nextTransforms),
-			);
-			measureRendererSync("world-render.update-residency-index", {}, () =>
-				updateResidencyIndex(),
-			);
+			syncRenderChunkRoots(nextTransforms);
+			updateResidencyIndex();
 		},
 		setRenderSpatialQuery(nextQuery) {
 			renderSpatialQuery = nextQuery;
@@ -442,9 +425,7 @@ export function createWorldDisplayRenderer(
 		if (disposed) {
 			return;
 		}
-		measureRendererSync("world-render.sync-spatial-visibility", {}, () =>
-			syncSpatialVisibility(),
-		);
+		syncSpatialVisibility();
 		syncReducedFrameRateState();
 		if (
 			isReducedFrameRateActive &&
@@ -456,9 +437,7 @@ export function createWorldDisplayRenderer(
 
 		const frameStartedAt = frameAt;
 		const renderStartedAt = window.performance.now();
-		measureRendererSync("world-render.render-passes", {}, () =>
-			renderWorldPasses(),
-		);
+		renderWorldPasses();
 		const renderMs = window.performance.now() - renderStartedAt;
 		lastRenderedAt = frameStartedAt;
 		if (lastFrameAt !== null) {
@@ -489,19 +468,6 @@ export function createWorldDisplayRenderer(
 			performanceWindowStartedAt = frameStartedAt;
 		}
 		lastFrameAt = frameStartedAt;
-	}
-
-	function measureRendererSync<T>(
-		name: string,
-		detail: Record<string, unknown>,
-		work: () => T,
-	): T {
-		const profiler = getActiveFrontendProfiler();
-		if (!profiler) {
-			return work();
-		}
-
-		return profiler.measureSync(name, detail, work);
 	}
 
 	function resetPerformanceWindow(): void {

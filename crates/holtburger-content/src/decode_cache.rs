@@ -2,7 +2,6 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::io::Cursor;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use holtburger_dat::file_type::{
@@ -25,7 +24,6 @@ const GFX_OBJ_CAPACITY: usize = 8_192;
 pub struct ContentDecodeCache {
     pinned: PinnedContentCache,
     lru: LruDecodedRecordCache,
-    stats: ContentDecodeCacheStatsCounters,
 }
 
 #[derive(Debug, Default)]
@@ -42,42 +40,6 @@ struct LruDecodedRecordCache {
     scenes: Mutex<SimpleLru<u32, Scene>>,
     setup_models: Mutex<SimpleLru<u32, SetupModel>>,
     gfx_objs: Mutex<SimpleLru<u32, GfxObj>>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ContentDecodeCacheKindStats {
-    pub hits: u64,
-    pub misses: u64,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ContentDecodeCacheStats {
-    pub cell_landblocks: ContentDecodeCacheKindStats,
-    pub landblock_infos: ContentDecodeCacheKindStats,
-    pub env_cells: ContentDecodeCacheKindStats,
-    pub environments: ContentDecodeCacheKindStats,
-    pub region_desc: ContentDecodeCacheKindStats,
-    pub scenes: ContentDecodeCacheKindStats,
-    pub setup_models: ContentDecodeCacheKindStats,
-    pub gfx_objs: ContentDecodeCacheKindStats,
-}
-
-#[derive(Debug, Default)]
-struct ContentDecodeCacheStatsCounters {
-    cell_landblocks: ContentDecodeCacheKindStatsCounters,
-    landblock_infos: ContentDecodeCacheKindStatsCounters,
-    env_cells: ContentDecodeCacheKindStatsCounters,
-    environments: ContentDecodeCacheKindStatsCounters,
-    region_desc: ContentDecodeCacheKindStatsCounters,
-    scenes: ContentDecodeCacheKindStatsCounters,
-    setup_models: ContentDecodeCacheKindStatsCounters,
-    gfx_objs: ContentDecodeCacheKindStatsCounters,
-}
-
-#[derive(Debug, Default)]
-struct ContentDecodeCacheKindStatsCounters {
-    hits: AtomicU64,
-    misses: AtomicU64,
 }
 
 #[derive(Debug)]
@@ -106,41 +68,23 @@ impl ContentDecodeCache {
         Self::default()
     }
 
-    pub fn stats(&self) -> ContentDecodeCacheStats {
-        ContentDecodeCacheStats {
-            cell_landblocks: self.stats.cell_landblocks.snapshot(),
-            landblock_infos: self.stats.landblock_infos.snapshot(),
-            env_cells: self.stats.env_cells.snapshot(),
-            environments: self.stats.environments.snapshot(),
-            region_desc: self.stats.region_desc.snapshot(),
-            scenes: self.stats.scenes.snapshot(),
-            setup_models: self.stats.setup_models.snapshot(),
-            gfx_objs: self.stats.gfx_objs.snapshot(),
-        }
-    }
-
     pub fn cell_landblock(
         &self,
         content: &ContentRepository,
         landblock_id: u32,
     ) -> Result<CellLandblock> {
-        load_lru_record(
-            &self.lru.cell_landblocks,
-            &self.stats.cell_landblocks,
-            landblock_id,
-            || {
-                let resource = content
-                    .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
-                    .with_context(|| {
-                        format!(
-                            "Could not read {}:0x{landblock_id:08X} from content repository",
-                            EOR_CELL_NAMESPACE
-                        )
-                    })?;
-                CellLandblock::unpack(&resource.bytes)
-                    .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))
-            },
-        )
+        load_lru_record(&self.lru.cell_landblocks, landblock_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{landblock_id:08X} from content repository",
+                        EOR_CELL_NAMESPACE
+                    )
+                })?;
+            CellLandblock::unpack(&resource.bytes)
+                .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))
+        })
     }
 
     pub fn landblock_info(
@@ -148,44 +92,34 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         landblock_info_id: u32,
     ) -> Result<LandblockInfo> {
-        load_lru_record(
-            &self.lru.landblock_infos,
-            &self.stats.landblock_infos,
-            landblock_info_id,
-            || {
-                let resource = content
-                    .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
-                    .with_context(|| {
-                        format!(
-                            "Could not read {}:0x{landblock_info_id:08X} from content repository",
-                            EOR_CELL_NAMESPACE
-                        )
-                    })?;
-                LandblockInfo::unpack(&resource.bytes).with_context(|| {
-                    format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
-                })
-            },
-        )
+        load_lru_record(&self.lru.landblock_infos, landblock_info_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, landblock_info_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{landblock_info_id:08X} from content repository",
+                        EOR_CELL_NAMESPACE
+                    )
+                })?;
+            LandblockInfo::unpack(&resource.bytes).with_context(|| {
+                format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
+            })
+        })
     }
 
     pub fn env_cell(&self, content: &ContentRepository, env_cell_id: u32) -> Result<EnvCell> {
-        load_lru_record(
-            &self.lru.env_cells,
-            &self.stats.env_cells,
-            env_cell_id,
-            || {
-                let resource = content
-                    .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
-                    .with_context(|| {
-                        format!(
-                            "Could not read {}:0x{env_cell_id:08X} from content repository",
-                            EOR_CELL_NAMESPACE
-                        )
-                    })?;
-                EnvCell::unpack(&mut Cursor::new(resource.bytes))
-                    .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))
-            },
-        )
+        load_lru_record(&self.lru.env_cells, env_cell_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{env_cell_id:08X} from content repository",
+                        EOR_CELL_NAMESPACE
+                    )
+                })?;
+            EnvCell::unpack(&mut Cursor::new(resource.bytes))
+                .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))
+        })
     }
 
     pub fn environment(
@@ -193,23 +127,18 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         environment_id: u32,
     ) -> Result<Environment> {
-        load_lru_record(
-            &self.lru.environments,
-            &self.stats.environments,
-            environment_id,
-            || {
-                let resource = content
-                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
-                    .with_context(|| {
-                        format!(
-                            "Could not read {}:0x{environment_id:08X} from content repository",
-                            EOR_PORTAL_NAMESPACE
-                        )
-                    })?;
-                Environment::unpack(&mut Cursor::new(resource.bytes))
-                    .with_context(|| format!("Could not decode Environment 0x{environment_id:08X}"))
-            },
-        )
+        load_lru_record(&self.lru.environments, environment_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, environment_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{environment_id:08X} from content repository",
+                        EOR_PORTAL_NAMESPACE
+                    )
+                })?;
+            Environment::unpack(&mut Cursor::new(resource.bytes))
+                .with_context(|| format!("Could not decode Environment 0x{environment_id:08X}"))
+        })
     }
 
     pub fn region_desc(&self, content: &ContentRepository) -> Result<RegionDesc> {
@@ -220,11 +149,9 @@ impl ContentDecodeCache {
             .expect("region desc cache lock should not be poisoned")
             .clone()
         {
-            self.stats.region_desc.record_hit();
             return Ok(region);
         }
 
-        self.stats.region_desc.record_miss();
         let resource = content
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
             .with_context(|| {
@@ -244,7 +171,7 @@ impl ContentDecodeCache {
     }
 
     pub fn scene(&self, content: &ContentRepository, scene_id: u32) -> Result<Scene> {
-        load_lru_record(&self.lru.scenes, &self.stats.scenes, scene_id, || {
+        load_lru_record(&self.lru.scenes, scene_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, scene_id))
                 .with_context(|| {
@@ -263,27 +190,22 @@ impl ContentDecodeCache {
         content: &ContentRepository,
         setup_model_id: u32,
     ) -> Result<SetupModel> {
-        load_lru_record(
-            &self.lru.setup_models,
-            &self.stats.setup_models,
-            setup_model_id,
-            || {
-                let resource = content
-                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
-                    .with_context(|| {
-                        format!(
-                            "Could not read {}:0x{setup_model_id:08X} from content repository",
-                            EOR_PORTAL_NAMESPACE
-                        )
-                    })?;
-                SetupModel::unpack(&mut Cursor::new(resource.bytes))
-                    .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))
-            },
-        )
+        load_lru_record(&self.lru.setup_models, setup_model_id, || {
+            let resource = content
+                .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
+                .with_context(|| {
+                    format!(
+                        "Could not read {}:0x{setup_model_id:08X} from content repository",
+                        EOR_PORTAL_NAMESPACE
+                    )
+                })?;
+            SetupModel::unpack(&mut Cursor::new(resource.bytes))
+                .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))
+        })
     }
 
     pub fn gfx_obj(&self, content: &ContentRepository, gfx_obj_id: u32) -> Result<GfxObj> {
-        load_lru_record(&self.lru.gfx_objs, &self.stats.gfx_objs, gfx_obj_id, || {
+        load_lru_record(&self.lru.gfx_objs, gfx_obj_id, || {
             let resource = content
                 .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
                 .with_context(|| {
@@ -300,7 +222,6 @@ impl ContentDecodeCache {
 
 fn load_lru_record<V>(
     cache: &Mutex<SimpleLru<u32, V>>,
-    stats: &ContentDecodeCacheKindStatsCounters,
     key: u32,
     load: impl FnOnce() -> Result<V>,
 ) -> Result<V>
@@ -312,34 +233,15 @@ where
         .expect("decode cache lock should not be poisoned")
         .get(&key)
     {
-        stats.record_hit();
         return Ok(value);
     }
 
-    stats.record_miss();
     let value = load()?;
     cache
         .lock()
         .expect("decode cache lock should not be poisoned")
         .insert(key, value.clone());
     Ok(value)
-}
-
-impl ContentDecodeCacheKindStatsCounters {
-    fn snapshot(&self) -> ContentDecodeCacheKindStats {
-        ContentDecodeCacheKindStats {
-            hits: self.hits.load(Ordering::Relaxed),
-            misses: self.misses.load(Ordering::Relaxed),
-        }
-    }
-
-    fn record_hit(&self) {
-        self.hits.fetch_add(1, Ordering::Relaxed);
-    }
-
-    fn record_miss(&self) {
-        self.misses.fetch_add(1, Ordering::Relaxed);
-    }
 }
 
 impl<K, V> SimpleLru<K, V>
@@ -480,10 +382,6 @@ mod tests {
         assert_eq!(first.id, landblock_id);
         assert_eq!(second.id, landblock_id);
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
-        assert_eq!(
-            cache.stats().cell_landblocks,
-            ContentDecodeCacheKindStats { hits: 1, misses: 1 },
-        );
     }
 
     #[test]

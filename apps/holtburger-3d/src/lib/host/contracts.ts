@@ -680,26 +680,6 @@ export const envCellPayloadDtoSchema = z.object({
 });
 export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;
 
-const terrainTextureLayerDtoSchema = z.object({
-	terrainType: z.number().int().nonnegative(),
-	textureAssetId: z.string().min(1),
-	textureDid: z.number().int().nonnegative(),
-	tiling: z.number().finite(),
-	alphaTextureAssetId: z.string().min(1).nullable(),
-	alphaTextureDid: z.number().int().nonnegative().nullable(),
-	alphaIndex: z.number().int().nonnegative().nullable(),
-	rotation: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
-});
-
-const terrainRoadLayerDtoSchema = z.object({
-	textureAssetId: z.string().min(1),
-	textureDid: z.number().int().nonnegative(),
-	alphaTextureAssetId: z.string().min(1),
-	alphaTextureDid: z.number().int().nonnegative(),
-	alphaIndex: z.number().int().nonnegative(),
-	rotation: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
-});
-
 const terrainDetailLayerDtoSchema = z.object({
 	textureAssetId: z.string().min(1),
 	textureDid: z.number().int().nonnegative(),
@@ -718,6 +698,37 @@ const terrainColorVariationDtoSchema = z.object({
 	activeRenderPath: z.literal(false),
 });
 
+const terrainMaterialTypeEntryDtoSchema = z.object({
+	terrainType: z.number().int().nonnegative(),
+	textureAssetId: z.string().min(1),
+	textureDid: z.number().int().nonnegative(),
+	tiling: z.number().finite(),
+	detail: terrainDetailLayerDtoSchema.nullable(),
+	colorVariation: terrainColorVariationDtoSchema.nullable(),
+});
+
+const terrainAlphaMapEntryDtoSchema = z.object({
+	alphaIndex: z.number().int().nonnegative(),
+	alphaTextureAssetId: z.string().min(1),
+	alphaTextureDid: z.number().int().nonnegative(),
+	selector: z.number().int().nonnegative(),
+});
+
+const terrainRoadAlphaMapEntryDtoSchema = z.object({
+	roadIndex: z.number().int().nonnegative(),
+	roadTextureAssetId: z.string().min(1),
+	roadTextureDid: z.number().int().nonnegative(),
+	alphaTextureAssetId: z.string().min(1),
+	alphaTextureDid: z.number().int().nonnegative(),
+	selector: z.number().int().nonnegative(),
+});
+
+const terrainPcodeEncodingDtoSchema = z.object({
+	terrainCodeBits: z.literal(5),
+	roadCodeBits: z.literal(2),
+	sizeBitMask: z.number().int().nonnegative(),
+});
+
 const terrainMaterialDependenciesDtoSchema = z.object({
 	renderTextureAssetIds: z.array(z.string().min(1)),
 	renderSurfaceAssetIds: z.array(z.string().min(1)),
@@ -729,17 +740,15 @@ export const terrainMaterialPayloadDtoSchema = z.object({
 	residencyKind: z.literal("unknown"),
 	sourceAssetKind: z.literal("terrain-material"),
 	regionNumber: z.number().int().nonnegative(),
-	pcode: z.number().int().nonnegative(),
-	materialKind: z.literal("tex-merge"),
-	base: terrainTextureLayerDtoSchema,
-	terrainOverlays: z.array(terrainTextureLayerDtoSchema),
-	roadOverlays: z.array(terrainRoadLayerDtoSchema),
-	detail: terrainDetailLayerDtoSchema.nullable(),
-	colorVariation: terrainColorVariationDtoSchema.nullable(),
+	materialKind: z.literal("tex-merge-table"),
+	terrainTypes: z.array(terrainMaterialTypeEntryDtoSchema),
+	terrainAlphaMaps: z.array(terrainAlphaMapEntryDtoSchema),
+	roadAlphaMaps: z.array(terrainRoadAlphaMapEntryDtoSchema),
+	pcodeEncoding: terrainPcodeEncodingDtoSchema,
 	dependencies: terrainMaterialDependenciesDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
-export type TerrainMaterialPayloadDto = z.infer<
+export type TerrainMaterialTablePayloadDto = z.infer<
 	typeof terrainMaterialPayloadDtoSchema
 >;
 

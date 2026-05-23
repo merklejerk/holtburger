@@ -783,26 +783,6 @@ export interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase
 	};
 }
 
-interface PreparedTerrainTextureLayer {
-	terrainType: number;
-	textureAssetId: string;
-	textureDid: number;
-	tiling: number;
-	alphaTextureAssetId: string | null;
-	alphaTextureDid: number | null;
-	alphaIndex: number | null;
-	rotation: 0 | 1 | 2 | 3;
-}
-
-interface PreparedTerrainRoadLayer {
-	textureAssetId: string;
-	textureDid: number;
-	alphaTextureAssetId: string;
-	alphaTextureDid: number;
-	alphaIndex: number;
-	rotation: 0 | 1 | 2 | 3;
-}
-
 interface PreparedTerrainDetailLayer {
 	textureAssetId: string;
 	textureDid: number;
@@ -821,24 +801,53 @@ interface PreparedTerrainColorVariation {
 	activeRenderPath: false;
 }
 
+interface PreparedTerrainMaterialTypeEntry {
+	terrainType: number;
+	textureAssetId: string;
+	textureDid: number;
+	tiling: number;
+	detail: PreparedTerrainDetailLayer | null;
+	colorVariation: PreparedTerrainColorVariation | null;
+}
+
+interface PreparedTerrainAlphaMapEntry {
+	alphaIndex: number;
+	alphaTextureAssetId: string;
+	alphaTextureDid: number;
+	selector: number;
+}
+
+interface PreparedTerrainRoadAlphaMapEntry {
+	roadIndex: number;
+	roadTextureAssetId: string;
+	roadTextureDid: number;
+	alphaTextureAssetId: string;
+	alphaTextureDid: number;
+	selector: number;
+}
+
+interface PreparedTerrainPcodeEncoding {
+	terrainCodeBits: 5;
+	roadCodeBits: 2;
+	sizeBitMask: number;
+}
+
 interface PreparedTerrainMaterialDependencies {
 	renderTextureAssetIds: string[];
 	renderSurfaceAssetIds: string[];
 	paletteAssetIds: string[];
 }
 
-export interface PreparedTerrainMaterialPayload extends PreparedAssetPayloadBase {
+export interface PreparedTerrainMaterialTablePayload extends PreparedAssetPayloadBase {
 	kind: "terrain-material";
 	sourceAssetKind: "terrain-material";
 	residencyKind: "unknown";
 	regionNumber: number;
-	pcode: number;
-	materialKind: "tex-merge";
-	base: PreparedTerrainTextureLayer;
-	terrainOverlays: PreparedTerrainTextureLayer[];
-	roadOverlays: PreparedTerrainRoadLayer[];
-	detail: PreparedTerrainDetailLayer | null;
-	colorVariation: PreparedTerrainColorVariation | null;
+	materialKind: "tex-merge-table";
+	terrainTypes: PreparedTerrainMaterialTypeEntry[];
+	terrainAlphaMaps: PreparedTerrainAlphaMapEntry[];
+	roadAlphaMaps: PreparedTerrainRoadAlphaMapEntry[];
+	pcodeEncoding: PreparedTerrainPcodeEncoding;
 	dependencies: PreparedTerrainMaterialDependencies;
 }
 
@@ -907,7 +916,7 @@ export type PreparedAssetPayload =
 	| PreparedSetupModelPayload
 	| PreparedMaterialRecipePayload
 	| PreparedSetupAppearancePayload
-	| PreparedTerrainMaterialPayload
+	| PreparedTerrainMaterialTablePayload
 	| PreparedRenderTexturePayload
 	| PreparedRenderSurfacePayload
 	| PreparedPalettePayload
@@ -970,12 +979,7 @@ export function getPreparedAssetDependencies(
 	if (asset.payload.kind === "landblock-terrain") {
 		const payload = asset.payload;
 		return uniqueSortedAssetIds([
-			...payload.terrain.quads.map((quad) =>
-				formatTerrainMaterialDependencyAssetId(
-					payload.regionNumber,
-					quad.pcode,
-				),
-			),
+			formatTerrainMaterialDependencyAssetId(payload.regionNumber),
 			...payload.buildingShells.flatMap((buildingShell) =>
 				buildingShell.materialSurfaceIds.map(formatMaterialDependencyAssetId),
 			),
@@ -1072,11 +1076,8 @@ function formatMaterialDependencyAssetId(surfaceId: number): string {
 	return `material/${formatHex32(surfaceId)}`;
 }
 
-function formatTerrainMaterialDependencyAssetId(
-	regionNumber: number,
-	pcode: number,
-): string {
-	return `terrain-material/${Math.trunc(regionNumber)}/${Math.trunc(pcode)}`;
+function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
+	return `terrain-material/${Math.trunc(regionNumber)}`;
 }
 
 function formatHex32(value: number): string {

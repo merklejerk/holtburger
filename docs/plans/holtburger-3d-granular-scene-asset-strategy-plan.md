@@ -29,6 +29,14 @@ The fix should not make the renderer more tolerant of missing materials. Missing
 prepared material recipes for visible geometry should fail loudly with enough
 diagnostics to identify the broken ownership edge.
 
+Material and terrain-material semantics in this plan should be guided by
+[`holtburger-3d-materials-texturing-strategy.md`](holtburger-3d-materials-texturing-strategy.md).
+That document is the evidence source for the `CSurface` graph,
+LandSurf/TexMerge `pcode` handling, ACViewer-style terrain blending, and the
+current limits around default setup appearance. If the two plans conflict, treat
+the material strategy as the reference data source and update this plan's route
+ownership or planner steps to match it.
+
 ## Goals
 
 - Reduce overlap between outdoor coverage data and focused landblock scene data.
@@ -1137,19 +1145,38 @@ Problems should scream:
 
 ## Migration Plan
 
-### Phase 0: Document and Lock Current Contracts
+### Phase 0: Baseline the Problem Without Freezing It
 
-- Add explicit tests that describe current dependency extraction for
-  `landblock-pack`, `gfx-obj`, `setup-model`, `material`, `render-texture`,
-  `render-surface`, `palette`, and generated terrain material recipes.
-- Add a contract test proving visible interior cell surface IDs require prepared
-  material assets.
-- Keep the test names framed around desired ownership so they survive the route
-  migration.
+Do not add tests whose purpose is to preserve current `landblock-pack` or
+`landblock-summary` dependency extraction behavior. The current extraction shape
+is part of the problem: it scans nested landblock payloads for ownership facts
+that should belong to first-class assets. Locking that behavior would make the
+migration harder and would create tests that need to be deleted as soon as the
+plan succeeds.
+
+Use this phase only to capture evidence and failure fixtures that make the route
+split safer:
+
+- Record representative current payloads for:
+  - a focused outdoor landblock with statics, buildings, and linked env cells;
+  - a dungeon landblock with env cells and no terrain route expectation;
+  - an env cell whose render geometry references `CSurface` IDs;
+  - terrain quads with mixed corner terrain codes and road bits.
+- Add tests only for desired invariants that survive the migration:
+  - visible interior cell surface IDs must require prepared `material/*` assets;
+  - geometry that names a material source must expose a typed dependency edge;
+  - missing material graph outputs are failed asset contracts, not silent
+    frontend fallbacks;
+  - dependency extraction for new routes is route-specific and typed.
+- Identify old tests that encode `landblock-pack`/`landblock-summary` ownership
+  assumptions and mark them as migration targets instead of expanding them.
 
 Validation:
 
-- `npm run test:ts -- src/lib/assets src/lib/world-display`
+- Fixture capture or focused harness output is checked into the plan or test
+  data only if it documents a route invariant needed by the new design.
+- No new tests should require `landblock-pack` or `landblock-summary` to remain
+  dependency owners.
 
 ### Phase 1: Introduce Route Helpers and DTO Types
 

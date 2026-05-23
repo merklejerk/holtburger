@@ -93,11 +93,8 @@ export function formatEnvCellAssetId(envCellId: number): string {
 	return `env-cell/${formatHex32(envCellId)}`;
 }
 
-export function formatTerrainMaterialAssetId(
-	regionNumber: number,
-	pcode: number,
-): string {
-	return `terrain-material/${formatUnsignedRouteNumber(regionNumber)}/${formatUnsignedRouteNumber(pcode)}`;
+export function formatTerrainMaterialAssetId(regionNumber: number): string {
+	return `terrain-material/${formatUnsignedRouteNumber(regionNumber)}`;
 }
 
 export function parseLandblockTerrainAssetId(assetId: string): number | null {
@@ -117,14 +114,13 @@ export function parseEnvCellAssetId(assetId: string): number | null {
 
 export function parseTerrainMaterialAssetId(
 	assetId: string,
-): { regionNumber: number; pcode: number } | null {
-	const match = /^terrain-material\/(\d+)\/(\d+)$/.exec(assetId);
+): { regionNumber: number } | null {
+	const match = /^terrain-material\/(\d+)$/.exec(assetId);
 	if (!match) {
 		return null;
 	}
 	return {
 		regionNumber: Number.parseInt(match[1], 10),
-		pcode: Number.parseInt(match[2], 10),
 	};
 }
 

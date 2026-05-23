@@ -1330,6 +1330,42 @@ Validation:
 - `npm run test:ts -- src/lib/landblocks.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/asset-hydration-policy.test.ts`
 - `npm run check`
 
+Progress as of 2026-05-23:
+
+- Replaced frontend `terrain-material/{regionNumber}/{pcode}` route formatting
+  and parsing with `terrain-material/{regionNumber}`.
+- Updated route helper tests so pcode-addressed terrain material strings are
+  invalid.
+- Replaced the frontend prepared terrain material payload interface with
+  `PreparedTerrainMaterialTablePayload`.
+- Updated the host DTO schema for `kind: "terrain-material"` to describe a
+  region table: terrain type entries, terrain alpha map entries, road alpha map
+  entries, pcode encoding metadata, and downstream render resource dependencies.
+- Updated raw host-response and prepared-record dependency extraction so
+  `landblock/{id}/terrain` emits one `terrain-material/{regionNumber}`
+  dependency no matter how many unique pcodes appear in its quads.
+- Updated terrain material dependency tests to use a region material table
+  payload and verify downstream render texture/surface/palette extraction.
+- Confirmed `terrain-material/{regionNumber}` remains graph hydration while
+  terrain, scene, and env-cell roots remain direct hydration.
+- Ran:
+  `npm run test:ts -- src/lib/landblocks.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/asset-hydration-policy.test.ts`.
+- Ran: `npm run check`.
+- Ran Prettier check for touched frontend files and this plan.
+
+Phase 1.1 decisions and refinements:
+
+- `terrain-material/{regionNumber}` keeps `kind: "terrain-material"` for now
+  because the route is still the terrain material boundary; the payload
+  `materialKind` now distinguishes it as a `"tex-merge-table"`.
+- The frontend schema models enough table structure for contracts and dependency
+  extraction, but Phase 2 still needs to prove the exact table fields against the
+  Rust `RegionDesc`, `TerrainTex`, terrain alpha, road alpha, and ACViewer
+  renderer paths.
+- The dependency extractor still duplicates route logic between raw response and
+  prepared-record paths. Phase 5 cleanup should centralize this, but Phase 2 can
+  proceed with the corrected route shape.
+
 ### Phase 2: Add Rust Host Routes
 
 - Add `ContentAssetRequest` variants, asset-ID parsers, Tauri adapter response

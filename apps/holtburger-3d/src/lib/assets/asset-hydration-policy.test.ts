@@ -31,7 +31,7 @@ describe("asset hydration policy", () => {
 		},
 	);
 
-	it.each([["dependency-manifest/synthetic"], ["terrain-material/1/1234"]])(
+	it.each([["dependency-manifest/synthetic"], ["terrain-material/1"]])(
 		"classifies %s as graph hydration",
 		(assetId) => {
 			expect(isSceneCoverageAssetId(assetId)).toBe(false);

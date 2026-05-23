@@ -77,14 +77,12 @@ describe("outdoor landblock helpers", () => {
 		);
 		expect(formatEnvCellAssetId(0xda550123)).toBe("env-cell/da550123");
 		expect(parseEnvCellAssetId("env-cell/da550123")).toBe(0xda550123);
-		expect(formatTerrainMaterialAssetId(1, 123456)).toBe(
-			"terrain-material/1/123456",
-		);
-		expect(parseTerrainMaterialAssetId("terrain-material/1/123456")).toEqual({
+		expect(formatTerrainMaterialAssetId(1)).toBe("terrain-material/1");
+		expect(parseTerrainMaterialAssetId("terrain-material/1")).toEqual({
 			regionNumber: 1,
-			pcode: 123456,
 		});
 		expect(parseLandblockTerrainAssetId("landblock/da55ffff/scene")).toBeNull();
+		expect(parseTerrainMaterialAssetId("terrain-material/1/123456")).toBeNull();
 		expect(
 			parseTerrainMaterialAssetId("terrain-material/1/not-a-number"),
 		).toBeNull();

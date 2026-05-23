@@ -144,7 +144,7 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
-	it("extracts granular landblock terrain dependencies from pcodes and building shells", () => {
+	it("extracts one terrain material table dependency per terrain region", () => {
 		const response = createJsonResponse(
 			"landblock/da55ffff/terrain",
 			createLandblockTerrainPayload(),
@@ -152,8 +152,7 @@ describe("asset response dependencies", () => {
 
 		expect(getAssetResponseDependencies(response)).toEqual([
 			{ assetId: "material/08000010" },
-			{ assetId: "terrain-material/1/1234" },
-			{ assetId: "terrain-material/1/5678" },
+			{ assetId: "terrain-material/1" },
 		]);
 	});
 
@@ -186,18 +185,27 @@ describe("asset response dependencies", () => {
 	});
 
 	it("extracts terrain material render resource dependencies", () => {
-		const response = createJsonResponse("terrain-material/1/1234", {
+		const response = createJsonResponse("terrain-material/1", {
 			kind: "terrain-material",
 			residencyKind: "unknown",
 			sourceAssetKind: "terrain-material",
 			regionNumber: 1,
-			pcode: 1234,
-			materialKind: "tex-merge",
-			base: createTerrainTextureLayer("render-texture/05000010"),
-			terrainOverlays: [createTerrainTextureLayer("render-texture/05000011")],
-			roadOverlays: [],
-			detail: null,
-			colorVariation: null,
+			materialKind: "tex-merge-table",
+			terrainTypes: [createTerrainMaterialTypeEntry("render-texture/05000010")],
+			terrainAlphaMaps: [
+				{
+					alphaIndex: 0,
+					alphaTextureAssetId: "render-texture/05000011",
+					alphaTextureDid: 0x05000011,
+					selector: 2,
+				},
+			],
+			roadAlphaMaps: [],
+			pcodeEncoding: {
+				terrainCodeBits: 5,
+				roadCodeBits: 2,
+				sizeBitMask: 0x10000000,
+			},
 			dependencies: {
 				renderTextureAssetIds: [
 					"render-texture/05000010",
@@ -227,8 +235,7 @@ describe("asset response dependencies", () => {
 			),
 		).toEqual([
 			{ assetId: "material/08000010" },
-			{ assetId: "terrain-material/1/1234" },
-			{ assetId: "terrain-material/1/5678" },
+			{ assetId: "terrain-material/1" },
 		]);
 	});
 
@@ -595,16 +602,14 @@ function createEnvCellPayload() {
 	};
 }
 
-function createTerrainTextureLayer(textureAssetId: string) {
+function createTerrainMaterialTypeEntry(textureAssetId: string) {
 	return {
 		terrainType: 1,
 		textureAssetId,
 		textureDid: 0x05000010,
 		tiling: 1,
-		alphaTextureAssetId: null,
-		alphaTextureDid: null,
-		alphaIndex: null,
-		rotation: 0 as const,
+		detail: null,
+		colorVariation: null,
 	};
 }
 

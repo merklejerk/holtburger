@@ -43,11 +43,8 @@ export function getAssetResponseDependencies(
 	);
 	if (landblockTerrain.success) {
 		return uniqueSortedAssetIds([
-			...landblockTerrain.data.terrain.quads.map((quad) =>
-				formatTerrainMaterialDependencyAssetId(
-					landblockTerrain.data.regionNumber,
-					quad.pcode,
-				),
+			formatTerrainMaterialDependencyAssetId(
+				landblockTerrain.data.regionNumber,
 			),
 			...landblockTerrain.data.buildingShells.flatMap((buildingShell) =>
 				buildingShell.materialSurfaceIds.map(formatMaterialDependencyAssetId),
@@ -155,11 +152,8 @@ function formatMaterialDependencyAssetId(surfaceId: number): string {
 	return `material/${formatHex32(surfaceId)}`;
 }
 
-function formatTerrainMaterialDependencyAssetId(
-	regionNumber: number,
-	pcode: number,
-): string {
-	return `terrain-material/${Math.trunc(regionNumber)}/${Math.trunc(pcode)}`;
+function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
+	return `terrain-material/${Math.trunc(regionNumber)}`;
 }
 
 function formatHex32(value: number): string {

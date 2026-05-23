@@ -4,14 +4,9 @@
 	import { frontendState } from "./app/frontend-state";
 	import { AssetChannelController } from "./lib/assets/asset-channel";
 	import { SceneAssetStreamingController } from "./lib/assets/scene-asset-streaming-controller";
-	import {
-		readDebugConfig,
-		saveFrontendProfileSummary,
-	} from "./lib/host/tauri";
-	import { createFrontendProfiler } from "./lib/performance/frontend-profiler";
+	import { readDebugConfig } from "./lib/host/tauri";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
 
-	const AUTO_PROFILE_SNAPSHOT_INTERVAL_MS = 5_000;
 	const tauriLaunchCommand = "npm run tauri:dev";
 	const currentRoute =
 		typeof window === "undefined" ? "/browser" : window.location.pathname;
@@ -21,38 +16,7 @@
 
 	onMount(() => {
 		let dispose = () => {};
-		const frontendProfiler = createFrontendProfiler();
-		let autoProfileSnapshotTimer: number | null = null;
-		let autoProfileSaveRunning = false;
-		const saveProfileSnapshot = async (): Promise<string | null> => {
-			if (autoProfileSaveRunning) {
-				return null;
-			}
-
-			autoProfileSaveRunning = true;
-			try {
-				return await saveFrontendProfileSummary(
-					frontendProfiler.createSummary(),
-				);
-			} catch (error) {
-				console.warn("[holtburger-3d][profile] failed to save summary", error);
-				return null;
-			} finally {
-				autoProfileSaveRunning = false;
-			}
-		};
-
-		if (frontendProfiler.enabled) {
-			frontendProfiler.startCapture();
-			autoProfileSnapshotTimer = window.setInterval(() => {
-				void saveProfileSnapshot();
-			}, AUTO_PROFILE_SNAPSHOT_INTERVAL_MS);
-		}
-		const assetChannel = new AssetChannelController(
-			undefined,
-			undefined,
-			frontendProfiler,
-		);
+		const assetChannel = new AssetChannelController();
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
 			getPreparedByAssetId: () => get(frontendState).asset.preparedByAssetId,
@@ -67,7 +31,6 @@
 			applyAssetError: (request, message) =>
 				frontendState.applyAssetError(request, message),
 			debugLog,
-			profiler: frontendProfiler,
 		});
 
 		const unsubscribeFrontendState = frontendState.subscribe((state) => {
@@ -95,13 +58,6 @@
 		return () => {
 			unsubscribeFrontendState();
 			dispose();
-			if (autoProfileSnapshotTimer !== null) {
-				window.clearInterval(autoProfileSnapshotTimer);
-			}
-			if (frontendProfiler.enabled) {
-				void saveProfileSnapshot();
-			}
-			frontendProfiler.dispose();
 			sceneStreamer.dispose();
 			assetChannel.dispose();
 		};

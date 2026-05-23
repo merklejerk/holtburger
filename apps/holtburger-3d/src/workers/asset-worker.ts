@@ -19,7 +19,7 @@ import {
 	landblockSummaryPayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 } from "../lib/host/contracts";
-import { decodeBinaryAssetBatchEnvelopeWithTelemetry } from "../lib/host/binary-asset-envelope";
+import { decodeBinaryAssetBatchEnvelope } from "../lib/host/binary-asset-envelope";
 import type {
 	AssetResidencyKind,
 	PreparedAssetRecord,
@@ -36,18 +36,12 @@ export interface AssetWorkerPrepareBatchRequest {
 
 export interface AssetWorkerPrepareBatchItem {
 	request: AssetLookupRequestDto;
-	mainPostStartedAtEpochMs: number;
 }
 
 export interface AssetWorkerHostLookupBinaryCompleteMessage {
 	type: "host-lookup-assets-binary-complete";
 	requestId: string;
 	envelopes: AssetWorkerHostBinaryEnvelope[];
-	workerRequestPostedAtEpochMs: number;
-	mainRequestReceivedAtEpochMs: number;
-	mainLookupStartedAtEpochMs: number;
-	mainLookupEndedAtEpochMs: number;
-	mainResponsePostStartedAtEpochMs: number;
 }
 
 export interface AssetWorkerHostLookupBinaryErrorMessage {
@@ -63,7 +57,6 @@ export interface AssetWorkerHostBinaryEnvelope {
 export interface AssetWorkerPreparedAssetMessage {
 	type: "asset-ready";
 	asset: PreparedAssetRecord;
-	profile: AssetWorkerReadyProfile;
 }
 
 export interface AssetWorkerErrorMessage {
@@ -82,7 +75,6 @@ export interface AssetWorkerHostLookupBinaryRequestMessage {
 	type: "host-lookup-assets-binary";
 	requestId: string;
 	requests: AssetLookupRequestDto[];
-	workerPostStartedAtEpochMs: number;
 }
 
 export type AssetWorkerRequestMessage =
@@ -95,37 +87,6 @@ export type AssetWorkerPreparedResult =
 export type AssetWorkerResponseMessage =
 	| AssetWorkerPreparedBatchMessage
 	| AssetWorkerHostLookupBinaryRequestMessage;
-
-export interface AssetWorkerReadyProfile {
-	assetKind: string;
-	geometryBytes: number;
-	transferableBytes: number;
-	transferableCount: number;
-	workerReceivedAtMs: number;
-	hostLookupStartedAtMs: number;
-	hostLookupEndedAtMs: number;
-	workerHostRequestPostedAtEpochMs: number;
-	mainHostRequestReceivedAtEpochMs: number;
-	mainHostLookupStartedAtEpochMs: number;
-	mainHostLookupEndedAtEpochMs: number;
-	mainHostResponsePostStartedAtEpochMs: number;
-	workerHostResponseReceivedAtEpochMs: number;
-	hostRequestCount: number;
-	hostResponseByteLength: number;
-	decodeStartedAtMs: number;
-	decodeEndedAtMs: number;
-	rustAssetLoadMs: number;
-	rustResponseSerializeMs: number;
-	prepareStartedAtMs: number;
-	prepareEndedAtMs: number;
-	transferCollectStartedAtMs: number;
-	transferCollectEndedAtMs: number;
-	mainPostStartedAtEpochMs: number;
-	workerReceivedAtEpochMs: number;
-	mainPostPayloadKind: string;
-	postStartedAtMs: number;
-	postStartedAtEpochMs: number;
-}
 
 export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
@@ -802,42 +763,14 @@ const WORKER_PREPARE_BATCH_SIZE = 4;
 const WORKER_PREPARE_BATCH_CONCURRENCY = 2;
 const WORKER_PREPARE_COALESCE_WINDOW_MS = 8;
 
-export interface QueuedPrepareItem extends AssetWorkerPrepareBatchItem {
-	workerReceivedAtMs: number;
-	workerReceivedAtEpochMs: number;
-}
-
-interface BinaryLookupBatchResult {
-	responses: AssetLookupResponseDto[];
-	hostLookupStartedAtMs: number;
-	hostLookupEndedAtMs: number;
-	workerHostRequestPostedAtEpochMs: number;
-	mainHostRequestReceivedAtEpochMs: number;
-	mainHostLookupStartedAtEpochMs: number;
-	mainHostLookupEndedAtEpochMs: number;
-	mainHostResponsePostStartedAtEpochMs: number;
-	workerHostResponseReceivedAtEpochMs: number;
-	hostRequestCount: number;
-	hostResponseByteLength: number;
-	decodeStartedAtMs: number;
-	decodeEndedAtMs: number;
-	rustAssetLoadMs: number;
-	rustResponseSerializeMs: number;
-}
+export type QueuedPrepareItem = AssetWorkerPrepareBatchItem;
 
 class AssetWorkerHostBridge {
 	private nextRequestIndex = 1;
 	private readonly pendingLookups = new Map<
 		string,
 		{
-			resolve: (result: {
-				envelopes: AssetWorkerHostBinaryEnvelope[];
-				workerRequestPostedAtEpochMs: number;
-				mainRequestReceivedAtEpochMs: number;
-				mainLookupStartedAtEpochMs: number;
-				mainLookupEndedAtEpochMs: number;
-				mainResponsePostStartedAtEpochMs: number;
-			}) => void;
+			resolve: (envelopes: AssetWorkerHostBinaryEnvelope[]) => void;
 			reject: (error: Error) => void;
 		}
 	>();
@@ -846,72 +779,15 @@ class AssetWorkerHostBridge {
 
 	async lookupBinaryAssets(
 		requests: readonly AssetLookupRequestDto[],
-	): Promise<BinaryLookupBatchResult> {
+	): Promise<AssetLookupResponseDto[]> {
 		if (requests.length === 0) {
-			const now = performance.now();
-			const nowEpoch = performance.timeOrigin + now;
-			return {
-				responses: [],
-				hostLookupStartedAtMs: now,
-				hostLookupEndedAtMs: now,
-				workerHostRequestPostedAtEpochMs: nowEpoch,
-				mainHostRequestReceivedAtEpochMs: nowEpoch,
-				mainHostLookupStartedAtEpochMs: nowEpoch,
-				mainHostLookupEndedAtEpochMs: nowEpoch,
-				mainHostResponsePostStartedAtEpochMs: nowEpoch,
-				workerHostResponseReceivedAtEpochMs: nowEpoch,
-				hostRequestCount: 0,
-				hostResponseByteLength: 0,
-				decodeStartedAtMs: now,
-				decodeEndedAtMs: now,
-				rustAssetLoadMs: 0,
-				rustResponseSerializeMs: 0,
-			};
+			return [];
 		}
 
-		const hostLookupStartedAtMs = performance.now();
-		const hostLookup = await this.requestBinaryEnvelopes(requests);
-		const hostLookupEndedAtMs = performance.now();
-		const workerHostResponseReceivedAtEpochMs =
-			performance.timeOrigin + hostLookupEndedAtMs;
-		const decodeStartedAtMs = performance.now();
-		const decodedEnvelopes = hostLookup.envelopes.map((envelope) =>
-			decodeBinaryAssetBatchEnvelopeWithTelemetry(envelope.payload),
+		const envelopes = await this.requestBinaryEnvelopes(requests);
+		return envelopes.flatMap((envelope) =>
+			decodeBinaryAssetBatchEnvelope(envelope.payload),
 		);
-		const responses = decodedEnvelopes.flatMap((envelope) => envelope.responses);
-		const rustAssetLoadMs = decodedEnvelopes.reduce(
-			(total, envelope) => total + (envelope.hostProfile?.assetLoadMs ?? 0),
-			0,
-		);
-		const rustResponseSerializeMs = decodedEnvelopes.reduce(
-			(total, envelope) =>
-				total + (envelope.hostProfile?.responseSerializeMs ?? 0),
-			0,
-		);
-		const decodeEndedAtMs = performance.now();
-		return {
-			responses,
-			hostLookupStartedAtMs,
-			hostLookupEndedAtMs,
-			workerHostRequestPostedAtEpochMs:
-				hostLookup.workerRequestPostedAtEpochMs,
-			mainHostRequestReceivedAtEpochMs:
-				hostLookup.mainRequestReceivedAtEpochMs,
-			mainHostLookupStartedAtEpochMs: hostLookup.mainLookupStartedAtEpochMs,
-			mainHostLookupEndedAtEpochMs: hostLookup.mainLookupEndedAtEpochMs,
-			mainHostResponsePostStartedAtEpochMs:
-				hostLookup.mainResponsePostStartedAtEpochMs,
-			workerHostResponseReceivedAtEpochMs,
-			hostRequestCount: requests.length,
-			hostResponseByteLength: hostLookup.envelopes.reduce(
-				(total, envelope) => total + envelope.payload.byteLength,
-				0,
-			),
-			decodeStartedAtMs,
-			decodeEndedAtMs,
-			rustAssetLoadMs,
-			rustResponseSerializeMs,
-		};
 	}
 
 	resolve(message: AssetWorkerHostLookupBinaryCompleteMessage): void {
@@ -920,14 +796,7 @@ class AssetWorkerHostBridge {
 			return;
 		}
 		this.pendingLookups.delete(message.requestId);
-		pending.resolve({
-			envelopes: message.envelopes,
-			workerRequestPostedAtEpochMs: message.workerRequestPostedAtEpochMs,
-			mainRequestReceivedAtEpochMs: message.mainRequestReceivedAtEpochMs,
-			mainLookupStartedAtEpochMs: message.mainLookupStartedAtEpochMs,
-			mainLookupEndedAtEpochMs: message.mainLookupEndedAtEpochMs,
-			mainResponsePostStartedAtEpochMs: message.mainResponsePostStartedAtEpochMs,
-		});
+		pending.resolve(message.envelopes);
 	}
 
 	reject(message: AssetWorkerHostLookupBinaryErrorMessage): void {
@@ -941,24 +810,14 @@ class AssetWorkerHostBridge {
 
 	private requestBinaryEnvelopes(
 		requests: readonly AssetLookupRequestDto[],
-	): Promise<{
-		envelopes: AssetWorkerHostBinaryEnvelope[];
-		workerRequestPostedAtEpochMs: number;
-		mainRequestReceivedAtEpochMs: number;
-		mainLookupStartedAtEpochMs: number;
-		mainLookupEndedAtEpochMs: number;
-		mainResponsePostStartedAtEpochMs: number;
-	}> {
+	): Promise<AssetWorkerHostBinaryEnvelope[]> {
 		const requestId = `asset-worker-host-${this.nextRequestIndex++}`;
 		return new Promise((resolve, reject) => {
-			const workerRequestPostedAtEpochMs =
-				performance.timeOrigin + performance.now();
 			this.pendingLookups.set(requestId, { resolve, reject });
 			this.workerScope.postMessage?.({
 				type: "host-lookup-assets-binary",
 				requestId,
 				requests: [...requests],
-				workerPostStartedAtEpochMs: workerRequestPostedAtEpochMs,
 			});
 		});
 	}
@@ -975,14 +834,8 @@ class AssetWorkerPrepareScheduler {
 	) {}
 
 	enqueue(items: readonly AssetWorkerPrepareBatchItem[]): void {
-		const workerReceivedAtMs = performance.now();
-		const workerReceivedAtEpochMs = performance.timeOrigin + workerReceivedAtMs;
 		for (const item of items) {
-			this.queue.push({
-				...item,
-				workerReceivedAtMs,
-				workerReceivedAtEpochMs,
-			});
+			this.queue.push({ ...item });
 		}
 		this.scheduleFlush();
 	}
@@ -1023,10 +876,10 @@ class AssetWorkerPrepareScheduler {
 	private async processBatch(items: readonly QueuedPrepareItem[]): Promise<void> {
 		const results: AssetWorkerPreparedResult[] = [];
 		const transferables: Transferable[] = [];
-		let lookupResult: BinaryLookupBatchResult;
+		let responses: AssetLookupResponseDto[];
 
 		try {
-			lookupResult = await this.hostBridge.lookupBinaryAssets(
+			responses = await this.hostBridge.lookupBinaryAssets(
 				items.map((item) => item.request),
 			);
 		} catch (error) {
@@ -1035,18 +888,11 @@ class AssetWorkerPrepareScheduler {
 		}
 
 		const responsesByRequestId = new Map(
-			lookupResult.responses.map((response) => [response.requestId, response]),
+			responses.map((response) => [response.requestId, response]),
 		);
-		const preparedResults: Array<{
-			asset: PreparedAssetRecord;
-			profile: Omit<
-				AssetWorkerReadyProfile,
-				"postStartedAtMs" | "postStartedAtEpochMs"
-			>;
-		}> = [];
+		const preparedAssets: PreparedAssetRecord[] = [];
 
 		for (const item of items) {
-			const prepareStartedAtMs = performance.now();
 			try {
 				const response = responsesByRequestId.get(item.request.requestId);
 				if (!response) {
@@ -1055,49 +901,8 @@ class AssetWorkerPrepareScheduler {
 					);
 				}
 				const asset = prepareAssetPayload(item.request, response);
-				const prepareEndedAtMs = performance.now();
-				const transferCollectStartedAtMs = performance.now();
-				const transferMetadata = prepareAssetForPostMessage(asset);
-				const transferCollectEndedAtMs = performance.now();
-				transferables.push(...transferMetadata.transferables);
-				preparedResults.push({
-					asset,
-					profile: {
-						assetKind: asset.payload.kind,
-						geometryBytes: transferMetadata.geometryBytes,
-						transferableBytes: transferMetadata.transferableBytes,
-						transferableCount: transferMetadata.transferables.length,
-						workerReceivedAtMs: item.workerReceivedAtMs,
-						hostLookupStartedAtMs: lookupResult.hostLookupStartedAtMs,
-						hostLookupEndedAtMs: lookupResult.hostLookupEndedAtMs,
-						workerHostRequestPostedAtEpochMs:
-							lookupResult.workerHostRequestPostedAtEpochMs,
-						mainHostRequestReceivedAtEpochMs:
-							lookupResult.mainHostRequestReceivedAtEpochMs,
-						mainHostLookupStartedAtEpochMs:
-							lookupResult.mainHostLookupStartedAtEpochMs,
-						mainHostLookupEndedAtEpochMs:
-							lookupResult.mainHostLookupEndedAtEpochMs,
-						mainHostResponsePostStartedAtEpochMs:
-							lookupResult.mainHostResponsePostStartedAtEpochMs,
-						workerHostResponseReceivedAtEpochMs:
-							lookupResult.workerHostResponseReceivedAtEpochMs,
-						hostRequestCount: lookupResult.hostRequestCount,
-						hostResponseByteLength: lookupResult.hostResponseByteLength,
-						decodeStartedAtMs: lookupResult.decodeStartedAtMs,
-						decodeEndedAtMs: lookupResult.decodeEndedAtMs,
-						rustAssetLoadMs: lookupResult.rustAssetLoadMs,
-						rustResponseSerializeMs: lookupResult.rustResponseSerializeMs,
-						prepareStartedAtMs,
-						prepareEndedAtMs,
-						transferCollectStartedAtMs,
-						transferCollectEndedAtMs,
-						mainPostStartedAtEpochMs: item.mainPostStartedAtEpochMs,
-						workerReceivedAtEpochMs: item.workerReceivedAtEpochMs,
-						mainPostPayloadKind:
-							describeAssetLookupResponsePayloadKind(response),
-					},
-				});
+				transferables.push(...prepareAssetForPostMessage(asset));
+				preparedAssets.push(asset);
 			} catch (error) {
 				results.push({
 					type: "asset-error",
@@ -1108,17 +913,10 @@ class AssetWorkerPrepareScheduler {
 			}
 		}
 
-		const postStartedAtMs = performance.now();
-		const postStartedAtEpochMs = performance.timeOrigin + postStartedAtMs;
-		for (const prepared of preparedResults) {
+		for (const asset of preparedAssets) {
 			results.push({
 				type: "asset-ready",
-				asset: prepared.asset,
-				profile: {
-					...prepared.profile,
-					postStartedAtMs,
-					postStartedAtEpochMs,
-				},
+				asset,
 			});
 		}
 		this.workerScope.postMessage?.(
@@ -1182,19 +980,6 @@ function isLargeWorkerPrepareAsset(assetId: string): boolean {
 	return assetId.startsWith("landblock-pack/");
 }
 
-function describeAssetLookupResponsePayloadKind(
-	response: AssetLookupResponseDto,
-): string {
-	const payload = response.payload;
-	if (typeof payload === "object" && payload !== null && "kind" in payload) {
-		const kind = (payload as { kind?: unknown }).kind;
-		if (typeof kind === "string") {
-			return kind;
-		}
-	}
-	return response.payloadKind;
-}
-
 if (
 	typeof workerScope.postMessage === "function" &&
 	typeof workerScope.document === "undefined"
@@ -1219,30 +1004,18 @@ if (
 	};
 }
 
-interface AssetTransferMetadata {
-	transferables: Transferable[];
-	geometryBytes: number;
-	transferableBytes: number;
-}
-
 function prepareAssetForPostMessage(
 	asset: PreparedAssetRecord,
-): AssetTransferMetadata {
+): Transferable[] {
 	const transferables: Transferable[] = [];
 	const transferredBuffers = new Set<ArrayBuffer>();
-	const stats = { geometryBytes: 0, transferableBytes: 0 };
 	asset.response = createPreparedResponseSummary(asset.response);
 	collectPreparedAssetTransferables(
 		asset,
 		transferables,
 		transferredBuffers,
-		stats,
 	);
-	return {
-		transferables,
-		geometryBytes: stats.geometryBytes,
-		transferableBytes: stats.transferableBytes,
-	};
+	return transferables;
 }
 
 function createPreparedResponseSummary(
@@ -1262,14 +1035,12 @@ function collectPreparedAssetTransferables(
 	asset: PreparedAssetRecord,
 	transferables: Transferable[],
 	transferredBuffers: Set<ArrayBuffer>,
-	stats: { geometryBytes: number; transferableBytes: number },
 ): void {
 	if (asset.payload.kind === "gfx-obj") {
 		normalizeRenderGeometryForTransfer(
 			asset.payload.renderGeometry,
 			transferables,
 			transferredBuffers,
-			stats,
 		);
 		return;
 	}
@@ -1280,7 +1051,6 @@ function collectPreparedAssetTransferables(
 				cell.renderGeometry,
 				transferables,
 				transferredBuffers,
-				stats,
 			);
 		}
 		return;
@@ -1291,25 +1061,21 @@ function normalizeRenderGeometryForTransfer(
 	renderGeometry: PreparedPolygonSetRenderGeometry,
 	transferables: Transferable[],
 	transferredBuffers: Set<ArrayBuffer>,
-	stats: { geometryBytes: number; transferableBytes: number },
 ): void {
 	renderGeometry.positions = normalizeFloat32ArrayForTransfer(
 		renderGeometry.positions,
 		transferables,
 		transferredBuffers,
-		stats,
 	);
 	renderGeometry.normals = normalizeFloat32ArrayForTransfer(
 		renderGeometry.normals,
 		transferables,
 		transferredBuffers,
-		stats,
 	);
 	renderGeometry.uvs = normalizeFloat32ArrayForTransfer(
 		renderGeometry.uvs,
 		transferables,
 		transferredBuffers,
-		stats,
 	);
 }
 
@@ -1317,10 +1083,8 @@ function normalizeFloat32ArrayForTransfer(
 	values: number[] | Float32Array,
 	transferables: Transferable[],
 	transferredBuffers: Set<ArrayBuffer>,
-	stats: { geometryBytes: number; transferableBytes: number },
 ): Float32Array {
 	const typedValues = createTransferableFloat32Array(values);
-	stats.geometryBytes += typedValues.byteLength;
 	const buffer = typedValues.buffer;
 	if (
 		typedValues.byteLength > 0 &&
@@ -1331,7 +1095,6 @@ function normalizeFloat32ArrayForTransfer(
 	) {
 		transferredBuffers.add(buffer);
 		transferables.push(buffer);
-		stats.transferableBytes += buffer.byteLength;
 	}
 	return typedValues;
 }

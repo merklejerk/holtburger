@@ -21,14 +21,6 @@ const binarySectionSchema = z.object({
 	byteLength: z.number().int().nonnegative(),
 });
 
-const binaryEnvelopeHostProfileSchema = z.object({
-	requestCount: z.number().int().nonnegative(),
-	assetLoadMs: z.number().nonnegative(),
-	responseSerializeMs: z.number().nonnegative(),
-	cacheBefore: z.unknown().optional(),
-	cacheAfter: z.unknown().optional(),
-});
-
 const binaryEnvelopeManifestSchema = z.object({
 	transport: z.literal("holtburger-asset-binary"),
 	version: z.literal(VERSION),
@@ -36,19 +28,9 @@ const binaryEnvelopeManifestSchema = z.object({
 	sectionByteOffsetBase: z.literal("section-data"),
 	responses: z.array(assetLookupResponseDtoSchema),
 	sections: z.array(binarySectionSchema),
-	hostProfile: binaryEnvelopeHostProfileSchema.optional(),
 });
 
 type BinarySection = z.infer<typeof binarySectionSchema>;
-
-export type BinaryAssetBatchHostProfile = z.infer<
-	typeof binaryEnvelopeHostProfileSchema
->;
-
-export interface DecodedBinaryAssetBatchEnvelope {
-	responses: AssetLookupResponseDto[];
-	hostProfile: BinaryAssetBatchHostProfile | null;
-}
 
 export function decodeBinaryAssetEnvelope(
 	value: unknown,
@@ -65,12 +47,6 @@ export function decodeBinaryAssetEnvelope(
 export function decodeBinaryAssetBatchEnvelope(
 	value: unknown,
 ): AssetLookupResponseDto[] {
-	return decodeBinaryAssetBatchEnvelopeWithTelemetry(value).responses;
-}
-
-export function decodeBinaryAssetBatchEnvelopeWithTelemetry(
-	value: unknown,
-): DecodedBinaryAssetBatchEnvelope {
 	const bytes = normalizeBinaryResponse(value);
 	if (bytes.byteLength < HEADER_LENGTH) {
 		throw new Error("Binary asset envelope is shorter than its fixed header.");
@@ -111,10 +87,7 @@ export function decodeBinaryAssetBatchEnvelopeWithTelemetry(
 	for (const section of manifest.sections) {
 		hydrateBinarySection(hydrated, bytes, sectionDataStart, section);
 	}
-	return {
-		responses: hydrated.responses,
-		hostProfile: manifest.hostProfile ?? null,
-	};
+	return hydrated.responses;
 }
 
 function normalizeBinaryResponse(value: unknown): Uint8Array {

@@ -7,7 +7,7 @@ mod source_reader;
 pub mod static_outdoor_scene;
 
 pub use character_gen::CharacterGenCatalog;
-pub use decode_cache::{ContentDecodeCache, ContentDecodeCacheKindStats, ContentDecodeCacheStats};
+pub use decode_cache::ContentDecodeCache;
 pub use landblock_pack::{
     CellLandblockFact, EnvCellFact, EnvCellPortalFact, EnvironmentFact, IndoorStaticObjectFact,
     LandblockClassification, LandblockInfoFact, LandblockInteriorFacts, LandblockPack,

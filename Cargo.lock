@@ -1490,6 +1490,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "holtburger-debug-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "clap",
+ "env_logger",
+ "hex",
+ "holtburger-content",
+ "holtburger-core",
+ "log",
+ "tokio",
+]
+
+[[package]]
 name = "holtburger-protocol"
 version = "0.1.0"
 dependencies = [

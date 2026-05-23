@@ -323,7 +323,13 @@ impl ObjDesc {
     fn read<R: Read + Seek>(reader: &mut R) -> BinResult<Self> {
         align_boundary(reader, 4)?;
 
-        let _marker = u8::read(reader)?;
+        let marker = u8::read(reader)?;
+        if marker != 0x11 {
+            return Err(binrw::Error::AssertFail {
+                pos: reader.stream_position().unwrap_or(0).saturating_sub(1),
+                message: format!("ObjDesc marker must be 0x11, got 0x{marker:02X}"),
+            });
+        }
         let num_palettes = u8::read(reader)?;
         let num_texture_map_changes = u8::read(reader)?;
         let num_anim_part_changes = u8::read(reader)?;
@@ -334,28 +340,56 @@ impl ObjDesc {
             None
         };
 
+        let sub_palettes =
+            read_exact_count_vec(reader, usize::from(num_palettes), SubPalette::read)?;
+        let mut texture_changes = Vec::with_capacity(usize::from(num_texture_map_changes));
+        for _ in 0..num_texture_map_changes {
+            add_texture_change_retail(&mut texture_changes, TextureMapChange::read(reader)?);
+        }
+
+        let mut anim_part_changes = Vec::with_capacity(usize::from(num_anim_part_changes));
+        for _ in 0..num_anim_part_changes {
+            add_anim_part_change_retail(&mut anim_part_changes, AnimationPartChange::read(reader)?);
+        }
+
         let obj_desc = Self {
             palette_id,
-            sub_palettes: read_exact_count_vec(
-                reader,
-                usize::from(num_palettes),
-                SubPalette::read,
-            )?,
-            texture_changes: read_exact_count_vec(
-                reader,
-                usize::from(num_texture_map_changes),
-                TextureMapChange::read,
-            )?,
-            anim_part_changes: read_exact_count_vec(
-                reader,
-                usize::from(num_anim_part_changes),
-                AnimationPartChange::read,
-            )?,
+            sub_palettes,
+            texture_changes,
+            anim_part_changes,
         };
 
         align_boundary(reader, 4)?;
 
         Ok(obj_desc)
+    }
+}
+
+fn add_texture_change_retail(changes: &mut Vec<TextureMapChange>, new_change: TextureMapChange) {
+    if let Some(index) = changes.iter().position(|change| {
+        change.part_index == new_change.part_index && change.old_texture == new_change.old_texture
+    }) {
+        changes.remove(index);
+    }
+
+    if changes.len() < 255 {
+        changes.push(new_change);
+    }
+}
+
+fn add_anim_part_change_retail(
+    changes: &mut Vec<AnimationPartChange>,
+    new_change: AnimationPartChange,
+) {
+    if let Some(index) = changes
+        .iter()
+        .position(|change| change.part_index == new_change.part_index)
+    {
+        changes.remove(index);
+    }
+
+    if changes.len() < 255 {
+        changes.push(new_change);
     }
 }
 

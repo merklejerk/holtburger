@@ -81,6 +81,53 @@ export function formatLandblockSummaryAssetId(landblockId: number): string {
 	return `landblock-summary/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
 }
 
+export function formatLandblockTerrainAssetId(landblockId: number): string {
+	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/terrain`;
+}
+
+export function formatLandblockSceneAssetId(landblockId: number): string {
+	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/scene`;
+}
+
+export function formatEnvCellAssetId(envCellId: number): string {
+	return `env-cell/${formatHex32(envCellId)}`;
+}
+
+export function formatTerrainMaterialAssetId(
+	regionNumber: number,
+	pcode: number,
+): string {
+	return `terrain-material/${formatUnsignedRouteNumber(regionNumber)}/${formatUnsignedRouteNumber(pcode)}`;
+}
+
+export function parseLandblockTerrainAssetId(assetId: string): number | null {
+	const match = /^landblock\/([0-9a-fA-F]{8})\/terrain$/.exec(assetId);
+	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
+}
+
+export function parseLandblockSceneAssetId(assetId: string): number | null {
+	const match = /^landblock\/([0-9a-fA-F]{8})\/scene$/.exec(assetId);
+	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
+}
+
+export function parseEnvCellAssetId(assetId: string): number | null {
+	const match = /^env-cell\/([0-9a-fA-F]{8})$/.exec(assetId);
+	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
+}
+
+export function parseTerrainMaterialAssetId(
+	assetId: string,
+): { regionNumber: number; pcode: number } | null {
+	const match = /^terrain-material\/(\d+)\/(\d+)$/.exec(assetId);
+	if (!match) {
+		return null;
+	}
+	return {
+		regionNumber: Number.parseInt(match[1], 10),
+		pcode: Number.parseInt(match[2], 10),
+	};
+}
+
 export function deriveFirstEnvCellId(
 	landblockId: number,
 	numEnvCells: number,
@@ -111,6 +158,16 @@ export function deriveLandblockEnvCellIds(
 
 export function formatHex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
+}
+
+function formatUnsignedRouteNumber(value: number): string {
+	const normalized = Math.trunc(value);
+	if (!Number.isFinite(normalized) || normalized < 0) {
+		throw new Error(
+			`route number must be a nonnegative finite integer: ${value}`,
+		);
+	}
+	return `${normalized}`;
 }
 
 function compareOutdoorCoverageLandblocks(

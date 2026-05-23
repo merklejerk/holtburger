@@ -181,6 +181,174 @@ export interface PreparedLandblockSummaryBuilding extends PreparedLandblockSumma
 	portals: PreparedLandblockSummaryBuildingPortal[];
 }
 
+interface PreparedTerrainBvhItem {
+	row: number;
+	col: number;
+	quadIndex: number;
+	triangleIndices: [number, number];
+}
+
+interface PreparedTerrainBvh {
+	coordinateSpace: "landblock-terrain-local";
+	nodes: PreparedLandblockBvhNode[];
+	items: PreparedTerrainBvhItem[];
+}
+
+interface PreparedLandblockTerrainTriangle {
+	terrainTriangleId: string;
+	quadIndex: number;
+	triangleInQuad: 0 | 1;
+	vertexIndices: [number, number, number];
+	averageHeight: number;
+	bounds: PreparedBounds;
+}
+
+interface PreparedTerrainQuad {
+	terrainQuadId: string;
+	row: number;
+	col: number;
+	quadIndex: number;
+	sourceTerrainIndices: [number, number, number, number];
+	vertexIndices: [number, number, number, number];
+	triangleIndices: [number, number];
+	diagonal: "southwest-northeast" | "southeast-northwest";
+	cornerTerrainCodes: [number, number, number, number];
+	pcode: number;
+	averageHeight: number;
+	bounds: PreparedBounds;
+}
+
+interface PreparedLandblockTerrain {
+	gridSize: number;
+	tileSize: number;
+	vertices: Vec3Dto[];
+	triangles: PreparedLandblockTerrainTriangle[];
+	quads: PreparedTerrainQuad[];
+	terrainBvh: PreparedTerrainBvh;
+	minHeight: number;
+	maxHeight: number;
+	bounds: PreparedBounds | null;
+}
+
+interface PreparedLandblockTerrainBuildingShell {
+	instanceId: string;
+	sourceDid: number;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+	renderGeometry: PreparedPolygonSetRenderGeometry;
+	materialSurfaceIds: number[];
+}
+
+export interface PreparedLandblockTerrainPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-terrain";
+	sourceAssetKind: "landblock-terrain";
+	residencyKind: "outdoor-landblock";
+	landblockId: number;
+	regionId: number;
+	regionNumber: number;
+	terrain: PreparedLandblockTerrain;
+	buildingShells: PreparedLandblockTerrainBuildingShell[];
+	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+}
+
+interface PreparedEnvCellResidencyBvhItem {
+	envCellId: number;
+	memberId: string;
+	assetId: string;
+	source: "building-portal-link" | "env-cell-placement" | "derived";
+}
+
+interface PreparedEnvCellResidencyBvh {
+	coordinateSpace: "landblock-scene-residency";
+	nodes: PreparedLandblockBvhNode[];
+	items: PreparedEnvCellResidencyBvhItem[];
+}
+
+type PreparedOutdoorBvhItem =
+	| { kind: "static"; instanceId: string }
+	| { kind: "building"; instanceId: string }
+	| { kind: "building-portal-anchor"; portalId: string };
+
+interface PreparedOutdoorBvh {
+	coordinateSpace: "landblock-render-local";
+	nodes: PreparedLandblockBvhNode[];
+	items: PreparedOutdoorBvhItem[];
+}
+
+interface PreparedLandblockScenePlacedSourceMemberBase {
+	instanceId: string;
+	memberId: string;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
+	sourceBounds: PreparedBounds | null;
+	instanceBounds: PreparedBounds | null;
+}
+
+interface PreparedLandblockSceneStaticMember extends PreparedLandblockScenePlacedSourceMemberBase {
+	kind: "scenery" | "generated-scenery";
+}
+
+interface PreparedLandblockSceneBuildingPortal {
+	portalId: string;
+	sourceIndex: number;
+	flags: number;
+	otherCellId: number;
+	otherPortalId: number;
+	stabLocalCellIds: number[];
+	linkedEnvCellIds: number[];
+}
+
+interface PreparedLandblockSceneBuildingMember extends PreparedLandblockScenePlacedSourceMemberBase {
+	kind: "building";
+	numLeaves: number;
+	portals: PreparedLandblockSceneBuildingPortal[];
+}
+
+interface PreparedLandblockSceneEnvCellMember {
+	memberId: string;
+	envCellId: number;
+	assetId: string;
+	localPlacement: PlacementTransformDto;
+	visibleEnvCellIds: number[];
+	restrictionObjectId: number | null;
+	seenOutside: boolean | null;
+}
+
+type PreparedLandblockScenePortalEndpoint =
+	| { kind: "landblock-building"; instanceId: string; portalId: string }
+	| { kind: "env-cell"; envCellId: number; portalId: string }
+	| { kind: "outside"; landblockId: number };
+
+interface PreparedLandblockScenePortalLink {
+	linkId: string;
+	source: PreparedLandblockScenePortalEndpoint;
+	target: PreparedLandblockScenePortalEndpoint;
+	flags: number;
+	otherCellId: number;
+	otherPortalId: number;
+	polygonId: number | null;
+	sourceIndex: number;
+}
+
+export interface PreparedLandblockScenePayload extends PreparedAssetPayloadBase {
+	kind: "landblock-scene";
+	sourceAssetKind: "landblock-scene";
+	residencyKind: "landblock";
+	landblockId: number;
+	landblockInfoId: number;
+	classification: "outdoor" | "dungeon";
+	statics: PreparedLandblockSceneStaticMember[];
+	buildings: PreparedLandblockSceneBuildingMember[];
+	envCells: PreparedLandblockSceneEnvCellMember[];
+	portalLinks: PreparedLandblockScenePortalLink[];
+	envCellResidencyBvh: PreparedEnvCellResidencyBvh;
+	outdoorBvh: PreparedOutdoorBvh | null;
+	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+}
+
 export interface PreparedLandblockInteriorCell {
 	envCellId: number;
 	environmentId: number;
@@ -417,6 +585,66 @@ export interface PreparedPolygonSetRenderGeometry {
 	bounds: PreparedPolygonSetRenderBounds | null;
 }
 
+interface PreparedEnvCellSurfaceSlot {
+	slotId: number;
+	surfaceId: number;
+	materialAssetId: string;
+}
+
+interface PreparedEnvCellPortal {
+	portalId: string;
+	sourceIndex: number;
+	flags: number;
+	polygonId: number;
+	otherCellId: number;
+	otherPortalId: number;
+	targetEnvCellId: number | null;
+	isOutsideTransition: boolean;
+}
+
+interface PreparedEnvCellStaticMember {
+	instanceId: string;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
+	sourceBounds: PreparedBounds | null;
+	instanceBounds: PreparedBounds | null;
+}
+
+type PreparedEnvCellBvhItem =
+	| {
+			kind: "render-geometry";
+			polygonId: number | null;
+			triangleRange: [number, number];
+	  }
+	| { kind: "static"; instanceId: string }
+	| { kind: "portal"; portalId: string };
+
+interface PreparedEnvCellBvh {
+	coordinateSpace: "env-cell-local";
+	nodes: PreparedLandblockBvhNode[];
+	items: PreparedEnvCellBvhItem[];
+}
+
+export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
+	kind: "env-cell";
+	sourceAssetKind: "env-cell";
+	residencyKind: "interior-cell";
+	envCellId: number;
+	environmentId: number;
+	cellStructureId: number;
+	surfaces: PreparedEnvCellSurfaceSlot[];
+	portals: PreparedEnvCellPortal[];
+	visibleEnvCellIds: number[];
+	portalApertures: PreparedPortalAperture[];
+	statics: PreparedEnvCellStaticMember[];
+	renderGeometry: PreparedPolygonSetRenderGeometry;
+	cellBsp: PreparedPolygonSetBspNode;
+	localBvh: PreparedEnvCellBvh;
+}
+
 export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {
 	kind: "gfx-obj";
 	sourceAssetKind: "gfx-obj";
@@ -555,6 +783,65 @@ export interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase
 	};
 }
 
+interface PreparedTerrainTextureLayer {
+	terrainType: number;
+	textureAssetId: string;
+	textureDid: number;
+	tiling: number;
+	alphaTextureAssetId: string | null;
+	alphaTextureDid: number | null;
+	alphaIndex: number | null;
+	rotation: 0 | 1 | 2 | 3;
+}
+
+interface PreparedTerrainRoadLayer {
+	textureAssetId: string;
+	textureDid: number;
+	alphaTextureAssetId: string;
+	alphaTextureDid: number;
+	alphaIndex: number;
+	rotation: 0 | 1 | 2 | 3;
+}
+
+interface PreparedTerrainDetailLayer {
+	textureAssetId: string;
+	textureDid: number;
+	tiling: number;
+	fadeNear: number;
+	fadeFar: number;
+}
+
+interface PreparedTerrainColorVariation {
+	minVertBright: number;
+	maxVertBright: number;
+	minVertSaturate: number;
+	maxVertSaturate: number;
+	minVertHue: number;
+	maxVertHue: number;
+	activeRenderPath: false;
+}
+
+interface PreparedTerrainMaterialDependencies {
+	renderTextureAssetIds: string[];
+	renderSurfaceAssetIds: string[];
+	paletteAssetIds: string[];
+}
+
+export interface PreparedTerrainMaterialPayload extends PreparedAssetPayloadBase {
+	kind: "terrain-material";
+	sourceAssetKind: "terrain-material";
+	residencyKind: "unknown";
+	regionNumber: number;
+	pcode: number;
+	materialKind: "tex-merge";
+	base: PreparedTerrainTextureLayer;
+	terrainOverlays: PreparedTerrainTextureLayer[];
+	roadOverlays: PreparedTerrainRoadLayer[];
+	detail: PreparedTerrainDetailLayer | null;
+	colorVariation: PreparedTerrainColorVariation | null;
+	dependencies: PreparedTerrainMaterialDependencies;
+}
+
 export interface PreparedRenderTexturePayload extends PreparedAssetPayloadBase {
 	kind: "render-texture";
 	sourceAssetKind: "render-texture";
@@ -613,10 +900,14 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 export type PreparedAssetPayload =
 	| PreparedLandblockPackPayload
 	| PreparedLandblockSummaryPayload
+	| PreparedLandblockTerrainPayload
+	| PreparedLandblockScenePayload
+	| PreparedEnvCellPayload
 	| PreparedGfxObjPayload
 	| PreparedSetupModelPayload
 	| PreparedMaterialRecipePayload
 	| PreparedSetupAppearancePayload
+	| PreparedTerrainMaterialPayload
 	| PreparedRenderTexturePayload
 	| PreparedRenderSurfacePayload
 	| PreparedPalettePayload
@@ -676,6 +967,36 @@ export function getPreparedAssetDependencies(
 		return asset.payload.dependencyAssetIds.map((assetId) => ({ assetId }));
 	}
 
+	if (asset.payload.kind === "landblock-terrain") {
+		const payload = asset.payload;
+		return uniqueSortedAssetIds([
+			...payload.terrain.quads.map((quad) =>
+				formatTerrainMaterialDependencyAssetId(
+					payload.regionNumber,
+					quad.pcode,
+				),
+			),
+			...payload.buildingShells.flatMap((buildingShell) =>
+				buildingShell.materialSurfaceIds.map(formatMaterialDependencyAssetId),
+			),
+		]);
+	}
+
+	if (asset.payload.kind === "landblock-scene") {
+		return uniqueSortedAssetIds([
+			...asset.payload.statics.map((member) => member.sourceAssetId),
+			...asset.payload.buildings.map((member) => member.sourceAssetId),
+			...asset.payload.envCells.map((member) => member.assetId),
+		]);
+	}
+
+	if (asset.payload.kind === "env-cell") {
+		return uniqueSortedAssetIds([
+			...asset.payload.surfaces.map((surface) => surface.materialAssetId),
+			...asset.payload.statics.map((member) => member.sourceAssetId),
+		]);
+	}
+
 	if (asset.payload.kind === "setup-model") {
 		const dependencies = asset.payload.dependencies;
 		if (!dependencies) {
@@ -710,6 +1031,14 @@ export function getPreparedAssetDependencies(
 		]);
 	}
 
+	if (asset.payload.kind === "terrain-material") {
+		return uniqueSortedAssetIds([
+			...asset.payload.dependencies.renderTextureAssetIds,
+			...asset.payload.dependencies.renderSurfaceAssetIds,
+			...asset.payload.dependencies.paletteAssetIds,
+		]);
+	}
+
 	if (asset.payload.kind === "render-texture") {
 		return uniqueSortedAssetIds(
 			asset.payload.dependencies.renderSurfaceAssetIds,
@@ -737,6 +1066,21 @@ function uniqueSortedAssetIds(
 	assetIds: readonly string[],
 ): PreparedAssetDependency[] {
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
+}
+
+function formatMaterialDependencyAssetId(surfaceId: number): string {
+	return `material/${formatHex32(surfaceId)}`;
+}
+
+function formatTerrainMaterialDependencyAssetId(
+	regionNumber: number,
+	pcode: number,
+): string {
+	return `terrain-material/${Math.trunc(regionNumber)}/${Math.trunc(pcode)}`;
+}
+
+function formatHex32(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 export function derivePreparedAssetDependencyStatus(

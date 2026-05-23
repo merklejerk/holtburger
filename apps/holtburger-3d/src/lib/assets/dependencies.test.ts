@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { AssetLookupResponseDto } from "../host/contracts";
 import { getAssetResponseDependencies } from "./dependencies";
+import type { PreparedAssetRecord, PreparedAssetPayload } from "./types";
+import { getPreparedAssetDependencies } from "./types";
 
 const provenance = {
 	source: "repo-local-hba" as const,
@@ -139,6 +141,94 @@ describe("asset response dependencies", () => {
 
 		expect(getAssetResponseDependencies(response)).toEqual([
 			{ assetId: "material/08000010" },
+		]);
+	});
+
+	it("extracts granular landblock terrain dependencies from pcodes and building shells", () => {
+		const response = createJsonResponse(
+			"landblock/da55ffff/terrain",
+			createLandblockTerrainPayload(),
+		);
+
+		expect(getAssetResponseDependencies(response)).toEqual([
+			{ assetId: "material/08000010" },
+			{ assetId: "terrain-material/1/1234" },
+			{ assetId: "terrain-material/1/5678" },
+		]);
+	});
+
+	it("extracts granular scene and env-cell dependencies from typed members", () => {
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse("landblock/da55ffff/scene", {
+					...createLandblockScenePayload(),
+					statics: [createSceneStaticMember("static-0", "gfx-obj/01000010")],
+					buildings: [
+						createSceneBuildingMember("building-0", "setup-model/02000010"),
+					],
+					envCells: [createSceneEnvCellMember(0xda550100)],
+				}),
+			),
+		).toEqual([
+			{ assetId: "env-cell/da550100" },
+			{ assetId: "gfx-obj/01000010" },
+			{ assetId: "setup-model/02000010" },
+		]);
+
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse("env-cell/da550100", createEnvCellPayload()),
+			),
+		).toEqual([
+			{ assetId: "material/08000020" },
+			{ assetId: "setup-model/02000020" },
+		]);
+	});
+
+	it("extracts terrain material render resource dependencies", () => {
+		const response = createJsonResponse("terrain-material/1/1234", {
+			kind: "terrain-material",
+			residencyKind: "unknown",
+			sourceAssetKind: "terrain-material",
+			regionNumber: 1,
+			pcode: 1234,
+			materialKind: "tex-merge",
+			base: createTerrainTextureLayer("render-texture/05000010"),
+			terrainOverlays: [createTerrainTextureLayer("render-texture/05000011")],
+			roadOverlays: [],
+			detail: null,
+			colorVariation: null,
+			dependencies: {
+				renderTextureAssetIds: [
+					"render-texture/05000010",
+					"render-texture/05000011",
+				],
+				renderSurfaceAssetIds: ["render-surface/06000010"],
+				paletteAssetIds: ["palette/04000010"],
+			},
+			provenance,
+		});
+
+		expect(getAssetResponseDependencies(response)).toEqual([
+			{ assetId: "palette/04000010" },
+			{ assetId: "render-surface/06000010" },
+			{ assetId: "render-texture/05000010" },
+			{ assetId: "render-texture/05000011" },
+		]);
+	});
+
+	it("extracts prepared granular route dependencies with the same ownership rules", () => {
+		expect(
+			getPreparedAssetDependencies(
+				createPreparedAssetRecord(
+					"landblock/da55ffff/terrain",
+					createLandblockTerrainPayload(),
+				),
+			),
+		).toEqual([
+			{ assetId: "material/08000010" },
+			{ assetId: "terrain-material/1/1234" },
+			{ assetId: "terrain-material/1/5678" },
 		]);
 	});
 
@@ -300,6 +390,22 @@ function createJsonResponse(
 	};
 }
 
+function createPreparedAssetRecord(
+	assetId: string,
+	payload: PreparedAssetPayload,
+): PreparedAssetRecord {
+	return {
+		request: {
+			requestId: `request-${assetId}`,
+			assetId,
+			priority: "streaming",
+		},
+		response: createJsonResponse(assetId, payload),
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
+	};
+}
+
 function createSetupPart(partIndex: number, gfxObjAssetId: string) {
 	return {
 		partIndex,
@@ -307,5 +413,235 @@ function createSetupPart(partIndex: number, gfxObjAssetId: string) {
 		gfxObjAssetId,
 		parentIndex: null,
 		scale: null,
+	};
+}
+
+function createLandblockTerrainPayload() {
+	return {
+		kind: "landblock-terrain" as const,
+		residencyKind: "outdoor-landblock" as const,
+		sourceAssetKind: "landblock-terrain" as const,
+		landblockId: 0xda55ffff,
+		regionId: 0x13000000,
+		regionNumber: 1,
+		terrain: {
+			gridSize: 9,
+			tileSize: 24,
+			vertices: [],
+			triangles: [],
+			quads: [
+				createTerrainQuad(0, 0, 0, 1234),
+				createTerrainQuad(0, 1, 1, 1234),
+				createTerrainQuad(1, 0, 2, 5678),
+			],
+			terrainBvh: {
+				coordinateSpace: "landblock-terrain-local" as const,
+				nodes: [],
+				items: [],
+			},
+			minHeight: 0,
+			maxHeight: 0,
+			bounds: null,
+		},
+		buildingShells: [
+			{
+				instanceId: "building-shell-0",
+				sourceDid: 0x02000010,
+				sourceIndex: 0,
+				localPlacement: identityPlacement(),
+				renderGeometry: emptyRenderGeometry(0x02000010),
+				materialSurfaceIds: [0x08000010],
+			},
+		],
+		diagnostics: emptyLandblockDiagnostics(),
+		provenance,
+	};
+}
+
+function createTerrainQuad(
+	row: number,
+	col: number,
+	quadIndex: number,
+	pcode: number,
+) {
+	return {
+		terrainQuadId: `terrain-quad-${row}-${col}`,
+		row,
+		col,
+		quadIndex,
+		sourceTerrainIndices: [0, 1, 9, 10] as [number, number, number, number],
+		vertexIndices: [0, 1, 9, 10] as [number, number, number, number],
+		triangleIndices: [quadIndex * 2, quadIndex * 2 + 1] as [number, number],
+		diagonal: "southwest-northeast" as const,
+		cornerTerrainCodes: [1, 2, 3, 4] as [number, number, number, number],
+		pcode,
+		averageHeight: 0,
+		bounds: emptyBounds(),
+	};
+}
+
+function createLandblockScenePayload() {
+	return {
+		kind: "landblock-scene" as const,
+		residencyKind: "landblock" as const,
+		sourceAssetKind: "landblock-scene" as const,
+		landblockId: 0xda55ffff,
+		landblockInfoId: 0xda55fffe,
+		classification: "outdoor" as const,
+		statics: [],
+		buildings: [],
+		envCells: [],
+		portalLinks: [],
+		envCellResidencyBvh: {
+			coordinateSpace: "landblock-scene-residency" as const,
+			nodes: [],
+			items: [],
+		},
+		outdoorBvh: null,
+		diagnostics: emptyLandblockDiagnostics(),
+		provenance,
+	};
+}
+
+function createSceneStaticMember(instanceId: string, sourceAssetId: string) {
+	return {
+		...createScenePlacedSourceMember(instanceId, sourceAssetId),
+		kind: "scenery" as const,
+	};
+}
+
+function createSceneBuildingMember(instanceId: string, sourceAssetId: string) {
+	return {
+		...createScenePlacedSourceMember(instanceId, sourceAssetId),
+		kind: "building" as const,
+		numLeaves: 0,
+		portals: [],
+	};
+}
+
+function createScenePlacedSourceMember(
+	instanceId: string,
+	sourceAssetId: string,
+) {
+	return {
+		instanceId,
+		memberId: `member-${instanceId}`,
+		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+		sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: identityPlacement(),
+		sourceScale: { x: 1, y: 1, z: 1 },
+		sourceBounds: null,
+		instanceBounds: null,
+	};
+}
+
+function createSceneEnvCellMember(envCellId: number) {
+	return {
+		memberId: "env-cell-member-0",
+		envCellId,
+		assetId: "env-cell/da550100",
+		localPlacement: identityPlacement(),
+		visibleEnvCellIds: [],
+		restrictionObjectId: null,
+		seenOutside: null,
+	};
+}
+
+function createEnvCellPayload() {
+	return {
+		kind: "env-cell" as const,
+		residencyKind: "interior-cell" as const,
+		sourceAssetKind: "env-cell" as const,
+		envCellId: 0xda550100,
+		environmentId: 0x0d000001,
+		cellStructureId: 0x0d000002,
+		surfaces: [
+			{
+				slotId: 1,
+				surfaceId: 0x08000020,
+				materialAssetId: "material/08000020",
+			},
+		],
+		portals: [],
+		visibleEnvCellIds: [],
+		portalApertures: [],
+		statics: [
+			{
+				instanceId: "cell-static-0",
+				sourceDid: 0x02000020,
+				sourceAssetId: "setup-model/02000020",
+				sourceIndex: 0,
+				localPlacement: identityPlacement(),
+				sourceScale: { x: 1, y: 1, z: 1 },
+				sourceBounds: null,
+				instanceBounds: null,
+			},
+		],
+		renderGeometry: emptyRenderGeometry(0x0d000002),
+		cellBsp: {
+			kind: "leaf" as const,
+			index: 0,
+			solid: 0,
+			sphere: null,
+			polyIds: [],
+		},
+		localBvh: {
+			coordinateSpace: "env-cell-local" as const,
+			nodes: [],
+			items: [],
+		},
+		provenance,
+	};
+}
+
+function createTerrainTextureLayer(textureAssetId: string) {
+	return {
+		terrainType: 1,
+		textureAssetId,
+		textureDid: 0x05000010,
+		tiling: 1,
+		alphaTextureAssetId: null,
+		alphaTextureDid: null,
+		alphaIndex: null,
+		rotation: 0 as const,
+	};
+}
+
+function emptyRenderGeometry(sourceId: number) {
+	return {
+		sourceId,
+		vertexCount: 0,
+		triangleCount: 0,
+		positions: [],
+		normals: [],
+		uvs: [],
+		triangles: [],
+		surfaceIds: [],
+		invalidPolygons: [],
+		skippedPolygonCount: 0,
+		bounds: null,
+	};
+}
+
+function identityPlacement() {
+	return {
+		origin: { x: 0, y: 0, z: 0 },
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+	};
+}
+
+function emptyBounds() {
+	return {
+		min: { x: 0, y: 0, z: 0 },
+		max: { x: 0, y: 0, z: 0 },
+	};
+}
+
+function emptyLandblockDiagnostics() {
+	return {
+		sourceRecords: [],
+		omissions: [],
+		errors: [],
 	};
 }

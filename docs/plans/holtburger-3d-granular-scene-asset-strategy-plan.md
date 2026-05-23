@@ -101,18 +101,18 @@ dependencies instead of hiding them under `landblock-pack.prepared`.
 
 Use granular, REST-like asset IDs:
 
-| Route                                     | Purpose                                                                                                                                                                                        | Dependencies                                                                                                                      |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `landblock/{id}/terrain`                  | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, terrain-only BVH, and building shell render geometry.                                         | Terrain material assets derived by the frontend from `regionNumber` plus quad pcodes, plus building render material dependencies. |
-| `landblock/{id}/scene`                    | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`.                                         |
-| `env-cell/{id}`                           | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                                                 |
-| `gfx-obj/{did}`                           | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                                                 |
-| `setup-model/{did}`                       | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                                                    |
-| `terrain-material/{regionNumber}/{pcode}` | One generated LandSurf/TexMerge terrain material recipe.                                                                                                                                       | Terrain base, overlay, alpha, road, and detail texture dependencies as required.                                                  |
-| `material/{did}`                          | One `CSurface` material recipe.                                                                                                                                                                | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                                                  |
-| `render-texture/{did}`                    | One `RenderTexture` mip chain descriptor.                                                                                                                                                      | `render-surface/{did}`.                                                                                                           |
-| `render-surface/{did}`                    | One image payload.                                                                                                                                                                             | `palette/{did}` for indexed/default-palette surfaces.                                                                             |
-| `palette/{did}`                           | One palette payload.                                                                                                                                                                           | None.                                                                                                                             |
+| Route                             | Purpose                                                                                                                                                                                        | Dependencies                                                                                               |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `landblock/{id}/terrain`          | Outdoor coverage render geometry: terrain, source terrain corner codes, computed terrain pcodes, terrain-only BVH, and building shell render geometry.                                         | One region terrain material table derived from `regionNumber`, plus building render material dependencies. |
+| `landblock/{id}/scene`            | Focused scene membership: typed statics/buildings with placements, env-cell membership, portal/link graph, an env-cell residency BVH, and outdoor render BVH when outdoor-space members exist. | Derived from typed member fields: static/building `sourceAssetId` and env-cell `assetId`.                  |
+| `env-cell/{id}`                   | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                          |
+| `gfx-obj/{did}`                   | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                          |
+| `setup-model/{did}`               | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                             |
+| `terrain-material/{regionNumber}` | Region-scoped LandSurf/TexMerge terrain material lookup tables used to interpret any terrain pcode in that region.                                                                             | Terrain base, overlay, alpha, road, and detail texture dependencies referenced by the region tables.       |
+| `material/{did}`                  | One `CSurface` material recipe.                                                                                                                                                                | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                           |
+| `render-texture/{did}`            | One `RenderTexture` mip chain descriptor.                                                                                                                                                      | `render-surface/{did}`.                                                                                    |
+| `render-surface/{did}`            | One image payload.                                                                                                                                                                             | `palette/{did}` for indexed/default-palette surfaces.                                                      |
+| `palette/{did}`                   | One palette payload.                                                                                                                                                                           | None.                                                                                                      |
 
 ### Route Notes
 
@@ -159,11 +159,11 @@ Target material graph responsibilities:
   surface slot entry into a full `0x08...` `CSurface` DataID, and exposes
   `surfaces[].materialAssetId`. It should not inline full material recipes into
   the env-cell response.
-- `terrain-material/{regionNumber}/{pcode}` adds a material graph entry
+- `terrain-material/{regionNumber}` adds a route-facing material table entry
   point for terrain LandSurf/TexMerge resolution. It should resolve the active
-  `RegionDesc` terrain tables plus the source pcode into one generated terrain
-  material recipe and direct base/overlay/alpha/road/detail texture
-  dependencies.
+  `RegionDesc` terrain tables into one bounded region table that can interpret
+  any terrain pcode in that region and expose direct base/overlay/alpha/road/detail
+  texture dependencies.
 - `setup-model/{did}` is no longer a material graph appearance route for the
   default case. It exposes setup parts and lets the frontend compose those parts
   with `gfx-obj/*` assets and their material slots.
@@ -186,8 +186,8 @@ transitive pack helpers:
   `gfx-obj/{did}`;
 - `resolve_env_cell_material_slots(envCellId)` or equivalent slot extraction for
   `env-cell/{id}`;
-- `resolve_terrain_material_recipe(regionNumber, pcode)` for
-  `terrain-material/{regionNumber}/{pcode}`;
+- `resolve_terrain_material_table(regionNumber)` for
+  `terrain-material/{regionNumber}`;
 - optional appearance override resolution only for a future explicit
   appearance route, not for default setup-model loading.
 
@@ -650,29 +650,32 @@ and road bits used by `TexMerge.GetTerrain`, `GetRoadCode`, terrain alpha
 selection, road alpha selection, and rotation selection. Rust should copy the
 active `RegionDesc` identity into the terrain payload as `regionId` and
 `regionNumber`, preserve the four raw corner terrain codes on each quad, compute
-the client pcode, and leave route construction for `terrain-material/*` to the
-frontend route helper.
+the client pcode, and request one region-scoped `terrain-material/{regionNumber}`
+table for pcode interpretation.
 
 Triangles are render primitives derived from a quad split. They should not own
 material references. The renderer can resolve a triangle's material through its
 `quadIndex`, then `quads[quadIndex].pcode`, then
-`terrain-material/{regionNumber}/{pcode}`.
+`terrain-material/{regionNumber}`.
 
 Terrain material resolution should not reuse the env-cell `surfaces[]` slot-table
 pattern. Outdoor terrain is driven by `CellLandblock.terrain` codes and the
 terrain/LandSurf/TexMerge path. The terrain payload should therefore keep source
-corner codes and computed pcodes on quads. The frontend may derive terrain
-material requests from those pcodes because the route is a direct pcode-addressed
-material recipe, not an opaque dependency hidden in nested landblock-pack data.
+corner codes and computed pcodes on quads, while the terrain material route
+should provide the bounded region table needed to interpret those pcodes. Do not
+promote every pcode to a standalone graph-visible asset; pcodes are high
+cardinality generated keys and should remain per-quad material lookup inputs.
 
 The frontend dependency walk for terrain is:
 
 1. request `landblock/{id}/terrain`;
-2. read and deduplicate `terrain.quads[].pcode`;
-3. format and request each
-   `terrain-material/{regionNumber}/{pcode}` asset;
-4. let each terrain material asset expose its terrain base, overlay, alpha,
-   road, detail, and downstream texture/surface/palette dependencies.
+2. read `terrain.regionNumber`;
+3. request `terrain-material/{regionNumber}`;
+4. use `terrain.quads[].pcode` with the region terrain material table to produce
+   per-quad GPU terrain layers at render time;
+5. let the region terrain material table expose downstream
+   texture/surface/palette dependencies for terrain base, overlay, alpha, road,
+   and detail resources.
 
 `landblock/{id}/terrain` is the only landblock route that should participate in
 terrain rendering or terrain texture resolution. `landblock/{id}/scene` should
@@ -681,44 +684,56 @@ not carry terrain codes, cheap terrain colors, diagnostic terrain facts,
 
 ### Terrain Material Shape
 
-`terrain-material/{regionNumber}/{pcode}` should describe the ACViewer-style GPU
-terrain blend inputs for one LandSurf/TexMerge pcode. It is not a normal
-`CSurface` asset and should not pretend to be a `material/{did}` route.
+`terrain-material/{regionNumber}` should describe the ACViewer-style GPU terrain
+material lookup data for one region. It is not a normal `CSurface` asset and
+should not pretend to be a `material/{did}` route. It is also not one generated
+asset per pcode. The table is region scoped because `pcode` values are high
+cardinality generated keys; exposing them as normal assets would pollute the
+asset graph with potentially many synthetic nodes.
 
 Recommended shape:
 
 ```ts
-interface PreparedTerrainMaterialPayload {
+interface PreparedTerrainMaterialTablePayload {
   kind: "terrain-material";
   regionNumber: number;
-  pcode: number;
-  materialKind: "tex-merge";
-  base: TerrainTextureLayer;
-  terrainOverlays: TerrainTextureLayer[];
-  roadOverlays: TerrainRoadLayer[];
-  detail: TerrainDetailLayer | null;
-  colorVariation: TerrainColorVariation | null;
+  materialKind: "tex-merge-table";
+  terrainTypes: TerrainMaterialTypeEntry[];
+  terrainAlphaMaps: TerrainAlphaMapEntry[];
+  roadAlphaMaps: TerrainRoadAlphaMapEntry[];
+  pcodeEncoding: TerrainPcodeEncoding;
   dependencies: TerrainMaterialDependencies;
 }
 
-interface TerrainTextureLayer {
+interface TerrainMaterialTypeEntry {
   terrainType: number;
   textureAssetId: AssetId; // render-texture/{did}
   textureDid: DataId;
   tiling: number;
-  alphaTextureAssetId: AssetId | null; // render-texture/{did}
-  alphaTextureDid: DataId | null;
-  alphaIndex: number | null;
-  rotation: 0 | 1 | 2 | 3;
+  detail: TerrainDetailLayer | null;
+  colorVariation: TerrainColorVariation | null;
 }
 
-interface TerrainRoadLayer {
-  textureAssetId: AssetId; // render-texture/{did}
-  textureDid: DataId;
+interface TerrainAlphaMapEntry {
+  alphaIndex: number;
   alphaTextureAssetId: AssetId; // render-texture/{did}
   alphaTextureDid: DataId;
-  alphaIndex: number;
-  rotation: 0 | 1 | 2 | 3;
+  selector: number;
+}
+
+interface TerrainRoadAlphaMapEntry {
+  roadIndex: number;
+  roadTextureAssetId: AssetId; // render-texture/{did}
+  roadTextureDid: DataId;
+  alphaTextureAssetId: AssetId; // render-texture/{did}
+  alphaTextureDid: DataId;
+  selector: number;
+}
+
+interface TerrainPcodeEncoding {
+  terrainCodeBits: 5;
+  roadCodeBits: 2;
+  sizeBitMask: number;
 }
 
 interface TerrainDetailLayer {
@@ -957,11 +972,11 @@ for scene statics. Scene follow-up requests should come from typed member fields
 Material requests should fall out of `env-cell/*` and `gfx-obj/*` metadata.
 Building shell material requests in `landblock/{id}/terrain` come from
 `buildingShells[].materialSurfaceIds`.
-Terrain material requests are the exception: the frontend derives
-`terrain-material/*` route IDs from
-`landblock/{id}/terrain.regionNumber` and
-`landblock/{id}/terrain.terrain.quads[].pcode` because terrain materials are
-pcode-addressed recipes.
+Terrain material requests are the exception: the frontend derives one
+`terrain-material/{regionNumber}` route from
+`landblock/{id}/terrain.regionNumber`. Terrain pcodes remain quad-local lookup
+inputs consumed by that region table; they should not become graph-visible asset
+IDs.
 
 ## Planner Strategy Changes
 
@@ -991,9 +1006,9 @@ The planner should use separate selection policies for the root route families:
 
 Follow-up dependency extraction should be route-specific and typed:
 
-- `landblock/{id}/terrain` enqueues terrain materials derived from
-  `regionNumber` plus unique `terrain.quads[].pcode`, and building shell
-  `material/{did}` requests from `buildingShells[].materialSurfaceIds`.
+- `landblock/{id}/terrain` enqueues one `terrain-material/{regionNumber}` route
+  and building shell `material/{did}` requests from
+  `buildingShells[].materialSurfaceIds`.
 - `landblock/{id}/scene` enqueues `statics[].sourceAssetId`,
   `buildings[].sourceAssetId`, and selected `envCells[].assetId`. It never
   enqueues material, render-texture, render-surface, or palette routes directly.
@@ -1002,8 +1017,8 @@ Follow-up dependency extraction should be route-specific and typed:
   `statics[].sourceAssetId`.
 - `setup-model/{did}` enqueues each setup part `gfx-obj/{did}`.
 - `gfx-obj/{did}` enqueues its `material/{did}` slots.
-- `material/{did}` and `terrain-material/{regionNumber}/{pcode}` enqueue their
-  direct texture/surface/palette dependencies.
+- `material/{did}` and `terrain-material/{regionNumber}` enqueue their direct
+  texture/surface/palette dependencies.
 
 The broad streaming loop should be:
 
@@ -1054,9 +1069,9 @@ Recommended frontend order:
 
 1. Add route helpers in `landblocks.ts` for `landblock/{id}/terrain`,
    `landblock/{id}/scene`, `env-cell/{id}`, and
-   `terrain-material/{regionNumber}/{pcode}` while leaving old helpers in place.
+   `terrain-material/{regionNumber}` while leaving old helpers in place.
 2. Add Zod schemas in `host/contracts.ts` and prepared payload types in
-   `assets/types.ts` for the new routes. Keep old schemas until Phase 5.
+   `assets/types.ts` for the new routes. Keep old schemas until Phase 6.
 3. Centralize route-specific dependency extraction in one frontend module, then
    have both `getAssetResponseDependencies` and `getPreparedAssetDependencies`
    call it. Avoid maintaining two divergent switch statements for the same route
@@ -1099,7 +1114,8 @@ to understand both old and new route families. Add narrow selectors such as:
 - static/building source members from prepared assets: old pack/summary facts
   during migration, new `landblock/{id}/scene` members after switch.
 
-Delete those migration adapters in Phase 5 when old routes are removed. Do not
+Delete those migration adapters during Phase 5 cleanup if the renderer has fully
+cut over; otherwise delete them in Phase 6 with the old route semantics. Do not
 leave compatibility reexports or broad union types in renderer hot paths after
 the cutover.
 
@@ -1108,12 +1124,12 @@ selection from old pack/summary `terrainMesh` payloads to
 `landblock/{id}/terrain` while preserving the current debug-color renderer as a
 temporary visualization path. In that step, the terrain payload must already
 carry `cornerTerrainCodes` and `pcode` so planner/material diagnostics can prove
-the right `terrain-material/*` requests. Second, add the terrain material shader
-path that consumes `terrain-material/{regionNumber}/{pcode}` layer recipes.
-During the temporary debug-color step, make diagnostics distinguish "terrain
-material rendering not enabled yet" from "visible terrain material route is
-missing or failed" so we do not hide planner/host failures once material mode is
-enabled.
+the right `terrain-material/{regionNumber}` table request. Second, add the
+terrain material shader path that consumes the region material table and evaluates
+quad pcodes into GPU blend layers. During the temporary debug-color step, make
+diagnostics distinguish "terrain material rendering not enabled yet" from
+"visible terrain material table is missing or failed" so we do not hide
+planner/host failures once material mode is enabled.
 
 ## Failure Policy
 
@@ -1132,9 +1148,9 @@ Problems should scream:
   surface IDs but omits `buildingShells[].materialSurfaceIds`, treat it as an
   asset contract error.
 - When terrain material rendering is enabled, if visible terrain reaches
-  `WorldDisplay` before its `terrain-material/{regionNumber}/{pcode}` asset is
-  prepared or pending, emit a high-severity structured diagnostic with the owning
-  terrain asset ID, region number, pcode, and prepared asset counts.
+  `WorldDisplay` before its `terrain-material/{regionNumber}` table is prepared
+  or pending, emit a high-severity structured diagnostic with the owning terrain
+  asset ID, region number, pcode, and prepared asset counts.
 - If Rust fails to resolve `terrain-material/*`, `material/*`,
   `render-texture/*`, `render-surface/*`, or `palette/*`, log to stderr at the
   host boundary with the requested route and source error chain.
@@ -1204,7 +1220,7 @@ Phase 0 course corrections:
   default `setup-appearance` ownership as migration targets. They should be
   rewritten or deleted as route ownership moves to `landblock/{id}/terrain`,
   `landblock/{id}/scene`, `env-cell/{id}`, `gfx-obj/{did}`, and
-  `terrain-material/{regionNumber}/{pcode}`.
+  `terrain-material/{regionNumber}`.
 - Future dependency tests should be added around the new route-specific
   extractors, not around additional scans of nested old pack payloads.
 
@@ -1214,7 +1230,7 @@ Phase 0 course corrections:
   - `landblock/{id}/terrain`;
   - `landblock/{id}/scene`;
   - `env-cell/{id}`;
-  - `terrain-material/{regionNumber}/{pcode}`.
+  - `terrain-material/{regionNumber}`.
 - Add TypeScript payload types and Zod schemas for the new routes.
 - Add prepared-record dependency extractors for the new route payloads while
   keeping old pack/summary extractors active.
@@ -1227,6 +1243,92 @@ Validation:
 
 - Typecheck route helpers against representative asset IDs.
 - Ensure invalid route strings fail loudly.
+
+Progress as of 2026-05-23:
+
+- Added frontend route format/parse helpers for:
+  - `landblock/{id}/terrain`;
+  - `landblock/{id}/scene`;
+  - `env-cell/{id}`;
+  - `terrain-material/{regionNumber}/{pcode}`.
+- Added TypeScript payload interfaces and Zod DTO schemas for the new route
+  families:
+  - `landblock-terrain`;
+  - `landblock-scene`;
+  - `env-cell`;
+  - `terrain-material`.
+- Added raw host-response dependency extraction for the original Phase 1
+  terrain-material payload shape:
+  - terrain -> unique `terrain-material/{regionNumber}/{pcode}` plus building
+    shell `material/{did}`;
+  - scene -> typed static/building `sourceAssetId` and env-cell `assetId`;
+  - env-cell -> surface `materialAssetId` plus static `sourceAssetId`;
+  - terrain-material -> render texture/surface/palette dependencies.
+- Added prepared-record dependency extraction for the same new ownership edges.
+- Updated frontend hydration classification so `landblock/{id}/terrain`,
+  `landblock/{id}/scene`, and `env-cell/{id}` are direct hydration roots.
+  `terrain-material/{regionNumber}/{pcode}` remains graph hydration.
+- Added focused tests for route helper parsing/formatting, new dependency
+  extraction, prepared-record extraction, and hydration classification.
+- Ran:
+  `npm run test:ts -- src/lib/landblocks.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/asset-hydration-policy.test.ts`.
+- Ran: `npm run check`.
+- Ran Prettier check for touched frontend files and this plan.
+
+Phase 1 decisions and course corrections:
+
+- Phase 1 initially scaffolded `terrain-material/{regionNumber}/{pcode}` as a
+  graph-visible synthetic asset. That shape is now rejected because pcode is a
+  high-cardinality generated key. Phase 1.1 must replace it with
+  `terrain-material/{regionNumber}` before Rust host routes are added.
+- The existing `isSceneCoverageAssetId` predicate now includes granular direct
+  roots, including `env-cell/*`. That keeps the migration small, but the name is
+  now too narrow. Rename or split it before Phase 4 planner work so direct
+  hydration policy does not read as outdoor-only coverage.
+- Dependency extraction now supports new routes in both raw response and
+  prepared-record paths, but the logic is still duplicated between
+  `dependencies.ts` and `types.ts`. Before Phase 2 or early in Phase 3,
+  centralize the route-specific extraction rules in one module and have both
+  callers delegate to it.
+- Host DTO schemas intentionally describe the target successful payloads even
+  though Rust does not serve these routes yet. Phase 2 must add either matching
+  successful payloads or a shared failed-asset schema that parses separately from
+  successful route payloads.
+
+### Phase 1.1: Correct Terrain Material Route Shape
+
+Phase 1 intentionally added frontend scaffolding before Rust host routes existed,
+but the pcode-addressed terrain material route was the wrong abstraction. A
+single pcode is a high-cardinality generated key derived from quad corner terrain
+codes and road bits; making every unique pcode a graph-visible asset would add
+many synthetic nodes to streaming, cache, diagnostics, and scheduler state.
+
+Course correction:
+
+- Replace `terrain-material/{regionNumber}/{pcode}` route helpers with
+  `terrain-material/{regionNumber}`.
+- Replace `PreparedTerrainMaterialPayload` with a region-scoped
+  `PreparedTerrainMaterialTablePayload` shape.
+- Update raw and prepared dependency extraction so `landblock/{id}/terrain`
+  emits one terrain material table dependency per `regionNumber`, not one
+  dependency per unique pcode.
+- Keep `terrain.quads[].pcode` on `landblock/{id}/terrain`; pcodes are still
+  required as per-quad lookup inputs for the renderer.
+- Update terrain material dependency extraction so
+  `terrain-material/{regionNumber}` exposes the render texture/surface/palette
+  dependencies referenced by the region table.
+- Update tests that currently expect pcode-addressed terrain material routes.
+- Keep `terrain-material/{regionNumber}` as graph hydration and
+  `landblock/{id}/terrain` as direct hydration.
+
+Validation:
+
+- Route helper tests prove `terrain-material/{regionNumber}` parses and invalid
+  pcode-addressed route strings fail.
+- Dependency tests prove a terrain payload with many unique pcodes emits a
+  single `terrain-material/{regionNumber}` dependency.
+- `npm run test:ts -- src/lib/landblocks.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/asset-hydration-policy.test.ts`
+- `npm run check`
 
 ### Phase 2: Add Rust Host Routes
 
@@ -1245,11 +1347,11 @@ Validation:
   graph, and an outdoor static BVH when outdoor-space members exist.
 - `env-cell/{id}` should project one interior cell render/topology payload and
   typed surface slots with `materialAssetId` route IDs.
-- `terrain-material/{regionNumber}/{pcode}` should project one generated terrain
-  material recipe from the active `RegionDesc` terrain tables.
+- `terrain-material/{regionNumber}` should project one region-scoped terrain
+  material table from the active `RegionDesc` terrain tables.
 - Add or expose material graph entry points for route-facing material resolution:
   `material/{did}`, `gfx-obj/{did}` slots, `env-cell/{id}` slots, and
-  `terrain-material/{regionNumber}/{pcode}`.
+  `terrain-material/{regionNumber}`.
 - Keep new host routes capable of failed structured responses with provenance;
   do not fall through to app-local stubs for recognized-but-failed route IDs.
 - Failed route responses must still match either that route's schema with an
@@ -1265,8 +1367,8 @@ Validation:
 
 ### Phase 3: Move Dependency Ownership to First-Class Assets and Route Helpers
 
-- Make terrain material route helpers derive `terrain-material/*` requests from
-  `terrain.regionNumber` and `terrain.quads[].pcode`.
+- Make terrain material route helpers derive `terrain-material/{regionNumber}`
+  requests from `terrain.regionNumber`.
 - Make `env-cell/{id}` expose typed surface slots whose `materialAssetId` fields
   are the material route inputs for env-cell render geometry.
 - Keep `gfx-obj/{did}` as the material dependency owner for object geometry.
@@ -1288,7 +1390,7 @@ Validation:
 Validation:
 
 - Asset graph tests prove:
-  - terrain -> terrain material -> render-texture/render-surface/palette;
+  - terrain -> terrain material table -> render-texture/render-surface/palette;
   - terrain -> building shell material -> render-texture/render-surface/palette;
   - scene -> typed static/building member -> setup-model or gfx-obj;
   - scene -> typed env-cell member -> env-cell;
@@ -1332,7 +1434,50 @@ Validation:
   env-cell, gfx, setup, material, texture, surface, and palette assets as
   separate prepared records.
 
-### Phase 5: Retire Old Pack Semantics
+### Phase 5: Cleanup Migration Debt
+
+After the new route families are serving the renderer and before deleting the
+old pack routes, remove temporary scaffolding and weakened abstractions created
+during the migration:
+
+- Centralize route-specific dependency extraction so raw host responses and
+  prepared records use one shared implementation. Delete duplicate switch
+  statements in `dependencies.ts` and `types.ts`.
+- Rename or split policy helpers whose names became misleading during the
+  transition, especially `isSceneCoverageAssetId`, which now includes direct
+  env-cell roots.
+- Delete broad old/new renderer adapter unions once each renderer subsystem
+  consumes a narrow selector for terrain, scene members, env cells, static
+  renderables, portal work items, and material diagnostics.
+- Remove temporary compatibility branches that accept both
+  `landblock-pack`/`landblock-summary` and the new `landblock/*`/`env-cell/*`
+  payloads in production paths.
+- Remove default `setup-appearance` scheduling from setup-model loading if it is
+  still present; keep appearance-level resolution only behind an explicit future
+  override route.
+- Tighten schema and payload names that were intentionally provisional during
+  route bring-up. Successful route payloads should have one canonical `kind`;
+  failed route responses should use the shared failed-asset schema, not
+  schema-incomplete successful payload kinds.
+- Revisit any temporary nullability or optional fields added to smooth the
+  migration. Keep optional fields only when the source data actually permits
+  absence.
+- Replace migration-target tests that assert old ownership with tests for the
+  new ownership edges, then delete the old assertions.
+- Remove dead imports, helper functions, fixture builders, and debug-only logs
+  left over from pack/summary migration.
+
+Validation:
+
+- `rg "migration-target|temporary|compat|old route|landblock-pack|landblock-summary" apps/holtburger-3d/src`
+  has only intentional diagnostic fixtures or removal notes.
+- `rg "setup-appearance" apps/holtburger-3d/src/lib/assets apps/holtburger-3d/src/lib/world-display`
+  finds only explicit future override handling or deleted-route fixtures.
+- `npm run lint`
+- `npm run check`
+- `npm run check:rust`
+
+### Phase 6: Retire Old Pack Semantics
 
 - Stop using `landblock-pack/*` and `landblock-summary/*` in planner code.
 - Remove old route helpers, schemas, and tests once no production code depends on
@@ -1347,7 +1492,7 @@ Validation:
 - `npm run check`
 - `npm run check:rust`
 
-### Phase 6: Revisit Further Splits with Measurements
+### Phase 7: Revisit Further Splits with Measurements
 
 Only after the route migration is stable, evaluate whether to split:
 
@@ -1357,7 +1502,7 @@ Only after the route migration is stable, evaluate whether to split:
   `landblock/{id}/terrain-geometry`.
 
 Large arrays should already use binary sections inside the owning route response;
-do not wait for Phase 6 to stop JSON-expanding geometry. Require profiling or a
+do not wait for Phase 7 to stop JSON-expanding geometry. Require profiling or a
 concrete consumer before introducing a new route split.
 
 ## Open Questions
@@ -1378,8 +1523,8 @@ concrete consumer before introducing a new route split.
   `gfx-obj/{did}`.
 - Materials are requested either because first-class renderable assets declare
   direct dependencies or, for terrain only, because the frontend derives
-  `terrain-material/*` routes from `regionNumber` and pcodes on the terrain
-  asset.
+  one `terrain-material/{regionNumber}` table route from `regionNumber` and uses
+  terrain pcodes as per-quad lookup inputs.
 - `landblock/{id}/terrain` owns terrain and building shell render geometry;
   `landblock/{id}/scene` owns focused semantic membership, portals, env cells,
   and scene BVHs.

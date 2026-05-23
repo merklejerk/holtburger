@@ -1,14 +1,18 @@
 import type { AssetLookupResponseDto } from "../host/contracts";
 import {
 	dependencyManifestPayloadDtoSchema,
+	envCellPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
+	landblockScenePayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
+	landblockTerrainPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
 	renderTexturePayloadDtoSchema,
 	setupModelPayloadDtoSchema,
 	setupAppearancePayloadDtoSchema,
+	terrainMaterialPayloadDtoSchema,
 } from "../host/contracts";
 
 export interface AssetDependencyRef {
@@ -32,6 +36,42 @@ export function getAssetResponseDependencies(
 	);
 	if (landblockSummary.success) {
 		return [];
+	}
+
+	const landblockTerrain = landblockTerrainPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockTerrain.success) {
+		return uniqueSortedAssetIds([
+			...landblockTerrain.data.terrain.quads.map((quad) =>
+				formatTerrainMaterialDependencyAssetId(
+					landblockTerrain.data.regionNumber,
+					quad.pcode,
+				),
+			),
+			...landblockTerrain.data.buildingShells.flatMap((buildingShell) =>
+				buildingShell.materialSurfaceIds.map(formatMaterialDependencyAssetId),
+			),
+		]);
+	}
+
+	const landblockScene = landblockScenePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockScene.success) {
+		return uniqueSortedAssetIds([
+			...landblockScene.data.statics.map((member) => member.sourceAssetId),
+			...landblockScene.data.buildings.map((member) => member.sourceAssetId),
+			...landblockScene.data.envCells.map((member) => member.assetId),
+		]);
+	}
+
+	const envCell = envCellPayloadDtoSchema.safeParse(response.payload);
+	if (envCell.success) {
+		return uniqueSortedAssetIds([
+			...envCell.data.surfaces.map((surface) => surface.materialAssetId),
+			...envCell.data.statics.map((member) => member.sourceAssetId),
+		]);
 	}
 
 	const setupModel = setupModelPayloadDtoSchema.safeParse(response.payload);
@@ -68,6 +108,17 @@ export function getAssetResponseDependencies(
 		]);
 	}
 
+	const terrainMaterial = terrainMaterialPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (terrainMaterial.success) {
+		return uniqueSortedAssetIds([
+			...terrainMaterial.data.dependencies.renderTextureAssetIds,
+			...terrainMaterial.data.dependencies.renderSurfaceAssetIds,
+			...terrainMaterial.data.dependencies.paletteAssetIds,
+		]);
+	}
+
 	const renderTexture = renderTexturePayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -98,4 +149,19 @@ export function getAssetResponseDependencies(
 
 function uniqueSortedAssetIds(assetIds: string[]): AssetDependencyRef[] {
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
+}
+
+function formatMaterialDependencyAssetId(surfaceId: number): string {
+	return `material/${formatHex32(surfaceId)}`;
+}
+
+function formatTerrainMaterialDependencyAssetId(
+	regionNumber: number,
+	pcode: number,
+): string {
+	return `terrain-material/${Math.trunc(regionNumber)}/${Math.trunc(pcode)}`;
+}
+
+function formatHex32(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }

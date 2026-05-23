@@ -5,12 +5,20 @@ import {
 	deriveFirstEnvCellId,
 	deriveLandblockEnvCellId,
 	deriveLandblockEnvCellIds,
+	formatEnvCellAssetId,
 	formatLandblockPackAssetId,
+	formatLandblockSceneAssetId,
 	formatLandblockSummaryAssetId,
+	formatLandblockTerrainAssetId,
 	formatLandblockLabel,
+	formatTerrainMaterialAssetId,
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
+	parseEnvCellAssetId,
+	parseLandblockSceneAssetId,
+	parseLandblockTerrainAssetId,
+	parseTerrainMaterialAssetId,
 } from "./landblocks";
 
 describe("outdoor landblock helpers", () => {
@@ -25,6 +33,12 @@ describe("outdoor landblock helpers", () => {
 		);
 		expect(formatLandblockSummaryAssetId(landblockId)).toBe(
 			"landblock-summary/da55ffff",
+		);
+		expect(formatLandblockTerrainAssetId(landblockId)).toBe(
+			"landblock/da55ffff/terrain",
+		);
+		expect(formatLandblockSceneAssetId(landblockId)).toBe(
+			"landblock/da55ffff/scene",
 		);
 	});
 
@@ -52,5 +66,27 @@ describe("outdoor landblock helpers", () => {
 		expect(deriveLandblockEnvCellIds(0xda55012e, 3)).toEqual([
 			0xda550100, 0xda550101, 0xda550102,
 		]);
+	});
+
+	it("formats and parses granular scene asset ids", () => {
+		expect(parseLandblockTerrainAssetId("landblock/da550123/terrain")).toBe(
+			0xda550123,
+		);
+		expect(parseLandblockSceneAssetId("landblock/da550123/scene")).toBe(
+			0xda550123,
+		);
+		expect(formatEnvCellAssetId(0xda550123)).toBe("env-cell/da550123");
+		expect(parseEnvCellAssetId("env-cell/da550123")).toBe(0xda550123);
+		expect(formatTerrainMaterialAssetId(1, 123456)).toBe(
+			"terrain-material/1/123456",
+		);
+		expect(parseTerrainMaterialAssetId("terrain-material/1/123456")).toEqual({
+			regionNumber: 1,
+			pcode: 123456,
+		});
+		expect(parseLandblockTerrainAssetId("landblock/da55ffff/scene")).toBeNull();
+		expect(
+			parseTerrainMaterialAssetId("terrain-material/1/not-a-number"),
+		).toBeNull();
 	});
 });

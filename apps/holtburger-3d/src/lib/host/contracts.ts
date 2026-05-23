@@ -395,6 +395,354 @@ export type LandblockSummaryPayloadDto = z.infer<
 	typeof landblockSummaryPayloadDtoSchema
 >;
 
+const preparedTerrainBvhItemDtoSchema = z.object({
+	row: z.number().int().nonnegative(),
+	col: z.number().int().nonnegative(),
+	quadIndex: z.number().int().nonnegative(),
+	triangleIndices: z.tuple([
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+	]),
+});
+
+const preparedTerrainBvhDtoSchema = z.object({
+	coordinateSpace: z.literal("landblock-terrain-local"),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	items: z.array(preparedTerrainBvhItemDtoSchema),
+});
+
+const landblockTerrainTriangleDtoSchema = z.object({
+	terrainTriangleId: z.string().min(1),
+	quadIndex: z.number().int().nonnegative(),
+	triangleInQuad: z.union([z.literal(0), z.literal(1)]),
+	vertexIndices: z.tuple([
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+	]),
+	averageHeight: z.number().finite(),
+	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
+});
+
+const landblockTerrainQuadDtoSchema = z.object({
+	terrainQuadId: z.string().min(1),
+	row: z.number().int().nonnegative(),
+	col: z.number().int().nonnegative(),
+	quadIndex: z.number().int().nonnegative(),
+	sourceTerrainIndices: z.tuple([
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+	]),
+	vertexIndices: z.tuple([
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+	]),
+	triangleIndices: z.tuple([
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+	]),
+	diagonal: z.enum(["southwest-northeast", "southeast-northwest"]),
+	cornerTerrainCodes: z.tuple([
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+		z.number().int().nonnegative(),
+	]),
+	pcode: z.number().int().nonnegative(),
+	averageHeight: z.number().finite(),
+	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
+});
+
+const landblockTerrainDtoSchema = z.object({
+	gridSize: z.number().int().positive(),
+	tileSize: z.number().finite().positive(),
+	vertices: z.array(vec3DtoSchema),
+	triangles: z.array(landblockTerrainTriangleDtoSchema),
+	quads: z.array(landblockTerrainQuadDtoSchema),
+	terrainBvh: preparedTerrainBvhDtoSchema,
+	minHeight: z.number().finite(),
+	maxHeight: z.number().finite(),
+	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }).nullable(),
+});
+
+const landblockTerrainBuildingShellDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	sourceDid: z.number().int().nonnegative(),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
+	materialSurfaceIds: z.array(z.number().int().nonnegative()),
+});
+
+export const landblockTerrainPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-terrain"),
+	residencyKind: z.literal("outdoor-landblock"),
+	sourceAssetKind: z.literal("landblock-terrain"),
+	landblockId: z.number().int().nonnegative(),
+	regionId: z.number().int().nonnegative(),
+	regionNumber: z.number().int().nonnegative(),
+	terrain: landblockTerrainDtoSchema,
+	buildingShells: z.array(landblockTerrainBuildingShellDtoSchema),
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockTerrainPayloadDto = z.infer<
+	typeof landblockTerrainPayloadDtoSchema
+>;
+
+const landblockScenePlacedSourceMemberBaseDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	memberId: z.string().min(1),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	sourceScale: vec3DtoSchema,
+	sourceBounds: preparedAabbDtoSchema,
+	instanceBounds: preparedAabbDtoSchema,
+});
+
+const landblockSceneStaticMemberDtoSchema =
+	landblockScenePlacedSourceMemberBaseDtoSchema.extend({
+		kind: z.enum(["scenery", "generated-scenery"]),
+	});
+
+const landblockSceneBuildingPortalDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	stabLocalCellIds: z.array(z.number().int().nonnegative()),
+	linkedEnvCellIds: z.array(z.number().int().nonnegative()),
+});
+
+const landblockSceneBuildingMemberDtoSchema =
+	landblockScenePlacedSourceMemberBaseDtoSchema.extend({
+		kind: z.literal("building"),
+		numLeaves: z.number().int().nonnegative(),
+		portals: z.array(landblockSceneBuildingPortalDtoSchema),
+	});
+
+const landblockSceneEnvCellMemberDtoSchema = z.object({
+	memberId: z.string().min(1),
+	envCellId: z.number().int().nonnegative(),
+	assetId: z.string().min(1),
+	localPlacement: placementTransformDtoSchema,
+	visibleEnvCellIds: z.array(z.number().int().nonnegative()),
+	restrictionObjectId: z.number().int().nonnegative().nullable(),
+	seenOutside: z.boolean().nullable(),
+});
+
+const preparedEnvCellResidencyBvhItemDtoSchema = z.object({
+	envCellId: z.number().int().nonnegative(),
+	memberId: z.string().min(1),
+	assetId: z.string().min(1),
+	source: z.enum(["building-portal-link", "env-cell-placement", "derived"]),
+});
+
+const preparedEnvCellResidencyBvhDtoSchema = z.object({
+	coordinateSpace: z.literal("landblock-scene-residency"),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	items: z.array(preparedEnvCellResidencyBvhItemDtoSchema),
+});
+
+const preparedOutdoorBvhItemDtoSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
+	z.object({ kind: z.literal("building"), instanceId: z.string().min(1) }),
+	z.object({
+		kind: z.literal("building-portal-anchor"),
+		portalId: z.string().min(1),
+	}),
+]);
+
+const preparedOutdoorBvhDtoSchema = z.object({
+	coordinateSpace: z.literal("landblock-render-local"),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	items: z.array(preparedOutdoorBvhItemDtoSchema),
+});
+
+const landblockScenePortalLinkEndpointDtoSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("landblock-building"),
+		instanceId: z.string().min(1),
+		portalId: z.string().min(1),
+	}),
+	z.object({
+		kind: z.literal("env-cell"),
+		envCellId: z.number().int().nonnegative(),
+		portalId: z.string().min(1),
+	}),
+	z.object({
+		kind: z.literal("outside"),
+		landblockId: z.number().int().nonnegative(),
+	}),
+]);
+
+const landblockScenePortalLinkDtoSchema = z.object({
+	linkId: z.string().min(1),
+	source: landblockScenePortalLinkEndpointDtoSchema,
+	target: landblockScenePortalLinkEndpointDtoSchema,
+	flags: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	polygonId: z.number().int().nonnegative().nullable(),
+	sourceIndex: z.number().int().nonnegative(),
+});
+
+export const landblockScenePayloadDtoSchema = z.object({
+	kind: z.literal("landblock-scene"),
+	residencyKind: z.literal("landblock"),
+	sourceAssetKind: z.literal("landblock-scene"),
+	landblockId: z.number().int().nonnegative(),
+	landblockInfoId: z.number().int().nonnegative(),
+	classification: landblockClassificationValueSchema,
+	statics: z.array(landblockSceneStaticMemberDtoSchema),
+	buildings: z.array(landblockSceneBuildingMemberDtoSchema),
+	envCells: z.array(landblockSceneEnvCellMemberDtoSchema),
+	portalLinks: z.array(landblockScenePortalLinkDtoSchema),
+	envCellResidencyBvh: preparedEnvCellResidencyBvhDtoSchema,
+	outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockScenePayloadDto = z.infer<
+	typeof landblockScenePayloadDtoSchema
+>;
+
+const envCellSurfaceSlotDtoSchema = z.object({
+	slotId: z.number().int().positive(),
+	surfaceId: z.number().int().nonnegative(),
+	materialAssetId: z.string().min(1),
+});
+
+const envCellPortalDtoSchema = z.object({
+	portalId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	polygonId: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	targetEnvCellId: z.number().int().nonnegative().nullable(),
+	isOutsideTransition: z.boolean(),
+});
+
+const envCellStaticMemberDtoSchema = z.object({
+	instanceId: z.string().min(1),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	sourceScale: vec3DtoSchema,
+	sourceBounds: preparedAabbDtoSchema,
+	instanceBounds: preparedAabbDtoSchema,
+});
+
+const preparedEnvCellBvhItemDtoSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("render-geometry"),
+		polygonId: z.number().int().nonnegative().nullable(),
+		triangleRange: z.tuple([
+			z.number().int().nonnegative(),
+			z.number().int().nonnegative(),
+		]),
+	}),
+	z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
+	z.object({ kind: z.literal("portal"), portalId: z.string().min(1) }),
+]);
+
+const preparedEnvCellBvhDtoSchema = z.object({
+	coordinateSpace: z.literal("env-cell-local"),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	items: z.array(preparedEnvCellBvhItemDtoSchema),
+});
+
+export const envCellPayloadDtoSchema = z.object({
+	kind: z.literal("env-cell"),
+	residencyKind: z.literal("interior-cell"),
+	sourceAssetKind: z.literal("env-cell"),
+	envCellId: z.number().int().nonnegative(),
+	environmentId: z.number().int().nonnegative(),
+	cellStructureId: z.number().int().nonnegative(),
+	surfaces: z.array(envCellSurfaceSlotDtoSchema),
+	portals: z.array(envCellPortalDtoSchema),
+	visibleEnvCellIds: z.array(z.number().int().nonnegative()),
+	portalApertures: z.array(preparedPortalApertureDtoSchema),
+	statics: z.array(envCellStaticMemberDtoSchema),
+	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
+	cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
+	localBvh: preparedEnvCellBvhDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;
+
+const terrainTextureLayerDtoSchema = z.object({
+	terrainType: z.number().int().nonnegative(),
+	textureAssetId: z.string().min(1),
+	textureDid: z.number().int().nonnegative(),
+	tiling: z.number().finite(),
+	alphaTextureAssetId: z.string().min(1).nullable(),
+	alphaTextureDid: z.number().int().nonnegative().nullable(),
+	alphaIndex: z.number().int().nonnegative().nullable(),
+	rotation: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+});
+
+const terrainRoadLayerDtoSchema = z.object({
+	textureAssetId: z.string().min(1),
+	textureDid: z.number().int().nonnegative(),
+	alphaTextureAssetId: z.string().min(1),
+	alphaTextureDid: z.number().int().nonnegative(),
+	alphaIndex: z.number().int().nonnegative(),
+	rotation: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+});
+
+const terrainDetailLayerDtoSchema = z.object({
+	textureAssetId: z.string().min(1),
+	textureDid: z.number().int().nonnegative(),
+	tiling: z.number().finite(),
+	fadeNear: z.number().finite(),
+	fadeFar: z.number().finite(),
+});
+
+const terrainColorVariationDtoSchema = z.object({
+	minVertBright: z.number().finite(),
+	maxVertBright: z.number().finite(),
+	minVertSaturate: z.number().finite(),
+	maxVertSaturate: z.number().finite(),
+	minVertHue: z.number().finite(),
+	maxVertHue: z.number().finite(),
+	activeRenderPath: z.literal(false),
+});
+
+const terrainMaterialDependenciesDtoSchema = z.object({
+	renderTextureAssetIds: z.array(z.string().min(1)),
+	renderSurfaceAssetIds: z.array(z.string().min(1)),
+	paletteAssetIds: z.array(z.string().min(1)),
+});
+
+export const terrainMaterialPayloadDtoSchema = z.object({
+	kind: z.literal("terrain-material"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("terrain-material"),
+	regionNumber: z.number().int().nonnegative(),
+	pcode: z.number().int().nonnegative(),
+	materialKind: z.literal("tex-merge"),
+	base: terrainTextureLayerDtoSchema,
+	terrainOverlays: z.array(terrainTextureLayerDtoSchema),
+	roadOverlays: z.array(terrainRoadLayerDtoSchema),
+	detail: terrainDetailLayerDtoSchema.nullable(),
+	colorVariation: terrainColorVariationDtoSchema.nullable(),
+	dependencies: terrainMaterialDependenciesDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type TerrainMaterialPayloadDto = z.infer<
+	typeof terrainMaterialPayloadDtoSchema
+>;
+
 const gfxObjVertexDtoSchema = z.object({
 	id: z.number().int().nonnegative(),
 	origin: vec3DtoSchema,

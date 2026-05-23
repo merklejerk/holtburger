@@ -62,6 +62,7 @@ import {
 	isPreparedGfxObjAsset,
 } from "./static-renderables";
 import {
+	type MaterialResourceDiagnostic,
 	WorldMaterialResourceCache,
 	formatMaterialAssetId,
 } from "./material-resources";
@@ -199,6 +200,20 @@ const UNFOCUSED_MAX_RENDER_FPS = 15;
 const UNFOCUSED_RENDER_INTERVAL_MS = 1000 / UNFOCUSED_MAX_RENDER_FPS;
 const SELECTED_DEBUG_EDGE_RADIUS = 0.12;
 const MIN_STATIC_RENDERABLE_INSTANCE_CAPACITY = 8;
+const MATERIAL_DIAGNOSTIC_LOG_PREFIX = "[holtburger-3d][material]";
+const MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT = 12;
+
+interface CoalescedMaterialDiagnosticBucket {
+	category: string;
+	count: number;
+	messages: Set<string>;
+	materialAssetIds: Set<string>;
+	preparedKinds: Map<string, number>;
+	preparedAssetCounts: Record<string, number> | null;
+	preparedMaterialRecipeCount: number | null;
+	preparedMaterialAssetIdSamples: string[];
+	samples: MaterialResourceDiagnostic[];
+}
 
 interface VisibleTransitionPortalWork {
 	workItem: TransitionPortalWorkItem;
@@ -212,6 +227,164 @@ interface VisibleTransitionPortalWork {
 interface PortalDepthResetCapability {
 	supported: boolean;
 	reason: string | null;
+}
+
+function createCoalescedMaterialDiagnosticReporter(): (
+	diagnostic: MaterialResourceDiagnostic,
+) => void {
+	const buckets = new Map<string, CoalescedMaterialDiagnosticBucket>();
+	let flushHandle: ReturnType<typeof setTimeout> | null = null;
+
+	const flush = (): void => {
+		flushHandle = null;
+		const pendingBuckets = [...buckets.values()];
+		buckets.clear();
+
+		for (const bucket of pendingBuckets) {
+			if (bucket.count === 1) {
+				const sample = bucket.samples[0];
+				if (sample) {
+					console.warn(
+						MATERIAL_DIAGNOSTIC_LOG_PREFIX,
+						sample.message,
+						sample.detail,
+					);
+				}
+				continue;
+			}
+
+			console.warn(
+				MATERIAL_DIAGNOSTIC_LOG_PREFIX,
+				`${bucket.count} ${describeMaterialDiagnosticCategory(bucket.category)}. Samples: ${[
+					...bucket.materialAssetIds,
+				]
+					.slice(0, MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT)
+					.join(", ")}`,
+				{
+					category: bucket.category,
+					count: bucket.count,
+					messages: [...bucket.messages].slice(
+						0,
+						MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT,
+					),
+					materialAssetIds: [...bucket.materialAssetIds].slice(
+						0,
+						MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT,
+					),
+					preparedKinds: Object.fromEntries(bucket.preparedKinds),
+					preparedAssetCounts: bucket.preparedAssetCounts,
+					preparedMaterialRecipeCount: bucket.preparedMaterialRecipeCount,
+					preparedMaterialAssetIdSamples:
+						bucket.preparedMaterialAssetIdSamples,
+					samples: bucket.samples.map((sample) => sample.detail),
+				},
+			);
+		}
+	};
+
+	return (diagnostic): void => {
+		const category = materialDiagnosticCategory(diagnostic.key);
+		const bucket =
+			buckets.get(category) ?? createMaterialDiagnosticBucket(category);
+		bucket.count += 1;
+		bucket.messages.add(diagnostic.message);
+		addMaterialDiagnosticDetail(bucket, diagnostic);
+		if (bucket.samples.length < MATERIAL_DIAGNOSTIC_SAMPLE_LIMIT) {
+			bucket.samples.push(diagnostic);
+		}
+		buckets.set(category, bucket);
+
+		if (flushHandle === null) {
+			flushHandle = setTimeout(flush, 0);
+		}
+	};
+}
+
+function createMaterialDiagnosticBucket(
+	category: string,
+): CoalescedMaterialDiagnosticBucket {
+	return {
+		category,
+		count: 0,
+		messages: new Set(),
+		materialAssetIds: new Set(),
+		preparedKinds: new Map(),
+		preparedAssetCounts: null,
+		preparedMaterialRecipeCount: null,
+		preparedMaterialAssetIdSamples: [],
+		samples: [],
+	};
+}
+
+function addMaterialDiagnosticDetail(
+	bucket: CoalescedMaterialDiagnosticBucket,
+	diagnostic: MaterialResourceDiagnostic,
+): void {
+	const materialAssetId = diagnostic.detail.materialAssetId;
+	if (typeof materialAssetId === "string") {
+		bucket.materialAssetIds.add(materialAssetId);
+	}
+
+	const preparedKind = diagnostic.detail.preparedKind;
+	if (typeof preparedKind === "string") {
+		bucket.preparedKinds.set(
+			preparedKind,
+			(bucket.preparedKinds.get(preparedKind) ?? 0) + 1,
+		);
+	} else if (preparedKind === null) {
+		bucket.preparedKinds.set(
+			"null",
+			(bucket.preparedKinds.get("null") ?? 0) + 1,
+		);
+	}
+
+	if (isStringNumberRecord(diagnostic.detail.preparedAssetCounts)) {
+		bucket.preparedAssetCounts = diagnostic.detail.preparedAssetCounts;
+	}
+	if (typeof diagnostic.detail.preparedMaterialRecipeCount === "number") {
+		bucket.preparedMaterialRecipeCount =
+			diagnostic.detail.preparedMaterialRecipeCount;
+	}
+	if (Array.isArray(diagnostic.detail.preparedMaterialAssetIdSamples)) {
+		bucket.preparedMaterialAssetIdSamples =
+			diagnostic.detail.preparedMaterialAssetIdSamples.filter(
+				(assetId): assetId is string => typeof assetId === "string",
+			);
+	}
+}
+
+function isStringNumberRecord(value: unknown): value is Record<string, number> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.values(value).every((entry) => typeof entry === "number")
+	);
+}
+
+function materialDiagnosticCategory(key: string): string {
+	return key.split(":")[0] ?? key;
+}
+
+function describeMaterialDiagnosticCategory(category: string): string {
+	switch (category) {
+		case "missing-recipe":
+			return "materials were requested by geometry before a material recipe was prepared";
+		case "failed-recipe":
+			return "material recipes failed to resolve";
+		case "missing-render-texture":
+			return "materials are missing render texture dependencies";
+		case "missing-render-surface":
+			return "materials are missing render surface dependencies";
+		case "unsupported-render-surface":
+			return "materials reference unsupported render surface formats";
+		case "missing-palette":
+			return "materials reference missing palette dependencies";
+		case "texture-upload-failed":
+			return "materials could not upload selected render surfaces";
+		default:
+			return "material diagnostics were reported";
+	}
 }
 
 export function createWorldDisplayRenderer(
@@ -255,7 +428,10 @@ export function createWorldDisplayRenderer(
 	const portalAperturePassMeshes = new Map<string, Mesh>();
 
 	const scene = new Scene();
-	const materialResourceCache = new WorldMaterialResourceCache();
+	const reportMaterialDiagnostic = createCoalescedMaterialDiagnosticReporter();
+	const materialResourceCache = new WorldMaterialResourceCache(
+		reportMaterialDiagnostic,
+	);
 
 	const camera = new PerspectiveCamera(52, 1, 0.1, 5000);
 
@@ -1574,7 +1750,8 @@ export function createWorldDisplayRenderer(
 		cell: StructuredInteriorCell,
 	): Mesh {
 		const materialPlan = materialResourceCache.resolveMaterialPlan({
-			slots: cell.surfaceIds.map((surfaceId) => ({
+			slots: cell.surfaceIds.map((surfaceId, slotIndex) => ({
+				slotIndex,
 				surfaceId,
 				materialAssetId: formatMaterialAssetId(surfaceId),
 			})),

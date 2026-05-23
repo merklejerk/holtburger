@@ -119,8 +119,8 @@ async function lookupBinaryAssetBatch(
 		batch: { requests },
 	});
 	const responses = decodeBinaryAssetBatchEnvelope(payload);
-	return responses.map(
-		(response) => assetLookupResponseDtoSchema.parse(response),
+	return responses.map((response) =>
+		assetLookupResponseDtoSchema.parse(response),
 	);
 }
 
@@ -207,12 +207,16 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 	return (
 		assetId.startsWith("landblock-pack/") ||
 		assetId.startsWith("landblock-summary/") ||
-		assetId.startsWith("gfx-obj/")
+		assetId.startsWith("gfx-obj/") ||
+		assetId.startsWith("render-surface/")
 	);
 }
 
 function isLargeBinaryAssetLookup(assetId: string): boolean {
-	return assetId.startsWith("landblock-pack/");
+	return (
+		assetId.startsWith("landblock-pack/") ||
+		assetId.startsWith("render-surface/")
+	);
 }
 
 export async function submitCameraHint(

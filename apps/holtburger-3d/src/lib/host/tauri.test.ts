@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { lookupAsset, planBinaryLookupBatches, submitCameraHint } from "./tauri";
+import {
+	lookupAsset,
+	planBinaryLookupBatches,
+	submitCameraHint,
+} from "./tauri";
 
 describe("Tauri host commands", () => {
 	it("fails fast outside the Tauri runtime when submitting camera hints", async () => {
@@ -26,23 +30,26 @@ describe("Tauri host commands", () => {
 		).rejects.toThrow(/requires the Tauri runtime/i);
 	});
 
-	it("isolates large landblock pack binary lookups from small batched assets", () => {
+	it("isolates large binary lookups from small batched assets", () => {
 		const batches = planBinaryLookupBatches([
 			createRequest("a", "landblock-summary/0102ffff"),
 			createRequest("b", "landblock-pack/0102ffff"),
 			createRequest("c", "gfx-obj/01000001"),
-			createRequest("d", "landblock-summary/0103ffff"),
-			createRequest("e", "landblock-pack/0103ffff"),
+			createRequest("d", "render-surface/06000001"),
+			createRequest("e", "landblock-summary/0103ffff"),
+			createRequest("f", "landblock-pack/0103ffff"),
 		]);
 
-		expect(batches.map((batch) => batch.map((request) => request.assetId))).toEqual(
-			[
-				["landblock-summary/0102ffff"],
-				["landblock-pack/0102ffff"],
-				["gfx-obj/01000001", "landblock-summary/0103ffff"],
-				["landblock-pack/0103ffff"],
-			],
-		);
+		expect(
+			batches.map((batch) => batch.map((request) => request.assetId)),
+		).toEqual([
+			["landblock-summary/0102ffff"],
+			["landblock-pack/0102ffff"],
+			["gfx-obj/01000001"],
+			["render-surface/06000001"],
+			["landblock-summary/0103ffff"],
+			["landblock-pack/0103ffff"],
+		]);
 	});
 });
 

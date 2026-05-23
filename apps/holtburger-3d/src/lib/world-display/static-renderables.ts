@@ -725,7 +725,8 @@ function normalizePackStaticRenderablePart(
 function resolveGfxObjMaterialSlots(
 	gfxObj: PreparedGfxObjPayload,
 ): ResolvedMaterialSlot[] {
-	return gfxObj.surfaceIds.map((surfaceId) => ({
+	return gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
+		slotIndex,
 		surfaceId,
 		materialAssetId: formatMaterialAssetId(surfaceId),
 	}));
@@ -754,6 +755,7 @@ function resolveSetupPartMaterialSlots(
 	);
 	if (appearancePart) {
 		return appearancePart.materialSlots.map((slot) => ({
+			slotIndex: slot.slotIndex,
 			surfaceId: slot.surfaceId,
 			materialAssetId: slot.materialAssetId,
 		}));
@@ -803,7 +805,11 @@ function describeMaterialSignature(
 ): string {
 	return [
 		appearanceKey,
-		...slots.map((slot) => `${slot.surfaceId}:${slot.materialAssetId}`).sort(),
+		...slots
+			.map(
+				(slot) => `${slot.slotIndex}:${slot.surfaceId}:${slot.materialAssetId}`,
+			)
+			.sort(),
 	].join(",");
 }
 

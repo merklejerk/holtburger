@@ -135,6 +135,38 @@ export function deriveSceneCoverageAssetIds(
 	].sort();
 }
 
+export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
+	browserDestination: BrowserLocationSelection | null;
+	preparedByAssetId: Record<string, PreparedAssetRecord>;
+	pendingAssetIds?: string[];
+	options?: OutdoorSceneRequestOptions;
+}): string[] {
+	const {
+		browserDestination,
+		preparedByAssetId,
+		pendingAssetIds = [],
+		options = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS,
+	} = input;
+	if (!browserDestination) {
+		return [];
+	}
+
+	const materialAssetIds = isIndoorBrowserDestination(browserDestination)
+		? collectIndoorVisibleMaterialAssetIds(
+				browserDestination,
+				preparedByAssetId,
+			)
+		: collectOutdoorVisibleMaterialAssetIds(
+				browserDestination,
+				preparedByAssetId,
+				options,
+			);
+	const pendingAssetIdSet = new Set(pendingAssetIds);
+	return materialAssetIds.filter(
+		(assetId) => !preparedByAssetId[assetId] && !pendingAssetIdSet.has(assetId),
+	);
+}
+
 function createLandblockPackCoverageRequestsForInterest(
 	requestRevision: number,
 	browserDestination: BrowserLocationSelection,
@@ -298,22 +330,49 @@ function createStaticRenderableAssetRequests(
 		collectSelectedSummaryBuildingSourceAssetIds(preparedByAssetId, {
 			buildingLandblockIds,
 		});
+	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+		preparedByAssetId,
+		summaryBuildingSourceAssetIds,
+	);
+	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
+		preparedByAssetId,
+		[...packGfxAssetIds, ...setupModelPartGfxAssetIds],
+		new Set(linkedInteriorCoverage.envCellIds),
+	);
 
-	return [...new Set([...packGfxAssetIds, ...summaryBuildingSourceAssetIds])]
-		.sort()
-		.filter(
-			(assetId) =>
-				isStaticRenderableAssetId(assetId) &&
-				!preparedByAssetId[assetId] &&
-				!pendingAssetIdSet.has(assetId),
-		)
-		.map((assetId) => ({
-			requestId: `${priority}-${requestRevision}-${describeRequiredBrowserDestinationIdentity(
-				browserDestination,
-			)}-static-renderable-${assetId}`,
-			assetId,
-			priority,
-		}));
+	const geometryAssetIds = [
+		...new Set([
+			...packGfxAssetIds,
+			...summaryBuildingSourceAssetIds,
+			...setupModelPartGfxAssetIds,
+		]),
+	].sort();
+	const materialRequests = createUnpreparedRequests(
+		materialAssetIds,
+		requestRevision,
+		priority,
+		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-static-material`,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+
+	return [
+		...geometryAssetIds
+			.filter(
+				(assetId) =>
+					isStaticRenderableAssetId(assetId) &&
+					!preparedByAssetId[assetId] &&
+					!pendingAssetIdSet.has(assetId),
+			)
+			.map((assetId) => ({
+				requestId: `${priority}-${requestRevision}-${describeRequiredBrowserDestinationIdentity(
+					browserDestination,
+				)}-static-renderable-${assetId}`,
+				assetId,
+				priority,
+			})),
+		...materialRequests,
+	];
 }
 
 export function derivePackInteriorEnvCellIdsForLandblocks(
@@ -371,22 +430,134 @@ function createIndoorStaticRenderableAssetRequests(
 			envCellIds: new Set(activeEnvCellIds),
 		},
 	);
+	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+		preparedByAssetId,
+		packGfxAssetIds,
+	);
+	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
+		preparedByAssetId,
+		[...packGfxAssetIds, ...setupModelPartGfxAssetIds],
+		new Set(activeEnvCellIds),
+	);
 
-	return [...new Set(packGfxAssetIds)]
-		.sort()
-		.filter(
-			(assetId) =>
-				isStaticRenderableAssetId(assetId) &&
-				!preparedByAssetId[assetId] &&
-				!pendingAssetIdSet.has(assetId),
-		)
-		.map((assetId) => ({
-			requestId: `${priority}-${requestRevision}-${describeRequiredBrowserDestinationIdentity(
-				browserDestination,
-			)}-indoor-static-renderable-${assetId}`,
-			assetId,
-			priority,
-		}));
+	const geometryAssetIds = [
+		...new Set([...packGfxAssetIds, ...setupModelPartGfxAssetIds]),
+	].sort();
+	const materialRequests = createUnpreparedRequests(
+		materialAssetIds,
+		requestRevision,
+		priority,
+		`${describeRequiredBrowserDestinationIdentity(browserDestination)}-indoor-static-material`,
+		preparedByAssetId,
+		pendingAssetIds,
+	);
+
+	return [
+		...geometryAssetIds
+			.filter(
+				(assetId) =>
+					isStaticRenderableAssetId(assetId) &&
+					!preparedByAssetId[assetId] &&
+					!pendingAssetIdSet.has(assetId),
+			)
+			.map((assetId) => ({
+				requestId: `${priority}-${requestRevision}-${describeRequiredBrowserDestinationIdentity(
+					browserDestination,
+				)}-indoor-static-renderable-${assetId}`,
+				assetId,
+				priority,
+			})),
+		...materialRequests,
+	];
+}
+
+function collectIndoorVisibleMaterialAssetIds(
+	browserDestination: BrowserLocationSelection,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+): string[] {
+	if (!isIndoorBrowserDestination(browserDestination)) {
+		return [];
+	}
+	const activeEnvCellIds = deriveStructuredInteriorCoverage(
+		deriveBrowserFocusedStructuredInteriorMembershipPolicy(
+			browserDestination.envCellId,
+		),
+		preparedByAssetId,
+	).envCellIds;
+	const packGfxAssetIds = collectSelectedPackStaticGfxAssetIds(
+		preparedByAssetId,
+		{
+			buildingLandblockIds: new Set(),
+			detailLandblockIds: new Set(),
+			envCellIds: new Set(activeEnvCellIds),
+		},
+	);
+	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+		preparedByAssetId,
+		packGfxAssetIds,
+	);
+	return collectStaticRenderableMaterialAssetIds(
+		preparedByAssetId,
+		[...packGfxAssetIds, ...setupModelPartGfxAssetIds],
+		new Set(activeEnvCellIds),
+	);
+}
+
+function collectOutdoorVisibleMaterialAssetIds(
+	browserDestination: BrowserLocationSelection,
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	options: OutdoorSceneRequestOptions,
+): string[] {
+	const outdoorInterest = deriveOutdoorInterestForBrowserDestination(
+		browserDestination,
+		options,
+	);
+	const buildingLandblockIds = new Set(outdoorInterest.buildingLandblockIds);
+	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
+	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
+	const linkedInteriorCellIds = derivePackInteriorEnvCellIdsForLandblocks(
+		preparedByAssetId,
+		envCellLandblockIds,
+	);
+	const linkedInteriorCoverage = deriveStructuredInteriorCoverage(
+		{
+			kind: "landblock-closure",
+			seedEnvCellIds: [...linkedInteriorCellIds],
+		},
+		preparedByAssetId,
+	);
+	const packGfxAssetIds = collectSelectedPackStaticGfxAssetIds(
+		preparedByAssetId,
+		{
+			buildingLandblockIds,
+			detailLandblockIds,
+			envCellIds: new Set(linkedInteriorCoverage.envCellIds),
+		},
+	);
+	const summaryBuildingSourceAssetIds =
+		collectSelectedSummaryBuildingSourceAssetIds(preparedByAssetId, {
+			buildingLandblockIds,
+		});
+	const setupModelPartGfxAssetIds = collectPreparedSetupModelPartGfxAssetIds(
+		preparedByAssetId,
+		summaryBuildingSourceAssetIds,
+	);
+	return collectStaticRenderableMaterialAssetIds(
+		preparedByAssetId,
+		[...packGfxAssetIds, ...setupModelPartGfxAssetIds],
+		new Set(linkedInteriorCoverage.envCellIds),
+	);
+}
+
+function collectStaticRenderableMaterialAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	gfxAssetIds: readonly string[],
+	envCellIds: ReadonlySet<number>,
+): string[] {
+	return uniqueSortedAssetIds([
+		...collectPreparedGfxObjMaterialAssetIds(preparedByAssetId, gfxAssetIds),
+		...collectPreparedEnvCellMaterialAssetIds(preparedByAssetId, envCellIds),
+	]);
 }
 
 function collectSelectedPackStaticGfxAssetIds(
@@ -433,6 +604,69 @@ function collectSelectedSummaryBuildingSourceAssetIds(
 		})
 		.map((building) => building.sourceAssetId)
 		.filter((assetId): assetId is string => assetId !== null);
+}
+
+function collectPreparedSetupModelPartGfxAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	sourceAssetIds: readonly string[],
+): string[] {
+	const gfxAssetIds: string[] = [];
+	for (const sourceAssetId of sourceAssetIds) {
+		const sourceAsset = preparedByAssetId[sourceAssetId];
+		if (sourceAsset?.payload.kind !== "setup-model") {
+			continue;
+		}
+
+		for (const part of sourceAsset.payload.parts) {
+			gfxAssetIds.push(part.gfxObjAssetId);
+		}
+	}
+	return gfxAssetIds;
+}
+
+function collectPreparedGfxObjMaterialAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	gfxAssetIds: readonly string[],
+): string[] {
+	return [
+		...new Set(
+			gfxAssetIds.flatMap((gfxAssetId) => {
+				const asset = preparedByAssetId[gfxAssetId];
+				if (asset?.payload.kind !== "gfx-obj") {
+					return [];
+				}
+				const dependencyAssetIds = asset.payload.dependencies?.materialAssetIds;
+				if (dependencyAssetIds && dependencyAssetIds.length > 0) {
+					return dependencyAssetIds;
+				}
+				return asset.payload.surfaceIds.map(formatMaterialAssetId);
+			}),
+		),
+	].sort();
+}
+
+function collectPreparedEnvCellMaterialAssetIds(
+	preparedByAssetId: Record<string, PreparedAssetRecord>,
+	envCellIds: ReadonlySet<number>,
+): string[] {
+	return uniqueSortedAssetIds(
+		Object.values(preparedByAssetId).flatMap((asset) => {
+			if (asset.payload.kind !== "landblock-pack") {
+				return [];
+			}
+			return asset.payload.prepared.interiorCells
+				.filter((cell) => envCellIds.has(cell.envCellId))
+				.flatMap((cell) => cell.surfaceIds.map(formatMaterialAssetId));
+		}),
+	);
+}
+
+function formatMaterialAssetId(surfaceId: number): string {
+	return `material/${surfaceId.toString(16).padStart(8, "0")}`;
+}
+
+function uniqueSortedAssetIds(assetIds: readonly string[]): string[] {
+	return [...new Set(assetIds)].sort();
 }
 
 function collectPreparedLandblockPackIds(

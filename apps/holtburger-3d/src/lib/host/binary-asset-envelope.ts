@@ -9,7 +9,7 @@ const HEADER_LENGTH = 16;
 const MAGIC = "HBAB";
 const VERSION = 1;
 
-const binarySectionScalarTypeSchema = z.enum(["f32", "i32"]);
+const binarySectionScalarTypeSchema = z.enum(["f32", "i32", "u8"]);
 
 const binarySectionSchema = z.object({
 	role: z.string().min(1),
@@ -192,6 +192,11 @@ function decodeBinarySection(
 	if (section.scalarType === "i32") {
 		return Array.from(readInt32Section(bytes));
 	}
+	if (section.scalarType === "u8") {
+		const copy = new Uint8Array(bytes.byteLength);
+		copy.set(bytes);
+		return copy;
+	}
 	throw new Error(
 		`Unsupported binary section scalar type ${section.scalarType}.`,
 	);
@@ -221,7 +226,7 @@ function assertAligned(
 }
 
 function scalarByteLength(scalarType: BinarySection["scalarType"]): number {
-	return scalarType === "f32" ? 4 : 4;
+	return scalarType === "u8" ? 1 : 4;
 }
 
 function assignPath(

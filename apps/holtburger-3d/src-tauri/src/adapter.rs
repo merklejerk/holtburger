@@ -5,17 +5,16 @@ use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockClassification, LandblockPack,
     LandblockPackSourceDiagnostics, LandblockSummary, LandblockSummaryBuilding,
-    LandblockSummaryBuildingPortal, MaterialArchiveCapabilityReport, PreparedAabb, PreparedBvh,
-    PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
-    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
-    PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
-    PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
-    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
-    PreparedVec3, ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource,
-    ResolvedSetupAppearance, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
-    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
-    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
-    normalize_landblock_id,
+    LandblockSummaryBuildingPortal, PreparedAabb, PreparedBvh, PreparedBvhNode,
+    PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
+    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
+    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
+    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
+    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
+    SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
+    SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance, StaticOutdoorScene,
+    StaticRenderableSourceFamily, build_gfx_obj_render_geometry, normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -112,7 +111,6 @@ impl HostBoundaryAdapter {
     pub fn new(verbose: bool) -> Self {
         let content = ContentRepository::from_hba_path(repo_assets_hba_path())
             .expect("failed to open repo-local 3D app content repository");
-        log_material_capability_report(&content.material_capability_report());
         let content = Arc::new(content);
         let decode_cache = Arc::new(ContentDecodeCache::new());
         let content_asset_runtime = ContentAssetRuntime::new(ContentAssetService::new(
@@ -327,40 +325,6 @@ impl HostBoundaryAdapter {
             sequence,
         }
     }
-}
-
-fn log_material_capability_report(report: &MaterialArchiveCapabilityReport) {
-    let log_line = format!(
-        "Material capability: complete={} CSurface {}/{} available, RenderTexture {}/{} available, RenderSurface {}/{} available, Palette {}/{} available, ClothingTable {}/{} available, visual sources {}/{} available, dependency refs: CSurface {} available / {} pruned / {} missing, RenderTexture {} available / {} pruned / {} missing, RenderSurface {} available / {} pruned / {} missing, Palette {} available / {} pruned / {} missing, {} parse failures",
-        report.material_complete,
-        report.record_counts.c_surface.available,
-        report.record_counts.c_surface.total,
-        report.record_counts.render_texture.available,
-        report.record_counts.render_texture.total,
-        report.record_counts.render_surface.available,
-        report.record_counts.render_surface.total,
-        report.record_counts.palette.available,
-        report.record_counts.palette.total,
-        report.record_counts.clothing_table.available,
-        report.record_counts.clothing_table.total,
-        report.visual_source_records.available,
-        report.visual_source_records.total,
-        report.material_references.available_csurfaces,
-        report.material_references.pruned_csurfaces.len(),
-        report.material_references.missing_csurfaces.len(),
-        report.material_references.available_render_textures,
-        report.material_references.pruned_render_textures.len(),
-        report.material_references.missing_render_textures.len(),
-        report.material_references.available_render_surfaces,
-        report.material_references.pruned_render_surfaces.len(),
-        report.material_references.missing_render_surfaces.len(),
-        report.material_references.available_palettes,
-        report.material_references.pruned_palettes.len(),
-        report.material_references.missing_palettes.len(),
-        report.material_references.parse_failures.len(),
-    );
-
-    eprintln!("[holtburger-3d][content] {log_line}");
 }
 
 impl HostBoundaryAdapter {
@@ -618,7 +582,10 @@ impl HostBoundaryAdapter {
         let payload = match asset {
             Ok(ContentAsset::MaterialRecipe(recipe)) => serialize_material_recipe_payload(&recipe),
             Ok(_) => unreachable!("content asset runtime returned mismatched material recipe"),
-            Err(error) => failed_dependency_payload("material-recipe", surface_id, error),
+            Err(error) => {
+                log_material_graph_failure("material-recipe", surface_id, &error);
+                failed_dependency_payload("material-recipe", surface_id, error)
+            }
         };
 
         AssetLookupResponseDto {
@@ -662,7 +629,10 @@ impl HostBoundaryAdapter {
                 serialize_render_texture_payload(&render_texture)
             }
             Ok(_) => unreachable!("content asset runtime returned mismatched render texture"),
-            Err(error) => failed_dependency_payload("render-texture", render_texture_id, error),
+            Err(error) => {
+                log_material_graph_failure("render-texture", render_texture_id, &error);
+                failed_dependency_payload("render-texture", render_texture_id, error)
+            }
         };
 
         AssetLookupResponseDto {
@@ -684,7 +654,10 @@ impl HostBoundaryAdapter {
                 serialize_render_surface_payload(&render_surface)
             }
             Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
-            Err(error) => failed_dependency_payload("render-surface", render_surface_id, error),
+            Err(error) => {
+                log_material_graph_failure("render-surface", render_surface_id, &error);
+                failed_dependency_payload("render-surface", render_surface_id, error)
+            }
         };
 
         AssetLookupResponseDto {
@@ -704,7 +677,10 @@ impl HostBoundaryAdapter {
         let payload = match asset {
             Ok(ContentAsset::Palette(palette)) => serialize_palette_payload(&palette),
             Ok(_) => unreachable!("content asset runtime returned mismatched palette"),
-            Err(error) => failed_dependency_payload("palette", palette_id, error),
+            Err(error) => {
+                log_material_graph_failure("palette", palette_id, &error);
+                failed_dependency_payload("palette", palette_id, error)
+            }
         };
 
         AssetLookupResponseDto {
@@ -1044,6 +1020,22 @@ fn serialize_render_surface_payload(render_surface: &RenderSurface) -> serde_jso
     })
 }
 
+fn serialize_render_surface_binary_payload(
+    render_surface: &RenderSurface,
+    path_prefix: &str,
+    writer: &mut BinaryAssetSectionWriter,
+) -> serde_json::Value {
+    let mut payload = serialize_render_surface_payload(render_surface);
+    payload["sourceBytes"] = serde_json::json!([]);
+    writer.push_u8_section(
+        "renderSurface.sourceBytes",
+        format!("{path_prefix}.sourceBytes"),
+        1,
+        &render_surface.source_data,
+    );
+    payload
+}
+
 fn serialize_palette_payload(palette: &Palette) -> serde_json::Value {
     serde_json::json!({
         "kind": "palette",
@@ -1076,6 +1068,12 @@ fn failed_dependency_payload(kind: &str, file_id: u32, error: anyhow::Error) -> 
             "detail": detail
         }
     })
+}
+
+fn log_material_graph_failure(kind: &str, file_id: u32, error: &anyhow::Error) {
+    eprintln!(
+        "[holtburger-3d][material-graph] failed to resolve {kind}/0x{file_id:08X}: {error:#}"
+    );
 }
 
 struct BinaryAssetSection {
@@ -1125,6 +1123,18 @@ impl BinaryAssetSectionWriter {
             scalar_count += 1;
         }
         self.push_section(role, path, "i32", component_count, offset, scalar_count);
+    }
+
+    fn push_u8_section(
+        &mut self,
+        role: impl Into<String>,
+        path: impl Into<String>,
+        component_count: u32,
+        values: &[u8],
+    ) {
+        let offset = self.data.len();
+        self.data.extend(values);
+        self.push_section(role, path, "u8", component_count, offset, values.len());
     }
 
     fn push_section(
@@ -1221,6 +1231,22 @@ fn serialize_content_asset_binary_response(
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched gfx obj"),
             Err(error) => adapter.build_gfx_obj_lookup_response(request, gfx_obj_id, Err(error)),
+        },
+        ContentAssetRequest::RenderSurface(render_surface_id) => match asset {
+            Ok(ContentAsset::RenderSurface(render_surface)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_render_surface_binary_payload(
+                    &render_surface,
+                    path_prefix,
+                    writer,
+                ),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
+            Err(error) => {
+                adapter.build_render_surface_lookup_response(request, render_surface_id, Err(error))
+            }
         },
         unsupported => anyhow::bail!(
             "binary asset lookup does not support {unsupported:?} for {}",
@@ -2442,6 +2468,7 @@ fn vec3_length(vector: &Vec3Dto) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_dat::file_type::PixelFormatId;
 
     #[test]
     fn asset_lookup_remains_available_without_browser_runtime_residency() {
@@ -2665,6 +2692,57 @@ mod tests {
         assert!(
             bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
             "binary envelope should contain gfx section data"
+        );
+    }
+
+    #[test]
+    fn render_surface_binary_payload_moves_source_bytes_into_u8_section() {
+        let render_surface = RenderSurface {
+            id: 0x0600_0001,
+            unknown: 0,
+            width: 1,
+            height: 1,
+            format: PixelFormatId::A8R8G8B8,
+            format_raw: PixelFormatId::A8R8G8B8.raw(),
+            source_data: vec![0x33, 0x22, 0x11, 0xff],
+            default_palette_id: None,
+        };
+        let mut writer = BinaryAssetSectionWriter::default();
+        let payload = serialize_render_surface_binary_payload(
+            &render_surface,
+            "responses.0.payload",
+            &mut writer,
+        );
+        let bytes = serialize_asset_binary_batch_response(
+            vec![AssetLookupResponseDto {
+                request_id: "test-render-surface-binary".to_string(),
+                asset_id: "render-surface/06000001".to_string(),
+                payload_kind: AssetPayloadKindDto::Json,
+                payload,
+            }],
+            writer,
+        )
+        .expect("binary render-surface payload should serialize");
+
+        let (manifest, manifest_len) = decode_binary_manifest(&bytes);
+        assert_eq!(
+            manifest["responses"][0]["payload"]["sourceBytes"]
+                .as_array()
+                .expect("source bytes should be a manifest placeholder")
+                .len(),
+            0
+        );
+        let sections = manifest["sections"]
+            .as_array()
+            .expect("binary manifest should expose sections");
+        assert!(sections.iter().any(|section| {
+            section["path"] == "responses.0.payload.sourceBytes"
+                && section["scalarType"] == "u8"
+                && section["byteLength"] == 4
+        }));
+        assert!(
+            bytes.len() > ASSET_BINARY_HEADER_LEN + manifest_len,
+            "binary envelope should contain render-surface source bytes"
         );
     }
 

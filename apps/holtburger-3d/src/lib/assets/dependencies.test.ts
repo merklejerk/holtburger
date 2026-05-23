@@ -86,13 +86,137 @@ describe("asset response dependencies", () => {
 			defaultMotionTable: null,
 			defaultSoundTable: null,
 			defaultScriptTable: null,
+			dependencies: {
+				gfxObjAssetIds: [
+					"gfx-obj/01000010",
+					"gfx-obj/01000011",
+					"gfx-obj/01000010",
+				],
+				setupAppearanceAssetId: "setup-appearance/02000010",
+			},
 			provenance,
 		});
 
 		expect(getAssetResponseDependencies(response)).toEqual([
 			{ assetId: "gfx-obj/01000010" },
 			{ assetId: "gfx-obj/01000011" },
+			{ assetId: "setup-appearance/02000010" },
 		]);
+	});
+
+	it("extracts material dependencies from gfx and setup appearance payloads", () => {
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse("gfx-obj/01000010", {
+					kind: "gfx-obj",
+					residencyKind: "unknown",
+					sourceAssetKind: "gfx-obj",
+					gfxObjId: 0x01000010,
+					flags: null,
+					surfaceIds: [0x08000010],
+					vertexArray: { vertexType: null, vertexCount: 0, vertices: [] },
+					drawingPolygons: [],
+					drawingBsp: null,
+					dependencies: {
+						materialAssetIds: ["material/08000010"],
+					},
+					physicsWitness: { polygonCount: 0, hasBsp: false },
+					renderGeometry: {
+						sourceId: 0x01000010,
+						vertexCount: 0,
+						triangleCount: 0,
+						positions: [],
+						normals: [],
+						uvs: [],
+						triangles: [],
+						surfaceIds: [],
+						invalidPolygons: [],
+						skippedPolygonCount: 0,
+						bounds: null,
+					},
+					sortCenter: null,
+					didDegrade: null,
+					provenance,
+				}),
+			),
+		).toEqual([{ assetId: "material/08000010" }]);
+
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse("setup-appearance/02000010", {
+					kind: "setup-appearance",
+					residencyKind: "unknown",
+					sourceAssetKind: "setup-appearance",
+					setupModelId: 0x02000010,
+					appearanceKey: "setup:0x02000010|base",
+					parts: [],
+					textureChanges: [],
+					animPartChanges: [],
+					paletteId: null,
+					subPalettes: [],
+					dependencies: {
+						materialAssetIds: ["material/08000010"],
+						paletteAssetIds: ["palette/04000010"],
+					},
+					provenance,
+				}),
+			),
+		).toEqual([
+			{ assetId: "material/08000010" },
+			{ assetId: "palette/04000010" },
+		]);
+	});
+
+	it("extracts render resource dependencies from material payloads", () => {
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse("material/08000010", {
+					kind: "material-recipe",
+					residencyKind: "unknown",
+					sourceAssetKind: "material-recipe",
+					surfaceId: 0x08000010,
+					surfaceType: 2,
+					source: {
+						kind: "texture",
+						renderTextureId: 0x05000010,
+						renderSurfaceIds: [0x06000010],
+						paletteId: 0x04000010,
+						renderSurfaceDefaultPaletteIds: [],
+					},
+					translucency: 1,
+					luminosity: 0,
+					diffuse: 1,
+					dependencies: {
+						renderTextureAssetIds: ["render-texture/05000010"],
+						renderSurfaceAssetIds: ["render-surface/06000010"],
+						paletteAssetIds: ["palette/04000010"],
+					},
+					provenance,
+				}),
+			),
+		).toEqual([
+			{ assetId: "palette/04000010" },
+			{ assetId: "render-surface/06000010" },
+			{ assetId: "render-texture/05000010" },
+		]);
+
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse("render-texture/05000010", {
+					kind: "render-texture",
+					residencyKind: "unknown",
+					sourceAssetKind: "render-texture",
+					renderTextureId: 0x05000010,
+					textureType: 1,
+					unknown: 0,
+					renderSurfaceIds: [0x06000010],
+					dependencies: {
+						renderSurfaceAssetIds: ["render-surface/06000010"],
+					},
+					provenance,
+				}),
+			),
+		).toEqual([{ assetId: "render-surface/06000010" }]);
 	});
 
 	it("extracts dependency manifest asset ids", () => {

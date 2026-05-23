@@ -494,6 +494,10 @@ const gfxObjPhysicsWitnessDtoSchema = z.object({
 	rootKind: z.enum(["port", "leaf", "internal"]).nullable().optional(),
 });
 
+const materialAssetDependenciesDtoSchema = z.object({
+	materialAssetIds: z.array(z.string().min(1)),
+});
+
 export const gfxObjPayloadDtoSchema = z.object({
 	kind: z.literal("gfx-obj"),
 	residencyKind: z.literal("unknown"),
@@ -504,6 +508,7 @@ export const gfxObjPayloadDtoSchema = z.object({
 	vertexArray: gfxObjVertexArrayDtoSchema,
 	drawingPolygons: z.array(gfxObjPolygonDtoSchema),
 	drawingBsp: polygonSetBspNodeDtoSchema.nullable(),
+	dependencies: materialAssetDependenciesDtoSchema,
 	physicsWitness: gfxObjPhysicsWitnessDtoSchema,
 	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema.optional(),
 	sortCenter: vec3DtoSchema.nullable(),
@@ -546,6 +551,11 @@ const setupModelLightDtoSchema = z.object({
 	coneAngle: z.number().finite(),
 });
 
+const setupModelDependenciesDtoSchema = z.object({
+	gfxObjAssetIds: z.array(z.string().min(1)),
+	setupAppearanceAssetId: z.string().min(1),
+});
+
 export const setupModelPayloadDtoSchema = z.object({
 	kind: z.literal("setup-model"),
 	residencyKind: z.literal("unknown"),
@@ -569,9 +579,146 @@ export const setupModelPayloadDtoSchema = z.object({
 	defaultMotionTable: z.number().int().nonnegative().nullable(),
 	defaultSoundTable: z.number().int().nonnegative().nullable(),
 	defaultScriptTable: z.number().int().nonnegative().nullable(),
+	dependencies: setupModelDependenciesDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
 export type SetupModelPayloadDto = z.infer<typeof setupModelPayloadDtoSchema>;
+
+const materialRecipeDependenciesDtoSchema = z.object({
+	renderTextureAssetIds: z.array(z.string().min(1)),
+	renderSurfaceAssetIds: z.array(z.string().min(1)),
+	paletteAssetIds: z.array(z.string().min(1)),
+});
+
+const materialRecipeSourceDtoSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("solid-color"),
+		argb: z.number().int().nonnegative(),
+	}),
+	z.object({
+		kind: z.literal("texture"),
+		renderTextureId: z.number().int().nonnegative(),
+		renderSurfaceIds: z.array(z.number().int().nonnegative()),
+		paletteId: z.number().int().nonnegative().nullable(),
+		renderSurfaceDefaultPaletteIds: z.array(z.number().int().nonnegative()),
+	}),
+]);
+
+export const materialRecipePayloadDtoSchema = z.object({
+	kind: z.literal("material-recipe"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("material-recipe"),
+	surfaceId: z.number().int().nonnegative(),
+	surfaceType: z.number().int().nonnegative(),
+	source: materialRecipeSourceDtoSchema,
+	translucency: z.number().finite(),
+	luminosity: z.number().finite(),
+	diffuse: z.number().finite(),
+	dependencies: materialRecipeDependenciesDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type MaterialRecipePayloadDto = z.infer<
+	typeof materialRecipePayloadDtoSchema
+>;
+
+const setupAppearanceMaterialSlotDtoSchema = z.object({
+	slotIndex: z.number().int().nonnegative(),
+	surfaceId: z.number().int().nonnegative(),
+	materialAssetId: z.string().min(1),
+});
+
+const setupAppearancePartDtoSchema = z.object({
+	partIndex: z.number().int().nonnegative(),
+	gfxObjId: z.number().int().nonnegative(),
+	gfxObjAssetId: z.string().min(1),
+	materialSlots: z.array(setupAppearanceMaterialSlotDtoSchema),
+});
+
+export const setupAppearancePayloadDtoSchema = z.object({
+	kind: z.literal("setup-appearance"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("setup-appearance"),
+	setupModelId: z.number().int().nonnegative(),
+	appearanceKey: z.string().min(1),
+	parts: z.array(setupAppearancePartDtoSchema),
+	textureChanges: z.array(
+		z.object({
+			partIndex: z.number().int().nonnegative(),
+			oldTexture: z.number().int().nonnegative(),
+			newTexture: z.number().int().nonnegative(),
+		}),
+	),
+	animPartChanges: z.array(
+		z.object({
+			partIndex: z.number().int().nonnegative(),
+			partId: z.number().int().nonnegative(),
+		}),
+	),
+	paletteId: z.number().int().nonnegative().nullable(),
+	subPalettes: z.array(
+		z.object({
+			subId: z.number().int().nonnegative(),
+			offset: z.number().int().nonnegative(),
+			numColors: z.number().int().nonnegative(),
+		}),
+	),
+	dependencies: z.object({
+		materialAssetIds: z.array(z.string().min(1)),
+		paletteAssetIds: z.array(z.string().min(1)),
+	}),
+	provenance: assetProvenanceDtoSchema,
+});
+export type SetupAppearancePayloadDto = z.infer<
+	typeof setupAppearancePayloadDtoSchema
+>;
+
+export const renderTexturePayloadDtoSchema = z.object({
+	kind: z.literal("render-texture"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("render-texture"),
+	renderTextureId: z.number().int().nonnegative(),
+	textureType: z.number().int().nonnegative(),
+	unknown: z.number().int(),
+	renderSurfaceIds: z.array(z.number().int().nonnegative()),
+	dependencies: z.object({
+		renderSurfaceAssetIds: z.array(z.string().min(1)),
+	}),
+	provenance: assetProvenanceDtoSchema,
+});
+export type RenderTexturePayloadDto = z.infer<
+	typeof renderTexturePayloadDtoSchema
+>;
+
+export const renderSurfacePayloadDtoSchema = z.object({
+	kind: z.literal("render-surface"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("render-surface"),
+	renderSurfaceId: z.number().int().nonnegative(),
+	unknown: z.number().int(),
+	width: z.number().int().nonnegative(),
+	height: z.number().int().nonnegative(),
+	formatRaw: z.number().int().nonnegative(),
+	format: z.string().min(1),
+	sourceByteLength: z.number().int().nonnegative(),
+	defaultPaletteId: z.number().int().nonnegative().nullable(),
+	dependencies: z.object({
+		paletteAssetIds: z.array(z.string().min(1)),
+	}),
+	provenance: assetProvenanceDtoSchema,
+});
+export type RenderSurfacePayloadDto = z.infer<
+	typeof renderSurfacePayloadDtoSchema
+>;
+
+export const palettePayloadDtoSchema = z.object({
+	kind: z.literal("palette"),
+	residencyKind: z.literal("unknown"),
+	sourceAssetKind: z.literal("palette"),
+	paletteId: z.number().int().nonnegative(),
+	colorCount: z.number().int().nonnegative(),
+	provenance: assetProvenanceDtoSchema,
+});
+export type PalettePayloadDto = z.infer<typeof palettePayloadDtoSchema>;
 
 export const appearanceManifestPayloadDtoSchema = z.object({
 	kind: z.literal("appearance-manifest"),

@@ -313,10 +313,14 @@ fn append_archive_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::properties::GfxObjFlags;
+    use holtburger_common::{Sphere, Vector3};
     use holtburger_dat::file_type::{
-        CharGen, ChatPoseTable, EnvCell, MotionKinematics, SkillTable, SpellTable, XpTable,
+        AnimationPartChange, CharGen, ChatPoseTable, EnvCell, GfxObj, MotionKinematics, ObjDesc,
+        SkillTable, SpellTable, SubPalette, TextureMapChange, XpTable,
     };
-    use holtburger_dat::file_type::{PixelFormatId, SurfaceType};
+    use holtburger_dat::file_type::{PixelFormatId, SetupModel, SurfaceType};
+    use holtburger_dat::graphics::CVertexArray;
     use holtburger_dat::graphics::Frame;
     use holtburger_dat::{
         DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HOLTBURGER_CORE_NAMESPACE,
@@ -702,6 +706,159 @@ mod tests {
         writer.write(path).expect("test HBA should be written");
     }
 
+    fn write_setup_appearance_hba(path: &Path) {
+        let mut setup_bytes = std::io::Cursor::new(Vec::new());
+        test_setup_model(0x0200_0030, &[0x0100_0030, 0x0100_0031])
+            .pack(&mut setup_bytes)
+            .expect("test setup should pack");
+
+        let mut gfx_a_bytes = std::io::Cursor::new(Vec::new());
+        test_gfx_obj(0x0100_0030, &[0x0800_0030])
+            .pack(&mut gfx_a_bytes)
+            .expect("test gfx obj should pack");
+
+        let mut gfx_b_bytes = std::io::Cursor::new(Vec::new());
+        test_gfx_obj(0x0100_0031, &[0x0800_0031])
+            .pack(&mut gfx_b_bytes)
+            .expect("test gfx obj should pack");
+
+        let mut replacement_gfx_bytes = std::io::Cursor::new(Vec::new());
+        test_gfx_obj(0x0100_0032, &[0x0800_0032])
+            .pack(&mut replacement_gfx_bytes)
+            .expect("replacement gfx obj should pack");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0200_0030,
+                DatFileType::SetupModel as u32,
+                setup_bytes.into_inner(),
+            )
+            .expect("setup should be added");
+        for (id, bytes) in [
+            (0x0100_0030, gfx_a_bytes.into_inner()),
+            (0x0100_0031, gfx_b_bytes.into_inner()),
+            (0x0100_0032, replacement_gfx_bytes.into_inner()),
+        ] {
+            writer
+                .add(EOR_PORTAL_NAMESPACE, id, DatFileType::Model as u32, bytes)
+                .expect("gfx obj should be added");
+        }
+        for (surface_id, render_texture_id, palette_id) in [
+            (0x0800_0030, 0x0500_0030, 0x0400_0030),
+            (0x0800_0031, 0x0500_0031, 0x0400_0031),
+            (0x0800_0032, 0x0500_0032, 0x0400_0032),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    surface_id,
+                    DatFileType::Surface as u32,
+                    textured_csurface_bytes(render_texture_id, palette_id),
+                )
+                .expect("surface should be added");
+        }
+        for (render_texture_id, render_surface_id) in [
+            (0x0500_0030, 0x0600_0030),
+            (0x0500_0031, 0x0600_0031),
+            (0x0500_0032, 0x0600_0032),
+            (0x0500_0040, 0x0600_0040),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    render_texture_id,
+                    DatFileType::SurfaceTexture as u32,
+                    render_texture_bytes(render_texture_id, &[render_surface_id]),
+                )
+                .expect("render texture should be added");
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    render_surface_id,
+                    DatFileType::Texture as u32,
+                    render_surface_bytes(
+                        render_surface_id,
+                        PixelFormatId::A8R8G8B8,
+                        &[1, 2, 3, 4],
+                        None,
+                    ),
+                )
+                .expect("render surface should be added");
+        }
+        for palette_id in [
+            0x0400_0030,
+            0x0400_0031,
+            0x0400_0032,
+            0x0400_0040,
+            0x0400_0041,
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    palette_id,
+                    DatFileType::Palette as u32,
+                    palette_bytes(palette_id),
+                )
+                .expect("palette should be added");
+        }
+
+        writer.write(path).expect("test HBA should be written");
+    }
+
+    fn test_setup_model(id: u32, parts: &[u32]) -> SetupModel {
+        SetupModel {
+            id,
+            flags: 0,
+            parts: parts.to_vec(),
+            parent_index: Vec::new(),
+            default_scale: Vec::new(),
+            holding_locations: Default::default(),
+            connection_points: Default::default(),
+            placement_frames: Default::default(),
+            cyl_spheres: Vec::new(),
+            spheres: Vec::new(),
+            height: 0.0,
+            radius: 0.0,
+            step_up: 0.0,
+            step_down: 0.0,
+            sorting_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 0.0,
+            },
+            selection_sphere: Sphere {
+                center: Vector3::zero(),
+                radius: 0.0,
+            },
+            lights: Default::default(),
+            default_animation: None,
+            default_script: None,
+            default_motion_table: None,
+            default_sound_table: None,
+            default_script_table: None,
+        }
+    }
+
+    fn test_gfx_obj(id: u32, surfaces: &[u32]) -> GfxObj {
+        GfxObj {
+            id,
+            flags: GfxObjFlags::empty(),
+            surfaces: surfaces.to_vec(),
+            vertex_array: CVertexArray {
+                vertex_type: 1,
+                vertices: Default::default(),
+            },
+            physics_polygons: Default::default(),
+            physics_bsp: None,
+            sort_center: Vector3::zero(),
+            polygons: Default::default(),
+            drawing_bsp: None,
+            did_degrade: None,
+        }
+    }
+
     fn solid_csurface_bytes(color: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&SurfaceType::BASE1_SOLID.bits().to_le_bytes());
@@ -1028,5 +1185,70 @@ mod tests {
                 render_surface_default_palette_ids: Vec::new(),
             })
         );
+    }
+
+    #[test]
+    fn resolves_setup_appearance_with_texture_and_part_overrides() {
+        use crate::MaterialAppearanceInput;
+
+        let dir = tempdir().expect("tempdir should be created");
+        write_setup_appearance_hba(&dir.path().join("materials.hba"));
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let base = repository
+            .resolve_setup_appearance(0x0200_0030, MaterialAppearanceInput::default())
+            .expect("base setup appearance should resolve");
+        let overridden = repository
+            .resolve_setup_appearance(
+                0x0200_0030,
+                MaterialAppearanceInput {
+                    obj_desc: Some(ObjDesc {
+                        palette_id: Some(0x0400_0040),
+                        sub_palettes: vec![SubPalette {
+                            sub_id: 0x0400_0041,
+                            offset: 16,
+                            num_colors: 24,
+                        }],
+                        texture_changes: vec![TextureMapChange {
+                            part_index: 0,
+                            old_texture: 0x0500_0030,
+                            new_texture: 0x0500_0040,
+                        }],
+                        anim_part_changes: vec![AnimationPartChange {
+                            part_index: 1,
+                            part_id: 0x0100_0032,
+                        }],
+                    }),
+                },
+            )
+            .expect("overridden setup appearance should resolve");
+
+        assert_ne!(base.appearance_key, overridden.appearance_key);
+        assert_eq!(base.parts[1].gfx_obj_id, 0x0100_0031);
+        assert_eq!(overridden.parts[1].gfx_obj_id, 0x0100_0032);
+        assert_eq!(
+            texture_id(&overridden.parts[0].material_slots[0].material.source),
+            Some(0x0500_0040)
+        );
+        assert_eq!(
+            texture_id(&base.parts[0].material_slots[0].material.source),
+            Some(0x0500_0030)
+        );
+        assert_eq!(
+            overridden.material_asset_ids,
+            vec![0x0800_0030, 0x0800_0032]
+        );
+        assert_eq!(
+            overridden.palette_dependencies,
+            vec![0x0400_0030, 0x0400_0032, 0x0400_0040, 0x0400_0041]
+        );
+    }
+
+    fn texture_id(source: &crate::ResolvedMaterialSource) -> Option<u32> {
+        match source {
+            crate::ResolvedMaterialSource::SolidColor(_) => None,
+            crate::ResolvedMaterialSource::Texture(texture) => Some(texture.render_texture_id),
+        }
     }
 }

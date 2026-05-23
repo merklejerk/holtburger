@@ -33,6 +33,7 @@ describe("asset cache policy", () => {
 		expect(plan.retainedAssetIds).toEqual([
 			"gfx-obj/01000001",
 			"landblock-pack/0102ffff",
+			"setup-appearance/02000001",
 			"setup-model/02000001",
 		]);
 		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
@@ -66,6 +67,7 @@ describe("asset cache policy", () => {
 			"gfx-obj/01000001",
 			"landblock-pack/0102ffff",
 			"landblock-pack/016cffff",
+			"setup-appearance/02000001",
 			"setup-model/02000001",
 		]);
 		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
@@ -201,6 +203,10 @@ function createPreparedSetupModelAsset(
 		defaultMotionTable: null,
 		defaultSoundTable: null,
 		defaultScriptTable: null,
+		dependencies: {
+			gfxObjAssetIds: [...gfxObjAssetIds],
+			setupAppearanceAssetId: "setup-appearance/02000001",
+		},
 	} satisfies PreparedSetupModelPayload);
 }
 
@@ -220,6 +226,9 @@ function createPreparedGfxObjAsset(assetId: string): PreparedAssetRecord {
 		},
 		drawingPolygons: [],
 		drawingBsp: null,
+		dependencies: {
+			materialAssetIds: [],
+		},
 		physicsWitness: {
 			polygonCount: 0,
 			hasBsp: false,

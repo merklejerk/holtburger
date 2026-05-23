@@ -21,8 +21,8 @@ pub use env_cell::EnvCell;
 pub use environment::{CellStruct, Environment};
 pub use gfx_obj::GfxObj;
 pub use material::{
-    CSurface, CSurfaceSource, ObjDesc, Palette, PixelFormatId, RenderSurface, RenderTexture,
-    SurfaceType,
+    AnimationPartChange, CSurface, CSurfaceSource, ObjDesc, Palette, PixelFormatId, RenderSurface,
+    RenderTexture, SubPalette, SurfaceType, TextureMapChange,
 };
 pub use motion_kinematics::{MotionKinematics, MotionKinematicsTable};
 pub use motion_table::{MotionCommandKinematics, MotionTable, MotionTableMovementProfile};

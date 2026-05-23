@@ -1,13 +1,16 @@
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockPack, LandblockPackAssembler, LandblockSummary,
-    LandblockSummaryAssembler, normalize_landblock_id,
+    LandblockSummaryAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
+    ResolvedSetupAppearance, normalize_landblock_id,
 };
-use holtburger_dat::file_type::{GfxObj, SetupModel};
+use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
+use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex, Semaphore};
 
 const DEFAULT_CONTENT_ASSET_WORKERS: usize = 2;
@@ -18,6 +21,11 @@ pub enum ContentAssetRequest {
     LandblockSummary(u32),
     GfxObj(u32),
     SetupModel(u32),
+    MaterialRecipe(u32),
+    SetupAppearance(u32),
+    RenderTexture(u32),
+    RenderSurface(u32),
+    Palette(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +34,11 @@ pub enum ContentAsset {
     LandblockSummary(Box<LandblockSummary>),
     GfxObj(Box<GfxObj>),
     SetupModel(Box<SetupModel>),
+    MaterialRecipe(Box<ResolvedMaterialRecipe>),
+    SetupAppearance(Box<ResolvedSetupAppearance>),
+    RenderTexture(Box<RenderTexture>),
+    RenderSurface(Box<RenderSurface>),
+    Palette(Box<Palette>),
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +89,58 @@ impl ContentAssetService {
                         .with_context(|| {
                             format!("Could not load SetupModel 0x{setup_model_id:08X}")
                         })?,
+                )))
+            }
+            ContentAssetRequest::MaterialRecipe(surface_id) => Ok(ContentAsset::MaterialRecipe(
+                Box::new(self.content.resolve_material_recipe(surface_id).with_context(
+                    || format!("Could not resolve material recipe 0x{surface_id:08X}"),
+                )?),
+            )),
+            ContentAssetRequest::SetupAppearance(setup_model_id) => {
+                Ok(ContentAsset::SetupAppearance(Box::new(
+                    self.content
+                        .resolve_setup_appearance(setup_model_id, MaterialAppearanceInput::default())
+                        .with_context(|| {
+                            format!(
+                                "Could not resolve setup appearance for SetupModel 0x{setup_model_id:08X}"
+                            )
+                        })?,
+                )))
+            }
+            ContentAssetRequest::RenderTexture(render_texture_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, render_texture_id))
+                    .with_context(|| {
+                        format!("Could not load RenderTexture 0x{render_texture_id:08X}")
+                    })?;
+                Ok(ContentAsset::RenderTexture(Box::new(
+                    RenderTexture::unpack(&mut Cursor::new(resource.bytes)).with_context(
+                        || format!("Could not parse RenderTexture 0x{render_texture_id:08X}"),
+                    )?,
+                )))
+            }
+            ContentAssetRequest::RenderSurface(render_surface_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, render_surface_id))
+                    .with_context(|| {
+                        format!("Could not load RenderSurface 0x{render_surface_id:08X}")
+                    })?;
+                Ok(ContentAsset::RenderSurface(Box::new(
+                    RenderSurface::unpack(&mut Cursor::new(resource.bytes)).with_context(
+                        || format!("Could not parse RenderSurface 0x{render_surface_id:08X}"),
+                    )?,
+                )))
+            }
+            ContentAssetRequest::Palette(palette_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, palette_id))
+                    .with_context(|| format!("Could not load Palette 0x{palette_id:08X}"))?;
+                Ok(ContentAsset::Palette(Box::new(
+                    Palette::unpack(&mut Cursor::new(resource.bytes))
+                        .with_context(|| format!("Could not parse Palette 0x{palette_id:08X}"))?,
                 )))
             }
         }

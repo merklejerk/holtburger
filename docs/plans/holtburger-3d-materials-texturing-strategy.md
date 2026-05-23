@@ -882,34 +882,63 @@ fixture proves its semantic role.
 
 ### Phase 2: material graph in `holtburger-content`
 
-Add content-level resolution APIs that turn existing geometry references into
-explicit material recipes:
+Status: **implemented for static `GfxObj` and env-cell material slots, plus
+deep legacy dependency validation**.
+
+This phase added `holtburger-content` material graph APIs that turn existing
+geometry references into explicit material recipes:
 
 - `GfxObj` surface slots -> `ResolvedMaterialSlot[]`;
 - env-cell surface indices -> `ResolvedMaterialSlot[]`;
-- `Setup + ObjDesc` -> per-part mesh selection plus texture and palette
-  changes.
 
-Start this phase by extending the phase 0 report from shallow `CSurface`
-existence checks to full dependency validation using the new parsers:
-`CSurface -> RenderTexture -> RenderSurface -> Palette`. That gives the asset
-scheduler a proven dependency graph instead of requiring each frontend to
-rediscover missing material records.
+`ResolvedMaterialRecipe` preserves the immutable legacy material facts the
+renderer needs for initial scheduling: `surface_id`, `SurfaceType`, solid color
+or texture source, `RenderTexture` ID, mip/render-surface IDs, explicit palette
+ID, render-surface default palette IDs, translucency, luminosity, and diffuse.
+It intentionally does **not** carry decoded pixel bytes; that remains a phase 3
+/ phase 4 host and renderer-resource-cache concern.
 
-Keep parsed DAT records immutable. Put runtime appearance state in separate
-resolved descriptors keyed by the actual inputs: surface ID, render texture ID,
-palette ID, texture swaps, subpalette changes, translucency, luminosity, and
-diffuse color. This prevents the renderer from caching all players or spawned
-objects by `GfxObjId` alone.
+The phase 0 capability report now validates the full legacy dependency chain:
 
-### Phase 3: host contract and asset scheduling
+- visual source records still provide the root `CSurface` references;
+- available `CSurface` records are parsed to find `RenderTexture` and explicit
+  palette IDs;
+- available `RenderTexture` records are parsed to find render-surface/mip IDs;
+- available indexed `RenderSurface` records are parsed to find default palette
+  IDs;
+- referenced `RenderTexture`, `RenderSurface`, and `Palette` records are
+  reported as available, pruned, or missing;
+- parser failures for `CSurface`, `RenderTexture`, `RenderSurface`, and
+  `Palette` records block `material_complete`.
+
+Decision: this phase keeps parsed DAT records immutable and exposes stable
+recipe IDs instead of renderer-owned objects. Runtime appearance state still
+belongs in later resolved descriptors keyed by the actual inputs: surface ID,
+render texture ID, palette ID, texture swaps, subpalette changes, translucency,
+luminosity, and diffuse color. This prevents the renderer from caching all
+players or spawned objects by `GfxObjId` alone.
+
+Course correction: `Setup + ObjDesc` resolution was not included in the first
+phase 2 implementation. The new APIs cover material slots for static meshes and
+interior cells, but setup part selection, texture-map changes, animation part
+changes, and clothing/subpalette edits still need an appearance-aware resolver.
+That resolver should reuse the phase 1 `ObjDesc` parser and return a material
+appearance key rather than mutating the base `CSurface`/`RenderTexture`
+records.
+
+Refinement for the next steps: host scheduling should consume these material
+recipe IDs before inlining bytes. Prepared `GfxObj` and landblock payloads can
+list material recipe dependencies first; separate material/render-surface
+payloads can then carry compact bytes and format metadata only when requested.
+
+### Phase 3: host contract, asset scheduling, and runtime appearance
 
 Extend `ContentAssetRequest` and prepared responses with material dependency
 edges before sending texture bytes inline:
 
 - prepared `GfxObj` and landblock payloads list required material asset IDs;
-- material asset payloads list their render-texture, render-surface, and
-  palette dependencies;
+- material asset payloads list their render-texture, render-surface, explicit
+  palette, and default render-surface palette dependencies;
 - render-surface payloads carry compact binary pixel data plus format metadata,
   not JSON-expanded texels.
 
@@ -917,6 +946,36 @@ This keeps landblock payloads small and lets the existing asset scheduler fetch
 texture resources independently. The host boundary should expose typed
 capability errors for missing material dependencies instead of silently
 downgrading to debug colors.
+
+Phase 3 must also implement the runtime appearance layer that sits on top of
+the phase 2 base material graph. Static world geometry can use the phase 2
+recipes directly; dynamic actors and setup-authored objects need a resolved
+appearance key before renderer caching is safe.
+
+Required runtime appearance deliverables:
+
+- add a content-level setup/appearance resolver that takes a setup ID plus
+  optional `ObjDesc`/appearance inputs and returns selected part mesh IDs,
+  resolved material recipe IDs, and a stable material appearance key;
+- apply `ObjDesc.texture_changes` as `RenderTexture` substitutions for the
+  matching part/old-texture pair, without mutating the base `RenderTexture`
+  record;
+- apply `ObjDesc.anim_part_changes` before material binding so part swaps use
+  the replacement mesh's own surface table and material slots;
+- carry `ObjDesc.palette_id` and `ObjDesc.sub_palettes` into the appearance
+  key and palette dependency list, even if subpalette pixel rewriting remains a
+  renderer/cache implementation detail until phase 4;
+- route protocol/entity creation appearance data into this resolver instead of
+  letting renderer code apply ad hoc texture overrides;
+- expose missing/pruned/unsupported appearance dependencies as typed host
+  capability errors, not silent debug-material downgrades.
+
+Acceptance criteria for this phase: a dynamic actor/setup payload with a
+texture-map change must request the replacement `RenderTexture` and render with
+a different material appearance key than the same setup without that change.
+Two entities sharing the same base setup but different texture or palette
+overrides must not share a renderer material instance unless the resolved
+appearance keys are identical.
 
 ### Phase 4: renderer material resource cache
 
@@ -927,7 +986,8 @@ it into the world-display renderer. Its responsibilities:
   resources;
 - cache GPU textures by render-surface ID and decode parameters;
 - cache palette textures by palette ID plus subpalette edits;
-- cache material instances by resolved appearance key, not by mesh ID;
+- cache material instances by resolved appearance key, including runtime
+  texture substitutions and palette/subpalette edits, not by mesh ID;
 - dispose textures and materials through the renderer lifecycle.
 
 Keep the existing debug material path behind an explicit missing-material

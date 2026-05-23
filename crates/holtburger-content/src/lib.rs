@@ -2,6 +2,7 @@ pub mod character_gen;
 pub mod decode_cache;
 pub mod landblock_pack;
 pub mod material_capabilities;
+pub mod material_graph;
 pub mod repository;
 pub mod soul_emote;
 mod source_reader;
@@ -28,6 +29,9 @@ pub use material_capabilities::{
     MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,
     MaterialReferenceCoverage, MaterialReferenceParseFailure, RepositoryResourceIndexEntry,
     VisualSourceRecordCoverage,
+};
+pub use material_graph::{
+    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedTextureMaterial,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

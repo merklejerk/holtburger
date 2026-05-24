@@ -95,6 +95,14 @@ export function formatLandblockSceneAssetId(landblockId: number): string {
 	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/scene`;
 }
 
+export function formatLandblockOutdoorAssetId(landblockId: number): string {
+	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/outdoor`;
+}
+
+export function formatLandblockTopologyAssetId(landblockId: number): string {
+	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/topology`;
+}
+
 export function formatEnvCellAssetId(envCellId: number): string {
 	return `env-cell/${formatHex32(envCellId)}`;
 }
@@ -111,14 +119,22 @@ export function parseLandblockTerrainAssetId(assetId: string): number | null {
 export function parseLandblockBuildingShellsAssetId(
 	assetId: string,
 ): number | null {
-	const match = /^landblock\/([0-9a-fA-F]{8})\/building-shells$/.exec(
-		assetId,
-	);
+	const match = /^landblock\/([0-9a-fA-F]{8})\/building-shells$/.exec(assetId);
 	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
 }
 
 export function parseLandblockSceneAssetId(assetId: string): number | null {
 	const match = /^landblock\/([0-9a-fA-F]{8})\/scene$/.exec(assetId);
+	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
+}
+
+export function parseLandblockOutdoorAssetId(assetId: string): number | null {
+	const match = /^landblock\/([0-9a-fA-F]{8})\/outdoor$/.exec(assetId);
+	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
+}
+
+export function parseLandblockTopologyAssetId(assetId: string): number | null {
+	const match = /^landblock\/([0-9a-fA-F]{8})\/topology$/.exec(assetId);
 	return match ? Number.parseInt(match[1], 16) >>> 0 : null;
 }
 

@@ -1,7 +1,7 @@
 # Holtburger 3D Granular Scene Asset Strategy Plan
 
-Status: in progress; Phase 3 is implemented, and Phase 3.1 is the immediate
-pivot before frontend route switching.
+Status: in progress; Phase 4 is implemented for the primary host/planner/render
+paths, with old pack/summary cleanup still tracked for Phase 5 and Phase 6.
 
 Note: phases before Phase 3.1 document the migration path and several
 superseded intermediate route boundaries. The current target route names are
@@ -2118,6 +2118,87 @@ Validation:
 - Manual browser verification that focused landblocks load scene, terrain,
   env-cell, gfx, setup, material, texture, surface, and palette assets as
   separate prepared records.
+
+Progress as of 2026-05-24:
+
+- Added host/core/content support for `landblock/{id}/outdoor` and
+  `landblock/{id}/topology`.
+- `landblock/{id}/outdoor` now serializes terrain, region material-table
+  identity, explicit outdoor objects, buildings, generated scenery facts, and an
+  outdoor static BVH from a route-specific `LandblockOutdoorAsset`.
+- `landblock/{id}/topology` now serializes env-cell membership, portal links,
+  and env-cell residency BVH from a route-specific `LandblockTopologyAsset`.
+- Frontend route helpers, Zod contracts, prepared payload types, hydration
+  policy, dependency extraction, and dependency tests now understand
+  `landblock-outdoor` and `landblock-topology`.
+- The scene request planner now selects outdoor render roots, topology roots,
+  and direct `env-cell/{id}` roots. It no longer walks
+  `landblock-pack.prepared.staticMeshes`,
+  `landblock-pack.prepared.interiorCells`, or `landblock-summary.sourceFacts`
+  for the main planning path.
+- Structured interior coverage now derives landblock closure from topology
+  membership. Structured interior rendering consumes first-class `env-cell`
+  payloads for render geometry, portal apertures, cell BSP, surface ids, and
+  static counts.
+- Terrain rendering can consume `landblock-outdoor` and `landblock-terrain`
+  terrain payloads by adapting the route-specific terrain DTO back to the
+  existing frontend terrain mesh shape.
+- Static renderable scene selection now expands outdoor source members and
+  env-cell static members through prepared `gfx-obj` / `setup-model` assets
+  rather than relying on pack static meshes or summary building facts.
+
+Decisions:
+
+- Keep `landblock/{id}/terrain`, `landblock/{id}/building-shells`, and
+  `landblock/{id}/scene` alive during the migration, but do not schedule them
+  from the Phase 4 planner path.
+- Build `landblock-outdoor` generated scenery in the outdoor route, not in
+  topology. This keeps terrain/region scene-table dependencies out of topology.
+- Keep topology membership separate from direct `env-cell/{id}` hydration. The
+  topology route identifies relevant cells; env-cell assets own interior render
+  geometry, static members, material slots, portal apertures, and local BVH.
+- Let the frontend derive terrain material dependencies from the outdoor
+  route's `regionNumber` and terrain pcodes. The route does not enumerate every
+  possible pcode material asset.
+
+Course corrections:
+
+- Phase 3.1 became a prerequisite for Phase 4. The implementation therefore
+  brought up `outdoor` and `topology` routes first, then switched frontend
+  planning.
+- The old `LandblockSceneAsset` remains as a migration route for
+  `landblock/{id}/scene`, but Phase 4 introduced `LandblockTopologyAsset`
+  instead of repurposing that shape.
+- Renderer updates were intentionally limited to the primary runtime path:
+  terrain scene, structured interiors, static renderables, and the render
+  resource coordinator. Some debug/spatial/diagnostic helpers still carry
+  old pack terminology and should move in the cleanup phases.
+
+Cleanup targets:
+
+- Delete or isolate old planner/render helpers that still mention pack/summary
+  after Phase 5 removes old route usage.
+- Rename `LandblockPackStaticRenderableResource` and related static-renderable
+  cache members now that the primary path is outdoor/env-cell based.
+- Rename `deriveFocusedOutdoorCoverageLandblockIds` call sites and any
+  `pack`-named tests/docs that now refer to topology or outdoor routes.
+- Update render-spatial debug selectors and portal-work-item helpers so they do
+  not require `landblock-pack` payloads once equivalent topology/env-cell
+  selectors exist.
+- Remove migration-only backend variants for `LandblockTerrain`,
+  `LandblockBuildingShells`, and `LandblockScene` after production code stops
+  requesting them.
+
+Validation completed:
+
+- `cargo check -p holtburger-content`
+- `cargo check -p holtburger-core`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `cargo test -p holtburger-content`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml adapter::tests -- --nocapture`
+- `npm run test:ts -- src/lib/landblocks.test.ts src/lib/assets/dependencies.test.ts src/lib/assets/scene-asset-request-planner.test.ts`
+- `npm run test:ts -- src/lib/assets/scene-asset-request-planner.test.ts src/lib/world-display/structured-interior-scene.test.ts src/lib/world-display/terrain-scene.test.ts`
+- `npm run check`
 
 ### Phase 5: Retire Old Pack Semantics
 

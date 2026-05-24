@@ -6,11 +6,12 @@ use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
-    LandblockBuildingShellsAsset, LandblockBuildingShellsAssetAssembler, LandblockPack,
-    LandblockPackAssembler, LandblockSceneAsset, LandblockSceneAssetAssembler, LandblockSummary,
-    LandblockSummaryAssembler, LandblockTerrainAsset, LandblockTerrainAssetAssembler,
-    MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedSetupAppearance,
-    ResolvedTerrainMaterialTable, normalize_landblock_id,
+    LandblockBuildingShellsAsset, LandblockBuildingShellsAssetAssembler, LandblockOutdoorAsset,
+    LandblockOutdoorAssetAssembler, LandblockPack, LandblockPackAssembler, LandblockSceneAsset,
+    LandblockSceneAssetAssembler, LandblockSummary, LandblockSummaryAssembler,
+    LandblockTerrainAsset, LandblockTerrainAssetAssembler, LandblockTopologyAsset,
+    LandblockTopologyAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
+    ResolvedSetupAppearance, ResolvedTerrainMaterialTable, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -25,6 +26,8 @@ pub enum ContentAssetRequest {
     LandblockTerrain(u32),
     LandblockBuildingShells(u32),
     LandblockScene(u32),
+    LandblockOutdoor(u32),
+    LandblockTopology(u32),
     EnvCell(u32),
     TerrainMaterial(u32),
     GfxObj(u32),
@@ -47,6 +50,12 @@ pub enum ContentAsset {
     },
     LandblockBuildingShells(Box<LandblockBuildingShellsAsset>),
     LandblockScene(Box<LandblockSceneAsset>),
+    LandblockOutdoor {
+        outdoor: Box<LandblockOutdoorAsset>,
+        region_id: u32,
+        region_number: u32,
+    },
+    LandblockTopology(Box<LandblockTopologyAsset>),
     EnvCell(Box<EnvCellAsset>),
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     GfxObj(Box<GfxObj>),
@@ -122,6 +131,30 @@ impl ContentAssetService {
                 let landblock_id = normalize_landblock_id(landblock_id);
                 Ok(ContentAsset::LandblockScene(Box::new(
                     LandblockSceneAssetAssembler::new().assemble_landblock_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        landblock_id,
+                    ),
+                )))
+            }
+            ContentAssetRequest::LandblockOutdoor(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                let outdoor = LandblockOutdoorAssetAssembler::new().assemble_landblock_with_cache(
+                    &self.content,
+                    &self.decode_cache,
+                    landblock_id,
+                );
+                let region = self.decode_cache.region_desc(&self.content)?;
+                Ok(ContentAsset::LandblockOutdoor {
+                    outdoor: Box::new(outdoor),
+                    region_id: region.id,
+                    region_number: region.region_number,
+                })
+            }
+            ContentAssetRequest::LandblockTopology(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                Ok(ContentAsset::LandblockTopology(Box::new(
+                    LandblockTopologyAssetAssembler::new().assemble_landblock_with_cache(
                         &self.content,
                         &self.decode_cache,
                         landblock_id,

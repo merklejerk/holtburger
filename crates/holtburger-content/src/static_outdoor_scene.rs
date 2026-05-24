@@ -224,7 +224,7 @@ impl StaticOutdoorSceneAssembler {
         )
     }
 
-    fn assemble_from_loaded(
+    pub(crate) fn assemble_from_loaded(
         &self,
         source: &mut ContentSourceReader<'_>,
         landblock_id: u32,

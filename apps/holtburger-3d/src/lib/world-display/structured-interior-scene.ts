@@ -6,8 +6,8 @@ import type {
 	AssetChannelState,
 	PreparedInteriorCellStructure,
 	PreparedAssetRecord,
+	PreparedEnvCellPayload,
 	PreparedIndoorCellPortal,
-	PreparedLandblockInteriorCell,
 	PreparedPolygonSetBspNode,
 	PreparedPolygonSetRenderGeometry,
 	PreparedPortalAperture,
@@ -18,7 +18,11 @@ import {
 	type StructuredInteriorCoverage,
 } from "../assets/structured-interior-coverage";
 import type { PlacementTransformDto } from "../host/contracts";
-import { formatHex32, formatLandblockPackAssetId } from "../landblocks";
+import {
+	formatEnvCellAssetId,
+	formatHex32,
+	formatLandblockTopologyAssetId,
+} from "../landblocks";
 import {
 	deriveStructuredCellRenderChunk,
 	type RenderChunkPlacement,
@@ -114,7 +118,7 @@ function deriveBrowserFocusedStructuredInteriorSceneModel(
 ): StructuredInteriorSceneModel {
 	const activeEnvCellIds =
 		structuredInteriorCoverage?.envCellIds ??
-		deriveBrowserFocusedEnvCellIdsFromPacks(focusEnvCellId, assetState) ??
+		deriveBrowserFocusedEnvCellIdsFromTopology(focusEnvCellId, assetState) ??
 		deriveStructuredInteriorCoverage(
 			deriveBrowserFocusedStructuredInteriorMembershipPolicy(focusEnvCellId),
 			assetState.preparedByAssetId,
@@ -135,26 +139,29 @@ function deriveStructuredInteriorSceneForEnvCells(
 	const cells: StructuredInteriorCell[] = [];
 
 	for (const envCellId of activeEnvCellIds) {
-		const packCell = findPreparedPackInteriorCell(
+		const envCell = findPreparedEnvCell(
 			assetState.preparedByAssetId,
 			envCellId,
 		);
-		if (packCell) {
+		if (envCell) {
 			const renderChunk = deriveStructuredCellRenderChunk(envCellId);
 			cells.push({
 				renderKey: formatRenderDomainKey(
 					WORLD_RENDER_DOMAIN.interiorCellShell,
-					`landblock-pack/${formatHex32(envCellId & 0xffff0000)}/interior-cell/${formatHex32(envCellId)}`,
+					`env-cell/${formatHex32(envCellId)}`,
 				),
 				envCellId,
 				renderChunk,
-				environmentId: packCell.environmentId,
-				cellStructureId: packCell.cellStructureId,
+				environmentId: envCell.environmentId,
+				cellStructureId: envCell.cellStructureId,
 				isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
-				chunkLocalPlacement: packCell.localPlacement,
-				surfaceIds: packCell.surfaceIds,
-				portalCount: packCell.portals.length,
-				portals: packCell.portals.map((portal) => ({
+				chunkLocalPlacement: {
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				surfaceIds: envCell.surfaces.map((surface) => surface.surfaceId),
+				portalCount: envCell.portals.length,
+				portals: envCell.portals.map((portal) => ({
 					portalId: portal.portalId,
 					sourceIndex: portal.sourceIndex,
 					flags: portal.flags,
@@ -165,12 +172,12 @@ function deriveStructuredInteriorSceneForEnvCells(
 						portal.targetEnvCellId ??
 						(envCellId & 0xffff0000) | portal.otherCellId,
 				})),
-				portalApertures: packCell.portalApertures,
-				staticObjectCount: packCell.staticObjectCount,
+				portalApertures: envCell.portalApertures,
+				staticObjectCount: envCell.statics.length,
 				cellStructure: null,
-				cellBsp: packCell.cellBsp,
-				renderGeometry: packCell.renderGeometry,
-				debugColorKey: `landblock-pack:${envCellId}:${packCell.environmentId}:${formatHex32(packCell.cellStructureId)}`,
+				cellBsp: envCell.cellBsp,
+				renderGeometry: envCell.renderGeometry,
+				debugColorKey: `env-cell:${envCellId}:${envCell.environmentId}:${formatHex32(envCell.cellStructureId)}`,
 			});
 			continue;
 		}
@@ -188,16 +195,18 @@ function deriveStructuredInteriorSceneForEnvCells(
 	};
 }
 
-function deriveBrowserFocusedEnvCellIdsFromPacks(
+function deriveBrowserFocusedEnvCellIdsFromTopology(
 	focusEnvCellId: number,
 	assetState: AssetChannelState,
 ): number[] | null {
 	const focusLandblockPrefix = focusEnvCellId & 0xffff0000;
 	const focusLandblockAsset =
-		assetState.preparedByAssetId[formatLandblockPackAssetId(focusEnvCellId)];
+		assetState.preparedByAssetId[
+			formatLandblockTopologyAssetId(focusEnvCellId)
+		];
 	const envCellIds =
-		focusLandblockAsset?.payload.kind === "landblock-pack"
-			? focusLandblockAsset.payload.prepared.interiorCells
+		focusLandblockAsset?.payload.kind === "landblock-topology"
+			? focusLandblockAsset.payload.envCells
 					.filter(
 						(cell) => (cell.envCellId & 0xffff0000) === focusLandblockPrefix,
 					)
@@ -209,20 +218,16 @@ function deriveBrowserFocusedEnvCellIdsFromPacks(
 		: null;
 }
 
-function findPreparedPackInteriorCell(
+function findPreparedEnvCell(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 	envCellId: number,
-): PreparedLandblockInteriorCell | null {
-	const asset = preparedByAssetId[formatLandblockPackAssetId(envCellId)];
-	if (asset?.payload.kind !== "landblock-pack") {
+): PreparedEnvCellPayload | null {
+	const asset = preparedByAssetId[formatEnvCellAssetId(envCellId)];
+	if (asset?.payload.kind !== "env-cell") {
 		return null;
 	}
 
-	return (
-		asset.payload.prepared.interiorCells.find(
-			(candidate) => candidate.envCellId === envCellId,
-		) ?? null
-	);
+	return asset.payload.envCellId === envCellId ? asset.payload : null;
 }
 
 function compareStructuredInteriorCells(

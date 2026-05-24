@@ -7,17 +7,25 @@ import {
 	type PreparedAssetRecord,
 	type PreparedPolygonSetBspNode,
 } from "../assets/types";
-import { formatLandblockPackAssetId } from "../landblocks";
+import {
+	formatEnvCellAssetId,
+	formatLandblockTopologyAssetId,
+} from "../landblocks";
 import { deriveStructuredInteriorSceneModel } from "./structured-interior-scene";
 
 describe("structured interior scene", () => {
-	it("renders the owning dungeon pack while keeping the destination env cell focused", () => {
+	it("renders focused env cells from topology membership and env-cell payloads", () => {
 		const destination = parseBrowserLocationInput("016c0155");
-		const assetState = createAssetStateWithPack(
-			createPreparedLandblockPackAsset(
+		const assetState = createAssetStateWithRecords(
+			createPreparedLandblockTopologyAsset(
 				0x016cffff,
 				[0x016c0155, 0x016c0156, 0x016c0157],
 			),
+			...[
+				createPreparedEnvCellAsset(0x016c0155, 1),
+				createPreparedEnvCellAsset(0x016c0156, 2),
+				createPreparedEnvCellAsset(0x016c0157, 3),
+			],
 		);
 
 		const scene = deriveStructuredInteriorSceneModel(assetState, destination);
@@ -34,23 +42,23 @@ describe("structured interior scene", () => {
 	});
 });
 
-function createAssetStateWithPack(
-	pack: PreparedAssetRecord,
+function createAssetStateWithRecords(
+	...records: PreparedAssetRecord[]
 ): AssetChannelState {
 	const state = createInitialAssetChannelState();
 	return {
 		...state,
-		preparedByAssetId: {
-			[pack.request.assetId]: pack,
-		},
+		preparedByAssetId: Object.fromEntries(
+			records.map((record) => [record.request.assetId, record]),
+		),
 	};
 }
 
-function createPreparedLandblockPackAsset(
+function createPreparedLandblockTopologyAsset(
 	landblockId: number,
 	envCellIds: number[],
 ): PreparedAssetRecord {
-	const assetId = formatLandblockPackAssetId(landblockId);
+	const assetId = formatLandblockTopologyAssetId(landblockId);
 	return {
 		request: { requestId: assetId, assetId, priority: "streaming" },
 		response: {
@@ -61,61 +69,92 @@ function createPreparedLandblockPackAsset(
 		},
 		preparedAt: "2026-05-20T00:00:00.000Z",
 		payload: {
-			kind: "landblock-pack",
-			sourceAssetKind: "landblock-pack",
+			kind: "landblock-topology",
+			sourceAssetKind: "landblock-topology",
 			residencyKind: "landblock",
 			provenance: {
 				source: "repo-local-hba",
-				sourceAssetKind: "landblock-pack",
+				sourceAssetKind: "landblock-topology",
 				errorCode: null,
 				detail: "test",
 			},
 			landblockId,
 			landblockInfoId: (landblockId & 0xffff0000) | 0xfffe,
 			classification: "dungeon",
-			sourceFacts: {
-				buildings: [],
+			envCells: envCellIds.map((envCellId) => ({
+				memberId: `env-cell/${envCellId.toString(16).padStart(8, "0")}`,
+				envCellId,
+				assetId: formatEnvCellAssetId(envCellId),
+				localPlacement: {
+					origin: { x: 0, y: 0, z: 0 },
+					orientation: { w: 1, x: 0, y: 0, z: 0 },
+				},
+				visibleEnvCellIds: [],
+				restrictionObjectId: null,
+				seenOutside: null,
+			})),
+			portalLinks: [],
+			envCellResidencyBvh: {
+				coordinateSpace: "landblock-scene-residency",
+				nodes: [],
+				items: [],
 			},
-			prepared: {
-				terrainMesh: null,
-				outdoorStaticInstances: [],
-				interiorCells: envCellIds.map((envCellId, index) => ({
-					envCellId,
-					environmentId: 0x0d000001,
-					cellStructureId: index + 1,
-					localPlacement: {
-						origin: { x: 0, y: 0, z: 0 },
-						orientation: { w: 1, x: 0, y: 0, z: 0 },
-					},
-					surfaceIds: [],
-					portals: [],
-					portalApertures: [],
-					staticObjectCount: 0,
-					cellBsp: createLeafBspNode(),
-					renderGeometry: {
-						sourceId: index + 1,
-						vertexCount: 0,
-						triangleCount: 0,
-						positions: [],
-						normals: [],
-						uvs: [],
-						triangles: [],
-						surfaceIds: [],
-						invalidPolygons: [],
-						skippedPolygonCount: 0,
-						bounds: null,
-					},
-				})),
-				staticMeshes: [],
-				spatialItems: [],
-				staticLandblockBvh: null,
+			diagnostics: { sourceRecords: [], errors: [], omissions: [] },
+		},
+	};
+}
+
+function createPreparedEnvCellAsset(
+	envCellId: number,
+	cellStructureId: number,
+): PreparedAssetRecord {
+	const assetId = formatEnvCellAssetId(envCellId);
+	return {
+		request: { requestId: assetId, assetId, priority: "streaming" },
+		response: {
+			requestId: assetId,
+			assetId,
+			payloadKind: "json",
+			payload: {},
+		},
+		preparedAt: "2026-05-20T00:00:00.000Z",
+		payload: {
+			kind: "env-cell",
+			sourceAssetKind: "env-cell",
+			residencyKind: "interior-cell",
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "env-cell",
+				errorCode: null,
+				detail: "test",
 			},
-			dependencies: {
-				cellDatIds: [],
-				portalDatIds: [],
-				renderableAssetIds: [],
+			envCellId,
+			environmentId: 0x0d000001,
+			cellStructureId,
+			surfaces: [],
+			portals: [],
+			visibleEnvCellIds: [],
+			portalApertures: [],
+			statics: [],
+			renderGeometry: {
+				sourceId: cellStructureId,
+				vertexCount: 0,
+				triangleCount: 0,
+				positions: [],
+				normals: [],
+				uvs: [],
+				triangles: [],
+				surfaceIds: [],
+				invalidPolygons: [],
+				skippedPolygonCount: 0,
+				bounds: null,
 			},
-			diagnostics: { sourceRecords: [], errors: [] },
+			cellBsp: createLeafBspNode(),
+			localBvh: {
+				coordinateSpace: "env-cell-local",
+				nodes: [],
+				items: [],
+			},
 		},
 	};
 }

@@ -4,20 +4,21 @@ use std::sync::{Arc, Mutex};
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, LandblockBuildingShell,
-    LandblockBuildingShellsAsset, LandblockClassification, LandblockPack,
-    LandblockPackSourceDiagnostics, LandblockSceneAsset, LandblockSceneBuildingMember,
-    LandblockSceneStaticMember, LandblockSummary, LandblockSummaryBuilding,
-    LandblockSummaryBuildingPortal, LandblockTerrainAsset, PreparedAabb, PreparedBvh,
-    PreparedBvhNode, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
-    PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
-    PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedSpatialItem,
-    PreparedSpatialItemKind, PreparedSpatialItemMetadata, PreparedStaticInstance,
-    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
-    PreparedVec3, ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource,
-    ResolvedSetupAppearance, ResolvedTerrainMaterialTable, SoulEmoteCatalog, SourceLoadError,
-    SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame,
-    StaticOutdoorInstance, StaticOutdoorScene, StaticRenderableSourceFamily,
-    build_gfx_obj_render_geometry, normalize_landblock_id,
+    LandblockBuildingShellsAsset, LandblockClassification, LandblockOutdoorAsset,
+    LandblockOutdoorStaticMember, LandblockPack, LandblockPackSourceDiagnostics,
+    LandblockSceneAsset, LandblockSceneBuildingMember, LandblockSceneStaticMember,
+    LandblockSummary, LandblockSummaryBuilding, LandblockSummaryBuildingPortal,
+    LandblockTerrainAsset, LandblockTopologyAsset, PreparedAabb, PreparedBvh, PreparedBvhNode,
+    PreparedInteriorCell, PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
+    PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
+    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
+    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
+    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+    ResolvedMaterialRecipe, ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
+    ResolvedTerrainMaterialTable, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
+    SourceRecordDiagnostic, SourceRecordStatus, StaticOutdoorFrame, StaticOutdoorInstance,
+    StaticOutdoorScene, StaticRenderableSourceFamily, build_gfx_obj_render_geometry,
+    normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -261,6 +262,39 @@ impl HostBoundaryAdapter {
                 }
                 Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene"),
                 Err(error) => self.build_failed_landblock_scene_lookup_response(
+                    request,
+                    normalize_landblock_id(landblock_id),
+                    error,
+                ),
+            },
+            ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockOutdoor {
+                    outdoor,
+                    region_id,
+                    region_number,
+                }) => self.build_landblock_outdoor_lookup_response(
+                    request,
+                    *outdoor,
+                    region_id,
+                    region_number,
+                ),
+                Ok(_) => {
+                    unreachable!("content asset runtime returned mismatched landblock outdoor")
+                }
+                Err(error) => self.build_failed_landblock_outdoor_lookup_response(
+                    request,
+                    normalize_landblock_id(landblock_id),
+                    error,
+                ),
+            },
+            ContentAssetRequest::LandblockTopology(landblock_id) => match asset {
+                Ok(ContentAsset::LandblockTopology(topology)) => {
+                    self.build_landblock_topology_lookup_response(request, *topology)
+                }
+                Ok(_) => {
+                    unreachable!("content asset runtime returned mismatched landblock topology")
+                }
+                Err(error) => self.build_failed_landblock_topology_lookup_response(
                     request,
                     normalize_landblock_id(landblock_id),
                     error,
@@ -598,6 +632,62 @@ impl HostBoundaryAdapter {
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
             payload: failed_landblock_scene_payload(landblock_id, error),
+        }
+    }
+
+    fn build_landblock_outdoor_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        outdoor: LandblockOutdoorAsset,
+        region_id: u32,
+        region_number: u32,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serialize_landblock_outdoor_payload(&outdoor, region_id, region_number),
+        }
+    }
+
+    fn build_failed_landblock_outdoor_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+        error: anyhow::Error,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: failed_landblock_outdoor_payload(landblock_id, error),
+        }
+    }
+
+    fn build_landblock_topology_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        topology: LandblockTopologyAsset,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: serialize_landblock_topology_payload(&topology),
+        }
+    }
+
+    fn build_failed_landblock_topology_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        landblock_id: u32,
+        error: anyhow::Error,
+    ) -> AssetLookupResponseDto {
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload: failed_landblock_topology_payload(landblock_id, error),
         }
     }
 
@@ -998,6 +1088,14 @@ fn parse_landblock_scene_asset_id(asset_id: &str) -> Option<u32> {
     parse_landblock_child_asset_id(asset_id, "/scene")
 }
 
+fn parse_landblock_outdoor_asset_id(asset_id: &str) -> Option<u32> {
+    parse_landblock_child_asset_id(asset_id, "/outdoor")
+}
+
+fn parse_landblock_topology_asset_id(asset_id: &str) -> Option<u32> {
+    parse_landblock_child_asset_id(asset_id, "/topology")
+}
+
 fn parse_env_cell_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("env-cell/")
@@ -1028,6 +1126,12 @@ fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAssetReq
         })
         .or_else(|| {
             parse_landblock_scene_asset_id(asset_id).map(ContentAssetRequest::LandblockScene)
+        })
+        .or_else(|| {
+            parse_landblock_outdoor_asset_id(asset_id).map(ContentAssetRequest::LandblockOutdoor)
+        })
+        .or_else(|| {
+            parse_landblock_topology_asset_id(asset_id).map(ContentAssetRequest::LandblockTopology)
         })
         .or_else(|| parse_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
         .or_else(|| {
@@ -1384,6 +1488,47 @@ fn failed_landblock_scene_payload(landblock_id: u32, error: anyhow::Error) -> se
     })
 }
 
+fn failed_landblock_outdoor_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
+    let detail = format!("{error:#}");
+    let error_code = asset_cache_error_code(&error);
+    serde_json::json!({
+        "kind": "landblock-outdoor",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "landblock-outdoor",
+        "landblockId": landblock_id,
+        "regionId": REGION_DESC_FILE_ID,
+        "regionNumber": 0,
+        "classification": "outdoor",
+        "terrain": empty_landblock_terrain(),
+        "statics": [],
+        "outdoorBvh": null,
+        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-outdoor", error_code, &detail),
+        "provenance": failed_provenance("landblock-outdoor", error_code, &detail),
+    })
+}
+
+fn failed_landblock_topology_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
+    let detail = format!("{error:#}");
+    let error_code = asset_cache_error_code(&error);
+    serde_json::json!({
+        "kind": "landblock-topology",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-topology",
+        "landblockId": landblock_id,
+        "landblockInfoId": landblock_id & 0xffff_fffe,
+        "classification": "outdoor",
+        "envCells": [],
+        "portalLinks": [],
+        "envCellResidencyBvh": {
+            "coordinateSpace": "landblock-scene-residency",
+            "nodes": [],
+            "items": [],
+        },
+        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-topology", error_code, &detail),
+        "provenance": failed_provenance("landblock-topology", error_code, &detail),
+    })
+}
+
 fn failed_env_cell_payload(env_cell_id: u32, error: anyhow::Error) -> serde_json::Value {
     let detail = format!("{error:#}");
     let error_code = asset_cache_error_code(&error);
@@ -1692,6 +1837,38 @@ fn serialize_content_asset_binary_response(
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene"),
             Err(error) => adapter.build_failed_landblock_scene_lookup_response(
+                request,
+                normalize_landblock_id(landblock_id),
+                error,
+            ),
+        },
+        ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
+            Ok(ContentAsset::LandblockOutdoor {
+                outdoor,
+                region_id,
+                region_number,
+            }) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_landblock_outdoor_payload(&outdoor, region_id, region_number),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched landblock outdoor"),
+            Err(error) => adapter.build_failed_landblock_outdoor_lookup_response(
+                request,
+                normalize_landblock_id(landblock_id),
+                error,
+            ),
+        },
+        ContentAssetRequest::LandblockTopology(landblock_id) => match asset {
+            Ok(ContentAsset::LandblockTopology(topology)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_landblock_topology_payload(&topology),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched landblock topology"),
+            Err(error) => adapter.build_failed_landblock_topology_lookup_response(
                 request,
                 normalize_landblock_id(landblock_id),
                 error,
@@ -2683,6 +2860,156 @@ fn serialize_landblock_scene_payload(scene: &LandblockSceneAsset) -> serde_json:
             "detail": scene.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
+}
+
+fn serialize_landblock_outdoor_payload(
+    outdoor: &LandblockOutdoorAsset,
+    region_id: u32,
+    region_number: u32,
+) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-outdoor",
+        "residencyKind": "outdoor-landblock",
+        "sourceAssetKind": "landblock-outdoor",
+        "landblockId": outdoor.landblock_id,
+        "regionId": region_id,
+        "regionNumber": region_number,
+        "classification": "outdoor",
+        "terrain": serialize_landblock_outdoor_terrain(outdoor),
+        "statics": outdoor.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
+        "outdoorBvh": serialize_landblock_outdoor_bvh(outdoor),
+        "diagnostics": serialize_landblock_pack_diagnostics(&outdoor.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-outdoor",
+            "errorCode": outdoor.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": outdoor.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_landblock_topology_payload(topology: &LandblockTopologyAsset) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-topology",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-topology",
+        "landblockId": topology.landblock_id,
+        "landblockInfoId": topology.landblock_info_id,
+        "classification": serialize_landblock_classification(topology.classification),
+        "envCells": topology.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
+        "portalLinks": serialize_landblock_topology_portal_links(topology),
+        "envCellResidencyBvh": serialize_landblock_topology_env_cell_residency_bvh(topology),
+        "diagnostics": serialize_landblock_pack_diagnostics(&topology.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-topology",
+            "errorCode": topology.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": topology.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_landblock_outdoor_terrain(outdoor: &LandblockOutdoorAsset) -> serde_json::Value {
+    let terrain_asset = LandblockTerrainAsset {
+        landblock_id: outdoor.landblock_id,
+        cell_landblock: outdoor.cell_landblock.clone(),
+        terrain_mesh: outdoor.terrain_mesh.clone(),
+        diagnostics: outdoor.diagnostics.clone(),
+    };
+    serialize_landblock_terrain(&terrain_asset)
+}
+
+fn serialize_landblock_outdoor_static_member(
+    member: &LandblockOutdoorStaticMember,
+) -> serde_json::Value {
+    let instance = &member.instance;
+    serde_json::json!({
+        "kind": serialize_landblock_outdoor_static_kind(instance.kind),
+        "instanceId": instance.instance_id,
+        "sourceDid": instance.source_did,
+        "sourceAssetId": instance.source_asset_id,
+        "sourceIndex": instance.source_index,
+        "localPlacement": serialize_frame(&instance.local_placement),
+        "sourceScale": serialize_prepared_vec3(&instance.source_scale),
+        "sourceBounds": member.source_bounds.map(serialize_bounds),
+        "instanceBounds": member.instance_bounds.map(serialize_bounds),
+        "building": member.building.as_ref().map(|building| serde_json::json!({
+            "numLeaves": building.num_leaves,
+            "portals": building.portals.iter().map(|portal| serde_json::json!({
+                "portalId": portal.portal_id,
+                "sourceIndex": portal.source_index,
+                "flags": portal.flags,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "stabLocalCellIds": portal.stab_list,
+                "linkedEnvCellIds": portal.linked_env_cell_ids,
+            })).collect::<Vec<_>>(),
+        })),
+        "generated": member.generated.as_ref().map(|generated| serde_json::json!({
+            "terrainIndex": generated.terrain_index,
+            "sceneId": generated.scene_id,
+            "sceneTemplateIndex": generated.scene_template_index,
+        })),
+    })
+}
+
+fn serialize_landblock_outdoor_static_kind(kind: PreparedStaticInstanceKind) -> &'static str {
+    match kind {
+        PreparedStaticInstanceKind::Building => "building",
+        PreparedStaticInstanceKind::GeneratedScenery => "generated-scenery",
+        _ => "explicit-object",
+    }
+}
+
+fn serialize_landblock_outdoor_bvh(outdoor: &LandblockOutdoorAsset) -> serde_json::Value {
+    let Some(bvh) = outdoor.outdoor_bvh.as_ref() else {
+        return serde_json::Value::Null;
+    };
+    serde_json::json!({
+        "coordinateSpace": "landblock-render-local",
+        "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
+        "items": outdoor.statics.iter().map(|member| serde_json::json!({
+            "kind": serialize_landblock_outdoor_bvh_item_kind(member.instance.kind),
+            "instanceId": member.instance.instance_id,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn serialize_landblock_outdoor_bvh_item_kind(kind: PreparedStaticInstanceKind) -> &'static str {
+    match kind {
+        PreparedStaticInstanceKind::Building => "building",
+        _ => "static",
+    }
+}
+
+fn serialize_landblock_topology_env_cell_residency_bvh(
+    topology: &LandblockTopologyAsset,
+) -> serde_json::Value {
+    let scene = LandblockSceneAsset {
+        landblock_id: topology.landblock_id,
+        landblock_info_id: topology.landblock_info_id,
+        classification: topology.classification,
+        statics: Vec::new(),
+        buildings: Vec::new(),
+        env_cells: topology.env_cells.clone(),
+        diagnostics: topology.diagnostics.clone(),
+    };
+    serialize_landblock_scene_env_cell_residency_bvh(&scene)
+}
+
+fn serialize_landblock_topology_portal_links(
+    topology: &LandblockTopologyAsset,
+) -> Vec<serde_json::Value> {
+    let scene = LandblockSceneAsset {
+        landblock_id: topology.landblock_id,
+        landblock_info_id: topology.landblock_info_id,
+        classification: topology.classification,
+        statics: Vec::new(),
+        buildings: Vec::new(),
+        env_cells: topology.env_cells.clone(),
+        diagnostics: topology.diagnostics.clone(),
+    };
+    serialize_landblock_scene_portal_links(&scene)
 }
 
 fn serialize_landblock_scene_env_cell_residency_bvh(
@@ -4070,6 +4397,64 @@ mod tests {
             asset.payload["envCellResidencyBvh"]["coordinateSpace"],
             "landblock-scene-residency"
         );
+    }
+
+    #[test]
+    fn landblock_outdoor_lookup_returns_render_payload() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-landblock-outdoor".to_string(),
+            asset_id: "landblock/da55ffff/outdoor".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+
+        assert_eq!(asset.asset_id, "landblock/da55ffff/outdoor");
+        assert_eq!(asset.payload["kind"], "landblock-outdoor");
+        assert_eq!(asset.payload["sourceAssetKind"], "landblock-outdoor");
+        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
+        assert_eq!(asset.payload["regionId"], REGION_DESC_FILE_ID);
+        assert!(
+            asset.payload["terrain"]["quads"]
+                .as_array()
+                .expect("outdoor route should expose terrain quads")
+                .iter()
+                .any(|quad| quad["pcode"].as_u64().is_some_and(|pcode| pcode != 0))
+        );
+        assert!(
+            asset.payload["statics"]
+                .as_array()
+                .expect("outdoor route should expose render statics")
+                .iter()
+                .all(|member| member["sourceAssetId"]
+                    .as_str()
+                    .is_some_and(|asset_id| asset_id.starts_with("setup-model/")
+                        || asset_id.starts_with("gfx-obj/")))
+        );
+        assert!(asset.payload.get("envCells").is_none());
+    }
+
+    #[test]
+    fn landblock_topology_lookup_returns_env_cell_membership_only() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-landblock-topology".to_string(),
+            asset_id: "landblock/da55ffff/topology".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+
+        assert_eq!(asset.asset_id, "landblock/da55ffff/topology");
+        assert_eq!(asset.payload["kind"], "landblock-topology");
+        assert_eq!(asset.payload["sourceAssetKind"], "landblock-topology");
+        assert_eq!(asset.payload["landblockId"], 0xda55ffffu32);
+        assert!(
+            asset.payload["envCells"]
+                .as_array()
+                .expect("topology route should expose env cell members")
+                .iter()
+                .any(|cell| cell["assetId"] == "env-cell/da550100")
+        );
+        assert!(asset.payload.get("terrain").is_none());
+        assert!(asset.payload.get("statics").is_none());
     }
 
     #[test]

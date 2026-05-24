@@ -5,8 +5,10 @@ import {
 } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
+	PreparedEnvCellPayload,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
+	PreparedLandblockOutdoorPayload,
 	PreparedLandblockPackPayload,
 	PreparedLandblockSummaryBuilding,
 	PreparedLandblockSummaryPayload,
@@ -16,7 +18,7 @@ import type {
 	PreparedSetupAppearancePayload,
 } from "../assets/types";
 import {
-	derivePackInteriorEnvCellIdsForLandblocks,
+	deriveTopologyEnvCellIdsForLandblocks,
 	deriveTerrainFocusLandblockId,
 } from "../assets/scene-asset-request-planner";
 import {
@@ -26,7 +28,9 @@ import {
 import type { PlacementTransformDto, Vec3Dto } from "../host/contracts";
 import {
 	buildOutdoorCoverageLandblockIds,
+	formatEnvCellAssetId,
 	formatLandblockPackAssetId,
+	formatLandblockOutdoorAssetId,
 	formatLandblockSummaryAssetId,
 	formatHex32,
 	normalizeOutdoorLandblockId,
@@ -210,7 +214,7 @@ export function deriveStaticRenderableSceneModel(
 				{
 					kind: "landblock-closure",
 					seedEnvCellIds: [
-						...derivePackInteriorEnvCellIdsForLandblocks(
+						...deriveTopologyEnvCellIdsForLandblocks(
 							assetState.preparedByAssetId,
 							envCellLandblockSet,
 						),
@@ -219,22 +223,17 @@ export function deriveStaticRenderableSceneModel(
 				assetState.preparedByAssetId,
 			).envCellIds,
 	);
-	const sourceInstances = collectPackStaticRenderableSourceInstances(
+	const sourceInstances = collectOutdoorStaticRenderableSourceInstances(
 		assetState,
 		{
 			buildingLandblockIds: buildingLandblockSet,
 			detailLandblockIds: detailLandblockSet,
-			envCellIds: activeInteriorEnvCellIds,
 		},
-		cache,
 	)
 		.concat(
-			collectSummaryBuildingSourceInstances(
+			collectEnvCellStaticRenderableSourceInstances(
 				assetState,
-				{
-					buildingLandblockIds: buildingLandblockSet,
-				},
-				cache,
+				activeInteriorEnvCellIds,
 			),
 		)
 		.filter((instance) => activeLandblockSet.has(instance.owningLandblockId))
@@ -242,22 +241,20 @@ export function deriveStaticRenderableSceneModel(
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
 	const parts: StaticRenderablePart[] = [
-		...collectPackStaticRenderableParts(
+		...collectOutdoorStaticRenderableParts(
 			assetState,
 			{
 				buildingLandblockIds: buildingLandblockSet,
 				detailLandblockIds: detailLandblockSet,
-				envCellIds: activeInteriorEnvCellIds,
 			},
-			missingGfxAssetIds,
-			cache,
-		),
-		...collectSummaryBuildingStaticRenderableParts(
-			assetState,
-			{ buildingLandblockIds: buildingLandblockSet },
 			missingSourceAssetIds,
 			missingGfxAssetIds,
-			cache,
+		),
+		...collectEnvCellStaticRenderableParts(
+			assetState,
+			activeInteriorEnvCellIds,
+			missingSourceAssetIds,
+			missingGfxAssetIds,
 		),
 	];
 
@@ -284,22 +281,17 @@ function deriveIndoorStaticRenderableSceneModel(
 		browserDestination,
 		structuredInteriorCoverage,
 	);
-	const sourceInstances = collectPackIndoorStaticRenderableSourceInstances(
+	const sourceInstances = collectEnvCellStaticRenderableSourceInstances(
 		assetState,
 		activeEnvCellIds,
-		cache,
 	).sort(compareSourceInstances);
 	const missingSourceAssetIds = new Set<string>();
 	const missingGfxAssetIds = new Set<string>();
-	const parts: StaticRenderablePart[] = collectPackStaticRenderableParts(
+	const parts: StaticRenderablePart[] = collectEnvCellStaticRenderableParts(
 		assetState,
-		{
-			buildingLandblockIds: new Set(),
-			detailLandblockIds: new Set(),
-			envCellIds: activeEnvCellIds,
-		},
+		activeEnvCellIds,
+		missingSourceAssetIds,
 		missingGfxAssetIds,
-		cache,
 	);
 
 	return {
@@ -372,6 +364,18 @@ function isPreparedLandblockSummaryAsset(
 	return asset?.payload.kind === "landblock-summary";
 }
 
+function isPreparedLandblockOutdoorAsset(
+	asset: PreparedAssetRecord | undefined,
+): asset is PreparedAssetRecord & { payload: PreparedLandblockOutdoorPayload } {
+	return asset?.payload.kind === "landblock-outdoor";
+}
+
+function isPreparedEnvCellAsset(
+	asset: PreparedAssetRecord | undefined,
+): asset is PreparedAssetRecord & { payload: PreparedEnvCellPayload } {
+	return asset?.payload.kind === "env-cell";
+}
+
 export function createEmptyStaticRenderableSceneModel(): StaticRenderableSceneModel {
 	return {
 		focusLandblockId: null,
@@ -398,6 +402,33 @@ function collectPackStaticRenderableSourceInstances(
 		.filter((instance) => isPackStaticInstanceSelected(instance, selection));
 }
 
+function collectOutdoorStaticRenderableSourceInstances(
+	assetState: AssetChannelState,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+	},
+): StaticRenderableSourceInstance[] {
+	const landblockIds = new Set([
+		...selection.buildingLandblockIds,
+		...selection.detailLandblockIds,
+	]);
+	return [...landblockIds].flatMap((landblockId) => {
+		const asset =
+			assetState.preparedByAssetId[formatLandblockOutdoorAssetId(landblockId)];
+		if (!isPreparedLandblockOutdoorAsset(asset)) {
+			return [];
+		}
+		return asset.payload.statics
+			.map((member) =>
+				normalizeOutdoorStaticSourceInstance(member, asset.payload),
+			)
+			.filter((instance) =>
+				isOutdoorStaticInstanceSelected(instance, selection),
+			);
+	});
+}
+
 function collectPackIndoorStaticRenderableSourceInstances(
 	assetState: AssetChannelState,
 	activeEnvCellIds: ReadonlySet<number>,
@@ -415,6 +446,21 @@ function collectPackIndoorStaticRenderableSourceInstances(
 	)
 		.flatMap((resource) => resource.sourceInstances)
 		.filter((instance) => isPackStaticInstanceSelected(instance, selection));
+}
+
+function collectEnvCellStaticRenderableSourceInstances(
+	assetState: AssetChannelState,
+	activeEnvCellIds: ReadonlySet<number>,
+): StaticRenderableSourceInstance[] {
+	return [...activeEnvCellIds].flatMap((envCellId) => {
+		const asset = assetState.preparedByAssetId[formatEnvCellAssetId(envCellId)];
+		if (!isPreparedEnvCellAsset(asset)) {
+			return [];
+		}
+		return asset.payload.statics.map((member) =>
+			normalizeEnvCellStaticSourceInstance(member, asset.payload),
+		);
+	});
 }
 
 function collectSummaryBuildingSourceInstances(
@@ -473,6 +519,61 @@ function normalizeSummaryBuildingSourceInstance(
 		sourceScale: UNIT_SCALE,
 		numLeaves: building.numLeaves,
 	};
+}
+
+function normalizeOutdoorStaticSourceInstance(
+	member: PreparedLandblockOutdoorPayload["statics"][number],
+	payload: PreparedLandblockOutdoorPayload,
+): StaticRenderableSourceInstance {
+	return {
+		kind:
+			member.kind === "explicit-object"
+				? "scenery"
+				: member.kind === "generated-scenery"
+					? "generated-scenery"
+					: "building",
+		instanceId: member.instanceId,
+		owningLandblockId: normalizeOutdoorLandblockId(payload.landblockId),
+		owningEnvCellId: null,
+		sourceDid: member.sourceDid,
+		sourceAssetId: member.sourceAssetId,
+		sourceIndex: member.sourceIndex,
+		parentPlacements: [],
+		chunkLocalInstancePlacement: member.localPlacement,
+		sourceScale: member.sourceScale,
+		numLeaves: member.building?.numLeaves ?? null,
+	};
+}
+
+function normalizeEnvCellStaticSourceInstance(
+	member: PreparedEnvCellPayload["statics"][number],
+	payload: PreparedEnvCellPayload,
+): StaticRenderableSourceInstance {
+	return {
+		kind: "indoor-static",
+		instanceId: member.instanceId,
+		owningLandblockId: normalizeOutdoorLandblockId(payload.envCellId),
+		owningEnvCellId: payload.envCellId,
+		sourceDid: member.sourceDid,
+		sourceAssetId: member.sourceAssetId,
+		sourceIndex: member.sourceIndex,
+		parentPlacements: [],
+		chunkLocalInstancePlacement: member.localPlacement,
+		sourceScale: member.sourceScale,
+		numLeaves: null,
+	};
+}
+
+function isOutdoorStaticInstanceSelected(
+	instance: StaticRenderableSourceInstance,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+	},
+): boolean {
+	return instance.kind === "building"
+		? selection.buildingLandblockIds.has(instance.owningLandblockId)
+		: selection.detailLandblockIds.has(instance.owningLandblockId);
 }
 
 function compareSourceInstances(
@@ -624,6 +725,47 @@ function collectSummaryBuildingStaticRenderableParts(
 		assetState,
 		selection,
 		cache,
+	).flatMap((instance) =>
+		expandStaticRenderableSourceInstanceParts(
+			instance,
+			assetState,
+			missingSourceAssetIds,
+			missingGfxAssetIds,
+		),
+	);
+}
+
+function collectOutdoorStaticRenderableParts(
+	assetState: AssetChannelState,
+	selection: {
+		buildingLandblockIds: ReadonlySet<number>;
+		detailLandblockIds: ReadonlySet<number>;
+	},
+	missingSourceAssetIds: Set<string>,
+	missingGfxAssetIds: Set<string>,
+): StaticRenderablePart[] {
+	return collectOutdoorStaticRenderableSourceInstances(
+		assetState,
+		selection,
+	).flatMap((instance) =>
+		expandStaticRenderableSourceInstanceParts(
+			instance,
+			assetState,
+			missingSourceAssetIds,
+			missingGfxAssetIds,
+		),
+	);
+}
+
+function collectEnvCellStaticRenderableParts(
+	assetState: AssetChannelState,
+	activeEnvCellIds: ReadonlySet<number>,
+	missingSourceAssetIds: Set<string>,
+	missingGfxAssetIds: Set<string>,
+): StaticRenderablePart[] {
+	return collectEnvCellStaticRenderableSourceInstances(
+		assetState,
+		activeEnvCellIds,
 	).flatMap((instance) =>
 		expandStaticRenderableSourceInstanceParts(
 			instance,

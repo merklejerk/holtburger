@@ -4,10 +4,12 @@ import {
 	envCellPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	landblockBuildingShellsPayloadDtoSchema,
+	landblockOutdoorPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
 	landblockScenePayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
 	landblockTerrainPayloadDtoSchema,
+	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
 	renderTexturePayloadDtoSchema,
@@ -50,6 +52,18 @@ export function getAssetResponseDependencies(
 		]);
 	}
 
+	const landblockOutdoor = landblockOutdoorPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockOutdoor.success) {
+		return uniqueSortedAssetIds([
+			formatTerrainMaterialDependencyAssetId(
+				landblockOutdoor.data.regionNumber,
+			),
+			...landblockOutdoor.data.statics.map((member) => member.sourceAssetId),
+		]);
+	}
+
 	const landblockBuildingShells =
 		landblockBuildingShellsPayloadDtoSchema.safeParse(response.payload);
 	if (landblockBuildingShells.success) {
@@ -67,6 +81,15 @@ export function getAssetResponseDependencies(
 			...landblockScene.data.buildings.map((member) => member.sourceAssetId),
 			...landblockScene.data.envCells.map((member) => member.assetId),
 		]);
+	}
+
+	const landblockTopology = landblockTopologyPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockTopology.success) {
+		return uniqueSortedAssetIds(
+			landblockTopology.data.envCells.map((member) => member.assetId),
+		);
 	}
 
 	const envCell = envCellPayloadDtoSchema.safeParse(response.payload);

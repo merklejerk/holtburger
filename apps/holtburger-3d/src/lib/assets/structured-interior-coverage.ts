@@ -1,4 +1,4 @@
-import { formatLandblockPackAssetId } from "../landblocks";
+import { formatLandblockTopologyAssetId } from "../landblocks";
 import type { PreparedAssetRecord } from "./types";
 
 export type StructuredInteriorMembershipPolicy =
@@ -44,10 +44,10 @@ function deriveLandblockClosureCoverage(
 	for (const seedEnvCellId of uniqueSorted(seedEnvCellIds)) {
 		envCellIds.add(seedEnvCellId);
 
-		const packAsset =
-			preparedByAssetId[formatLandblockPackAssetId(seedEnvCellId)];
-		if (packAsset?.payload.kind === "landblock-pack") {
-			for (const cell of packAsset.payload.prepared.interiorCells) {
+		const topologyAsset =
+			preparedByAssetId[formatLandblockTopologyAssetId(seedEnvCellId)];
+		if (topologyAsset?.payload.kind === "landblock-topology") {
+			for (const cell of topologyAsset.payload.envCells) {
 				envCellIds.add(cell.envCellId);
 			}
 			continue;

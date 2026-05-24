@@ -3,8 +3,10 @@ import { isIndoorBrowserDestination } from "../../app/browser-mode";
 import type {
 	AssetChannelState,
 	PreparedAssetRecord,
+	PreparedLandblockOutdoorPayload,
 	PreparedLandblockPackPayload,
 	PreparedLandblockSummaryPayload,
+	PreparedLandblockTerrainPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
@@ -141,7 +143,37 @@ function getTerrainMeshFromPreparedAsset(
 		return asset.payload.prepared.terrainMesh;
 	}
 
+	if (
+		asset.payload.kind === "landblock-outdoor" ||
+		asset.payload.kind === "landblock-terrain"
+	) {
+		return convertPreparedLandblockTerrainPayload(asset.payload);
+	}
+
 	return null;
+}
+
+function convertPreparedLandblockTerrainPayload(
+	payload: PreparedLandblockOutdoorPayload | PreparedLandblockTerrainPayload,
+): PreparedTerrainMesh {
+	return {
+		landblockId: payload.landblockId,
+		gridSize: payload.terrain.gridSize,
+		tileSize: payload.terrain.tileSize,
+		vertices: payload.terrain.vertices,
+		triangles: payload.terrain.triangles.map((triangle) => ({
+			a: triangle.vertexIndices[0],
+			b: triangle.vertexIndices[1],
+			c: triangle.vertexIndices[2],
+			terrainType:
+				payload.terrain.quads.find(
+					(quad) => quad.quadIndex === triangle.quadIndex,
+				)?.pcode ?? 0,
+			averageHeight: triangle.averageHeight,
+		})),
+		minHeight: payload.terrain.minHeight,
+		maxHeight: payload.terrain.maxHeight,
+	};
 }
 
 function compareLandblockGridPosition(
@@ -191,6 +223,15 @@ function inferTerrainDataSource(
 	}
 
 	if (isPreparedLandblockSummaryWithTerrain(asset)) {
+		return asset.payload.provenance.source === "repo-local-hba"
+			? "repo-local-cell-landblock"
+			: "unknown";
+	}
+
+	if (
+		asset.payload.kind === "landblock-outdoor" ||
+		asset.payload.kind === "landblock-terrain"
+	) {
 		return asset.payload.provenance.source === "repo-local-hba"
 			? "repo-local-cell-landblock"
 			: "unknown";

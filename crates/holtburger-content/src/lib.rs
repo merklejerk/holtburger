@@ -33,7 +33,9 @@ pub use material_capabilities::{
 pub use material_graph::{
     MaterialAppearanceInput, ResolvedAnimationPartChange, ResolvedMaterialRecipe,
     ResolvedMaterialSlot, ResolvedMaterialSource, ResolvedSetupAppearance,
-    ResolvedSetupAppearancePart, ResolvedTextureChange, ResolvedTextureMaterial,
+    ResolvedSetupAppearancePart, ResolvedTerrainAlphaMap, ResolvedTerrainMaterialTable,
+    ResolvedTerrainMaterialType, ResolvedTerrainRoadAlphaMap, ResolvedTextureChange,
+    ResolvedTextureMaterial,
 };
 pub use repository::ContentRepository;
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};

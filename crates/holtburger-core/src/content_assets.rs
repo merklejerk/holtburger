@@ -7,7 +7,7 @@ use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockPack, LandblockPackAssembler, LandblockSummary,
     LandblockSummaryAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedSetupAppearance, normalize_landblock_id,
+    ResolvedSetupAppearance, ResolvedTerrainMaterialTable, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -19,6 +19,10 @@ const DEFAULT_CONTENT_ASSET_WORKERS: usize = 2;
 pub enum ContentAssetRequest {
     LandblockPack(u32),
     LandblockSummary(u32),
+    LandblockTerrain(u32),
+    LandblockScene(u32),
+    EnvCell(u32),
+    TerrainMaterial(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -32,6 +36,14 @@ pub enum ContentAssetRequest {
 pub enum ContentAsset {
     LandblockPack(Box<LandblockPack>),
     LandblockSummary(Box<LandblockSummary>),
+    LandblockTerrain {
+        pack: Box<LandblockPack>,
+        region_id: u32,
+        region_number: u32,
+    },
+    LandblockScene(Box<LandblockPack>),
+    EnvCell(Box<LandblockPack>),
+    TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     GfxObj(Box<GfxObj>),
     SetupModel(Box<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -77,6 +89,51 @@ impl ContentAssetService {
                     ),
                 )))
             }
+            ContentAssetRequest::LandblockTerrain(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                let pack = LandblockPackAssembler::new().assemble_landblock_with_cache(
+                    &self.content,
+                    &self.decode_cache,
+                    landblock_id,
+                );
+                let region = self.decode_cache.region_desc(&self.content)?;
+                Ok(ContentAsset::LandblockTerrain {
+                    pack: Box::new(pack),
+                    region_id: region.id,
+                    region_number: region.region_number,
+                })
+            }
+            ContentAssetRequest::LandblockScene(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                Ok(ContentAsset::LandblockScene(Box::new(
+                    LandblockPackAssembler::new().assemble_landblock_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        landblock_id,
+                    ),
+                )))
+            }
+            ContentAssetRequest::EnvCell(env_cell_id) => {
+                let landblock_id = normalize_landblock_id(env_cell_id & 0xffff_0000);
+                Ok(ContentAsset::EnvCell(Box::new(
+                    LandblockPackAssembler::new().assemble_landblock_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        landblock_id,
+                    ),
+                )))
+            }
+            ContentAssetRequest::TerrainMaterial(region_number) => Ok(
+                ContentAsset::TerrainMaterial(Box::new(
+                    self.content
+                        .resolve_terrain_material_table(region_number)
+                        .with_context(|| {
+                            format!(
+                                "Could not resolve terrain material table for region {region_number}"
+                            )
+                        })?,
+                )),
+            ),
             ContentAssetRequest::GfxObj(gfx_obj_id) => Ok(ContentAsset::GfxObj(Box::new(
                 self.decode_cache
                     .gfx_obj(&self.content, gfx_obj_id)

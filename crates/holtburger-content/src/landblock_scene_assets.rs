@@ -1125,40 +1125,46 @@ fn build_prepared_outdoor_static_instances(
             .explicit_objects
             .iter()
             .filter_map(|instance| {
+                let (owning_landblock_id, local_placement) =
+                    normalize_outdoor_static_frame(instance.owning_landblock_id, &instance.frame);
                 build_prepared_static_instance(PreparedStaticInstanceSpec {
                     kind: PreparedStaticInstanceKind::Scenery,
                     instance_id: instance.identity.stable_id(),
-                    owning_landblock_id: instance.owning_landblock_id,
+                    owning_landblock_id,
                     owning_env_cell_id: None,
                     source_did: instance.source.did,
                     source_index: instance.source_index,
-                    local_placement: convert_static_outdoor_frame(&instance.frame),
+                    local_placement,
                     source_scale: unit_prepared_vec3(),
                 })
             })
             .chain(scene.buildings.iter().filter_map(|building| {
                 let instance = &building.instance;
+                let (owning_landblock_id, local_placement) =
+                    normalize_outdoor_static_frame(instance.owning_landblock_id, &instance.frame);
                 build_prepared_static_instance(PreparedStaticInstanceSpec {
                     kind: PreparedStaticInstanceKind::Building,
                     instance_id: instance.identity.stable_id(),
-                    owning_landblock_id: instance.owning_landblock_id,
+                    owning_landblock_id,
                     owning_env_cell_id: None,
                     source_did: instance.source.did,
                     source_index: instance.source_index,
-                    local_placement: convert_static_outdoor_frame(&instance.frame),
+                    local_placement,
                     source_scale: unit_prepared_vec3(),
                 })
             }))
             .chain(scene.generated_scenery.iter().filter_map(|generated| {
                 let instance = &generated.instance;
+                let (owning_landblock_id, local_placement) =
+                    normalize_outdoor_static_frame(instance.owning_landblock_id, &instance.frame);
                 build_prepared_static_instance(PreparedStaticInstanceSpec {
                     kind: PreparedStaticInstanceKind::GeneratedScenery,
                     instance_id: instance.identity.stable_id(),
-                    owning_landblock_id: instance.owning_landblock_id,
+                    owning_landblock_id,
                     owning_env_cell_id: None,
                     source_did: instance.source.did,
                     source_index: instance.source_index,
-                    local_placement: convert_static_outdoor_frame(&instance.frame),
+                    local_placement,
                     source_scale: PreparedVec3 {
                         x: generated.scale,
                         y: generated.scale,
@@ -1167,6 +1173,32 @@ fn build_prepared_outdoor_static_instances(
                 })
             }))
     })
+}
+
+fn normalize_outdoor_static_frame(
+    landblock_id: u32,
+    frame: &crate::static_outdoor_scene::StaticOutdoorFrame,
+) -> (u32, Frame) {
+    let block_delta_x = (frame.origin.x / 192.0).floor() as i32;
+    let block_delta_y = (frame.origin.y / 192.0).floor() as i32;
+    let normalized_landblock_id = normalize_landblock_id(landblock_id);
+    if block_delta_x == 0 && block_delta_y == 0 {
+        return (normalized_landblock_id, convert_static_outdoor_frame(frame));
+    }
+
+    let x = ((normalized_landblock_id >> 24) & 0xff) as i32 + block_delta_x;
+    let y = ((normalized_landblock_id >> 16) & 0xff) as i32 + block_delta_y;
+    (
+        ((x as u32 & 0xff) << 24) | ((y as u32 & 0xff) << 16) | 0xffff,
+        Frame {
+            origin: holtburger_common::Vector3 {
+                x: frame.origin.x - block_delta_x as f32 * 192.0,
+                y: frame.origin.y - block_delta_y as f32 * 192.0,
+                z: frame.origin.z,
+            },
+            orientation: frame.orientation,
+        },
+    )
 }
 
 fn build_prepared_indoor_static_instances(
@@ -1276,6 +1308,14 @@ fn build_prepared_static_mesh(
     source_bounds: Option<PreparedAabb>,
 ) -> PreparedStaticMesh {
     let combined_scale = multiply_prepared_vec3(instance.source_scale, part_scale);
+    let instance_bounds = source_bounds.map(|bounds| {
+        conservative_instance_bounds(
+            &instance.local_placement,
+            &part_placements,
+            bounds,
+            combined_scale,
+        )
+    });
     PreparedStaticMesh {
         instance_id: instance.instance_id.clone(),
         kind: instance.kind,
@@ -1292,9 +1332,7 @@ fn build_prepared_static_mesh(
         part_placements,
         part_scale,
         source_bounds,
-        instance_bounds: source_bounds.map(|bounds| {
-            conservative_instance_bounds(&instance.local_placement, bounds, combined_scale)
-        }),
+        instance_bounds,
     }
 }
 
@@ -1380,12 +1418,14 @@ fn transform_render_bounds_by_ac_placement(
         + half_extent.y * half_extent.y
         + half_extent.z * half_extent.z)
         .sqrt();
-    let origin = convert_ac_vector_to_render_space(placement.origin);
-    let center = PreparedVec3 {
-        x: origin.x + center.x * scale.x,
-        y: origin.y + center.y * scale.y,
-        z: origin.z + center.z * scale.z,
+    let scaled_center = holtburger_common::Vector3 {
+        x: center.x * scale.x,
+        y: center.y * scale.y,
+        z: center.z * scale.z,
     };
+    let center = convert_ac_vector_to_render_space(
+        placement.origin + rotate_ac_vector(scaled_center, placement.orientation),
+    );
     PreparedAabb {
         min: PreparedVec3 {
             x: center.x - radius,
@@ -1397,6 +1437,39 @@ fn transform_render_bounds_by_ac_placement(
             y: center.y + radius,
             z: center.z + radius,
         },
+    }
+}
+
+fn combine_ac_frames(parent: &Frame, child: &Frame) -> Frame {
+    Frame {
+        origin: parent.origin + rotate_ac_vector(child.origin, parent.orientation),
+        orientation: multiply_ac_quaternion(parent.orientation, child.orientation),
+    }
+}
+
+fn rotate_ac_vector(
+    vector: holtburger_common::Vector3,
+    rotation: holtburger_common::Quaternion,
+) -> holtburger_common::Vector3 {
+    let q_vector = holtburger_common::Vector3 {
+        x: rotation.x,
+        y: rotation.y,
+        z: rotation.z,
+    };
+    let uv = q_vector.cross(&vector);
+    let uuv = q_vector.cross(&uv);
+    vector + uv * (2.0 * rotation.w) + uuv * 2.0
+}
+
+fn multiply_ac_quaternion(
+    left: holtburger_common::Quaternion,
+    right: holtburger_common::Quaternion,
+) -> holtburger_common::Quaternion {
+    holtburger_common::Quaternion {
+        w: left.w * right.w - left.x * right.x - left.y * right.y - left.z * right.z,
+        x: left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
+        y: left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
+        z: left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
     }
 }
 
@@ -1673,10 +1746,25 @@ fn dot_prepared_vec3(left: PreparedVec3, right: PreparedVec3) -> f32 {
 
 fn conservative_instance_bounds(
     placement: &Frame,
+    part_placements: &[Frame],
     source_bounds: PreparedAabb,
     scale: PreparedVec3,
 ) -> PreparedAabb {
-    transform_render_bounds_by_ac_placement(source_bounds, placement, scale)
+    if part_placements.is_empty() {
+        return transform_render_bounds_by_ac_placement(source_bounds, placement, scale);
+    }
+
+    part_placements
+        .iter()
+        .map(|part_placement| {
+            transform_render_bounds_by_ac_placement(
+                source_bounds,
+                &combine_ac_frames(placement, part_placement),
+                scale,
+            )
+        })
+        .reduce(union_bounds)
+        .expect("non-empty part placements should yield bounds")
 }
 
 fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh {
@@ -1949,11 +2037,14 @@ fn derive_portal_aperture_plane_from_points(
 fn build_cell_structure_render_geometry(
     cell_structure: &CellStruct,
 ) -> PreparedPolygonSetRenderGeometry {
+    // Retail and ACViewer draw the full CellStruct polygon list for env cells.
+    // The drawing BSP is still useful for culling/visibility, but it is not the
+    // authoritative render polygon set for cell shell geometry.
     build_polygon_set_render_geometry(
         cell_structure.id,
         &cell_structure.vertex_array,
         &cell_structure.polygons,
-        cell_structure.drawing_bsp.as_ref(),
+        None,
     )
 }
 
@@ -2331,6 +2422,103 @@ mod tests {
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 0);
     }
 
+    #[test]
+    fn cell_structure_render_geometry_does_not_filter_to_drawing_bsp_polygons() {
+        let mut vertex_array = holtburger_dat::graphics::CVertexArray::new();
+        vertex_array.vertices.extend([
+            (
+                0,
+                holtburger_dat::graphics::SWVertex {
+                    num_uvs: 1,
+                    origin: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
+                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 0.0, v: 0.0 }],
+                },
+            ),
+            (
+                1,
+                holtburger_dat::graphics::SWVertex {
+                    num_uvs: 1,
+                    origin: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
+                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 1.0, v: 0.0 }],
+                },
+            ),
+            (
+                2,
+                holtburger_dat::graphics::SWVertex {
+                    num_uvs: 1,
+                    origin: holtburger_common::Vector3::new(0.0, 1.0, 0.0),
+                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 0.0, v: 1.0 }],
+                },
+            ),
+            (
+                3,
+                holtburger_dat::graphics::SWVertex {
+                    num_uvs: 1,
+                    origin: holtburger_common::Vector3::new(1.0, 1.0, 0.0),
+                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 1.0, v: 1.0 }],
+                },
+            ),
+        ]);
+        let polygons = HashMap::from([
+            (10, test_triangle_polygon([0, 1, 2])),
+            (20, test_triangle_polygon([1, 3, 2])),
+        ]);
+        let cell_structure = CellStruct {
+            id: 0x1234,
+            vertex_array,
+            polygons,
+            portals: Vec::new(),
+            cell_bsp: BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: None,
+                poly_ids: Vec::new(),
+            }),
+            physics_polygons: HashMap::new(),
+            physics_bsp: BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: None,
+                poly_ids: Vec::new(),
+            }),
+            drawing_bsp: Some(BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                solid: 0,
+                sphere: None,
+                poly_ids: vec![10],
+            })),
+        };
+
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
+
+        assert_eq!(geometry.triangle_count, 2);
+        assert_eq!(
+            geometry
+                .triangles
+                .iter()
+                .map(|triangle| triangle.polygon_id)
+                .collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+    }
+
+    fn test_triangle_polygon(vertex_ids: [u16; 3]) -> Polygon {
+        Polygon {
+            num_pts: 3,
+            stippling: 0,
+            sides_type: 1,
+            pos_surface: 0,
+            neg_surface: 0,
+            vertex_ids: vertex_ids.to_vec(),
+            pos_uv_indices: vec![0, 0, 0],
+            neg_uv_indices: vec![0, 0, 0],
+        }
+    }
+
     fn find_env_cell_asset_fixture(archive: &HbaReader) -> Option<(u32, Vec<u8>, u32, Vec<u8>)> {
         for entry in archive
             .entries()
@@ -2408,5 +2596,110 @@ mod tests {
         );
         assert_eq!(mesh.triangles[0].terrain_type, 0);
         assert_eq!(mesh.triangles[2].terrain_type, 9);
+    }
+
+    #[test]
+    fn outdoor_static_frames_are_normalized_like_adjust_to_outside() {
+        let frame = crate::static_outdoor_scene::StaticOutdoorFrame {
+            origin: holtburger_common::Vector3 {
+                x: 200.0,
+                y: -5.0,
+                z: 2.0,
+            },
+            orientation: holtburger_common::Quaternion::identity(),
+        };
+
+        let (landblock_id, placement) = normalize_outdoor_static_frame(0x0203ffff, &frame);
+
+        assert_eq!(landblock_id, 0x0302ffff);
+        assert_eq!(
+            placement.origin,
+            holtburger_common::Vector3 {
+                x: 8.0,
+                y: 187.0,
+                z: 2.0,
+            }
+        );
+    }
+
+    #[test]
+    fn static_instance_bounds_include_setup_part_placements() {
+        let instance = Frame {
+            origin: holtburger_common::Vector3 {
+                x: 10.0,
+                y: 20.0,
+                z: 2.0,
+            },
+            orientation: holtburger_common::Quaternion::identity(),
+        };
+        let part = Frame {
+            origin: holtburger_common::Vector3 {
+                x: 3.0,
+                y: 4.0,
+                z: 5.0,
+            },
+            orientation: holtburger_common::Quaternion::identity(),
+        };
+        let bounds = conservative_instance_bounds(
+            &instance,
+            &[part],
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                max: PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            unit_prepared_vec3(),
+        );
+
+        assert_eq!(
+            bounds.min,
+            PreparedVec3 {
+                x: 13.0,
+                y: 7.0,
+                z: -24.0,
+            }
+        );
+        assert_eq!(bounds.max, bounds.min);
+    }
+
+    #[test]
+    fn static_instance_bounds_rotate_source_centers() {
+        let placement = Frame {
+            origin: holtburger_common::Vector3 {
+                x: 10.0,
+                y: 20.0,
+                z: 2.0,
+            },
+            orientation: holtburger_common::Quaternion::from_heading(180.0_f32.to_radians()),
+        };
+        let bounds = conservative_instance_bounds(
+            &placement,
+            &[],
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                max: PreparedVec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            unit_prepared_vec3(),
+        );
+
+        assert!((bounds.min.x - 10.0).abs() < 0.001);
+        assert!((bounds.min.y - 2.0).abs() < 0.001);
+        assert!((bounds.min.z + 19.0).abs() < 0.001);
+        assert_eq!(bounds.max, bounds.min);
     }
 }

@@ -172,6 +172,45 @@ describe("scene asset request planner", () => {
 		]);
 	});
 
+	it("requests outdoor-linked env-cell static dependencies", () => {
+		const destination = parseBrowserLocationInput("da55", "manual", "outdoor");
+		expect(destination).not.toBeNull();
+
+		const preparedTopology = createPreparedTopology(0xda55ffff, [0xda55010b]);
+		const preparedEnvCell = createPreparedEnvCell(
+			0xda55010b,
+			[],
+			["setup-model/020000a7"],
+		);
+		const setupModel = createPreparedSetupModel(
+			"setup-model/020000a7",
+			"gfx-obj/010007b7",
+		);
+		const requests = createSceneCoverageRequests(
+			{
+				requestRevision: 8,
+				browserDestination: destination,
+				preparedByAssetId: {
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
+					[setupModel.request.assetId]: setupModel,
+				},
+				pendingAssetIds: [],
+				options: {
+					terrainRadius: 0,
+					buildingRadius: 0,
+					detailRadius: 0,
+					envCellRadius: 0,
+				},
+			},
+			"streaming",
+		);
+
+		expect(requests.map((request) => request.assetId)).toContain(
+			"gfx-obj/010007b7",
+		);
+	});
+
 	it("requests material graphs for prepared static gfx dependencies", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();

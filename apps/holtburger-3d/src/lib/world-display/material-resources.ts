@@ -1,6 +1,7 @@
 import {
 	Color,
 	DataTexture,
+	DoubleSide,
 	MeshStandardMaterial,
 	RGBAFormat,
 	SRGBColorSpace,
@@ -86,6 +87,7 @@ export class WorldMaterialResourceCache {
 		appearanceKey: string;
 		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 		fallbackColorKey: string;
+		doubleSided?: boolean;
 	}): MaterialResourcePlan {
 		const slots =
 			options.slots.length > 0
@@ -103,6 +105,7 @@ export class WorldMaterialResourceCache {
 				appearanceKey: options.appearanceKey,
 				preparedByAssetId: options.preparedByAssetId,
 				fallbackColorKey: `${options.fallbackColorKey}:${slot.surfaceId}`,
+				doubleSided: options.doubleSided ?? false,
 			}),
 		);
 		return {
@@ -137,9 +140,11 @@ export class WorldMaterialResourceCache {
 		appearanceKey: string;
 		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 		fallbackColorKey: string;
+		doubleSided: boolean;
 	}): Material {
 		const materialKey = [
 			options.appearanceKey,
+			options.doubleSided ? "double-sided" : "front-sided",
 			options.materialAssetId,
 			describeMaterialPreparedStateSignature(
 				options.materialAssetId,
@@ -248,6 +253,7 @@ function createMaterial(options: {
 		renderSurface: PreparedRenderSurfacePayload,
 	) => Texture | null;
 	reportDiagnostic: MaterialResourceDiagnosticHandler;
+	doubleSided: boolean;
 }): Material {
 	const recipeAsset = options.preparedByAssetId[options.materialAssetId];
 	if (recipeAsset?.payload.kind !== "material-recipe") {
@@ -268,7 +274,9 @@ function createMaterial(options: {
 				),
 			},
 		});
-		return createDebugFallbackMaterial(options.fallbackColorKey);
+		return createDebugFallbackMaterial(options.fallbackColorKey, {
+			doubleSided: options.doubleSided,
+		});
 	}
 
 	const recipe = recipeAsset.payload;
@@ -291,6 +299,7 @@ function createMaterial(options: {
 			roughness: 0.88,
 			transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
 			opacity: normalizeLegacyOpacity(recipe.translucency),
+			side: options.doubleSided ? DoubleSide : undefined,
 		});
 	}
 
@@ -314,6 +323,7 @@ function createMaterial(options: {
 			roughness: 0.88,
 			transparent: opacity < 1 || hasSourceAlpha(renderSurface.formatRaw),
 			opacity,
+			side: options.doubleSided ? DoubleSide : undefined,
 		});
 	}
 
@@ -340,6 +350,7 @@ function createMaterial(options: {
 		roughness: 0.88,
 		transparent: normalizeLegacyOpacity(recipe.translucency) < 1,
 		opacity: normalizeLegacyOpacity(recipe.translucency),
+		side: options.doubleSided ? DoubleSide : undefined,
 	});
 }
 
@@ -726,12 +737,16 @@ function buildTexturePlaceholderColor(
 	return colorFromString(seed, 0.46, 0.5);
 }
 
-function createDebugFallbackMaterial(colorKey: string): Material {
+function createDebugFallbackMaterial(
+	colorKey: string,
+	options: { doubleSided?: boolean } = {},
+): Material {
 	return new MeshStandardMaterial({
 		color: colorFromString(colorKey, 0.54, 0.48),
 		flatShading: true,
 		metalness: 0.02,
 		roughness: 0.9,
+		side: options.doubleSided ? DoubleSide : undefined,
 	});
 }
 

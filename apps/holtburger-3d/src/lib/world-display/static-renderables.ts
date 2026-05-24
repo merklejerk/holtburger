@@ -25,7 +25,10 @@ import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
 	formatHex32,
+	getOutdoorLandblockCoords,
+	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 } from "../landblocks";
 import {
 	deriveStaticRenderablePartRenderChunk,
@@ -354,6 +357,10 @@ function normalizeOutdoorStaticSourceInstance(
 	member: PreparedLandblockOutdoorPayload["statics"][number],
 	payload: PreparedLandblockOutdoorPayload,
 ): StaticRenderableSourceInstance {
+	const normalizedPlacement = normalizeOutdoorStaticPlacement(
+		member.localPlacement,
+		payload.landblockId,
+	);
 	return {
 		kind:
 			member.kind === "explicit-object"
@@ -362,15 +369,53 @@ function normalizeOutdoorStaticSourceInstance(
 					? "generated-scenery"
 					: "building",
 		instanceId: member.instanceId,
-		owningLandblockId: normalizeOutdoorLandblockId(payload.landblockId),
+		owningLandblockId: normalizedPlacement.landblockId,
 		owningEnvCellId: null,
 		sourceDid: member.sourceDid,
 		sourceAssetId: member.sourceAssetId,
 		sourceIndex: member.sourceIndex,
 		parentPlacements: [],
-		chunkLocalInstancePlacement: member.localPlacement,
+		chunkLocalInstancePlacement: normalizedPlacement.localPlacement,
 		sourceScale: member.sourceScale,
 		numLeaves: member.building?.numLeaves ?? null,
+	};
+}
+
+function normalizeOutdoorStaticPlacement(
+	localPlacement: PlacementTransformDto,
+	landblockId: number,
+): { landblockId: number; localPlacement: PlacementTransformDto } {
+	const blockDeltaX = Math.floor(
+		localPlacement.origin.x / OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+	const blockDeltaY = Math.floor(
+		localPlacement.origin.y / OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+	if (blockDeltaX === 0 && blockDeltaY === 0) {
+		return {
+			landblockId: normalizeOutdoorLandblockId(landblockId),
+			localPlacement,
+		};
+	}
+
+	const coords = getOutdoorLandblockCoords(landblockId);
+	return {
+		landblockId: makeOutdoorLandblockId(
+			coords.x + blockDeltaX,
+			coords.y + blockDeltaY,
+		),
+		localPlacement: {
+			origin: {
+				...localPlacement.origin,
+				x:
+					localPlacement.origin.x -
+					blockDeltaX * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+				y:
+					localPlacement.origin.y -
+					blockDeltaY * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			},
+			orientation: localPlacement.orientation,
+		},
 	};
 }
 
@@ -386,7 +431,7 @@ function normalizeEnvCellStaticSourceInstance(
 		sourceDid: member.sourceDid,
 		sourceAssetId: member.sourceAssetId,
 		sourceIndex: member.sourceIndex,
-		parentPlacements: [payload.localPlacement],
+		parentPlacements: [],
 		chunkLocalInstancePlacement: member.localPlacement,
 		sourceScale: member.sourceScale,
 		numLeaves: null,
@@ -586,7 +631,10 @@ function expandStaticRenderableSourceInstanceParts(
 					gfxObjAssetId: part.gfxObjAssetId,
 					materialAppearanceKey: "setup-base",
 					materialSlots: resolveSetupPartMaterialSlots(assetState, part),
-					partPlacements: [],
+					partPlacements: deriveSetupPartDefaultPlacements(
+						sourceAsset.payload,
+						part.partIndex,
+					),
 					scale: part.scale ?? UNIT_SCALE,
 				}),
 			];
@@ -595,6 +643,34 @@ function expandStaticRenderableSourceInstanceParts(
 
 	missingSourceAssetIds.add(instance.sourceAssetId);
 	return [];
+}
+
+function deriveSetupPartDefaultPlacements(
+	setupModel: PreparedSetupModelPayload,
+	partIndex: number,
+): PlacementTransformDto[] {
+	const placementSet = selectDefaultSetupPlacementSet(setupModel);
+	const placement = placementSet?.localPlacements[partIndex];
+	return placement ? [placement] : [];
+}
+
+function selectDefaultSetupPlacementSet(
+	setupModel: PreparedSetupModelPayload,
+): PreparedSetupModelPayload["placementSets"][number] | null {
+	return (
+		setupModel.placementSets.find((placementSet) => placementSet.key === 0x65) ??
+		setupModel.placementSets.find((placementSet) => placementSet.key === 0) ??
+		setupModel.placementSets.reduce<
+			PreparedSetupModelPayload["placementSets"][number] | null
+		>(
+			(selectedPlacementSet, placementSet) =>
+				selectedPlacementSet === null ||
+				placementSet.key < selectedPlacementSet.key
+					? placementSet
+					: selectedPlacementSet,
+			null,
+		)
+	);
 }
 
 function resolveGfxObjMaterialSlots(

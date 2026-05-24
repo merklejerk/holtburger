@@ -505,6 +505,9 @@ export const terrainMaterialPayloadDtoSchema = z.object({
 	dependencies: terrainMaterialDependenciesDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
+export type TerrainMaterialPayloadDto = z.infer<
+	typeof terrainMaterialPayloadDtoSchema
+>;
 const gfxObjVertexDtoSchema = z.object({
 	id: z.number().int().nonnegative(),
 	origin: vec3DtoSchema,

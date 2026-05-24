@@ -10,16 +10,17 @@ use holtburger_content::{
     PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
     PreparedPortalAperturePlaneSource, PreparedStaticInstanceKind, PreparedStaticMesh,
     PreparedTerrainMesh, PreparedVec3, ResolvedMaterialRecipe, ResolvedMaterialSlot,
-    ResolvedMaterialSource, ResolvedSetupAppearance, ResolvedTerrainMaterialTable,
-    SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
-    SourceRecordStatus, build_gfx_obj_render_geometry, normalize_landblock_id,
+    ResolvedMaterialSource, ResolvedRenderTexture, ResolvedSetupAppearance,
+    ResolvedTerrainMaterialTable, SoulEmoteCatalog, SourceLoadError, SourceOmissionDiagnostic,
+    SourceRecordDiagnostic, SourceRecordStatus, build_gfx_obj_render_geometry,
+    normalize_landblock_id,
 };
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
 };
-use holtburger_dat::EOR_CELL_NAMESPACE;
+#[cfg(test)]
 use holtburger_dat::file_type::REGION_DESC_FILE_ID;
-use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
+use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::file_type::{MotionKinematics, SkillTable, SpellTable, XpTable};
 use holtburger_dat::graphics::{CVertexArray, Polygon};
 use holtburger_dat::physics::BspNode;
@@ -65,7 +66,10 @@ impl HostRuntimeService {
         self.adapter.accept_camera_hint(&mut state, hint)
     }
 
-    pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+    pub async fn asset_lookup(
+        &self,
+        request: AssetLookupRequestDto,
+    ) -> anyhow::Result<AssetLookupResponseDto> {
         self.adapter.asset_lookup(request).await
     }
 
@@ -78,7 +82,9 @@ impl HostRuntimeService {
 
     #[cfg(test)]
     fn asset_lookup_blocking(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
-        self.adapter.asset_lookup_blocking(request)
+        self.adapter
+            .asset_lookup_blocking(request)
+            .expect("test asset lookup should succeed")
     }
 
     pub fn debug_config(&self) -> DebugConfigDto {
@@ -124,7 +130,10 @@ impl HostBoundaryAdapter {
         }
     }
 
-    pub async fn asset_lookup(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+    pub async fn asset_lookup(
+        &self,
+        request: AssetLookupRequestDto,
+    ) -> anyhow::Result<AssetLookupResponseDto> {
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
             let asset = self
                 .content_asset_runtime
@@ -133,7 +142,7 @@ impl HostBoundaryAdapter {
             return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
-        self.build_app_local_asset_lookup_response(request)
+        Ok(self.build_app_local_asset_lookup_response(request))
     }
 
     pub async fn asset_lookup_binary_batch(
@@ -170,7 +179,10 @@ impl HostBoundaryAdapter {
     }
 
     #[cfg(test)]
-    fn asset_lookup_blocking(&self, request: AssetLookupRequestDto) -> AssetLookupResponseDto {
+    fn asset_lookup_blocking(
+        &self,
+        request: AssetLookupRequestDto,
+    ) -> anyhow::Result<AssetLookupResponseDto> {
         if self.verbose {
             eprintln!(
                 "[holtburger-3d][asset.lookup] request_id={} asset_id={} priority={:?}",
@@ -185,7 +197,7 @@ impl HostBoundaryAdapter {
             return self.build_content_asset_lookup_response(request, content_request, asset);
         }
 
-        self.build_app_local_asset_lookup_response(request)
+        Ok(self.build_app_local_asset_lookup_response(request))
     }
 
     fn build_content_asset_lookup_response(
@@ -193,8 +205,8 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         content_request: ContentAssetRequest,
         asset: anyhow::Result<ContentAsset>,
-    ) -> AssetLookupResponseDto {
-        match content_request {
+    ) -> anyhow::Result<AssetLookupResponseDto> {
+        Ok(match content_request {
             ContentAssetRequest::LandblockOutdoor(landblock_id) => match asset {
                 Ok(ContentAsset::LandblockOutdoor {
                     outdoor,
@@ -209,10 +221,10 @@ impl HostBoundaryAdapter {
                 Ok(_) => {
                     unreachable!("content asset runtime returned mismatched landblock outdoor")
                 }
-                Err(error) => self.build_failed_landblock_outdoor_lookup_response(
-                    request,
+                Err(error) => anyhow::bail!(
+                    "failed to load landblock outdoor 0x{:08X} for {}: {error:#}",
                     normalize_landblock_id(landblock_id),
-                    error,
+                    request.asset_id
                 ),
             },
             ContentAssetRequest::LandblockTopology(landblock_id) => match asset {
@@ -222,20 +234,21 @@ impl HostBoundaryAdapter {
                 Ok(_) => {
                     unreachable!("content asset runtime returned mismatched landblock topology")
                 }
-                Err(error) => self.build_failed_landblock_topology_lookup_response(
-                    request,
+                Err(error) => anyhow::bail!(
+                    "failed to load landblock topology 0x{:08X} for {}: {error:#}",
                     normalize_landblock_id(landblock_id),
-                    error,
+                    request.asset_id
                 ),
             },
             ContentAssetRequest::EnvCell(env_cell_id) => match asset {
                 Ok(ContentAsset::EnvCell(env_cell)) => {
-                    self.build_env_cell_lookup_response(request, env_cell_id, *env_cell)
+                    self.build_env_cell_lookup_response(request, env_cell_id, *env_cell)?
                 }
                 Ok(_) => unreachable!("content asset runtime returned mismatched env-cell"),
-                Err(error) => {
-                    self.build_failed_env_cell_lookup_response(request, env_cell_id, error)
-                }
+                Err(error) => anyhow::bail!(
+                    "failed to load env-cell 0x{env_cell_id:08X} for {}: {error:#}",
+                    request.asset_id
+                ),
             },
             ContentAssetRequest::TerrainMaterial(region_number) => {
                 self.build_terrain_material_lookup_response(request, region_number, asset)
@@ -247,21 +260,21 @@ impl HostBoundaryAdapter {
                 self.build_setup_model_lookup_response(request, setup_model_id, asset)
             }
             ContentAssetRequest::MaterialRecipe(surface_id) => {
-                self.build_material_recipe_lookup_response(request, surface_id, asset)
+                self.build_material_recipe_lookup_response(request, surface_id, asset)?
             }
             ContentAssetRequest::SetupAppearance(setup_model_id) => {
                 self.build_setup_appearance_lookup_response(request, setup_model_id, asset)
             }
             ContentAssetRequest::RenderTexture(render_texture_id) => {
-                self.build_render_texture_lookup_response(request, render_texture_id, asset)
+                self.build_render_texture_lookup_response(request, render_texture_id, asset)?
             }
             ContentAssetRequest::RenderSurface(render_surface_id) => {
-                self.build_render_surface_lookup_response(request, render_surface_id, asset)
+                self.build_render_surface_lookup_response(request, render_surface_id, asset)?
             }
             ContentAssetRequest::Palette(palette_id) => {
                 self.build_palette_lookup_response(request, palette_id, asset)
             }
-        }
+        })
     }
 
     fn build_app_local_asset_lookup_response(
@@ -365,20 +378,6 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn build_failed_landblock_outdoor_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: failed_landblock_outdoor_payload(landblock_id, error),
-        }
-    }
-
     fn build_landblock_topology_lookup_response(
         &self,
         request: AssetLookupRequestDto,
@@ -392,57 +391,24 @@ impl HostBoundaryAdapter {
         }
     }
 
-    fn build_failed_landblock_topology_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        landblock_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: failed_landblock_topology_payload(landblock_id, error),
-        }
-    }
-
     fn build_env_cell_lookup_response(
         &self,
         request: AssetLookupRequestDto,
         env_cell_id: u32,
         env_cell: EnvCellAsset,
-    ) -> AssetLookupResponseDto {
-        let payload = if env_cell.prepared_cell.env_cell_id == env_cell_id {
-            serialize_env_cell_payload(&env_cell)
-        } else {
-            failed_env_cell_payload(
-                env_cell_id,
-                anyhow::anyhow!(
-                    "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
-                    env_cell.prepared_cell.env_cell_id
-                ),
-            )
-        };
-        AssetLookupResponseDto {
+    ) -> anyhow::Result<AssetLookupResponseDto> {
+        if env_cell.prepared_cell.env_cell_id != env_cell_id {
+            anyhow::bail!(
+                "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
+                env_cell.prepared_cell.env_cell_id
+            );
+        }
+        Ok(AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
-            payload,
-        }
-    }
-
-    fn build_failed_env_cell_lookup_response(
-        &self,
-        request: AssetLookupRequestDto,
-        env_cell_id: u32,
-        error: anyhow::Error,
-    ) -> AssetLookupResponseDto {
-        AssetLookupResponseDto {
-            request_id: request.request_id,
-            asset_id: request.asset_id,
-            payload_kind: AssetPayloadKindDto::Json,
-            payload: failed_env_cell_payload(env_cell_id, error),
-        }
+            payload: serialize_env_cell_payload(&env_cell),
+        })
     }
 
     fn build_terrain_material_lookup_response(
@@ -583,22 +549,25 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         surface_id: u32,
         asset: anyhow::Result<ContentAsset>,
-    ) -> AssetLookupResponseDto {
+    ) -> anyhow::Result<AssetLookupResponseDto> {
         let payload = match asset {
             Ok(ContentAsset::MaterialRecipe(recipe)) => serialize_material_recipe_payload(&recipe),
             Ok(_) => unreachable!("content asset runtime returned mismatched material recipe"),
             Err(error) => {
                 log_material_graph_failure("material-recipe", surface_id, &error);
-                failed_dependency_payload("material-recipe", surface_id, error)
+                anyhow::bail!(
+                    "failed to load material recipe 0x{surface_id:08X} for {}: {error:#}",
+                    request.asset_id
+                );
             }
         };
 
-        AssetLookupResponseDto {
+        Ok(AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
             payload,
-        }
+        })
     }
 
     fn build_setup_appearance_lookup_response(
@@ -628,7 +597,7 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         render_texture_id: u32,
         asset: anyhow::Result<ContentAsset>,
-    ) -> AssetLookupResponseDto {
+    ) -> anyhow::Result<AssetLookupResponseDto> {
         let payload = match asset {
             Ok(ContentAsset::RenderTexture(render_texture)) => {
                 serialize_render_texture_payload(&render_texture)
@@ -636,16 +605,19 @@ impl HostBoundaryAdapter {
             Ok(_) => unreachable!("content asset runtime returned mismatched render texture"),
             Err(error) => {
                 log_material_graph_failure("render-texture", render_texture_id, &error);
-                failed_dependency_payload("render-texture", render_texture_id, error)
+                anyhow::bail!(
+                    "failed to load render texture 0x{render_texture_id:08X} for {}: {error:#}",
+                    request.asset_id
+                );
             }
         };
 
-        AssetLookupResponseDto {
+        Ok(AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
             payload,
-        }
+        })
     }
 
     fn build_render_surface_lookup_response(
@@ -653,7 +625,7 @@ impl HostBoundaryAdapter {
         request: AssetLookupRequestDto,
         render_surface_id: u32,
         asset: anyhow::Result<ContentAsset>,
-    ) -> AssetLookupResponseDto {
+    ) -> anyhow::Result<AssetLookupResponseDto> {
         let payload = match asset {
             Ok(ContentAsset::RenderSurface(render_surface)) => {
                 serialize_render_surface_payload(&render_surface)
@@ -661,16 +633,19 @@ impl HostBoundaryAdapter {
             Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
             Err(error) => {
                 log_material_graph_failure("render-surface", render_surface_id, &error);
-                failed_dependency_payload("render-surface", render_surface_id, error)
+                anyhow::bail!(
+                    "failed to load render surface 0x{render_surface_id:08X} for {}: {error:#}",
+                    request.asset_id
+                );
             }
         };
 
-        AssetLookupResponseDto {
+        Ok(AssetLookupResponseDto {
             request_id: request.request_id,
             asset_id: request.asset_id,
             payload_kind: AssetPayloadKindDto::Json,
             payload,
-        }
+        })
     }
 
     fn build_palette_lookup_response(
@@ -998,12 +973,12 @@ fn serialize_material_slot(slot: &ResolvedMaterialSlot) -> serde_json::Value {
     })
 }
 
-fn serialize_render_texture_payload(render_texture: &RenderTexture) -> serde_json::Value {
+fn serialize_render_texture_payload(render_texture: &ResolvedRenderTexture) -> serde_json::Value {
     serde_json::json!({
         "kind": "render-texture",
         "residencyKind": "unknown",
         "sourceAssetKind": "render-texture",
-        "renderTextureId": render_texture.id,
+        "renderTextureId": render_texture.render_texture_id,
         "textureType": render_texture.texture_type,
         "unknown": render_texture.unknown,
         "renderSurfaceIds": render_texture.render_surface_ids,
@@ -1094,73 +1069,6 @@ fn failed_dependency_payload(kind: &str, file_id: u32, error: anyhow::Error) -> 
     })
 }
 
-fn failed_landblock_outdoor_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
-    let detail = format!("{error:#}");
-    let error_code = asset_cache_error_code(&error);
-    serde_json::json!({
-        "kind": "landblock-outdoor",
-        "residencyKind": "outdoor-landblock",
-        "sourceAssetKind": "landblock-outdoor",
-        "landblockId": landblock_id,
-        "regionId": REGION_DESC_FILE_ID,
-        "regionNumber": 0,
-        "classification": "outdoor",
-        "terrain": empty_landblock_terrain(),
-        "statics": [],
-        "outdoorBvh": null,
-        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-outdoor", error_code, &detail),
-        "provenance": failed_provenance("landblock-outdoor", error_code, &detail),
-    })
-}
-
-fn failed_landblock_topology_payload(landblock_id: u32, error: anyhow::Error) -> serde_json::Value {
-    let detail = format!("{error:#}");
-    let error_code = asset_cache_error_code(&error);
-    serde_json::json!({
-        "kind": "landblock-topology",
-        "residencyKind": "landblock",
-        "sourceAssetKind": "landblock-topology",
-        "landblockId": landblock_id,
-        "landblockInfoId": landblock_id & 0xffff_fffe,
-        "classification": "outdoor",
-        "envCells": [],
-        "portalLinks": [],
-        "envCellResidencyBvh": {
-            "coordinateSpace": "landblock-topology-residency",
-            "nodes": [],
-            "items": [],
-        },
-        "diagnostics": failed_landblock_diagnostics(EOR_CELL_NAMESPACE, landblock_id, "landblock-topology", error_code, &detail),
-        "provenance": failed_provenance("landblock-topology", error_code, &detail),
-    })
-}
-
-fn failed_env_cell_payload(env_cell_id: u32, error: anyhow::Error) -> serde_json::Value {
-    let detail = format!("{error:#}");
-    let error_code = asset_cache_error_code(&error);
-    serde_json::json!({
-        "kind": "env-cell",
-        "residencyKind": "interior-cell",
-        "sourceAssetKind": "env-cell",
-        "envCellId": env_cell_id,
-        "environmentId": 0,
-        "cellStructureId": 0,
-        "surfaces": [],
-        "portals": [],
-        "visibleEnvCellIds": [],
-        "portalApertures": [],
-        "statics": [],
-        "renderGeometry": empty_polygon_set_render_geometry(env_cell_id),
-        "cellBsp": empty_bsp_leaf(),
-        "localBvh": {
-            "coordinateSpace": "env-cell-local",
-            "nodes": [],
-            "items": [],
-        },
-        "provenance": failed_provenance("env-cell", error_code, &detail),
-    })
-}
-
 fn failed_terrain_material_payload(region_number: u32, error: anyhow::Error) -> serde_json::Value {
     let detail = format!("{error:#}");
     let error_code = asset_cache_error_code(&error);
@@ -1187,58 +1095,12 @@ fn failed_terrain_material_payload(region_number: u32, error: anyhow::Error) -> 
     })
 }
 
-fn failed_landblock_diagnostics(
-    namespace: &str,
-    file_id: u32,
-    role: &str,
-    error_code: &str,
-    detail: &str,
-) -> serde_json::Value {
-    serde_json::json!({
-        "sourceRecords": [],
-        "omissions": [],
-        "errors": [{
-            "namespace": namespace,
-            "fileId": file_id,
-            "role": role,
-            "errorCode": error_code,
-            "detail": detail,
-        }],
-    })
-}
-
 fn failed_provenance(kind: &str, error_code: &str, detail: &str) -> serde_json::Value {
     serde_json::json!({
         "source": "app-local-stub",
         "sourceAssetKind": kind,
         "errorCode": error_code,
         "detail": detail,
-    })
-}
-
-fn empty_polygon_set_render_geometry(source_id: u32) -> serde_json::Value {
-    serde_json::json!({
-        "sourceId": source_id,
-        "vertexCount": 0,
-        "triangleCount": 0,
-        "positions": [],
-        "normals": [],
-        "uvs": [],
-        "triangles": [],
-        "surfaceIds": [],
-        "invalidPolygons": [],
-        "skippedPolygonCount": 0,
-        "bounds": null,
-    })
-}
-
-fn empty_bsp_leaf() -> serde_json::Value {
-    serde_json::json!({
-        "kind": "leaf",
-        "index": 0,
-        "solid": 0,
-        "sphere": null,
-        "polyIds": [],
     })
 }
 
@@ -1384,10 +1246,10 @@ fn serialize_content_asset_binary_response(
                 ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock outdoor"),
-            Err(error) => adapter.build_failed_landblock_outdoor_lookup_response(
-                request,
+            Err(error) => anyhow::bail!(
+                "failed to load landblock outdoor 0x{:08X} for {}: {error:#}",
                 normalize_landblock_id(landblock_id),
-                error,
+                request.asset_id
             ),
         },
         ContentAssetRequest::LandblockTopology(landblock_id) => match asset {
@@ -1398,10 +1260,10 @@ fn serialize_content_asset_binary_response(
                 payload: serialize_landblock_topology_payload(&topology),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock topology"),
-            Err(error) => adapter.build_failed_landblock_topology_lookup_response(
-                request,
+            Err(error) => anyhow::bail!(
+                "failed to load landblock topology 0x{:08X} for {}: {error:#}",
                 normalize_landblock_id(landblock_id),
-                error,
+                request.asset_id
             ),
         },
         ContentAssetRequest::EnvCell(env_cell_id) => match asset {
@@ -1409,22 +1271,21 @@ fn serialize_content_asset_binary_response(
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
-                payload: if env_cell.prepared_cell.env_cell_id == env_cell_id {
-                    serialize_env_cell_binary_payload(&env_cell, path_prefix, writer)
-                } else {
-                    failed_env_cell_payload(
-                        env_cell_id,
-                        anyhow::anyhow!(
+                payload: {
+                    if env_cell.prepared_cell.env_cell_id != env_cell_id {
+                        anyhow::bail!(
                             "EnvCell assembler returned 0x{:08X} for request 0x{env_cell_id:08X}",
                             env_cell.prepared_cell.env_cell_id
-                        ),
-                    )
+                        );
+                    }
+                    serialize_env_cell_binary_payload(&env_cell, path_prefix, writer)
                 },
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched env-cell"),
-            Err(error) => {
-                adapter.build_failed_env_cell_lookup_response(request, env_cell_id, error)
-            }
+            Err(error) => anyhow::bail!(
+                "failed to load env-cell 0x{env_cell_id:08X} for {}: {error:#}",
+                request.asset_id
+            ),
         },
         ContentAssetRequest::GfxObj(gfx_obj_id) => match asset {
             Ok(ContentAsset::GfxObj(gfx_obj)) => AssetLookupResponseDto {
@@ -1448,9 +1309,11 @@ fn serialize_content_asset_binary_response(
                 ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched render surface"),
-            Err(error) => {
-                adapter.build_render_surface_lookup_response(request, render_surface_id, Err(error))
-            }
+            Err(error) => adapter.build_render_surface_lookup_response(
+                request,
+                render_surface_id,
+                Err(error),
+            )?,
         },
         unsupported => anyhow::bail!(
             "binary asset lookup does not support {unsupported:?} for {}",
@@ -2199,7 +2062,7 @@ fn serialize_env_cell_payload(asset: &EnvCellAsset) -> serde_json::Value {
     serialize_env_cell_payload_with_geometry(
         asset,
         serialize_prepared_polygon_set_render_geometry(&asset.prepared_cell.render_geometry),
-        serialize_prepared_portal_aperture,
+        |_aperture_index, aperture| serialize_prepared_portal_aperture(aperture),
     )
 }
 
@@ -2215,8 +2078,13 @@ fn serialize_env_cell_binary_payload(
             format!("{path_prefix}.renderGeometry"),
             writer,
         ),
-        |aperture| {
-            serialize_prepared_portal_aperture_standalone_binary(aperture, path_prefix, writer)
+        |aperture_index, aperture| {
+            serialize_prepared_portal_aperture_standalone_binary(
+                aperture_index,
+                aperture,
+                path_prefix,
+                writer,
+            )
         },
     )
 }
@@ -2227,7 +2095,7 @@ fn serialize_env_cell_payload_with_geometry<F>(
     mut serialize_aperture: F,
 ) -> serde_json::Value
 where
-    F: FnMut(&PreparedPortalAperture) -> serde_json::Value,
+    F: FnMut(usize, &PreparedPortalAperture) -> serde_json::Value,
 {
     let cell = &asset.prepared_cell;
     let static_meshes = asset.static_meshes.iter().collect::<Vec<_>>();
@@ -2258,7 +2126,7 @@ where
             })
         }).collect::<Vec<_>>(),
         "visibleEnvCellIds": asset.env_cell.visible_cell_ids,
-        "portalApertures": cell.portal_apertures.iter().map(&mut serialize_aperture).collect::<Vec<_>>(),
+        "portalApertures": cell.portal_apertures.iter().enumerate().map(|(index, aperture)| serialize_aperture(index, aperture)).collect::<Vec<_>>(),
         "statics": static_meshes.iter().map(|mesh| {
             serde_json::json!({
                 "instanceId": mesh.instance_id,
@@ -2284,16 +2152,14 @@ where
 }
 
 fn serialize_prepared_portal_aperture_standalone_binary(
+    aperture_index: usize,
     aperture: &PreparedPortalAperture,
     path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     writer.push_f32_section(
         "envCell.portalApertures.points",
-        format!(
-            "{path_prefix}.portalApertures.{}.points",
-            aperture.source_index
-        ),
+        format!("{path_prefix}.portalApertures.{}.points", aperture_index),
         3,
         aperture
             .points
@@ -3088,6 +2954,31 @@ mod tests {
                 .as_array()
                 .expect("terrain material route should expose texture dependencies")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn render_texture_lookup_exposes_only_available_surface_candidates() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-render-texture-candidates".to_string(),
+            asset_id: "render-texture/05002862".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.payload["kind"], "render-texture");
+        assert_eq!(asset.payload["renderTextureId"], 0x05002862u32);
+        assert_eq!(
+            asset.payload["renderSurfaceIds"]
+                .as_array()
+                .expect("render texture route should expose render surface candidates"),
+            &[serde_json::json!(0x060041c0u32)]
+        );
+        assert_eq!(
+            asset.payload["dependencies"]["renderSurfaceAssetIds"]
+                .as_array()
+                .expect("render texture route should expose dependency ids"),
+            &[serde_json::json!("render-surface/060041c0")]
         );
     }
 

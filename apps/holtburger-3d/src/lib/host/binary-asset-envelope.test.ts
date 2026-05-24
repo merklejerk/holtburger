@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeBinaryAssetEnvelope } from "./binary-asset-envelope";
+import {
+	decodeBinaryAssetBatchEnvelope,
+	decodeBinaryAssetEnvelope,
+	encodeJsonAssetBatchEnvelope,
+} from "./binary-asset-envelope";
 
 describe("decodeBinaryAssetEnvelope", () => {
 	it("hydrates binary landblock terrain arrays into the normalized response payload", () => {
@@ -162,6 +166,74 @@ describe("decodeBinaryAssetEnvelope", () => {
 		expect(payload.sourceBytes).toBeInstanceOf(Uint8Array);
 		expect(Array.from(payload.sourceBytes as Uint8Array)).toEqual([
 			0x11, 0x22, 0x33, 0x44,
+		]);
+	});
+
+	it("hydrates env-cell portal aperture points as vec3 objects", () => {
+		const points = new Float32Array([1, 2, 3, 4, 5, 6]);
+		const response = decodeBinaryAssetEnvelope(
+			buildEnvelope({
+				response: {
+					requestId: "request-4",
+					assetId: "env-cell/01030100",
+					payloadKind: "json",
+					payload: {
+						kind: "env-cell",
+						portalApertures: [{ points: [] }],
+					},
+				},
+				sections: [
+					{
+						role: "envCell.portalApertures.points",
+						path: "responses.0.payload.portalApertures.0.points",
+						scalarType: "f32",
+						componentCount: 3,
+						elementCount: 2,
+						byteOffset: 0,
+						byteLength: points.byteLength,
+					},
+				],
+				sectionData: [points],
+			}),
+		);
+
+		expect(response.payload).toMatchObject({
+			portalApertures: [
+				{
+					points: [
+						{ x: 1, y: 2, z: 3 },
+						{ x: 4, y: 5, z: 6 },
+					],
+				},
+			],
+		});
+	});
+
+	it("encodes JSON-only responses as no-section envelopes", () => {
+		const responses = decodeBinaryAssetBatchEnvelope(
+			encodeJsonAssetBatchEnvelope([
+				{
+					requestId: "request-5",
+					assetId: "material/0800006c",
+					payloadKind: "json",
+					payload: {
+						kind: "material-recipe",
+						surfaceId: 0x0800006c,
+					},
+				},
+			]),
+		);
+
+		expect(responses).toEqual([
+			{
+				requestId: "request-5",
+				assetId: "material/0800006c",
+				payloadKind: "json",
+				payload: {
+					kind: "material-recipe",
+					surfaceId: 0x0800006c,
+				},
+			},
 		]);
 	});
 });

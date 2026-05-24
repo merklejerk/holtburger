@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	lookupAsset,
+	planAssetLookupEnvelopeRequests,
 	planBinaryLookupBatches,
 	submitCameraHint,
 } from "./tauri";
@@ -49,6 +50,23 @@ describe("Tauri host commands", () => {
 			["render-surface/06000001"],
 			["landblock/0103ffff/topology"],
 			["env-cell/01030100"],
+		]);
+	});
+
+	it("plans material recipes through JSON envelopes instead of binary lookup", () => {
+		const plan = planAssetLookupEnvelopeRequests([
+			createRequest("a", "env-cell/01030100"),
+			createRequest("b", "material/0800006c"),
+			createRequest("c", "render-surface/06000001"),
+			createRequest("d", "render-texture/05000001"),
+		]);
+
+		expect(
+			plan.binaryBatches.map((batch) => batch.map((request) => request.assetId)),
+		).toEqual([["env-cell/01030100"], ["render-surface/06000001"]]);
+		expect(plan.jsonRequests.map((request) => request.assetId)).toEqual([
+			"material/0800006c",
+			"render-texture/05000001",
 		]);
 	});
 });

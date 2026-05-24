@@ -8,9 +8,10 @@ use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
     LandblockOutdoorAsset, LandblockOutdoorAssetAssembler, LandblockTopologyAsset,
     LandblockTopologyAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedSetupAppearance, ResolvedTerrainMaterialTable, normalize_landblock_id,
+    ResolvedRenderTexture, ResolvedSetupAppearance, ResolvedTerrainMaterialTable,
+    normalize_landblock_id,
 };
-use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
+use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex, Semaphore};
 
@@ -45,7 +46,7 @@ pub enum ContentAsset {
     SetupModel(Box<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
     SetupAppearance(Box<ResolvedSetupAppearance>),
-    RenderTexture(Box<RenderTexture>),
+    RenderTexture(Box<ResolvedRenderTexture>),
     RenderSurface(Box<RenderSurface>),
     Palette(Box<Palette>),
 }
@@ -138,16 +139,12 @@ impl ContentAssetService {
                 )))
             }
             ContentAssetRequest::RenderTexture(render_texture_id) => {
-                let resource = self
-                    .content
-                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, render_texture_id))
-                    .with_context(|| {
-                        format!("Could not load RenderTexture 0x{render_texture_id:08X}")
-                    })?;
                 Ok(ContentAsset::RenderTexture(Box::new(
-                    RenderTexture::unpack(&mut Cursor::new(resource.bytes)).with_context(
-                        || format!("Could not parse RenderTexture 0x{render_texture_id:08X}"),
-                    )?,
+                    self.content
+                        .resolve_render_texture(render_texture_id)
+                        .with_context(|| {
+                            format!("Could not resolve RenderTexture 0x{render_texture_id:08X}")
+                        })?,
                 )))
             }
             ContentAssetRequest::RenderSurface(render_surface_id) => {

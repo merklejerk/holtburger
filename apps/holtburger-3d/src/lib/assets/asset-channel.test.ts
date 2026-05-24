@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AssetLookupRequestDto } from "../host/contracts";
+import type { AssetLookupRequestDto, AssetLookupResponseDto } from "../host/contracts";
 import type { BinaryAssetLookupEnvelopeDto } from "../host/tauri";
 import type { AssetWorkerLike } from "./asset-channel";
 import { AssetChannelController } from "./asset-channel";
@@ -11,6 +11,7 @@ import type {
 	QueuedPrepareItem,
 } from "../../workers/asset-worker";
 import { planWorkerPrepareBatches } from "../../workers/asset-worker";
+import { prepareAssetPayload } from "../../workers/asset-worker";
 import type { PreparedAssetRecord } from "./types";
 
 describe("asset channel", () => {
@@ -104,6 +105,29 @@ describe("asset worker prepare batching", () => {
 			["gfx-obj/01000003"],
 			["gfx-obj/01000004"],
 		]);
+	});
+});
+
+describe("asset worker payload preparation", () => {
+	it("fails hard when a landblock outdoor route returns a non-outdoor payload", () => {
+		const request = createRequest(
+			"request-outdoor",
+			"landblock/da5fffff/outdoor",
+		);
+		const response: AssetLookupResponseDto = {
+			requestId: request.requestId,
+			assetId: request.assetId,
+			payloadKind: "json",
+			payload: {
+				kind: "landblock-outdoor",
+				residencyKind: "outdoor-landblock",
+				sourceAssetKind: "landblock-outdoor",
+			},
+		};
+
+		expect(() => prepareAssetPayload(request, response)).toThrow(
+			/landblock-outdoor route.*payload failed the landblock-outdoor contract/,
+		);
 	});
 });
 

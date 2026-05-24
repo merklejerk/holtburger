@@ -40,6 +40,14 @@ pub struct ResolvedTextureMaterial {
     pub render_surface_default_palette_ids: Vec<u32>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedRenderTexture {
+    pub render_texture_id: u32,
+    pub texture_type: u8,
+    pub unknown: i32,
+    pub render_surface_ids: Vec<u32>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialAppearanceInput {
     pub obj_desc: Option<ObjDesc>,
@@ -139,6 +147,20 @@ pub(crate) struct ParsedMaterialDependency {
 }
 
 impl ContentRepository {
+    pub fn resolve_render_texture(&self, render_texture_id: u32) -> Result<ResolvedRenderTexture> {
+        let dependency = read_render_texture_dependency(self, render_texture_id)?;
+        Ok(ResolvedRenderTexture {
+            render_texture_id: dependency.render_texture.id,
+            texture_type: dependency.render_texture.texture_type,
+            unknown: dependency.render_texture.unknown,
+            render_surface_ids: dependency
+                .render_surfaces
+                .iter()
+                .map(|dependency| dependency.render_surface.id)
+                .collect(),
+        })
+    }
+
     pub fn resolve_gfx_obj_material_slots(
         &self,
         gfx_obj_id: u32,
@@ -440,8 +462,22 @@ fn read_render_texture_dependency(
         .with_context(|| format!("failed to parse RenderTexture 0x{render_texture_id:08X}"))?;
 
     let mut render_surfaces = Vec::with_capacity(render_texture.render_surface_ids.len());
+    let mut missing_render_surface_ids = Vec::new();
     for render_surface_id in &render_texture.render_surface_ids {
-        render_surfaces.push(read_render_surface_dependency(content, *render_surface_id)?);
+        match read_render_surface_dependency(content, *render_surface_id) {
+            Ok(render_surface) => render_surfaces.push(render_surface),
+            Err(error) if is_missing_or_pruned_resource_error(&error) => {
+                missing_render_surface_ids.push(*render_surface_id);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    if render_surfaces.is_empty() {
+        anyhow::bail!(
+            "RenderTexture 0x{render_texture_id:08X} has no available render surfaces; missing/pruned candidates: {}",
+            format_data_id_list(&missing_render_surface_ids)
+        );
     }
 
     Ok(ParsedRenderTextureDependency {
@@ -492,6 +528,23 @@ fn read_available_resource(
         .with_context(|| format!("failed to read {namespace}:0x{file_id:08X}"))
 }
 
+fn is_missing_or_pruned_resource_error(error: &anyhow::Error) -> bool {
+    let detail = format!("{error:#}");
+    detail.contains("missing resource ") || detail.contains(" is pruned")
+}
+
+fn format_data_id_list(file_ids: &[u32]) -> String {
+    if file_ids.is_empty() {
+        return "none".to_string();
+    }
+
+    file_ids
+        .iter()
+        .map(|file_id| format!("0x{file_id:08X}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn material_recipe_from_dependency(
     content: &ContentRepository,
     dependency: ParsedMaterialDependency,
@@ -519,7 +572,11 @@ fn material_recipe_from_dependency(
 
             ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
                 render_texture_id,
-                render_surface_ids: render_texture.render_texture.render_surface_ids,
+                render_surface_ids: render_texture
+                    .render_surfaces
+                    .iter()
+                    .map(|dependency| dependency.render_surface.id)
+                    .collect(),
                 palette_id: (orig_palette_id != 0).then_some(orig_palette_id),
                 render_surface_default_palette_ids,
             })

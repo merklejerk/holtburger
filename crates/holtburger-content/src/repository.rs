@@ -1188,6 +1188,95 @@ mod tests {
     }
 
     #[test]
+    fn resolves_textured_material_from_available_surface_texture_candidates() {
+        use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
+
+        let dir = tempdir().expect("tempdir should be created");
+        let path = dir.path().join("materials.hba");
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0800_0040,
+                DatFileType::Surface as u32,
+                textured_csurface_bytes(0x0500_0040, 0),
+            )
+            .expect("surface should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0040,
+                DatFileType::SurfaceTexture as u32,
+                render_texture_bytes(0x0500_0040, &[0x0600_4040, 0x0600_0040]),
+            )
+            .expect("render texture should be added");
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0600_0040,
+                DatFileType::Texture as u32,
+                render_surface_bytes(0x0600_0040, PixelFormatId::A8R8G8B8, &[1, 2, 3, 4], None),
+            )
+            .expect("available render surface should be added");
+        writer.write(&path).expect("test HBA should be written");
+
+        let repository =
+            ContentRepository::from_hba_dir(dir.path()).expect("content repository should load");
+        let recipe = repository
+            .resolve_material_recipe(0x0800_0040)
+            .expect("material should resolve from its available render-surface candidate");
+        let render_texture = repository
+            .resolve_render_texture(0x0500_0040)
+            .expect("render texture should expose its available render-surface candidates");
+
+        assert_eq!(
+            recipe.source,
+            ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
+                render_texture_id: 0x0500_0040,
+                render_surface_ids: vec![0x0600_0040],
+                palette_id: None,
+                render_surface_default_palette_ids: Vec::new(),
+            })
+        );
+        assert_eq!(render_texture.render_surface_ids, vec![0x0600_0040]);
+    }
+
+    #[test]
+    fn repo_assets_resolve_surface_texture_candidates_with_missing_first_texture() {
+        use crate::{ResolvedMaterialSource, ResolvedTextureMaterial};
+
+        let source_path = repo_assets_hba_path();
+        if !source_path.is_file() {
+            eprintln!(
+                "skipping repo material candidate test; missing repo-local {}",
+                source_path.display()
+            );
+            return;
+        }
+
+        let repository = ContentRepository::from_hba_path(source_path)
+            .expect("repo assets.hba should load as content repository");
+        let recipe = repository
+            .resolve_material_recipe(0x0800_11FC)
+            .expect("repo material should resolve through its available texture candidate");
+        let render_texture = repository
+            .resolve_render_texture(0x0500_2862)
+            .expect("repo render texture should resolve through its available texture candidate");
+
+        assert_eq!(
+            recipe.source,
+            ResolvedMaterialSource::Texture(ResolvedTextureMaterial {
+                render_texture_id: 0x0500_2862,
+                render_surface_ids: vec![0x0600_41C0],
+                palette_id: None,
+                render_surface_default_palette_ids: Vec::new(),
+            })
+        );
+        assert_eq!(render_texture.render_surface_ids, vec![0x0600_41C0]);
+    }
+
+    #[test]
     fn resolves_setup_appearance_with_texture_and_part_overrides() {
         use crate::MaterialAppearanceInput;
 

@@ -1,5 +1,7 @@
 import type { SceneCameraFrame, SceneBoundsFrame } from "./camera";
 
+export type WorldDisplayRenderStyle = "solid" | "wireframe" | "no-material";
+
 export interface WorldRenderMetrics {
 	bounds: SceneBoundsFrame | null;
 	cameraFrame: SceneCameraFrame | null;

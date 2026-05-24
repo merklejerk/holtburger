@@ -386,7 +386,7 @@ function normalizeEnvCellStaticSourceInstance(
 		sourceDid: member.sourceDid,
 		sourceAssetId: member.sourceAssetId,
 		sourceIndex: member.sourceIndex,
-		parentPlacements: [],
+		parentPlacements: [payload.localPlacement],
 		chunkLocalInstancePlacement: member.localPlacement,
 		sourceScale: member.sourceScale,
 		numLeaves: null,

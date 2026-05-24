@@ -15,6 +15,7 @@
 	import type { SceneCameraFrame } from "./camera";
 	import type {
 		BrowserCameraResidencyChangeHandler,
+		WorldDisplayRenderStyle,
 		WorldRenderCameraFrameChangeHandler,
 		WorldRenderMetricsChangeHandler,
 	} from "./renderer-contract";
@@ -71,6 +72,7 @@
 	let renderSpatialQuery: RenderSpatialIndexQuery | null = null;
 	let controlledCameraFrame: SceneCameraFrame | null = null;
 	let transitionPortalMaxDepth = 1;
+	let renderStyle: WorldDisplayRenderStyle = "solid";
 
 	onMount(() => {
 		let disposed = false;
@@ -95,6 +97,7 @@
 				onCameraFrameChange,
 				onRenderMetricsChange,
 				onCameraResidencyChange,
+				renderStyle,
 			});
 			rendererController = controller;
 		});
@@ -173,6 +176,11 @@
 	export function setTransitionPortalMaxDepth(nextMaxDepth: number): void {
 		transitionPortalMaxDepth = nextMaxDepth;
 		rendererController?.setTransitionPortalMaxDepth(transitionPortalMaxDepth);
+	}
+
+	export function setRenderStyle(nextStyle: WorldDisplayRenderStyle): void {
+		renderStyle = nextStyle;
+		rendererController?.setRenderStyle(renderStyle);
 	}
 
 	export function pickTerrainLandblockAtViewportPoint(

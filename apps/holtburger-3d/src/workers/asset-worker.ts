@@ -381,6 +381,7 @@ function parseExpectedRoutePayload<T>(
 				assetId,
 				expectedKind,
 				parsedPayload.error.issues,
+				payload,
 			),
 		);
 	}
@@ -391,6 +392,7 @@ function formatTypedPayloadParseError(
 	assetId: string,
 	expectedKind: string,
 	issues: readonly ZodIssue[],
+	payload: unknown,
 ): string {
 	const issueText = issues
 		.slice(0, 12)
@@ -401,7 +403,26 @@ function formatTypedPayloadParseError(
 		.join("; ");
 	const suffix =
 		issues.length > 12 ? `; ${issues.length - 12} more issue(s)` : "";
-	return `Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract: ${issueText}${suffix}`;
+	return `Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract: ${issueText}${suffix}. Payload summary: ${describeUnknownPayload(
+		payload,
+	)}`;
+}
+
+function describeUnknownPayload(payload: unknown): string {
+	if (payload === undefined) {
+		return "undefined";
+	}
+	if (payload === null) {
+		return "null";
+	}
+	if (Array.isArray(payload)) {
+		return `array(length=${payload.length})`;
+	}
+	if (typeof payload === "object") {
+		const record = payload as Record<string, unknown>;
+		return `object(keys=${Object.keys(record).slice(0, 24).join(",")})`;
+	}
+	return `${typeof payload}(${String(payload).slice(0, 120)})`;
 }
 
 function prepareGfxObj(
@@ -973,6 +994,7 @@ type AssetWorkerRuntimeScope = typeof globalThis & {
 };
 
 const workerScope = globalThis as AssetWorkerRuntimeScope;
+const ASSET_WORKER_DIAGNOSTIC_BUILD = "asset-worker-diag-2026-05-24a";
 const WORKER_PREPARE_BATCH_SIZE = 4;
 const WORKER_PREPARE_BATCH_CONCURRENCY = 2;
 const WORKER_PREPARE_COALESCE_WINDOW_MS = 8;
@@ -999,9 +1021,25 @@ class AssetWorkerHostBridge {
 		}
 
 		const envelopes = await this.requestBinaryEnvelopes(requests);
-		return envelopes.flatMap((envelope) =>
+		const responses = envelopes.flatMap((envelope) =>
 			decodeBinaryAssetBatchEnvelope(envelope.payload),
 		);
+		const missingPayloadResponses = responses.filter(
+			(response) => response.payload === undefined,
+		);
+		if (missingPayloadResponses.length > 0) {
+			throw new Error(
+				`Host binary lookup decoded ${missingPayloadResponses.length} response(s) without payload: ${JSON.stringify(
+					missingPayloadResponses.map((response) => ({
+						requestId: response.requestId,
+						assetId: response.assetId,
+						payloadKind: response.payloadKind,
+						keys: Object.keys(response),
+					})),
+				)}.`,
+			);
+		}
+		return responses;
 	}
 
 	resolve(message: AssetWorkerHostLookupBinaryCompleteMessage): void {
@@ -1124,7 +1162,7 @@ class AssetWorkerPrepareScheduler {
 					type: "asset-error",
 					requestId: item.request.requestId,
 					assetId: item.request.assetId,
-					message: error instanceof Error ? error.message : String(error),
+					message: formatWorkerDiagnosticError(error),
 				});
 			}
 		}
@@ -1154,10 +1192,15 @@ class AssetWorkerPrepareScheduler {
 				type: "asset-error",
 				requestId: item.request.requestId,
 				assetId: item.request.assetId,
-				message: error instanceof Error ? error.message : String(error),
+				message: formatWorkerDiagnosticError(error),
 			})),
 		});
 	}
+}
+
+function formatWorkerDiagnosticError(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	return `[${ASSET_WORKER_DIAGNOSTIC_BUILD}] ${message}`;
 }
 
 export function planWorkerPrepareBatches(

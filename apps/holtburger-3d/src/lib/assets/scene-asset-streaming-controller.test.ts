@@ -193,6 +193,10 @@ function createPreparedEnvCellWithStaticGfx(
 		envCellId: 0x016c0155,
 		environmentId: 0x0d000001,
 		cellStructureId: 0x0d000002,
+		localPlacement: {
+			origin: { x: 0, y: 0, z: 0 },
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+		},
 		surfaces: [],
 		portals: [],
 		visibleEnvCellIds: [],

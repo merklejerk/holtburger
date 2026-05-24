@@ -58,6 +58,7 @@ import {
 import { deriveTransitionPortalCandidates } from "./transition-portal-work-items";
 import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
+import type { WorldDisplayRenderStyle } from "./renderer-contract";
 
 let lastOutdoorRenderStarvationSignature: string | null = null;
 
@@ -69,6 +70,7 @@ export interface BrowserRenderResourceCoordinatorInput {
 	detailLodRadius: number;
 	envCellLodRadius: number;
 	transitionPortalMaxDepth: number;
+	renderStyle: WorldDisplayRenderStyle;
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
@@ -114,6 +116,7 @@ export interface BrowserRenderResourceSurface {
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
+	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 }
 
 export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourceSnapshot {
@@ -356,6 +359,9 @@ export class BrowserRenderResourceCoordinator {
 				() =>
 					surface.setTransitionPortalMaxDepth(input.transitionPortalMaxDepth),
 			);
+			this.applySurfaceResource("render-style", input.renderStyle, () =>
+				surface.setRenderStyle(input.renderStyle),
+			);
 		}
 
 		this.snapshot = deriveSnapshot({
@@ -399,7 +405,8 @@ type BrowserRenderResourceSurfaceKey =
 	| "debug-overlay-scene"
 	| "render-spatial-query"
 	| "controlled-camera-frame"
-	| "transition-portal-depth";
+	| "transition-portal-depth"
+	| "render-style";
 
 function describeAssetStateSignature(state: AssetChannelState): string {
 	return [

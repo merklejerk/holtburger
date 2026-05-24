@@ -86,6 +86,7 @@ import {
 import type {
 	BrowserCameraResidency,
 	BrowserCameraResidencyChangeHandler,
+	WorldDisplayRenderStyle,
 	WorldRenderCameraFrameChangeHandler,
 	WorldRenderDebugMetrics,
 	WorldRenderMetrics,
@@ -158,6 +159,7 @@ export interface WorldDisplayRendererOptions {
 	renderSpatialQuery: RenderSpatialIndexQuery | null;
 	controlledCameraFrame: SceneCameraFrame | null;
 	transitionPortalMaxDepth?: number;
+	renderStyle?: WorldDisplayRenderStyle;
 	onCameraFrameChange?: WorldRenderCameraFrameChangeHandler;
 	onRenderMetricsChange?: WorldRenderMetricsChangeHandler;
 	onCameraResidencyChange?: BrowserCameraResidencyChangeHandler;
@@ -175,6 +177,7 @@ export interface WorldDisplayRenderer {
 	setRenderSpatialQuery(query: RenderSpatialIndexQuery | null): void;
 	setControlledCameraFrame(frame: SceneCameraFrame | null): void;
 	setTransitionPortalMaxDepth(maxDepth: number): void;
+	setRenderStyle(renderStyle: WorldDisplayRenderStyle): void;
 	setCameraFrameChangeHandler(
 		handler: WorldRenderCameraFrameChangeHandler | undefined,
 	): void;
@@ -193,6 +196,11 @@ export interface WorldDisplayRenderer {
 		ownerKeys?: ReadonlySet<string>,
 	): RenderSpatialPick | null;
 	dispose(): void;
+}
+
+interface RenderStyleMaterialUserData {
+	originalRenderStyleMaterial?: Material | Material[];
+	renderStyleDebugColorKey?: string;
 }
 
 const PERFORMANCE_REPORT_INTERVAL_MS = 500;
@@ -404,6 +412,9 @@ export function createWorldDisplayRenderer(
 	let transitionPortalMaxDepth = clampTransitionPortalMaxDepth(
 		options.transitionPortalMaxDepth ?? DEFAULT_TRANSITION_PORTAL_MAX_DEPTH,
 	);
+	let renderStyle: WorldDisplayRenderStyle = options.renderStyle ?? "solid";
+	const noMaterialOverrideMaterials = new Map<string, MeshStandardMaterial>();
+	const wireframeOverrideMaterials = new Map<string, MeshBasicMaterial>();
 	let onCameraFrameChange = options.onCameraFrameChange;
 	let onRenderMetricsChange = options.onRenderMetricsChange;
 	let onCameraResidencyChange = options.onCameraResidencyChange;
@@ -574,6 +585,10 @@ export function createWorldDisplayRenderer(
 		},
 		setTransitionPortalMaxDepth(maxDepth) {
 			transitionPortalMaxDepth = clampTransitionPortalMaxDepth(maxDepth);
+		},
+		setRenderStyle(nextRenderStyle) {
+			renderStyle = nextRenderStyle;
+			syncRenderStyle();
 		},
 		setCameraFrameChangeHandler(handler) {
 			onCameraFrameChange = handler;
@@ -1576,6 +1591,7 @@ export function createWorldDisplayRenderer(
 			if (firstPart.kind === "indoor-static") {
 				mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
 			}
+			applyRenderStyleToObject(mesh);
 			const partsSignature = describeStaticRenderablePartsSignature(parts);
 			if (
 				staticRenderableGroupPartSignatures.get(groupKey) !== partsSignature
@@ -1770,6 +1786,8 @@ export function createWorldDisplayRenderer(
 		mesh.layers.set(WORLD_RENDER_LAYER.diagnosticInterior);
 		mesh.layers.enable(WORLD_RENDER_LAYER.portalInterior);
 		mesh.userData.spatialItemId = structuredCellSpatialItemId(cell.renderKey);
+		mesh.userData.renderStyleDebugColorKey = cell.debugColorKey;
+		applyRenderStyleToObject(mesh);
 		return mesh;
 	}
 
@@ -2341,6 +2359,7 @@ export function createWorldDisplayRenderer(
 		mesh.name = `static-renderable/${groupKey}`;
 		mesh.userData.gfxAssetId = gfxAssetId;
 		mesh.userData.materialOwnedByResourceCache = true;
+		mesh.userData.renderStyleDebugColorKey = groupKey;
 		return mesh;
 	}
 
@@ -2351,11 +2370,19 @@ export function createWorldDisplayRenderer(
 		mesh.count = parts.length;
 		parts.forEach((part, index) => {
 			mesh.setMatrixAt(index, buildStaticRenderablePartMatrix(part));
-			mesh.setColorAt(index, new Color("#ffffff"));
+			mesh.setColorAt(index, buildStaticRenderableColor(part.debugColorKey));
 		});
 		mesh.instanceMatrix.needsUpdate = true;
 		if (mesh.instanceColor) {
 			mesh.instanceColor.needsUpdate = true;
+		}
+		const materialOrMaterials = mesh.material;
+		if (Array.isArray(materialOrMaterials)) {
+			for (const material of materialOrMaterials) {
+				material.needsUpdate = true;
+			}
+		} else {
+			materialOrMaterials.needsUpdate = true;
 		}
 	}
 
@@ -2403,7 +2430,139 @@ export function createWorldDisplayRenderer(
 		});
 		const mesh = new Mesh(geometry, material);
 		mesh.name = tile.assetId;
+		mesh.userData.renderStyleDebugColorKey = tile.assetId;
+		applyRenderStyleToObject(mesh);
 		return mesh;
+	}
+
+	function syncRenderStyle(): void {
+		for (const mesh of terrainMeshes.values()) {
+			applyRenderStyleToObject(mesh);
+		}
+		for (const mesh of staticRenderableGroupMeshes.values()) {
+			applyRenderStyleToObject(mesh);
+		}
+		for (const mesh of structuredInteriorMeshes.values()) {
+			applyRenderStyleToObject(mesh);
+		}
+	}
+
+	function applyRenderStyleToObject(object: Object3D): void {
+		object.traverse((child) => {
+			if (child instanceof Mesh) {
+				applyRenderStyleToMesh(child);
+			}
+		});
+	}
+
+	function applyRenderStyleToMesh(mesh: Mesh): void {
+		const originalMaterial = restoreRenderStyleOriginalMaterial(mesh);
+
+		if (renderStyle === "solid") {
+			return;
+		}
+
+		storeRenderStyleOriginalMaterial(mesh, originalMaterial);
+		mesh.material =
+			renderStyle === "wireframe"
+				? getWireframeOverrideMaterial(mesh)
+				: getNoMaterialOverrideMaterial(mesh);
+	}
+
+	function getNoMaterialOverrideMaterial(mesh: Mesh): MeshStandardMaterial {
+		if (mesh instanceof InstancedMesh) {
+			return getInstancedNoMaterialOverrideMaterial(mesh);
+		}
+
+		const color = getRenderStyleDebugColor(mesh);
+		const colorKey = color.getHexString();
+		const existing = noMaterialOverrideMaterials.get(colorKey);
+		if (existing) {
+			return existing;
+		}
+
+		const material = new MeshStandardMaterial({
+			color,
+			emissive: color,
+			emissiveIntensity: 0.16,
+			flatShading: true,
+			metalness: 0.02,
+			roughness: 0.9,
+			side: DoubleSide,
+		});
+		noMaterialOverrideMaterials.set(colorKey, material);
+		return material;
+	}
+
+	function getInstancedNoMaterialOverrideMaterial(
+		mesh: InstancedMesh,
+	): MeshStandardMaterial {
+		const color = getRenderStyleDebugColor(mesh);
+		const colorKey = `instanced:${color.getHexString()}`;
+		const existing = noMaterialOverrideMaterials.get(colorKey);
+		if (existing) {
+			return existing;
+		}
+
+		const material = new MeshStandardMaterial({
+			color,
+			emissive: color,
+			emissiveIntensity: 0.2,
+			flatShading: true,
+			metalness: 0.02,
+			roughness: 0.9,
+			side: DoubleSide,
+			vertexColors: true,
+		});
+		noMaterialOverrideMaterials.set(colorKey, material);
+		return material;
+	}
+
+	function getWireframeOverrideMaterial(mesh: Mesh): MeshBasicMaterial {
+		const color = getRenderStyleDebugColor(mesh);
+		const colorKey = color.getHexString();
+		const existing = wireframeOverrideMaterials.get(colorKey);
+		if (existing) {
+			return existing;
+		}
+
+		const material = new MeshBasicMaterial({
+			color,
+			depthTest: false,
+			side: DoubleSide,
+			vertexColors: true,
+			wireframe: true,
+		});
+		wireframeOverrideMaterials.set(colorKey, material);
+		return material;
+	}
+
+	function getRenderStyleDebugColor(mesh: Mesh): Color {
+		const userData = mesh.userData as RenderStyleMaterialUserData;
+		const colorKey = userData.renderStyleDebugColorKey ?? mesh.name;
+		return buildStaticRenderableColor(colorKey);
+	}
+
+	function storeRenderStyleOriginalMaterial(
+		mesh: Mesh,
+		material: Material | Material[],
+	): void {
+		const userData = mesh.userData as RenderStyleMaterialUserData;
+		userData.originalRenderStyleMaterial ??= material;
+	}
+
+	function restoreRenderStyleOriginalMaterial(
+		mesh: Mesh,
+	): Material | Material[] {
+		const userData = mesh.userData as RenderStyleMaterialUserData;
+		const originalMaterial = userData.originalRenderStyleMaterial;
+		if (!originalMaterial) {
+			return mesh.material;
+		}
+
+		mesh.material = originalMaterial;
+		delete userData.originalRenderStyleMaterial;
+		return originalMaterial;
 	}
 
 	function dispose(): void {
@@ -2447,6 +2606,8 @@ export function createWorldDisplayRenderer(
 		materialResourceCache.dispose();
 		chunkRoots.clear();
 		chunkRootContainer.clear();
+		disposeMaterialMap(noMaterialOverrideMaterials);
+		disposeMaterialMap(wireframeOverrideMaterials);
 		portalBatchMaskMaterial.dispose();
 		portalDepthResetMaterial.dispose();
 		renderer.dispose();
@@ -2634,6 +2795,7 @@ function createRenderDebugMetrics(
 }
 
 function disposeMeshMaterial(mesh: Mesh): void {
+	restoreRenderStyleOriginalMaterialForDisposal(mesh);
 	if (mesh.userData.materialOwnedByResourceCache === true) {
 		return;
 	}
@@ -2646,4 +2808,21 @@ function disposeMeshMaterial(mesh: Mesh): void {
 	}
 
 	material.dispose();
+}
+
+function restoreRenderStyleOriginalMaterialForDisposal(mesh: Mesh): void {
+	const userData = mesh.userData as RenderStyleMaterialUserData;
+	if (!userData.originalRenderStyleMaterial) {
+		return;
+	}
+
+	mesh.material = userData.originalRenderStyleMaterial;
+	delete userData.originalRenderStyleMaterial;
+}
+
+function disposeMaterialMap(materials: Map<string, Material>): void {
+	for (const material of materials.values()) {
+		material.dispose();
+	}
+	materials.clear();
 }

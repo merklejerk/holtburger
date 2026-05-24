@@ -24,6 +24,7 @@ import {
 type BrowserPageId = "location-entry" | "destination-preview";
 
 export type BrowserNavigationFocusMode = "manual" | "follow-camera";
+export type BrowserRenderStyle = "solid" | "wireframe" | "no-material";
 type BrowserDestinationSource = "manual" | "landblock-pick" | "follow-camera";
 export type BrowserLandblockInputMode = "outdoor" | "dungeon";
 type NorthSouthHemisphere = "N" | "S";
@@ -74,6 +75,7 @@ export interface BrowserModeState {
 	showPortalPolygons: boolean;
 	showCellIndicators: boolean;
 	highlightPortalTargets: boolean;
+	renderStyle: BrowserRenderStyle;
 	page: BrowserPageId;
 }
 
@@ -105,6 +107,7 @@ export function createBrowserModeState(): BrowserModeState {
 		showPortalPolygons: false,
 		showCellIndicators: false,
 		highlightPortalTargets: false,
+		renderStyle: "solid",
 		page: DEFAULT_BROWSER_DESTINATION
 			? "destination-preview"
 			: "location-entry",
@@ -309,6 +312,16 @@ export function updatePortalTargetHighlighting(
 	};
 }
 
+export function updateBrowserRenderStyle(
+	browserMode: BrowserModeState,
+	renderStyle: BrowserRenderStyle,
+): BrowserModeState {
+	return {
+		...browserMode,
+		renderStyle,
+	};
+}
+
 export function previewBrowserLocation(
 	browserMode: BrowserModeState,
 ): BrowserModeState {
@@ -342,6 +355,7 @@ export function previewBrowserLocation(
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
+		renderStyle: browserMode.renderStyle,
 		page: "destination-preview",
 	};
 }
@@ -375,6 +389,7 @@ export function selectBrowserLandblockDestination(
 		showPortalPolygons: browserMode.showPortalPolygons,
 		showCellIndicators: browserMode.showCellIndicators,
 		highlightPortalTargets: browserMode.highlightPortalTargets,
+		renderStyle: browserMode.renderStyle,
 		page: "destination-preview",
 	};
 }

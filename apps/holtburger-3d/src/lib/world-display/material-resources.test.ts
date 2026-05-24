@@ -61,6 +61,41 @@ describe("world material resource cache", () => {
 		cache.dispose();
 	});
 
+	it("refreshes fallback materials after texture dependencies become prepared", () => {
+		const cache = new WorldMaterialResourceCache();
+		const materialAssetId = formatMaterialAssetId(0x08000002);
+		const renderSurfaceAssetId = "render-surface/06000002";
+		const recipe = createPreparedAsset(
+			materialAssetId,
+			createTextureMaterialRecipe(0x08000002, 0x06000002),
+		);
+		const fallbackPlan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000002, materialAssetId }],
+			appearanceKey: "base",
+			preparedByAssetId: {
+				[materialAssetId]: recipe,
+			},
+			fallbackColorKey: "part",
+		});
+		const texturedPlan = cache.resolveMaterialPlan({
+			slots: [{ slotIndex: 0, surfaceId: 0x08000002, materialAssetId }],
+			appearanceKey: "base",
+			preparedByAssetId: {
+				[materialAssetId]: recipe,
+				[renderSurfaceAssetId]: createPreparedAsset(
+					renderSurfaceAssetId,
+					createRenderSurfacePayload(0x06000002),
+				),
+			},
+			fallbackColorKey: "part",
+		});
+
+		expect((fallbackPlan.materials[0] as MeshStandardMaterial).map).toBeNull();
+		expect((texturedPlan.materials[0] as MeshStandardMaterial).map).not.toBeNull();
+		expect(texturedPlan.materials[0]).not.toBe(fallbackPlan.materials[0]);
+		cache.dispose();
+	});
+
 	it("reports missing material recipes before drawing a fallback", () => {
 		const diagnostics: string[] = [];
 		const cache = new WorldMaterialResourceCache((diagnostic) => {

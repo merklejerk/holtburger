@@ -7,15 +7,18 @@ import {
 } from "./binary-asset-envelope";
 
 describe("decodeBinaryAssetEnvelope", () => {
-	it("hydrates binary landblock terrain arrays into the normalized response payload", () => {
+	it("hydrates binary landblock terrain arrays into contract-rich records", () => {
 		const payload = {
+			landblockId: 0x0102ffff,
 			terrain: {
 				vertices: [],
 				triangles: [],
 			},
 		};
 		const vertices = new Float32Array([1, 2, 3, 4, 5, 6]);
-		const triangles = new Float32Array([4, 1, 0, 1, 2, 4.5]);
+		const triangles = new Float32Array([
+			0, 4, 1, 0, 1, 2, 4.5, 0, 1, 2, 3, 4, 5,
+		]);
 		const response = decodeBinaryAssetEnvelope(
 			buildEnvelope({
 				response: {
@@ -38,7 +41,7 @@ describe("decodeBinaryAssetEnvelope", () => {
 						role: "landblockTerrain.triangles",
 						path: "responses.0.payload.terrain.triangles",
 						scalarType: "f32",
-						componentCount: 6,
+						componentCount: 13,
 						elementCount: 1,
 						byteOffset: vertices.byteLength,
 						byteLength: triangles.byteLength,
@@ -56,10 +59,16 @@ describe("decodeBinaryAssetEnvelope", () => {
 				],
 				triangles: [
 					{
+						terrainTriangleId:
+							"landblock/0102ffff/outdoor/terrain/triangle/0000",
 						quadIndex: 4,
 						triangleInQuad: 1,
 						vertexIndices: [0, 1, 2],
 						averageHeight: 4.5,
+						bounds: {
+							min: { x: 0, y: 1, z: 2 },
+							max: { x: 3, y: 4, z: 5 },
+						},
 					},
 				],
 			},

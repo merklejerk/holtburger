@@ -109,6 +109,7 @@
 	let highlightPortalTargets = $state(
 		initialFrontendState.browserMode.highlightPortalTargets,
 	);
+	let renderStyle = $state(initialFrontendState.browserMode.renderStyle);
 	let navigationFocusMode = $state(
 		initialFrontendState.browserMode.navigationFocusMode,
 	);
@@ -425,6 +426,7 @@
 		showPortalPolygons = state.browserMode.showPortalPolygons;
 		showCellIndicators = state.browserMode.showCellIndicators;
 		highlightPortalTargets = state.browserMode.highlightPortalTargets;
+		renderStyle = state.browserMode.renderStyle;
 		navigationFocusMode = state.browserMode.navigationFocusMode;
 
 		const browserDestinationIdentity =
@@ -520,6 +522,7 @@
 			detailLodRadius,
 			envCellLodRadius,
 			transitionPortalMaxDepth,
+			renderStyle,
 			showPortalPolygons,
 			showCellIndicators,
 			highlightPortalTargets,

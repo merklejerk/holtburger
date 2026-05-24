@@ -60,7 +60,9 @@ export const assetLookupResponseDtoSchema = z.object({
 	requestId: z.string().min(1),
 	assetId: z.string().min(1),
 	payloadKind: assetPayloadKindValueSchema,
-	payload: z.unknown(),
+	payload: z.unknown().refine((payload) => payload !== undefined, {
+		message: "payload is required",
+	}),
 });
 export type AssetLookupResponseDto = z.infer<
 	typeof assetLookupResponseDtoSchema
@@ -425,6 +427,7 @@ export const envCellPayloadDtoSchema = z.object({
 	envCellId: z.number().int().nonnegative(),
 	environmentId: z.number().int().nonnegative(),
 	cellStructureId: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
 	surfaces: z.array(envCellSurfaceSlotDtoSchema),
 	portals: z.array(envCellPortalDtoSchema),
 	visibleEnvCellIds: z.array(z.number().int().nonnegative()),

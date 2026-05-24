@@ -329,14 +329,34 @@ function createStaticRenderableAssetRequests(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
 	);
+	const envCellStaticSourceAssetIds =
+		collectPreparedEnvCellStaticSourceAssetIds(
+			preparedByAssetId,
+			new Set(linkedInteriorCoverage.envCellIds),
+		);
+	const envCellSetupModelPartGfxAssetIds =
+		collectPreparedSetupModelPartGfxAssetIds(
+			preparedByAssetId,
+			envCellStaticSourceAssetIds,
+		);
 	const materialAssetIds = collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
-		[...outdoorSourceAssetIds, ...setupModelPartGfxAssetIds],
+		[
+			...outdoorSourceAssetIds,
+			...setupModelPartGfxAssetIds,
+			...envCellStaticSourceAssetIds,
+			...envCellSetupModelPartGfxAssetIds,
+		],
 		new Set(linkedInteriorCoverage.envCellIds),
 	);
 
 	const geometryAssetIds = [
-		...new Set([...outdoorSourceAssetIds, ...setupModelPartGfxAssetIds]),
+		...new Set([
+			...outdoorSourceAssetIds,
+			...setupModelPartGfxAssetIds,
+			...envCellStaticSourceAssetIds,
+			...envCellSetupModelPartGfxAssetIds,
+		]),
 	].sort();
 	const materialRequests = createUnpreparedRequests(
 		materialAssetIds,
@@ -532,9 +552,24 @@ function collectOutdoorVisibleMaterialAssetIds(
 		preparedByAssetId,
 		outdoorSourceAssetIds,
 	);
+	const envCellStaticSourceAssetIds =
+		collectPreparedEnvCellStaticSourceAssetIds(
+			preparedByAssetId,
+			new Set(linkedInteriorCoverage.envCellIds),
+		);
+	const envCellSetupModelPartGfxAssetIds =
+		collectPreparedSetupModelPartGfxAssetIds(
+			preparedByAssetId,
+			envCellStaticSourceAssetIds,
+		);
 	return collectStaticRenderableMaterialAssetIds(
 		preparedByAssetId,
-		[...outdoorSourceAssetIds, ...setupModelPartGfxAssetIds],
+		[
+			...outdoorSourceAssetIds,
+			...setupModelPartGfxAssetIds,
+			...envCellStaticSourceAssetIds,
+			...envCellSetupModelPartGfxAssetIds,
+		],
 		new Set(linkedInteriorCoverage.envCellIds),
 	);
 }

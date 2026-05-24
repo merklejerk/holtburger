@@ -2423,6 +2423,7 @@ fn serialize_prepared_polygon_set_invalid_polygon(
 ) -> serde_json::Value {
     serde_json::json!({
         "polygonId": polygon.polygon_id,
+        "reason": polygon.reason,
         "vertexIds": polygon.vertex_ids,
         "missingVertexIds": polygon.missing_vertex_ids,
     })

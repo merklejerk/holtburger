@@ -1774,7 +1774,6 @@ export function createWorldDisplayRenderer(
 			appearanceKey: "structured-interior",
 			preparedByAssetId: assetState.preparedByAssetId,
 			fallbackColorKey: cell.debugColorKey,
-			doubleSided: true,
 		});
 		const geometry = buildGfxObjGeometry(
 			cell.renderGeometry,

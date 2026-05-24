@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 holtburger-content.workspace = true
 holtburger-core.workspace = true
+holtburger-dat.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 clap.workspace = true

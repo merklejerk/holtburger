@@ -1,6 +1,116 @@
 # Holtburger 3D Polygon Sidedness Parity Plan
 
-Status: draft implementation plan.
+Status: implemented except live DAT audit/manual visual validation.
+
+## Implementation Progress
+
+### 2026-05-24 Phase 0 Update
+
+Completed:
+
+- Added source-backed implementation comments next to the Rust side-expansion
+  helper.
+- Added `crates/holtburger-debug-harness/src/bin/audit_polygon_sides.rs`, a
+  non-interactive HBA audit tool for counting `sides_type`, stippling,
+  `CounterClockwise`, `NoPos`, `NoNeg`, and malformed UV side data in live
+  DAT-backed content.
+
+Decision:
+
+- `CounterClockwise` remains positive-only for constructed render geometry
+  unless the audit plus retail/client evidence justifies a different rule.
+
+Blocker:
+
+- The audit has been implemented but not run against full local DAT/HBA content
+  as part of this change. No committed test depends on asset files.
+
+### 2026-05-24 Phases 1-3 Update
+
+Completed:
+
+- Replaced the one-side `derive_environment_polygon_render_side` flow with a
+  canonical Rust side-expansion helper in
+  `crates/holtburger-content/src/landblock_scene_assets.rs`.
+- Applied that helper to both `gfx-obj` and env-cell shell geometry through
+  their shared `build_polygon_set_render_geometry` path.
+- `sides_type == None` now emits positive plus reversed positive geometry.
+- `sides_type == Clockwise` now emits a negative side with `neg_surface` and
+  `neg_uv_indices` when negative side data is present.
+- `sides_type == CounterClockwise` no longer flips positive-side winding or
+  normals in constructed geometry.
+- Env-cell shell geometry still draws the full `CellStruct.polygons` list; the
+  drawing BSP remains out of the render polygon filter for cell shells.
+
+Course correction:
+
+- Side kind is currently internal to Rust helper/tests. It is not added to the
+  frontend DTO because material grouping only needs `surface_id` and
+  `first_vertex`; exposing it can wait until a debug UI needs it.
+
+### 2026-05-24 Phase 4 Update
+
+Completed:
+
+- Removed the structured-interior `doubleSided: true` production material
+  workaround from `world-display-renderer.ts`.
+- Removed the now-unused `doubleSided` material-plan option from
+  `material-resources.ts`.
+- Kept existing `DoubleSide` usage only in diagnostic/portal paths:
+  portal masks, portal depth reset, no-material override, and wireframe
+  override.
+
+### 2026-05-24 Phases 5-6 Update
+
+Completed:
+
+- Confirmed the TypeScript asset worker still passes through Rust-prepared
+  `renderGeometry` and does not triangulate polygon sides.
+- Added fixture-only Rust tests for `NoPos`, `None`, `Clockwise`, `NoNeg`,
+  `CounterClockwise`, side winding, surface assignment, and malformed UV side
+  data.
+- Extended invalid polygon diagnostics with a `reason` field so malformed
+  positive/negative UV side data is visible instead of only contributing to a
+  skip count.
+
+Refinement:
+
+- `PreparedPolygonSetInvalidPolygon` now covers missing vertices and malformed
+  UV side data. If future diagnostics need non-invalid informational events
+  such as "`CounterClockwise` treated as positive-only", add a separate
+  diagnostic collection rather than overloading invalid polygons.
+
+### 2026-05-24 Phase 7 Update
+
+Automated validation completed:
+
+- `cargo test -p holtburger-content landblock_scene_assets`
+- `cargo check -p holtburger-3d`
+- `cargo check -p holtburger-debug-harness`
+- `npm run check` from `apps/holtburger-3d`
+- `npm run test:ts -- material-resources binary-asset-envelope` from
+  `apps/holtburger-3d`
+
+Remaining validation:
+
+- Run `cargo run -p holtburger-debug-harness --bin audit_polygon_sides -- --dats <path-to-assets.hba>`
+  against full local content and record any meaningful `CounterClockwise`,
+  `NoPos`, or malformed UV samples.
+- Manually inspect outdoor-linked interior env cells, dungeon landblocks, and
+  two-sided outdoor statics in Holtburger 3D.
+
+Cleanup completed:
+
+- Removed `derive_environment_polygon_render_side`.
+- Removed the old `CounterClockwise` winding/normal flip.
+- Removed production structured-interior `doubleSided` material use.
+- Kept TypeScript geometry handling as pass-through.
+
+Follow-up cleanup target:
+
+- If the audit shows frequent non-invalid informational cases, add a dedicated
+  polygon side diagnostic collection instead of expanding
+  `PreparedPolygonSetInvalidPolygon` further.
 
 ## Purpose
 

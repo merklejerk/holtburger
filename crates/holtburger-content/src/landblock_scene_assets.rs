@@ -329,6 +329,7 @@ pub struct PreparedPolygonSetRenderTriangle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedPolygonSetInvalidPolygon {
     pub polygon_id: u16,
+    pub reason: &'static str,
     pub vertex_ids: Vec<u16>,
     pub missing_vertex_ids: Vec<u16>,
 }
@@ -636,9 +637,8 @@ impl EnvCellAssetAssembler {
         let cell_structure_id = env_cell.cell_structure_id.ok_or_else(|| {
             anyhow::anyhow!("EnvCell 0x{env_cell_id:08X} did not declare a cell structure id")
         })?;
-        let environment =
-            load_environment_fact(&mut context, environment_id, &[cell_structure_id])
-                .ok_or_else(|| env_cell_assembly_error(env_cell_id, &context.diagnostics))?;
+        let environment = load_environment_fact(&mut context, environment_id, &[cell_structure_id])
+            .ok_or_else(|| env_cell_assembly_error(env_cell_id, &context.diagnostics))?;
         let interiors = LandblockInteriorFacts {
             env_cells: vec![env_cell.clone()],
             environments: vec![environment],
@@ -681,7 +681,9 @@ fn env_cell_assembly_error(
         })
         .collect::<Vec<_>>();
     if details.is_empty() {
-        anyhow::anyhow!("Could not assemble EnvCell 0x{env_cell_id:08X}; no source diagnostics were recorded")
+        anyhow::anyhow!(
+            "Could not assemble EnvCell 0x{env_cell_id:08X}; no source diagnostics were recorded"
+        )
     } else {
         anyhow::anyhow!(
             "Could not assemble EnvCell 0x{env_cell_id:08X}; {}",
@@ -2081,10 +2083,6 @@ fn build_polygon_set_render_geometry(
             skipped_polygon_count += 1;
             continue;
         }
-        let Some(render_side) = derive_environment_polygon_render_side(polygon) else {
-            skipped_polygon_count += 1;
-            continue;
-        };
         let missing_vertex_ids = polygon
             .vertex_ids
             .iter()
@@ -2094,49 +2092,35 @@ fn build_polygon_set_render_geometry(
         if !missing_vertex_ids.is_empty() {
             invalid_polygons.push(PreparedPolygonSetInvalidPolygon {
                 polygon_id: *polygon_id,
+                reason: INVALID_POLYGON_REASON_MISSING_VERTICES,
                 vertex_ids: polygon.vertex_ids.clone(),
                 missing_vertex_ids,
             });
             skipped_polygon_count += 1;
             continue;
         }
+        record_polygon_side_diagnostics(*polygon_id, polygon, &mut invalid_polygons);
 
-        if let Some(surface_id) = render_side.surface_id {
-            surface_ids.insert(surface_id);
+        let render_sides = derive_polygon_render_sides(polygon);
+        if render_sides.is_empty() {
+            skipped_polygon_count += 1;
+            continue;
         }
-
-        for vertex_index in 1..(polygon.vertex_ids.len() - 1) {
-            let triangle_vertex_offsets = if render_side.counter_clockwise_culled {
-                [0, vertex_index + 1, vertex_index]
-            } else {
-                [0, vertex_index, vertex_index + 1]
-            };
-            triangles.push(PreparedPolygonSetRenderTriangle {
-                polygon_id: *polygon_id,
-                surface_id: render_side.surface_id,
-                first_vertex: positions.len() / 3,
-            });
-
-            for polygon_vertex_offset in triangle_vertex_offsets {
-                let vertex_id = polygon.vertex_ids[polygon_vertex_offset];
-                let vertex = vertex_array
-                    .vertices
-                    .get(&vertex_id)
-                    .expect("missing vertices were filtered before triangulation");
-                let render_position = convert_ac_vector_to_render_space(vertex.origin);
-                let render_normal = convert_ac_vector_to_render_space(vertex.normal);
-                positions.extend([render_position.x, render_position.y, render_position.z]);
-                normals.extend([
-                    scale_normal_component(render_normal.x, render_side.normal_scale),
-                    scale_normal_component(render_normal.y, render_side.normal_scale),
-                    scale_normal_component(render_normal.z, render_side.normal_scale),
-                ]);
-
-                let uv_index = render_side.uv_indices[polygon_vertex_offset] as usize;
-                let uv = vertex.uvs.get(uv_index);
-                uvs.extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
-                bounds = Some(expand_bounds(bounds, render_position));
+        for render_side in render_sides {
+            if let Some(surface_id) = render_side.surface_id {
+                surface_ids.insert(surface_id);
             }
+            append_polygon_render_side_geometry(
+                *polygon_id,
+                polygon,
+                vertex_array,
+                render_side,
+                &mut positions,
+                &mut normals,
+                &mut uvs,
+                &mut triangles,
+                &mut bounds,
+            );
         }
     }
 
@@ -2159,30 +2143,165 @@ fn build_polygon_set_render_geometry(
     }
 }
 
-struct PolygonRenderSide<'a> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreparedPolygonRenderSideKind {
+    Positive,
+    PositiveReversed,
+    Negative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PreparedPolygonWinding {
+    Source,
+    Reversed,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PreparedPolygonRenderSide<'a> {
+    kind: PreparedPolygonRenderSideKind,
     surface_id: Option<i16>,
     uv_indices: &'a [u8],
+    winding: PreparedPolygonWinding,
     normal_scale: f32,
-    counter_clockwise_culled: bool,
 }
 
 const STIPPLING_NO_POS: u8 = 0x04;
+const STIPPLING_NO_NEG: u8 = 0x08;
+const CULL_MODE_NONE: i32 = 1;
+const CULL_MODE_CLOCKWISE: i32 = 2;
 const CULL_MODE_COUNTER_CLOCKWISE: i32 = 3;
+const INVALID_POLYGON_REASON_MISSING_VERTICES: &str = "missing-vertices";
+const INVALID_POLYGON_REASON_MALFORMED_POSITIVE_UV_INDICES: &str = "malformed-positive-uv-indices";
+const INVALID_POLYGON_REASON_MALFORMED_NEGATIVE_UV_INDICES: &str = "malformed-negative-uv-indices";
 
-fn derive_environment_polygon_render_side(polygon: &Polygon) -> Option<PolygonRenderSide<'_>> {
-    if (polygon.stippling & STIPPLING_NO_POS) != 0 {
-        return None;
+fn record_polygon_side_diagnostics(
+    polygon_id: u16,
+    polygon: &Polygon,
+    invalid_polygons: &mut Vec<PreparedPolygonSetInvalidPolygon>,
+) {
+    if (polygon.stippling & STIPPLING_NO_POS) == 0
+        && polygon.pos_uv_indices.len() != polygon.vertex_ids.len()
+    {
+        invalid_polygons.push(PreparedPolygonSetInvalidPolygon {
+            polygon_id,
+            reason: INVALID_POLYGON_REASON_MALFORMED_POSITIVE_UV_INDICES,
+            vertex_ids: polygon.vertex_ids.clone(),
+            missing_vertex_ids: Vec::new(),
+        });
     }
-    if polygon.pos_uv_indices.len() != polygon.vertex_ids.len() {
-        return None;
+    if polygon.sides_type == CULL_MODE_CLOCKWISE
+        && (polygon.stippling & STIPPLING_NO_NEG) == 0
+        && polygon.neg_uv_indices.len() != polygon.vertex_ids.len()
+    {
+        invalid_polygons.push(PreparedPolygonSetInvalidPolygon {
+            polygon_id,
+            reason: INVALID_POLYGON_REASON_MALFORMED_NEGATIVE_UV_INDICES,
+            vertex_ids: polygon.vertex_ids.clone(),
+            missing_vertex_ids: Vec::new(),
+        });
     }
-    let counter_clockwise_culled = polygon.sides_type == CULL_MODE_COUNTER_CLOCKWISE;
-    Some(PolygonRenderSide {
-        surface_id: normalize_surface_id(polygon.pos_surface),
-        uv_indices: &polygon.pos_uv_indices,
-        normal_scale: if counter_clockwise_culled { -1.0 } else { 1.0 },
-        counter_clockwise_culled,
-    })
+}
+
+fn derive_polygon_render_sides(polygon: &Polygon) -> Vec<PreparedPolygonRenderSide<'_>> {
+    // Retail CPolygon::UnPack aliases CullMode.None negative side data to the
+    // positive side, and D3DPolyRender::ConstructMesh expands CullMode.None and
+    // CullMode.Clockwise into explicit geometry. ACE's Polygon.Unpack and
+    // holtburger-dat's Polygon decoder mirror the same stored side model.
+    let mut sides = Vec::with_capacity(2);
+    if positive_polygon_side_is_renderable(polygon) {
+        sides.push(PreparedPolygonRenderSide {
+            kind: PreparedPolygonRenderSideKind::Positive,
+            surface_id: normalize_surface_id(polygon.pos_surface),
+            uv_indices: &polygon.pos_uv_indices,
+            winding: PreparedPolygonWinding::Source,
+            normal_scale: 1.0,
+        });
+    }
+
+    match polygon.sides_type {
+        CULL_MODE_NONE if positive_polygon_side_is_renderable(polygon) => {
+            sides.push(PreparedPolygonRenderSide {
+                kind: PreparedPolygonRenderSideKind::PositiveReversed,
+                surface_id: normalize_surface_id(polygon.pos_surface),
+                uv_indices: &polygon.pos_uv_indices,
+                winding: PreparedPolygonWinding::Reversed,
+                normal_scale: -1.0,
+            });
+        }
+        CULL_MODE_CLOCKWISE if negative_polygon_side_is_renderable(polygon) => {
+            sides.push(PreparedPolygonRenderSide {
+                kind: PreparedPolygonRenderSideKind::Negative,
+                surface_id: normalize_surface_id(polygon.neg_surface),
+                uv_indices: &polygon.neg_uv_indices,
+                winding: PreparedPolygonWinding::Reversed,
+                normal_scale: -1.0,
+            });
+        }
+        // The retail constructed mesh path reviewed so far has no special
+        // CounterClockwise expansion branch. Treat it as positive-only instead
+        // of preserving the old Holtburger winding flip.
+        CULL_MODE_COUNTER_CLOCKWISE => {}
+        _ => {}
+    }
+
+    sides
+}
+
+fn positive_polygon_side_is_renderable(polygon: &Polygon) -> bool {
+    (polygon.stippling & STIPPLING_NO_POS) == 0
+        && polygon.pos_uv_indices.len() == polygon.vertex_ids.len()
+}
+
+fn negative_polygon_side_is_renderable(polygon: &Polygon) -> bool {
+    polygon.sides_type == CULL_MODE_CLOCKWISE
+        && (polygon.stippling & STIPPLING_NO_NEG) == 0
+        && polygon.neg_uv_indices.len() == polygon.vertex_ids.len()
+}
+
+fn append_polygon_render_side_geometry(
+    polygon_id: u16,
+    polygon: &Polygon,
+    vertex_array: &holtburger_dat::graphics::CVertexArray,
+    render_side: PreparedPolygonRenderSide<'_>,
+    positions: &mut Vec<f32>,
+    normals: &mut Vec<f32>,
+    uvs: &mut Vec<f32>,
+    triangles: &mut Vec<PreparedPolygonSetRenderTriangle>,
+    bounds: &mut Option<PreparedAabb>,
+) {
+    let _side_kind = render_side.kind;
+    for vertex_index in 1..(polygon.vertex_ids.len() - 1) {
+        let triangle_vertex_offsets = match render_side.winding {
+            PreparedPolygonWinding::Source => [0, vertex_index, vertex_index + 1],
+            PreparedPolygonWinding::Reversed => [0, vertex_index + 1, vertex_index],
+        };
+        triangles.push(PreparedPolygonSetRenderTriangle {
+            polygon_id,
+            surface_id: render_side.surface_id,
+            first_vertex: positions.len() / 3,
+        });
+
+        for polygon_vertex_offset in triangle_vertex_offsets {
+            let vertex_id = polygon.vertex_ids[polygon_vertex_offset];
+            let vertex = vertex_array
+                .vertices
+                .get(&vertex_id)
+                .expect("missing vertices were filtered before triangulation");
+            let render_position = convert_ac_vector_to_render_space(vertex.origin);
+            let render_normal = convert_ac_vector_to_render_space(vertex.normal);
+            positions.extend([render_position.x, render_position.y, render_position.z]);
+            normals.extend([
+                scale_normal_component(render_normal.x, render_side.normal_scale),
+                scale_normal_component(render_normal.y, render_side.normal_scale),
+                scale_normal_component(render_normal.z, render_side.normal_scale),
+            ]);
+
+            let uv_index = render_side.uv_indices[polygon_vertex_offset] as usize;
+            let uv = vertex.uvs.get(uv_index);
+            uvs.extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
+            *bounds = Some(expand_bounds(*bounds, render_position));
+        }
+    }
 }
 
 fn collect_drawing_bsp_renderable_polygon_ids(node: &BspNode) -> HashSet<u16> {
@@ -2336,41 +2455,8 @@ mod tests {
         }
     }
 
-    fn minimal_cell_landblock_bytes(landblock_id: u32) -> Vec<u8> {
-        minimal_cell_landblock_bytes_with_height(landblock_id, 0)
-    }
-
-    fn minimal_cell_landblock_bytes_with_height(landblock_id: u32, height: u8) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&landblock_id.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        for _ in 0..81 {
-            bytes.extend_from_slice(&0u16.to_le_bytes());
-        }
-        bytes.extend(std::iter::repeat_n(height, 81));
-        bytes.push(0);
-        bytes
-    }
-
-    fn minimal_landblock_info_bytes(landblock_info_id: u32) -> Vec<u8> {
-        minimal_landblock_info_bytes_with_env_cells(landblock_info_id, 0)
-    }
-
     fn repo_assets_hba_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")
-    }
-
-    fn minimal_landblock_info_bytes_with_env_cells(
-        landblock_info_id: u32,
-        num_cells: u32,
-    ) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&landblock_info_id.to_le_bytes());
-        bytes.extend_from_slice(&num_cells.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes.extend_from_slice(&0u16.to_le_bytes());
-        bytes
     }
 
     #[test]
@@ -2424,45 +2510,7 @@ mod tests {
 
     #[test]
     fn cell_structure_render_geometry_does_not_filter_to_drawing_bsp_polygons() {
-        let mut vertex_array = holtburger_dat::graphics::CVertexArray::new();
-        vertex_array.vertices.extend([
-            (
-                0,
-                holtburger_dat::graphics::SWVertex {
-                    num_uvs: 1,
-                    origin: holtburger_common::Vector3::new(0.0, 0.0, 0.0),
-                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
-                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 0.0, v: 0.0 }],
-                },
-            ),
-            (
-                1,
-                holtburger_dat::graphics::SWVertex {
-                    num_uvs: 1,
-                    origin: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
-                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
-                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 1.0, v: 0.0 }],
-                },
-            ),
-            (
-                2,
-                holtburger_dat::graphics::SWVertex {
-                    num_uvs: 1,
-                    origin: holtburger_common::Vector3::new(0.0, 1.0, 0.0),
-                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
-                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 0.0, v: 1.0 }],
-                },
-            ),
-            (
-                3,
-                holtburger_dat::graphics::SWVertex {
-                    num_uvs: 1,
-                    origin: holtburger_common::Vector3::new(1.0, 1.0, 0.0),
-                    normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
-                    uvs: vec![holtburger_dat::graphics::Vec2Duv { u: 1.0, v: 1.0 }],
-                },
-            ),
-        ]);
+        let vertex_array = test_vertex_array();
         let polygons = HashMap::from([
             (10, test_triangle_polygon([0, 1, 2])),
             (20, test_triangle_polygon([1, 3, 2])),
@@ -2506,11 +2554,206 @@ mod tests {
         );
     }
 
+    #[test]
+    fn polygon_side_expansion_suppresses_no_pos_positive_side() {
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.stippling = STIPPLING_NO_POS;
+        polygon.pos_uv_indices.clear();
+
+        assert!(derive_polygon_render_sides(&polygon).is_empty());
+    }
+
+    #[test]
+    fn polygon_side_expansion_duplicates_cull_none_with_reversed_positive_side() {
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_NONE;
+        polygon.pos_surface = 4;
+
+        let sides = derive_polygon_render_sides(&polygon);
+
+        assert_eq!(sides.len(), 2);
+        assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
+        assert_eq!(sides[0].surface_id, Some(4));
+        assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
+        assert_eq!(sides[0].normal_scale, 1.0);
+        assert_eq!(
+            sides[1].kind,
+            PreparedPolygonRenderSideKind::PositiveReversed
+        );
+        assert_eq!(sides[1].surface_id, Some(4));
+        assert_eq!(sides[1].uv_indices, polygon.pos_uv_indices);
+        assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
+        assert_eq!(sides[1].normal_scale, -1.0);
+    }
+
+    #[test]
+    fn polygon_side_expansion_emits_clockwise_negative_side_with_negative_surface() {
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.pos_surface = 4;
+        polygon.neg_surface = 7;
+        polygon.neg_uv_indices = vec![1, 1, 1];
+
+        let sides = derive_polygon_render_sides(&polygon);
+
+        assert_eq!(sides.len(), 2);
+        assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
+        assert_eq!(sides[0].surface_id, Some(4));
+        assert_eq!(sides[0].uv_indices, polygon.pos_uv_indices);
+        assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
+        assert_eq!(sides[1].kind, PreparedPolygonRenderSideKind::Negative);
+        assert_eq!(sides[1].surface_id, Some(7));
+        assert_eq!(sides[1].uv_indices, polygon.neg_uv_indices);
+        assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
+        assert_eq!(sides[1].normal_scale, -1.0);
+    }
+
+    #[test]
+    fn polygon_side_expansion_suppresses_clockwise_no_neg_negative_side() {
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.stippling = STIPPLING_NO_NEG;
+        polygon.neg_uv_indices.clear();
+
+        let sides = derive_polygon_render_sides(&polygon);
+
+        assert_eq!(sides.len(), 1);
+        assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
+    }
+
+    #[test]
+    fn polygon_side_expansion_treats_counter_clockwise_as_positive_only() {
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_COUNTER_CLOCKWISE;
+
+        let sides = derive_polygon_render_sides(&polygon);
+
+        assert_eq!(sides.len(), 1);
+        assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
+        assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
+        assert_eq!(sides[0].normal_scale, 1.0);
+    }
+
+    #[test]
+    fn polygon_render_geometry_uses_retail_side_winding_and_surfaces() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.pos_surface = 4;
+        polygon.neg_surface = 7;
+        polygon.neg_uv_indices = vec![1, 1, 1];
+        let polygons = HashMap::from([(11, polygon)]);
+
+        let geometry =
+            build_polygon_set_render_geometry(0x0200_0001, &vertex_array, &polygons, None);
+
+        assert_eq!(geometry.triangle_count, 2);
+        assert_eq!(
+            geometry
+                .triangles
+                .iter()
+                .map(|triangle| (
+                    triangle.polygon_id,
+                    triangle.surface_id,
+                    triangle.first_vertex
+                ))
+                .collect::<Vec<_>>(),
+            vec![(11, Some(4), 0), (11, Some(7), 3)]
+        );
+        assert_eq!(
+            geometry.positions,
+            vec![
+                0.0, 0.0, -0.0, 1.0, 0.0, -0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -0.0, 0.0, 0.0, -1.0,
+                1.0, 0.0, -0.0,
+            ]
+        );
+        assert_eq!(
+            geometry.normals,
+            vec![
+                0.0, 1.0, -0.0, 0.0, 1.0, -0.0, 0.0, 1.0, -0.0, -0.0, -1.0, 0.0, -0.0, -1.0, 0.0,
+                -0.0, -1.0, 0.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn polygon_render_geometry_reports_malformed_positive_uvs() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.pos_uv_indices = vec![0, 0];
+        let polygons = HashMap::from([(12, polygon)]);
+
+        let geometry =
+            build_polygon_set_render_geometry(0x0200_0001, &vertex_array, &polygons, None);
+
+        assert_eq!(geometry.triangle_count, 0);
+        assert_eq!(geometry.skipped_polygon_count, 1);
+        assert_eq!(
+            geometry.invalid_polygons,
+            vec![PreparedPolygonSetInvalidPolygon {
+                polygon_id: 12,
+                reason: INVALID_POLYGON_REASON_MALFORMED_POSITIVE_UV_INDICES,
+                vertex_ids: vec![0, 1, 2],
+                missing_vertex_ids: Vec::new(),
+            }]
+        );
+    }
+
+    #[test]
+    fn polygon_render_geometry_reports_malformed_negative_uvs_without_dropping_positive_side() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.sides_type = CULL_MODE_CLOCKWISE;
+        polygon.neg_uv_indices = vec![1, 1];
+        let polygons = HashMap::from([(13, polygon)]);
+
+        let geometry =
+            build_polygon_set_render_geometry(0x0200_0001, &vertex_array, &polygons, None);
+
+        assert_eq!(geometry.triangle_count, 1);
+        assert_eq!(geometry.skipped_polygon_count, 0);
+        assert_eq!(
+            geometry.invalid_polygons,
+            vec![PreparedPolygonSetInvalidPolygon {
+                polygon_id: 13,
+                reason: INVALID_POLYGON_REASON_MALFORMED_NEGATIVE_UV_INDICES,
+                vertex_ids: vec![0, 1, 2],
+                missing_vertex_ids: Vec::new(),
+            }]
+        );
+    }
+
+    fn test_vertex_array() -> holtburger_dat::graphics::CVertexArray {
+        let mut vertex_array = holtburger_dat::graphics::CVertexArray::new();
+        vertex_array.vertices.extend([
+            (0, test_vertex(0.0, 0.0, 0.0, 0.0, 0.0)),
+            (1, test_vertex(1.0, 0.0, 0.0, 1.0, 0.0)),
+            (2, test_vertex(0.0, 1.0, 0.0, 0.0, 1.0)),
+            (3, test_vertex(1.0, 1.0, 0.0, 1.0, 1.0)),
+        ]);
+        vertex_array
+    }
+
+    fn test_vertex(x: f32, y: f32, z: f32, u: f32, v: f32) -> holtburger_dat::graphics::SWVertex {
+        holtburger_dat::graphics::SWVertex {
+            num_uvs: 2,
+            origin: holtburger_common::Vector3::new(x, y, z),
+            normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+            uvs: vec![
+                holtburger_dat::graphics::Vec2Duv { u, v },
+                holtburger_dat::graphics::Vec2Duv {
+                    u: u + 0.5,
+                    v: v + 0.5,
+                },
+            ],
+        }
+    }
+
     fn test_triangle_polygon(vertex_ids: [u16; 3]) -> Polygon {
         Polygon {
             num_pts: 3,
             stippling: 0,
-            sides_type: 1,
+            sides_type: 0,
             pos_surface: 0,
             neg_surface: 0,
             vertex_ids: vertex_ids.to_vec(),

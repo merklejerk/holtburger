@@ -388,6 +388,7 @@ interface PreparedPolygonSetRenderBounds {
 
 interface PreparedPolygonSetInvalidPolygon {
 	polygonId: number;
+	reason: string;
 	vertexIds: number[];
 	missingVertexIds: number[];
 }

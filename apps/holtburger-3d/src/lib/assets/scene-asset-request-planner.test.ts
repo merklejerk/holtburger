@@ -4,16 +4,15 @@ import {
 	describeBrowserDestinationIdentity,
 	parseBrowserLocationInput,
 } from "../../app/browser-mode";
-import { createPreparedTerrainAsset } from "../../app/test-fixtures";
 import {
 	formatEnvCellAssetId,
-	formatLandblockPackAssetId,
+	formatLandblockTopologyAssetId,
 } from "../landblocks";
 import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
 } from "./scene-asset-request-planner";
-import type { PreparedAssetRecord, PreparedLandblockStaticMesh } from "./types";
+import type { PreparedAssetRecord } from "./types";
 
 describe("scene asset request planner", () => {
 	it("derives outdoor browser coverage from destination and radii", () => {
@@ -36,18 +35,19 @@ describe("scene asset request planner", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"landblock-pack/da55ffff",
-			"landblock-summary/d954ffff",
-			"landblock-summary/d955ffff",
-			"landblock-summary/d956ffff",
-			"landblock-summary/da54ffff",
-			"landblock-summary/da56ffff",
-			"landblock-summary/db54ffff",
-			"landblock-summary/db55ffff",
-			"landblock-summary/db56ffff",
+			"landblock/d954ffff/outdoor",
+			"landblock/d955ffff/outdoor",
+			"landblock/d956ffff/outdoor",
+			"landblock/da54ffff/outdoor",
+			"landblock/da55ffff/outdoor",
+			"landblock/da56ffff/outdoor",
+			"landblock/db54ffff/outdoor",
+			"landblock/db55ffff/outdoor",
+			"landblock/db56ffff/outdoor",
+			"landblock/da55ffff/topology",
 		]);
 		expect(requests[0]?.requestId).toBe(
-			"streaming-7-outdoor-landblock-da55ffff-pack-landblock-pack/da55ffff",
+			"streaming-7-outdoor-landblock-da55ffff-outdoor-landblock/d954ffff/outdoor",
 		);
 	});
 
@@ -90,13 +90,19 @@ describe("scene asset request planner", () => {
 		expect(requests).toEqual([
 			{
 				requestId:
-					"bootstrap-3-interior-cell-016c0155-landblock-016cffff-pack-landblock-pack/016cffff",
-				assetId: "landblock-pack/016cffff",
+					"bootstrap-3-interior-cell-016c0155-landblock-016cffff-topology-landblock/016cffff/topology",
+				assetId: "landblock/016cffff/topology",
+				priority: "bootstrap",
+			},
+			{
+				requestId:
+					"bootstrap-3-interior-cell-016c0155-landblock-016cffff-env-cell-env-cell/016c0155",
+				assetId: "env-cell/016c0155",
 				priority: "bootstrap",
 			},
 		]);
 		expect(deriveSceneCoverageAssetIds(destination, {})).toEqual([
-			"landblock-pack/016cffff",
+			"landblock/016cffff/topology",
 		]);
 	});
 
@@ -104,17 +110,19 @@ describe("scene asset request planner", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
-		const preparedPack = createPreparedDungeonPackWithIndoorStatic(
-			0x016cffff,
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(
 			0x016c0155,
-			"gfx-obj/02000001",
+			[],
+			["gfx-obj/02000001"],
 		);
 		const requests = createSceneCoverageRequests(
 			{
 				requestRevision: 4,
 				browserDestination: destination,
 				preparedByAssetId: {
-					[preparedPack.request.assetId]: preparedPack,
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
 				},
 				pendingAssetIds: [],
 			},
@@ -135,10 +143,11 @@ describe("scene asset request planner", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
-		const preparedPack = createPreparedDungeonPackWithIndoorStatic(
-			0x016cffff,
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(
 			0x016c0155,
-			"setup-model/02000001",
+			[],
+			["setup-model/02000001"],
 		);
 		const setupModel = createPreparedSetupModel(
 			"setup-model/02000001",
@@ -149,7 +158,8 @@ describe("scene asset request planner", () => {
 				requestRevision: 5,
 				browserDestination: destination,
 				preparedByAssetId: {
-					[preparedPack.request.assetId]: preparedPack,
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
 					[setupModel.request.assetId]: setupModel,
 				},
 				pendingAssetIds: [],
@@ -166,10 +176,11 @@ describe("scene asset request planner", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
-		const preparedPack = createPreparedDungeonPackWithIndoorStatic(
-			0x016cffff,
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(
 			0x016c0155,
-			"gfx-obj/02000001",
+			[],
+			["gfx-obj/02000001"],
 		);
 		const gfxObj = createPreparedGfxObj("gfx-obj/02000001", [
 			"material/0800006c",
@@ -180,7 +191,8 @@ describe("scene asset request planner", () => {
 				requestRevision: 6,
 				browserDestination: destination,
 				preparedByAssetId: {
-					[preparedPack.request.assetId]: preparedPack,
+					[preparedTopology.request.assetId]: preparedTopology,
+					[preparedEnvCell.request.assetId]: preparedEnvCell,
 					[gfxObj.request.assetId]: gfxObj,
 				},
 				pendingAssetIds: [],
@@ -208,21 +220,18 @@ describe("scene asset request planner", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		expect(destination).not.toBeNull();
 
-		const preparedPack = createPreparedDungeonPackWithIndoorStatic(
-			0x016cffff,
+		const preparedTopology = createPreparedTopology(0x016cffff, [0x016c0155]);
+		const preparedEnvCell = createPreparedEnvCell(
 			0x016c0155,
-			"gfx-obj/02000001",
+			["material/0800006c", "material/0800007e"],
+			["gfx-obj/02000001"],
 		);
-		const preparedEnvCell = createPreparedEnvCell(0x016c0155, [
-			"material/0800006c",
-			"material/0800007e",
-		]);
 		const requests = createSceneCoverageRequests(
 			{
 				requestRevision: 7,
 				browserDestination: destination,
 				preparedByAssetId: {
-					[preparedPack.request.assetId]: preparedPack,
+					[preparedTopology.request.assetId]: preparedTopology,
 					[preparedEnvCell.request.assetId]: preparedEnvCell,
 				},
 				pendingAssetIds: [],
@@ -238,58 +247,66 @@ describe("scene asset request planner", () => {
 	});
 });
 
-function createPreparedDungeonPackWithIndoorStatic(
+function createPreparedTopology(
 	landblockId: number,
-	envCellId: number,
-	gfxObjAssetId: string,
+	envCellIds: number[],
 ): PreparedAssetRecord {
-	const asset = createPreparedTerrainAsset(
-		"fixture-dungeon-pack",
-		formatLandblockPackAssetId(landblockId),
-	);
-	if (asset.payload.kind !== "landblock-pack") {
-		throw new Error("Expected test fixture to create a landblock pack.");
-	}
-
-	asset.payload.classification = "dungeon";
-	asset.payload.prepared.staticMeshes = [
-		createPreparedIndoorStaticMesh(landblockId, envCellId, gfxObjAssetId),
-	];
-	asset.payload.dependencies.renderableAssetIds = [gfxObjAssetId];
-	return asset;
-}
-
-function createPreparedIndoorStaticMesh(
-	landblockId: number,
-	envCellId: number,
-	gfxObjAssetId: string,
-): PreparedLandblockStaticMesh {
-	return {
-		instanceId: "fixture-indoor-static",
-		kind: "indoor-static",
-		owningLandblockId: landblockId,
-		owningEnvCellId: envCellId,
-		sourceDid: 0x02000001,
-		sourceAssetId: "setup-model/02000001",
-		sourceIndex: 0,
-		localPlacement: {
-			origin: { x: 0, y: 0, z: 0 },
-			orientation: { w: 1, x: 0, y: 0, z: 0 },
+	const assetId = formatLandblockTopologyAssetId(landblockId);
+	const request = {
+		requestId: `fixture-${assetId}`,
+		assetId,
+		priority: "streaming" as const,
+	};
+	const payload = {
+		kind: "landblock-topology" as const,
+		sourceAssetKind: "landblock-topology" as const,
+		residencyKind: "landblock" as const,
+		provenance: {
+			source: "repo-local-hba" as const,
+			sourceAssetKind: "landblock-topology",
+			errorCode: null,
+			detail: null,
 		},
-		sourceScale: { x: 1, y: 1, z: 1 },
-		partIndex: 0,
-		gfxObjId: 0x02000001,
-		gfxObjAssetId,
-		partPlacements: [],
-		partScale: { x: 1, y: 1, z: 1 },
-		sourceBounds: null,
-		instanceBounds: null,
+		landblockId,
+		landblockInfoId: landblockId & 0xffff_fffe,
+		classification: "dungeon" as const,
+		envCells: envCellIds.map((envCellId) => ({
+			memberId: `env-cell/${envCellId.toString(16).padStart(8, "0")}`,
+			envCellId,
+			assetId: formatEnvCellAssetId(envCellId),
+			localPlacement: {
+				origin: { x: 0, y: 0, z: 0 },
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+			},
+			visibleEnvCellIds: [],
+			restrictionObjectId: null,
+			seenOutside: null,
+		})),
+		portalLinks: [],
+		envCellResidencyBvh: {
+			coordinateSpace: "landblock-scene-residency" as const,
+			nodes: [],
+			items: [],
+		},
+		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
+	};
+	return {
+		request,
+		response: {
+			requestId: request.requestId,
+			assetId,
+			payloadKind: "json",
+			payload,
+		},
+		payload,
+		preparedAt: "2026-05-23T00:00:00.000Z",
 	};
 }
 
 function createPreparedEnvCell(
 	envCellId: number,
 	materialAssetIds: string[],
+	sourceAssetIds: string[] = [],
 ): PreparedAssetRecord {
 	const assetId = formatEnvCellAssetId(envCellId);
 	const request = {
@@ -318,7 +335,19 @@ function createPreparedEnvCell(
 		portals: [],
 		visibleEnvCellIds: [],
 		portalApertures: [],
-		statics: [],
+		statics: sourceAssetIds.map((sourceAssetId, index) => ({
+			instanceId: `fixture-indoor-static-${index}`,
+			sourceDid: 0x02000001,
+			sourceAssetId,
+			sourceIndex: index,
+			localPlacement: {
+				origin: { x: 0, y: 0, z: 0 },
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+			sourceBounds: null,
+			instanceBounds: null,
+		})),
 		renderGeometry: {
 			sourceId: 1,
 			vertexCount: 0,

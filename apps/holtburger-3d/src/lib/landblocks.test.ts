@@ -7,19 +7,23 @@ import {
 	deriveLandblockEnvCellIds,
 	formatEnvCellAssetId,
 	formatLandblockBuildingShellsAssetId,
+	formatLandblockOutdoorAssetId,
 	formatLandblockPackAssetId,
 	formatLandblockSceneAssetId,
 	formatLandblockSummaryAssetId,
 	formatLandblockTerrainAssetId,
 	formatLandblockLabel,
+	formatLandblockTopologyAssetId,
 	formatTerrainMaterialAssetId,
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 	parseEnvCellAssetId,
 	parseLandblockBuildingShellsAssetId,
+	parseLandblockOutdoorAssetId,
 	parseLandblockSceneAssetId,
 	parseLandblockTerrainAssetId,
+	parseLandblockTopologyAssetId,
 	parseTerrainMaterialAssetId,
 } from "./landblocks";
 
@@ -44,6 +48,12 @@ describe("outdoor landblock helpers", () => {
 		);
 		expect(formatLandblockSceneAssetId(landblockId)).toBe(
 			"landblock/da55ffff/scene",
+		);
+		expect(formatLandblockOutdoorAssetId(landblockId)).toBe(
+			"landblock/da55ffff/outdoor",
+		);
+		expect(formatLandblockTopologyAssetId(landblockId)).toBe(
+			"landblock/da55ffff/topology",
 		);
 	});
 
@@ -80,10 +90,14 @@ describe("outdoor landblock helpers", () => {
 		expect(parseLandblockSceneAssetId("landblock/da550123/scene")).toBe(
 			0xda550123,
 		);
+		expect(parseLandblockOutdoorAssetId("landblock/da550123/outdoor")).toBe(
+			0xda550123,
+		);
+		expect(parseLandblockTopologyAssetId("landblock/da550123/topology")).toBe(
+			0xda550123,
+		);
 		expect(
-			parseLandblockBuildingShellsAssetId(
-				"landblock/da550123/building-shells",
-			),
+			parseLandblockBuildingShellsAssetId("landblock/da550123/building-shells"),
 		).toBe(0xda550123);
 		expect(formatEnvCellAssetId(0xda550123)).toBe("env-cell/da550123");
 		expect(parseEnvCellAssetId("env-cell/da550123")).toBe(0xda550123);

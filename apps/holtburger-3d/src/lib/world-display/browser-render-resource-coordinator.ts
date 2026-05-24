@@ -1,7 +1,7 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import { browserDestinationToInteriorCellId } from "../../app/browser-mode";
 import {
-	derivePackInteriorEnvCellIdsForLandblocks,
+	deriveTopologyEnvCellIdsForLandblocks,
 	deriveTerrainFocusLandblockId,
 } from "../assets/scene-asset-request-planner";
 import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
@@ -24,7 +24,10 @@ import {
 	deriveRenderChunkTransforms,
 	type RenderChunkTransform,
 } from "./render-anchor";
-import type { RenderLandblockAnchor, RenderChunkPlacement } from "./render-chunks";
+import type {
+	RenderLandblockAnchor,
+	RenderChunkPlacement,
+} from "./render-chunks";
 import {
 	createLinearRenderSpatialIndex,
 	type RenderSpatialIndexQuery,
@@ -102,9 +105,7 @@ export interface BrowserRenderResourceSurface {
 	setRenderSceneContext(
 		context: ReturnType<typeof deriveWorldRenderSceneContext>,
 	): void;
-	setRenderChunkTransforms(
-		transforms: readonly RenderChunkTransform[],
-	): void;
+	setRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
 	setTerrainScene(scene: TerrainSceneModel): void;
 	setStaticRenderableScene(scene: StaticRenderableSceneModel): void;
 	setStructuredInteriorScene(scene: StructuredInteriorSceneModel): void;
@@ -144,8 +145,10 @@ export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourc
 			"Structured interior scene is dormant until the browser destination or outdoor links select env cells.",
 		cellIndicatorText: "Cell indicators are hidden.",
 		portalDiagnosticsText: "Portal polygon overlays are hidden.",
-		landblockVisibilityText: "Outdoor landblock selection is waiting for focus.",
-		cellVisibilityFallbackText: "0 loaded env cells; renderer visibility pending.",
+		landblockVisibilityText:
+			"Outdoor landblock selection is waiting for focus.",
+		cellVisibilityFallbackText:
+			"0 loaded env cells; renderer visibility pending.",
 	};
 }
 
@@ -179,7 +182,9 @@ export class BrowserRenderResourceCoordinator {
 		this.surface?.setControlledCameraFrame(frame);
 	}
 
-	update(input: BrowserRenderResourceCoordinatorInput): BrowserRenderResourceSnapshot {
+	update(
+		input: BrowserRenderResourceCoordinatorInput,
+	): BrowserRenderResourceSnapshot {
 		const outdoorFocusLandblockId =
 			input.browserDestination?.kind === "outdoor-location"
 				? deriveTerrainFocusLandblockId(input.browserDestination)
@@ -204,7 +209,7 @@ export class BrowserRenderResourceCoordinator {
 			outdoorSceneInterest === null
 				? []
 				: [
-						...derivePackInteriorEnvCellIdsForLandblocks(
+						...deriveTopologyEnvCellIdsForLandblocks(
 							input.assetState.preparedByAssetId,
 							new Set(outdoorSceneInterest.envCellLandblockIds),
 						),
@@ -222,9 +227,9 @@ export class BrowserRenderResourceCoordinator {
 				? null
 				: {
 						buildingLandblockIds: outdoorSceneInterest.buildingLandblockIds,
-					detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
-					envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
-				},
+						detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
+						envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
+					},
 			this.staticRenderableResourceCache,
 		);
 		const structuredInteriorScene = deriveStructuredInteriorSceneModel(
@@ -369,7 +374,8 @@ export class BrowserRenderResourceCoordinator {
 			this.applySurfaceResource(
 				"transition-portal-depth",
 				String(input.transitionPortalMaxDepth),
-				() => surface.setTransitionPortalMaxDepth(input.transitionPortalMaxDepth),
+				() =>
+					surface.setTransitionPortalMaxDepth(input.transitionPortalMaxDepth),
 			);
 		}
 
@@ -415,7 +421,8 @@ export class BrowserRenderResourceCoordinator {
 		for (const entry of entries) {
 			nextOwnerKeys.add(entry.ownerKey);
 			if (
-				this.appliedLandblockPackSpatialItems.get(entry.ownerKey) !== entry.items
+				this.appliedLandblockPackSpatialItems.get(entry.ownerKey) !==
+				entry.items
 			) {
 				this.renderSpatialIndex.replaceOwnerItems(entry.ownerKey, entry.items);
 				this.appliedLandblockPackSpatialItems.set(entry.ownerKey, entry.items);
@@ -598,7 +605,9 @@ function describeRenderSpatialIndexSignature({
 	].join(";");
 }
 
-function describeSceneCameraFrameSignature(frame: SceneCameraFrame | null): string {
+function describeSceneCameraFrameSignature(
+	frame: SceneCameraFrame | null,
+): string {
 	if (!frame) {
 		return "none";
 	}
@@ -622,7 +631,11 @@ function describeSceneCameraFrameSignature(frame: SceneCameraFrame | null): stri
 		.join("|");
 }
 
-function formatVectorSignature(vector: { x: number; y: number; z: number }): string {
+function formatVectorSignature(vector: {
+	x: number;
+	y: number;
+	z: number;
+}): string {
 	return `${vector.x.toFixed(5)},${vector.y.toFixed(5)},${vector.z.toFixed(5)}`;
 }
 
@@ -763,8 +776,9 @@ function deriveSnapshot({
 						input.browserDestination,
 					)
 				: `${staticRenderableScene.parts.length} static renderable part${staticRenderableScene.parts.length === 1 ? "" : "s"} across ${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size} domain-safe chunked instanced group${staticRenderableScene.partsByRenderDomainChunkAndGfxAssetId.size === 1 ? "" : "s"}.`,
-		staticRenderableLayerText:
-			describeStaticRenderableLayerState(staticRenderableScene),
+		staticRenderableLayerText: describeStaticRenderableLayerState(
+			staticRenderableScene,
+		),
 		structuredInteriorText:
 			structuredInteriorScene.cells.length > 0
 				? linkedOutdoorEnvCellIds.length > 0 &&

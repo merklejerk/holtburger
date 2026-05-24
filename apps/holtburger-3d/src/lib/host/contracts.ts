@@ -620,6 +620,49 @@ const landblockScenePortalLinkDtoSchema = z.object({
 	sourceIndex: z.number().int().nonnegative(),
 });
 
+const landblockOutdoorBuildingFactsDtoSchema = z.object({
+	numLeaves: z.number().int().nonnegative(),
+	portals: z.array(landblockSceneBuildingPortalDtoSchema),
+});
+
+const landblockGeneratedSceneryFactsDtoSchema = z.object({
+	terrainIndex: z.number().int().nonnegative(),
+	sceneId: z.number().int().nonnegative(),
+	sceneTemplateIndex: z.number().int().nonnegative(),
+});
+
+const landblockOutdoorStaticMemberDtoSchema = z.object({
+	kind: z.enum(["explicit-object", "building", "generated-scenery"]),
+	instanceId: z.string().min(1),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	sourceIndex: z.number().int().nonnegative(),
+	localPlacement: placementTransformDtoSchema,
+	sourceScale: vec3DtoSchema,
+	sourceBounds: preparedAabbDtoSchema.nullable(),
+	instanceBounds: preparedAabbDtoSchema.nullable(),
+	building: landblockOutdoorBuildingFactsDtoSchema.nullable(),
+	generated: landblockGeneratedSceneryFactsDtoSchema.nullable(),
+});
+
+export const landblockOutdoorPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-outdoor"),
+	residencyKind: z.literal("outdoor-landblock"),
+	sourceAssetKind: z.literal("landblock-outdoor"),
+	landblockId: z.number().int().nonnegative(),
+	regionId: z.number().int().nonnegative(),
+	regionNumber: z.number().int().nonnegative(),
+	classification: z.literal("outdoor"),
+	terrain: landblockTerrainDtoSchema,
+	statics: z.array(landblockOutdoorStaticMemberDtoSchema),
+	outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockOutdoorPayloadDto = z.infer<
+	typeof landblockOutdoorPayloadDtoSchema
+>;
+
 export const landblockScenePayloadDtoSchema = z.object({
 	kind: z.literal("landblock-scene"),
 	residencyKind: z.literal("landblock"),
@@ -638,6 +681,23 @@ export const landblockScenePayloadDtoSchema = z.object({
 });
 export type LandblockScenePayloadDto = z.infer<
 	typeof landblockScenePayloadDtoSchema
+>;
+
+export const landblockTopologyPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-topology"),
+	residencyKind: z.literal("landblock"),
+	sourceAssetKind: z.literal("landblock-topology"),
+	landblockId: z.number().int().nonnegative(),
+	landblockInfoId: z.number().int().nonnegative(),
+	classification: landblockClassificationValueSchema,
+	envCells: z.array(landblockSceneEnvCellMemberDtoSchema),
+	portalLinks: z.array(landblockScenePortalLinkDtoSchema),
+	envCellResidencyBvh: preparedEnvCellResidencyBvhDtoSchema,
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockTopologyPayloadDto = z.infer<
+	typeof landblockTopologyPayloadDtoSchema
 >;
 
 const envCellSurfaceSlotDtoSchema = z.object({

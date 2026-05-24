@@ -154,6 +154,35 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
+	it("extracts outdoor and topology dependencies from route-specific members", () => {
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse(
+					"landblock/da55ffff/outdoor",
+					createLandblockOutdoorPayload([
+						createOutdoorStaticMember("static-0", "gfx-obj/01000010"),
+						createOutdoorStaticMember("building-0", "setup-model/02000010"),
+					]),
+				),
+			),
+		).toEqual([
+			{ assetId: "gfx-obj/01000010" },
+			{ assetId: "setup-model/02000010" },
+			{ assetId: "terrain-material/1" },
+		]);
+
+		expect(
+			getAssetResponseDependencies(
+				createJsonResponse(
+					"landblock/da55ffff/topology",
+					createLandblockTopologyPayload([
+						createSceneEnvCellMember(0xda550100),
+					]),
+				),
+			),
+		).toEqual([{ assetId: "env-cell/da550100" }]);
+	});
+
 	it("extracts building shell dependencies without material leaves", () => {
 		const response = createJsonResponse(
 			"landblock/da55ffff/building-shells",
@@ -493,6 +522,64 @@ function createLandblockBuildingShellsPayload(
 				kind: "building-shell" as const,
 				shellId: shell.shellId,
 			})),
+		},
+		diagnostics: emptyLandblockDiagnostics(),
+		provenance,
+	};
+}
+
+function createLandblockOutdoorPayload(
+	statics: ReturnType<typeof createOutdoorStaticMember>[] = [],
+) {
+	const terrainPayload = createLandblockTerrainPayload();
+	return {
+		kind: "landblock-outdoor" as const,
+		residencyKind: "outdoor-landblock" as const,
+		sourceAssetKind: "landblock-outdoor" as const,
+		landblockId: terrainPayload.landblockId,
+		regionId: terrainPayload.regionId,
+		regionNumber: terrainPayload.regionNumber,
+		classification: "outdoor" as const,
+		terrain: terrainPayload.terrain,
+		statics,
+		outdoorBvh: null,
+		diagnostics: emptyLandblockDiagnostics(),
+		provenance,
+	};
+}
+
+function createOutdoorStaticMember(instanceId: string, sourceAssetId: string) {
+	return {
+		kind: "explicit-object" as const,
+		instanceId,
+		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
+		sourceAssetId,
+		sourceIndex: 0,
+		localPlacement: identityPlacement(),
+		sourceScale: { x: 1, y: 1, z: 1 },
+		sourceBounds: null,
+		instanceBounds: null,
+		building: null,
+		generated: null,
+	};
+}
+
+function createLandblockTopologyPayload(
+	envCells: ReturnType<typeof createSceneEnvCellMember>[] = [],
+) {
+	return {
+		kind: "landblock-topology" as const,
+		residencyKind: "landblock" as const,
+		sourceAssetKind: "landblock-topology" as const,
+		landblockId: 0xda55ffff,
+		landblockInfoId: 0xda55fffe,
+		classification: "outdoor" as const,
+		envCells,
+		portalLinks: [],
+		envCellResidencyBvh: {
+			coordinateSpace: "landblock-scene-residency" as const,
+			nodes: [],
+			items: [],
 		},
 		diagnostics: emptyLandblockDiagnostics(),
 		provenance,

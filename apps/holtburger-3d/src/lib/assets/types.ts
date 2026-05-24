@@ -241,6 +241,45 @@ export interface PreparedLandblockTerrainPayload extends PreparedAssetPayloadBas
 	diagnostics: PreparedLandblockPackPayload["diagnostics"];
 }
 
+interface PreparedLandblockOutdoorBuildingFacts {
+	numLeaves: number;
+	portals: PreparedLandblockSceneBuildingPortal[];
+}
+
+interface PreparedLandblockGeneratedSceneryFacts {
+	terrainIndex: number;
+	sceneId: number;
+	sceneTemplateIndex: number;
+}
+
+interface PreparedLandblockOutdoorStaticMember {
+	kind: "explicit-object" | "building" | "generated-scenery";
+	instanceId: string;
+	sourceDid: number;
+	sourceAssetId: string;
+	sourceIndex: number;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
+	sourceBounds: PreparedBounds | null;
+	instanceBounds: PreparedBounds | null;
+	building: PreparedLandblockOutdoorBuildingFacts | null;
+	generated: PreparedLandblockGeneratedSceneryFacts | null;
+}
+
+export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-outdoor";
+	sourceAssetKind: "landblock-outdoor";
+	residencyKind: "outdoor-landblock";
+	landblockId: number;
+	regionId: number;
+	regionNumber: number;
+	classification: "outdoor";
+	terrain: PreparedLandblockTerrain;
+	statics: PreparedLandblockOutdoorStaticMember[];
+	outdoorBvh: PreparedOutdoorBvh | null;
+	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+}
+
 interface PreparedLandblockBuildingShellBvhItem {
 	kind: "building-shell";
 	shellId: string;
@@ -368,6 +407,19 @@ export interface PreparedLandblockScenePayload extends PreparedAssetPayloadBase 
 	portalLinks: PreparedLandblockScenePortalLink[];
 	envCellResidencyBvh: PreparedEnvCellResidencyBvh;
 	outdoorBvh: PreparedOutdoorBvh | null;
+	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+}
+
+export interface PreparedLandblockTopologyPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-topology";
+	sourceAssetKind: "landblock-topology";
+	residencyKind: "landblock";
+	landblockId: number;
+	landblockInfoId: number;
+	classification: "outdoor" | "dungeon";
+	envCells: PreparedLandblockSceneEnvCellMember[];
+	portalLinks: PreparedLandblockScenePortalLink[];
+	envCellResidencyBvh: PreparedEnvCellResidencyBvh;
 	diagnostics: PreparedLandblockPackPayload["diagnostics"];
 }
 
@@ -932,8 +984,10 @@ export type PreparedAssetPayload =
 	| PreparedLandblockPackPayload
 	| PreparedLandblockSummaryPayload
 	| PreparedLandblockTerrainPayload
+	| PreparedLandblockOutdoorPayload
 	| PreparedLandblockBuildingShellsPayload
 	| PreparedLandblockScenePayload
+	| PreparedLandblockTopologyPayload
 	| PreparedEnvCellPayload
 	| PreparedGfxObjPayload
 	| PreparedSetupModelPayload
@@ -1006,6 +1060,13 @@ export function getPreparedAssetDependencies(
 		]);
 	}
 
+	if (asset.payload.kind === "landblock-outdoor") {
+		return uniqueSortedAssetIds([
+			formatTerrainMaterialDependencyAssetId(asset.payload.regionNumber),
+			...asset.payload.statics.map((member) => member.sourceAssetId),
+		]);
+	}
+
 	if (asset.payload.kind === "landblock-building-shells") {
 		return uniqueSortedAssetIds(
 			asset.payload.shells.map((shell) => shell.sourceAssetId),
@@ -1018,6 +1079,12 @@ export function getPreparedAssetDependencies(
 			...asset.payload.buildings.map((member) => member.sourceAssetId),
 			...asset.payload.envCells.map((member) => member.assetId),
 		]);
+	}
+
+	if (asset.payload.kind === "landblock-topology") {
+		return uniqueSortedAssetIds(
+			asset.payload.envCells.map((member) => member.assetId),
+		);
 	}
 
 	if (asset.payload.kind === "env-cell") {

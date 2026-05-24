@@ -2277,6 +2277,7 @@ dependencies = [
  "hex",
  "holtburger-content",
  "holtburger-core",
+ "holtburger-dat",
  "log",
  "tokio",
 ]

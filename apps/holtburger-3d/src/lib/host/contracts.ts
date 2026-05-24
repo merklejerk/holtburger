@@ -85,6 +85,7 @@ const preparedPolygonSetRenderTriangleDtoSchema = z.object({
 
 const preparedPolygonSetInvalidPolygonDtoSchema = z.object({
 	polygonId: z.number().int().nonnegative(),
+	reason: z.string(),
 	vertexIds: z.array(z.number().int()),
 	missingVertexIds: z.array(z.number().int()),
 });

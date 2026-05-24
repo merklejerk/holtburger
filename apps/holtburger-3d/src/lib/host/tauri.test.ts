@@ -31,7 +31,7 @@ describe("Tauri host commands", () => {
 		).rejects.toThrow(/requires the Tauri runtime/i);
 	});
 
-	it("isolates large binary lookups from small batched assets", () => {
+	it("plans binary lookups as one host batch", () => {
 		const batches = planBinaryLookupBatches([
 			createRequest("a", "landblock/0102ffff/topology"),
 			createRequest("b", "landblock/0102ffff/outdoor"),
@@ -44,12 +44,14 @@ describe("Tauri host commands", () => {
 		expect(
 			batches.map((batch) => batch.map((request) => request.assetId)),
 		).toEqual([
-			["landblock/0102ffff/topology"],
-			["landblock/0102ffff/outdoor"],
-			["gfx-obj/01000001"],
-			["render-surface/06000001"],
-			["landblock/0103ffff/topology"],
-			["env-cell/01030100"],
+			[
+				"landblock/0102ffff/topology",
+				"landblock/0102ffff/outdoor",
+				"gfx-obj/01000001",
+				"render-surface/06000001",
+				"landblock/0103ffff/topology",
+				"env-cell/01030100",
+			],
 		]);
 	});
 
@@ -63,7 +65,7 @@ describe("Tauri host commands", () => {
 
 		expect(
 			plan.binaryBatches.map((batch) => batch.map((request) => request.assetId)),
-		).toEqual([["env-cell/01030100"], ["render-surface/06000001"]]);
+		).toEqual([["env-cell/01030100", "render-surface/06000001"]]);
 		expect(plan.jsonRequests.map((request) => request.assetId)).toEqual([
 			"material/0800006c",
 			"render-texture/05000001",

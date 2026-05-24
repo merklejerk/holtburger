@@ -2154,6 +2154,7 @@ name = "holtburger-3d"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "futures",
  "holtburger-common",
  "holtburger-content",
  "holtburger-core",

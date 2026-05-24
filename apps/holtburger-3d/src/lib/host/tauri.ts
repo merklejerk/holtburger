@@ -16,8 +16,6 @@ import {
 } from "./binary-asset-envelope";
 import type { ZodType } from "zod";
 
-const MAX_BINARY_LOOKUP_BATCH_SIZE = 4;
-
 export interface BinaryAssetLookupEnvelopeDto {
 	payload: ArrayBuffer;
 }
@@ -188,32 +186,7 @@ function normalizeBinaryPayloadToArrayBuffer(payload: unknown): ArrayBuffer {
 export function planBinaryLookupBatches(
 	requests: readonly AssetLookupRequestDto[],
 ): AssetLookupRequestDto[][] {
-	const batches: AssetLookupRequestDto[][] = [];
-	let currentBatch: AssetLookupRequestDto[] = [];
-
-	const flushCurrentBatch = (): void => {
-		if (currentBatch.length === 0) {
-			return;
-		}
-		batches.push(currentBatch);
-		currentBatch = [];
-	};
-
-	for (const request of requests) {
-		if (isLargeBinaryAssetLookup(request.assetId)) {
-			flushCurrentBatch();
-			batches.push([request]);
-			continue;
-		}
-
-		currentBatch.push(request);
-		if (currentBatch.length >= MAX_BINARY_LOOKUP_BATCH_SIZE) {
-			flushCurrentBatch();
-		}
-	}
-
-	flushCurrentBatch();
-	return batches;
+	return requests.length === 0 ? [] : [[...requests]];
 }
 
 export interface AssetLookupEnvelopePlan {
@@ -240,14 +213,6 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("gfx-obj/") ||
-		assetId.startsWith("render-surface/")
-	);
-}
-
-function isLargeBinaryAssetLookup(assetId: string): boolean {
-	return (
-		/^landblock\/[0-9a-fA-F]{8}\/outdoor$/.test(assetId) ||
-		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("render-surface/")
 	);
 }

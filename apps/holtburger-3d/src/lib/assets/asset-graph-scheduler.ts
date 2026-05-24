@@ -14,21 +14,10 @@ export interface AssetGraphPreparationResult {
 	dependencyStatus: PreparedAssetDependencyStatus;
 }
 
-interface AssetGraphSchedulerOptions {
-	lookupConcurrencyLimit?: number;
-}
-
-const DEFAULT_LOOKUP_CONCURRENCY_LIMIT = 4;
-
 export class AssetGraphScheduler {
-	private readonly lookupConcurrencyLimit: number;
-
 	constructor(
 		private readonly gateway: AssetPreparationGateway,
-		options: AssetGraphSchedulerOptions = {},
 	) {
-		this.lookupConcurrencyLimit =
-			options.lookupConcurrencyLimit ?? DEFAULT_LOOKUP_CONCURRENCY_LIMIT;
 	}
 
 	async prepareAssetGraph(
@@ -48,14 +37,8 @@ export class AssetGraphScheduler {
 		};
 
 		while (graph.hasReadyRequests() || activeLookupTasks.size > 0) {
-			while (
-				!graph.hasFailed() &&
-				graph.hasReadyRequests() &&
-				activeLookupTasks.size < this.lookupConcurrencyLimit
-			) {
-				const requests = graph.shiftReadyRequests(
-					this.lookupConcurrencyLimit - activeLookupTasks.size,
-				);
+			if (!graph.hasFailed() && graph.hasReadyRequests()) {
+				const requests = graph.shiftReadyRequests();
 				if (requests.length > 0) {
 					scheduleLookupBatch(requests);
 				}
@@ -129,11 +112,8 @@ class GraphTraversalState {
 		return this.readyQueue.length > 0;
 	}
 
-	shiftReadyRequests(maxCount: number): AssetLookupRequestDto[] {
-		if (!Number.isInteger(maxCount) || maxCount <= 0) {
-			throw new Error("Graph lookup batch size must be positive.");
-		}
-		return this.readyQueue.splice(0, maxCount);
+	shiftReadyRequests(): AssetLookupRequestDto[] {
+		return this.readyQueue.splice(0);
 	}
 
 	hasFailed(): boolean {

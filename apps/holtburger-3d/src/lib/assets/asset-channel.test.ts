@@ -8,14 +8,12 @@ import type {
 	AssetWorkerPrepareBatchRequest,
 	AssetWorkerRequestMessage,
 	AssetWorkerResponseMessage,
-	QueuedPrepareItem,
 } from "../../workers/asset-worker";
-import { planWorkerPrepareBatches } from "../../workers/asset-worker";
 import { prepareAssetPayload } from "../../workers/asset-worker";
 import type { PreparedAssetRecord } from "./types";
 
 describe("asset channel", () => {
-	it("posts one worker prepare request per asset", async () => {
+	it("posts microtask-coalesced worker prepare requests as one batch", async () => {
 		const worker = new FakeAssetWorker();
 		const channel = new AssetChannelController(
 			async () => [],
@@ -32,8 +30,8 @@ describe("asset channel", () => {
 			worker.prepareMessages.map((message) =>
 				message.items.map((item) => item.request),
 			),
-		).toEqual([[first], [second]]);
-		expect(worker.transferLists).toEqual([[], []]);
+		).toEqual([[first, second]]);
+		expect(worker.transferLists).toEqual([[]]);
 
 		for (const message of worker.prepareMessages) {
 			worker.emitPreparedBatch(message);
@@ -79,32 +77,6 @@ describe("asset channel", () => {
 
 		worker.emitPreparedBatch(prepareMessage as AssetWorkerPrepareBatchRequest);
 		await expect(prepared).resolves.toEqual(createPreparedAsset(request));
-	});
-});
-
-describe("asset worker prepare batching", () => {
-	it("batches small assets while isolating large scene roots", () => {
-		const items = [
-			createQueuedItem("request-a", "gfx-obj/01000001"),
-			createQueuedItem("request-b", "gfx-obj/01000002"),
-			createQueuedItem("request-outdoor", "landblock/da5fffff/outdoor"),
-			createQueuedItem("request-topology", "landblock/da5fffff/topology"),
-			createQueuedItem("request-d", "gfx-obj/01000003"),
-			createQueuedItem("request-e", "gfx-obj/01000004"),
-		];
-
-		expect(
-			planWorkerPrepareBatches(items, 2).map((batch) =>
-				batch.map((item) => item.request.assetId),
-			),
-		).toEqual([
-			["gfx-obj/01000001"],
-			["gfx-obj/01000002"],
-			["landblock/da5fffff/outdoor"],
-			["landblock/da5fffff/topology"],
-			["gfx-obj/01000003"],
-			["gfx-obj/01000004"],
-		]);
 	});
 });
 
@@ -215,15 +187,6 @@ function createPreparedAsset(request: AssetLookupRequestDto): PreparedAssetRecor
 			debugPresentation: null,
 		},
 		preparedAt: "2026-05-22T00:00:00.000Z",
-	};
-}
-
-function createQueuedItem(
-	requestId: string,
-	assetId: string,
-): QueuedPrepareItem {
-	return {
-		request: createRequest(requestId, assetId),
 	};
 }
 

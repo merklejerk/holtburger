@@ -236,9 +236,7 @@ export class AssetChannelController {
 
 		try {
 			this.throwIfDisposed();
-			for (const pending of pendingRequests) {
-				this.postPrepareRequest(pending);
-			}
+			this.postPrepareRequests(pendingRequests);
 		} catch (error) {
 			const normalized = toError(error);
 			for (const pending of pendingRequests) {
@@ -248,14 +246,12 @@ export class AssetChannelController {
 		}
 	}
 
-	private postPrepareRequest(pending: PendingAssetRequest): void {
+	private postPrepareRequests(pendingRequests: readonly PendingAssetRequest[]): void {
 		const message = {
 			type: "prepare-assets",
-			items: [
-				{
-					request: pending.request,
-				},
-			],
+			items: pendingRequests.map((pending) => ({
+				request: pending.request,
+			})),
 		} satisfies AssetWorkerRequestMessage;
 		this.worker.postMessage(message);
 	}

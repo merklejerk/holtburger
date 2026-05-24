@@ -149,23 +149,29 @@ impl HostBoundaryAdapter {
         &self,
         requests: Vec<AssetLookupRequestDto>,
     ) -> anyhow::Result<Vec<u8>> {
-        let mut writer = BinaryAssetSectionWriter::default();
-        let mut responses = Vec::with_capacity(requests.len());
-        for request in requests {
-            let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id)
-            else {
-                anyhow::bail!(
-                    "binary asset lookup only supports content assets, got {}",
-                    request.asset_id
-                );
-            };
+        let loaded_assets = futures::future::join_all(requests.into_iter().map(|request| {
+            let content_asset_runtime = self.content_asset_runtime.clone();
+            async move {
+                let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id)
+                else {
+                    anyhow::bail!(
+                        "binary asset lookup only supports content assets, got {}",
+                        request.asset_id
+                    );
+                };
 
+                let asset = content_asset_runtime.load(content_request.clone()).await;
+                anyhow::Ok((request, content_request, asset))
+            }
+        }))
+        .await;
+
+        let mut writer = BinaryAssetSectionWriter::default();
+        let mut responses = Vec::with_capacity(loaded_assets.len());
+        for loaded_asset in loaded_assets {
+            let (request, content_request, asset) = loaded_asset?;
             let response_index = responses.len();
             let path_prefix = format!("responses.{response_index}.payload");
-            let asset = self
-                .content_asset_runtime
-                .load(content_request.clone())
-                .await;
             responses.push(serialize_content_asset_binary_response(
                 self,
                 request,

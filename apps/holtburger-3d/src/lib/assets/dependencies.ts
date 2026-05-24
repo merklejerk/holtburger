@@ -3,12 +3,7 @@ import {
 	dependencyManifestPayloadDtoSchema,
 	envCellPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
-	landblockBuildingShellsPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
-	landblockPackPayloadDtoSchema,
-	landblockScenePayloadDtoSchema,
-	landblockSummaryPayloadDtoSchema,
-	landblockTerrainPayloadDtoSchema,
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
@@ -25,33 +20,6 @@ export interface AssetDependencyRef {
 export function getAssetResponseDependencies(
 	response: AssetLookupResponseDto,
 ): AssetDependencyRef[] {
-	const landblockPack = landblockPackPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockPack.success) {
-		return uniqueSortedAssetIds(
-			landblockPack.data.dependencies.renderableAssetIds,
-		);
-	}
-
-	const landblockSummary = landblockSummaryPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockSummary.success) {
-		return [];
-	}
-
-	const landblockTerrain = landblockTerrainPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockTerrain.success) {
-		return uniqueSortedAssetIds([
-			formatTerrainMaterialDependencyAssetId(
-				landblockTerrain.data.regionNumber,
-			),
-		]);
-	}
-
 	const landblockOutdoor = landblockOutdoorPayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -61,25 +29,6 @@ export function getAssetResponseDependencies(
 				landblockOutdoor.data.regionNumber,
 			),
 			...landblockOutdoor.data.statics.map((member) => member.sourceAssetId),
-		]);
-	}
-
-	const landblockBuildingShells =
-		landblockBuildingShellsPayloadDtoSchema.safeParse(response.payload);
-	if (landblockBuildingShells.success) {
-		return uniqueSortedAssetIds(
-			landblockBuildingShells.data.shells.map((shell) => shell.sourceAssetId),
-		);
-	}
-
-	const landblockScene = landblockScenePayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockScene.success) {
-		return uniqueSortedAssetIds([
-			...landblockScene.data.statics.map((member) => member.sourceAssetId),
-			...landblockScene.data.buildings.map((member) => member.sourceAssetId),
-			...landblockScene.data.envCells.map((member) => member.assetId),
 		]);
 	}
 

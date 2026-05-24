@@ -4,9 +4,6 @@ import type {
 	AssetChannelState,
 	PreparedAssetRecord,
 	PreparedLandblockOutdoorPayload,
-	PreparedLandblockPackPayload,
-	PreparedLandblockSummaryPayload,
-	PreparedLandblockTerrainPayload,
 	PreparedTerrainMesh,
 } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
@@ -135,18 +132,7 @@ export function deriveTerrainSceneModel(
 function getTerrainMeshFromPreparedAsset(
 	asset: PreparedAssetRecord,
 ): PreparedTerrainMesh | null {
-	if (isPreparedLandblockPackWithTerrain(asset)) {
-		return asset.payload.prepared.terrainMesh;
-	}
-
-	if (isPreparedLandblockSummaryWithTerrain(asset)) {
-		return asset.payload.prepared.terrainMesh;
-	}
-
-	if (
-		asset.payload.kind === "landblock-outdoor" ||
-		asset.payload.kind === "landblock-terrain"
-	) {
+	if (asset.payload.kind === "landblock-outdoor") {
 		return convertPreparedLandblockTerrainPayload(asset.payload);
 	}
 
@@ -154,7 +140,7 @@ function getTerrainMeshFromPreparedAsset(
 }
 
 function convertPreparedLandblockTerrainPayload(
-	payload: PreparedLandblockOutdoorPayload | PreparedLandblockTerrainPayload,
+	payload: PreparedLandblockOutdoorPayload,
 ): PreparedTerrainMesh {
 	return {
 		landblockId: payload.landblockId,
@@ -216,44 +202,11 @@ function describeTerrainDataSources(
 function inferTerrainDataSource(
 	asset: PreparedAssetRecord,
 ): TerrainSceneTile["dataSource"] {
-	if (isPreparedLandblockPackWithTerrain(asset)) {
-		return asset.payload.provenance.source === "repo-local-hba"
-			? "repo-local-cell-landblock"
-			: "unknown";
-	}
-
-	if (isPreparedLandblockSummaryWithTerrain(asset)) {
-		return asset.payload.provenance.source === "repo-local-hba"
-			? "repo-local-cell-landblock"
-			: "unknown";
-	}
-
-	if (
-		asset.payload.kind === "landblock-outdoor" ||
-		asset.payload.kind === "landblock-terrain"
-	) {
+	if (asset.payload.kind === "landblock-outdoor") {
 		return asset.payload.provenance.source === "repo-local-hba"
 			? "repo-local-cell-landblock"
 			: "unknown";
 	}
 
 	return "unknown";
-}
-
-function isPreparedLandblockPackWithTerrain(
-	asset: PreparedAssetRecord,
-): asset is PreparedAssetRecord & { payload: PreparedLandblockPackPayload } {
-	return (
-		asset.payload.kind === "landblock-pack" &&
-		asset.payload.prepared.terrainMesh !== null
-	);
-}
-
-function isPreparedLandblockSummaryWithTerrain(
-	asset: PreparedAssetRecord,
-): asset is PreparedAssetRecord & { payload: PreparedLandblockSummaryPayload } {
-	return (
-		asset.payload.kind === "landblock-summary" &&
-		asset.payload.prepared.terrainMesh !== null
-	);
 }

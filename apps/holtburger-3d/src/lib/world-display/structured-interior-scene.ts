@@ -262,11 +262,11 @@ function describeStructuredInteriorStatus(
 }
 
 function describePreparedIndoorCache(assetState: AssetChannelState): string {
-	const preparedLandblockPackCount = Object.values(
-		assetState.preparedByAssetId,
-	).filter((asset) => asset.payload.kind === "landblock-pack").length;
+	const preparedEnvCellCount = Object.values(assetState.preparedByAssetId).filter(
+		(asset) => asset.payload.kind === "env-cell",
+	).length;
 
-	return `Structured interior cache contains ${preparedLandblockPackCount} prepared landblock pack${preparedLandblockPackCount === 1 ? "" : "s"}.`;
+	return `Structured interior cache contains ${preparedEnvCellCount} prepared env-cell asset${preparedEnvCellCount === 1 ? "" : "s"}.`;
 }
 
 function emptyStructuredInteriorSceneModel(

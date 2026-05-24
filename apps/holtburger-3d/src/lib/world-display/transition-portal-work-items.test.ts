@@ -26,7 +26,7 @@ const IDENTITY_PLACEMENT = {
 describe("transition portal work items", () => {
 	it("joins topology-only outdoor portals to loaded outside-transition env-cell apertures", () => {
 		const assetState = createAssetState([
-			createLandblockPackAsset({
+			createLandblockOutdoorAsset({
 				portalId: "outdoor-topology/00",
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [0x016c0157],
@@ -59,7 +59,7 @@ describe("transition portal work items", () => {
 			outsideVisibleSide: "positive",
 			targetStatus: "outside",
 			stencilRef: 1,
-			requestedInteriorEnvCellIds: [0x016c0155, 0x016c0156, 0x016c0157],
+			requestedInteriorEnvCellIds: [0x016c0155, 0x016c0157],
 		});
 		expect(model.candidates[0]?.aperture.id).toBe("cell-outside/01");
 	});
@@ -67,7 +67,7 @@ describe("transition portal work items", () => {
 	it("skips topology portals when aperture geometry is not loaded yet", () => {
 		const model = deriveModel(
 			createAssetState([
-				createLandblockPackAsset({
+				createLandblockOutdoorAsset({
 					portalId: "outdoor-topology/00",
 					linkedEnvCellIds: [0x016c0155],
 					stabList: [],
@@ -88,7 +88,7 @@ describe("transition portal work items", () => {
 
 	it("keeps the candidate source injectable for future runtime providers", () => {
 		const assetState = createAssetState([
-			createLandblockPackAsset({
+			createLandblockOutdoorAsset({
 				portalId: "outdoor-topology/00",
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [],
@@ -106,9 +106,9 @@ describe("transition portal work items", () => {
 		expect(model.candidates[0]?.source).toBe("runtime");
 	});
 
-	it("joins pack topology to pack-prepared aperture geometry without legacy scene assets", () => {
+	it("joins outdoor topology to env-cell aperture geometry without legacy scene assets", () => {
 		const assetState = createAssetState([
-			createLandblockPackAsset({
+			createLandblockOutdoorAsset({
 				portalId: "outdoor-topology/00",
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [],
@@ -157,7 +157,7 @@ describe("transition portal work items", () => {
 
 	it("rejects malformed outside apertures without treating them as walls", () => {
 		const assetState = createAssetState([
-			createLandblockPackAsset({
+			createLandblockOutdoorAsset({
 				portalId: "outdoor-topology/00",
 				linkedEnvCellIds: [0x016c0155],
 				stabList: [],
@@ -210,7 +210,7 @@ describe("transition portal work items", () => {
 	it("builds per-frame work items with explicit direction and broad scene targets", () => {
 		const model = deriveModel(
 			createAssetState([
-				createLandblockPackAsset({
+				createLandblockOutdoorAsset({
 					portalId: "outdoor-topology/00",
 					linkedEnvCellIds: [0x016c0155],
 					stabList: [],
@@ -267,29 +267,48 @@ function createAssetState(records: PreparedAssetRecord[]): AssetChannelState {
 	return state;
 }
 
-function createLandblockPackAsset(options: {
+function createLandblockOutdoorAsset(options: {
 	portalId: string;
 	linkedEnvCellIds: number[];
 	stabList: number[];
 	interiorEnvCellIds?: number[];
 }): PreparedAssetRecord {
-	return createPreparedAssetRecord("landblock-pack/016cffff", {
-		kind: "landblock-pack",
-		residencyKind: "landblock",
-		sourceAssetKind: "landblock-pack",
+	return createPreparedAssetRecord("landblock/016cffff/outdoor", {
+		kind: "landblock-outdoor",
+		residencyKind: "outdoor-landblock",
+		sourceAssetKind: "landblock-outdoor",
 		provenance: createProvenance(),
 		landblockId: 0x016cffff,
-		landblockInfoId: 0x016cfffe,
+		regionId: 0x13000000,
+		regionNumber: 1,
 		classification: "outdoor",
-		sourceFacts: {
-			buildings: [
-				{
-					instanceId: "building/0",
-					owningLandblockId: 0x016cffff,
-					sourceDid: 0x02000001,
-					sourceAssetId: "setup-model/02000001",
-					sourceIndex: 0,
-					localPlacement: IDENTITY_PLACEMENT,
+		terrain: {
+			gridSize: 9,
+			tileSize: 24,
+			vertices: [],
+			triangles: [],
+			quads: [],
+			terrainBvh: {
+				coordinateSpace: "landblock-terrain-local",
+				nodes: [],
+				items: [],
+			},
+			minHeight: 0,
+			maxHeight: 0,
+			bounds: null,
+		},
+		statics: [
+			{
+				kind: "building",
+				instanceId: "building/0",
+				sourceDid: 0x02000001,
+				sourceAssetId: "setup-model/02000001",
+				sourceIndex: 0,
+				localPlacement: IDENTITY_PLACEMENT,
+				sourceScale: { x: 1, y: 1, z: 1 },
+				sourceBounds: null,
+				instanceBounds: null,
+				building: {
 					numLeaves: 1,
 					portals: [
 						{
@@ -298,37 +317,15 @@ function createLandblockPackAsset(options: {
 							flags: 0,
 							otherCellId: options.linkedEnvCellIds[0] ?? 0,
 							otherPortalId: 0,
-							stabList: options.stabList,
+							stabLocalCellIds: options.stabList,
 							linkedEnvCellIds: options.linkedEnvCellIds,
 						},
 					],
 				},
-			],
-		},
-		prepared: {
-			terrainMesh: null,
-			outdoorStaticInstances: [],
-			interiorCells: (options.interiorEnvCellIds ?? []).map((envCellId) => ({
-				envCellId,
-				environmentId: 0x0d000001,
-				cellStructureId: 1,
-				localPlacement: IDENTITY_PLACEMENT,
-				surfaceIds: [],
-				portals: [],
-				portalApertures: [],
-				staticObjectCount: 0,
-				cellBsp: createLeafBspNode(),
-				renderGeometry: createRenderGeometry(),
-			})),
-			staticMeshes: [],
-			spatialItems: [],
-			staticLandblockBvh: null,
-		},
-		dependencies: {
-			cellDatIds: [],
-			portalDatIds: [],
-			renderableAssetIds: [],
-		},
+				generated: null,
+			},
+		],
+		outdoorBvh: null,
 		diagnostics: {
 			sourceRecords: [],
 			errors: [],

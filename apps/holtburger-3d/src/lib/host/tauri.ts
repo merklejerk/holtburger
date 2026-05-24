@@ -205,8 +205,8 @@ export function planBinaryLookupBatches(
 
 function usesBinaryAssetLookup(assetId: string): boolean {
 	return (
-		assetId.startsWith("landblock-pack/") ||
-		assetId.startsWith("landblock-summary/") ||
+		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId) ||
+		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("gfx-obj/") ||
 		assetId.startsWith("render-surface/")
 	);
@@ -214,7 +214,8 @@ function usesBinaryAssetLookup(assetId: string): boolean {
 
 function isLargeBinaryAssetLookup(assetId: string): boolean {
 	return (
-		assetId.startsWith("landblock-pack/") ||
+		/^landblock\/[0-9a-fA-F]{8}\/outdoor$/.test(assetId) ||
+		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("render-surface/")
 	);
 }

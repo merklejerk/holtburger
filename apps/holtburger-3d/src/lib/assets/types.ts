@@ -1053,31 +1053,10 @@ export function getPreparedAssetDependencies(
 		return asset.payload.dependencyAssetIds.map((assetId) => ({ assetId }));
 	}
 
-	if (asset.payload.kind === "landblock-terrain") {
-		const payload = asset.payload;
-		return uniqueSortedAssetIds([
-			formatTerrainMaterialDependencyAssetId(payload.regionNumber),
-		]);
-	}
-
 	if (asset.payload.kind === "landblock-outdoor") {
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialDependencyAssetId(asset.payload.regionNumber),
 			...asset.payload.statics.map((member) => member.sourceAssetId),
-		]);
-	}
-
-	if (asset.payload.kind === "landblock-building-shells") {
-		return uniqueSortedAssetIds(
-			asset.payload.shells.map((shell) => shell.sourceAssetId),
-		);
-	}
-
-	if (asset.payload.kind === "landblock-scene") {
-		return uniqueSortedAssetIds([
-			...asset.payload.statics.map((member) => member.sourceAssetId),
-			...asset.payload.buildings.map((member) => member.sourceAssetId),
-			...asset.payload.envCells.map((member) => member.assetId),
 		]);
 	}
 
@@ -1141,16 +1120,6 @@ export function getPreparedAssetDependencies(
 
 	if (asset.payload.kind === "render-surface") {
 		return uniqueSortedAssetIds(asset.payload.dependencies.paletteAssetIds);
-	}
-
-	if (asset.payload.kind === "landblock-pack") {
-		return asset.payload.dependencies.renderableAssetIds.map((assetId) => ({
-			assetId,
-		}));
-	}
-
-	if (asset.payload.kind === "landblock-summary") {
-		return [];
 	}
 
 	return [];

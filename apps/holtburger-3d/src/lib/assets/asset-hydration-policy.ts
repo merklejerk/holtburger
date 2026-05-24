@@ -8,11 +8,7 @@ export function classifyAssetHydration(assetId: string): AssetHydrationMode {
 
 export function isSceneCoverageAssetId(assetId: string): boolean {
 	return (
-		assetId.startsWith("landblock-pack/") ||
-		assetId.startsWith("landblock-summary/") ||
-		/^landblock\/[0-9a-fA-F]{8}\/(?:terrain|building-shells|scene|outdoor|topology)$/.test(
-			assetId,
-		) ||
+		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId)
 	);
 }

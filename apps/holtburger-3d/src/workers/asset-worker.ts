@@ -4,9 +4,15 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 	DependencyManifestPayloadDto,
+	EnvCellPayloadDto,
 	GfxObjPayloadDto,
+	LandblockBuildingShellsPayloadDto,
+	LandblockOutdoorPayloadDto,
 	LandblockPackPayloadDto,
+	LandblockScenePayloadDto,
 	LandblockSummaryPayloadDto,
+	LandblockTerrainPayloadDto,
+	LandblockTopologyPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
 	RenderSurfacePayloadDto,
@@ -18,10 +24,16 @@ import {
 	appearanceManifestPayloadDtoSchema,
 	assetProvenanceDtoSchema,
 	dependencyManifestPayloadDtoSchema,
+	envCellPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
+	landblockBuildingShellsPayloadDtoSchema,
+	landblockOutdoorPayloadDtoSchema,
 	landblockPackPayloadDtoSchema,
+	landblockScenePayloadDtoSchema,
 	landblockSummaryPayloadDtoSchema,
+	landblockTerrainPayloadDtoSchema,
+	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
@@ -117,6 +129,65 @@ export function prepareAssetPayload(
 			request,
 			response,
 			landblockSummaryPayload.data,
+		);
+	}
+
+	const landblockOutdoorPayload = landblockOutdoorPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockOutdoorPayload.success) {
+		return prepareTypedContentAsset(
+			request,
+			response,
+			landblockOutdoorPayload.data,
+		);
+	}
+
+	const landblockTopologyPayload = landblockTopologyPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockTopologyPayload.success) {
+		return prepareTypedContentAsset(
+			request,
+			response,
+			landblockTopologyPayload.data,
+		);
+	}
+
+	const envCellPayload = envCellPayloadDtoSchema.safeParse(response.payload);
+	if (envCellPayload.success) {
+		return prepareTypedContentAsset(request, response, envCellPayload.data);
+	}
+
+	const landblockTerrainPayload = landblockTerrainPayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockTerrainPayload.success) {
+		return prepareTypedContentAsset(
+			request,
+			response,
+			landblockTerrainPayload.data,
+		);
+	}
+
+	const landblockBuildingShellsPayload =
+		landblockBuildingShellsPayloadDtoSchema.safeParse(response.payload);
+	if (landblockBuildingShellsPayload.success) {
+		return prepareTypedContentAsset(
+			request,
+			response,
+			landblockBuildingShellsPayload.data,
+		);
+	}
+
+	const landblockScenePayload = landblockScenePayloadDtoSchema.safeParse(
+		response.payload,
+	);
+	if (landblockScenePayload.success) {
+		return prepareTypedContentAsset(
+			request,
+			response,
+			landblockScenePayload.data,
 		);
 	}
 
@@ -382,6 +453,28 @@ function preparePassthroughAsset(
 		| RenderTexturePayloadDto
 		| RenderSurfacePayloadDto
 		| PalettePayloadDto,
+): PreparedAssetRecord {
+	return {
+		request,
+		response,
+		payload: {
+			...payload,
+			provenance: parseProvenance(payload.provenance),
+		} as PreparedAssetPayload,
+		preparedAt: new Date().toISOString(),
+	};
+}
+
+function prepareTypedContentAsset(
+	request: AssetLookupRequestDto,
+	response: AssetLookupResponseDto,
+	payload:
+		| LandblockOutdoorPayloadDto
+		| LandblockTopologyPayloadDto
+		| EnvCellPayloadDto
+		| LandblockTerrainPayloadDto
+		| LandblockBuildingShellsPayloadDto
+		| LandblockScenePayloadDto,
 ): PreparedAssetRecord {
 	return {
 		request,
@@ -1061,7 +1154,11 @@ export function planWorkerPrepareBatches(
 }
 
 function isLargeWorkerPrepareAsset(assetId: string): boolean {
-	return assetId.startsWith("landblock-pack/");
+	return (
+		/^landblock\/[0-9a-fA-F]{8}\/outdoor$/.test(assetId) ||
+		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
+		/^gfx-obj\/[0-9a-fA-F]{8}$/.test(assetId)
+	);
 }
 
 if (
@@ -1125,14 +1222,12 @@ function collectPreparedAssetTransferables(
 		return;
 	}
 
-	if (asset.payload.kind === "landblock-pack") {
-		for (const cell of asset.payload.prepared.interiorCells) {
-			normalizeRenderGeometryForTransfer(
-				cell.renderGeometry,
-				transferables,
-				transferredBuffers,
-			);
-		}
+	if (asset.payload.kind === "env-cell") {
+		normalizeRenderGeometryForTransfer(
+			asset.payload.renderGeometry,
+			transferables,
+			transferredBuffers,
+		);
 		return;
 	}
 }

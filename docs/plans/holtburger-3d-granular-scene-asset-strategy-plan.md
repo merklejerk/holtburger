@@ -1,7 +1,8 @@
 # Holtburger 3D Granular Scene Asset Strategy Plan
 
-Status: in progress; Phase 4 is implemented for the primary host/planner/render
-paths, with old pack/summary cleanup still tracked for Phase 5 and Phase 6.
+Status: in progress; Phase 5 has cut production frontend planning/render paths
+off old pack/summary semantics. Backend legacy route variants and old DTO
+shapes remain isolated cleanup targets for Phase 6.
 
 Note: phases before Phase 3.1 document the migration path and several
 superseded intermediate route boundaries. The current target route names are
@@ -109,18 +110,18 @@ dependencies instead of hiding them under `landblock-pack.prepared`.
 
 Use granular, REST-like asset IDs:
 
-| Route                             | Purpose                                                                                                                                                                                        | Dependencies                                                                                         |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `landblock/{id}/outdoor`          | Outdoor landblock render contribution: terrain, terrain pcodes/material inputs, explicit outdoor objects, buildings, generated scenery, and outdoor render BVHs.                                | One region terrain material table from `regionNumber`, plus typed outdoor member `sourceAssetId`s.   |
-| `landblock/{id}/topology`         | Focused env-cell/topology membership: env-cell membership, portal/link graph, and an env-cell residency BVH.                                                                                    | Derived from typed env-cell member `assetId` values.                                                 |
-| `env-cell/{id}`                   | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                                                       | `material/{did}` for every referenced `CSurface`.                                                    |
-| `gfx-obj/{did}`                   | One GfxObj render/physics projection.                                                                                                                                                          | `material/{did}` for every referenced `CSurface`.                                                    |
-| `setup-model/{did}`               | Setup parts, placements, lights, and default part composition.                                                                                                                                 | `gfx-obj/{did}` for each part.                                                                       |
-| `terrain-material/{regionNumber}` | Region-scoped LandSurf/TexMerge terrain material lookup tables used to interpret any terrain pcode in that region.                                                                             | Terrain base, overlay, alpha, road, and detail texture dependencies referenced by the region tables. |
-| `material/{did}`                  | One `CSurface` material recipe.                                                                                                                                                                | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                     |
-| `render-texture/{did}`            | One `RenderTexture` mip chain descriptor.                                                                                                                                                      | `render-surface/{did}`.                                                                              |
-| `render-surface/{did}`            | One image payload.                                                                                                                                                                             | `palette/{did}` for indexed/default-palette surfaces.                                                |
-| `palette/{did}`                   | One palette payload.                                                                                                                                                                           | None.                                                                                                |
+| Route                             | Purpose                                                                                                                                                          | Dependencies                                                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `landblock/{id}/outdoor`          | Outdoor landblock render contribution: terrain, terrain pcodes/material inputs, explicit outdoor objects, buildings, generated scenery, and outdoor render BVHs. | One region terrain material table from `regionNumber`, plus typed outdoor member `sourceAssetId`s.   |
+| `landblock/{id}/topology`         | Focused env-cell/topology membership: env-cell membership, portal/link graph, and an env-cell residency BVH.                                                     | Derived from typed env-cell member `assetId` values.                                                 |
+| `env-cell/{id}`                   | One structured interior cell with topology, portals, BSP witnesses, render geometry, and material slots.                                                         | `material/{did}` for every referenced `CSurface`.                                                    |
+| `gfx-obj/{did}`                   | One GfxObj render/physics projection.                                                                                                                            | `material/{did}` for every referenced `CSurface`.                                                    |
+| `setup-model/{did}`               | Setup parts, placements, lights, and default part composition.                                                                                                   | `gfx-obj/{did}` for each part.                                                                       |
+| `terrain-material/{regionNumber}` | Region-scoped LandSurf/TexMerge terrain material lookup tables used to interpret any terrain pcode in that region.                                               | Terrain base, overlay, alpha, road, and detail texture dependencies referenced by the region tables. |
+| `material/{did}`                  | One `CSurface` material recipe.                                                                                                                                  | `render-texture/{did}`, `render-surface/{did}`, and `palette/{did}` as required.                     |
+| `render-texture/{did}`            | One `RenderTexture` mip chain descriptor.                                                                                                                        | `render-surface/{did}`.                                                                              |
+| `render-surface/{did}`            | One image payload.                                                                                                                                               | `palette/{did}` for indexed/default-palette surfaces.                                                |
+| `palette/{did}`                   | One palette payload.                                                                                                                                             | None.                                                                                                |
 
 ### Route Notes
 
@@ -1911,8 +1912,7 @@ Progress as of 2026-05-24:
 
 Decisions and course corrections:
 
-- `landblock/{id}/scene` no longer includes generated outdoor scenery in Phase
-  3. Generated scenery depends on terrain codes, `RegionDesc`, scene records,
+- `landblock/{id}/scene` no longer includes generated outdoor scenery in Phase 3. Generated scenery depends on terrain codes, `RegionDesc`, scene records,
   and object-bound checks. Pulling it into scene assembly would reintroduce a
   terrain/region dependency into the focused scene route. Treat generated
   scenery as a future ownership decision: either terrain-owned decorative
@@ -2202,16 +2202,101 @@ Validation completed:
 
 ### Phase 5: Retire Old Pack Semantics
 
-- Stop using `landblock-pack/*` and `landblock-summary/*` in planner code.
-- Remove old route helpers, schemas, and tests once no production code depends on
-  them.
+- Stop using `landblock-pack/*`, `landblock-summary/*`, and the migration-only
+  `landblock/{id}/terrain`, `landblock/{id}/building-shells`, and
+  `landblock/{id}/scene` routes in production frontend code.
+- Remove old route helpers, schemas, prepared payload variants, backend request
+  variants, and tests once no production code depends on them.
+- Replace remaining renderer/debug/portal selectors that require
+  `landblock-pack` payloads with selectors over `landblock/{id}/outdoor`,
+  `landblock/{id}/topology`, and direct `env-cell/{id}` payloads.
 - If a temporary old-route adapter is still needed for a diagnostic harness, keep
   it isolated and mark it for deletion with a specific follow-up.
 
 Validation:
 
-- `rg "landblock-pack|landblock-summary" apps/holtburger-3d/src` should find
-  only migration notes, deleted-route tests, or explicit diagnostic fixtures.
+- `rg "landblock-pack|landblock-summary|building-shells|landblock/.*/scene|landblock/.*/terrain" apps/holtburger-3d/src`
+  should find only migration notes, deleted-route tests, or explicit diagnostic
+  fixtures.
+- `npm run check`
+- `npm run check:rust`
+
+Progress as of 2026-05-24:
+
+- Removed old `landblock-pack/*`, `landblock-summary/*`, and migration-only
+  `landblock/{id}/terrain`, `landblock/{id}/building-shells`, and
+  `landblock/{id}/scene` ownership from production frontend dependency
+  extraction and direct hydration classification. The only landblock direct
+  roots in production hydration policy are now `landblock/{id}/outdoor`,
+  `landblock/{id}/topology`, and `env-cell/{id}`.
+- Updated the asset worker so `landblock-outdoor`, `landblock-topology`,
+  `env-cell`, and remaining migration route DTOs prepare as typed payloads
+  instead of falling through to generic/unknown payload handling. This fixed a
+  real Phase 4 gap: the planner could request the new routes, but the worker did
+  not yet promote them to prepared route payloads.
+- Updated binary lookup and worker batching policy so large direct roots use the
+  new route families: `landblock/{id}/outdoor`, `env-cell/{id}`, `gfx-obj/{did}`,
+  and `render-surface/{did}`. Old pack/summary routes are no longer binary
+  lookup roots in frontend host policy.
+- Removed the pack-era static-renderable cache/resource path from production
+  rendering. Static renderables now derive outdoor source members from
+  `landblock/{id}/outdoor` and interior source members from direct
+  `env-cell/{id}` payloads.
+- Removed the secondary pack spatial-index owner path from the browser render
+  resource coordinator. Terrain, structured interiors, debug overlays, and
+  static renderables now provide the active render chunks/spatial items without
+  a duplicate `landblock-pack` spatial stream.
+- Switched transition portal candidate derivation to read building portal links
+  from `landblock/{id}/outdoor.statics[].building.portals[]` instead of
+  `landblock-pack.sourceFacts.buildings[]`.
+- Updated browser/debug model text to describe direct outdoor/topology/env-cell
+  route ownership instead of landblock packs.
+- Replaced old-contract tests with new ownership tests for hydration,
+  dependency extraction, terrain scene selection, browser model text, static
+  renderable selection, transition portal derivation, and structured interior
+  rendering.
+
+Phase 5 decisions and course corrections:
+
+- Do not remove Rust backend legacy route variants in this phase. The production
+  frontend no longer schedules them, but adapter tests and old diagnostic routes
+  still exercise them. Deleting those alongside the frontend cutover would mix
+  route-retirement verification with a large Rust serializer/test deletion. That
+  is now an explicit Phase 6 cleanup target.
+- Keep old TypeScript payload interfaces and Zod schemas temporarily because the
+  worker still has to parse adapter/test responses during migration. They should
+  not appear in production route selection, hydration policy, dependency
+  extraction, terrain rendering, static rendering, or transition portal
+  selection.
+- The worker bug was not just cleanup debt: new route payloads must be prepared
+  as typed assets before renderer selectors can rely on them. Future route
+  additions should add worker preparation in the same phase as schemas.
+- Direct `env-cell/{id}` coverage changes transition portal closure behavior:
+  the old pack test fixture implicitly carried extra interior cells via
+  `prepared.interiorCells`; the new outdoor portal seed only contributes linked
+  env cells plus stab-listed cells. Additional cells must come from topology
+  membership or explicit structured-interior coverage, not from hidden pack
+  payload contents.
+
+Cleanup targets carried to Phase 6:
+
+- Delete old frontend route helpers, DTO schemas, prepared payload variants, and
+  worker parsers for `landblock-pack`, `landblock-summary`,
+  `landblock/{id}/terrain`, `landblock/{id}/building-shells`, and
+  `landblock/{id}/scene` after adapter/backend route deletion lands.
+- Delete or rewrite `render-spatial-scene.ts` pack-spatial helpers and their
+  tests; production no longer imports them.
+- Remove old Tauri/core/content request variants and serializers for
+  `LandblockPack`, `LandblockSummary`, `LandblockTerrain`,
+  `LandblockBuildingShells`, and `LandblockScene`, or move them behind an
+  explicit diagnostic-only harness if still needed.
+- Rename `isSceneCoverageAssetId` to a direct-root/hydration name now that it
+  intentionally includes direct env-cell roots and excludes old scene coverage
+  packs.
+
+Validation completed:
+
+- `npm run test:ts -- src/lib/assets/dependencies.test.ts src/lib/assets/asset-hydration-policy.test.ts src/lib/world-display/terrain-scene.test.ts src/lib/world-display/model.test.ts src/lib/world-display/static-renderables.test.ts src/lib/world-display/transition-portal-work-items.test.ts src/lib/world-display/structured-interior-scene.test.ts`
 - `npm run check`
 - `npm run check:rust`
 
@@ -2228,11 +2313,13 @@ abstractions created during the migration:
   transition, especially `isSceneCoverageAssetId`, which now includes direct
   env-cell roots.
 - Delete broad old/new renderer adapter unions once each renderer subsystem
-  consumes a narrow selector for terrain, scene members, env cells, static
-  renderables, portal work items, and material diagnostics.
+  consumes narrow selectors for outdoor terrain/static members, topology/env-cell
+  membership, direct env-cell render geometry, portal work items, and material
+  diagnostics.
 - Remove temporary compatibility branches that accept both
-  `landblock-pack`/`landblock-summary` and the new `landblock/*`/`env-cell/*`
-  payloads in production paths.
+  `landblock-pack`/`landblock-summary`/migration-only `landblock/*` route names
+  and the new `landblock/{id}/outdoor` / `landblock/{id}/topology` /
+  `env-cell/{id}` payloads in production paths.
 - Remove default `setup-appearance` scheduling from setup-model loading if it is
   still present; keep appearance-level resolution only behind an explicit future
   override route.
@@ -2250,7 +2337,7 @@ abstractions created during the migration:
 
 Validation:
 
-- `rg "migration-target|temporary|compat|old route|landblock-pack|landblock-summary" apps/holtburger-3d/src`
+- `rg "migration-target|temporary|compat|old route|landblock-pack|landblock-summary|building-shells|landblock/.*/scene|landblock/.*/terrain" apps/holtburger-3d/src`
   has only intentional diagnostic fixtures or removal notes.
 - `rg "setup-appearance" apps/holtburger-3d/src/lib/assets apps/holtburger-3d/src/lib/world-display`
   finds only explicit future override handling or deleted-route fixtures.
@@ -2263,9 +2350,10 @@ Validation:
 Only after the route migration is stable, evaluate whether to split:
 
 - `env-cell/{id}/topology` from `env-cell/{id}/render`;
-- `landblock/{id}/scene-bvh` from `landblock/{id}/scene`;
+- `landblock/{id}/outdoor-bvh` from `landblock/{id}/outdoor`;
+- `landblock/{id}/topology-bvh` from `landblock/{id}/topology`;
 - dedicated geometry routes such as `env-cell/{id}/render` or
-  `landblock/{id}/terrain-geometry`.
+  `landblock/{id}/outdoor-geometry`.
 
 Large arrays should already use binary sections inside the owning route response;
 do not wait for Phase 7 to stop JSON-expanding geometry. Require profiling or a
@@ -2276,7 +2364,7 @@ concrete consumer before introducing a new route split.
 - Should `env-cell/{id}` IDs use the raw env-cell file ID exactly, or normalize
   to landblock-plus-cell-index in routes while carrying the raw file ID in the
   payload?
-- Should scene membership include all env cells in the landblock or only
+- Should topology membership include all env cells in the landblock or only
   portal-reachable cells from focused buildings?
 - Should renderer fallback material drawing be disabled entirely in development
   builds after the diagnostic is emitted?
@@ -2291,13 +2379,16 @@ concrete consumer before introducing a new route split.
   direct dependencies or, for terrain only, because the frontend derives
   one `terrain-material/{regionNumber}` table route from `regionNumber` and uses
   terrain pcodes as per-quad lookup inputs.
-- `landblock/{id}/terrain` owns terrain render geometry; `landblock/{id}/scene`
-  owns focused semantic membership, portals, env cells, and scene BVHs.
-- `landblock/{id}/building-shells` owns far outdoor building/setup shell
-  coverage and can be fetched without hydrating focused scene membership.
-- The frontend can fetch both terrain and scene for a focused landblock without
-  duplicating heavy render geometry.
-- `landblock/{id}/scene` carries statics/buildings/env-cell membership and
-  placements directly, without a parallel top-level `renderableAssetIds` list.
+- `landblock/{id}/outdoor` owns outdoor terrain render geometry, explicit
+  outdoor objects, building shells, generated scenery, region terrain material
+  table identity, and outdoor BVHs.
+- `landblock/{id}/topology` owns focused semantic membership: env-cell members,
+  portal links, and env-cell residency BVH. It does not own terrain, generated
+  scenery, or static render geometry.
+- The frontend can fetch both outdoor render contribution and topology for a
+  focused landblock without duplicating heavy interior render geometry.
+- `landblock/{id}/outdoor` carries static/building/generated members directly,
+  and `landblock/{id}/topology` carries env-cell membership directly; neither
+  route uses a parallel top-level `renderableAssetIds` list.
 - Missing material recipes produce host/frontend diagnostics that identify the
   owner, route, source ID, and dependency edge that failed.

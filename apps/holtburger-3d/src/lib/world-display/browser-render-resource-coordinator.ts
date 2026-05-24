@@ -9,7 +9,7 @@ import {
 	createInitialAssetChannelState,
 	type AssetChannelState,
 } from "../assets/types";
-import { formatHex32, normalizeOutdoorLandblockId } from "../landblocks";
+import { formatHex32 } from "../landblocks";
 import type { CameraHintAckDto } from "../host/contracts";
 import {
 	deriveBrowserWorldDisplayModel,
@@ -31,23 +31,18 @@ import type {
 import {
 	createLinearRenderSpatialIndex,
 	type RenderSpatialIndexQuery,
-	type RenderSpatialItem,
 	type RenderSpatialMetadata,
 } from "./render-spatial-index";
 import {
 	DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
-	LandblockPackSpatialItemCache,
 	STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY,
 	TERRAIN_SPATIAL_OWNER_KEY,
 	deriveDebugOverlaySpatialItems,
-	deriveLandblockPackRenderChunkPlacements,
-	deriveLandblockPackSpatialEntries,
 	deriveStructuredInteriorSpatialItems,
 	deriveTerrainSpatialItems,
 } from "./render-spatial-scene";
 import { deriveWorldRenderSceneContext } from "./render-scene-context";
 import {
-	StaticRenderableResourceCache,
 	deriveStaticRenderableSceneModel,
 	type StaticRenderableSceneModel,
 } from "./static-renderables";
@@ -154,15 +149,6 @@ export function createEmptyBrowserRenderResourceSnapshot(): BrowserRenderResourc
 
 export class BrowserRenderResourceCoordinator {
 	private readonly renderSpatialIndex = createLinearRenderSpatialIndex();
-	private readonly staticRenderableResourceCache =
-		new StaticRenderableResourceCache();
-	private readonly landblockPackSpatialItemCache =
-		new LandblockPackSpatialItemCache();
-	private activeLandblockPackSpatialOwnerKeys = new Set<string>();
-	private readonly appliedLandblockPackSpatialItems = new Map<
-		string,
-		readonly RenderSpatialItem[]
-	>();
 	private surface: BrowserRenderResourceSurface | null = null;
 	private snapshot = createEmptyBrowserRenderResourceSnapshot();
 	private appliedSurfaceSignatures: Partial<
@@ -230,7 +216,6 @@ export class BrowserRenderResourceCoordinator {
 						detailLandblockIds: outdoorSceneInterest.detailLandblockIds,
 						envCellLandblockIds: outdoorSceneInterest.envCellLandblockIds,
 					},
-			this.staticRenderableResourceCache,
 		);
 		const structuredInteriorScene = deriveStructuredInteriorSceneModel(
 			input.assetState,
@@ -267,23 +252,11 @@ export class BrowserRenderResourceCoordinator {
 			structuredInteriorScene,
 			activeLandblockIds: outdoorSceneInterest?.buildingLandblockIds ?? [],
 		});
-		const activeLandblockPackIds = deriveActiveLandblockPackIds({
-			outdoorSceneInterest,
-			terrainScene,
-			staticRenderableScene,
-			structuredInteriorScene,
-		});
-		const landblockPackRenderChunkPlacements =
-			deriveLandblockPackRenderChunkPlacements(
-				input.assetState,
-				activeLandblockPackIds,
-			);
 		const activeRenderChunkPlacements = collectActiveRenderChunkPlacements(
 			terrainScene,
 			structuredInteriorScene,
 			debugOverlayScene,
 			staticRenderableScene,
-			landblockPackRenderChunkPlacements,
 		);
 		const activeRenderChunkTransforms = deriveRenderChunkTransforms(
 			input.activeRenderAnchor,
@@ -308,11 +281,6 @@ export class BrowserRenderResourceCoordinator {
 			DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 			deriveDebugOverlaySpatialItems(debugOverlayScene),
 		);
-		this.replaceLandblockPackSpatialItems(
-			input.assetState,
-			activeLandblockPackIds,
-		);
-
 		const surface = this.surface;
 		if (surface) {
 			this.applySurfaceResource(
@@ -407,35 +375,6 @@ export class BrowserRenderResourceCoordinator {
 		apply();
 		this.appliedSurfaceSignatures[key] = signature;
 	}
-
-	private replaceLandblockPackSpatialItems(
-		assetState: AssetChannelState,
-		activeLandblockPackIds: ReadonlySet<number>,
-	): void {
-		const entries = deriveLandblockPackSpatialEntries(
-			assetState,
-			activeLandblockPackIds,
-			this.landblockPackSpatialItemCache,
-		);
-		const nextOwnerKeys = new Set<string>();
-		for (const entry of entries) {
-			nextOwnerKeys.add(entry.ownerKey);
-			if (
-				this.appliedLandblockPackSpatialItems.get(entry.ownerKey) !==
-				entry.items
-			) {
-				this.renderSpatialIndex.replaceOwnerItems(entry.ownerKey, entry.items);
-				this.appliedLandblockPackSpatialItems.set(entry.ownerKey, entry.items);
-			}
-		}
-		for (const ownerKey of this.activeLandblockPackSpatialOwnerKeys) {
-			if (!nextOwnerKeys.has(ownerKey)) {
-				this.renderSpatialIndex.clearOwner(ownerKey);
-				this.appliedLandblockPackSpatialItems.delete(ownerKey);
-			}
-		}
-		this.activeLandblockPackSpatialOwnerKeys = nextOwnerKeys;
-	}
 }
 
 type BrowserRenderResourceSurfaceKey =
@@ -450,42 +389,6 @@ type BrowserRenderResourceSurfaceKey =
 	| "render-spatial-query"
 	| "controlled-camera-frame"
 	| "transition-portal-depth";
-
-function deriveActiveLandblockPackIds({
-	outdoorSceneInterest,
-	terrainScene,
-	staticRenderableScene,
-	structuredInteriorScene,
-}: {
-	outdoorSceneInterest: ReturnType<typeof deriveOutdoorSceneInterest> | null;
-	terrainScene: TerrainSceneModel;
-	staticRenderableScene: StaticRenderableSceneModel;
-	structuredInteriorScene: StructuredInteriorSceneModel;
-}): ReadonlySet<number> {
-	const landblockIds = new Set<number>();
-	if (outdoorSceneInterest) {
-		for (const landblockId of [
-			...outdoorSceneInterest.terrainLandblockIds,
-			...outdoorSceneInterest.buildingLandblockIds,
-			...outdoorSceneInterest.detailLandblockIds,
-			...outdoorSceneInterest.envCellLandblockIds,
-		]) {
-			landblockIds.add(normalizeOutdoorLandblockId(landblockId));
-		}
-	}
-
-	for (const tile of terrainScene.tiles) {
-		landblockIds.add(normalizeOutdoorLandblockId(tile.landblockId));
-	}
-	for (const landblockId of staticRenderableScene.activeLandblockIds) {
-		landblockIds.add(normalizeOutdoorLandblockId(landblockId));
-	}
-	for (const cell of structuredInteriorScene.cells) {
-		landblockIds.add(normalizeOutdoorLandblockId(cell.envCellId));
-	}
-
-	return landblockIds;
-}
 
 function describeAssetStateSignature(state: AssetChannelState): string {
 	return [
@@ -599,7 +502,9 @@ function describeRenderSpatialIndexSignature({
 		describeDebugOverlaySceneSignature(debugOverlayScene),
 		describeRenderChunkTransformsSignature(activeRenderChunkTransforms),
 		Object.keys(assetState.preparedByAssetId)
-			.filter((assetId) => assetId.startsWith("landblock-pack/"))
+			.filter((assetId) =>
+				/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId),
+			)
 			.sort()
 			.join(","),
 	].join(";");
@@ -674,7 +579,6 @@ function collectActiveRenderChunkPlacements(
 	structuredInterior: StructuredInteriorSceneModel,
 	debugOverlay: WorldDebugOverlayModel,
 	staticRenderables: StaticRenderableSceneModel,
-	landblockPacks: RenderChunkPlacement[],
 ): RenderChunkPlacement[] {
 	const chunksByKey = new Map<string, RenderChunkPlacement>();
 	for (const chunk of [
@@ -683,7 +587,6 @@ function collectActiveRenderChunkPlacements(
 		...debugOverlay.cells.map((cell) => cell.renderChunk),
 		...debugOverlay.portals.map((portal) => portal.renderChunk),
 		...staticRenderables.parts.map((part) => part.renderChunk),
-		...landblockPacks,
 	]) {
 		chunksByKey.set(chunk.chunkKey, chunk);
 	}

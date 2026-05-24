@@ -24,7 +24,7 @@ describe("browser world display model", () => {
 		);
 	});
 
-	it("describes dungeon destination coverage as an owning landblock pack", () => {
+	it("describes dungeon destination coverage as direct env-cell assets", () => {
 		const destination = parseBrowserLocationInput("016c0155");
 		const model = deriveBrowserWorldDisplayModel({
 			assetState: createInitialAssetChannelState(),
@@ -36,9 +36,9 @@ describe("browser world display model", () => {
 			pendingCameraHint: false,
 		});
 
-		expect(model.sceneContext.kind).toBe("indoor-landblock-pack");
+		expect(model.sceneContext.kind).toBe("indoor-env-cell-closure");
 		expect(model.sceneContext.coverageText).toContain(
-			"Browser dungeons load the owning landblock pack as an isolated scene.",
+			"Browser dungeons load topology membership and direct env-cell render assets.",
 		);
 		expect(collectModelText(model)).not.toMatch(
 			/\bruntime\b|\bauthoritative\b|visible-cell/i,

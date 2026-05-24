@@ -7,11 +7,11 @@ import {
 	buildOutdoorCoverageLandblocks,
 	formatHex32,
 	formatLandblockLabel,
-	formatLandblockPackAssetId,
+	formatLandblockOutdoorAssetId,
 } from "../landblocks";
 import type {
 	AssetChannelState,
-	PreparedLandblockPackPayload,
+	PreparedLandblockOutdoorPayload,
 } from "../assets/types";
 import { describePreparedAssetPayload } from "../assets/types";
 import type { CameraHintAckDto } from "../host/contracts";
@@ -41,7 +41,7 @@ interface WorldDisplaySceneChunk {
 }
 
 interface BrowserWorldDisplaySceneContext {
-	kind: "outdoor-landblock-ring" | "indoor-landblock-pack";
+	kind: "outdoor-landblock-ring" | "indoor-env-cell-closure";
 	statusText: string;
 	focusAnchorLabel: string;
 	destinationText: string;
@@ -199,43 +199,43 @@ function deriveSceneContext(
 			(landblock) => landblock.landblockId,
 		),
 	);
-	const preparedLandblockPacks = Object.values(assetState.preparedByAssetId)
+	const preparedOutdoorLandblocks = Object.values(assetState.preparedByAssetId)
 		.map((asset) => asset.payload)
 		.filter(
-			(payload): payload is PreparedLandblockPackPayload =>
-				payload.kind === "landblock-pack" &&
+			(payload): payload is PreparedLandblockOutdoorPayload =>
+				payload.kind === "landblock-outdoor" &&
 				(buildingLandblockIds.has(payload.landblockId) ||
 					detailLandblockIds.has(payload.landblockId)),
 		);
-	const staticInstanceCount = preparedLandblockPacks.reduce(
+	const staticInstanceCount = preparedOutdoorLandblocks.reduce(
 		(total, payload) =>
 			total +
-			payload.prepared.outdoorStaticInstances.filter(
-				(instance) =>
-					instance.kind !== "building" &&
-					detailLandblockIds.has(instance.owningLandblockId),
+			payload.statics.filter(
+				(member) =>
+					member.kind !== "building" &&
+					detailLandblockIds.has(payload.landblockId),
 			).length,
 		0,
 	);
-	const staticBuildingCount = preparedLandblockPacks.reduce(
+	const staticBuildingCount = preparedOutdoorLandblocks.reduce(
 		(total, payload) =>
 			total +
-			payload.prepared.outdoorStaticInstances.filter(
-				(instance) =>
-					instance.kind === "building" &&
-					buildingLandblockIds.has(instance.owningLandblockId),
+			payload.statics.filter(
+				(member) =>
+					member.kind === "building" &&
+					buildingLandblockIds.has(payload.landblockId),
 			).length,
 		0,
 	);
-	const staticRenderableSourceAssetIds = preparedLandblockPacks.flatMap(
+	const staticRenderableSourceAssetIds = preparedOutdoorLandblocks.flatMap(
 		(payload) =>
-			payload.prepared.outdoorStaticInstances
-				.filter((instance) =>
-					instance.kind === "building"
-						? buildingLandblockIds.has(instance.owningLandblockId)
-						: detailLandblockIds.has(instance.owningLandblockId),
+			payload.statics
+				.filter((member) =>
+					member.kind === "building"
+						? buildingLandblockIds.has(payload.landblockId)
+						: detailLandblockIds.has(payload.landblockId),
 				)
-				.map((instance) => instance.sourceAssetId),
+				.map((member) => member.sourceAssetId),
 	);
 
 	return {
@@ -267,21 +267,18 @@ function deriveIndoorSceneContext(
 	const preparedIndoorCellCount = Object.values(
 		assetState.preparedByAssetId,
 	).reduce(
-		(total, asset) =>
-			asset.payload.kind === "landblock-pack"
-				? total + asset.payload.prepared.interiorCells.length
-				: total,
+		(total, asset) => (asset.payload.kind === "env-cell" ? total + 1 : total),
 		0,
 	);
 	return {
-		kind: "indoor-landblock-pack",
+		kind: "indoor-env-cell-closure",
 		statusText:
-			"Browser dungeon scene context is explicit: WorldDisplay renders the owning landblock pack and tracks the current env-cell focus separately from outdoor terrain.",
+			"Browser dungeon scene context is explicit: WorldDisplay renders direct env-cell assets selected by topology and tracks the current env-cell focus separately from outdoor terrain.",
 		focusAnchorLabel: focusEnvCellLabel,
 		destinationText: destinationLabel
 			? `Browser destination focus is ${destinationLabel}.`
 			: `Browser dungeon focus is ${focusEnvCellLabel}.`,
-		coverageText: `Dungeon focus ${focusEnvCellLabel} is backed by ${preparedIndoorCellCount} pack-prepared cell${preparedIndoorCellCount === 1 ? "" : "s"}. Browser dungeons load the owning landblock pack as an isolated scene.`,
+		coverageText: `Dungeon focus ${focusEnvCellLabel} is backed by ${preparedIndoorCellCount} prepared env-cell asset${preparedIndoorCellCount === 1 ? "" : "s"}. Browser dungeons load topology membership and direct env-cell render assets.`,
 		gapText: null,
 		chunks: [],
 		staticRenderableInstanceCount: 0,
@@ -296,7 +293,7 @@ function createTerrainContract(
 	const focusChunk =
 		sceneContext?.chunks.find((chunk) => chunk.role === "focus") ?? null;
 	const requestKey = focusChunk
-		? formatLandblockPackAssetId(focusChunk.landblockId)
+		? formatLandblockOutdoorAssetId(focusChunk.landblockId)
 		: null;
 
 	return {
@@ -308,7 +305,7 @@ function createTerrainContract(
 			"ACViewer.WorldViewer.LoadLandblock + ACE.DatLoader.CellLandblock",
 		geometryAnchor: "ACViewer.Render.R_Landblock + TerrainBatchDraw.AddTerrain",
 		indoorBranchText:
-			"Outdoor terrain comes from normalized landblock loads; dungeon env cells stay on a separate landblock-pack rendering track.",
+			"Outdoor terrain comes from landblock outdoor assets; dungeon env cells stay on a direct env-cell rendering track.",
 		statusText: requestKey
 			? `${requestKey} is ready: Rust decodes CellLandblock data into an app-local payload, and WorldDisplay owns final mesh and GPU hydration.`
 			: "The terrain contract shape is in place, but it still needs a focus outdoor landblock before the first request key can be selected.",

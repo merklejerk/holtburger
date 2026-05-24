@@ -85,11 +85,15 @@
 	let browserDestination = $state<BrowserLocationSelection | null>(
 		initialFrontendState.browserMode.destination,
 	);
-	let terrainLodRadius = $state(initialFrontendState.browserMode.terrainLodRadius);
+	let terrainLodRadius = $state(
+		initialFrontendState.browserMode.terrainLodRadius,
+	);
 	let buildingLodRadius = $state(
 		initialFrontendState.browserMode.buildingLodRadius,
 	);
-	let detailLodRadius = $state(initialFrontendState.browserMode.detailLodRadius);
+	let detailLodRadius = $state(
+		initialFrontendState.browserMode.detailLodRadius,
+	);
 	let envCellLodRadius = $state(
 		initialFrontendState.browserMode.envCellLodRadius,
 	);
@@ -215,9 +219,7 @@
 		return describeBrowserCameraResidency(rendererCameraResidency);
 	});
 	const navigationFocusText = $derived(
-		navigationFocusMode === "follow-camera"
-			? "Follow camera"
-			: "Manual",
+		navigationFocusMode === "follow-camera" ? "Follow camera" : "Manual",
 	);
 	const destinationSourceText = $derived(
 		describeBrowserDestinationSource(browserDestination),
@@ -264,9 +266,8 @@
 	);
 
 	onMount(() => {
-		const unsubscribeFrontendState = frontendState.subscribe(
-			applyFrontendState,
-		);
+		const unsubscribeFrontendState =
+			frontendState.subscribe(applyFrontendState);
 		void tick().then(() => {
 			renderResourceCoordinator.setSurface(worldDisplaySurface);
 			scheduleCurrentSceneResourceUpdate();
@@ -1325,13 +1326,15 @@
 	}
 
 	function describeAssetPipelineDebugState(): string {
-		const preparedLandblockPackIds = Object.keys(assetState.preparedByAssetId)
-			.filter((assetId) => assetId.startsWith("landblock-pack/"))
+		const preparedLandblockRouteIds = Object.keys(assetState.preparedByAssetId)
+			.filter((assetId) =>
+				/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId),
+			)
 			.sort();
 		const recentHistory = assetState.history
 			.map((entry) => `${entry.status}:${entry.assetId}`)
 			.join(" | ");
-		return `landblock packs ${preparedLandblockPackIds.length}: ${preparedLandblockPackIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
+		return `landblock routes ${preparedLandblockRouteIds.length}: ${preparedLandblockRouteIds.slice(0, 4).join(", ") || "none"}; recent ${recentHistory || "none"}.`;
 	}
 
 	function describeAssetCacheDebugState(): string {

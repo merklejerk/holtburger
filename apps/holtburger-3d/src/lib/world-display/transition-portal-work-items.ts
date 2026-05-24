@@ -1,8 +1,5 @@
 import { deriveStructuredInteriorCoverage } from "../assets/structured-interior-coverage";
-import type {
-	AssetChannelState,
-	PreparedLandblockStaticBuildingPortal,
-} from "../assets/types";
+import type { AssetChannelState } from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
 import { normalizeOutdoorLandblockId } from "../landblocks";
 import {
@@ -54,6 +51,12 @@ interface TransitionPortalCandidateDiagnostics {
 	skippedMissingApertureCount: number;
 	skippedMissingPolygonCount: number;
 	truncatedInteriorGroupCount: number;
+}
+
+interface OutdoorBuildingPortalLink {
+	portalId: string;
+	linkedEnvCellIds: number[];
+	stabList: number[];
 }
 
 export interface TransitionPortalCandidateModel {
@@ -166,10 +169,10 @@ export function deriveTransitionPortalCandidates({
 function collectActiveOutdoorBuildingPortals(
 	assetState: AssetChannelState,
 	activeLandblockIds: ReadonlySet<number>,
-): PreparedLandblockStaticBuildingPortal[] {
+): OutdoorBuildingPortalLink[] {
 	return Object.values(assetState.preparedByAssetId).flatMap((asset) => {
 		if (
-			asset.payload.kind !== "landblock-pack" ||
+			asset.payload.kind !== "landblock-outdoor" ||
 			!activeLandblockIds.has(
 				normalizeOutdoorLandblockId(asset.payload.landblockId),
 			)
@@ -177,8 +180,14 @@ function collectActiveOutdoorBuildingPortals(
 			return [];
 		}
 
-		return asset.payload.sourceFacts.buildings.flatMap(
-			(building) => building.portals,
+		return asset.payload.statics.flatMap((member) =>
+			member.kind === "building" && member.building
+				? member.building.portals.map((portal) => ({
+						portalId: portal.portalId,
+						linkedEnvCellIds: portal.linkedEnvCellIds,
+						stabList: portal.stabLocalCellIds,
+					}))
+				: [],
 		);
 	});
 }
@@ -295,7 +304,7 @@ function createTransitionPortalCandidate({
 	coverageBySeedKey,
 }: {
 	aperture: PortalAperture;
-	portal: PreparedLandblockStaticBuildingPortal;
+	portal: OutdoorBuildingPortalLink;
 	stencilRef: number;
 	source: TransitionPortalSource;
 	assetState: AssetChannelState;

@@ -7,15 +7,9 @@ import {
 } from "./asset-hydration-policy";
 
 describe("asset hydration policy", () => {
-	it("classifies landblock packs as direct scene coverage", () => {
-		const assetId = "landblock-pack/da55ffff";
-		expect(isSceneCoverageAssetId(assetId)).toBe(true);
-		expect(classifyAssetHydration(assetId)).toBe("direct");
-	});
-
 	it.each([
-		["landblock/da55ffff/terrain"],
-		["landblock/da55ffff/scene"],
+		["landblock/da55ffff/outdoor"],
+		["landblock/da55ffff/topology"],
 		["env-cell/da550100"],
 	])("classifies granular scene root %s as direct hydration", (assetId) => {
 		expect(isSceneCoverageAssetId(assetId)).toBe(true);

@@ -13,50 +13,6 @@ const provenance = {
 };
 
 describe("asset response dependencies", () => {
-	it("documents migration-target landblock pack shared renderable extraction", () => {
-		const response = createJsonResponse("landblock-pack/da55ffff", {
-			kind: "landblock-pack",
-			residencyKind: "landblock",
-			sourceAssetKind: "landblock-pack",
-			landblockId: 0xda55ffff,
-			landblockInfoId: 0xda55fffe,
-			classification: "outdoor",
-			sourceFacts: {
-				buildings: [],
-			},
-			prepared: {
-				terrainMesh: null,
-				outdoorStaticInstances: [],
-				interiorCells: [],
-				staticMeshes: [],
-				spatialItems: [],
-				staticLandblockBvh: null,
-			},
-			dependencies: {
-				cellDatIds: [0xda55ffff, 0xda55fffe],
-				portalDatIds: [],
-				renderableAssetIds: [
-					"setup-model/02000001",
-					"gfx-obj/01000001",
-					"setup-model/02000001",
-				],
-				missing: [],
-				unsupported: [],
-			},
-			diagnostics: {
-				sourceRecords: [],
-				omissions: [],
-				errors: [],
-			},
-			provenance,
-		});
-
-		expect(getAssetResponseDependencies(response)).toEqual([
-			{ assetId: "gfx-obj/01000001" },
-			{ assetId: "setup-model/02000001" },
-		]);
-	});
-
 	it("extracts setup-model part gfx dependencies without default setup appearance", () => {
 		const response = createJsonResponse("setup-model/02000010", {
 			kind: "setup-model",
@@ -143,17 +99,6 @@ describe("asset response dependencies", () => {
 		]);
 	});
 
-	it("extracts one terrain material table dependency per terrain region", () => {
-		const response = createJsonResponse(
-			"landblock/da55ffff/terrain",
-			createLandblockTerrainPayload(),
-		);
-
-		expect(getAssetResponseDependencies(response)).toEqual([
-			{ assetId: "terrain-material/1" },
-		]);
-	});
-
 	it("extracts outdoor and topology dependencies from route-specific members", () => {
 		expect(
 			getAssetResponseDependencies(
@@ -183,40 +128,7 @@ describe("asset response dependencies", () => {
 		).toEqual([{ assetId: "env-cell/da550100" }]);
 	});
 
-	it("extracts building shell dependencies without material leaves", () => {
-		const response = createJsonResponse(
-			"landblock/da55ffff/building-shells",
-			createLandblockBuildingShellsPayload([
-				createBuildingShellMember("shell-0", "setup-model/02000010"),
-				createBuildingShellMember("shell-1", "gfx-obj/01000010"),
-				createBuildingShellMember("shell-2", "setup-model/02000010"),
-			]),
-		);
-
-		expect(getAssetResponseDependencies(response)).toEqual([
-			{ assetId: "gfx-obj/01000010" },
-			{ assetId: "setup-model/02000010" },
-		]);
-	});
-
-	it("extracts granular scene and env-cell dependencies from typed members", () => {
-		expect(
-			getAssetResponseDependencies(
-				createJsonResponse("landblock/da55ffff/scene", {
-					...createLandblockScenePayload(),
-					statics: [createSceneStaticMember("static-0", "gfx-obj/01000010")],
-					buildings: [
-						createSceneBuildingMember("building-0", "setup-model/02000010"),
-					],
-					envCells: [createSceneEnvCellMember(0xda550100)],
-				}),
-			),
-		).toEqual([
-			{ assetId: "env-cell/da550100" },
-			{ assetId: "gfx-obj/01000010" },
-			{ assetId: "setup-model/02000010" },
-		]);
-
+	it("extracts env-cell render dependencies from typed members", () => {
 		expect(
 			getAssetResponseDependencies(
 				createJsonResponse("env-cell/da550100", createEnvCellPayload()),
@@ -272,22 +184,27 @@ describe("asset response dependencies", () => {
 		expect(
 			getPreparedAssetDependencies(
 				createPreparedAssetRecord(
-					"landblock/da55ffff/terrain",
-					createLandblockTerrainPayload(),
+					"landblock/da55ffff/outdoor",
+					createLandblockOutdoorPayload([
+						createOutdoorStaticMember("static-0", "gfx-obj/01000010"),
+					]),
 				),
 			),
-		).toEqual([{ assetId: "terrain-material/1" }]);
+		).toEqual([
+			{ assetId: "gfx-obj/01000010" },
+			{ assetId: "terrain-material/1" },
+		]);
 
 		expect(
 			getPreparedAssetDependencies(
 				createPreparedAssetRecord(
-					"landblock/da55ffff/building-shells",
-					createLandblockBuildingShellsPayload([
-						createBuildingShellMember("shell-0", "setup-model/02000010"),
+					"landblock/da55ffff/topology",
+					createLandblockTopologyPayload([
+						createSceneEnvCellMember(0xda550100),
 					]),
 				),
 			),
-		).toEqual([{ assetId: "setup-model/02000010" }]);
+		).toEqual([{ assetId: "env-cell/da550100" }]);
 	});
 
 	it("extracts material dependencies from gfx and setup appearance payloads", () => {

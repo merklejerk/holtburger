@@ -7,9 +7,10 @@ use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
     LandblockBuildingShellsAsset, LandblockBuildingShellsAssetAssembler, LandblockPack,
-    LandblockPackAssembler, LandblockSummary, LandblockSummaryAssembler, LandblockTerrainAsset,
-    LandblockTerrainAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedSetupAppearance, ResolvedTerrainMaterialTable, normalize_landblock_id,
+    LandblockPackAssembler, LandblockSceneAsset, LandblockSceneAssetAssembler, LandblockSummary,
+    LandblockSummaryAssembler, LandblockTerrainAsset, LandblockTerrainAssetAssembler,
+    MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedSetupAppearance,
+    ResolvedTerrainMaterialTable, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -45,7 +46,7 @@ pub enum ContentAsset {
         region_number: u32,
     },
     LandblockBuildingShells(Box<LandblockBuildingShellsAsset>),
-    LandblockScene(Box<LandblockPack>),
+    LandblockScene(Box<LandblockSceneAsset>),
     EnvCell(Box<EnvCellAsset>),
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     GfxObj(Box<GfxObj>),
@@ -120,7 +121,7 @@ impl ContentAssetService {
             ContentAssetRequest::LandblockScene(landblock_id) => {
                 let landblock_id = normalize_landblock_id(landblock_id);
                 Ok(ContentAsset::LandblockScene(Box::new(
-                    LandblockPackAssembler::new().assemble_landblock_with_cache(
+                    LandblockSceneAssetAssembler::new().assemble_landblock_with_cache(
                         &self.content,
                         &self.decode_cache,
                         landblock_id,

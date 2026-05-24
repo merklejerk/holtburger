@@ -79,10 +79,7 @@ export function getAssetResponseDependencies(
 
 	const setupModel = setupModelPayloadDtoSchema.safeParse(response.payload);
 	if (setupModel.success) {
-		return uniqueSortedAssetIds([
-			...setupModel.data.dependencies.gfxObjAssetIds,
-			setupModel.data.dependencies.setupAppearanceAssetId,
-		]);
+		return uniqueSortedAssetIds(setupModel.data.dependencies.gfxObjAssetIds);
 	}
 
 	const gfxObj = gfxObjPayloadDtoSchema.safeParse(response.payload);

@@ -50,13 +50,16 @@ describe("asset channel", () => {
 		const channel = new AssetChannelController(
 			async (requests): Promise<BinaryAssetLookupEnvelopeDto[]> => {
 				expect(requests.map((request) => request.assetId)).toEqual([
-					"landblock-pack/da5fffff",
+					"landblock/da5fffff/outdoor",
 				]);
 				return [{ payload: envelope }];
 			},
 			() => worker,
 		);
-		const request = createRequest("request-pack", "landblock-pack/da5fffff");
+		const request = createRequest(
+			"request-outdoor",
+			"landblock/da5fffff/outdoor",
+		);
 
 		const prepared = channel.prepareAsset(request);
 		await waitForMicrotasks();
@@ -79,12 +82,12 @@ describe("asset channel", () => {
 });
 
 describe("asset worker prepare batching", () => {
-	it("batches small assets while isolating landblock packs", () => {
+	it("batches small assets while isolating large scene roots", () => {
 		const items = [
 			createQueuedItem("request-a", "gfx-obj/01000001"),
 			createQueuedItem("request-b", "gfx-obj/01000002"),
-			createQueuedItem("request-pack", "landblock-pack/da5fffff"),
-			createQueuedItem("request-c", "landblock-summary/da5fffff"),
+			createQueuedItem("request-outdoor", "landblock/da5fffff/outdoor"),
+			createQueuedItem("request-topology", "landblock/da5fffff/topology"),
 			createQueuedItem("request-d", "gfx-obj/01000003"),
 			createQueuedItem("request-e", "gfx-obj/01000004"),
 		];
@@ -94,9 +97,11 @@ describe("asset worker prepare batching", () => {
 				batch.map((item) => item.request.assetId),
 			),
 		).toEqual([
-			["gfx-obj/01000001", "gfx-obj/01000002"],
-			["landblock-pack/da5fffff"],
-			["landblock-summary/da5fffff", "gfx-obj/01000003"],
+			["gfx-obj/01000001"],
+			["gfx-obj/01000002"],
+			["landblock/da5fffff/outdoor"],
+			["landblock/da5fffff/topology"],
+			["gfx-obj/01000003"],
 			["gfx-obj/01000004"],
 		]);
 	});

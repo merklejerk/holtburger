@@ -1,12 +1,12 @@
 export type AssetHydrationMode = "direct" | "graph";
 
 export function classifyAssetHydration(assetId: string): AssetHydrationMode {
-	return isSceneCoverageAssetId(assetId) || isStaticRenderableAssetId(assetId)
+	return isDirectSceneRootAssetId(assetId) || isStaticRenderableAssetId(assetId)
 		? "direct"
 		: "graph";
 }
 
-export function isSceneCoverageAssetId(assetId: string): boolean {
+export function isDirectSceneRootAssetId(assetId: string): boolean {
 	return (
 		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId)

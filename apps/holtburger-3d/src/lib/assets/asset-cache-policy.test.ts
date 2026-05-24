@@ -5,13 +5,14 @@ import type {
 	PreparedAssetPayload,
 	PreparedAssetRecord,
 	PreparedGfxObjPayload,
+	PreparedLandblockOutdoorPayload,
 	PreparedSetupModelPayload,
 } from "./types";
 
 describe("asset cache policy", () => {
 	it("retains outdoor active roots and recursively prepared setup/gfx dependencies", () => {
 		const preparedByAssetId = indexPreparedAssets([
-			createPreparedLandblockPackAsset("landblock-pack/0102ffff", [
+			createPreparedLandblockOutdoorAsset("landblock/0102ffff/outdoor", [
 				"setup-model/02000001",
 			]),
 			createPreparedSetupModelAsset("setup-model/02000001", [
@@ -24,7 +25,7 @@ describe("asset cache policy", () => {
 		const plan = planPreparedAssetCachePrune({
 			preparedByAssetId,
 			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: ["landblock-pack/0102ffff"],
+			activeCoverageAssetIds: ["landblock/0102ffff/outdoor"],
 			inFlightAssetIds: [],
 			nowMs: 10_000,
 			warmRetainMs: 1_000,
@@ -32,9 +33,9 @@ describe("asset cache policy", () => {
 
 		expect(plan.retainedAssetIds).toEqual([
 			"gfx-obj/01000001",
-			"landblock-pack/0102ffff",
-			"setup-appearance/02000001",
+			"landblock/0102ffff/outdoor",
 			"setup-model/02000001",
+			"terrain-material/1",
 		]);
 		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
 		expect(
@@ -44,7 +45,7 @@ describe("asset cache policy", () => {
 
 	it("retains indoor coverage roots, static dependencies, and in-flight ids", () => {
 		const preparedByAssetId = indexPreparedAssets([
-			createPreparedLandblockPackAsset("landblock-pack/016cffff", [
+			createPreparedLandblockOutdoorAsset("landblock/016cffff/outdoor", [
 				"setup-model/02000001",
 			]),
 			createPreparedSetupModelAsset("setup-model/02000001", [
@@ -57,18 +58,18 @@ describe("asset cache policy", () => {
 		const plan = planPreparedAssetCachePrune({
 			preparedByAssetId,
 			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: ["landblock-pack/016cffff"],
-			inFlightAssetIds: ["landblock-pack/0102ffff"],
+			activeCoverageAssetIds: ["landblock/016cffff/outdoor"],
+			inFlightAssetIds: ["landblock/0102ffff/outdoor"],
 			nowMs: 10_000,
 			warmRetainMs: 1_000,
 		});
 
 		expect(plan.retainedAssetIds).toEqual([
 			"gfx-obj/01000001",
-			"landblock-pack/0102ffff",
-			"landblock-pack/016cffff",
-			"setup-appearance/02000001",
+			"landblock/0102ffff/outdoor",
+			"landblock/016cffff/outdoor",
 			"setup-model/02000001",
+			"terrain-material/1",
 		]);
 		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
 	});
@@ -129,41 +130,61 @@ function createMetadata(
 	);
 }
 
-function createPreparedLandblockPackAsset(
+function createPreparedLandblockOutdoorAsset(
 	assetId: string,
-	renderableAssetIds: readonly string[],
+	sourceAssetIds: readonly string[],
 ): PreparedAssetRecord {
 	const landblockId = Number.parseInt(
-		assetId.slice("landblock-pack/".length),
+		assetId.slice("landblock/".length, "landblock/".length + 8),
 		16,
 	);
 	return createPreparedAsset(assetId, {
-		kind: "landblock-pack",
-		sourceAssetKind: "landblock-pack",
-		residencyKind: "landblock",
-		provenance: createProvenance("landblock-pack"),
+		kind: "landblock-outdoor",
+		sourceAssetKind: "landblock-outdoor",
+		residencyKind: "outdoor-landblock",
+		provenance: createProvenance("landblock-outdoor"),
 		landblockId,
-		landblockInfoId: landblockId & 0xffff_fffe,
+		regionId: 0x13000000,
+		regionNumber: 1,
 		classification: "outdoor",
-		sourceFacts: { buildings: [] },
-		prepared: {
-			terrainMesh: null,
-			outdoorStaticInstances: [],
-			interiorCells: [],
-			staticMeshes: [],
-			spatialItems: [],
-			staticLandblockBvh: null,
+		terrain: {
+			gridSize: 9,
+			tileSize: 24,
+			vertices: [],
+			triangles: [],
+			quads: [],
+			terrainBvh: {
+				coordinateSpace: "landblock-outdoor-terrain-local",
+				nodes: [],
+				items: [],
+			},
+			minHeight: 0,
+			maxHeight: 0,
+			bounds: null,
 		},
-		dependencies: {
-			cellDatIds: [],
-			portalDatIds: [],
-			renderableAssetIds: [...renderableAssetIds],
-		},
+		statics: sourceAssetIds.map((sourceAssetId, sourceIndex) => ({
+			kind: "explicit-object",
+			instanceId: `static-${sourceIndex}`,
+			sourceDid: 0x02000001 + sourceIndex,
+			sourceAssetId,
+			sourceIndex,
+			localPlacement: {
+				origin: { x: 0, y: 0, z: 0 },
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+			sourceBounds: null,
+			instanceBounds: null,
+			building: null,
+			generated: null,
+		})),
+		outdoorBvh: null,
 		diagnostics: {
 			sourceRecords: [],
+			omissions: [],
 			errors: [],
 		},
-	});
+	} satisfies PreparedLandblockOutdoorPayload);
 }
 
 function createPreparedSetupModelAsset(
@@ -205,7 +226,6 @@ function createPreparedSetupModelAsset(
 		defaultScriptTable: null,
 		dependencies: {
 			gfxObjAssetIds: [...gfxObjAssetIds],
-			setupAppearanceAssetId: "setup-appearance/02000001",
 		},
 	} satisfies PreparedSetupModelPayload);
 }

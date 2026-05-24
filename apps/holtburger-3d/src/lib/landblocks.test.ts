@@ -6,12 +6,7 @@ import {
 	deriveLandblockEnvCellId,
 	deriveLandblockEnvCellIds,
 	formatEnvCellAssetId,
-	formatLandblockBuildingShellsAssetId,
 	formatLandblockOutdoorAssetId,
-	formatLandblockPackAssetId,
-	formatLandblockSceneAssetId,
-	formatLandblockSummaryAssetId,
-	formatLandblockTerrainAssetId,
 	formatLandblockLabel,
 	formatLandblockTopologyAssetId,
 	formatTerrainMaterialAssetId,
@@ -19,10 +14,7 @@ import {
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 	parseEnvCellAssetId,
-	parseLandblockBuildingShellsAssetId,
 	parseLandblockOutdoorAssetId,
-	parseLandblockSceneAssetId,
-	parseLandblockTerrainAssetId,
 	parseLandblockTopologyAssetId,
 	parseTerrainMaterialAssetId,
 } from "./landblocks";
@@ -34,21 +26,6 @@ describe("outdoor landblock helpers", () => {
 		expect(landblockId).toBe(0xda55ffff);
 		expect(landblockId).toBeGreaterThan(0);
 		expect(formatLandblockLabel(landblockId)).toBe("0xda55ffff");
-		expect(formatLandblockPackAssetId(landblockId)).toBe(
-			"landblock-pack/da55ffff",
-		);
-		expect(formatLandblockSummaryAssetId(landblockId)).toBe(
-			"landblock-summary/da55ffff",
-		);
-		expect(formatLandblockTerrainAssetId(landblockId)).toBe(
-			"landblock/da55ffff/terrain",
-		);
-		expect(formatLandblockBuildingShellsAssetId(landblockId)).toBe(
-			"landblock/da55ffff/building-shells",
-		);
-		expect(formatLandblockSceneAssetId(landblockId)).toBe(
-			"landblock/da55ffff/scene",
-		);
 		expect(formatLandblockOutdoorAssetId(landblockId)).toBe(
 			"landblock/da55ffff/outdoor",
 		);
@@ -84,30 +61,21 @@ describe("outdoor landblock helpers", () => {
 	});
 
 	it("formats and parses granular scene asset ids", () => {
-		expect(parseLandblockTerrainAssetId("landblock/da550123/terrain")).toBe(
-			0xda550123,
-		);
-		expect(parseLandblockSceneAssetId("landblock/da550123/scene")).toBe(
-			0xda550123,
-		);
 		expect(parseLandblockOutdoorAssetId("landblock/da550123/outdoor")).toBe(
 			0xda550123,
 		);
 		expect(parseLandblockTopologyAssetId("landblock/da550123/topology")).toBe(
 			0xda550123,
 		);
-		expect(
-			parseLandblockBuildingShellsAssetId("landblock/da550123/building-shells"),
-		).toBe(0xda550123);
 		expect(formatEnvCellAssetId(0xda550123)).toBe("env-cell/da550123");
 		expect(parseEnvCellAssetId("env-cell/da550123")).toBe(0xda550123);
 		expect(formatTerrainMaterialAssetId(1)).toBe("terrain-material/1");
 		expect(parseTerrainMaterialAssetId("terrain-material/1")).toEqual({
 			regionNumber: 1,
 		});
-		expect(parseLandblockTerrainAssetId("landblock/da55ffff/scene")).toBeNull();
+		expect(parseLandblockOutdoorAssetId("landblock/da55ffff/scene")).toBeNull();
 		expect(
-			parseLandblockBuildingShellsAssetId("landblock/da55ffff/terrain"),
+			parseLandblockTopologyAssetId("landblock/da55ffff/terrain"),
 		).toBeNull();
 		expect(parseTerrainMaterialAssetId("terrain-material/1/123456")).toBeNull();
 		expect(

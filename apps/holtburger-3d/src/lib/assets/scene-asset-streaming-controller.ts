@@ -5,7 +5,7 @@ import {
 import type { AssetLookupRequestDto, AssetPriority } from "../host/contracts";
 import {
 	classifyAssetHydration,
-	isSceneCoverageAssetId,
+	isDirectSceneRootAssetId,
 	isStaticRenderableAssetId,
 } from "./asset-hydration-policy";
 import type { AssetGraphPreparationResult } from "./asset-graph-scheduler";
@@ -367,7 +367,7 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 	const preparedPlanningAssetKey = Object.keys(input.preparedByAssetId)
 		.filter(
 			(assetId) =>
-				isSceneCoverageAssetId(assetId) || isStaticRenderableAssetId(assetId),
+				isDirectSceneRootAssetId(assetId) || isStaticRenderableAssetId(assetId),
 		)
 		.sort()
 		.join(",");

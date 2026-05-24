@@ -52,30 +52,6 @@ interface PreparedDebugPresentation {
 	paletteKey: string;
 }
 
-interface PreparedLandblockStaticSourceInstance {
-	instanceId: string;
-	owningLandblockId: number;
-	sourceDid: number;
-	sourceAssetId: string;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
-}
-
-export interface PreparedLandblockStaticBuildingPortal {
-	portalId: string;
-	sourceIndex: number;
-	flags: number;
-	otherCellId: number;
-	otherPortalId: number;
-	stabList: number[];
-	linkedEnvCellIds: number[];
-}
-
-interface PreparedLandblockStaticBuilding extends PreparedLandblockStaticSourceInstance {
-	numLeaves: number;
-	portals: PreparedLandblockStaticBuildingPortal[];
-}
-
 export interface PreparedIndoorCellPortal {
 	portalId: string;
 	sourceIndex: number;
@@ -86,99 +62,33 @@ export interface PreparedIndoorCellPortal {
 	targetEnvCellId: number;
 }
 
-interface PreparedLandblockCellPortal {
-	portalId: string;
-	sourceIndex: number;
-	flags: number;
-	polygonId: number;
-	otherCellId: number;
-	otherPortalId: number;
-	targetEnvCellId: number | null;
-	isOutsideTransition: boolean;
+interface PreparedSourceRecordDiagnostic {
+	namespace: string;
+	fileId: number;
+	role: string;
+	status: "loaded" | "missing" | "decode-failed";
 }
 
-export interface PreparedLandblockPackPayload extends PreparedAssetPayloadBase {
-	kind: "landblock-pack";
-	sourceAssetKind: "landblock-pack";
-	residencyKind: "landblock";
-	landblockId: number;
-	landblockInfoId: number;
-	classification: "outdoor" | "dungeon";
-	sourceFacts: {
-		buildings: PreparedLandblockStaticBuilding[];
-	};
-	prepared: {
-		terrainMesh: PreparedTerrainMesh | null;
-		outdoorStaticInstances: PreparedLandblockStaticInstance[];
-		interiorCells: PreparedLandblockInteriorCell[];
-		staticMeshes: PreparedLandblockStaticMesh[];
-		spatialItems: PreparedLandblockSpatialItem[];
-		staticLandblockBvh: PreparedLandblockBvh | null;
-	};
-	dependencies: {
-		cellDatIds: number[];
-		portalDatIds: number[];
-		renderableAssetIds: string[];
-	};
-	diagnostics: {
-		sourceRecords: {
-			namespace: string;
-			fileId: number;
-			role: string;
-			status: "loaded" | "missing" | "decode-failed";
-		}[];
-		errors: {
-			namespace: string;
-			fileId: number;
-			role: string;
-			errorCode: AssetErrorCode;
-			detail: string;
-		}[];
-	};
+interface PreparedSourceOmissionDiagnostic {
+	namespace: string;
+	fileId: number;
+	role: string;
+	reason: string;
+	detail: string;
 }
 
-export interface PreparedLandblockSummaryPayload extends PreparedAssetPayloadBase {
-	kind: "landblock-summary";
-	sourceAssetKind: "landblock-summary";
-	residencyKind: "landblock";
-	landblockId: number;
-	landblockInfoId: number;
-	classification: "outdoor" | "dungeon";
-	sourceFacts: {
-		buildings: PreparedLandblockSummaryBuilding[];
-	};
-	prepared: {
-		terrainMesh: PreparedTerrainMesh | null;
-	};
-	dependencies: {
-		cellDatIds: number[];
-		renderableAssetIds: string[];
-	};
-	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+interface PreparedSourceLoadErrorDiagnostic {
+	namespace: string;
+	fileId: number;
+	role: string;
+	errorCode: AssetErrorCode;
+	detail: string;
 }
 
-interface PreparedLandblockSummaryObject {
-	instanceId: string;
-	owningLandblockId: number;
-	sourceDid: number;
-	sourceAssetId: string | null;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
-}
-
-interface PreparedLandblockSummaryBuildingPortal {
-	portalId: string;
-	sourceIndex: number;
-	flags: number;
-	otherCellId: number;
-	otherPortalId: number;
-	stabList: number[];
-	linkedEnvCellIds: number[];
-}
-
-export interface PreparedLandblockSummaryBuilding extends PreparedLandblockSummaryObject {
-	numLeaves: number;
-	portals: PreparedLandblockSummaryBuildingPortal[];
+interface PreparedContentSourceDiagnostics {
+	sourceRecords: PreparedSourceRecordDiagnostic[];
+	omissions: PreparedSourceOmissionDiagnostic[];
+	errors: PreparedSourceLoadErrorDiagnostic[];
 }
 
 interface PreparedTerrainBvhItem {
@@ -189,12 +99,12 @@ interface PreparedTerrainBvhItem {
 }
 
 interface PreparedTerrainBvh {
-	coordinateSpace: "landblock-terrain-local";
+	coordinateSpace: "landblock-outdoor-terrain-local";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedTerrainBvhItem[];
 }
 
-interface PreparedLandblockTerrainTriangle {
+interface PreparedOutdoorTerrainTriangle {
 	terrainTriangleId: string;
 	quadIndex: number;
 	triangleInQuad: 0 | 1;
@@ -218,11 +128,11 @@ interface PreparedTerrainQuad {
 	bounds: PreparedBounds;
 }
 
-interface PreparedLandblockTerrain {
+interface PreparedOutdoorTerrain {
 	gridSize: number;
 	tileSize: number;
 	vertices: Vec3Dto[];
-	triangles: PreparedLandblockTerrainTriangle[];
+	triangles: PreparedOutdoorTerrainTriangle[];
 	quads: PreparedTerrainQuad[];
 	terrainBvh: PreparedTerrainBvh;
 	minHeight: number;
@@ -230,20 +140,9 @@ interface PreparedLandblockTerrain {
 	bounds: PreparedBounds | null;
 }
 
-export interface PreparedLandblockTerrainPayload extends PreparedAssetPayloadBase {
-	kind: "landblock-terrain";
-	sourceAssetKind: "landblock-terrain";
-	residencyKind: "outdoor-landblock";
-	landblockId: number;
-	regionId: number;
-	regionNumber: number;
-	terrain: PreparedLandblockTerrain;
-	diagnostics: PreparedLandblockPackPayload["diagnostics"];
-}
-
 interface PreparedLandblockOutdoorBuildingFacts {
 	numLeaves: number;
-	portals: PreparedLandblockSceneBuildingPortal[];
+	portals: PreparedLandblockBuildingPortal[];
 }
 
 interface PreparedLandblockGeneratedSceneryFacts {
@@ -274,42 +173,10 @@ export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBas
 	regionId: number;
 	regionNumber: number;
 	classification: "outdoor";
-	terrain: PreparedLandblockTerrain;
+	terrain: PreparedOutdoorTerrain;
 	statics: PreparedLandblockOutdoorStaticMember[];
 	outdoorBvh: PreparedOutdoorBvh | null;
-	diagnostics: PreparedLandblockPackPayload["diagnostics"];
-}
-
-interface PreparedLandblockBuildingShellBvhItem {
-	kind: "building-shell";
-	shellId: string;
-}
-
-interface PreparedLandblockBuildingShellBvh {
-	coordinateSpace: "landblock-local";
-	nodes: PreparedLandblockBvhNode[];
-	items: PreparedLandblockBuildingShellBvhItem[];
-}
-
-interface PreparedLandblockBuildingShellMember {
-	shellId: string;
-	buildingIndex: number;
-	sourceDid: number;
-	sourceAssetId: string;
-	localPlacement: PlacementTransformDto;
-	sourceScale: Vec3Dto;
-	sourceBounds: PreparedBounds | null;
-	instanceBounds: PreparedBounds | null;
-}
-
-export interface PreparedLandblockBuildingShellsPayload extends PreparedAssetPayloadBase {
-	kind: "landblock-building-shells";
-	sourceAssetKind: "landblock-building-shells";
-	residencyKind: "outdoor-landblock";
-	landblockId: number;
-	shells: PreparedLandblockBuildingShellMember[];
-	shellBvh: PreparedLandblockBuildingShellBvh;
-	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+	diagnostics: PreparedContentSourceDiagnostics;
 }
 
 interface PreparedEnvCellResidencyBvhItem {
@@ -320,7 +187,7 @@ interface PreparedEnvCellResidencyBvhItem {
 }
 
 interface PreparedEnvCellResidencyBvh {
-	coordinateSpace: "landblock-scene-residency";
+	coordinateSpace: "landblock-topology-residency";
 	nodes: PreparedLandblockBvhNode[];
 	items: PreparedEnvCellResidencyBvhItem[];
 }
@@ -336,23 +203,7 @@ interface PreparedOutdoorBvh {
 	items: PreparedOutdoorBvhItem[];
 }
 
-interface PreparedLandblockScenePlacedSourceMemberBase {
-	instanceId: string;
-	memberId: string;
-	sourceDid: number;
-	sourceAssetId: string;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
-	sourceScale: Vec3Dto;
-	sourceBounds: PreparedBounds | null;
-	instanceBounds: PreparedBounds | null;
-}
-
-interface PreparedLandblockSceneStaticMember extends PreparedLandblockScenePlacedSourceMemberBase {
-	kind: "scenery" | "generated-scenery";
-}
-
-interface PreparedLandblockSceneBuildingPortal {
+interface PreparedLandblockBuildingPortal {
 	portalId: string;
 	sourceIndex: number;
 	flags: number;
@@ -362,13 +213,7 @@ interface PreparedLandblockSceneBuildingPortal {
 	linkedEnvCellIds: number[];
 }
 
-interface PreparedLandblockSceneBuildingMember extends PreparedLandblockScenePlacedSourceMemberBase {
-	kind: "building";
-	numLeaves: number;
-	portals: PreparedLandblockSceneBuildingPortal[];
-}
-
-interface PreparedLandblockSceneEnvCellMember {
+interface PreparedLandblockTopologyEnvCellMember {
 	memberId: string;
 	envCellId: number;
 	assetId: string;
@@ -378,15 +223,15 @@ interface PreparedLandblockSceneEnvCellMember {
 	seenOutside: boolean | null;
 }
 
-type PreparedLandblockScenePortalEndpoint =
+type PreparedLandblockTopologyPortalEndpoint =
 	| { kind: "landblock-building"; instanceId: string; portalId: string }
 	| { kind: "env-cell"; envCellId: number; portalId: string }
 	| { kind: "outside"; landblockId: number };
 
-interface PreparedLandblockScenePortalLink {
+interface PreparedLandblockTopologyPortalLink {
 	linkId: string;
-	source: PreparedLandblockScenePortalEndpoint;
-	target: PreparedLandblockScenePortalEndpoint;
+	source: PreparedLandblockTopologyPortalEndpoint;
+	target: PreparedLandblockTopologyPortalEndpoint;
 	flags: number;
 	otherCellId: number;
 	otherPortalId: number;
@@ -394,46 +239,17 @@ interface PreparedLandblockScenePortalLink {
 	sourceIndex: number;
 }
 
-export interface PreparedLandblockScenePayload extends PreparedAssetPayloadBase {
-	kind: "landblock-scene";
-	sourceAssetKind: "landblock-scene";
-	residencyKind: "landblock";
-	landblockId: number;
-	landblockInfoId: number;
-	classification: "outdoor" | "dungeon";
-	statics: PreparedLandblockSceneStaticMember[];
-	buildings: PreparedLandblockSceneBuildingMember[];
-	envCells: PreparedLandblockSceneEnvCellMember[];
-	portalLinks: PreparedLandblockScenePortalLink[];
-	envCellResidencyBvh: PreparedEnvCellResidencyBvh;
-	outdoorBvh: PreparedOutdoorBvh | null;
-	diagnostics: PreparedLandblockPackPayload["diagnostics"];
-}
-
-export interface PreparedLandblockTopologyPayload extends PreparedAssetPayloadBase {
+interface PreparedLandblockTopologyPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-topology";
 	sourceAssetKind: "landblock-topology";
 	residencyKind: "landblock";
 	landblockId: number;
 	landblockInfoId: number;
 	classification: "outdoor" | "dungeon";
-	envCells: PreparedLandblockSceneEnvCellMember[];
-	portalLinks: PreparedLandblockScenePortalLink[];
+	envCells: PreparedLandblockTopologyEnvCellMember[];
+	portalLinks: PreparedLandblockTopologyPortalLink[];
 	envCellResidencyBvh: PreparedEnvCellResidencyBvh;
-	diagnostics: PreparedLandblockPackPayload["diagnostics"];
-}
-
-export interface PreparedLandblockInteriorCell {
-	envCellId: number;
-	environmentId: number;
-	cellStructureId: number;
-	localPlacement: PlacementTransformDto;
-	surfaceIds: number[];
-	portals: PreparedLandblockCellPortal[];
-	portalApertures: PreparedPortalAperture[];
-	staticObjectCount: number;
-	cellBsp: PreparedPolygonSetBspNode;
-	renderGeometry: PreparedPolygonSetRenderGeometry;
+	diagnostics: PreparedContentSourceDiagnostics;
 }
 
 export interface PreparedPortalAperture {
@@ -450,80 +266,9 @@ interface PreparedPortalAperturePlane {
 	source: "drawing-bsp-portal" | "derived-from-render-points";
 }
 
-type PreparedLandblockStaticInstanceKind =
-	| "scenery"
-	| "building"
-	| "generated-scenery"
-	| "indoor-static";
-
 interface PreparedBounds {
 	min: Vec3Dto;
 	max: Vec3Dto;
-}
-
-export interface PreparedLandblockStaticInstance {
-	instanceId: string;
-	kind: PreparedLandblockStaticInstanceKind;
-	owningLandblockId: number;
-	owningEnvCellId: number | null;
-	sourceDid: number;
-	sourceAssetId: string;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
-	sourceScale: Vec3Dto;
-}
-
-export interface PreparedLandblockStaticMesh {
-	instanceId: string;
-	kind: PreparedLandblockStaticInstanceKind;
-	owningLandblockId: number;
-	owningEnvCellId: number | null;
-	sourceDid: number;
-	sourceAssetId: string;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
-	sourceScale: Vec3Dto;
-	partIndex: number;
-	gfxObjId: number;
-	gfxObjAssetId: string;
-	partPlacements: PlacementTransformDto[];
-	partScale: Vec3Dto;
-	sourceBounds: PreparedBounds | null;
-	instanceBounds: PreparedBounds | null;
-}
-
-type PreparedLandblockSpatialItemKind =
-	| "terrain"
-	| "outdoor-static"
-	| "building"
-	| "env-cell"
-	| "indoor-static"
-	| "portal";
-
-type PreparedLandblockSpatialItemMetadata =
-	| { kind: "none" }
-	| {
-			kind: "terrain-quad";
-			row: number;
-			col: number;
-			quadIndex: number;
-			triangleIndices: [number, number];
-	  };
-
-export interface PreparedLandblockSpatialItem {
-	id: string;
-	kind: PreparedLandblockSpatialItemKind;
-	ownerId: number | null;
-	sourceAssetId: string | null;
-	bounds: PreparedBounds;
-	metadata: PreparedLandblockSpatialItemMetadata;
-}
-
-interface PreparedLandblockBvh {
-	coordinateSpace: "landblock-render-local";
-	landblockId: number;
-	scope: "static-landblock";
-	nodes: PreparedLandblockBvhNode[];
 }
 
 interface PreparedLandblockBvhNode {
@@ -793,7 +538,6 @@ export interface PreparedSetupModelPayload extends PreparedAssetPayloadBase {
 	defaultScriptTable: number | null;
 	dependencies?: {
 		gfxObjAssetIds: string[];
-		setupAppearanceAssetId: string;
 	};
 }
 
@@ -821,7 +565,7 @@ export interface PreparedMaterialRecipePayload extends PreparedAssetPayloadBase 
 	};
 }
 
-export interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase {
+interface PreparedSetupAppearancePayload extends PreparedAssetPayloadBase {
 	kind: "setup-appearance";
 	sourceAssetKind: "setup-appearance";
 	setupModelId: number;
@@ -912,7 +656,7 @@ interface PreparedTerrainMaterialDependencies {
 	paletteAssetIds: string[];
 }
 
-export interface PreparedTerrainMaterialTablePayload extends PreparedAssetPayloadBase {
+interface PreparedTerrainMaterialTablePayload extends PreparedAssetPayloadBase {
 	kind: "terrain-material";
 	sourceAssetKind: "terrain-material";
 	residencyKind: "unknown";
@@ -981,12 +725,7 @@ interface PreparedUnknownAssetPayload extends PreparedAssetPayloadBase {
 }
 
 export type PreparedAssetPayload =
-	| PreparedLandblockPackPayload
-	| PreparedLandblockSummaryPayload
-	| PreparedLandblockTerrainPayload
 	| PreparedLandblockOutdoorPayload
-	| PreparedLandblockBuildingShellsPayload
-	| PreparedLandblockScenePayload
 	| PreparedLandblockTopologyPayload
 	| PreparedEnvCellPayload
 	| PreparedGfxObjPayload

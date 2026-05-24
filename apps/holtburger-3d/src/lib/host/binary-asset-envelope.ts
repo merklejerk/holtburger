@@ -140,12 +140,32 @@ function decodeBinarySection(
 	) {
 		return readFloat32Section(bytes);
 	}
-	if (section.role === "prepared.terrainMesh.vertices") {
+	if (
+		section.role === "prepared.terrainMesh.vertices" ||
+		section.role === "landblockTerrain.vertices"
+	) {
 		return chunk(Array.from(readFloat32Section(bytes)), 3).map(([x, y, z]) => ({
 			x,
 			y,
 			z,
 		}));
+	}
+	if (section.role === "landblockTerrain.triangles") {
+		return chunk(Array.from(readFloat32Section(bytes)), 6).map(
+			([
+				quadIndex,
+				triangleInQuad,
+				vertexIndexA,
+				vertexIndexB,
+				vertexIndexC,
+				averageHeight,
+			]) => ({
+				quadIndex,
+				triangleInQuad,
+				vertexIndices: [vertexIndexA, vertexIndexB, vertexIndexC],
+				averageHeight,
+			}),
+		);
 	}
 	if (section.role === "prepared.terrainMesh.triangles") {
 		return chunk(Array.from(readFloat32Section(bytes)), 5).map(

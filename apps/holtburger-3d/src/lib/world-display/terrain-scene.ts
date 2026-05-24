@@ -133,13 +133,13 @@ function getTerrainMeshFromPreparedAsset(
 	asset: PreparedAssetRecord,
 ): PreparedTerrainMesh | null {
 	if (asset.payload.kind === "landblock-outdoor") {
-		return convertPreparedLandblockTerrainPayload(asset.payload);
+		return convertPreparedOutdoorTerrainPayload(asset.payload);
 	}
 
 	return null;
 }
 
-function convertPreparedLandblockTerrainPayload(
+function convertPreparedOutdoorTerrainPayload(
 	payload: PreparedLandblockOutdoorPayload,
 ): PreparedTerrainMesh {
 	return {

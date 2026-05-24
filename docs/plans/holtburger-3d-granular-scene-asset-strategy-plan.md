@@ -2345,6 +2345,103 @@ Validation:
 - `npm run check`
 - `npm run check:rust`
 
+Progress as of 2026-05-24:
+
+- Removed frontend route helpers, host schemas, worker preparation branches, and
+  prepared-payload union members for `landblock-pack`, `landblock-summary`, and
+  the migration-only `landblock/{id}/terrain`,
+  `landblock/{id}/building-shells`, and `landblock/{id}/scene` routes.
+- Renamed the frontend hydration policy helper from scene-coverage terminology
+  to direct scene-root terminology so `landblock/{id}/outdoor`,
+  `landblock/{id}/topology`, and `env-cell/{id}` are treated as first-class
+  roots without implying one legacy scene payload.
+- Removed the old landblock-pack spatial renderer diagnostic path and its
+  inspector/test coverage. Outdoor rendering now uses the outdoor route shape;
+  structured interior rendering uses topology plus env-cell roots.
+- Removed implicit setup-appearance scheduling and setup-appearance composition
+  from setup-model rendering. `setup-appearance/{id}` remains an explicit future
+  override route, but setup models no longer declare it as a default dependency.
+- Removed old landblock pack/summary/migration request variants from
+  `holtburger-core`, and removed matching Tauri route parsers, response
+  serializers, binary serializers, failed-payload builders, and route tests.
+- Replaced the pack-named source diagnostics type with the route-neutral
+  `PreparedContentSourceDiagnostics`.
+- Added a real binary serializer for `landblock/{id}/outdoor` terrain arrays.
+  This corrected a Phase 5 gap where outdoor responses were classified as large
+  enough for binary transport but still relied on JSON-expanded terrain data in
+  the binary envelope.
+
+Decisions and course corrections:
+
+- `landblock/{id}/outdoor` is now the only outdoor render route. It owns terrain,
+  building shell render geometry, generated/static outdoor members, and the
+  outdoor BVH.
+- `landblock/{id}/topology` owns landblock-to-env-cell residency only. It does
+  not own outdoor terrain/static render data and does not carry env-cell render
+  geometry.
+- `env-cell/{id}` remains the direct render route for interior cell geometry and
+  its material dependencies.
+- Setup appearance data is not a default setup-model dependency. If appearance
+  overrides become useful, route planning should request `setup-appearance/{id}`
+  explicitly and prove how it changes composition.
+- Route cleanup should fail by absence: old route IDs are no longer accepted by
+  frontend parsers, worker preparation, core request variants, or the Tauri
+  adapter. This is intentional; old compatibility paths should not silently keep
+  working.
+
+Cleanup targets after Phase 6:
+
+- Split `crates/holtburger-content/src/landblock_pack.rs` into smaller modules
+  for outdoor assembly, topology assembly, env-cell assembly, and shared prepared
+  geometry helpers. Phase 6 removed route exposure first; module decomposition is
+  still debt.
+- Delete or rewrite the remaining historical pack/summary assemblers after the
+  debug harness and reverse-engineering workflows have explicit replacement
+  coverage. They are no longer reachable through the 3D app route API or
+  crate-level `holtburger-content` reexports, but the historical module remains
+  public for now because removing it outright is a larger content refactor.
+
+Cleanup follow-up completed on 2026-05-24:
+
+- Replaced live prepared coordinate-space strings
+  `landblock-terrain-local` and `landblock-scene-residency` with
+  `landblock-outdoor-terrain-local` and `landblock-topology-residency`.
+- Removed `LandblockTerrainAsset` and `LandblockSceneAsset` from the Tauri
+  adapter path. Outdoor terrain serialization now uses an app-local
+  `SerializedOutdoorTerrainSource`, and topology serialization walks
+  `LandblockTopologyAsset` directly instead of building a temporary scene asset.
+- Replaced internal terrain member IDs from `landblock/{id}/terrain/...` to
+  `landblock/{id}/outdoor/terrain/...`.
+- Removed old pack/summary/building-shell/terrain/scene asset structs and
+  assemblers from the crate-level `holtburger-content` reexports. They remain
+  inside the historical `landblock_pack` module only.
+- Renamed the shared building portal facts type from the summary-era
+  `LandblockSummaryBuildingPortal` to `LandblockBuildingPortal`.
+
+Validation completed for Phase 6:
+
+- `npm run check`
+- `npm run lint`
+- `npm run test:ts`
+- `npm run check:rust`
+- `cargo check -p holtburger-3d`
+- `cargo test -p holtburger-3d`
+- `cargo fmt --check`
+- `git diff --check`
+
+Refinements to future steps:
+
+- Any future route split must update the route parser, host contract schema,
+  worker preparation branch, dependency extraction, binary serializer, and tests
+  in the same phase. The outdoor binary serializer miss showed that route shape
+  and binary transport cannot be validated separately.
+- Do not introduce another route solely to move a dependency list. New routes
+  should represent a real ownership boundary, profiling-backed payload split, or
+  distinct consumer workflow.
+- Keep compatibility shims out of production paths. During future experiments,
+  temporary route support should live in tests or harness-only diagnostics unless
+  the final API decision is already made.
+
 ### Phase 7: Revisit Further Splits with Measurements
 
 Only after the route migration is stable, evaluate whether to split:

@@ -15,12 +15,12 @@ describe("asset state reducer", () => {
 			[
 				{
 					requestId: "bootstrap-terrain-a",
-					assetId: "landblock-pack/0102ffff",
+					assetId: "landblock/0102ffff/outdoor",
 					priority: "bootstrap",
 				},
 				{
 					requestId: "streaming-terrain-b",
-					assetId: "landblock-pack/0103ffff",
+					assetId: "landblock/0103ffff/outdoor",
 					priority: "streaming",
 				},
 			],
@@ -28,7 +28,7 @@ describe("asset state reducer", () => {
 		);
 
 		expect(state.status).toBe("pending");
-		expect(state.activeRequest?.assetId).toBe("landblock-pack/0103ffff");
+		expect(state.activeRequest?.assetId).toBe("landblock/0103ffff/outdoor");
 		expect(state.history.map((entry) => entry.status)).toEqual([
 			"requested",
 			"requested",
@@ -41,29 +41,29 @@ describe("asset state reducer", () => {
 			[
 				createPreparedTerrainAsset(
 					"bootstrap-terrain-a",
-					"landblock-pack/0102ffff",
+					"landblock/0102ffff/outdoor",
 				),
 				createPreparedTerrainAsset(
 					"bootstrap-terrain-b",
-					"landblock-pack/0103ffff",
+					"landblock/0103ffff/outdoor",
 				),
 			],
 			1_777,
 		);
 
 		expect(state.status).toBe("ready");
-		expect(state.activeRequest?.assetId).toBe("landblock-pack/0103ffff");
+		expect(state.activeRequest?.assetId).toBe("landblock/0103ffff/outdoor");
 		expect(state.preparedByPriority.bootstrap?.request.assetId).toBe(
-			"landblock-pack/0103ffff",
+			"landblock/0103ffff/outdoor",
 		);
-		expect(state.preparedByAssetId["landblock-pack/0102ffff"]).toBeDefined();
-		expect(state.preparedByAssetId["landblock-pack/0103ffff"]).toBeDefined();
+		expect(state.preparedByAssetId["landblock/0102ffff/outdoor"]).toBeDefined();
+		expect(state.preparedByAssetId["landblock/0103ffff/outdoor"]).toBeDefined();
 		expect(state.cacheMetadataByAssetId).toEqual({
-			"landblock-pack/0102ffff": {
+			"landblock/0102ffff/outdoor": {
 				lastPreparedAtMs: 1_777,
 				lastRetainedAtMs: 1_777,
 			},
-			"landblock-pack/0103ffff": {
+			"landblock/0103ffff/outdoor": {
 				lastPreparedAtMs: 1_777,
 				lastRetainedAtMs: 1_777,
 			},
@@ -76,21 +76,21 @@ describe("asset state reducer", () => {
 			[
 				createPreparedTerrainAsset(
 					"bootstrap-terrain-a",
-					"landblock-pack/0102ffff",
+					"landblock/0102ffff/outdoor",
 				),
 				createPreparedTerrainAsset(
 					"bootstrap-terrain-b",
-					"landblock-pack/0103ffff",
+					"landblock/0103ffff/outdoor",
 				),
 			],
 			1_000,
 		);
 
 		const prunedState = applyAssetCachePrune(state, {
-			retainedAssetIds: ["landblock-pack/0102ffff"],
-			evictedAssetIds: ["landblock-pack/0103ffff"],
+			retainedAssetIds: ["landblock/0102ffff/outdoor"],
+			evictedAssetIds: ["landblock/0103ffff/outdoor"],
 			cacheMetadataByAssetId: {
-				"landblock-pack/0102ffff": {
+				"landblock/0102ffff/outdoor": {
 					lastPreparedAtMs: 1_000,
 					lastRetainedAtMs: 2_000,
 				},
@@ -99,29 +99,29 @@ describe("asset state reducer", () => {
 				prepared: {
 					total: 2,
 					byKind: {
-						"landblock-pack": 2,
+						"landblock-outdoor": 2,
 					},
 				},
 				retained: {
 					total: 1,
 					byKind: {
-						"landblock-pack": 1,
+						"landblock-outdoor": 1,
 					},
 				},
 				evicted: {
 					total: 1,
 					byKind: {
-						"landblock-pack": 1,
+						"landblock-outdoor": 1,
 					},
 				},
 			},
 		});
 
 		expect(Object.keys(prunedState.preparedByAssetId)).toEqual([
-			"landblock-pack/0102ffff",
+			"landblock/0102ffff/outdoor",
 		]);
 		expect(prunedState.cacheMetadataByAssetId).toEqual({
-			"landblock-pack/0102ffff": {
+			"landblock/0102ffff/outdoor": {
 				lastPreparedAtMs: 1_000,
 				lastRetainedAtMs: 2_000,
 			},
@@ -131,8 +131,8 @@ describe("asset state reducer", () => {
 		expect(prunedState.lastResponse).toBeNull();
 		expect(prunedState.cacheDiagnostics?.evicted.total).toBe(1);
 		expect(prunedState.history.map((entry) => entry.assetId)).toEqual([
-			"landblock-pack/0102ffff",
-			"landblock-pack/0103ffff",
+			"landblock/0102ffff/outdoor",
+			"landblock/0103ffff/outdoor",
 		]);
 	});
 });

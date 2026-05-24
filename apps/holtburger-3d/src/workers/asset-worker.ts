@@ -6,12 +6,7 @@ import type {
 	DependencyManifestPayloadDto,
 	EnvCellPayloadDto,
 	GfxObjPayloadDto,
-	LandblockBuildingShellsPayloadDto,
 	LandblockOutdoorPayloadDto,
-	LandblockPackPayloadDto,
-	LandblockScenePayloadDto,
-	LandblockSummaryPayloadDto,
-	LandblockTerrainPayloadDto,
 	LandblockTopologyPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
@@ -27,12 +22,7 @@ import {
 	envCellPayloadDtoSchema,
 	genericAssetPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
-	landblockBuildingShellsPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
-	landblockPackPayloadDtoSchema,
-	landblockScenePayloadDtoSchema,
-	landblockSummaryPayloadDtoSchema,
-	landblockTerrainPayloadDtoSchema,
 	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
@@ -114,24 +104,6 @@ export function prepareAssetPayload(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
 ): PreparedAssetRecord {
-	const landblockPackPayload = landblockPackPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockPackPayload.success) {
-		return prepareLandblockPack(request, response, landblockPackPayload.data);
-	}
-
-	const landblockSummaryPayload = landblockSummaryPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockSummaryPayload.success) {
-		return prepareLandblockSummary(
-			request,
-			response,
-			landblockSummaryPayload.data,
-		);
-	}
-
 	const landblockOutdoorPayload = landblockOutdoorPayloadDtoSchema.safeParse(
 		response.payload,
 	);
@@ -157,38 +129,6 @@ export function prepareAssetPayload(
 	const envCellPayload = envCellPayloadDtoSchema.safeParse(response.payload);
 	if (envCellPayload.success) {
 		return prepareTypedContentAsset(request, response, envCellPayload.data);
-	}
-
-	const landblockTerrainPayload = landblockTerrainPayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockTerrainPayload.success) {
-		return prepareTypedContentAsset(
-			request,
-			response,
-			landblockTerrainPayload.data,
-		);
-	}
-
-	const landblockBuildingShellsPayload =
-		landblockBuildingShellsPayloadDtoSchema.safeParse(response.payload);
-	if (landblockBuildingShellsPayload.success) {
-		return prepareTypedContentAsset(
-			request,
-			response,
-			landblockBuildingShellsPayload.data,
-		);
-	}
-
-	const landblockScenePayload = landblockScenePayloadDtoSchema.safeParse(
-		response.payload,
-	);
-	if (landblockScenePayload.success) {
-		return prepareTypedContentAsset(
-			request,
-			response,
-			landblockScenePayload.data,
-		);
 	}
 
 	const gfxObjPayload = gfxObjPayloadDtoSchema.safeParse(response.payload);
@@ -303,66 +243,6 @@ export function prepareAssetPayload(
 	};
 }
 
-function prepareLandblockPack(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: LandblockPackPayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: {
-			kind: "landblock-pack",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: payload.residencyKind,
-			provenance: parseProvenance(payload.provenance),
-			landblockId: payload.landblockId,
-			landblockInfoId: payload.landblockInfoId,
-			classification: payload.classification,
-			sourceFacts: payload.sourceFacts,
-			prepared: payload.prepared,
-			dependencies: {
-				cellDatIds: payload.dependencies.cellDatIds,
-				portalDatIds: payload.dependencies.portalDatIds,
-				renderableAssetIds: payload.dependencies.renderableAssetIds,
-			},
-			diagnostics: {
-				sourceRecords: payload.diagnostics.sourceRecords,
-				errors: payload.diagnostics.errors,
-			},
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
-function prepareLandblockSummary(
-	request: AssetLookupRequestDto,
-	response: AssetLookupResponseDto,
-	payload: LandblockSummaryPayloadDto,
-): PreparedAssetRecord {
-	return {
-		request,
-		response,
-		payload: {
-			kind: "landblock-summary",
-			sourceAssetKind: payload.sourceAssetKind,
-			residencyKind: payload.residencyKind,
-			provenance: parseProvenance(payload.provenance),
-			landblockId: payload.landblockId,
-			landblockInfoId: payload.landblockInfoId,
-			classification: payload.classification,
-			sourceFacts: payload.sourceFacts,
-			prepared: payload.prepared,
-			dependencies: payload.dependencies,
-			diagnostics: {
-				sourceRecords: payload.diagnostics.sourceRecords,
-				errors: payload.diagnostics.errors,
-			},
-		},
-		preparedAt: new Date().toISOString(),
-	};
-}
-
 function prepareGfxObj(
 	request: AssetLookupRequestDto,
 	response: AssetLookupResponseDto,
@@ -471,10 +351,7 @@ function prepareTypedContentAsset(
 	payload:
 		| LandblockOutdoorPayloadDto
 		| LandblockTopologyPayloadDto
-		| EnvCellPayloadDto
-		| LandblockTerrainPayloadDto
-		| LandblockBuildingShellsPayloadDto
-		| LandblockScenePayloadDto,
+		| EnvCellPayloadDto,
 ): PreparedAssetRecord {
 	return {
 		request,

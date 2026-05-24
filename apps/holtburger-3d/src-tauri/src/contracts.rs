@@ -8,22 +8,6 @@ pub struct Vec3Dto {
     pub z: f32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QuaternionDto {
-    pub w: f32,
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlacementTransformDto {
-    pub origin: Vec3Dto,
-    pub orientation: QuaternionDto,
-}
-
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetPriorityDto {

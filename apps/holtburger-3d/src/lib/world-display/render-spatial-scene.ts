@@ -1,17 +1,6 @@
 import { Box3, Matrix4, Vector3 } from "three";
 
-import type {
-	AssetChannelState,
-	PreparedAssetRecord,
-	PreparedLandblockPackPayload,
-	PreparedLandblockSpatialItem,
-} from "../assets/types";
 import type { Vec3Dto } from "../host/contracts";
-import {
-	formatHex32,
-	formatLandblockPackAssetId,
-	normalizeOutdoorLandblockId,
-} from "../landblocks";
 import type {
 	PortalDebugOverlay,
 	WorldDebugOverlayModel,
@@ -28,12 +17,6 @@ import {
 	terrainSpatialItemId,
 } from "./render-spatial-ids";
 import { buildAcPlacementMatrix } from "./static-renderable-geometry";
-import {
-	deriveTerrainTileRenderChunk,
-	deriveRenderChunkKeyFromLandblockId,
-	type RenderChunkPlacement,
-	type RenderChunkKey,
-} from "./render-chunks";
 import type {
 	StructuredInteriorCell,
 	StructuredInteriorSceneModel,
@@ -44,36 +27,9 @@ export const TERRAIN_SPATIAL_OWNER_KEY = "terrain-scene";
 export const STRUCTURED_INTERIOR_SPATIAL_OWNER_KEY =
 	"structured-interior-scene";
 export const DEBUG_OVERLAY_SPATIAL_OWNER_KEY = "debug-overlay-scene";
-export const LANDBLOCK_PACK_SPATIAL_OWNER_KEY = "landblock-pack-scene";
 
 const PORTAL_PICK_THICKNESS = 0.35;
 const CELL_MARKER_PICK_RADIUS = 2.5;
-
-export interface LandblockPackSpatialEntry {
-	ownerKey: string;
-	landblockId: number;
-	items: RenderSpatialItem[];
-}
-
-export class LandblockPackSpatialItemCache {
-	private readonly itemsByPack = new WeakMap<
-		PreparedAssetRecord & { payload: PreparedLandblockPackPayload },
-		RenderSpatialItem[]
-	>();
-
-	getPackSpatialItems(
-		asset: PreparedAssetRecord & { payload: PreparedLandblockPackPayload },
-	): RenderSpatialItem[] {
-		const cached = this.itemsByPack.get(asset);
-		if (cached) {
-			return cached;
-		}
-
-		const items = derivePreparedPackSpatialItems(asset.payload);
-		this.itemsByPack.set(asset, items);
-		return items;
-	}
-}
 
 export function deriveTerrainSpatialItems(
 	terrainScene: TerrainSceneModel,
@@ -100,86 +56,6 @@ export function deriveDebugOverlaySpatialItems(
 	];
 }
 
-export function deriveLandblockPackSpatialItems(
-	assetState: AssetChannelState,
-	activeLandblockIds: ReadonlySet<number> | null = null,
-): RenderSpatialItem[] {
-	return deriveLandblockPackSpatialEntries(
-		assetState,
-		activeLandblockIds,
-	).flatMap((entry) => entry.items);
-}
-
-export function deriveLandblockPackSpatialEntries(
-	assetState: AssetChannelState,
-	activeLandblockIds: ReadonlySet<number> | null = null,
-	cache: LandblockPackSpatialItemCache | null = null,
-): LandblockPackSpatialEntry[] {
-	const assets =
-		activeLandblockIds === null
-			? Object.values(assetState.preparedByAssetId).flatMap((asset) =>
-					isPreparedLandblockPackAsset(asset) ? [asset] : [],
-				)
-			: collectLandblockPackAssets(assetState, activeLandblockIds);
-	return assets.map((asset) => ({
-		ownerKey: deriveLandblockPackSpatialOwnerKey(asset.payload.landblockId),
-		landblockId: normalizeOutdoorLandblockId(asset.payload.landblockId),
-		items: cache
-			? cache.getPackSpatialItems(asset)
-			: derivePreparedPackSpatialItems(asset.payload),
-	}));
-}
-
-export function deriveLandblockPackRenderChunkPlacements(
-	assetState: AssetChannelState,
-	activeLandblockIds: ReadonlySet<number> | null = null,
-): RenderChunkPlacement[] {
-	const chunksByKey = new Map<RenderChunkKey, RenderChunkPlacement>();
-	const packs =
-		activeLandblockIds === null
-			? Object.values(assetState.preparedByAssetId).flatMap((asset) =>
-					asset.payload.kind === "landblock-pack" ? [asset.payload] : [],
-				)
-			: collectLandblockPackAssets(assetState, activeLandblockIds).map(
-					(asset) => asset.payload,
-				);
-	for (const pack of packs) {
-		const chunk = deriveTerrainTileRenderChunk(pack.landblockId);
-		chunksByKey.set(chunk.chunkKey, chunk);
-	}
-
-	return [...chunksByKey.values()].sort((left, right) =>
-		left.chunkKey.localeCompare(right.chunkKey),
-	);
-}
-
-function collectLandblockPackAssets(
-	assetState: AssetChannelState,
-	landblockIds: ReadonlySet<number>,
-): (PreparedAssetRecord & { payload: PreparedLandblockPackPayload })[] {
-	const packs: (PreparedAssetRecord & {
-		payload: PreparedLandblockPackPayload;
-	})[] = [];
-	for (const landblockId of landblockIds) {
-		const asset =
-			assetState.preparedByAssetId[formatLandblockPackAssetId(landblockId)];
-		if (isPreparedLandblockPackAsset(asset)) {
-			packs.push(asset);
-		}
-	}
-	return packs;
-}
-
-function isPreparedLandblockPackAsset(
-	asset: PreparedAssetRecord | undefined,
-): asset is PreparedAssetRecord & { payload: PreparedLandblockPackPayload } {
-	return asset?.payload.kind === "landblock-pack";
-}
-
-export function deriveLandblockPackSpatialOwnerKey(landblockId: number): string {
-	return `${LANDBLOCK_PACK_SPATIAL_OWNER_KEY}/${formatHex32(normalizeOutdoorLandblockId(landblockId))}`;
-}
-
 function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 	const bounds = deriveTerrainTileBounds(tile);
 	return {
@@ -195,103 +71,6 @@ function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 			assetId: tile.assetId,
 			terrainQuad: null,
 		},
-	};
-}
-
-function derivePreparedPackSpatialItems(
-	pack: PreparedLandblockPackPayload,
-): RenderSpatialItem[] {
-	const chunkKey = deriveRenderChunkKeyFromLandblockId(pack.landblockId);
-	return pack.prepared.spatialItems.map((item) =>
-		derivePreparedPackSpatialItem(pack, item, chunkKey),
-	);
-}
-
-function derivePreparedPackSpatialItem(
-	pack: PreparedLandblockPackPayload,
-	item: PreparedLandblockPackPayload["prepared"]["spatialItems"][number],
-	chunkKey: RenderChunkKey,
-): RenderSpatialItem {
-	const kind = renderSpatialKindForPackItem(item);
-	return {
-		id: `landblock-pack:${item.id}`,
-		kind,
-		ownerKey: deriveLandblockPackSpatialOwnerKey(pack.landblockId),
-		chunkKey,
-		broadphaseBounds: item.bounds,
-		pickShape: { kind: "box", bounds: item.bounds },
-		metadata: derivePreparedPackSpatialMetadata(pack, item, kind),
-	};
-}
-
-function renderSpatialKindForPackItem(
-	item: PreparedLandblockSpatialItem,
-): RenderSpatialItem["kind"] {
-	switch (item.kind) {
-		case "terrain":
-			return "terrain";
-		case "env-cell":
-			return "structured-cell";
-		case "portal":
-			return "portal";
-		case "building":
-			return "building";
-		case "indoor-static":
-			return "indoor-static";
-		case "outdoor-static":
-			return "outdoor-static";
-	}
-}
-
-function derivePreparedPackSpatialMetadata(
-	pack: PreparedLandblockPackPayload,
-	item: PreparedLandblockSpatialItem,
-	kind: RenderSpatialItem["kind"],
-): RenderSpatialItem["metadata"] {
-	if (kind === "terrain") {
-		const terrainQuad =
-			item.metadata.kind === "terrain-quad"
-				? {
-						row: item.metadata.row,
-						col: item.metadata.col,
-						quadIndex: item.metadata.quadIndex,
-						triangleIndices: item.metadata.triangleIndices,
-					}
-				: null;
-		return {
-			kind: "terrain",
-			landblockId: pack.landblockId,
-			assetId: item.id,
-			terrainQuad,
-		};
-	}
-	if (kind === "structured-cell") {
-		return {
-			kind: "structured-cell",
-			envCellId: item.ownerId ?? pack.landblockId,
-			renderKey: item.id,
-			isFocus: false,
-		};
-	}
-	if (kind === "portal") {
-		return {
-			kind: "portal",
-			portalId: item.id,
-			sourceEnvCellId: item.ownerId ?? pack.landblockId,
-			targetEnvCellId: null,
-			targetStatus: "unsupported",
-			polygonId: 0,
-			otherPortalId: 0,
-			flags: 0,
-		};
-	}
-	return {
-		kind: "landblock-pack-spatial",
-		spatialKind: kind,
-		itemId: item.id,
-		landblockId: pack.landblockId,
-		ownerId: item.ownerId,
-		sourceAssetId: item.sourceAssetId,
 	};
 }
 

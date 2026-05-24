@@ -39,7 +39,7 @@ function createTerrainScene(tileCount: number): TerrainSceneModel {
 		cacheText: "test",
 		dataSourceText: "test",
 		tiles: Array.from({ length: tileCount }, () => ({
-			assetId: `landblock-pack/0102000`,
+			assetId: `landblock/0102ffff/outdoor`,
 		})) as TerrainSceneModel["tiles"],
 	};
 }

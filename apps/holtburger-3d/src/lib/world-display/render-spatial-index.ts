@@ -68,17 +68,6 @@ export type RenderSpatialMetadata =
 			polygonId: number;
 			otherPortalId: number;
 			flags: number;
-	  }
-	| {
-			kind: "landblock-pack-spatial";
-			spatialKind: Exclude<
-				RenderSpatialItemKind,
-				"terrain" | "structured-cell" | "portal"
-			>;
-			itemId: string;
-			landblockId: number;
-			ownerId: number | null;
-			sourceAssetId: string | null;
 	  };
 
 export interface RenderSpatialItem {

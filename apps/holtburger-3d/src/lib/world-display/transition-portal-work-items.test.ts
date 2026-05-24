@@ -289,7 +289,7 @@ function createLandblockOutdoorAsset(options: {
 			triangles: [],
 			quads: [],
 			terrainBvh: {
-				coordinateSpace: "landblock-terrain-local",
+				coordinateSpace: "landblock-outdoor-terrain-local",
 				nodes: [],
 				items: [],
 			},

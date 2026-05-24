@@ -284,7 +284,7 @@ function createPreparedTopology(
 		})),
 		portalLinks: [],
 		envCellResidencyBvh: {
-			coordinateSpace: "landblock-scene-residency" as const,
+			coordinateSpace: "landblock-topology-residency" as const,
 			nodes: [],
 			items: [],
 		},

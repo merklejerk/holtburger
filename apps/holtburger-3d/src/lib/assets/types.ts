@@ -230,15 +230,6 @@ interface PreparedLandblockTerrain {
 	bounds: PreparedBounds | null;
 }
 
-interface PreparedLandblockTerrainBuildingShell {
-	instanceId: string;
-	sourceDid: number;
-	sourceIndex: number;
-	localPlacement: PlacementTransformDto;
-	renderGeometry: PreparedPolygonSetRenderGeometry;
-	materialSurfaceIds: number[];
-}
-
 export interface PreparedLandblockTerrainPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-terrain";
 	sourceAssetKind: "landblock-terrain";
@@ -247,7 +238,38 @@ export interface PreparedLandblockTerrainPayload extends PreparedAssetPayloadBas
 	regionId: number;
 	regionNumber: number;
 	terrain: PreparedLandblockTerrain;
-	buildingShells: PreparedLandblockTerrainBuildingShell[];
+	diagnostics: PreparedLandblockPackPayload["diagnostics"];
+}
+
+interface PreparedLandblockBuildingShellBvhItem {
+	kind: "building-shell";
+	shellId: string;
+}
+
+interface PreparedLandblockBuildingShellBvh {
+	coordinateSpace: "landblock-local";
+	nodes: PreparedLandblockBvhNode[];
+	items: PreparedLandblockBuildingShellBvhItem[];
+}
+
+interface PreparedLandblockBuildingShellMember {
+	shellId: string;
+	buildingIndex: number;
+	sourceDid: number;
+	sourceAssetId: string;
+	localPlacement: PlacementTransformDto;
+	sourceScale: Vec3Dto;
+	sourceBounds: PreparedBounds | null;
+	instanceBounds: PreparedBounds | null;
+}
+
+export interface PreparedLandblockBuildingShellsPayload extends PreparedAssetPayloadBase {
+	kind: "landblock-building-shells";
+	sourceAssetKind: "landblock-building-shells";
+	residencyKind: "outdoor-landblock";
+	landblockId: number;
+	shells: PreparedLandblockBuildingShellMember[];
+	shellBvh: PreparedLandblockBuildingShellBvh;
 	diagnostics: PreparedLandblockPackPayload["diagnostics"];
 }
 
@@ -910,6 +932,7 @@ export type PreparedAssetPayload =
 	| PreparedLandblockPackPayload
 	| PreparedLandblockSummaryPayload
 	| PreparedLandblockTerrainPayload
+	| PreparedLandblockBuildingShellsPayload
 	| PreparedLandblockScenePayload
 	| PreparedEnvCellPayload
 	| PreparedGfxObjPayload
@@ -980,10 +1003,13 @@ export function getPreparedAssetDependencies(
 		const payload = asset.payload;
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialDependencyAssetId(payload.regionNumber),
-			...payload.buildingShells.flatMap((buildingShell) =>
-				buildingShell.materialSurfaceIds.map(formatMaterialDependencyAssetId),
-			),
 		]);
+	}
+
+	if (asset.payload.kind === "landblock-building-shells") {
+		return uniqueSortedAssetIds(
+			asset.payload.shells.map((shell) => shell.sourceAssetId),
+		);
 	}
 
 	if (asset.payload.kind === "landblock-scene") {
@@ -1072,16 +1098,8 @@ function uniqueSortedAssetIds(
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
 }
 
-function formatMaterialDependencyAssetId(surfaceId: number): string {
-	return `material/${formatHex32(surfaceId)}`;
-}
-
 function formatTerrainMaterialDependencyAssetId(regionNumber: number): string {
 	return `terrain-material/${Math.trunc(regionNumber)}`;
-}
-
-function formatHex32(value: number): string {
-	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 export function derivePreparedAssetDependencyStatus(

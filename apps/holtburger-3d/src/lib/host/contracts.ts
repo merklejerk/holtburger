@@ -469,15 +469,6 @@ const landblockTerrainDtoSchema = z.object({
 	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }).nullable(),
 });
 
-const landblockTerrainBuildingShellDtoSchema = z.object({
-	instanceId: z.string().min(1),
-	sourceDid: z.number().int().nonnegative(),
-	sourceIndex: z.number().int().nonnegative(),
-	localPlacement: placementTransformDtoSchema,
-	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
-	materialSurfaceIds: z.array(z.number().int().nonnegative()),
-});
-
 export const landblockTerrainPayloadDtoSchema = z.object({
 	kind: z.literal("landblock-terrain"),
 	residencyKind: z.literal("outdoor-landblock"),
@@ -486,12 +477,47 @@ export const landblockTerrainPayloadDtoSchema = z.object({
 	regionId: z.number().int().nonnegative(),
 	regionNumber: z.number().int().nonnegative(),
 	terrain: landblockTerrainDtoSchema,
-	buildingShells: z.array(landblockTerrainBuildingShellDtoSchema),
 	diagnostics: landblockPackDiagnosticsDtoSchema,
 	provenance: assetProvenanceDtoSchema,
 });
 export type LandblockTerrainPayloadDto = z.infer<
 	typeof landblockTerrainPayloadDtoSchema
+>;
+
+const landblockBuildingShellMemberDtoSchema = z.object({
+	shellId: z.string().min(1),
+	buildingIndex: z.number().int().nonnegative(),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	localPlacement: placementTransformDtoSchema,
+	sourceScale: vec3DtoSchema,
+	sourceBounds: preparedAabbDtoSchema,
+	instanceBounds: preparedAabbDtoSchema,
+});
+
+const preparedLandblockBuildingShellBvhItemDtoSchema = z.object({
+	kind: z.literal("building-shell"),
+	shellId: z.string().min(1),
+});
+
+const preparedLandblockBuildingShellBvhDtoSchema = z.object({
+	coordinateSpace: z.literal("landblock-local"),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	items: z.array(preparedLandblockBuildingShellBvhItemDtoSchema),
+});
+
+export const landblockBuildingShellsPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-building-shells"),
+	residencyKind: z.literal("outdoor-landblock"),
+	sourceAssetKind: z.literal("landblock-building-shells"),
+	landblockId: z.number().int().nonnegative(),
+	shells: z.array(landblockBuildingShellMemberDtoSchema),
+	shellBvh: preparedLandblockBuildingShellBvhDtoSchema,
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockBuildingShellsPayloadDto = z.infer<
+	typeof landblockBuildingShellsPayloadDtoSchema
 >;
 
 const landblockScenePlacedSourceMemberBaseDtoSchema = z.object({

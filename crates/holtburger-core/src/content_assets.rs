@@ -5,8 +5,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockPack, LandblockPackAssembler, LandblockSummary,
-    LandblockSummaryAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
+    ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
+    LandblockBuildingShellsAsset, LandblockBuildingShellsAssetAssembler, LandblockPack,
+    LandblockPackAssembler, LandblockSummary, LandblockSummaryAssembler, LandblockTerrainAsset,
+    LandblockTerrainAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
     ResolvedSetupAppearance, ResolvedTerrainMaterialTable, normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, RenderTexture, SetupModel};
@@ -20,6 +22,7 @@ pub enum ContentAssetRequest {
     LandblockPack(u32),
     LandblockSummary(u32),
     LandblockTerrain(u32),
+    LandblockBuildingShells(u32),
     LandblockScene(u32),
     EnvCell(u32),
     TerrainMaterial(u32),
@@ -37,12 +40,13 @@ pub enum ContentAsset {
     LandblockPack(Box<LandblockPack>),
     LandblockSummary(Box<LandblockSummary>),
     LandblockTerrain {
-        pack: Box<LandblockPack>,
+        terrain: Box<LandblockTerrainAsset>,
         region_id: u32,
         region_number: u32,
     },
+    LandblockBuildingShells(Box<LandblockBuildingShellsAsset>),
     LandblockScene(Box<LandblockPack>),
-    EnvCell(Box<LandblockPack>),
+    EnvCell(Box<EnvCellAsset>),
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     GfxObj(Box<GfxObj>),
     SetupModel(Box<SetupModel>),
@@ -91,17 +95,27 @@ impl ContentAssetService {
             }
             ContentAssetRequest::LandblockTerrain(landblock_id) => {
                 let landblock_id = normalize_landblock_id(landblock_id);
-                let pack = LandblockPackAssembler::new().assemble_landblock_with_cache(
+                let terrain = LandblockTerrainAssetAssembler::new().assemble_landblock_with_cache(
                     &self.content,
                     &self.decode_cache,
                     landblock_id,
                 );
                 let region = self.decode_cache.region_desc(&self.content)?;
                 Ok(ContentAsset::LandblockTerrain {
-                    pack: Box::new(pack),
+                    terrain: Box::new(terrain),
                     region_id: region.id,
                     region_number: region.region_number,
                 })
+            }
+            ContentAssetRequest::LandblockBuildingShells(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                Ok(ContentAsset::LandblockBuildingShells(Box::new(
+                    LandblockBuildingShellsAssetAssembler::new().assemble_landblock_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        landblock_id,
+                    ),
+                )))
             }
             ContentAssetRequest::LandblockScene(landblock_id) => {
                 let landblock_id = normalize_landblock_id(landblock_id);
@@ -114,14 +128,10 @@ impl ContentAssetService {
                 )))
             }
             ContentAssetRequest::EnvCell(env_cell_id) => {
-                let landblock_id = normalize_landblock_id(env_cell_id & 0xffff_0000);
-                Ok(ContentAsset::EnvCell(Box::new(
-                    LandblockPackAssembler::new().assemble_landblock_with_cache(
-                        &self.content,
-                        &self.decode_cache,
-                        landblock_id,
-                    ),
-                )))
+                let asset = EnvCellAssetAssembler::new()
+                    .assemble_env_cell_with_cache(&self.content, &self.decode_cache, env_cell_id)
+                    .ok_or_else(|| anyhow!("Could not assemble EnvCell 0x{env_cell_id:08X}"))?;
+                Ok(ContentAsset::EnvCell(Box::new(asset)))
             }
             ContentAssetRequest::TerrainMaterial(region_number) => Ok(
                 ContentAsset::TerrainMaterial(Box::new(

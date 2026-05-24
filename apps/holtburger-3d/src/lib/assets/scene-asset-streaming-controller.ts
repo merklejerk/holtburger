@@ -22,8 +22,6 @@ import {
 } from "./scene-asset-request-planner";
 import type { PreparedAssetCacheMetadata, PreparedAssetRecord } from "./types";
 
-const DEFAULT_SCENE_ASSET_REQUEST_CONCURRENCY_LIMIT = 4;
-
 interface SceneAssetChannel {
 	prepareAsset(request: AssetLookupRequestDto): Promise<PreparedAssetRecord>;
 	prepareAssetGraph(
@@ -50,7 +48,6 @@ export interface SceneAssetStreamingControllerDeps {
 	applyAssetCachePrune(prunePlan: PreparedAssetCachePrunePlan): void;
 	applyAssetError(request: AssetLookupRequestDto, message: string): void;
 	debugLog(label: string, detail: unknown): void;
-	requestConcurrencyLimit?: number;
 	nowMs?(): number;
 	warmRetainMs?: number;
 }
@@ -196,11 +193,8 @@ export class SceneAssetStreamingController {
 		}
 		this.deps.markAssetsPending(requests);
 
-		const requestConcurrencyLimit =
-			this.deps.requestConcurrencyLimit ??
-			DEFAULT_SCENE_ASSET_REQUEST_CONCURRENCY_LIMIT;
-		await settleWithConcurrency(requests, requestConcurrencyLimit, async (request) =>
-			this.prepareAndApplyRequest(request),
+		await Promise.allSettled(
+			requests.map((request) => this.prepareAndApplyRequest(request)),
 		);
 		this.prunePreparedCache(input);
 	}
@@ -393,36 +387,4 @@ function createSceneInterestSyncKey(input: SceneAssetStreamingInput): string {
 	return destinationIdentity
 		? `${destinationIdentity}:${interestKey}`
 		: `none:${interestKey}`;
-}
-
-export async function settleWithConcurrency<T>(
-	items: readonly T[],
-	concurrencyLimit: number,
-	work: (item: T) => Promise<void>,
-): Promise<PromiseSettledResult<void>[]> {
-	if (items.length === 0) {
-		return [];
-	}
-	if (!Number.isInteger(concurrencyLimit) || concurrencyLimit <= 0) {
-		throw new Error("Scene asset request concurrency limit must be positive.");
-	}
-
-	const results: PromiseSettledResult<void>[] = new Array(items.length);
-	let nextIndex = 0;
-	const workerCount = Math.min(concurrencyLimit, items.length);
-	await Promise.all(
-		Array.from({ length: workerCount }, async () => {
-			while (nextIndex < items.length) {
-				const itemIndex = nextIndex;
-				nextIndex += 1;
-				try {
-					await work(items[itemIndex] as T);
-					results[itemIndex] = { status: "fulfilled", value: undefined };
-				} catch (reason) {
-					results[itemIndex] = { status: "rejected", reason };
-				}
-			}
-		}),
-	);
-	return results;
 }

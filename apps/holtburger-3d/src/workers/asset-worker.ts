@@ -995,11 +995,6 @@ type AssetWorkerRuntimeScope = typeof globalThis & {
 
 const workerScope = globalThis as AssetWorkerRuntimeScope;
 const ASSET_WORKER_DIAGNOSTIC_BUILD = "asset-worker-diag-2026-05-24a";
-const WORKER_PREPARE_BATCH_SIZE = 4;
-const WORKER_PREPARE_BATCH_CONCURRENCY = 2;
-const WORKER_PREPARE_COALESCE_WINDOW_MS = 8;
-
-export type QueuedPrepareItem = AssetWorkerPrepareBatchItem;
 
 class AssetWorkerHostBridge {
 	private nextRequestIndex = 1;
@@ -1076,57 +1071,20 @@ class AssetWorkerHostBridge {
 }
 
 class AssetWorkerPrepareScheduler {
-	private readonly queue: QueuedPrepareItem[] = [];
-	private activeBatchCount = 0;
-	private flushScheduled = false;
-
 	constructor(
 		private readonly hostBridge: AssetWorkerHostBridge,
 		private readonly workerScope: AssetWorkerRuntimeScope,
 	) {}
 
 	enqueue(items: readonly AssetWorkerPrepareBatchItem[]): void {
-		for (const item of items) {
-			this.queue.push({ ...item });
-		}
-		this.scheduleFlush();
-	}
-
-	private scheduleFlush(): void {
-		if (this.flushScheduled) {
+		if (items.length === 0) {
 			return;
 		}
-
-		this.flushScheduled = true;
-		setTimeout(() => {
-			this.flushScheduled = false;
-			this.startReadyBatches();
-		}, WORKER_PREPARE_COALESCE_WINDOW_MS);
-	}
-
-	private startReadyBatches(): void {
-		while (
-			this.activeBatchCount < WORKER_PREPARE_BATCH_CONCURRENCY &&
-			this.queue.length > 0
-		) {
-			const [batch, ...remainingBatches] = planWorkerPrepareBatches(
-				this.queue.splice(0),
-				WORKER_PREPARE_BATCH_SIZE,
-			);
-			if (!batch) {
-				return;
-			}
-			this.queue.unshift(...remainingBatches.flat());
-			this.activeBatchCount += 1;
-			void this.processBatch(batch).finally(() => {
-				this.activeBatchCount -= 1;
-				this.startReadyBatches();
-			});
-		}
+		void this.processBatch(items.map((item) => ({ ...item })));
 	}
 
 	private async processBatch(
-		items: readonly QueuedPrepareItem[],
+		items: readonly AssetWorkerPrepareBatchItem[],
 	): Promise<void> {
 		const results: AssetWorkerPreparedResult[] = [];
 		const transferables: Transferable[] = [];
@@ -1183,7 +1141,7 @@ class AssetWorkerPrepareScheduler {
 	}
 
 	private postBatchError(
-		items: readonly QueuedPrepareItem[],
+		items: readonly AssetWorkerPrepareBatchItem[],
 		error: unknown,
 	): void {
 		this.workerScope.postMessage?.({
@@ -1201,46 +1159,6 @@ class AssetWorkerPrepareScheduler {
 function formatWorkerDiagnosticError(error: unknown): string {
 	const message = error instanceof Error ? error.message : String(error);
 	return `[${ASSET_WORKER_DIAGNOSTIC_BUILD}] ${message}`;
-}
-
-export function planWorkerPrepareBatches(
-	items: readonly QueuedPrepareItem[],
-	maxBatchSize: number = WORKER_PREPARE_BATCH_SIZE,
-): QueuedPrepareItem[][] {
-	const batches: QueuedPrepareItem[][] = [];
-	let currentBatch: QueuedPrepareItem[] = [];
-
-	const flushCurrentBatch = (): void => {
-		if (currentBatch.length === 0) {
-			return;
-		}
-		batches.push(currentBatch);
-		currentBatch = [];
-	};
-
-	for (const item of items) {
-		if (isLargeWorkerPrepareAsset(item.request.assetId)) {
-			flushCurrentBatch();
-			batches.push([item]);
-			continue;
-		}
-
-		currentBatch.push(item);
-		if (currentBatch.length >= maxBatchSize) {
-			flushCurrentBatch();
-		}
-	}
-
-	flushCurrentBatch();
-	return batches;
-}
-
-function isLargeWorkerPrepareAsset(assetId: string): boolean {
-	return (
-		/^landblock\/[0-9a-fA-F]{8}\/outdoor$/.test(assetId) ||
-		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
-		/^gfx-obj\/[0-9a-fA-F]{8}$/.test(assetId)
-	);
 }
 
 if (

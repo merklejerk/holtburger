@@ -15,7 +15,7 @@ use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex, Semaphore};
 
-const DEFAULT_CONTENT_ASSET_WORKERS: usize = 2;
+const DEFAULT_CONTENT_ASSET_WORKERS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContentAssetRequest {

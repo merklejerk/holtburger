@@ -155,10 +155,7 @@ function deriveStructuredInteriorSceneForEnvCells(
 				environmentId: envCell.environmentId,
 				cellStructureId: envCell.cellStructureId,
 				isFocus: focusEnvCellId !== null && envCellId === focusEnvCellId,
-				chunkLocalPlacement: {
-					origin: { x: 0, y: 0, z: 0 },
-					orientation: { w: 1, x: 0, y: 0, z: 0 },
-				},
+				chunkLocalPlacement: envCell.localPlacement,
 				surfaceIds: envCell.surfaces.map((surface) => surface.surfaceId),
 				portalCount: envCell.portals.length,
 				portals: envCell.portals.map((portal) => ({

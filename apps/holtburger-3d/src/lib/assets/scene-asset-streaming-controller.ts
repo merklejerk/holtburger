@@ -271,12 +271,13 @@ export class SceneAssetStreamingController {
 				request,
 				hydrationKind,
 				message,
+				messageChunks: chunkDiagnosticString(message),
 				preparedAssetCounts: countPreparedAssetsByKind(
 					this.deps.getPreparedByAssetId(),
 				),
 				inFlightAssetIds: [...this.inFlightAssetIds],
 			};
-			console.error("[holtburger-3d][asset-graph]", detail);
+			console.error("[holtburger-3d][asset-graph][diag-2026-05-24a]", detail);
 			this.deps.debugLog("asset-error", detail);
 			if (!this.disposed) {
 				this.deps.applyAssetError(request, message);
@@ -295,6 +296,14 @@ function countPreparedAssetsByKind(
 		counts[asset.payload.kind] = (counts[asset.payload.kind] ?? 0) + 1;
 	}
 	return counts;
+}
+
+function chunkDiagnosticString(value: string, chunkSize = 120): string[] {
+	const chunks: string[] = [];
+	for (let index = 0; index < value.length; index += chunkSize) {
+		chunks.push(value.slice(index, index + chunkSize));
+	}
+	return chunks;
 }
 
 function reportMaterialGraphRequests(options: {

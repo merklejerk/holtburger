@@ -155,11 +155,12 @@ function hydrateBinarySection(
 	}
 
 	const bytes = envelopeBytes.subarray(sectionStart, sectionEnd);
-	const target = decodeBinarySection(section, bytes);
+	const target = decodeBinarySection(responseRoot, section, bytes);
 	assignPath(responseRoot, section.path, target);
 }
 
 function decodeBinarySection(
+	responseRoot: { responses: AssetLookupResponseDto[] },
 	section: BinarySection,
 	bytes: Uint8Array,
 ): unknown {
@@ -181,19 +182,37 @@ function decodeBinarySection(
 		}));
 	}
 	if (section.role === "landblockTerrain.triangles") {
-		return chunk(Array.from(readFloat32Section(bytes)), 6).map(
+		const landblockId = landblockIdForTerrainTriangleSection(
+			responseRoot,
+			section.path,
+		);
+		return chunk(Array.from(readFloat32Section(bytes)), 13).map(
 			([
+				triangleIndex,
 				quadIndex,
 				triangleInQuad,
 				vertexIndexA,
 				vertexIndexB,
 				vertexIndexC,
 				averageHeight,
+				minX,
+				minY,
+				minZ,
+				maxX,
+				maxY,
+				maxZ,
 			]) => ({
+				terrainTriangleId: `landblock/${formatHex32(
+					landblockId,
+				)}/outdoor/terrain/triangle/${formatHex16(triangleIndex)}`,
 				quadIndex,
 				triangleInQuad,
 				vertexIndices: [vertexIndexA, vertexIndexB, vertexIndexC],
 				averageHeight,
+				bounds: {
+					min: { x: minX, y: minY, z: minZ },
+					max: { x: maxX, y: maxY, z: maxZ },
+				},
 			}),
 		);
 	}
@@ -250,6 +269,37 @@ function decodeBinarySection(
 	throw new Error(
 		`Unsupported binary section scalar type ${section.scalarType}.`,
 	);
+}
+
+function landblockIdForTerrainTriangleSection(
+	responseRoot: { responses: AssetLookupResponseDto[] },
+	path: string,
+): number {
+	const match = /^responses\.(\d+)\.payload\.terrain\.triangles$/.exec(path);
+	if (!match) {
+		throw new Error(`Terrain triangle section path ${path} is not supported.`);
+	}
+	const responseIndex = Number.parseInt(match[1] as string, 10);
+	const payload = responseRoot.responses[responseIndex]?.payload;
+	if (
+		typeof payload !== "object" ||
+		payload === null ||
+		!("landblockId" in payload) ||
+		typeof payload.landblockId !== "number"
+	) {
+		throw new Error(
+			`Terrain triangle section path ${path} could not resolve a landblock id.`,
+		);
+	}
+	return payload.landblockId;
+}
+
+function formatHex32(value: number): string {
+	return value.toString(16).padStart(8, "0");
+}
+
+function formatHex16(value: number): string {
+	return value.toString(16).padStart(4, "0");
 }
 
 function readFloat32Section(bytes: Uint8Array): Float32Array {

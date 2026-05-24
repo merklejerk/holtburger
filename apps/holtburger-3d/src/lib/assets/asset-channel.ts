@@ -316,7 +316,13 @@ function toError(error: unknown): Error {
 }
 
 function createAssetWorker(): AssetWorkerLike {
-	return new Worker(new URL("../../workers/asset-worker.ts", import.meta.url), {
-		type: "module",
-	}) as unknown as AssetWorkerLike;
+	return new Worker(
+		new URL(
+			"../../workers/asset-worker.ts?asset-worker-diag-2026-05-24a",
+			import.meta.url,
+		),
+		{
+			type: "module",
+		},
+	) as unknown as AssetWorkerLike;
 }

@@ -138,7 +138,14 @@ export class WorldMaterialResourceCache {
 		preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>;
 		fallbackColorKey: string;
 	}): Material {
-		const materialKey = `${options.appearanceKey}|${options.materialAssetId}`;
+		const materialKey = [
+			options.appearanceKey,
+			options.materialAssetId,
+			describeMaterialPreparedStateSignature(
+				options.materialAssetId,
+				options.preparedByAssetId,
+			),
+		].join("|");
 		const cached = this.materialRecords.get(materialKey);
 		if (cached) {
 			return cached.material;
@@ -180,6 +187,41 @@ export class WorldMaterialResourceCache {
 		this.reportedDiagnosticKeys.add(diagnostic.key);
 		this.reportDiagnostic(diagnostic);
 	}
+}
+
+function describeMaterialPreparedStateSignature(
+	materialAssetId: string,
+	preparedByAssetId: Readonly<Record<string, PreparedAssetRecord>>,
+): string {
+	const recipeAsset = preparedByAssetId[materialAssetId];
+	if (recipeAsset?.payload.kind !== "material-recipe") {
+		return describePreparedAssetSignature(materialAssetId, recipeAsset);
+	}
+
+	const dependencyAssetIds = [
+		...recipeAsset.payload.dependencies.renderTextureAssetIds,
+		...recipeAsset.payload.dependencies.renderSurfaceAssetIds,
+		...recipeAsset.payload.dependencies.paletteAssetIds,
+	];
+	return [
+		describePreparedAssetSignature(materialAssetId, recipeAsset),
+		...dependencyAssetIds
+			.sort()
+			.map((assetId) =>
+				describePreparedAssetSignature(assetId, preparedByAssetId[assetId]),
+			),
+	].join(";");
+}
+
+function describePreparedAssetSignature(
+	assetId: string,
+	asset: PreparedAssetRecord | undefined,
+): string {
+	if (!asset) {
+		return `${assetId}:missing`;
+	}
+
+	return `${assetId}:${asset.payload.kind}:${asset.preparedAt}:${asset.payload.provenance.errorCode ?? "ok"}`;
 }
 
 export function formatMaterialAssetId(surfaceId: number): string {

@@ -7,6 +7,7 @@
 		MAX_TRANSITION_PORTAL_MAX_DEPTH,
 		MIN_BROWSER_LOD_RADIUS,
 		MIN_TRANSITION_PORTAL_MAX_DEPTH,
+		type BrowserRenderStyle,
 		type BrowserNavigationFocusMode,
 	} from "../app/browser-mode";
 	import { formatHex32, normalizeOutdoorLandblockId } from "../lib/landblocks";
@@ -147,6 +148,10 @@
 	function handlePortalTargetHighlightToggle(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
 		frontendState.updatePortalTargetHighlighting(input.checked);
+	}
+
+	function handleRenderStyleChange(renderStyle: BrowserRenderStyle): void {
+		frontendState.updateBrowserRenderStyle(renderStyle);
 	}
 
 	function formatOptionalHex32(value: number | null): string {
@@ -487,6 +492,40 @@
 	{:else if !isCollapsed && activeTab === "scene"}
 		<div class="browser-panel__body" role="tabpanel">
 			<p class="browser-panel__status">{sceneStatusText}</p>
+			<div
+				class="browser-form__segmented"
+				role="group"
+				aria-label="Render style"
+			>
+				<button
+					type="button"
+					class:active={$frontendState.browserMode.renderStyle === "solid"}
+					aria-pressed={$frontendState.browserMode.renderStyle === "solid"}
+					onclick={() => handleRenderStyleChange("solid")}
+				>
+					Solid
+				</button>
+				<button
+					type="button"
+					class:active={$frontendState.browserMode.renderStyle ===
+						"wireframe"}
+					aria-pressed={$frontendState.browserMode.renderStyle ===
+						"wireframe"}
+					onclick={() => handleRenderStyleChange("wireframe")}
+				>
+					Wireframe
+				</button>
+				<button
+					type="button"
+					class:active={$frontendState.browserMode.renderStyle ===
+						"no-material"}
+					aria-pressed={$frontendState.browserMode.renderStyle ===
+						"no-material"}
+					onclick={() => handleRenderStyleChange("no-material")}
+				>
+					No material
+				</button>
+			</div>
 			<dl class="data-list compact-data-list browser-panel__summary-list">
 				{#each sceneSummaryRows as row}
 					<div>

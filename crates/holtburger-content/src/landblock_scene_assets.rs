@@ -593,7 +593,20 @@ impl EnvCellAssetAssembler {
         decode_cache: &ContentDecodeCache,
         env_cell_id: u32,
     ) -> Option<EnvCellAsset> {
-        self.assemble_env_cell_with_context(
+        self.try_assemble_env_cell_with_context(
+            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
+            env_cell_id,
+        )
+        .ok()
+    }
+
+    pub fn try_assemble_env_cell_with_cache(
+        &self,
+        content: &ContentRepository,
+        decode_cache: &ContentDecodeCache,
+        env_cell_id: u32,
+    ) -> anyhow::Result<EnvCellAsset> {
+        self.try_assemble_env_cell_with_context(
             PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
             env_cell_id,
         )
@@ -601,34 +614,79 @@ impl EnvCellAssetAssembler {
 
     fn assemble_env_cell_with_context(
         &self,
-        mut context: PreparedContentAssemblyContext<'_>,
+        context: PreparedContentAssemblyContext<'_>,
         env_cell_id: u32,
     ) -> Option<EnvCellAsset> {
-        let source = context.load_env_cell(env_cell_id)?;
+        self.try_assemble_env_cell_with_context(context, env_cell_id)
+            .ok()
+    }
+
+    fn try_assemble_env_cell_with_context(
+        &self,
+        mut context: PreparedContentAssemblyContext<'_>,
+        env_cell_id: u32,
+    ) -> anyhow::Result<EnvCellAsset> {
+        let source = context
+            .load_env_cell(env_cell_id)
+            .ok_or_else(|| env_cell_assembly_error(env_cell_id, &context.diagnostics))?;
         let env_cell = EnvCellFact::from_env_cell(env_cell_id, &source);
-        let environment_id = env_cell.environment_id?;
-        let cell_structure_id = env_cell.cell_structure_id?;
+        let environment_id = env_cell.environment_id.ok_or_else(|| {
+            anyhow::anyhow!("EnvCell 0x{env_cell_id:08X} did not declare an environment id")
+        })?;
+        let cell_structure_id = env_cell.cell_structure_id.ok_or_else(|| {
+            anyhow::anyhow!("EnvCell 0x{env_cell_id:08X} did not declare a cell structure id")
+        })?;
         let environment =
-            load_environment_fact(&mut context, environment_id, &[cell_structure_id])?;
+            load_environment_fact(&mut context, environment_id, &[cell_structure_id])
+                .ok_or_else(|| env_cell_assembly_error(env_cell_id, &context.diagnostics))?;
         let interiors = LandblockInteriorFacts {
             env_cells: vec![env_cell.clone()],
             environments: vec![environment],
         };
         let prepared_cell = build_prepared_interior_cells(&interiors)
             .into_iter()
-            .next()?;
+            .next()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "EnvCell 0x{env_cell_id:08X} could not produce prepared interior geometry"
+                )
+            })?;
         let landblock_id = normalize_landblock_id(env_cell_id & 0xffff_0000);
         let indoor_instances =
             build_prepared_indoor_static_instances(landblock_id, &interiors).collect::<Vec<_>>();
         let static_meshes = build_prepared_static_meshes(&mut context, indoor_instances.iter());
         let diagnostics = context.into_diagnostics();
 
-        Some(EnvCellAsset {
+        Ok(EnvCellAsset {
             env_cell,
             prepared_cell,
             static_meshes,
             diagnostics,
         })
+    }
+}
+
+fn env_cell_assembly_error(
+    env_cell_id: u32,
+    diagnostics: &PreparedContentSourceDiagnostics,
+) -> anyhow::Error {
+    let details = diagnostics
+        .errors
+        .iter()
+        .map(|error| {
+            format!(
+                "{}:0x{:08X} {} {}: {}",
+                error.namespace, error.file_id, error.role, error.error_code, error.detail
+            )
+        })
+        .collect::<Vec<_>>();
+    if details.is_empty() {
+        anyhow::anyhow!("Could not assemble EnvCell 0x{env_cell_id:08X}; no source diagnostics were recorded")
+    } else {
+        anyhow::anyhow!(
+            "Could not assemble EnvCell 0x{env_cell_id:08X}; {}",
+            details.join("; ")
+        )
     }
 }
 
@@ -1772,10 +1830,6 @@ fn build_prepared_interior_cells(interiors: &LandblockInteriorFacts) -> Vec<Prep
         };
 
         let render_geometry = build_cell_structure_render_geometry(cell_structure);
-        if render_geometry.vertex_count == 0 {
-            continue;
-        }
-
         let portal_apertures = build_prepared_portal_apertures(cell_structure, &env_cell.portals);
         cells.push(PreparedInteriorCell {
             env_cell_id: env_cell.env_cell_id,

@@ -1470,17 +1470,25 @@ fn serialize_landblock_terrain_binary(
     writer.push_f32_section(
         "landblockTerrain.triangles",
         format!("{path_prefix}.terrain.triangles"),
-        6,
+        13,
         build_landblock_terrain_triangles(mesh)
             .iter()
-            .flat_map(|triangle| {
+            .enumerate()
+            .flat_map(|(triangle_index, triangle)| {
                 [
+                    triangle_index as f32,
                     triangle.quad_index as f32,
                     triangle.triangle_in_quad as f32,
                     triangle.vertex_indices[0] as f32,
                     triangle.vertex_indices[1] as f32,
                     triangle.vertex_indices[2] as f32,
                     triangle.average_height,
+                    triangle.bounds.min.x,
+                    triangle.bounds.min.y,
+                    triangle.bounds.min.z,
+                    triangle.bounds.max.x,
+                    triangle.bounds.max.y,
+                    triangle.bounds.max.z,
                 ]
             }),
     );
@@ -2106,6 +2114,7 @@ where
         "envCellId": cell.env_cell_id,
         "environmentId": cell.environment_id,
         "cellStructureId": cell.cell_structure_id,
+        "localPlacement": serialize_frame(&cell.local_placement),
         "surfaces": cell.surface_ids.iter().enumerate().map(|(index, surface_id)| {
             serde_json::json!({
                 "slotId": index + 1,
@@ -2905,12 +2914,24 @@ mod tests {
         assert!(
             sections
                 .iter()
+                .any(|section| section["path"] == "responses.0.payload.terrain.triangles")
+        );
+        assert!(
+            sections
+                .iter()
                 .any(|section| section["path"] == "responses.1.payload.renderGeometry.positions")
         );
         assert_eq!(
             manifest["responses"][0]["payload"]["terrain"]["vertices"]
                 .as_array()
                 .expect("terrain binary payload should leave JSON vertex placeholder")
+                .len(),
+            0
+        );
+        assert_eq!(
+            manifest["responses"][0]["payload"]["terrain"]["triangles"]
+                .as_array()
+                .expect("terrain binary payload should leave JSON triangle placeholder")
                 .len(),
             0
         );
@@ -2980,6 +3001,56 @@ mod tests {
                 .expect("render texture route should expose dependency ids"),
             &[serde_json::json!("render-surface/060041c0")]
         );
+    }
+
+    #[test]
+    fn env_cell_lookup_allows_real_renderless_cell_structures() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-renderless-env-cell".to_string(),
+            asset_id: "env-cell/da560109".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.payload["kind"], "env-cell");
+        assert_eq!(asset.payload["envCellId"], 0xda560109u32);
+        assert_eq!(asset.payload["renderGeometry"]["vertexCount"], 0);
+        assert_eq!(asset.payload["renderGeometry"]["triangleCount"], 0);
+    }
+
+    #[test]
+    fn landblock_outdoor_lookup_reports_cd57_contract_shape() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-cd57-outdoor".to_string(),
+            asset_id: "landblock/cd57ffff/outdoor".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Streaming,
+        });
+
+        assert_eq!(asset.payload["kind"], "landblock-outdoor");
+        assert_eq!(asset.payload["landblockId"], 0xcd57ffffu32);
+        assert!(asset.payload["terrain"].is_object());
+    }
+
+    #[test]
+    fn landblock_outdoor_binary_lookup_reports_cd57_contract_shape() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let bytes = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
+                request_id: "test-cd57-outdoor-binary".to_string(),
+                asset_id: "landblock/cd57ffff/outdoor".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Streaming,
+            },
+        ]))
+        .expect("binary cd57 outdoor lookup should succeed");
+
+        let (manifest, _) = decode_binary_manifest(&bytes);
+        assert_eq!(manifest["responses"][0]["payload"]["kind"], "landblock-outdoor");
+        assert_eq!(
+            manifest["responses"][0]["payload"]["landblockId"],
+            0xcd57ffffu32
+        );
+        assert!(manifest["responses"][0]["payload"]["terrain"].is_object());
     }
 
     #[test]

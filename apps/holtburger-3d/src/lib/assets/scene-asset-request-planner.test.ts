@@ -327,6 +327,10 @@ function createPreparedEnvCell(
 		envCellId,
 		environmentId: 0x0d000001,
 		cellStructureId: 1,
+		localPlacement: {
+			origin: { x: 0, y: 0, z: 0 },
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+		},
 		surfaces: materialAssetIds.map((materialAssetId, index) => ({
 			slotId: index + 1,
 			surfaceId: Number.parseInt(materialAssetId.slice("material/".length), 16),

@@ -454,6 +454,7 @@ export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
 	envCellId: number;
 	environmentId: number;
 	cellStructureId: number;
+	localPlacement: PlacementTransformDto;
 	surfaces: PreparedEnvCellSurfaceSlot[];
 	portals: PreparedEnvCellPortal[];
 	visibleEnvCellIds: number[];

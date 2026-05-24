@@ -38,6 +38,11 @@ describe("structured interior scene", () => {
 			0x016c0155, 0x016c0156, 0x016c0157,
 		]);
 		expect(scene.cells[0]?.isFocus).toBe(true);
+		expect(scene.cells[0]?.chunkLocalPlacement.origin).toEqual({
+			x: 1,
+			y: 2,
+			z: 3,
+		});
 		expect(scene.cells.slice(1).every((cell) => !cell.isFocus)).toBe(true);
 	});
 });
@@ -131,6 +136,14 @@ function createPreparedEnvCellAsset(
 			envCellId,
 			environmentId: 0x0d000001,
 			cellStructureId,
+			localPlacement: {
+				origin: {
+					x: cellStructureId,
+					y: cellStructureId + 1,
+					z: cellStructureId + 2,
+				},
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+			},
 			surfaces: [],
 			portals: [],
 			visibleEnvCellIds: [],

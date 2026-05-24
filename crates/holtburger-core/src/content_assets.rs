@@ -93,8 +93,12 @@ impl ContentAssetService {
             }
             ContentAssetRequest::EnvCell(env_cell_id) => {
                 let asset = EnvCellAssetAssembler::new()
-                    .assemble_env_cell_with_cache(&self.content, &self.decode_cache, env_cell_id)
-                    .ok_or_else(|| anyhow!("Could not assemble EnvCell 0x{env_cell_id:08X}"))?;
+                    .try_assemble_env_cell_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        env_cell_id,
+                    )
+                    .with_context(|| format!("Could not assemble EnvCell 0x{env_cell_id:08X}"))?;
                 Ok(ContentAsset::EnvCell(Box::new(asset)))
             }
             ContentAssetRequest::TerrainMaterial(region_number) => Ok(

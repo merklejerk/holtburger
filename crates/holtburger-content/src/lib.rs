@@ -1,6 +1,6 @@
 pub mod character_gen;
 pub mod decode_cache;
-pub mod landblock_pack;
+pub mod landblock_scene_assets;
 pub mod material_capabilities;
 pub mod material_graph;
 pub mod repository;
@@ -10,22 +10,19 @@ pub mod static_outdoor_scene;
 
 pub use character_gen::CharacterGenCatalog;
 pub use decode_cache::ContentDecodeCache;
-pub use landblock_pack::{
+pub use landblock_scene_assets::{
     CellLandblockFact, EnvCellAsset, EnvCellAssetAssembler, EnvCellFact, EnvCellPortalFact,
     EnvironmentFact, IndoorStaticObjectFact, LandblockBuildingPortal, LandblockClassification,
-    LandblockGeneratedSceneryFacts, LandblockInfoFact, LandblockInteriorFacts,
-    LandblockOutdoorAsset, LandblockOutdoorAssetAssembler, LandblockOutdoorBuildingFacts,
-    LandblockOutdoorStaticMember, LandblockPreparedFacts, LandblockRestriction,
-    LandblockTopologyAsset, LandblockTopologyAssetAssembler, PreparedAabb, PreparedBvh,
-    PreparedBvhNode, PreparedContentSourceDiagnostics, PreparedInteriorCell,
+    LandblockGeneratedSceneryFacts, LandblockInfoFact, LandblockOutdoorAsset,
+    LandblockOutdoorAssetAssembler, LandblockOutdoorBuildingFacts, LandblockOutdoorStaticMember,
+    LandblockRestriction, LandblockTopologyAsset, LandblockTopologyAssetAssembler, PreparedAabb,
+    PreparedBvh, PreparedBvhNode, PreparedContentSourceDiagnostics, PreparedInteriorCell,
     PreparedPolygonSetInvalidPolygon, PreparedPolygonSetRenderGeometry,
     PreparedPolygonSetRenderTriangle, PreparedPortalAperture, PreparedPortalAperturePlane,
-    PreparedPortalAperturePlaneSource, PreparedSpatialItem, PreparedSpatialItemKind,
-    PreparedSpatialItemMetadata, PreparedStaticInstance, PreparedStaticInstanceKind,
-    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainQuadSpatialMetadata,
-    PreparedTerrainTriangle, PreparedVec3, SourceLoadError, SourceOmissionDiagnostic,
-    SourceRecordDiagnostic, SourceRecordStatus, build_gfx_obj_render_geometry,
-    format_static_object_source_asset_id,
+    PreparedPortalAperturePlaneSource, PreparedStaticInstance, PreparedStaticInstanceKind,
+    PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+    SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus,
+    build_gfx_obj_render_geometry, format_static_object_source_asset_id,
 };
 pub use material_capabilities::{
     MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,

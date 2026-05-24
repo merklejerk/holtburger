@@ -2391,15 +2391,9 @@ Decisions and course corrections:
 
 Cleanup targets after Phase 6:
 
-- Split `crates/holtburger-content/src/landblock_pack.rs` into smaller modules
-  for outdoor assembly, topology assembly, env-cell assembly, and shared prepared
-  geometry helpers. Phase 6 removed route exposure first; module decomposition is
-  still debt.
-- Delete or rewrite the remaining historical pack/summary assemblers after the
-  debug harness and reverse-engineering workflows have explicit replacement
-  coverage. They are no longer reachable through the 3D app route API or
-  crate-level `holtburger-content` reexports, but the historical module remains
-  public for now because removing it outright is a larger content refactor.
+- Split `crates/holtburger-content/src/landblock_scene_assets.rs` into smaller
+  modules for outdoor assembly, topology assembly, env-cell assembly, and shared
+  prepared geometry helpers if the current module becomes hard to navigate.
 
 Cleanup follow-up completed on 2026-05-24:
 
@@ -2412,9 +2406,10 @@ Cleanup follow-up completed on 2026-05-24:
   `LandblockTopologyAsset` directly instead of building a temporary scene asset.
 - Replaced internal terrain member IDs from `landblock/{id}/terrain/...` to
   `landblock/{id}/outdoor/terrain/...`.
-- Removed old pack/summary/building-shell/terrain/scene asset structs and
-  assemblers from the crate-level `holtburger-content` reexports. They remain
-  inside the historical `landblock_pack` module only.
+- Deleted old pack/summary/building-shell/terrain/scene asset structs,
+  assemblers, helper functions, and tests from the content scene asset module.
+- Moved active outdoor/topology/env-cell/prepared geometry code from the legacy
+  `landblock_pack.rs` module to `landblock_scene_assets.rs`.
 - Renamed the shared building portal facts type from the summary-era
   `LandblockSummaryBuildingPortal` to `LandblockBuildingPortal`.
 

@@ -60,7 +60,7 @@ import { WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { SceneCameraFrame } from "./camera";
 import type { WorldDisplayRenderStyle } from "./renderer-contract";
 
-let lastOutdoorRenderStarvationSignature: string | null = null;
+let lastPreparedOutdoorAssetsNotRenderedSignature: string | null = null;
 
 export interface BrowserRenderResourceCoordinatorInput {
 	assetState: AssetChannelState;
@@ -272,7 +272,7 @@ export class BrowserRenderResourceCoordinator {
 			activeRenderAnchor: input.activeRenderAnchor,
 			browserDestination: input.browserDestination,
 		});
-		reportOutdoorRenderStarvation({
+		reportPreparedOutdoorAssetsNotRendered({
 			input,
 			outdoorSceneInterest,
 			terrainScene,
@@ -614,7 +614,7 @@ function collectActiveRenderChunkPlacements(
 	);
 }
 
-function reportOutdoorRenderStarvation({
+function reportPreparedOutdoorAssetsNotRendered({
 	input,
 	outdoorSceneInterest,
 	terrainScene,
@@ -634,11 +634,10 @@ function reportOutdoorRenderStarvation({
 	if (
 		input.browserDestination?.kind !== "outdoor-location" ||
 		outdoorSceneInterest === null ||
-		input.assetState.history.length === 0 ||
 		terrainScene.tiles.length > 0 ||
 		staticRenderableScene.parts.length > 0
 	) {
-		lastOutdoorRenderStarvationSignature = null;
+		lastPreparedOutdoorAssetsNotRenderedSignature = null;
 		return;
 	}
 
@@ -648,6 +647,11 @@ function reportOutdoorRenderStarvation({
 	const preparedOutdoorAssetIds = expectedOutdoorAssetIds.filter(
 		(assetId) => input.assetState.preparedByAssetId[assetId],
 	);
+	if (preparedOutdoorAssetIds.length === 0) {
+		lastPreparedOutdoorAssetsNotRenderedSignature = null;
+		return;
+	}
+
 	const recentRelevantActivity = input.assetState.history.filter((entry) =>
 		expectedOutdoorAssetIds.includes(entry.assetId),
 	);
@@ -660,14 +664,14 @@ function reportOutdoorRenderStarvation({
 		errorMessage: input.assetState.errorMessage,
 	});
 
-	if (signature === lastOutdoorRenderStarvationSignature) {
+	if (signature === lastPreparedOutdoorAssetsNotRenderedSignature) {
 		return;
 	}
-	lastOutdoorRenderStarvationSignature = signature;
+	lastPreparedOutdoorAssetsNotRenderedSignature = signature;
 
-	console.error("[holtburger-3d][render-starved][outdoor]", {
+	console.error("[holtburger-3d][render-starved][prepared-outdoor-not-rendered]", {
 		message:
-			"Outdoor browser destination has expected outdoor coverage but no terrain tiles or static renderable parts reached the renderer.",
+			"Outdoor browser destination has prepared outdoor coverage but no terrain tiles or static renderable parts reached the renderer.",
 		destination: input.browserDestination,
 		sceneContext: renderSceneContext,
 		expectedOutdoorAssetIds,

@@ -45,6 +45,7 @@
 		countPreparedAssetsByKind,
 		formatPreparedAssetKindCounts,
 	} from "../lib/assets/asset-cache-diagnostics";
+	import { describeMaterialAssetDiagnostics } from "../lib/assets/material-diagnostics";
 	import type { RenderSpatialMetadata } from "../lib/world-display/render-spatial-index";
 	import {
 		commitRenderAnchorCandidate,
@@ -160,6 +161,7 @@
 	let assetDebugText = $state("Waiting for asset activity.");
 	let assetPipelineDebugText = $state("Waiting for asset activity.");
 	let assetCacheDebugText = $state("Waiting for asset cache activity.");
+	let assetMaterialDebugText = $state("Waiting for material asset activity.");
 
 	const CAMERA_HINT_INTERVAL_MS = 250;
 	const DEBUG_SUMMARY_DEBOUNCE_MS = 500;
@@ -345,6 +347,7 @@
 			rows: [
 				{ label: "Active", value: assetDebugText },
 				{ label: "Pipeline", value: assetPipelineDebugText },
+				{ label: "Materials", value: assetMaterialDebugText },
 				{ label: "Cache", value: assetCacheDebugText },
 				{
 					label: "Layers",
@@ -547,6 +550,16 @@
 			assetSummaryText = describeAssetSummaryState();
 			assetDebugText = describeAssetDebugState();
 			assetPipelineDebugText = describeAssetPipelineDebugState();
+			assetMaterialDebugText = describeMaterialAssetDiagnostics({
+				assetState,
+				browserDestination,
+				options: {
+					terrainRadius: terrainLodRadius,
+					buildingRadius: buildingLodRadius,
+					detailRadius: detailLodRadius,
+					envCellRadius: envCellLodRadius,
+				},
+			});
 			assetCacheDebugText = describeAssetCacheDebugState();
 			debugSummaryTimer = null;
 		}, DEBUG_SUMMARY_DEBOUNCE_MS);

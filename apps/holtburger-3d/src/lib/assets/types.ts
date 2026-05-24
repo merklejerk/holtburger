@@ -165,6 +165,11 @@ interface PreparedLandblockOutdoorStaticMember {
 	generated: PreparedLandblockGeneratedSceneryFacts | null;
 }
 
+interface PreparedLandblockOutdoorDependencies {
+	renderableSourceAssetIds: string[];
+	materialAssetIds: string[];
+}
+
 export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBase {
 	kind: "landblock-outdoor";
 	sourceAssetKind: "landblock-outdoor";
@@ -176,6 +181,7 @@ export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBas
 	terrain: PreparedOutdoorTerrain;
 	statics: PreparedLandblockOutdoorStaticMember[];
 	outdoorBvh: PreparedOutdoorBvh | null;
+	dependencies: PreparedLandblockOutdoorDependencies;
 	diagnostics: PreparedContentSourceDiagnostics;
 }
 
@@ -447,6 +453,11 @@ interface PreparedEnvCellBvh {
 	items: PreparedEnvCellBvhItem[];
 }
 
+interface PreparedEnvCellDependencies {
+	renderableSourceAssetIds: string[];
+	materialAssetIds: string[];
+}
+
 export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
 	kind: "env-cell";
 	sourceAssetKind: "env-cell";
@@ -463,6 +474,7 @@ export interface PreparedEnvCellPayload extends PreparedAssetPayloadBase {
 	renderGeometry: PreparedPolygonSetRenderGeometry;
 	cellBsp: PreparedPolygonSetBspNode;
 	localBvh: PreparedEnvCellBvh;
+	dependencies: PreparedEnvCellDependencies;
 }
 
 export interface PreparedGfxObjPayload extends PreparedAssetPayloadBase {

@@ -28,7 +28,8 @@ export function getAssetResponseDependencies(
 			formatTerrainMaterialDependencyAssetId(
 				landblockOutdoor.data.regionNumber,
 			),
-			...landblockOutdoor.data.statics.map((member) => member.sourceAssetId),
+			...landblockOutdoor.data.dependencies.renderableSourceAssetIds,
+			...landblockOutdoor.data.dependencies.materialAssetIds,
 		]);
 	}
 
@@ -44,8 +45,8 @@ export function getAssetResponseDependencies(
 	const envCell = envCellPayloadDtoSchema.safeParse(response.payload);
 	if (envCell.success) {
 		return uniqueSortedAssetIds([
-			...envCell.data.surfaces.map((surface) => surface.materialAssetId),
-			...envCell.data.statics.map((member) => member.sourceAssetId),
+			...envCell.data.dependencies.materialAssetIds,
+			...envCell.data.dependencies.renderableSourceAssetIds,
 		]);
 	}
 

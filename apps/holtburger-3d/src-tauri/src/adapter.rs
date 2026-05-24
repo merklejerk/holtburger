@@ -1986,7 +1986,7 @@ fn serialize_landblock_outdoor_payload_with_terrain(
         "terrain": terrain,
         "statics": outdoor.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
         "outdoorBvh": serialize_landblock_outdoor_bvh(outdoor),
-        "diagnostics": serialize_landblock_pack_diagnostics(&outdoor.diagnostics),
+        "diagnostics": serialize_prepared_content_diagnostics(&outdoor.diagnostics),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "landblock-outdoor",
@@ -2007,7 +2007,7 @@ fn serialize_landblock_topology_payload(topology: &LandblockTopologyAsset) -> se
         "envCells": topology.env_cells.iter().map(serialize_landblock_scene_env_cell_member).collect::<Vec<_>>(),
         "portalLinks": serialize_landblock_topology_portal_links(topology),
         "envCellResidencyBvh": serialize_landblock_topology_env_cell_residency_bvh(topology),
-        "diagnostics": serialize_landblock_pack_diagnostics(&topology.diagnostics),
+        "diagnostics": serialize_prepared_content_diagnostics(&topology.diagnostics),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "landblock-topology",
@@ -2567,7 +2567,7 @@ fn recipe_palette_asset_ids(texture: &holtburger_content::ResolvedTextureMateria
     palette_ids
 }
 
-fn serialize_landblock_pack_diagnostics(
+fn serialize_prepared_content_diagnostics(
     diagnostics: &PreparedContentSourceDiagnostics,
 ) -> serde_json::Value {
     serde_json::json!({

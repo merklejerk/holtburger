@@ -20,44 +20,10 @@ pub enum LandblockClassification {
 }
 
 #[derive(Debug, Clone)]
-pub struct LandblockPack {
-    pub landblock_id: u32,
-    pub landblock_info_id: u32,
-    pub classification: LandblockClassification,
-    pub cell_landblock: Option<CellLandblockFact>,
-    pub landblock_info: Option<LandblockInfoFact>,
-    pub outdoor_scene: Option<StaticOutdoorScene>,
-    pub interiors: LandblockInteriorFacts,
-    pub prepared: LandblockPreparedFacts,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSummary {
-    pub landblock_id: u32,
-    pub landblock_info_id: u32,
-    pub classification: LandblockClassification,
-    pub cell_landblock: Option<CellLandblockFact>,
-    pub landblock_info: Option<LandblockInfoFact>,
-    pub terrain_mesh: Option<PreparedTerrainMesh>,
-    pub objects: Vec<LandblockSummaryObject>,
-    pub buildings: Vec<LandblockSummaryBuilding>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
 pub struct EnvCellAsset {
     pub env_cell: EnvCellFact,
     pub prepared_cell: PreparedInteriorCell,
     pub static_meshes: Vec<PreparedStaticMesh>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockTerrainAsset {
-    pub landblock_id: u32,
-    pub cell_landblock: Option<CellLandblockFact>,
-    pub terrain_mesh: Option<PreparedTerrainMesh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
@@ -72,59 +38,12 @@ pub struct LandblockOutdoorAsset {
 }
 
 #[derive(Debug, Clone)]
-pub struct LandblockBuildingShellsAsset {
-    pub landblock_id: u32,
-    pub landblock_info_id: u32,
-    pub shells: Vec<LandblockBuildingShell>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneAsset {
-    pub landblock_id: u32,
-    pub landblock_info_id: u32,
-    pub classification: LandblockClassification,
-    pub statics: Vec<LandblockSceneStaticMember>,
-    pub buildings: Vec<LandblockSceneBuildingMember>,
-    pub env_cells: Vec<EnvCellFact>,
-    pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
 pub struct LandblockTopologyAsset {
     pub landblock_id: u32,
     pub landblock_info_id: u32,
     pub classification: LandblockClassification,
     pub env_cells: Vec<EnvCellFact>,
     pub diagnostics: PreparedContentSourceDiagnostics,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockBuildingShell {
-    pub shell_id: String,
-    pub building_index: usize,
-    pub source_did: u32,
-    pub source_asset_id: String,
-    pub local_placement: Frame,
-    pub source_scale: PreparedVec3,
-    pub source_bounds: Option<PreparedAabb>,
-    pub instance_bounds: Option<PreparedAabb>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneStaticMember {
-    pub instance: PreparedStaticInstance,
-    pub source_bounds: Option<PreparedAabb>,
-    pub instance_bounds: Option<PreparedAabb>,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSceneBuildingMember {
-    pub instance: PreparedStaticInstance,
-    pub source_bounds: Option<PreparedAabb>,
-    pub instance_bounds: Option<PreparedAabb>,
-    pub num_leaves: u32,
-    pub portals: Vec<LandblockBuildingPortal>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,28 +66,6 @@ pub struct LandblockGeneratedSceneryFacts {
     pub terrain_index: usize,
     pub scene_id: u32,
     pub scene_template_index: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSummaryObject {
-    pub instance_id: String,
-    pub owning_landblock_id: u32,
-    pub source_did: u32,
-    pub source_asset_id: Option<String>,
-    pub source_index: usize,
-    pub local_placement: Frame,
-}
-
-#[derive(Debug, Clone)]
-pub struct LandblockSummaryBuilding {
-    pub instance_id: String,
-    pub owning_landblock_id: u32,
-    pub source_did: u32,
-    pub source_asset_id: Option<String>,
-    pub source_index: usize,
-    pub local_placement: Frame,
-    pub num_leaves: u32,
-    pub portals: Vec<LandblockBuildingPortal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,9 +110,9 @@ pub struct LandblockRestriction {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct LandblockInteriorFacts {
-    pub env_cells: Vec<EnvCellFact>,
-    pub environments: Vec<EnvironmentFact>,
+struct LandblockInteriorFacts {
+    env_cells: Vec<EnvCellFact>,
+    environments: Vec<EnvironmentFact>,
 }
 
 #[derive(Debug, Clone)]
@@ -259,16 +156,6 @@ pub struct EnvironmentFact {
     pub id: u32,
     pub cell_structure_ids: Vec<u32>,
     pub cell_structures: Vec<CellStruct>,
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct LandblockPreparedFacts {
-    pub terrain_mesh: Option<PreparedTerrainMesh>,
-    pub outdoor_static_instances: Vec<PreparedStaticInstance>,
-    pub interior_cells: Vec<PreparedInteriorCell>,
-    pub static_meshes: Vec<PreparedStaticMesh>,
-    pub spatial_items: Vec<PreparedSpatialItem>,
-    pub static_landblock_bvh: Option<PreparedBvh>,
 }
 
 #[derive(Debug, Clone)]
@@ -380,37 +267,17 @@ pub struct PreparedStaticMesh {
 }
 
 #[derive(Debug, Clone)]
-pub struct PreparedSpatialItem {
-    pub id: String,
-    pub kind: PreparedSpatialItemKind,
-    pub owner_id: Option<u32>,
-    pub source_asset_id: Option<String>,
-    pub bounds: PreparedAabb,
-    pub metadata: PreparedSpatialItemMetadata,
+struct PreparedSpatialItem {
+    id: String,
+    kind: PreparedSpatialItemKind,
+    bounds: PreparedAabb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PreparedSpatialItemKind {
-    Terrain,
+enum PreparedSpatialItemKind {
     OutdoorStatic,
     Building,
-    EnvCell,
     IndoorStatic,
-    Portal,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreparedSpatialItemMetadata {
-    None,
-    TerrainQuad(PreparedTerrainQuadSpatialMetadata),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedTerrainQuadSpatialMetadata {
-    pub row: usize,
-    pub col: usize,
-    pub quad_index: usize,
-    pub triangle_indices: [usize; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -513,35 +380,20 @@ pub struct SourceLoadError {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockPackAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockSummaryAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
 pub struct EnvCellAssetAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockTerrainAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockOutdoorAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockBuildingShellsAssetAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct LandblockSceneAssetAssembler;
-
-#[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockTopologyAssetAssembler;
 
-struct LandblockPackAssemblyContext<'a> {
+struct PreparedContentAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
     diagnostics: PreparedContentSourceDiagnostics,
 }
 
-impl<'a> LandblockPackAssemblyContext<'a> {
+impl<'a> PreparedContentAssemblyContext<'a> {
     fn new(content: &'a ContentRepository) -> Self {
         Self {
             source: ContentSourceReader::new(content),
@@ -714,196 +566,8 @@ impl<'a> LandblockPackAssemblyContext<'a> {
         });
     }
 
-    fn report_source_omission(
-        &mut self,
-        namespace: &'static str,
-        file_id: u32,
-        role: &'static str,
-        reason: &'static str,
-        detail: String,
-    ) {
-        self.diagnostics.omissions.push(SourceOmissionDiagnostic {
-            namespace,
-            file_id,
-            role,
-            reason,
-            detail,
-        });
-    }
-
     fn into_diagnostics(self) -> PreparedContentSourceDiagnostics {
         self.diagnostics
-    }
-}
-
-impl LandblockPackAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockPack {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockPack {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: LandblockPackAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockPack {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let cell_landblock_source = context.load_cell_landblock(landblock_id);
-        let landblock_info_source = context.load_landblock_info(landblock_id);
-        let cell_landblock = cell_landblock_source
-            .as_ref()
-            .map(CellLandblockFact::from_landblock);
-        let landblock_info = landblock_info_source
-            .as_ref()
-            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
-        let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
-        let interiors = landblock_info
-            .as_ref()
-            .map(|info| load_interior_facts(&mut context, landblock_id, info))
-            .unwrap_or_default();
-        let outdoor_scene = match classification {
-            LandblockClassification::Dungeon => {
-                context.report_source_omission(
-                    EOR_CELL_NAMESPACE,
-                    landblock_id,
-                    "landblock-static",
-                    "proven-dungeon-landblock",
-                    format!(
-                        "Skipped outdoor static scene assembly for proven dungeon landblock 0x{landblock_id:08X}."
-                    ),
-                );
-                None
-            }
-            LandblockClassification::Outdoor => match StaticOutdoorSceneAssembler::new()
-                .assemble_landblock_with_source(&mut context.source, landblock_id)
-            {
-                Ok(scene) => Some(scene),
-                Err(error) => {
-                    context.report_source_error(
-                        EOR_CELL_NAMESPACE,
-                        landblock_id,
-                        "landblock-static",
-                        "asset-decode-failed",
-                        format!(
-                            "Could not assemble outdoor static scene 0x{landblock_id:08X}: {error}"
-                        ),
-                    );
-                    None
-                }
-            },
-        };
-        let prepared = prepare_landblock_facts(
-            &mut context,
-            landblock_id,
-            cell_landblock.as_ref(),
-            &interiors,
-            outdoor_scene.as_ref(),
-        );
-        let diagnostics = context.into_diagnostics();
-
-        LandblockPack {
-            landblock_id,
-            landblock_info_id,
-            classification,
-            cell_landblock,
-            landblock_info,
-            outdoor_scene,
-            interiors,
-            prepared,
-            diagnostics,
-        }
-    }
-}
-
-impl LandblockSummaryAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockSummary {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockSummary {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: LandblockPackAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockSummary {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let cell_landblock_source = context.load_cell_landblock(landblock_id);
-        let landblock_info_source = context.load_landblock_info(landblock_id);
-        let cell_landblock = cell_landblock_source
-            .as_ref()
-            .map(CellLandblockFact::from_landblock);
-        let landblock_info = landblock_info_source
-            .as_ref()
-            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
-        let terrain_mesh = cell_landblock.as_ref().map(build_terrain_mesh);
-        let objects = landblock_info_source
-            .as_ref()
-            .map(|info| build_landblock_summary_objects(landblock_id, info))
-            .unwrap_or_default();
-        let buildings = landblock_info_source
-            .as_ref()
-            .map(|info| build_landblock_summary_buildings(landblock_id, info))
-            .unwrap_or_default();
-        let classification = classify_landblock(cell_landblock.as_ref(), landblock_info.as_ref());
-        let diagnostics = context.into_diagnostics();
-
-        LandblockSummary {
-            landblock_id,
-            landblock_info_id,
-            classification,
-            cell_landblock,
-            landblock_info,
-            terrain_mesh,
-            objects,
-            buildings,
-            diagnostics,
-        }
     }
 }
 
@@ -917,7 +581,10 @@ impl EnvCellAssetAssembler {
         content: &ContentRepository,
         env_cell_id: u32,
     ) -> Option<EnvCellAsset> {
-        self.assemble_env_cell_with_context(LandblockPackAssemblyContext::new(content), env_cell_id)
+        self.assemble_env_cell_with_context(
+            PreparedContentAssemblyContext::new(content),
+            env_cell_id,
+        )
     }
 
     pub fn assemble_env_cell_with_cache(
@@ -927,14 +594,14 @@ impl EnvCellAssetAssembler {
         env_cell_id: u32,
     ) -> Option<EnvCellAsset> {
         self.assemble_env_cell_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
+            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
             env_cell_id,
         )
     }
 
     fn assemble_env_cell_with_context(
         &self,
-        mut context: LandblockPackAssemblyContext<'_>,
+        mut context: PreparedContentAssemblyContext<'_>,
         env_cell_id: u32,
     ) -> Option<EnvCellAsset> {
         let source = context.load_env_cell(env_cell_id)?;
@@ -965,56 +632,6 @@ impl EnvCellAssetAssembler {
     }
 }
 
-impl LandblockTerrainAssetAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockTerrainAsset {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockTerrainAsset {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: LandblockPackAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockTerrainAsset {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let cell_landblock = context
-            .load_cell_landblock(landblock_id)
-            .as_ref()
-            .map(CellLandblockFact::from_landblock);
-        let terrain_mesh = cell_landblock.as_ref().map(build_terrain_mesh);
-        let diagnostics = context.into_diagnostics();
-
-        LandblockTerrainAsset {
-            landblock_id,
-            cell_landblock,
-            terrain_mesh,
-            diagnostics,
-        }
-    }
-}
-
 impl LandblockOutdoorAssetAssembler {
     pub fn new() -> Self {
         Self
@@ -1026,7 +643,7 @@ impl LandblockOutdoorAssetAssembler {
         raw_landblock_id: u32,
     ) -> LandblockOutdoorAsset {
         self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
+            PreparedContentAssemblyContext::new(content),
             raw_landblock_id,
         )
     }
@@ -1038,14 +655,14 @@ impl LandblockOutdoorAssetAssembler {
         raw_landblock_id: u32,
     ) -> LandblockOutdoorAsset {
         self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
+            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
             raw_landblock_id,
         )
     }
 
     fn assemble_landblock_with_context(
         &self,
-        mut context: LandblockPackAssemblyContext<'_>,
+        mut context: PreparedContentAssemblyContext<'_>,
         raw_landblock_id: u32,
     ) -> LandblockOutdoorAsset {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
@@ -1115,140 +732,6 @@ impl LandblockOutdoorAssetAssembler {
     }
 }
 
-impl LandblockBuildingShellsAssetAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockBuildingShellsAsset {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockBuildingShellsAsset {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: LandblockPackAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockBuildingShellsAsset {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let instances = context
-            .load_landblock_info(landblock_id)
-            .as_ref()
-            .map(|info| build_landblock_building_shell_instances(landblock_id, info))
-            .unwrap_or_default();
-        let static_meshes = build_prepared_static_meshes(&mut context, instances.iter());
-        let shells = instances
-            .iter()
-            .map(|instance| {
-                let (source_bounds, instance_bounds) =
-                    prepared_static_instance_bounds(instance, &static_meshes);
-                LandblockBuildingShell {
-                    shell_id: instance.instance_id.clone(),
-                    building_index: instance.source_index,
-                    source_did: instance.source_did,
-                    source_asset_id: instance.source_asset_id.clone(),
-                    local_placement: instance.local_placement.clone(),
-                    source_scale: instance.source_scale,
-                    source_bounds,
-                    instance_bounds,
-                }
-            })
-            .collect();
-        let diagnostics = context.into_diagnostics();
-
-        LandblockBuildingShellsAsset {
-            landblock_id,
-            landblock_info_id,
-            shells,
-            diagnostics,
-        }
-    }
-}
-
-impl LandblockSceneAssetAssembler {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn assemble_landblock(
-        &self,
-        content: &ContentRepository,
-        raw_landblock_id: u32,
-    ) -> LandblockSceneAsset {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
-            raw_landblock_id,
-        )
-    }
-
-    pub fn assemble_landblock_with_cache(
-        &self,
-        content: &ContentRepository,
-        decode_cache: &ContentDecodeCache,
-        raw_landblock_id: u32,
-    ) -> LandblockSceneAsset {
-        self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
-            raw_landblock_id,
-        )
-    }
-
-    fn assemble_landblock_with_context(
-        &self,
-        mut context: LandblockPackAssemblyContext<'_>,
-        raw_landblock_id: u32,
-    ) -> LandblockSceneAsset {
-        let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let landblock_info_source = context.load_landblock_info(landblock_id);
-        let landblock_info = landblock_info_source
-            .as_ref()
-            .map(|info| LandblockInfoFact::from_info(info, landblock_id));
-        let classification = classify_scene_landblock(landblock_info.as_ref());
-        let env_cells = landblock_info
-            .as_ref()
-            .map(|info| load_env_cell_facts(&mut context, landblock_id, info))
-            .unwrap_or_default();
-        let (static_instances, building_specs) = landblock_info_source
-            .as_ref()
-            .map(|info| build_landblock_scene_instances(landblock_id, info))
-            .unwrap_or_default();
-        let static_meshes = build_prepared_static_meshes(&mut context, static_instances.iter());
-        let (statics, buildings) =
-            build_landblock_scene_members(static_instances, building_specs, &static_meshes);
-        let diagnostics = context.into_diagnostics();
-
-        LandblockSceneAsset {
-            landblock_id,
-            landblock_info_id,
-            classification,
-            statics,
-            buildings,
-            env_cells,
-            diagnostics,
-        }
-    }
-}
-
 impl LandblockTopologyAssetAssembler {
     pub fn new() -> Self {
         Self
@@ -1260,7 +743,7 @@ impl LandblockTopologyAssetAssembler {
         raw_landblock_id: u32,
     ) -> LandblockTopologyAsset {
         self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::new(content),
+            PreparedContentAssemblyContext::new(content),
             raw_landblock_id,
         )
     }
@@ -1272,14 +755,14 @@ impl LandblockTopologyAssetAssembler {
         raw_landblock_id: u32,
     ) -> LandblockTopologyAsset {
         self.assemble_landblock_with_context(
-            LandblockPackAssemblyContext::with_decode_cache(content, decode_cache),
+            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
             raw_landblock_id,
         )
     }
 
     fn assemble_landblock_with_context(
         &self,
-        mut context: LandblockPackAssemblyContext<'_>,
+        mut context: PreparedContentAssemblyContext<'_>,
         raw_landblock_id: u32,
     ) -> LandblockTopologyAsset {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
@@ -1333,48 +816,8 @@ fn source_error_code_from_error(error: &anyhow::Error) -> &'static str {
     }
 }
 
-fn load_interior_facts(
-    context: &mut LandblockPackAssemblyContext<'_>,
-    landblock_id: u32,
-    landblock_info: &LandblockInfoFact,
-) -> LandblockInteriorFacts {
-    let env_cells = load_env_cell_facts(context, landblock_id, landblock_info);
-
-    let mut selected_cell_structures = env_cells
-        .iter()
-        .filter_map(|env_cell| Some((env_cell.environment_id?, env_cell.cell_structure_id?)))
-        .collect::<Vec<_>>();
-    selected_cell_structures.sort_unstable();
-    selected_cell_structures.dedup();
-
-    let mut environment_ids = selected_cell_structures
-        .iter()
-        .map(|(environment_id, _)| *environment_id)
-        .collect::<Vec<_>>();
-    environment_ids.sort_unstable();
-    environment_ids.dedup();
-
-    let environments = environment_ids
-        .into_iter()
-        .filter_map(|environment_id| {
-            let selected_ids = selected_cell_structures
-                .iter()
-                .filter_map(|(selected_environment_id, cell_structure_id)| {
-                    (*selected_environment_id == environment_id).then_some(*cell_structure_id)
-                })
-                .collect::<Vec<_>>();
-            load_environment_fact(context, environment_id, &selected_ids)
-        })
-        .collect();
-
-    LandblockInteriorFacts {
-        env_cells,
-        environments,
-    }
-}
-
 fn load_env_cell_facts(
-    context: &mut LandblockPackAssemblyContext<'_>,
+    context: &mut PreparedContentAssemblyContext<'_>,
     landblock_id: u32,
     landblock_info: &LandblockInfoFact,
 ) -> Vec<EnvCellFact> {
@@ -1389,7 +832,7 @@ fn load_env_cell_facts(
 }
 
 fn load_environment_fact(
-    context: &mut LandblockPackAssemblyContext<'_>,
+    context: &mut PreparedContentAssemblyContext<'_>,
     environment_id: u32,
     selected_cell_structure_ids: &[u32],
 ) -> Option<EnvironmentFact> {
@@ -1551,232 +994,6 @@ impl EnvironmentFact {
     }
 }
 
-fn build_landblock_summary_objects(
-    landblock_id: u32,
-    info: &LandblockInfo,
-) -> Vec<LandblockSummaryObject> {
-    info.objects
-        .iter()
-        .enumerate()
-        .map(|(source_index, object)| LandblockSummaryObject {
-            instance_id: format!(
-                "landblock-summary/{landblock_id:08x}/object/{source_index:04x}/{:08x}",
-                object.id
-            ),
-            owning_landblock_id: landblock_id,
-            source_did: object.id,
-            source_asset_id: renderable_source_asset_id(object.id),
-            source_index,
-            local_placement: Frame {
-                origin: object.frame.origin,
-                orientation: object.frame.orientation,
-            },
-        })
-        .collect()
-}
-
-fn build_landblock_summary_buildings(
-    landblock_id: u32,
-    info: &LandblockInfo,
-) -> Vec<LandblockSummaryBuilding> {
-    info.buildings
-        .iter()
-        .enumerate()
-        .map(|(source_index, building)| LandblockSummaryBuilding {
-            instance_id: format!(
-                "landblock-summary/{landblock_id:08x}/building/{source_index:04x}/{:08x}",
-                building.model_id
-            ),
-            owning_landblock_id: landblock_id,
-            source_did: building.model_id,
-            source_asset_id: renderable_source_asset_id(building.model_id),
-            source_index,
-            local_placement: Frame {
-                origin: building.frame.origin,
-                orientation: building.frame.orientation,
-            },
-            num_leaves: building.num_leaves,
-            portals: building
-                .portals
-                .iter()
-                .enumerate()
-                .map(|(portal_index, portal)| LandblockBuildingPortal {
-                    portal_id: format!(
-                        "landblock-summary/{landblock_id:08x}/building/{source_index:04x}/portal/{portal_index:04x}"
-                    ),
-                    source_index: portal_index,
-                    flags: portal.flags,
-                    other_cell_id: portal.other_cell_id,
-                    other_portal_id: portal.other_portal_id,
-                    stab_list: portal.stab_list.clone(),
-                    linked_env_cell_ids: portal
-                        .stab_list
-                        .iter()
-                        .copied()
-                        .map(|stab| crate::normalize_landblock_env_cell_id(landblock_id, stab))
-                        .collect(),
-                })
-                .collect(),
-        })
-        .collect()
-}
-
-fn build_landblock_building_shell_instances(
-    landblock_id: u32,
-    info: &LandblockInfo,
-) -> Vec<PreparedStaticInstance> {
-    info.buildings
-        .iter()
-        .enumerate()
-        .filter_map(|(source_index, building)| {
-            build_prepared_static_instance(PreparedStaticInstanceSpec {
-                kind: PreparedStaticInstanceKind::Building,
-                instance_id: format!(
-                    "landblock/{landblock_id:08x}/building-shell/{source_index:04x}/{:08x}",
-                    building.model_id
-                ),
-                owning_landblock_id: landblock_id,
-                owning_env_cell_id: None,
-                source_did: building.model_id,
-                source_index,
-                local_placement: Frame {
-                    origin: building.frame.origin,
-                    orientation: building.frame.orientation,
-                },
-                source_scale: unit_prepared_vec3(),
-            })
-        })
-        .collect()
-}
-
-#[derive(Debug, Clone)]
-struct LandblockSceneBuildingSpec {
-    instance_id: String,
-    num_leaves: u32,
-    portals: Vec<LandblockBuildingPortal>,
-}
-
-fn build_landblock_scene_instances(
-    landblock_id: u32,
-    info: &LandblockInfo,
-) -> (Vec<PreparedStaticInstance>, Vec<LandblockSceneBuildingSpec>) {
-    let mut instances = Vec::new();
-    let mut buildings = Vec::new();
-
-    instances.extend(
-        info.objects
-            .iter()
-            .enumerate()
-            .filter_map(|(source_index, object)| {
-                build_prepared_static_instance(PreparedStaticInstanceSpec {
-                    kind: PreparedStaticInstanceKind::Scenery,
-                    instance_id: format!(
-                        "landblock-static/{landblock_id:08x}/object/{source_index:04x}/{:08x}",
-                        object.id
-                    ),
-                    owning_landblock_id: landblock_id,
-                    owning_env_cell_id: None,
-                    source_did: object.id,
-                    source_index,
-                    local_placement: Frame {
-                        origin: object.frame.origin,
-                        orientation: object.frame.orientation,
-                    },
-                    source_scale: unit_prepared_vec3(),
-                })
-            }),
-    );
-
-    for (source_index, building) in info.buildings.iter().enumerate() {
-        let instance_id = format!(
-            "landblock-static/{landblock_id:08x}/building/{source_index:04x}/{:08x}",
-            building.model_id
-        );
-        let Some(instance) = build_prepared_static_instance(PreparedStaticInstanceSpec {
-            kind: PreparedStaticInstanceKind::Building,
-            instance_id: instance_id.clone(),
-            owning_landblock_id: landblock_id,
-            owning_env_cell_id: None,
-            source_did: building.model_id,
-            source_index,
-            local_placement: Frame {
-                origin: building.frame.origin,
-                orientation: building.frame.orientation,
-            },
-            source_scale: unit_prepared_vec3(),
-        }) else {
-            continue;
-        };
-
-        let portals = building
-            .portals
-            .iter()
-            .enumerate()
-            .map(|(portal_index, portal)| LandblockBuildingPortal {
-                portal_id: format!(
-                    "landblock-scene/{landblock_id:08x}/building/{source_index:04x}/portal/{portal_index:04x}"
-                ),
-                source_index: portal_index,
-                flags: portal.flags,
-                other_cell_id: portal.other_cell_id,
-                other_portal_id: portal.other_portal_id,
-                stab_list: portal.stab_list.clone(),
-                linked_env_cell_ids: portal
-                    .stab_list
-                    .iter()
-                    .copied()
-                    .map(|stab| crate::normalize_landblock_env_cell_id(landblock_id, stab))
-                    .collect(),
-            })
-            .collect();
-        buildings.push(LandblockSceneBuildingSpec {
-            instance_id: instance_id.clone(),
-            num_leaves: building.num_leaves,
-            portals,
-        });
-        instances.push(instance);
-    }
-
-    (instances, buildings)
-}
-
-fn build_landblock_scene_members(
-    instances: Vec<PreparedStaticInstance>,
-    building_specs: Vec<LandblockSceneBuildingSpec>,
-    static_meshes: &[PreparedStaticMesh],
-) -> (
-    Vec<LandblockSceneStaticMember>,
-    Vec<LandblockSceneBuildingMember>,
-) {
-    let mut statics = Vec::new();
-    let mut buildings = Vec::new();
-
-    for instance in instances {
-        let (source_bounds, instance_bounds) =
-            prepared_static_instance_bounds(&instance, static_meshes);
-        if instance.kind == PreparedStaticInstanceKind::Building {
-            let spec = building_specs
-                .iter()
-                .find(|spec| spec.instance_id == instance.instance_id);
-            buildings.push(LandblockSceneBuildingMember {
-                instance,
-                source_bounds,
-                instance_bounds,
-                num_leaves: spec.map(|spec| spec.num_leaves).unwrap_or_default(),
-                portals: spec.map(|spec| spec.portals.clone()).unwrap_or_default(),
-            });
-        } else {
-            statics.push(LandblockSceneStaticMember {
-                instance,
-                source_bounds,
-                instance_bounds,
-            });
-        }
-    }
-
-    (statics, buildings)
-}
-
 fn build_landblock_outdoor_static_members(
     outdoor_scene: Option<&StaticOutdoorScene>,
     instances: Vec<PreparedStaticInstance>,
@@ -1840,43 +1057,6 @@ fn build_landblock_outdoor_static_members(
             }
         })
         .collect()
-}
-
-fn prepare_landblock_facts(
-    context: &mut LandblockPackAssemblyContext<'_>,
-    landblock_id: u32,
-    cell_landblock: Option<&CellLandblockFact>,
-    interiors: &LandblockInteriorFacts,
-    outdoor_scene: Option<&StaticOutdoorScene>,
-) -> LandblockPreparedFacts {
-    let outdoor_static_instances =
-        build_prepared_outdoor_static_instances(outdoor_scene).collect::<Vec<_>>();
-    let indoor_static_instances =
-        build_prepared_indoor_static_instances(landblock_id, interiors).collect::<Vec<_>>();
-    let static_meshes = build_prepared_static_meshes(
-        context,
-        outdoor_static_instances
-            .iter()
-            .chain(indoor_static_instances.iter()),
-    );
-    let terrain_mesh = cell_landblock.map(build_terrain_mesh);
-    let interior_cells = build_prepared_interior_cells(interiors);
-    let spatial_items = build_prepared_spatial_items(
-        landblock_id,
-        terrain_mesh.as_ref(),
-        &interior_cells,
-        &static_meshes,
-    );
-    let static_landblock_bvh = build_prepared_bvh(landblock_id, &spatial_items);
-
-    LandblockPreparedFacts {
-        terrain_mesh,
-        outdoor_static_instances,
-        interior_cells,
-        static_meshes,
-        spatial_items,
-        static_landblock_bvh,
-    }
 }
 
 fn build_prepared_outdoor_static_instances(
@@ -1972,7 +1152,7 @@ fn build_prepared_static_instance(
 }
 
 fn build_prepared_static_meshes<'a>(
-    context: &mut LandblockPackAssemblyContext<'_>,
+    context: &mut PreparedContentAssemblyContext<'_>,
     instances: impl Iterator<Item = &'a PreparedStaticInstance>,
 ) -> Vec<PreparedStaticMesh> {
     let mut meshes = Vec::new();
@@ -1992,9 +1172,11 @@ fn build_prepared_static_meshes<'a>(
                 ));
             }
             0x02 => {
-                let Some(setup_model) =
-                    load_setup_model_for_pack(context, instance.source_did, &mut reported_missing)
-                else {
+                let Some(setup_model) = load_setup_model_for_static_mesh(
+                    context,
+                    instance.source_did,
+                    &mut reported_missing,
+                ) else {
                     continue;
                 };
                 for (part_index, gfx_obj_id) in setup_model.parts.iter().copied().enumerate() {
@@ -2090,63 +1272,6 @@ fn union_optional_bounds(
 
 const BVH_LEAF_ITEM_LIMIT: usize = 4;
 
-fn build_prepared_spatial_items(
-    landblock_id: u32,
-    terrain_mesh: Option<&PreparedTerrainMesh>,
-    interior_cells: &[PreparedInteriorCell],
-    static_meshes: &[PreparedStaticMesh],
-) -> Vec<PreparedSpatialItem> {
-    let mut items = Vec::new();
-
-    if let Some(terrain_mesh) = terrain_mesh {
-        items.extend(build_terrain_quad_spatial_items(landblock_id, terrain_mesh));
-    }
-
-    items.extend(interior_cells.iter().filter_map(|cell| {
-        let bounds = transform_render_bounds_by_ac_placement(
-            cell.render_geometry.bounds?,
-            &cell.local_placement,
-            unit_prepared_vec3(),
-        );
-        Some(PreparedSpatialItem {
-            id: format!(
-                "landblock-pack/{landblock_id:08x}/spatial/interior-cell/{:08x}",
-                cell.env_cell_id
-            ),
-            kind: PreparedSpatialItemKind::EnvCell,
-            owner_id: Some(cell.env_cell_id),
-            source_asset_id: None,
-            bounds,
-            metadata: PreparedSpatialItemMetadata::None,
-        })
-    }));
-
-    items.extend(static_meshes.iter().filter_map(|mesh| {
-        let bounds = mesh.instance_bounds?;
-        Some(PreparedSpatialItem {
-            id: format!(
-                "landblock-pack/{landblock_id:08x}/spatial/static/{}/part/{:04x}/{:08x}",
-                mesh.instance_id, mesh.part_index, mesh.gfx_obj_id
-            ),
-            kind: match mesh.kind {
-                PreparedStaticInstanceKind::Building => PreparedSpatialItemKind::Building,
-                PreparedStaticInstanceKind::IndoorStatic => PreparedSpatialItemKind::IndoorStatic,
-                PreparedStaticInstanceKind::Scenery
-                | PreparedStaticInstanceKind::GeneratedScenery => {
-                    PreparedSpatialItemKind::OutdoorStatic
-                }
-            },
-            owner_id: mesh.owning_env_cell_id.or(Some(mesh.owning_landblock_id)),
-            source_asset_id: Some(mesh.gfx_obj_asset_id.clone()),
-            bounds,
-            metadata: PreparedSpatialItemMetadata::None,
-        })
-    }));
-
-    items.sort_by(|left, right| left.id.cmp(&right.id));
-    items
-}
-
 fn build_outdoor_member_spatial_items(
     landblock_id: u32,
     statics: &[LandblockOutdoorStaticMember],
@@ -2170,75 +1295,12 @@ fn build_outdoor_member_spatial_items(
                         PreparedSpatialItemKind::IndoorStatic
                     }
                 },
-                owner_id: Some(member.instance.owning_landblock_id),
-                source_asset_id: Some(member.instance.source_asset_id.clone()),
                 bounds,
-                metadata: PreparedSpatialItemMetadata::None,
             })
         })
         .collect::<Vec<_>>();
     items.sort_by(|left, right| left.id.cmp(&right.id));
     items
-}
-
-fn build_terrain_quad_spatial_items(
-    landblock_id: u32,
-    mesh: &PreparedTerrainMesh,
-) -> Vec<PreparedSpatialItem> {
-    if mesh.grid_size < 2 {
-        return Vec::new();
-    }
-
-    let quad_width = mesh.grid_size - 1;
-    let mut items = Vec::with_capacity(quad_width * quad_width);
-    for row in 0..quad_width {
-        for col in 0..quad_width {
-            let southwest = row * mesh.grid_size + col;
-            let southeast = southwest + 1;
-            let northwest = southwest + mesh.grid_size;
-            let northeast = northwest + 1;
-            let Some(bounds) =
-                terrain_vertex_bounds(mesh, [southwest, southeast, northwest, northeast])
-            else {
-                continue;
-            };
-            let quad_index = row * quad_width + col;
-            let first_triangle_index = quad_index * 2;
-            items.push(PreparedSpatialItem {
-                id: format!(
-                    "landblock-pack/{landblock_id:08x}/spatial/terrain-quad/{row:02x}/{col:02x}"
-                ),
-                kind: PreparedSpatialItemKind::Terrain,
-                owner_id: Some(landblock_id),
-                source_asset_id: None,
-                bounds,
-                metadata: PreparedSpatialItemMetadata::TerrainQuad(
-                    PreparedTerrainQuadSpatialMetadata {
-                        row,
-                        col,
-                        quad_index,
-                        triangle_indices: [first_triangle_index, first_triangle_index + 1],
-                    },
-                ),
-            });
-        }
-    }
-    items
-}
-
-fn terrain_vertex_bounds<const N: usize>(
-    mesh: &PreparedTerrainMesh,
-    vertex_indices: [usize; N],
-) -> Option<PreparedAabb> {
-    vertex_indices
-        .into_iter()
-        .filter_map(|index| mesh.vertices.get(index))
-        .map(|vertex| PreparedVec3 {
-            x: vertex.x,
-            y: vertex.z,
-            z: if vertex.y == 0.0 { 0.0 } else { -vertex.y },
-        })
-        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
 }
 
 fn transform_render_bounds_by_ac_placement(
@@ -2385,17 +1447,14 @@ fn union_bounds(left: PreparedAabb, right: PreparedAabb) -> PreparedAabb {
 
 fn spatial_item_kind_mask(kind: PreparedSpatialItemKind) -> u32 {
     match kind {
-        PreparedSpatialItemKind::Terrain => 1 << 0,
         PreparedSpatialItemKind::OutdoorStatic => 1 << 1,
         PreparedSpatialItemKind::Building => 1 << 2,
-        PreparedSpatialItemKind::EnvCell => 1 << 3,
         PreparedSpatialItemKind::IndoorStatic => 1 << 4,
-        PreparedSpatialItemKind::Portal => 1 << 5,
     }
 }
 
-fn load_setup_model_for_pack(
-    context: &mut LandblockPackAssemblyContext<'_>,
+fn load_setup_model_for_static_mesh(
+    context: &mut PreparedContentAssemblyContext<'_>,
     setup_model_id: u32,
     reported_missing: &mut HashSet<u32>,
 ) -> Option<SetupModel> {
@@ -2416,7 +1475,7 @@ fn load_setup_model_for_pack(
 }
 
 fn load_gfx_obj_render_bounds(
-    context: &mut LandblockPackAssemblyContext<'_>,
+    context: &mut PreparedContentAssemblyContext<'_>,
     gfx_obj_id: u32,
     reported_missing: &mut HashSet<u32>,
 ) -> Option<PreparedAabb> {
@@ -3055,22 +2114,6 @@ pub fn format_static_object_source_asset_id(did: u32) -> String {
     }
 }
 
-fn classify_landblock(
-    cell_landblock: Option<&CellLandblockFact>,
-    landblock_info: Option<&LandblockInfoFact>,
-) -> LandblockClassification {
-    match (cell_landblock, landblock_info) {
-        (Some(cell_landblock), Some(landblock_info))
-            if cell_landblock.all_heights_zero
-                && landblock_info.num_env_cells > 0
-                && landblock_info.building_count == 0 =>
-        {
-            LandblockClassification::Dungeon
-        }
-        _ => LandblockClassification::Outdoor,
-    }
-}
-
 fn classify_scene_landblock(landblock_info: Option<&LandblockInfoFact>) -> LandblockClassification {
     match landblock_info {
         Some(info)
@@ -3194,7 +2237,7 @@ mod tests {
     }
 
     #[test]
-    fn env_cell_asset_assembly_does_not_read_landblock_pack_roots() {
+    fn env_cell_asset_assembly_does_not_read_landblock_roots() {
         let source_path = repo_assets_hba_path();
         if !source_path.is_file() {
             eprintln!(
@@ -3232,123 +2275,6 @@ mod tests {
         assert!(asset.prepared_cell.render_geometry.vertex_count > 0);
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 0);
         assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 0);
-    }
-
-    #[test]
-    fn terrain_asset_assembly_reads_only_cell_landblock_root() {
-        let landblock_id = 0x0102ffff;
-        let landblock_info_id = 0x0102fffe;
-        let source = Arc::new(CountingSource::new(HashMap::from([(
-            (EOR_CELL_NAMESPACE.to_string(), landblock_id),
-            minimal_cell_landblock_bytes_with_height(landblock_id, 1),
-        )])));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-
-        let asset =
-            LandblockTerrainAssetAssembler::new().assemble_landblock(&repository, landblock_id);
-
-        assert_eq!(asset.landblock_id, landblock_id);
-        assert!(asset.cell_landblock.is_some());
-        assert!(asset.terrain_mesh.is_some());
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 0);
-    }
-
-    #[test]
-    fn building_shell_asset_assembly_does_not_read_terrain_or_env_cells() {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping building shell asset assembly test; missing repo-local {}",
-                source_path.display()
-            );
-            return;
-        }
-
-        let archive = HbaReader::open(&source_path).expect("repo assets.hba should open");
-        let Some((landblock_id, landblock_info_id, landblock_info_bytes)) =
-            find_landblock_info_with_buildings_fixture(&archive)
-        else {
-            panic!("repo assets.hba should contain a LandblockInfo with buildings");
-        };
-        let source = Arc::new(CountingSource::new(HashMap::from([(
-            (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
-            landblock_info_bytes,
-        )])));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-
-        let asset = LandblockBuildingShellsAssetAssembler::new()
-            .assemble_landblock(&repository, landblock_id);
-
-        assert_eq!(asset.landblock_id, landblock_id);
-        assert_eq!(asset.landblock_info_id, landblock_info_id);
-        assert!(!asset.shells.is_empty());
-        assert!(
-            asset
-                .shells
-                .iter()
-                .all(|shell| shell.source_asset_id.starts_with("setup-model/")
-                    || shell.source_asset_id.starts_with("gfx-obj/"))
-        );
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 0);
-        for index in 0..16 {
-            assert_eq!(
-                source.read_count(
-                    EOR_CELL_NAMESPACE,
-                    derive_landblock_env_cell_id(landblock_id, index)
-                ),
-                0
-            );
-        }
-    }
-
-    #[test]
-    fn scene_asset_assembly_does_not_read_terrain_or_environment_geometry() {
-        let source_path = repo_assets_hba_path();
-        if !source_path.is_file() {
-            eprintln!(
-                "skipping scene asset assembly test; missing repo-local {}",
-                source_path.display()
-            );
-            return;
-        }
-
-        let archive = HbaReader::open(&source_path).expect("repo assets.hba should open");
-        let Some((landblock_id, landblock_info_id, landblock_info_bytes, env_cell_files)) =
-            find_landblock_scene_fixture(&archive)
-        else {
-            panic!("repo assets.hba should contain a LandblockInfo with env cells");
-        };
-        let mut files = HashMap::from([(
-            (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
-            landblock_info_bytes,
-        )]);
-        files.extend(
-            env_cell_files
-                .into_iter()
-                .map(|(env_cell_id, bytes)| ((EOR_CELL_NAMESPACE.to_string(), env_cell_id), bytes)),
-        );
-        let source = Arc::new(CountingSource::new(files));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-
-        let asset =
-            LandblockSceneAssetAssembler::new().assemble_landblock(&repository, landblock_id);
-
-        assert_eq!(asset.landblock_id, landblock_id);
-        assert!(!asset.env_cells.is_empty());
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 0);
-        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, 0x0d000000), 0);
-        assert!(
-            source
-                .reads
-                .lock()
-                .expect("counting source reads should not be poisoned")
-                .keys()
-                .all(|(namespace, file_id)| namespace != EOR_PORTAL_NAMESPACE
-                    || (*file_id >> 24 != 0x0d && *file_id >> 24 != 0x0e))
-        );
     }
 
     fn find_env_cell_asset_fixture(archive: &HbaReader) -> Option<(u32, Vec<u8>, u32, Vec<u8>)> {
@@ -3392,189 +2318,6 @@ mod tests {
         None
     }
 
-    fn find_landblock_scene_fixture(
-        archive: &HbaReader,
-    ) -> Option<(u32, u32, Vec<u8>, Vec<(u32, Vec<u8>)>)> {
-        for entry in archive
-            .entries()
-            .collect::<holtburger_dat::Result<Vec<_>>>()
-            .ok()?
-        {
-            if entry.namespace_id().ok()?.as_str() != EOR_CELL_NAMESPACE {
-                continue;
-            }
-            if DatFileType::from_id(entry.file_id) != DatFileType::LandblockInfo {
-                continue;
-            }
-            let landblock_info_bytes = archive
-                .get_file_in_namespace(EOR_CELL_NAMESPACE, entry.file_id)
-                .ok()?;
-            let landblock_info = LandblockInfo::unpack(&landblock_info_bytes).ok()?;
-            if landblock_info.num_cells == 0 {
-                continue;
-            }
-            let landblock_id = entry.file_id | 1;
-            let env_cell_files = (0..landblock_info.num_cells)
-                .filter_map(|index| {
-                    let env_cell_id = derive_landblock_env_cell_id(landblock_id, index);
-                    archive
-                        .get_file_in_namespace(EOR_CELL_NAMESPACE, env_cell_id)
-                        .ok()
-                        .map(|bytes| (env_cell_id, bytes))
-                })
-                .collect::<Vec<_>>();
-            if env_cell_files.is_empty() {
-                continue;
-            }
-            return Some((
-                landblock_id,
-                entry.file_id,
-                landblock_info_bytes,
-                env_cell_files,
-            ));
-        }
-        None
-    }
-
-    fn find_landblock_info_with_buildings_fixture(
-        archive: &HbaReader,
-    ) -> Option<(u32, u32, Vec<u8>)> {
-        for entry in archive
-            .entries()
-            .collect::<holtburger_dat::Result<Vec<_>>>()
-            .ok()?
-        {
-            if entry.namespace_id().ok()?.as_str() != EOR_CELL_NAMESPACE {
-                continue;
-            }
-            if DatFileType::from_id(entry.file_id) != DatFileType::LandblockInfo {
-                continue;
-            }
-            let landblock_info_bytes = archive
-                .get_file_in_namespace(EOR_CELL_NAMESPACE, entry.file_id)
-                .ok()?;
-            let landblock_info = LandblockInfo::unpack(&landblock_info_bytes).ok()?;
-            if landblock_info.buildings.is_empty() {
-                continue;
-            }
-            return Some((entry.file_id | 1, entry.file_id, landblock_info_bytes));
-        }
-        None
-    }
-
-    #[test]
-    fn pack_static_outdoor_assembly_reuses_loaded_landblock_roots() {
-        let landblock_id = 0x0102ffff;
-        let landblock_info_id = 0x0102fffe;
-        let source = Arc::new(CountingSource::new(HashMap::from([
-            (
-                (EOR_CELL_NAMESPACE.to_string(), landblock_id),
-                minimal_cell_landblock_bytes(landblock_id),
-            ),
-            (
-                (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
-                minimal_landblock_info_bytes(landblock_info_id),
-            ),
-        ])));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-
-        let pack = LandblockPackAssembler::new().assemble_landblock(&repository, landblock_id);
-
-        assert!(pack.cell_landblock.is_some());
-        assert!(pack.landblock_info.is_some());
-        assert!(pack.outdoor_scene.is_none());
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
-    }
-
-    #[test]
-    fn dungeon_classification_requires_zero_heights_env_cells_and_no_buildings() {
-        let cell = CellLandblockFact {
-            id: 0x0102ffff,
-            has_objects: false,
-            grid_size: LANDBLOCK_GRID_SIZE,
-            tile_size: LANDBLOCK_TILE_SIZE,
-            terrain_types: vec![0; 81],
-            heights: vec![0.0; 81],
-            min_height: 0.0,
-            max_height: 0.0,
-            all_heights_zero: true,
-        };
-        let info = LandblockInfoFact {
-            id: 0x0102fffe,
-            first_env_cell_id: Some(0x01020100),
-            num_env_cells: 2,
-            object_count: 0,
-            building_count: 0,
-            pack_mask: 0,
-            restrictions: Vec::new(),
-        };
-
-        assert_eq!(
-            classify_landblock(Some(&cell), Some(&info)),
-            LandblockClassification::Dungeon
-        );
-    }
-
-    #[test]
-    fn dungeon_pack_skips_outdoor_static_scene_assembly() {
-        let landblock_id = 0x0102ffff;
-        let landblock_info_id = 0x0102fffe;
-        let source = Arc::new(CountingSource::new(HashMap::from([
-            (
-                (EOR_CELL_NAMESPACE.to_string(), landblock_id),
-                minimal_cell_landblock_bytes(landblock_id),
-            ),
-            (
-                (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
-                minimal_landblock_info_bytes_with_env_cells(landblock_info_id, 2),
-            ),
-        ])));
-        let repository = ContentRepository::from_mounts(vec![source.clone()]);
-
-        let pack = LandblockPackAssembler::new().assemble_landblock(&repository, landblock_id);
-
-        assert_eq!(pack.classification, LandblockClassification::Dungeon);
-        assert!(pack.outdoor_scene.is_none());
-        assert!(pack.prepared.outdoor_static_instances.is_empty());
-        assert!(
-            pack.diagnostics
-                .omissions
-                .iter()
-                .any(|omission| omission.role == "landblock-static"
-                    && omission.reason == "proven-dungeon-landblock")
-        );
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_id), 1);
-        assert_eq!(source.read_count(EOR_CELL_NAMESPACE, landblock_info_id), 1);
-    }
-
-    #[test]
-    fn nonzero_height_landblock_does_not_skip_outdoor_static_scene_assembly() {
-        let landblock_id = 0x0102ffff;
-        let landblock_info_id = 0x0102fffe;
-        let source = Arc::new(CountingSource::new(HashMap::from([
-            (
-                (EOR_CELL_NAMESPACE.to_string(), landblock_id),
-                minimal_cell_landblock_bytes_with_height(landblock_id, 1),
-            ),
-            (
-                (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
-                minimal_landblock_info_bytes_with_env_cells(landblock_info_id, 2),
-            ),
-        ])));
-        let repository = ContentRepository::from_mounts(vec![source]);
-
-        let pack = LandblockPackAssembler::new().assemble_landblock(&repository, landblock_id);
-
-        assert_eq!(pack.classification, LandblockClassification::Outdoor);
-        assert!(pack.diagnostics.omissions.iter().all(|omission| {
-            omission.role != "landblock-static" || omission.reason != "proven-dungeon-landblock"
-        }));
-        assert!(pack.diagnostics.errors.iter().any(|error| {
-            error.role == "landblock-static" && error.error_code == "asset-decode-failed"
-        }));
-    }
-
     #[test]
     fn prepared_terrain_mesh_matches_frontend_landblock_basis() {
         let cell = CellLandblockFact {
@@ -3611,64 +2354,5 @@ mod tests {
         );
         assert_eq!(mesh.triangles[0].terrain_type, 0);
         assert_eq!(mesh.triangles[2].terrain_type, 9);
-    }
-
-    #[test]
-    fn terrain_spatial_items_are_quad_level_with_triangle_metadata() {
-        let cell = CellLandblockFact {
-            id: 0x0102ffff,
-            has_objects: false,
-            grid_size: LANDBLOCK_GRID_SIZE,
-            tile_size: LANDBLOCK_TILE_SIZE,
-            terrain_types: (0..81).collect(),
-            heights: (0..81).map(|height| height as f32).collect(),
-            min_height: 0.0,
-            max_height: 80.0,
-            all_heights_zero: false,
-        };
-
-        let mesh = build_terrain_mesh(&cell);
-        let items = build_terrain_quad_spatial_items(cell.id, &mesh);
-
-        assert_eq!(items.len(), 64);
-        assert_eq!(
-            items[0].id,
-            "landblock-pack/0102ffff/spatial/terrain-quad/00/00"
-        );
-        assert_eq!(items[0].kind, PreparedSpatialItemKind::Terrain);
-        assert_eq!(
-            items[0].bounds,
-            PreparedAabb {
-                min: PreparedVec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: -24.0,
-                },
-                max: PreparedVec3 {
-                    x: 24.0,
-                    y: 10.0,
-                    z: 0.0,
-                },
-            }
-        );
-        assert_eq!(
-            items[0].metadata,
-            PreparedSpatialItemMetadata::TerrainQuad(PreparedTerrainQuadSpatialMetadata {
-                row: 0,
-                col: 0,
-                quad_index: 0,
-                triangle_indices: [0, 1],
-            })
-        );
-
-        assert_eq!(
-            items[63].metadata,
-            PreparedSpatialItemMetadata::TerrainQuad(PreparedTerrainQuadSpatialMetadata {
-                row: 7,
-                col: 7,
-                quad_index: 63,
-                triangle_indices: [126, 127],
-            })
-        );
     }
 }
